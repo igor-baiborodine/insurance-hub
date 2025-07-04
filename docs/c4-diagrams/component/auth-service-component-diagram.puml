@@ -1,0 +1,27 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+skinparam linetype ortho
+
+title Component diagram for Auth Service
+
+Container_Boundary(auth_service_boundary, "Auth Service") {
+    Component(api, "Login Controller", "Micronaut REST Controller", "Exposes a REST endpoint for user authentication.")
+    Component(auth_provider, "Authentication Provider", "Java/Micronaut Service", "Handles the logic of validating user credentials.")
+    Component(jwt_provider, "JWT Provider", "Micronaut JWT Service", "Generates and signs JWT tokens upon successful authentication.")
+    Component(user_repo, "User Repository", "JPA Repository Interface", "Defines the contract for retrieving user data from the database.")
+    Component(db_adapter, "Database Adapter", "JPA Implementation", "Implements the user repository to interact with the database.")
+}
+
+System_Ext(gateway, "Agent Portal Gateway", "API Gateway")
+System_Ext(db, "PostgreSQL Database", "Relational Database")
+
+' Relationships
+Rel(gateway, api, "Requests authentication for user", "HTTPS/REST")
+Rel(api, auth_provider, "Delegates authentication to")
+Rel(auth_provider, user_repo, "Fetches user credentials via")
+Rel(auth_provider, jwt_provider, "Uses to generate token")
+Rel(user_repo, db_adapter, "Is implemented by")
+Rel(db_adapter, db, "Reads user data from", "JPA")
+
+@enduml

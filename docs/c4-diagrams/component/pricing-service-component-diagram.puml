@@ -1,0 +1,32 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+skinparam linetype ortho
+
+title Component diagram for Pricing Service
+
+' External Systems and Services
+System_Ext(policy_service, "Policy Service", "Microservice", "Requests price calculations for insurance offers.")
+System_Ext(config_fs, "Configuration / File System", "YAML/MVEL Files", "Provides persistent storage for tariff rules.")
+
+Container_Boundary(pricing_service, "Pricing Service") {
+    ' API Layer
+    Component(api, "Pricing API Controller", "Micronaut REST Controller", "Exposes REST endpoints for calculating prices.")
+
+    ' Application/Domain Logic
+    Component(calc_service, "Calculation Service", "Java/Micronaut Service", "Orchestrates the calculation by applying the correct tariff rules.")
+    Component(rules_engine, "MVEL Rules Engine", "MVEL Evaluator", "Parses and executes business rules written in MVEL.")
+    Component(tariff_repo, "Tariff Repository", "Java Component", "Loads and provides access to tariff rule files from the file system.")
+
+    ' Relationships within the service
+    Rel(api, calc_service, "Forwards calculation request to")
+    Rel(calc_service, tariff_repo, "Uses to fetch tariff rules")
+    Rel(calc_service, rules_engine, "Uses to execute rules against data")
+    Rel(tariff_repo, config_fs, "Loads MVEL rule scripts from", "File I/O")
+}
+
+' External Relationships
+' Synchronous Flow for Price Calculation
+Rel(policy_service, api, "Makes API calls to calculate price", "HTTPS/REST")
+
+@enduml

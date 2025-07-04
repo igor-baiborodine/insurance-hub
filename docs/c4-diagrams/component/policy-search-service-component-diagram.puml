@@ -1,0 +1,35 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+skinparam linetype ortho
+
+title Component diagram for Policy Search Service
+
+Person(user, "Insurance Agent", "A user of the insurance sales portal.")
+Container(spa, "Web Vue App", "Vue.js", "Provides the user interface for policy search.")
+Container(gateway, "Agent Portal Gateway", "Micronaut", "The single entry point for all API requests.")
+Container(policy_service, "Policy Service", "Micronaut", "Manages creation of policies and publishes events.")
+
+System_Ext(kafka, "Apache Kafka", "Message Broker")
+System_Ext(es, "Elasticsearch", "Search & Analytics Engine")
+
+Container_Boundary(pss, "policy-search-service") {
+    Component(api, "Search API Controller", "REST Controller", "Exposes REST endpoints for querying policies.")
+    Component(consumer, "Policy Events Consumer", "Kafka Listener", "Listens for and processes 'PolicyCreated' events from Kafka.")
+    Component(indexer, "Policy Indexer", "Java Component", "Transforms event data into a searchable read model.")
+    Component(repo, "Elasticsearch Repository", "Data Access Component", "Handles all read/write operations with the Elasticsearch database.")
+
+    Rel(api, repo, "Uses to find policies")
+    Rel(consumer, indexer, "Passes event data to")
+    Rel(indexer, repo, "Uses to save policy data")
+}
+
+Rel(user, spa, "Searches for policies")
+Rel(spa, gateway, "Sends search query to", "HTTPS/JSON")
+Rel(gateway, api, "Forwards search query to", "HTTPS/JSON")
+Rel(repo, es, "Reads from / Writes to", "REST API")
+
+Rel_Back(consumer, kafka, "Consumes 'PolicyCreated' event from")
+Rel(policy_service, kafka, "Publishes 'PolicyCreated' event to")
+
+@enduml

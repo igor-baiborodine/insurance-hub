@@ -1,0 +1,49 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+skinparam linetype ortho
+
+title Component diagram for Payment Service
+
+Container_Boundary(payment_service, "Payment Service") {
+    Component(api, "Payment API Controller", "Micronaut REST Controller", "Exposes REST endpoints for policy accounts and payments.")
+    Component(app_service, "Payment Application Service", "Java/Micronaut Service", "Orchestrates payment operations and coordinates domain logic.")
+    Component(event_handler, "Policy Event Handler", "Kafka Listener", "Subscribes to 'PolicyCreated' events to create new policy accounts.")
+    Component(import_service, "CSV Import Service", "Scheduled Job", "Processes bank statement files from the file system on a schedule.")
+
+    Component(policy_account, "Policy Account", "JPA Aggregate", "Manages the state of a policy account, including balance and payments.")
+    Component(payment_repo, "Policy Account Repository", "JPA Repository Interface", "Defines the contract for data persistence operations.")
+    Component(payment_reg_service, "Payment Registration Service", "Domain Service", "Encapsulates the logic for registering payments from a bank statement against policy accounts.")
+
+    Component(db_adapter, "Database Adapter", "JPA Implementation", "Implements the repository interface to interact with the PostgreSQL database.")
+    Component(kafka_consumer, "Kafka Consumer", "Micronaut Kafka Client", "Connects to Kafka and forwards events to the Event Handler.")
+    Component(file_processor, "CSV File Processor", "Java Component", "Parses and validates bank statement CSV files.")
+}
+
+System_Ext(gateway, "Agent Portal Gateway", "API Gateway")
+System_Ext(policy_service, "Policy Service", "Microservice")
+System_Ext(kafka, "Apache Kafka", "Event Streaming Platform")
+System_Ext(db, "PostgreSQL Database", "Relational Database")
+System_Ext(fs, "File System", "Storage for CSV bank statements")
+
+' Synchronous Flows
+Rel(gateway, api, "Makes API calls to", "HTTPS/REST")
+Rel(api, app_service, "Forwards requests to")
+Rel(app_service, payment_repo, "Uses")
+Rel(app_service, payment_reg_service, "Uses")
+Rel(payment_repo, db_adapter, "Is implemented by")
+Rel(db_adapter, db, "Reads from and writes to", "JPA")
+
+' Asynchronous Event Flow
+Rel(policy_service, kafka, "Publishes 'PolicyCreated' event to")
+Rel(kafka, kafka_consumer, "Forwards event to")
+Rel(kafka_consumer, event_handler, "Triggers")
+Rel(event_handler, policy_account, "Creates")
+Rel(policy_account, payment_repo, "Saves using")
+
+' Scheduled Job Flow
+Rel(import_service, file_processor, "Uses")
+Rel(file_processor, fs, "Reads CSV files from")
+Rel(import_service, payment_reg_service, "Uses")
+
+@enduml

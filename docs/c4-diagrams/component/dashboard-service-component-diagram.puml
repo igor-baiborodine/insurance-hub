@@ -1,0 +1,44 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+skinparam linetype ortho
+
+title Component diagram for Dashboard Service
+
+' External Systems and Services
+System_Ext(gateway, "Agent Portal Gateway", "API Gateway", "Serves dashboard data to the frontend.")
+System_Ext(policy_service, "Policy Service", "Microservice", "Publishes an event when a new policy is created.")
+System_Ext(kafka, "Apache Kafka", "Event Streaming Platform", "Brokers events between services.")
+System_Ext(db, "Elasticsearch", "Search & Analytics Engine", "Stores and aggregates sales data for analysis.")
+
+Container_Boundary(dashboard_service, "Dashboard Service") {
+    ' API Layer
+    Component(api, "Dashboard API Controller", "Micronaut REST Controller", "Exposes REST endpoints for sales analytics and dashboard data.")
+
+    ' Event Handling & Domain Logic
+    Component(event_handler, "Policy Event Handler", "Kafka Listener", "Subscribes to 'PolicyCreated' events to trigger sales data indexing.")
+    Component(analytics_service, "Analytics Service", "Java/Micronaut Service", "Processes events and prepares sales data documents for indexing.")
+    
+    ' Persistence & Infrastructure
+    Component(sales_repo, "Sales Data Repository", "Elasticsearch Repository", "Defines the contract for querying and indexing sales data.")
+    Component(db_adapter, "Elasticsearch Adapter", "Java Elasticsearch Client", "Implements the repository interface to interact with Elasticsearch.")
+    Component(kafka_consumer, "Kafka Consumer", "Micronaut Kafka Client", "Connects to Kafka and forwards events to the Event Handler.")
+
+    ' Relationships
+    Rel(api, sales_repo, "Uses to query aggregated data")
+    Rel(event_handler, analytics_service, "Uses to process events")
+    Rel(analytics_service, sales_repo, "Saves sales data using")
+    Rel(sales_repo, db_adapter, "Is implemented by")
+    Rel(db_adapter, db, "Writes to and reads from", "Elasticsearch API")
+    Rel(kafka, kafka_consumer, "Forwards event to")
+    Rel(kafka_consumer, event_handler, "Triggers")
+}
+
+' External Relationships
+' Asynchronous Event Flow
+Rel(policy_service, kafka, "Publishes 'PolicyCreated' event to")
+
+' Synchronous Data Flow
+Rel(gateway, api, "Makes API calls to get dashboard data", "HTTPS/REST")
+
+@enduml

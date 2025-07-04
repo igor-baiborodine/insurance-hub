@@ -1,0 +1,35 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+skinparam linetype ortho
+
+title Component diagram for Product Service
+
+' External Systems and Services
+System_Ext(gateway, "Agent Portal Gateway", "API Gateway", "Provides products data to the frontend.")
+System_Ext(policy_service, "Policy Service", "Microservice", "Fetches product definitions (e.g., questions) when creating offers.")
+System_Ext(db, "MongoDB", "NoSQL Document Database", "Stores the insurance product catalog.")
+
+Container_Boundary(product_service, "Product Service") {
+    ' API Layer
+    Component(api, "Product API Controller", "Micronaut REST Controller", "Exposes REST endpoints for the product catalog.")
+
+    ' Domain & Persistence
+    Component(product, "Product", "Mongo Document", "Represents the state of an insurance product, its covers, and questions.")
+    Component(product_repo, "Product Repository", "Micronaut Data Repository", "Defines the contract for data persistence operations using reactive patterns.")
+
+    ' Infrastructure
+    Component(db_adapter, "Database Adapter", "Reactive Mongo Implementation", "Implements the repository interface to interact with the MongoDB database.")
+
+    ' Relationships
+    Rel(api, product_repo, "Uses to query products")
+    Rel(product_repo, product, "Manages")
+    Rel(product_repo, db_adapter, "Is implemented by")
+    Rel(db_adapter, db, "Reads from and writes to", "Mongo Reactive Streams")
+}
+
+' External Relationships
+Rel(gateway, api, "Makes API calls to list products", "HTTPS/REST")
+Rel(policy_service, api, "Makes API calls to get product details", "HTTPS/REST")
+
+@enduml

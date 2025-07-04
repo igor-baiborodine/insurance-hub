@@ -1,0 +1,46 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+skinparam linetype ortho
+
+title Component diagram for Agent Portal Gateway
+
+' External Systems: The end-user's browser and the downstream microservices
+System_Ext(spa, "Single Page Application", "Vue.js", "The frontend application used by insurance agents.")
+System_Ext(auth_service, "Auth Service", "Microservice")
+System_Ext(policy_service, "Policy Service", "Microservice")
+System_Ext(payment_service, "Payment Service", "Microservice")
+System_Ext(dashboard_service, "Dashboard Service", "Microservice")
+System_Ext(product_service, "Product Service", "Microservice")
+System_Ext(pricing_service, "Pricing Service", "Microservice")
+System_Ext(chat_service, "Chat Service", "Microservice")
+System_Ext(consul, "Consul", "Service Discovery")
+
+Container_Boundary(gateway, "Agent Portal Gateway") {
+    ' Core Components of the Gateway
+    Component(http_server, "HTTP Server", "Netty", "Accepts all incoming requests from the frontend.")
+    Component(routing_engine, "Routing Engine", "Micronaut", "Matches request paths to configured downstream service routes.")
+    Component(auth_filter, "Authentication Filter", "Micronaut Security Filter", "Intercepts requests to validate JWT tokens by calling the Auth Service.")
+    Component(http_client, "HTTP Client", "Micronaut Declarative Client", "Forwards requests to the appropriate downstream microservices.")
+    Component(service_discovery, "Service Discovery Client", "Micronaut Consul Client", "Fetches the network locations of downstream services from Consul.")
+
+    ' Relationships within the Gateway
+    Rel(http_server, routing_engine, "Passes requests to")
+    Rel(routing_engine, auth_filter, "Applies filters to request")
+    Rel(auth_filter, http_client, "Allows or denies forwarding")
+    Rel(routing_engine, http_client, "Forwards request via")
+    Rel(http_client, service_discovery, "Uses to resolve service locations")
+}
+
+' External Relationships
+Rel(spa, http_server, "Makes API calls to", "HTTPS/REST & WebSocket")
+Rel(http_client, auth_service, "Validates JWT token with", "HTTPS/REST")
+Rel(http_client, policy_service, "Routes requests to")
+Rel(http_client, payment_service, "Routes requests to")
+Rel(http_client, dashboard_service, "Routes requests to")
+Rel(http_client, product_service, "Routes requests to")
+Rel(http_client, pricing_service, "Routes requests to")
+Rel(http_client, chat_service, "Routes requests to", "WebSocket")
+Rel(service_discovery, consul, "Registers with and queries")
+
+@enduml

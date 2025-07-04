@@ -1,0 +1,52 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+skinparam linetype ortho
+
+title Component diagram for Policy Service
+
+' External Systems and Services
+System_Ext(gateway, "Agent Portal Gateway", "API Gateway", "The primary entry point for API calls.")
+System_Ext(pricing_service, "Pricing Service", "Microservice", "Calculates prices for insurance products.")
+System_Ext(kafka, "Apache Kafka", "Event Streaming Platform", "Message broker for asynchronous events.")
+System_Ext(db, "RDBMS", "Relational Database", "Stores policy and offer data.")
+
+Container_Boundary(policy_service_boundary, "Policy Service") {
+    ' API Layer
+    Component(api, "Policy API Controller", "Micronaut REST Controller", "Exposes REST endpoints for creating offers and policies.")
+
+    ' CQRS - Command Side
+    Component(command_service, "Policy Command Service", "Java/Micronaut Service", "Handles all write operations like creating/updating offers and policies.")
+    Component(policy_aggregate, "Offer/Policy Aggregates", "JPA Aggregate", "Domain models that encapsulate the business logic and state for policies.")
+    
+    ' CQRS - Query Side
+    Component(query_service, "Policy Query Service", "Java/Micronaut Service", "Handles all read operations for policies.")
+
+    ' Repository Layer
+    Component(policy_repo, "Policy Repository", "JPA Repository Interface", "Defines the contract for data persistence operations (read/write).")
+    Component(db_adapter, "Database Adapter", "JPA Implementation", "Implements the repository to interact with the database.")
+
+    ' Infrastructure / Clients
+    Component(pricing_client, "Pricing Service Client", "Micronaut HTTP Client", "Makes synchronous REST calls to the Pricing Service.")
+    Component(kafka_producer, "Kafka Event Publisher", "Micronaut Kafka Client", "Publishes 'PolicyCreated' events to Kafka after a policy is saved.")
+
+    ' Relationships within the service
+    Rel(api, command_service, "Routes write commands to")
+    Rel(api, query_service, "Routes read queries to")
+    
+    Rel(command_service, pricing_client, "Uses to get price calculations")
+    Rel(command_service, policy_aggregate, "Creates and modifies")
+    Rel(command_service, kafka_producer, "Triggers to publish event")
+    Rel(policy_aggregate, policy_repo, "Is persisted by")
+
+    Rel(query_service, policy_repo, "Uses to fetch policy data")
+    Rel(policy_repo, db_adapter, "Is implemented by")
+}
+
+' External Relationships
+Rel(gateway, api, "Makes API calls to", "HTTPS/REST")
+Rel(pricing_client, pricing_service, "Gets price from", "HTTPS/REST")
+Rel(db_adapter, db, "Reads from and writes to", "JPA")
+Rel(kafka_producer, kafka, "Publishes 'PolicyCreated' event to")
+
+@enduml

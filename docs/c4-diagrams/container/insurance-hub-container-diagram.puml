@@ -1,0 +1,86 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+skinparam linetype ortho
+
+title Container diagram for Insurance Hub System
+
+' Actors
+Person(agent, "Insurance Agent", "Uses the system to sell insurance policies and view analytics.")
+
+System_Boundary(insurance_hub, "Insurance Hub") {
+    ' Frontend & Gateway
+    Container(spa, "Web Vue App", "Vue.js", "The single-page application providing the user interface.")
+    Container(gateway, "Agent Portal Gateway", "Micronaut", "The single entry point for all API requests from the frontend.")
+
+    ' Core Microservices
+    Container(auth_service, "Auth Service", "Java/Micronaut", "Handles user authentication and JWT token generation.")
+    Container(policy_service, "Policy Service", "Java/Micronaut", "Manages creation and lifecycle of insurance policies and offers.")
+    Container(product_service, "Product Service", "Java/Micronaut", "Manages the insurance product catalog.")
+    Container(pricing_service, "Pricing Service", "Java/Micronaut", "Calculates prices for insurance products based on defined rules.")
+    Container(policy_search_service, "Policy Search Service", "Java/Micronaut", "Provides a denormalized, searchable view of policies.")
+    Container(payment_service, "Payment Service", "Java/Micronaut", "Handles policyholder accounts and processes payments.")
+    Container(document_service, "Document Service", "Kotlin/Micronaut", "Generates and manages policy-related documents (e.g., PDFs).")
+    Container(dashboard_service, "Dashboard Service", "Java/Micronaut", "Provides sales analytics and visualizations.")
+    Container(chat_service, "Chat Service", "Java/Micronaut", "Provides real-time chat functionality for agents via WebSockets.")
+
+
+    ' Data Stores
+    ContainerDb(policy_db, "Policy Database", "PostgreSQL", "Stores policies and offers.")
+    ContainerDb(document_db, "Document Database", "PostgreSQL", "Stores document-related metadata.")
+    ContainerDb(product_db, "Product Database", "MongoDB", "Stores the product catalog.")
+    ContainerDb(payment_db, "Payment Database", "PostgreSQL", "Stores policy accounts and payment transactions.")
+    ContainerDb(search_db, "Search & Analytics DB", "Elasticsearch", "Stores denormalized data for policy search and sales analytics.")
+}
+
+' External Systems
+System_Ext(kafka, "Apache Kafka", "Event Streaming Platform", "Facilitates asynchronous communication between services.")
+System_Ext(jsreport, "JSReport Service", "External PDF Generator", "Renders HTML/data into a PDF document.")
+System_Ext(tariff_fs, "Tariff Rules Storage", "File System/MVEL", "Stores pricing rules as MVEL scripts.")
+System_Ext(bank_fs, "Bank Statements Storage", "File System/CSV", "Stores bank statements for payment processing.")
+System_Ext(docs_storage, "Document Storage", "File System/Blob", "Stores generated PDF documents.")
+
+
+' Relationships
+
+' User Interaction Flow
+Rel(agent, spa, "Uses", "HTTPS")
+Rel(spa, gateway, "Makes API calls to", "HTTPS/JSON & WebSocket")
+
+' Gateway to Services (Synchronous)
+Rel(gateway, auth_service, "Validates tokens with", "HTTPS")
+Rel(gateway, policy_service, "Routes requests to", "HTTPS")
+Rel(gateway, product_service, "Routes requests to", "HTTPS")
+Rel(gateway, policy_search_service, "Routes requests to", "HTTPS")
+Rel(gateway, payment_service, "Routes requests to", "HTTPS")
+Rel(gateway, document_service, "Routes requests to", "HTTPS")
+Rel(gateway, dashboard_service, "Routes requests to", "HTTPS")
+Rel(gateway, chat_service, "Proxies connection to", "WebSocket")
+
+
+' Inter-Service Communication (Synchronous)
+Rel(policy_service, pricing_service, "Requests price calculation from", "HTTPS/REST")
+Rel(policy_service, product_service, "Fetches product details from", "HTTPS/REST")
+
+' Asynchronous Event Flow via Kafka
+Rel(policy_service, kafka, "Publishes 'PolicyCreated' event")
+Rel(kafka, policy_search_service, "Consumes 'PolicyCreated' event")
+Rel(kafka, payment_service, "Consumes 'PolicyCreated' event")
+Rel(kafka, document_service, "Consumes 'PolicyCreated' event")
+Rel(kafka, dashboard_service, "Consumes 'PolicyCreated' event")
+
+' Database Relationships
+Rel(policy_service, policy_db, "Reads from and writes to", "JPA")
+Rel(document_service, document_db, "Reads from and writes to", "JPA")
+Rel(product_service, product_db, "Reads from and writes to", "Mongo Reactive Streams")
+Rel(payment_service, payment_db, "Reads from and writes to", "JPA")
+Rel(policy_search_service, search_db, "Reads from and writes to", "REST API")
+Rel(dashboard_service, search_db, "Reads from and writes to", "REST API")
+
+' External Service and Storage Relationships
+Rel(pricing_service, tariff_fs, "Loads tariff rules from", "File I/O")
+Rel(document_service, jsreport, "Requests PDF generation from", "HTTPS/REST")
+Rel(document_service, docs_storage, "Stores and retrieves PDFs from", "File I/O")
+Rel(payment_service, bank_fs, "Imports bank statements from", "File I/O")
+
+@enduml

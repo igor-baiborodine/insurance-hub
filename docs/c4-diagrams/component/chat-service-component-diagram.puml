@@ -1,0 +1,24 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+skinparam linetype ortho
+
+title Component diagram for Chat Service
+
+Container_Boundary(chat_service_boundary, "Chat Service") {
+    Component(websocket_server, "Chat WebSocket Server", "Micronaut WebSocket Server", "Manages persistent WebSocket connections and message broadcasting.")
+    Component(message_codec, "Message Codec", "Java/Micronaut Component", "Encodes and decodes chat messages between plain text and structured data.")
+    Component(session_manager, "Session Manager", "Java/Micronaut Component", "Maintains and tracks all active client WebSocket sessions.")
+}
+
+System_Ext(gateway, "Agent Portal Gateway", "API Gateway")
+System_Ext(browser, "Agent's Web Browser", "Frontend Application")
+
+
+' Relationships
+Rel(browser, gateway, "Connects to", "WebSocket")
+Rel(gateway, websocket_server, "Establishes and proxies WebSocket connection for")
+Rel(websocket_server, message_codec, "Uses to process incoming and outgoing messages")
+Rel(websocket_server, session_manager, "Uses to manage connections and broadcast messages")
+
+@enduml

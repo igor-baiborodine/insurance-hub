@@ -1,0 +1,49 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+skinparam linetype ortho
+
+title Component diagram for Documents Service
+
+' External Systems and Services
+System_Ext(gateway, "Agent Portal Gateway", "API Gateway", "Allows users to download generated documents.")
+System_Ext(policy_service, "Policy Service", "Microservice", "Publishes an event when a new policy is created.")
+System_Ext(kafka, "Apache Kafka", "Event Streaming Platform", "Message broker for asynchronous events.")
+System_Ext(jsreport, "JSReport Service", "External PDF Generation Engine", "Renders HTML/data into a PDF document.")
+System_Ext(fs, "Document Storage", "File System / Blob Storage", "Provides persistent storage for the generated PDF files.")
+
+Container_Boundary(documents_service, "Documents Service") {
+    ' API Layer
+    Component(api, "Document API Controller", "Micronaut REST Controller", "Exposes REST endpoints for downloading documents.")
+
+    ' Event Handling Layer
+    Component(event_listener, "Policy Event Listener", "Kafka Listener / Kotlin", "Subscribes to 'PolicyCreated' events to trigger PDF generation.")
+    Component(kafka_consumer, "Kafka Consumer", "Micronaut Kafka Client", "Connects to Kafka and forwards events to the Event Listener.")
+
+    ' Application/Domain Logic
+    Component(gen_service, "Document Generation Service", "Kotlin Service", "Orchestrates fetching data and calling the PDF generator.")
+    
+    ' Infrastructure / Clients
+    Component(pdf_generator, "PDF Generator Client", "JSReport Client", "Sends template and data to the JSReport Service for rendering.")
+    Component(doc_repo, "Document Repository", "File System Adapter", "Handles storing and retrieving PDF files from Document Storage.")
+
+    ' Relationships within the service
+    Rel(api, doc_repo, "Uses to fetch documents")
+    Rel(event_listener, gen_service, "Triggers")
+    Rel(gen_service, pdf_generator, "Uses to create PDF")
+    Rel(gen_service, doc_repo, "Uses to save PDF")
+    Rel(kafka, kafka_consumer, "Forwards event to")
+    Rel(kafka_consumer, event_listener, "Triggers")
+}
+
+' External Relationships
+' Asynchronous Event Flow for PDF Generation
+Rel(policy_service, kafka, "Publishes 'PolicyCreated' event to")
+Rel(pdf_generator, jsreport, "Generates PDF using", "HTTP/REST")
+Rel(doc_repo, fs, "Writes PDF to", "File I/O")
+
+' Synchronous Flow for Document Download
+Rel(gateway, api, "Makes API calls to download", "HTTPS/REST")
+Rel(doc_repo, fs, "Reads PDF from", "File I/O")
+
+@enduml

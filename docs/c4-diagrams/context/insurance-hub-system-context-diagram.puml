@@ -1,0 +1,26 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+skinparam linetype ortho
+
+title System Context diagram for Insurance Hub
+
+Person(agent, "Insurance Agent", "A user of the insurance sales portal who creates and manages policies.")
+
+System(insurance_hub, "Insurance Hub", "A microservices-based system for managing the full lifecycle of insurance policies, from quoting to payment and document generation.")
+
+System_Ext(jsreport, "JSReport Service", "External PDF Generation Engine", "Renders HTML and data into PDF documents.")
+System_Ext(kafka, "Apache Kafka", "Event Streaming Platform", "Provides a message broker for asynchronous communication between services.")
+System_Ext(bank_fs, "Bank Statements Storage", "File System/CSV", "A storage location for importing bank statement files for payment processing.")
+System_Ext(tariff_fs, "Tariff Rules Storage", "File System/MVEL", "A storage location for MVEL scripts that define pricing rules.")
+System_Ext(docs_storage, "Document Storage", "File System/Blob", "A persistent storage location for generated PDF policy documents.")
+
+
+Rel(agent, insurance_hub, "Uses the sales portal to create and manage insurance policies", "HTTPS")
+Rel(insurance_hub, jsreport, "Generates policy documents using", "HTTPS/REST")
+Rel(insurance_hub, kafka, "Publishes and consumes domain events for asynchronous processing")
+Rel(insurance_hub, bank_fs, "Imports bank statements for payment reconciliation", "File Read")
+Rel(insurance_hub, tariff_fs, "Reads pricing rules to calculate offer prices", "File Read")
+Rel(insurance_hub, docs_storage, "Stores and retrieves generated PDF documents", "File I/O")
+
+@enduml
