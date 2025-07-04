@@ -1,0 +1,36 @@
+@startuml
+!theme plain
+skinparam linetype ortho
+skinparam sequenceMessageAlign center
+
+title Sequence Diagram: Asynchronous Post-Sale Processing
+
+participant "Apache Kafka" as kafka
+
+box "Downstream Consumers" #LightGrey
+    participant "Payment Service" as payment_service
+    participant "Policy Search Service" as search_service
+    participant "Dashboard Service" as dashboard_service
+    participant "Documents Service" as doc_service
+end box
+
+database "Payment DB" as payment_db
+database "Elasticsearch" as elastic
+database "Document Storage" as doc_storage
+participant "JSReport Service" as jsreport
+
+kafka -> payment_service: 1a. Consume 'PolicyCreated' Event
+payment_service -> payment_db: 2a. Create & Save Policy Account
+
+kafka -> search_service: 1b. Consume 'PolicyCreated' Event
+search_service -> elastic: 2b. Index Policy for Search
+
+kafka -> dashboard_service: 1c. Consume 'PolicyCreated' Event
+dashboard_service -> elastic: 2c. Index Sales Data for Dashboard
+
+kafka -> doc_service: 1d. Consume 'PolicyCreated' Event
+doc_service -> jsreport: 2d. Request PDF Generation
+jsreport --> doc_service: 3d. Return Generated PDF
+doc_service -> doc_storage: 4d. Save PDF Document
+
+@enduml

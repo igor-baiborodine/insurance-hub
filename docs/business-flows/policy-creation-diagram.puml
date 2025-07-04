@@ -1,0 +1,34 @@
+@startuml
+!theme plain
+skinparam linetype ortho
+skinparam sequenceMessageAlign center
+
+title Sequence Diagram: Insurance Policy Creation
+
+actor "Insurance Agent" as agent
+participant "Agent Portal Gateway" as gateway
+participant "Policy Service" as policy_service
+participant "Product Service" as product_service
+participant "Pricing Service" as pricing_service
+database "Policy RDBMS" as policy_db
+participant "Apache Kafka" as kafka
+
+agent -> gateway: 1. Create Policy Request
+gateway -> policy_service: 2. Forward Request
+
+policy_service -> product_service: 3. Get Product Details
+product_service --> policy_service: 4. Return Product Details
+
+policy_service -> pricing_service: 5. Calculate Price Request
+pricing_service --> policy_service: 6. Return Calculated Price
+
+policy_service -> policy_db: 7. Save Policy
+policy_db --> policy_service: 8. Confirm Save
+
+policy_service -> kafka: 9. Publish 'PolicyCreated' Event
+
+kafka --> policy_service: 10. Acknowledge Event
+policy_service --> gateway: 11. Success Response
+gateway --> agent: 12. Success Response
+
+@enduml

@@ -1,0 +1,20 @@
+@startuml
+!theme plain
+skinparam linetype ortho
+skinparam sequenceMessageAlign center
+
+title Sequence Diagram: Policy Search
+
+actor "Insurance Agent" as agent
+participant "Agent Portal Gateway" as gateway
+participant "Policy Search Service" as search_service
+database "Elasticsearch" as elastic
+
+agent -> gateway: 1. Search Request
+gateway -> search_service: 2. Forward Search Query
+search_service -> elastic: 3. Execute Search Query
+elastic --> search_service: 4. Return Search Results
+search_service --> gateway: 5. Return Results
+gateway --> agent: 6. Display Results
+
+@enduml

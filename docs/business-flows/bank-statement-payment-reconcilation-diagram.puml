@@ -1,0 +1,20 @@
+@startuml
+!theme plain
+skinparam linetype ortho
+skinparam sequenceMessageAlign center
+
+title Sequence Diagram: Payment Reconciliation
+
+actor Scheduler as scheduler
+participant "Payment Service" as payment_service
+participant "File System" as fs
+database "Payment DB" as payment_db
+
+scheduler -> payment_service: 1. Trigger Scheduled Job
+payment_service -> fs: 2. Read Bank Statement CSV File
+fs --> payment_service: 3. Return File Content
+payment_service -> payment_service: 4. Process file and match payments to accounts
+payment_service -> payment_db: 5. Update Policy Account Balances
+payment_db --> payment_service: 6. Confirm Updates
+
+@enduml
