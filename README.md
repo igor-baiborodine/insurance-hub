@@ -1,3 +1,6 @@
+# WIP
+This project is an exercise in migrating the original [Micronaut Microservices POC](https://github.com/asc-lab/micronaut-microservices-poc) from Java/Micronaut to Go.
+
 # ASCLAB Micronaut PoC - LAB Insurance Sales Portal
 
 ![Build Status](https://github.com/asc-lab/micronaut-microservices-poc/workflows/Java%20CI%20with%20Maven/badge.svg)
