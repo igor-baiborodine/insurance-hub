@@ -1,0 +1,43 @@
+micronaut:
+  application:
+    name: product-service
+  server:
+    host: localhost
+    port: ${SERVICE_PORT:-1}
+#  metrics:
+#    enabled: true
+---
+jackson:
+  bean-introspection-module: true
+---
+mongodb:
+    uri: "mongodb://${MG_HOST:localhost}:${MG_PORT:27017}/demo"
+    cluster:
+      maxWaitQueueSize: 5
+    connectionPool:
+      maxSize: 20
+---
+consul:
+  client:
+    registration:
+      enabled: true
+      check:
+        http: true
+    defaultZone: "${CONSUL_HOST:localhost}:${CONSUL_PORT:8500}"
+---
+endpoints:
+  health:
+    enabled: true
+    sensitive: false
+#  metrics:
+#    enabled: true
+#    sensitive: false
+---
+tracing:
+  zipkin:
+    enabled: true
+    http:
+      url: "http://${ZIPKIN_HOST:localhost}:${ZIPKIN_PORT:9411}"
+      sampler:
+        probability: 1.0 # Configuration taking 100% of the request to be processed by Zipkin. In a real production system, that could be overwhelming.
+
