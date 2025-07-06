@@ -202,11 +202,166 @@ Internal Microservices
 
 ### Migration Notes
 
-TODO:
 
-1. Define system architecture: modular monolith etc.
-2. Define code source repo type: monorepo etc.
-3. Define migration strategy: develop from scratch(green field) or develop along the existing system
-4. Define migration sequence for system components
-5. Define observability components
-6. Define deployment environment: k8s
+### Migration Notes
+
+#### Component Migration Strategy
+
+| Component | Current Stack | Go Migration Approach |
+|-----------|---------------|----------------------|
+| **agent-portal-gateway** | Micronaut Gateway | [Envoy Proxy](https://www.envoyproxy.io/) for routing and load balancing |
+| **auth-service** | Micronaut Security + Micronaut Data JPA | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [golang-jwt](https://github.com/golang-jwt/jwt) + [GORM](https://gorm.io/) |
+| **chat-service** | Micronaut + WebSocket + Micronaut Data JPA | gRPC service + [gorilla/websocket](https://github.com/gorilla/websocket) + [GORM](https://gorm.io/) |
+| **dashboard-service** | Micronaut + Micronaut Data JPA + Elasticsearch | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [olivere/elastic](https://github.com/olivere/elastic) |
+| **document-service** | Micronaut + Micronaut Data JPA + File Storage | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [MinIO Go SDK](https://github.com/minio/minio-go) |
+| **policy-service** | Micronaut + Micronaut Data JPA | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) |
+| **payment-service** | Micronaut + Micronaut Data JPA | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) |
+| **pricing-service** | Micronaut + File Scripts | gRPC service + [Tarantool Go Connector](https://github.com/tarantool/go-tarantool) |
+| **product-service** | Micronaut + MongoDB | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + PostgreSQL JSONB |
+| **policy-search-service** | Micronaut + Elasticsearch | gRPC service + [olivere/elastic](https://github.com/olivere/elastic) |
+
+#### Component-Specific Migration Details
+
+**1. agent-portal-gateway**
+- **Current**: Micronaut Gateway for routing and load balancing
+- **Migration**: Replace with Envoy Proxy for advanced routing, service discovery, and load balancing
+- **Key Changes**:
+   - Remove Micronaut Gateway dependencies
+   - Configure Envoy Proxy for HTTP routing to backend gRPC services
+   - Services behind the gateway will handle their own HTTP exposure via grpc-gateway
+
+**2. auth-service**
+- **Current**: Micronaut Security with Micronaut Data JPA persistence
+- **Migration**: Native gRPC service with JWT token management, GORM, and HTTP exposure via grpc-gateway
+- **Key Changes**:
+   - Replace Micronaut Security with golang-jwt for token operations
+   - Replace Micronaut Data JPA with GORM for PostgreSQL access
+   - Implement gRPC authentication interceptors
+   - Add grpc-gateway for HTTP/JSON API exposure to external clients
+   - Maintain existing JWT token format for backward compatibility
+
+**3. chat-service**
+- **Current**: Micronaut with WebSocket support and Micronaut Data JPA
+- **Migration**: gRPC service with WebSocket gateway and GORM for persistence
+- **Key Changes**:
+   - Implement gRPC streaming for real-time message delivery between services
+   - Use gorilla/websocket for WebSocket connections to frontend
+   - Replace Micronaut Data JPA with GORM for chat history and user session persistence
+   - Bridge WebSocket messages to gRPC streams for internal communication
+
+**4. dashboard-service**
+- **Current**: Micronaut with Micronaut Data JPA and Elasticsearch integration
+- **Migration**: gRPC service with GORM for relational data, Elasticsearch for analytics, and HTTP exposure via grpc-gateway
+- **Key Changes**:
+   - Replace Micronaut HTTP controllers with gRPC methods
+   - Replace Micronaut Data JPA with GORM for dashboard configuration and user preferences
+   - Use olivere/elastic client for search operations
+   - Add grpc-gateway for external HTTP/JSON API access
+   - Implement Command/Query pattern with Go interfaces
+
+**5. document-service**
+- **Current**: Micronaut with Micronaut Data JPA and filesystem storage
+- **Migration**: gRPC service with GORM for metadata, MinIO for storage, and HTTP exposure via grpc-gateway
+- **Key Changes**:
+   - Replace file system storage with MinIO S3-compatible storage
+   - Replace Micronaut Data JPA with GORM for document metadata and versioning
+   - Implement gRPC streaming for large file uploads/downloads between services
+   - Add grpc-gateway for external HTTP/JSON API access
+   - Add presigned URL generation for direct client uploads
+
+**6. policy-service**
+- **Current**: Micronaut with Micronaut Data JPA
+- **Migration**: Standard gRPC service with GORM for PostgreSQL persistence and HTTP exposure via grpc-gateway
+- **Key Changes**:
+   - Convert Micronaut HTTP controllers to gRPC service methods
+   - Replace Micronaut Data JPA repositories with GORM models
+   - Add grpc-gateway for external HTTP/JSON API access
+   - Implement Command/Query separation using Go interfaces
+   - Migrate Micronaut validation to protobuf validation
+
+**7. payment-service**
+- **Current**: Micronaut with Micronaut Data JPA and external payment integrations
+- **Migration**: gRPC service with GORM for transaction persistence and HTTP exposure via grpc-gateway
+- **Key Changes**:
+   - Convert payment workflows to gRPC service methods
+   - Replace Micronaut Data JPA with GORM for transaction and payment persistence
+   - Add grpc-gateway for external HTTP/JSON API access
+   - Maintain existing external payment API integrations
+   - Implement gRPC client interceptors for external service calls
+
+**8. pricing-service**
+- **Current**: Micronaut with file-based pricing scripts
+- **Migration**: gRPC service with Tarantool-based rule engine (internal-only service)
+- **Key Changes**:
+   - **Revolutionary Change**: Migrate pricing logic from files to Lua scripts in Tarantool
+   - Service becomes thin gRPC wrapper around Tarantool procedure calls
+   - Eliminate file I/O completely for pricing calculations
+   - Enable dynamic rule updates without service restarts
+   - **Note**: No HTTP exposure needed - purely internal service
+
+**9. product-service**
+- **Current**: Micronaut with MongoDB
+- **Migration**: gRPC service with GORM for PostgreSQL JSONB storage and HTTP exposure via grpc-gateway
+- **Key Changes**:
+   - Migrate product data from MongoDB to PostgreSQL with JSONB columns
+   - Replace MongoDB queries with GORM JSONB operations
+   - Add grpc-gateway for external HTTP/JSON API access
+   - Maintain schema flexibility while gaining ACID compliance
+   - Use GORM's native PostgreSQL features for efficient JSONB handling
+
+**10. policy-search-service**
+- **Current**: Micronaut with Elasticsearch
+- **Migration**: gRPC service with Elasticsearch integration (internal-only service)
+- **Key Changes**:
+   - Replace Micronaut HTTP controllers with gRPC search methods
+   - Use olivere/elastic for Elasticsearch operations
+   - Implement gRPC streaming for large result sets
+   - Maintain existing Elasticsearch indices and mappings
+   - **Note**: No HTTP exposure needed - purely internal service
+
+#### Architecture Pattern Migrations
+
+**Command/Query Bus Pattern**
+- **Current**: Micronaut Command Bus with Java interfaces and generic type parameters
+- **Migration**: Go interfaces with GORM-backed handlers
+
+**Dependency Injection**
+- **Current**: Micronaut DI container with annotation-based injection
+- **Migration**: [Wire](https://github.com/google/wire) code generation with GORM instances
+
+**Inter-service Communication**
+- **Current**: Micronaut HTTP client with HTTP/JSON REST calls
+- **Migration**: Direct gRPC calls with [grpc-go](https://github.com/grpc/grpc-go)
+
+**External API Exposure**
+- **Current**: Micronaut HTTP controllers
+- **Migration**: grpc-gateway for services requiring external HTTP/JSON access
+
+**ORM Migration**
+- **Current**: Micronaut Data JPA with Hibernate
+- **Migration**: [GORM](https://gorm.io/) with PostgreSQL driver for all relational data persistence
+
+**Message Processing**
+- **Current**: Micronaut Kafka with JSON serialization
+- **Migration**: [sarama](https://github.com/Shopify/sarama) or [kafka-go](https://github.com/segmentio/kafka-go) with Avro serialization
+
+**Validation**
+- **Current**: Micronaut Validation with JSR-303 annotations
+- **Migration**: Protocol Buffers validation with [protoc-gen-validate](https://github.com/envoyproxy/protoc-gen-validate)
+
+**Configuration Management**
+- **Current**: Micronaut Configuration with YAML/Properties files
+- **Migration**: [Viper](https://github.com/spf13/viper) for configuration management
+
+**HTTP Server**
+- **Current**: Micronaut HTTP Server (Netty-based)
+- **Migration**: gRPC server with grpc-gateway for HTTP exposure where needed
+## System Observability
+
+TODO
+
+## Migration Strategy
+
+TODO
+
+Other Considerations
