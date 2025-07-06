@@ -229,6 +229,73 @@ Internal Microservices
   - HTTP-to-gRPC translation is delegated to individual backend services using `grpc-gateway`.
   - Envoy configuration will manage routing, TLS termination, and observability.
 
+<details>
+<summary>Reasoning for replacing agent-portal-gateway with Envoy Proxy in Kubernetes</summary>
+
+1. **Kubernetes-Native Integration & Ecosystem Alignment**
+
+* **Industry Standard:** Envoy is a CNCF (Cloud Native Computing Foundation) graduated project, the
+  same foundation that governs Kubernetes itself. It is the de-facto standard for high-performance
+  networking in cloud-native environments.
+* **Ingress Control:** Many of the most powerful Kubernetes Ingress Controllers (such as
+  Emissary-ingress, Contour, and Gloo Edge) are built directly on top of Envoy. This means adopting
+  Envoy aligns with established, battle-tested patterns for managing traffic into a Kubernetes
+  cluster. You can manage routes declaratively using Kubernetes manifests (CRDs).
+* **Service Mesh Foundation:** Using Envoy as an edge proxy (API Gateway/Ingress) is the first step
+  toward implementing a service mesh (like Istio or Linkerd). A service mesh uses Envoy as a sidecar
+  to manage all inter-service (east-west) traffic, providing uniform observability, security, and
+  traffic control across the entire cluster. This makes Envoy a strategic, future-proof choice.
+
+2. **Decoupling and Separation of Concerns**
+
+* **Infrastructure vs. Application Logic:** The Micronaut gateway combines application logic with
+  infrastructure concerns (routing, load balancing, TLS termination). Envoy is a dedicated,
+  out-of-process proxy, which cleanly separates network traffic management from the business logic
+  of the Go microservices.
+* **Team Autonomy:** This separation allows the platform/operations team to manage the gateway
+  configuration (routing, security policies, etc.) independently of the development teams, who can
+  focus solely on writing and deploying their Go services.
+
+3. **Superior Performance and Resource Efficiency**
+
+* **High-Performance C++ Core:** Envoy is written in C++ and has been designed from the ground up
+  for extreme performance, low latency, and a minimal memory/CPU footprint.
+* **Reduced Overhead:** Compared to a JVM-based solution like the Micronaut gateway, Envoy consumes
+  significantly fewer resources, which is a critical advantage in a containerized environment where
+  pods are often resource-constrained. This translates to lower operational costs and higher density
+  of services per node.
+
+4. **Advanced Traffic Management and Observability**
+
+* **Rich Feature Set:** Envoy provides a comprehensive suite of advanced traffic management features
+  out-of-the-box, including:
+  * **gRPC and HTTP/2 Support:** Native support for routing and load-balancing gRPC traffic, which
+  is central to the new Go architecture.
+  * **Resilience:** Sophisticated circuit breaking, timeouts, and retry policies.
+  * **Deployment Strategies:** Fine-grained traffic shifting for canary releases, blue-green
+  deployments, and A/B testing.
+  * **Security:** Advanced TLS termination and configuration.
+* **Unmatched Observability:** Envoy emits highly detailed statistics, logs, and distributed traces
+  for every request, integrating seamlessly with tools like Prometheus (metrics) and Jaeger (
+  tracing), which are standards in the Kubernetes ecosystem. This provides deep insight into system
+  behavior without requiring any instrumentation in the Go services themselves.
+
+5. **Configuration and Automation**
+
+* **Declarative & Dynamic:** Envoy's configuration can be managed declaratively and updated
+  dynamically via APIs without requiring restarts or downtime, which is essential for a CI/CD-driven
+  environment. When used with a Kubernetes Ingress Controller, this configuration is managed through
+  simple YAML files.
+* **Protocol-Agnostic:** Envoy can handle and route any TCP or UDP-based protocol, making it
+  versatile enough to manage not only HTTP and gRPC but also database connections or other custom
+  protocols if needed.
+
+This approach transforms the agent-portal-gateway from a custom application component into a
+standardized infrastructure component, aligning with Kubernetes best practices and cloud-native
+principles while providing superior performance and operational capabilities.
+
+</details>
+
 **2. auth-service**
 
 - **Current**: Micronaut Security with Micronaut Data JPA for persistence.
