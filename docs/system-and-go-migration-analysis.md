@@ -1,5 +1,156 @@
 # Insurance Hub System & Go Migration Analysis
 
+Table of Contents
+- [Migration Analysis](#migration-analysis)
+    - [Current State](#current-state)
+    - [Target State](#target-state)
+- [System Context](#system-context)
+    - [Migration Notes](#migration-notes)
+- [System Containers](#system-containers)
+    - [Migration Notes](#migration-notes-1)
+        - [Data Stores](#data-stores)
+        - [External systems](#external-systems)
+        - [External Exposure and Interservice Communication](#external-exposure-and-interservice-communication)
+- [System Container Components](#system-container-components)
+- [System Observability](#system-observability)
+- [Migration Strategy](#migration-strategy)
+
+## Migration Analysis
+
+### Current State
+
+The Insurance Hub system is a production-grade platform built primarily with **Java 14**
+using the **Micronaut** framework. It comprises multiple microservices that are responsible for core
+insurance functionalities. The system leverages a mix of persistence and messaging technologies,
+including **PostgreSQL**, **MongoDB**, **Elasticsearch**, and **Apache Kafka** for asynchronous
+event streaming and interservice decoupling. Key characteristics of the current state include:
+
+1. **Technology Stack**
+    - The backend services are written in Java, using the Micronaut framework for dependency
+      injection, web APIs, data access, and service orchestration.
+    - Lombok is extensively used to minimize boilerplate code in Java.
+    - Persistence is distributed: PostgreSQL is used for relational data, MongoDB for more
+      flexible/no-SQL storage needs, and Elasticsearch for full-text search and analytics.
+    - Apache Kafka enables event-driven communication between services.
+
+2. **Architecture**
+    - The platform is architected following microservices principles. Services mostly interact
+      synchronously over RESTful HTTP APIs, with selective use of event-driven (Kafka-based)
+      messaging.
+    - Integrations exist with external systems such as a local filesystem (for document and
+      statement storage) and JSReports (for PDF generation).
+
+3. **Deployment Environment**
+    - The system runs in a production environment that is **not fully cloud-native**—there is no
+      Kubernetes or full-feature cloud orchestration in place.
+    - For local development and integration testing, **Docker Compose** is used to emulate the
+      various services and supporting infrastructure, providing a containerized (but relatively
+      simple) developer experience.
+    - Production deployments are carried out using containerized images, but orchestration and
+      scaling are managed via traditional or bespoke methods rather than a unified cloud-native
+      platform.
+
+4. **Observability**
+    - Basic observability infrastructure is present: distributed tracing is implemented using **Zipkin**.
+    - However, the observability stack is **incomplete**. There is no unified or centralized logging
+      solution for aggregating and correlating log data across services.
+    - Metrics and monitoring are only partially implemented; there is a lack of comprehensive metric
+      collection, dashboards, and alerting mechanisms necessary for proactive incident detection and
+      diagnosis.
+    - This limits the ability to rapidly detect, investigate, and respond to issues in production.
+
+### Target State
+
+The target state for the Insurance Hub system represents a strategic redesign and technology
+refresh, with a primary goal of future-proofing the platform by modernizing its technical stack,
+leveraging cloud-native best practices, and fundamentally simplifying operations. Key
+characteristics of the target state include:
+
+1. **Technology Stack: Go-Powered Cloud-Native Microservices**
+
+- **Language Migration**: All backend services move from Java (Micronaut) to Go. Go is chosen for
+  its simplicity, performance, concurrency model, strong support in the cloud-native ecosystem,
+  rapid startup times, modest resource usage, and robust tooling for building distributed systems.
+- **Frameworks**: Use idiomatic Go; favor standard library, proven libraries (e.g., for HTTP/gRPC,
+  database), and ecosystem best-practices. Fewer framework-level abstractions than Java—favor clear
+  interfaces and explicit composition.
+
+2. **Cloud-Native, Kubernetes-First Deployment**
+
+- **Containerization**: All components delivered as OCI containers, optimized for fast
+  startup/teardown, minimal footprint, and easy orchestration.
+- **Kubernetes as the Primary Platform**: Deployment, scaling, service discovery, configuration, and
+  secret management leverage Kubernetes-native constructs (Deployments, Services, ConfigMaps,
+  Secrets).
+- **12-Factor Compliance**: Service configuration via environment; stateless business logic; logs to
+  stdout/stderr; persistent state only via explicitly managed cloud storage services.
+
+3. **Unified and Simplified Data Storage**
+
+- **Single Relational Store**: Consolidation onto PostgreSQL—abolish MongoDB, streamline management
+  and monitoring, reduce operational and security surface area.
+    - Use PostgreSQL’s **JSONB** capabilities for all previous “NoSQL”-style or flexible-schema
+      requirements (e.g., insurance products).
+    - Continue Elasticsearch for full-text search/analytics use cases.
+
+- **Benefits**: Improved data governance, reduced cognitive/operational overhead, clear backup and
+  disaster recovery model.
+
+4. **Cloud-Native Object Storage**
+
+- **File Storage Migration**: All previous direct file system accesses for documents, statements,
+  and other artifacts migrate to S3-compatible object storage, such as MinIO or AWS S3.
+    - Enables infinite scale, strong durability, and decouples storage lifecycle from application
+      lifecycle.
+    - Access controls, encryption, versioning, and policies managed at the storage/service layer.
+
+- **Integration**: Replace any local file system dependencies in code/config with S3-compatible APIs;
+  leverage Go’s strong support for these SDKs.
+
+5. **Replacing Legacy Integrations with Cloud Alternatives**
+
+- **Tariff Rules Execution**: Legacy file-based rules and script execution replaced by in-memory,
+  transactional database-stored procedures (e.g., Tarantool with Lua).
+    - Ensures scalability, performance, robust change management/versioning.
+
+- **PDF Generation**: Centralized, stateless Go service using browser-based rendering (e.g.,
+  chromedp/Chrome headless), removing legacy JSReports.
+
+6. **Communication: gRPC Internally, REST at the Edge**
+
+- **Internal Service Calls**: All interservice communication standardized on gRPC for performance,
+  streaming support, strict contracts, and code generation.
+- **External APIs**: Select services exposed via REST/HTTP using gRPC-gateway for compatibility with
+  third parties, web frontends, and OpenAPI/Swagger generation.
+- **Benefits**: Strongly typed API interactions, improved developer productivity, easier backward
+  compatibility, and API evolution.
+
+7. **Comprehensive Observability**
+
+- **Distributed Tracing**: End-to-end request tracing using OpenTelemetry, integrated with solutions
+  like Jaeger or Tempo.
+- **Centralized Logging**: Structured, JSON-formatted logs to stdout/stderr, ingested by
+  cloud-native log aggregators (e.g., Loki, Elasticsearch).
+- **Metrics**: Application-, infrastructure-, and business-level metrics exposed via Prometheus
+  endpoints; use Grafana for visualization.
+- **Dashboards & Alerts**: Predefined Grafana dashboards per service and aggregated; robust alerting
+  via Grafana Alerting or similar, facilitating rapid detection/triage.
+
+8. **Other Cloud-Native & Go-Centric Enhancements**
+
+- **CI/CD Pipeline Modernization**: Use GitOps or automated pipelines for deterministic, repeatable
+  deployments, with container image scanning, e2e/integration tests, and blue/green rollout
+  strategies.
+- **Zero-Trust Security**: Strong authentication and authorization, favoring short-lived
+  credentials, service-to-service mTLS, and secrets management tools provided by the cloud or
+  Kubernetes ecosystem (e.g., HashiCorp Vault, Kubernetes Secrets).
+- **Documentation & Development Practices**: Strict API contracts via .proto files, self-service API
+  documentation via gRPC-gateway OpenAPI integration, and shared libraries for repetitive concerns 
+  (logging, metrics, error handling).
+- **Resilience & Scalability**: Stateless Go microservices support rapid horizontal scaling;
+  leverage Kubernetes' pod autoscaling and distributed message streaming (Kafka) for burst
+  workloads.
+
 ## System Context
 
 * [Diagram source PlantUML](/docs/c4-diagrams/context/insurance-hub-system-context-diagram.puml)
@@ -219,8 +370,8 @@ Internal Microservices
 
 #### Component-Specific Migration Details
 
-**1. agent-portal-gateway**
-
+1. **agent-portal-gateway**
+ 
 - **Current**: Micronaut Gateway for routing and load balancing.
 - **Migration**: Replace with Envoy Proxy for advanced routing, service discovery, and load
   balancing.
@@ -296,7 +447,7 @@ principles while providing superior performance and operational capabilities.
 
 </details>
 
-**2. auth-service**
+2. **auth-service**
 
 - **Current**: Micronaut Security with Micronaut Data JPA for persistence.
 - **Migration**: A native gRPC service handling JWT token management, using GORM for persistence,
@@ -306,7 +457,7 @@ principles while providing superior performance and operational capabilities.
   - Replace Micronaut Data JPA with GORM for database operations against PostgreSQL.
   - Expose RESTful endpoints for login and token validation to external clients using `grpc-gateway`.
 
-**3. chat-service**
+3. **chat-service**
 
 - **Current**: Micronaut with WebSocket support and Micronaut Data JPA.
 - **Migration**: A gRPC service that uses `gorilla/websocket` to manage client connections and GORM
@@ -317,7 +468,7 @@ principles while providing superior performance and operational capabilities.
   the internal gRPC streams.
   - Replace Micronaut Data JPA with GORM for storing chat history and user data.
 
-**4. dashboard-service**
+4. **dashboard-service**
 
 - **Current**: Micronaut with Micronaut Data JPA and an Elasticsearch client.
 - **Migration**: A gRPC service that uses GORM for relational data and a native Go Elasticsearch
@@ -327,7 +478,7 @@ principles while providing superior performance and operational capabilities.
   - Use GORM for managing dashboard configurations and user preferences in PostgreSQL.
   - Integrate the `olivere/elastic` client for querying analytical data from Elasticsearch.
 
-**5. document-service**
+5. **document-service**
 
 - **Current**: Micronaut with Micronaut Data JPA and local file system storage.
 - **Migration**: A gRPC service that uses GORM for metadata persistence and MinIO for object
@@ -337,7 +488,7 @@ principles while providing superior performance and operational capabilities.
   - Use GORM to manage document metadata in PostgreSQL.
   - Implement gRPC streaming for efficient handling of large file uploads and downloads.
 
-**6. policy-service & payment-service**
+6. **policy-service & payment-service**
 
 - **Current**: Standard Micronaut services with Micronaut Data JPA.
 - **Migration**: Standard gRPC services with GORM for PostgreSQL persistence and `grpc-gateway` for
@@ -347,7 +498,7 @@ principles while providing superior performance and operational capabilities.
   - Replace Micronaut Data JPA repositories with GORM models and queries.
   - Use Protobuf for API contracts, enabling strong typing and validation.
 
-**7. pricing-service**
+7. **pricing-service**
 
 - **Current**: Micronaut service executing pricing logic from file-based scripts.
 - **Migration**: A lightweight, internal-only gRPC service that acts as a client to a Tarantool
@@ -358,7 +509,7 @@ principles while providing superior performance and operational capabilities.
   `go-tarantool` connector.
   - This service will not be exposed externally via HTTP.
 
-**8. product-service**
+8. **product-service**
 
 - **Current**: Micronaut service using a MongoDB database.
 - **Migration**: A gRPC service leveraging PostgreSQL with JSONB columns for product data, managed
@@ -370,7 +521,7 @@ principles while providing superior performance and operational capabilities.
    - This approach combines the flexibility of a document database with the power of a relational
      database.
 
-**9. policy-search-service**
+9. **policy-search-service**
 
 - **Current**: Micronaut service providing search capabilities over Elasticsearch.
 - **Migration**: An internal-only gRPC service that uses the `olivere/elastic` client to interface
@@ -402,3 +553,13 @@ TODO
 TODO
 
 Other Considerations
+
+TODO:
+
+1. Define system architecture: modular monolith etc.
+2. Define code source repo type: monorepo etc.
+3. Define migration strategy: develop from scratch(green field) or develop along the existing system
+4. Define migration sequence for system components
+5. Define observability components
+6. Define deployment environment: k8s - Kind for running locally
+
