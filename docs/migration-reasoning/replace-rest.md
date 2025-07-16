@@ -10,7 +10,7 @@ inconsistencies between documentation and actual service behavior.
 
 ## Why gRPC with gRPC-gateway is the Right Choice
 
-**Protocol Optimization for Different Use Cases**
+1. **Protocol Optimization for Different Use Cases**
 
 - **gRPC for internal communication**: Provides superior performance, type safety, bidirectional
   streaming, and efficient binary serialization between Go services, delivering 7-10x faster
@@ -18,7 +18,7 @@ inconsistencies between documentation and actual service behavior.
 - **HTTP/REST for external exposure**: Ensures universal compatibility with web frontends, mobile
   apps, and third-party integrations without forcing external clients to adopt gRPC
 
-**Single API Definition and Code Generation**
+2. **Single API Definition and Code Generation**
 
 - Define APIs once in `.proto` files, eliminating duplication and ensuring consistency across
   protocols
@@ -27,21 +27,21 @@ inconsistencies between documentation and actual service behavior.
 - Auto-generate OpenAPI/Swagger documentation for external API consumers
 - Maintain API contracts as code, ensuring documentation accuracy and version control
 
-**Performance Benefits**
+3. **Performance Benefits**
 
 - Internal gRPC communication significantly reduces serialization overhead through binary protocol
 - HTTP/JSON translation only occurs at the edge where needed, minimizing performance impact
 - Streaming capabilities enable efficient real-time data transfer for appropriate use cases
 - Connection multiplexing reduces network overhead for high-frequency service interactions
 
-**Operational Advantages**
+4. **Operational Advantages**
 
 - Strongly typed API contracts prevent runtime errors and improve developer productivity
 - Built-in support for API versioning and backward compatibility
 - Seamless integration with cloud-native observability tools (OpenTelemetry, Prometheus)
 - Kubernetes-native service discovery and load balancing work optimally with gRPC
 
-**Architecture Flow**
+5. **Architecture Flow**
 
 ```
 External Client (HTTP/JSON)

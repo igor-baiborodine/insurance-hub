@@ -12,7 +12,7 @@ failure.
 
 ## Why PostgreSQL with JSONB is the Right Choice
 
-**Consolidation of Database Technologies**
+1. **Consolidation of Database Technologies**
 
 - Eliminates the need for MongoDB by leveraging PostgreSQL's JSONB capabilities, consolidating all
   data storage to a single, proven technology stack
@@ -22,7 +22,7 @@ failure.
 - Lowers the learning curve for new team members by focusing expertise on a single database
   technology
 
-**JSONB Capabilities and Flexibility**
+2. **JSONB Capabilities and Flexibility**
 
 - PostgreSQL's JSONB data type provides excellent support for semi-structured insurance product data
   with schema flexibility comparable to MongoDB
@@ -32,7 +32,7 @@ failure.
   optimal performance
 - Maintains the flexibility to evolve product schemas without rigid migration requirements
 
-**ACID Compliance and Relational Integration**
+3. **ACID Compliance and Relational Integration**
 
 - Retains PostgreSQL's strong ACID properties, ensuring data consistency and reliable transactions
   for critical insurance product data
@@ -42,7 +42,7 @@ failure.
   policy data
 - Offers the hybrid approach of document-like flexibility with relational database reliability
 
-**Performance and Scalability**
+4. **Performance and Scalability**
 
 - Delivers comparable or superior performance to MongoDB for many JSON querying scenarios,
   particularly with proper indexing
@@ -51,7 +51,7 @@ failure.
 - Provides efficient storage and retrieval of complex product hierarchies and attribute
   relationships
 
-**Cloud-Native and Go Ecosystem Integration**
+5. **Cloud-Native and Go Ecosystem Integration**
 
 - Integrates seamlessly with the Go ecosystem through robust, mature drivers and ORMs (pgx, GORM)
 - Supports containerized deployment with official PostgreSQL Docker images and Kubernetes operators

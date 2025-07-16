@@ -12,7 +12,7 @@ calculations.
 
 ## Why Tarantool is the Right Choice
 
-**Extreme Performance Benefits**
+1. **Extreme Performance Benefits**
 
 - Tarantool operates as an in-memory database and application server, enabling tariff calculations
   to occur at in-memory speeds directly next to the data
@@ -21,7 +21,7 @@ calculations.
   execution model
 - Supports high-frequency pricing requests without degrading system performance
 
-**Superior Decoupling and Simplicity**
+2. **Superior Decoupling and Simplicity**
 
 - Transforms pricing logic into a self-contained, language-agnostic component within Tarantool
 - Simplifies the Go pricing service to a thin wrapper that receives requests, calls appropriate Lua
@@ -29,7 +29,7 @@ calculations.
 - Enables dynamic rule updates without requiring service redeployment or system downtime
 - Separates business logic from application deployment cycles, improving operational flexibility
 
-**Centralized and Atomic Rule Management**
+3. **Centralized and Atomic Rule Management**
 
 - Provides transactional consistency for pricing rule updates, ensuring the system never enters an
   inconsistent state
@@ -38,7 +38,7 @@ calculations.
 - Offers superior rule management compared to distributed script files with built-in versioning and
   rollback capabilities
 
-**Future-Proofing and Language Agnostic Access**
+4. **Future-Proofing and Language Agnostic Access**
 
 - Makes pricing logic accessible to any service regardless of programming language (Go, Python,
   Rust, etc.)
@@ -46,13 +46,13 @@ calculations.
 - Supports the microservices architecture by providing a centralized pricing calculation service
 - Enables consistent pricing behavior across all system components without code duplication
 
-**Cloud-Native Integration**
+5. **Cloud-Native Integration**
 
 - Tarantool's containerized deployment model aligns with Kubernetes-first architecture
 - Supports horizontal scaling and high-availability configurations
 - Integrates with modern observability tools for monitoring rule execution performance
 - Provides backup and disaster recovery capabilities for critical pricing rule data
 
-This approach transforms tariff rule management from a file-based, tightly-coupled system into a
+This approach transforms tariff rule management from a file-based, tightly coupled system into a
 high-performance, centralized, and language-agnostic pricing engine that supports both current
 migration goals and future scalability requirements.
