@@ -205,11 +205,14 @@ characteristics of the target state include:
 
 | External System          | Java        | Go                |
 |--------------------------|-------------|-------------------|
+| Service Discovery        | Consul      | Kubernetes-native |
 | Event streaming platform | Kafka       | Kafka             |
 | Bank statements storage  | File system | MinIO             |
 | Documents storage        | File system | MinIO             |
 | Tariff rules storage     | File system | Tarantool         |
 | PDF reports generator    | JSReports   | chromedp(library) |
+
+[Reasoning for replacing Consul with Kubernetes-native service discovery](migration-reasoning/replace-consul.md)
 
 [Reasoning for using Tarantool for tariff rule scripts storage and execution](migration-reasoning/replace-old-pricing.md)
 
