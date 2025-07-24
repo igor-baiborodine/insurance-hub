@@ -13,7 +13,14 @@ Table of Contents
         - [External systems](#external-systems)
         - [External Exposure and Interservice Communication](#external-exposure-and-interservice-communication)
 - [System Container Components](#system-container-components)
+    - [Migration Notes](#migration-notes-2) 
+        - [Component Migration Strategy](#component-migration-strategy)
+        - [Component-Specific Migration Details](#component-specific-migration-details)
+        - [Architecture Pattern Migrations](#architecture-pattern-migrations)
 - [System Observability](#system-observability)
+    - [Migration Notes](#migration-notes-2) 
+        - [Component Migration Strategy](#component-migration-strategy-1)
+        - [Component-Specific Migration Details](#component-specific-migration-details-1)
 - [Migration Strategy](#migration-strategy)
 
 ## Migration Analysis
@@ -454,6 +461,104 @@ compatibility of REST APIs.
 
 ## System Observability
 
+* [Diagram source PlantUML](java-c4-diagrams/observability/insurance-hub-observability-container-diagram.puml)
+* [Generated diagram on www.plantuml.com](https://www.plantuml.com/plantuml/png/bLR1Sjis4BthAxQwH9cfhKjFFSLstDgELNkYfEdqebc1QmfZ4E00e1scqt_lBc0YPEGubG-skDxTj-zXyQWt8QAFNMDcFschJ5SHx69imw_BfSV7urh7NRVj0ddbR2GRZvLhbgr1ApL78LP6RvTdlnpTIkZZwdhPO8ZaERGvumhKblnnA_rduLxR5ZqsO3WQ-vR0-RXpirdKqH2KVAWqrf9tvpnSsj1vj8hWejl2kkVk3Hp1MUSzZmCtMvxj0RVQwDXpyfrdVD-fs7cQpLx1YOhEXzaj-U3ieg87Cgub_pFCtmwVbpVy2pbjpj6Lireg86Ia7Q69Eq1RGVIksneAE-TY01r2Hs7-UZRBCsrENMShzFr23nDlM3fkEM4mVmt_p81_NZ5VJx3IoZkXe1K5M0JTj4RVQQeIUJTcnn7LXTUfkcYrg37I8_QCSrAB8BUiAHhuFOU5qXK-u3BXMEoYHCvjz3sqJdF-esPwMmnQCK5KsjQWhKZO44D4xUpyMqZkijiypIou_0Zh_FWydcHmDwrIFtWg7KCRLzSClGVLEgDLFmAxJO6Nu4fEWnPhQcWW-RTkUGC7bljGtbMTYcEi77aHh2GnDsGM6IhmKoHFbH0Bpq1f6M4CbIC_WXBL51hLcQna0ckqrGqQQFBgFiiDUz5X39WZBmAM99P6KGZSUNHcmzLGErBt-nmhNjPlCD_cq0JqdOj6sobioQk9EusOOdMqSzzVbWh3RklGLsFC8VQ33RLe-gXLWD8aGxReenPnARBwGZFVtlzdGDFvlgG5PBIyYMaYycMWTUj5uLFdiWewCEIsYrILcwcSCQII8E98-Hm-NYQla1m25291ow3_Yl-TVuxaERQSJiPJDQspJ20C_iMP2-Liw0o3Nx0AcWsgvKG9oK1F0W8FfXmFte-3dcgPj__UWe32DekanJN7eFTuTuzo1YroAhoJn-HI3sbNeYTic7noPme1QuAjT_VanrXNgx_6P_GALcWxfhqkDt5oK6DyNgVDdJOKX4v9ltOr_2PHmPKFa4lcoT4h_Q0hxb-yJEuvXEZodLTeJ9R2TH4Ky_1ez9V1JaVWJHfpy_Nk2iiKWuiitrc-Nt8e7pxSmhcjad6do6dYBl51R1h-NT13H7alLGLUr7bFsK7ubDi0Hp0Su-NK-cUSz_KDK_PtpIWXBnp_SSDiowlrpH_SNugcndrWRN7YmukBjnvSpAfSPsE1HLc3t7FwmXllooUl8mK9ISkoAfVBcppEr7aFhfwQwE7bnH0FhsSvzYxyT2Mdor6iutro0l9XMCaGCNPbWUVxaXvSN9RhyFBfVXrUNvm5LkNAmebI5B8UvHlcQF7-rFHO5YzVU9FCynDjsRrbgcbbcISBNKmcJ_D2vUHuyrJvWAUuw_N5CXrrJjbli-TAPPOzdvbgCttBZ3LQ9A_AIDdndqKv_zmwdddYvnpcHm5umx1TO_u3)
+* [Explanation of observability stack and flows](java-c4-diagrams/observability/insurance-hub-observability-container-analysis.md)
+
+### Component Migration Strategy
+
+| Observability Component   | Java                  | Go                                          |
+|---------------------------|-----------------------|---------------------------------------------|
+| Distributed Tracing       | Zipkin                | OpenTelemetry + Tempo                       |
+| Centralized Logging       | None (scattered logs) | Structured JSON logs + Loki                 |
+| Metrics Collection        | Partial/Ad-hoc        | Prometheus + Go metrics                     |
+| Visualization Dashboard   | None                  | Grafana                                     |
+| Alerting System           | None                  | Grafana Alerting                            |
+| Service Health Monitoring | Basic HTTP checks     | Kubernetes Probes + Custom Health Endpoints |
+
+The observability stack transformation represents a fundamental shift from basic, fragmented
+monitoring to a comprehensive, cloud-native observability platform built around the unified Grafana
+ecosystem. The current Java/Micronaut system relies on Zipkin for limited distributed tracing with
+no centralized logging, minimal metrics collection, and no unified dashboards or alerting. The
+target Go/Kubernetes architecture implements a complete observability stack built on
+industry-standard tools: OpenTelemetry for distributed tracing with Tempo backend, Loki for
+centralized logging, Prometheus for metrics collection, and Grafana for visualization and
+alerting—creating a cohesive, unified observability experience.
+
+This migration enables the "three pillars of observability" (metrics, logs, traces) to work together
+cohesively within a single visualization platform, providing comprehensive system visibility, faster
+troubleshooting, and proactive issue detection that is essential for operating a distributed
+microservices architecture at scale.
+
+### Component-Specific Migration Details
+
+1. **Distributed Tracing**
+
+- **Current**: Basic Zipkin tracing with limited service correlation and manual trace analysis
+  requirements.
+- **Migration**: OpenTelemetry SDK integrated into all Go services, exporting traces to Tempo
+  for comprehensive end-to-end request visibility with automatic correlation across service
+  boundaries and seamless integration with the Grafana ecosystem.
+- **Key Changes**:
+    - Industry-standard observability protocols with vendor-agnostic instrumentation
+    - Automatic trace propagation across gRPC and HTTP service calls
+    - Rich trace context including business metadata and custom tags
+    - Native integration with Grafana for unified trace analysis and correlation with logs and
+      metrics
+    - Object storage backend (MinIO) aligning with cloud-native storage strategy
+
+[Reasoning for OpenTelemetry-based distributed tracing](migration-reasoning/replace-zipkin.md)
+
+2. **Centralized Logging**
+
+- **Current**: Scattered application logs across service instances with no centralization, requiring
+  manual aggregation for troubleshooting.
+- **Migration**: Structured JSON logs emitted to stdout/stderr, automatically collected by
+  Kubernetes and forwarded to Loki for centralized storage, search, and correlation.
+- **Key Changes**:
+    - Unified log aggregation across all services and infrastructure components
+    - Structured data format enabling powerful querying and filtering capabilities
+    - Automatic correlation with traces and metrics through shared identifiers
+    - Cloud-native log collection with no additional infrastructure overhead
+    - Native Grafana integration for seamless log exploration and correlation
+
+3. **Metrics Collection**
+
+- **Current**: Partial, ad-hoc metrics collection with no standardized format or comprehensive
+  coverage.
+- **Migration**: Prometheus metrics exposed by all services via `/metrics` endpoints, including
+  custom business metrics alongside standard Go runtime metrics.
+- **Key Changes**:
+    - Standardized metrics format compatible with cloud-native monitoring tools
+    - Comprehensive coverage of application, infrastructure, and business metrics
+    - Automatic service discovery and scraping through Kubernetes integration
+    - Time-series data storage enabling trend analysis and capacity planning
+    - Direct integration with Grafana for rich visualization and alerting
+
+4. **Visualization and Alerting**
+
+- **Current**: No unified dashboards or proactive alerting capabilities.
+- **Migration**: Grafana dashboards providing service-level, infrastructure-level, and
+  business-level insights with unified access to metrics, logs, and traces, plus proactive alerting
+  via Grafana Alerting.
+- **Key Changes**:
+    - Single pane of glass for monitoring distributed system health across all observability data
+      types
+    - Pre-built dashboards for common observability patterns and Go-specific metrics
+    - Intelligent alerting based on SLA violations, error rates, and business KPIs
+    - Self-service observability is enabling developers to create custom views and alerts
+    - Unified correlation between metrics, logs, and traces within a single interface
+
+5. **Health Monitoring**
+
+- **Current**: Basic HTTP health checks with limited service status visibility.
+- **Migration**: Kubernetes liveness/readiness probes combined with custom health check endpoints
+  providing comprehensive service status visibility.
+- **Key Changes**:
+    - Native Kubernetes integration for automatic service lifecycle management
+    - Granular health status reporting for different service capabilities
+    - Automatic traffic routing based on service health status
+    - Integration with Grafana alerting for proactive issue notification
 TODO
 
 ## Migration Strategy
@@ -464,9 +569,5 @@ Other Considerations
 
 TODO:
 
-1. Define system architecture: modular monolith etc.
-2. Define code source repo type: monorepo etc.
-3. Define migration strategy: develop from scratch(green field) or develop along the existing system
-4. Define migration sequence for system components
-5. Define observability components
-6. Define deployment environment: k8s - Kind for running locally
+1. Define migration strategy: develop from scratch(green field) or develop along the existing system
+2. Define migration sequence for system components
