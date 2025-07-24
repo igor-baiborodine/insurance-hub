@@ -1,0 +1,61 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+skinparam linetype ortho
+
+title Container diagram for Insurance Hub System - Current Observability Infrastructure
+
+' Actors
+Person(developer, "Developer/Operator", "Monitors system health and troubleshoots issues")
+
+System_Boundary(insurance_hub, "Insurance Hub") {
+    ' Core Microservices (simplified for observability focus)
+    Container(gateway, "Agent Portal Gateway", "Java/Micronaut", "Entry point with basic tracing instrumentation")
+    Container(auth_service, "Auth Service", "Java/Micronaut", "Authentication service with basic logging")
+    Container(policy_service, "Policy Service", "Java/Micronaut", "Policy management with Zipkin tracing")
+    Container(product_service, "Product Service", "Java/Micronaut", "Product catalog with scattered logs")
+    Container(pricing_service, "Pricing Service", "Java/Micronaut", "Price calculation with minimal monitoring")
+    Container(payment_service, "Payment Service", "Java/Micronaut", "Payment processing with basic health checks")
+    Container(document_service, "Document Service", "Kotlin/Micronaut", "Document generation with ad-hoc logging")
+    Container(dashboard_service, "Dashboard Service", "Java/Micronaut", "Analytics dashboard with partial metrics")
+
+    ' Current Observability Infrastructure
+    Container(zipkin, "Zipkin Server", "Java/Spring Boot", "Distributed tracing collection and basic UI for trace analysis")
+}
+
+' External/Infrastructure Components
+System_Ext(consul, "HashiCorp Consul", "Service Discovery", "Service registry with basic health check capabilities")
+System_Ext(kafka, "Apache Kafka", "Event Streaming", "Message broker with basic JMX metrics")
+
+' Manual/Scattered Observability
+System_Ext(log_files, "Scattered Log Files", "File System", "Individual service logs stored locally without centralization")
+System_Ext(manual_monitoring, "Manual Health Checks", "HTTP Endpoints", "Basic HTTP health endpoints without standardization")
+
+' Relationships - Service Instrumentation
+Rel(gateway, zipkin, "Sends traces to", "HTTP/JSON")
+Rel(policy_service, zipkin, "Sends traces to", "HTTP/JSON")
+Rel(product_service, zipkin, "Sends traces to", "HTTP/JSON")
+Rel(pricing_service, zipkin, "Sends traces to", "HTTP/JSON")
+
+' Logging (Scattered)
+Rel(auth_service, log_files, "Writes logs to", "File I/O")
+Rel(payment_service, log_files, "Writes logs to", "File I/O")
+Rel(document_service, log_files, "Writes logs to", "File I/O")
+Rel(dashboard_service, log_files, "Writes logs to", "File I/O")
+
+' Service Discovery Health Checks
+Rel(gateway, consul, "Registers health status", "HTTP")
+Rel(auth_service, consul, "Registers health status", "HTTP")
+Rel(policy_service, consul, "Registers health status", "HTTP")
+Rel(product_service, consul, "Registers health status", "HTTP")
+
+' Manual Monitoring Access
+Rel(developer, zipkin, "Views traces manually", "Web UI")
+Rel(developer, consul, "Checks service status", "Web UI")
+Rel(developer, log_files, "Accesses logs manually", "SSH/File Access")
+Rel(developer, manual_monitoring, "Checks health endpoints", "HTTP")
+
+' Infrastructure Monitoring (Basic)
+Rel(kafka, manual_monitoring, "Exposes JMX metrics", "JMX")
+
+@enduml
