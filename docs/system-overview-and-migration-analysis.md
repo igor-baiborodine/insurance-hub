@@ -1,27 +1,33 @@
 # Insurance Hub System & Go Migration Analysis
 
-Table of Contents
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**
 
 - [Migration Analysis](#migration-analysis)
-    - [Current State](#current-state)
-    - [Target State](#target-state)
+  - [Current State](#current-state)
+  - [Target State](#target-state)
 - [System Context](#system-context)
-    - [Migration Notes](#migration-notes)
 - [System Containers](#system-containers)
-    - [Migration Notes](#migration-notes-1)
-        - [Data Stores](#data-stores)
-        - [External systems](#external-systems)
-        - [External Exposure and Interservice Communication](#external-exposure-and-interservice-communication)
+  - [Data Stores](#data-stores)
+  - [External systems](#external-systems)
+  - [External Exposure and Interservice Communication](#external-exposure-and-interservice-communication)
 - [System Container Components](#system-container-components)
-    - [Migration Notes](#migration-notes-2) 
-        - [Component Migration Strategy](#component-migration-strategy)
-        - [Component-Specific Migration Details](#component-specific-migration-details)
-        - [Architecture Pattern Migrations](#architecture-pattern-migrations)
+  - [Component Migration Strategy](#component-migration-strategy)
+  - [Component-Specific Migration Details](#component-specific-migration-details)
+  - [Architecture Pattern Migrations](#architecture-pattern-migrations)
 - [System Observability](#system-observability)
-    - [Migration Notes](#migration-notes-2) 
-        - [Component Migration Strategy](#component-migration-strategy-1)
-        - [Component-Specific Migration Details](#component-specific-migration-details-1)
+  - [Component Migration Strategy](#component-migration-strategy-1)
+  - [Component-Specific Migration Details](#component-specific-migration-details-1)
 - [Migration Strategy](#migration-strategy)
+  - [Phase 1: Foundational Infrastructure & Environment Migration (Lift and Shift)](#phase-1-foundational-infrastructure--environment-migration-lift-and-shift)
+  - [Phase 2: Foundational Observability with Shared Trace Storage](#phase-2-foundational-observability-with-shared-trace-storage)
+  - [Phase 3: Data Store Consolidation](#phase-3-data-store-consolidation)
+  - [Phase 4: Phased Service Migration to Go (Strangler Fig Pattern)](#phase-4-phased-service-migration-to-go-strangler-fig-pattern)
+  - [Phase 5: Modernize Edge and Authentication](#phase-5-modernize-edge-and-authentication)
+  - [Phase 6: Finalization, Automation, and Optimization](#phase-6-finalization-automation-and-optimization)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ## Migration Analysis
 
@@ -165,8 +171,6 @@ characteristics of the target state include:
 * [Generated diagram on www.plantuml.com](https://www.plantuml.com/plantuml/uml/ZPDFSzis4CNl_1HRdzoPsBhqr5CIHwdTsbEDfEIgWS2bY0f_sDsb77txOa69aLcbqni9BDxxOV7sFOiXwOElVdBH-hv6Q4Kw_dKs8_DwltFIzjkUaMoAWb7kRGgppfkeP-vOQk-siuTVxXQwzENbUHOC2r9UsZpeYMzotwbwnNiNEqCcW7SHvTWX998sLPKuyGYh8mi6E1s2sfcT5ZU9u2boJoPQXCT-MrKB94xnrkmopZku-RxxGLTkyj87K6983KYBuCO2DXuPkknhFBos2IoX4MGmiOPWOfRKRU-iGxw_-Rcg1ghRKMAJkt7fgKI3Ot2M4YCTd4M-snh66hYSrZiCwYxk2b7JUm_UDMYFrgDoZWQZ_JjeA0NukqzIZYNep35Wb09R9zkNdtnb92CknGlUpVoRtFx5X7hLJFVxQba-OJNmAN4kGOh6m-BJP_XjL85vp9YbOecnHc9uNByy3wP6J2QLf6T616tKfU_UD7kZBUcCRH7-qDzYU53UbH2Qe3VAYP4cKT2z1QM3g_KX822psI5iAUsHIkyC7wDjASNKCzWKGX-T7MYtAA-84SwDdx1iJTnl6iuE7_DNDZU2XJb_9iesQlxPZV6RFQo-3i_9mpxuT79I41UqYmglmi1dEMYo16l9-4WTfOp3kNQ298PSqmnGw_8DozxZ3ubUliwV_mD9ju4jkKuOf3K2DJOkOWPmLab9nISCTRAyESbbwK_dCFq0uQDFfv1tIEnOjFOQpJcDM6j2XYWVtmQbgfRepxCx7QilZ7g9oQ3AUKulnlJAm2ZXutgzM6KNzPY8Nup3AUt8_oA4NbziL9ejvwlrTRbpoXVzrZjkaGkSJP6p4cV5O5m4F1JLQOWlqd5T_NjkdqhaU1AujraZpBxMULSUOdoz9Phwklnb1hMAtwQbTDnustjjUceQf5A0_3-q9zdII9sQGoZay80yYSdO_L7zQVQdHkKznheF_Xy0)
 * [Explanation of system context and flows](java-c4-diagrams/context/insurance-hub-system-context-analysis.md)
 
-### Migration Notes
-
 1. **External System Integration Changes**: While the core external systems (Web Frontend, Mobile
    App, External Insurance Systems) remain unchanged, the internal service communication protocols
    will transition from HTTP/REST to gRPC, with gRPC-gateway providing HTTP compatibility at service
@@ -194,9 +198,7 @@ characteristics of the target state include:
 * [Generated diagram on www.plantuml.com](https://www.plantuml.com/plantuml/uml/dLT1LoCv3hxdLsWvDFHx3RdiQKy30QPXcfriGZD7dk9I4WykkzPoGMVtxNzVo-KgAaN1qDnIjgNli_HPKdxXW3xKfPdyJLjbwe9W6qB5_vXEFJwTR7JOrgkQoIjd0zbmebmvhGnQiJdcK1Yzcix-VZoNfUyttwObSY0Vb-vdqGAr9NzIYVy9FsXReSSIJ5mDkuh0-R1raqdGmH1qvw7Gk95pQ-VXodBjqIg2h_KAbZiEL4ucXt2gWlCycPDdPuzmGpPyWOFdqwUoSX2NlZCnX2q19ri83fYC0TqThPpHIXC3sW8UDJt57sXsGIi-EVWycJIWzsUkjWNwtL5dUHzZqu5cYWUVuRyJ0813kFGfPWLyWbynq1FkqaPtpoEkC9h_GIkugoFZgXA-yUV9doo_ReMqjXj3nnLk2B2g8b4Csbcel7lKHTnCLvC4WOvWVesA8ka1qAQ1ZpvJM63kV43JiXAi6wqYMwp3FZ2G3Nu7bOlEKphG63YTNu6dVzV4WM7jNPauhFDj1Jq7OEOyGVBCv1-r8XxmYdZR-xmdvE8dB9jFuN6DZpZTO_OLRM68cmkBDTcGGvAoT_t7BGJtG1Os507Inijmf8JlUi3pjF0sz0rQt123ylICP_IQr4uP0hT-JL5klIRF8ooyAseL-ZIQbVVn25lg8sPJXG6DsuoXHKPsqqThLjv6cw5HjS503EA1M5Jm4fTXXKm5E0i5hIDW0Rusn6_47htQZgL0rj_cD4_Qb-X6CEjyYKR_Xuelq3Z5bQ7c6RjrpiGe4ToLPFV2twoyJu7DFRRE5A94fLnjGygtX4GHCp5aY17mmgawRVNWpzkrFe7VN33QxbFujP5sbbSfUkW87NkIR1NG8S0HdMnEli3y_98_Zp11tguS-gBFf5rxPnuO3N5NDDiwohNa9RsLaGZ4FFLZFukVxqJpXEOuw990VC2wjaem8bZO9NMcPi2H0KAihKkd7gZ9GLkNpZ4WB8Fpmu9qlchrMQmwJQRZ8czXiJW_krdAZyRyFIzTlEPdajqs7tj-RvpTkFEpdkUmVVjLPyzPOzbp-jZtF7SSDfwM__esfBqRw3OR1u-MCSLqz2xvwIR0_5m_mMcN_EOI5mPPFjD-3xZ_OA70W2bZcKvpMiWC9IKy_YTj_-9781zNyoJ0RNEEwqSFk7v0QICLgYt1R_APk3ocLnqyOIa5RsumHDHIzYvHQQD3yvfuPzNME-jg1kNAihPjRrbHU2Aoa0KhVFh8VxAdolaWmbqkqi--c5lIyWOXlrxdavp85kGPljx6qIc5GzlW0ELazuG7O06zNg_lrooTEls6XTJQf6ZSKBgMDfH3DBsvkzXBVIxxFjaWW-m3Aw-hCBpN2kr30tGMVqK032ICNiMQBUzwK68Et1b9gZkLvIePcGmm2wVudfFxVbLy3V7Ck5KFChTzAleHR5__8Ip8D0LfgokMXUzCCcC6yetYuTAufqayrewKN64U8bFrlxsTBwClEP1sdYUh6tmWJhEHGcCOWkiCfjVBt_y9dvwhaR0vRCSl2AuL2yFHybc33Ko7C1YMxj3eGdJR33mCJpfiXnmxunSZpyBLOjlDSS6zRfkBryUCX_t-vrraoNpCk9F01ysxzlWXyq6NctltGvCK5sifwIqRTyh8EasAFCwgW5c_5er8P9ZSbxFU8dDDMmGgJtNYJWRuPwKkBfQt1sDUnsHmIK5jYTiTA2YWDZpkKlwpzGjiKvNbkKcdRghrA6vRrkVrocWMlCEcCSyyoKi_119NcNK-_PhiPivoNRxJHzRTnwmxuNtKlbFUJzXF3hlUFwXrendjpJeBmgB9NEg_Jru7QgLzVNuso-HUY20llEsact0YAQcpZvJRCRTkXw7E2-_WDZzjVOodF7__fIEHgPJlxAqV_WzxsfzO6ZzoFZUpqHmDtsw_tNzp4JMlv0Ok5BgUU3NzFTCVKLzlIEdAWJJ9t3BVg0MZxWPzElTVkPodu3KzKd8_nd0yvS_3nbKfF8VpmwYdoIzaYxeq_mS0)
 * [Explanation of system containers and flows](java-c4-diagrams/container/insurance-hub-container-analysis.md)
 
-### Migration Notes
-
-#### Data Stores
+### Data Stores
 
 | Data Store                  | Java          | Go                 |
 |-----------------------------|---------------|--------------------|
@@ -208,7 +210,7 @@ characteristics of the target state include:
 
 [Reasoning for using PostgreSQL with JSONB for storing insurance products](migration-reasoning/replace-mongodb.md)
 
-#### External systems
+### External systems
 
 | External System          | Java        | Go                |
 |--------------------------|-------------|-------------------|
@@ -225,7 +227,7 @@ characteristics of the target state include:
 
 [Reasoning for chromedp for generating PDF documents](migration-reasoning/replace-jsreport.md)
 
-#### External Exposure and Interservice Communication
+### External Exposure and Interservice Communication
 
 Use gRPC for internal service communication while exposing select services via gRPC-gateway to
 provide HTTP/OpenAPI functionality, combining the performance benefits of gRPC with the universal
@@ -295,9 +297,7 @@ compatibility of REST APIs.
     * [Generated diagram on www.plantuml.com](//www.plantuml.com/plantuml/png/TLJ1SXit3BtlLw0wDFQC8rrwwYc9vRQUiJkgvPmr41TQSS8bMG1hHTFflrTOIglDDZaI1F0U7XxvGHHPkpPKF_deGbSJx5Mp_BfOC1xcZTTzj-s4sAMe57NkKhl80QFLl1UjWzykxdzvlxBGv-UdHOkYnAVGvZwrEKMhoTQ_aYy-PcHi8VX8Uim4YNMVgagz1e8X7sgFZUNj4iEAKzqvXJNnctTKLU_WuQiIHmomFefIAu2nljnBLOARKz9DWqe7FDx1x6DZVLU95GFyNi8pYwyUnySJs9klII0NL84Q5K4Jw9vWnxq6zNnsEqR9ANXtt4WXO5twm8MHzNtsZfDSpx-HklqL1chQ-UZLfoXmG_DcVWT_ToHzu1OEUuhWc51zR23jTiGouL1l3IN59Yq_6S2VQVtN4ooJwreRV8cAMvGUUws9IVg1V9IECJeQY3XK3AcnxjLzYee-4cy-fIxMoCURSzferibwPhVmJmK0y0vCsYSy4jlvkjmRp7vKPra6n2a4ua6hY9t2oyFwTNBvy3Kd8IbN5EkSV5JfZQBxxuzHs2nJYpx2px0Y5YzAqT64sBduIcvsqNGGqY8lb9c4eXODHL49qWumJlMqNbu5N7eZbZkpwNMjnksx-1kcd4OAdV2IU4ry7AjJTZgvN9gDphjrfXiwDMsAY_DrSaYd0nQ_TMAkOaAd_eqWeofnb95sZt77ACgTquwdgjNR3TQObTW8d7q67qkew7NkNAHyR7CWqxA7juGXKeZpC1BugCGxT0IQoi46EdZTzvbdlqDzHXrHVg5GnjlxB1QpIB7UHERFOe8bMmmVBvSoknsAlis_ckGP8pRquynlX7aKy9SngORjSLHsJRIYebWjzjkqlMKExBNdUFNZeEbQcR0r4l-EVyR9_8Oo_8KcWh7_GjA_FeSXz0e4Bpe8O5X_lBwkrWjxQhDRwp7zwNxSgY4T_MsAFlo_OVM1OjsruJy0)
     * [Explanation of system containers and flows](java-c4-diagrams/component/product-service-component-analysis.md)
 
-### Migration Notes
-
-#### Component Migration Strategy
+### Component Migration Strategy
 
 | Component                 | Current Stack                                  | Go Migration Approach                                                                                                                                            |
 |---------------------------|------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -312,7 +312,7 @@ compatibility of REST APIs.
 | **product-service**       | Micronaut + MongoDB                            | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + PostgreSQL JSONB                                      |
 | **policy-search-service** | Micronaut + Elasticsearch                      | gRPC service + [olivere/elastic](https://github.com/olivere/elastic)                                                                                             |
 
-#### Component-Specific Migration Details
+### Component-Specific Migration Details
 
 1. **agent-portal-gateway**
 
@@ -446,7 +446,7 @@ compatibility of REST APIs.
      - **Internal Service Focus**: Deploy as an internal-only gRPC service accessible exclusively within
        the microservices architecture for optimized search operations.
 
-#### Architecture Pattern Migrations
+### Architecture Pattern Migrations
 
 | Pattern                         | Current (Java/Micronaut)                    | Proposed (Go)                                                                                                                                   |
 |---------------------------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -559,15 +559,179 @@ microservices architecture at scale.
     - Granular health status reporting for different service capabilities
     - Automatic traffic routing based on service health status
     - Integration with Grafana alerting for proactive issue notification
-TODO
 
 ## Migration Strategy
 
-TODO
+The strategy below follows an iterative approach, ensuring that each phase delivers value and builds a
+stable foundation for the next, minimizing risk throughout the process.
 
-Other Considerations
+### Phase 1: Foundational Infrastructure & Environment Migration (Lift and Shift)
 
-TODO:
+**Goal:** Move the existing Java application to a Kubernetes environment with minimal code changes.
+This validates the new platform and de-risks subsequent, more complex changes.
 
-1. Define migration strategy: develop from scratch(green field) or develop along the existing system
-2. Define migration sequence for system components
+1. **Provision Kubernetes Cluster:** Set up a production-ready Kubernetes cluster.
+2. **Deploy Core Infrastructure:**
+    * Deploy **PostgreSQL**, **Elasticsearch**, and **Apache Kafka** to the Kubernetes cluster.
+    * Deploy **MinIO** as the new S3-compatible object storage solution, which will replace the
+      existing file system storage.
+3. **Targeted Code Modification (Java):**
+    * As you noted, this step is unavoidable. Modify the existing Java services (e.g.,
+      `document-service`) that interact with the file system. Update them to use an S3-compatible
+      SDK pointed at the new MinIO service endpoint.
+4. **Containerize and Deploy Java Services:**
+    * Create production-grade container images for all Java microservices.
+    * Deploy these services to Kubernetes.
+    * **Replace Consul:** As per the [analysis](migration-reasoning/replace-consul.md), 
+      decommission Consul and switch to Kubernetes-native service discovery. This is primarily 
+      a configuration change in the Micronaut services to use Kubernetes' internal DNS for 
+      service-to-service communication.
+5. **Deploy Existing Gateway:** Deploy the current Java-based `agent-portal-gateway` to Kubernetes
+   and configure it to use the new K8s service discovery mechanism to route traffic to the backend
+   services.
+
+**Outcome:** The entire Java application is now running in the target Kubernetes environment. All
+dependencies are containerized, and object storage is handled by MinIO. The system is functional,
+providing a stable baseline for the next phases.
+
+### Phase 2: Foundational Observability with Shared Trace Storage
+
+**Goal:** Centralize tracing data storage to enable a unified view via Grafana and prepare for a
+seamless transition to a modern observability stack, all **without modifying the existing Java
+services**.
+
+1. **Deploy Core Observability Stack:**
+    * Deploy **Grafana Tempo**, **Prometheus**, **Loki**, and **Grafana** within the Kubernetes cluster.
+2. **Configure Shared Trace Storage:**
+    * Configure the existing **Zipkin** server to write its trace data to a persistent file system
+      volume within the cluster.
+    * Configure the newly deployed **Grafana Tempo** to read traces from the same file system volume
+      that Zipkin writes to. The Java services continue to send traces to Zipkin as they do today.
+
+**Outcome:** Existing tracing infrastructure is preserved with **zero changes to Java application
+code**. The modern observability stack (Grafana, Loki, Prometheus, Tempo) is deployed and can
+visualize traces from the legacy services. This provides a unified view and prepares the environment
+for new Go services to integrate directly with Tempo.
+
+### Phase 3: Data Store Consolidation
+
+**Goal:** Simplify the data layer by migrating product data from MongoDB to PostgreSQL, thereby
+reducing operational complexity and unifying the persistence strategy.
+
+1. **Adapt Database Schema:** Modify the PostgreSQL schema to accommodate the data currently stored
+   in MongoDB. As per this [analysis](migration-reasoning/replace-mongodb.md), use the `JSONB` data 
+   type to store flexible insurance product definitions.
+2. **Develop and Test Migration Scripts:** Create scripts to perform the ETL (Extract, Transform,
+   Load) process from MongoDB to the new PostgreSQL tables. Thoroughly validate the data integrity
+   post-migration.
+3. **Update `product-service`:** Refactor the data access layer of the Java `product-service` to
+   communicate with PostgreSQL instead of MongoDB.
+4. **Execute Migration:** Schedule and perform the data migration. After a final validation, switch
+   the `product-service` to use the new PostgreSQL database.
+5. **Decommission MongoDB:** Once the system is stable and the migration is confirmed successful,
+   decommission the MongoDB instance.
+
+**Outcome:** The system's data persistence is consolidated onto PostgreSQL, simplifying operations,
+backups, and data governance.
+
+### Phase 4: Phased Service Migration to Go (Strangler Fig Pattern)
+
+**Goal:** Gradually and safely replace the Java microservices with new, efficient Go microservices,
+integrating full observability and modernizing core components along the way.
+
+1. **Establish Go Development Standards:** Define project structure, idiomatic coding practices, and
+   standard libraries for logging, configuration, and OpenTelemetry instrumentation for all new Go
+   services.
+2. **Rewrite, Deploy, and Shift Traffic (Per-Service Iteration):** Apply the Strangler Fig
+   Pattern on a per-service basis. For each service:
+    * **Rewrite in Go:** Develop the new Go service.
+        * **Full Observability:** Instrument the new service from day one to export structured logs
+          to Loki, metrics to Prometheus, and traces to Tempo.
+        * **Component Modernization:** As part of the rewrite, modernize underlying dependencies.
+            * When rewriting the `document-service`, replace the JSReports dependency with a
+              new Go service using the `chromedp` library.
+            * When rewriting the `pricing-service`, migrate the file-based tariff rules to
+              **Tarantool** for scalable, in-memory execution.
+    * **Deploy and Test alongside Java Service:**
+        * Deploy the new Go service to Kubernetes, where it will run in parallel with its Java
+          counterpart.
+        * Initially, route no production traffic to the new service. Conduct thorough integration
+          and performance testing against it using internal endpoints.
+    * **Gradual Traffic Cutover:**
+        * Use the gateway or a service mesh to carefully shift traffic from the Java service to
+          the new Go service (e.g., 1%, 10%, 50%, 100%).
+        * Closely monitor the new service's behavior using the full observability stack (Grafana
+          dashboards for metrics, logs, and traces) to validate its stability and performance against
+          the Java baseline.
+    * **Decommission:** Once the Go service reliably handles 100% of traffic, decommission and
+      remove the old Java service.
+3. **Recommended Migration Sequence:** The following sequence is designed to start with lower-risk
+   services and progressively move to the most critical, high-impact components. This allows
+   building experience and confidence throughout the migration.
+    * **1. `document-service` (Low Risk):** This service has relatively isolated functionality
+      (document generation). Migrating it first provides an excellent test case for the new Go stack
+      and the `chromedp` library replacement for JSReports without impacting core transactional
+      flows.
+    * **2. `product-service` (Low-to-Medium Risk):** With its data store already migrated to
+      PostgreSQL in Phase 3, rewriting the service itself in Go is a logical next step. It provides
+      foundational data to other services, but its logic is likely less complex than the core
+      transactional services.
+    * **3. `pricing-service` (Medium-to-High Risk):** Pricing is a critical business function. This
+      migration involves not only a language change but also a shift in how tariff rules are
+      managed (moving to Tarantool). It should be undertaken after the team is comfortable with the
+      migration process.
+    * **4. `policy-service` (High Risk):** As the service managing core insurance policies, this is
+      a high-impact, critical component. It likely has complex business logic and dependencies on
+      the services migrated earlier.
+    * **5. `payment-service` (High Risk):** Handling financial transactions makes this service
+      extremely critical. It should be one of the last services to be migrated, ensuring maximum
+      stability of the surrounding new ecosystem.
+
+**Outcome:** The core business logic is progressively migrated to a modern, performant, and fully
+observable Go-based microservices architecture, with key legacy components updated in the process.
+
+### Phase 5: Modernize Edge and Authentication
+
+**Goal:** Replace the custom Java gateway and authentication service with powerful,
+industry-standard, cloud-native solutions. This phase can run in parallel with Phase 4.
+
+1. **Replace `auth-service` with Keycloak:**
+    * Deploy and configure Keycloak in Kubernetes.
+    * Migrate user data and authentication logic to Keycloak.
+    * Update frontends and all backend services (both Go and any remaining Java services) to use
+      Keycloak for authentication via standard OIDC/OAuth2 protocols.
+    * Decommission the custom Java `auth-service`, as justified in this [analysis](migration-reasoning/replace-auth-service.md).
+2. **Replace `agent-portal-gateway` with Envoy Proxy:**
+    * Deploy Envoy Proxy as the new ingress gateway.
+    * Configure Envoy to manage all incoming traffic, handle TLS termination, and perform routing.
+    * Use Envoy's advanced capabilities to translate external REST API calls into internal gRPC
+      calls for the new Go services.
+    * Integrate Envoy with Keycloak for JWT validation at the edge.
+    * Once Envoy manages all traffic, decommission the old Java `agent-portal-gateway`.
+
+**Outcome:** The system is fronted by a secure, highly performant, and feature-rich edge and
+identity management stack, aligned with cloud-native best practices.
+
+### Phase 6: Finalization, Automation, and Optimization
+
+**Goal:** Fully decommission legacy components, solidify the new architecture, automate processes,
+and optimize for performance, security, and cost.
+
+1. **Finalize Observability Migration:**
+    * After all Java services have been migrated to Go and are sending traces directly to Tempo
+      (post-Phase 4), decommission the **Zipkin** server.
+    * Execute a one-time migration to move historical trace data from the file system to **MinIO**
+      for long-term storage.
+    * Reconfigure **Tempo** to use **MinIO** as its primary, scalable storage backend.
+2. **Implement GitOps:** Automate CI/CD pipelines for the Go services using a GitOps tool like
+   ArgoCD or Flux for declarative, version-controlled deployments.
+3. **Advanced Kubernetes Management:**
+    * Implement Horizontal Pod Autoscalers (HPA) to automatically scale services.
+    * Enforce Kubernetes Network Policies to create a zero-trust network environment.
+    * Fine-tune resource requests and limits for all services to maximize cluster efficiency and
+      stability.
+4. **Continuous Improvement:**
+    * Use the rich data from the observability stack to continuously identify performance
+      bottlenecks and optimize resource usage.
+    * Ensure all new architecture and processes are thoroughly documented.
+    * Archive or remove all repositories and artifacts from the old system.
