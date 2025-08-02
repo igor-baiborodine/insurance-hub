@@ -3,7 +3,7 @@
 
 skinparam linetype ortho
 
-title System Context diagram for Insurance Hub (Go Migration Target State)
+title System context diagram for Insurance Hub (target state)
 
 Person(agent, "Insurance Agent", "A user of the insurance sales portal who creates and manages policies.")
 
