@@ -20,6 +20,7 @@
   - [Component Migration Strategy](#component-migration-strategy-1)
   - [Component-Specific Migration Details](#component-specific-migration-details-1)
 - [Migration Strategy](#migration-strategy)
+  - [Target State](#target-state-1)
   - [Phase 1: Foundational Infrastructure & Environment Migration (Lift and Shift)](#phase-1-foundational-infrastructure--environment-migration-lift-and-shift)
   - [Phase 2: Foundational Observability with Shared Trace Storage](#phase-2-foundational-observability-with-shared-trace-storage)
   - [Phase 3: Data Store Consolidation](#phase-3-data-store-consolidation)
