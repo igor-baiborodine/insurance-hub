@@ -3,7 +3,7 @@
 
 skinparam linetype ortho
 
-title Container diagram for Insurance Hub System
+title Container diagram for Insurance Hub
 
 ' Actors
 Person(agent, "Insurance Agent", "Uses the system to sell insurance policies and view analytics.")

@@ -3,7 +3,7 @@
 
 skinparam linetype ortho
 
-title Insurance Hub System — Go Implementation (C4 Container Diagram)
+title Container diagram for Insurance Hub (target state)
 
 ' Actor
 Person(agent, "Insurance Agent", "Uses the system to sell insurance policies and view analytics.")
