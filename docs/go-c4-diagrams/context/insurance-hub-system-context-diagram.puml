@@ -1,0 +1,21 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+skinparam linetype ortho
+
+title System Context diagram for Insurance Hub (Go Migration Target State)
+
+Person(agent, "Insurance Agent", "A user of the insurance sales portal who creates and manages policies.")
+
+System(insurance_hub, "Insurance Hub", "A cloud-native, Go-based microservices system for managing the full lifecycle of insurance policies. All interservice communication standardized on gRPC.")
+
+System_Ext(object_storage, "Object Storage", "S3-Compatible (MinIO/AWS S3)", "Provides scalable storage for documents, bank statements, and other artifacts.")
+System_Ext(kafka, "Apache Kafka", "Event Streaming Platform", "Provides a message broker for asynchronous communication and burst workload handling.")
+System_Ext(tarantool, "Tariff Rules Storage", "Tarantool", "Stores pricing rules for fast lookups.")
+
+Rel(agent, insurance_hub, "Uses the sales portal to create and manage insurance policies", "HTTPS/gRPC-gateway")
+Rel(insurance_hub, kafka, "Publishes and consumes domain events for asynchronous processing")
+Rel(insurance_hub, object_storage, "Stores and retrieves policy documents and bank statements", "S3 API")
+Rel(insurance_hub, tarantool, "Loads tariff rules for price calculations")
+
+@enduml
