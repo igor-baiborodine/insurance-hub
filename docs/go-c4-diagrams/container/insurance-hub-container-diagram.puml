@@ -27,16 +27,17 @@ System_Boundary(insurance_hub, "Insurance Hub") {
     Container(chat_service, "Chat Service", "Go Service", "Provides real-time chat for agents via WebSockets.")
 
     ' Data Stores
-    ContainerDb(policy_db, "Policy DB", "PostgreSQL", "Stores policies, offers, and product catalog (JSONB).")
+    ContainerDb(policy_db, "Policy DB", "PostgreSQL", "Stores policies and offers.")
+    ContainerDb(product_db, "Product DB", "PostgreSQL", "Stores the product catalog (using JSONB).")
     ContainerDb(payment_db, "Payment DB", "PostgreSQL", "Stores payment transactions and customer accounts.")
     ContainerDb(document_meta_db, "Document Metadata DB", "PostgreSQL", "Stores metadata for documents.")
     ContainerDb(search_db, "Search & Analytics DB", "Elasticsearch", "Stores denormalized data for search and analytics.")
-    Container(minio, "Object Storage", "MinIO (S3-compatible)", "Stores generated documents (PDFs) and bank statements.")
-    Container(tariff_rules, "Tariff Rules Storage", "Tarantool", "Stores pricing rules for fast lookups.")
 }
 
 ' External Systems
 System_Ext(kafka, "Apache Kafka", "Event Streaming Platform", "Facilitates asynchronous communication between services.")
+System_Ext(minio, "Object Storage", "MinIO (S3-compatible)", "Stores generated documents (PDFs) and bank statements.")
+System_Ext(tarantool, "Tariff Rules Storage", "Tarantool", "Stores pricing rules for fast lookups.")
 
 ' Relationships
 
@@ -67,12 +68,12 @@ Rel(kafka, dashboard_service, "Consumes 'PolicyCreated' event")
 
 ' Database and Storage Relationships
 Rel(policy_service, policy_db, "Reads from and writes to")
-Rel(product_service, policy_db, "Reads from and writes to")
+Rel(product_service, product_db, "Reads from and writes to")
 Rel(payment_service, payment_db, "Reads from and writes to")
 Rel(document_service, document_meta_db, "Reads from and writes to")
 Rel(policy_search_service, search_db, "Reads from and writes to")
 Rel(dashboard_service, search_db, "Reads from")
-Rel(pricing_service, tariff_rules, "Loads tariff rules from")
+Rel(pricing_service, tarantool, "Loads tariff rules from")
 Rel(document_service, minio, "Stores and retrieves PDF documents", "S3 API")
 Rel(payment_service, minio, "Imports bank statements from", "S3 API")
 

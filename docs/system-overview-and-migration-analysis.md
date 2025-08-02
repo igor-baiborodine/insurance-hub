@@ -42,7 +42,6 @@ event streaming and interservice decoupling. Key characteristics of the current 
 1. **Technology Stack**
     - The backend services are written in Java, using the Micronaut framework for dependency
       injection, web APIs, data access, and service orchestration.
-    - Lombok is extensively used to minimize boilerplate code in Java.
     - Persistence is distributed: PostgreSQL is used for relational data, MongoDB for more
       flexible/no-SQL storage needs, and Elasticsearch for full-text search and analytics.
     - Apache Kafka enables event-driven communication between services.
@@ -126,7 +125,7 @@ characteristics of the target state include:
 
    - **Tariff Rules Execution**: Legacy file-based rules and script execution replaced by in-memory,
      transactional database-stored procedures (e.g., Tarantool with Lua).
-       - Ensures scalability, performance, robust change management/versioning.
+       - Ensures scalability, performance, and robust change management/versioning.
    - **PDF Generation**: Centralized, stateless Go service using browser-based rendering (e.g.,
      chromedp/Chrome headless), removing legacy JSReports.
 
@@ -299,18 +298,18 @@ compatibility of REST APIs.
 
 ### Component Migration Strategy
 
-| Component                 | Current Stack                                  | Go Migration Approach                                                                                                                                            |
-|---------------------------|------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **agent-portal-gateway**  | Micronaut Gateway                              | [Envoy Proxy](https://www.envoyproxy.io/) for routing and load balancing                                                                                         |
-| **auth-service**          | Micronaut Security + Micronaut Data JPA        | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [golang-jwt](https://github.com/golang-jwt/jwt) + [GORM](https://gorm.io/)       |
-| **chat-service**          | Micronaut + WebSocket + Micronaut Data JPA     | gRPC service + [gorilla/websocket](https://github.com/gorilla/websocket) + [GORM](https://gorm.io/)                                                              |
-| **dashboard-service**     | Micronaut + Micronaut Data JPA + Elasticsearch | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [olivere/elastic](https://github.com/olivere/elastic) |
-| **document-service**      | Micronaut + Micronaut Data JPA + File Storage  | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [MinIO Go SDK](https://github.com/minio/minio-go)     |
-| **policy-service**        | Micronaut + Micronaut Data JPA                 | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/)                                                         |
-| **payment-service**       | Micronaut + Micronaut Data JPA                 | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/)                                                         |
-| **pricing-service**       | Micronaut + File Scripts                       | gRPC service + [Tarantool Go Connector](https://github.com/tarantool/go-tarantool)                                                                               |
-| **product-service**       | Micronaut + MongoDB                            | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + PostgreSQL JSONB                                      |
-| **policy-search-service** | Micronaut + Elasticsearch                      | gRPC service + [olivere/elastic](https://github.com/olivere/elastic)                                                                                             |
+| Component                 | Current Stack                                  | Go Migration Approach                                                                                                                                                   |
+|---------------------------|------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **agent-portal-gateway**  | Micronaut Gateway                              | Replaced by [Envoy Proxy](https://www.envoyproxy.io/) for routing and load balancing                                                                                    |
+| **auth-service**          | Micronaut Security + Micronaut Data JPA        | Replaced by [Keycloak](https://www.keycloak.org/) for identity and access management                                                                                    |
+| **chat-service**          | Micronaut + WebSocket + Micronaut Data JPA     | gRPC service + [gorilla/websocket](https://github.com/gorilla/websocket) + [GORM](https://gorm.io/)                                                                     |
+| **dashboard-service**     | Micronaut + Micronaut Data JPA + Elasticsearch | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [olivere/elastic](https://github.com/olivere/elastic)        |
+| **document-service**      | Micronaut + Micronaut Data JPA + File Storage  | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [MinIO Go SDK](https://github.com/minio/minio-go) + chromedp |
+| **policy-service**        | Micronaut + Micronaut Data JPA                 | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/)                                                                |
+| **payment-service**       | Micronaut + Micronaut Data JPA + File Storage  | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [MinIO Go SDK](https://github.com/minio/minio-go)            |
+| **pricing-service**       | Micronaut + File Scripts                       | gRPC service + [Tarantool Go Connector](https://github.com/tarantool/go-tarantool)                                                                                      |
+| **product-service**       | Micronaut + MongoDB                            | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + PostgreSQL JSONB                                             |
+| **policy-search-service** | Micronaut + Elasticsearch                      | gRPC service + [olivere/elastic](https://github.com/olivere/elastic)                                                                                                    |
 
 ### Component-Specific Migration Details
 
@@ -448,16 +447,16 @@ compatibility of REST APIs.
 
 ### Architecture Pattern Migrations
 
-| Pattern                         | Current (Java/Micronaut)                    | Proposed (Go)                                                                                                                                   |
-|---------------------------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Inter-service Communication** | Micronaut HTTP Client (REST, JSON)          | Direct service-to-service gRPC calls with `grpc-go`                                                                                             |
-| **External API Exposure**       | Micronaut HTTP Controllers                  | `grpc-gateway` to auto-generate a reverse-proxy server                                                                                          |
-| **ORM/Data Access**             | Micronaut Data JPA (Hibernate)              | [GORM](https://gorm.io/) for PostgreSQL interaction                                                                                             |
-| **Dependency Injection**        | Micronaut DI (Annotations, JSR-330)         | [Wire](https://github.com/google/wire) for compile-time dependency injection                                                                    |
-| **Message Processing**          | Micronaut Kafka with JSON serialization     | [Sarama](https://github.com/Shopify/sarama) or [kafka-go](https://github.com/segmentio/kafka-go) with Avro serialization for schema enforcement |
-| **Validation**                  | Micronaut Validation (Annotations, JSR-303) | [protoc-gen-validate](https://github.com/envoyproxy/protoc-gen-validate) for Protobuf-based validation                                          |
-| **Configuration**               | Micronaut Configuration (YAML, Properties)  | [Viper](https://github.com/spf13/viper) for handling configuration from files, env vars, etc.                                                   |
-| **Command/Query Bus**           | Custom Java implementation                  | Go interfaces to define command/query contracts, with handlers implemented using GORM for persistence                                           |
+| Pattern                         | Current (Java/Micronaut)                    | Proposed (Go)                                                                                                            |
+|---------------------------------|---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| **Inter-service Communication** | Micronaut HTTP Client (REST, JSON)          | Direct service-to-service gRPC calls with `grpc-go`                                                                      |
+| **External API Exposure**       | Micronaut HTTP Controllers                  | `grpc-gateway` to auto-generate a reverse-proxy server                                                                   |
+| **ORM/Data Access**             | Micronaut Data JPA (Hibernate)              | [GORM](https://gorm.io/) for PostgreSQL interaction                                                                      |
+| **Dependency Injection**        | Micronaut DI (Annotations, JSR-330)         | [Wire](https://github.com/google/wire) for compile-time dependency injection                                             |
+| **Message Processing**          | Micronaut Kafka with JSON serialization     | [Sarama](https://github.com/Shopify/sarama) or [kafka-go](https://github.com/segmentio/kafka-go) with JSON serialization |
+| **Validation**                  | Micronaut Validation (Annotations, JSR-303) | [protoc-gen-validate](https://github.com/envoyproxy/protoc-gen-validate) for Protobuf-based validation                   |
+| **Configuration**               | Micronaut Configuration (YAML, Properties)  | [Viper](https://github.com/spf13/viper) for handling configuration from files, env vars, etc.                            |
+| **Command/Query Bus**           | Custom Java implementation                  | Go interfaces to define command/query contracts, with handlers implemented using GORM for persistence                    |
 
 ## System Observability
 
@@ -469,8 +468,8 @@ compatibility of REST APIs.
 
 | Observability Component   | Java                  | Go                                          |
 |---------------------------|-----------------------|---------------------------------------------|
-| Distributed Tracing       | Zipkin                | OpenTelemetry + Tempo                       |
-| Centralized Logging       | None (scattered logs) | Structured JSON logs + Loki                 |
+| Distributed Tracing       | Zipkin                | OpenTelemetry + Grafana Tempo               |
+| Centralized Logging       | None (scattered logs) | Structured JSON logs + Grafana Loki         |
 | Metrics Collection        | Partial/Ad-hoc        | Prometheus + Go metrics                     |
 | Visualization Dashboard   | None                  | Grafana                                     |
 | Alerting System           | None                  | Grafana Alerting                            |
@@ -564,6 +563,18 @@ microservices architecture at scale.
 
 The strategy below follows an iterative approach, ensuring that each phase delivers value and builds a
 stable foundation for the next, minimizing risk throughout the process.
+
+### Target State
+
+1. **System Context**
+* [Diagram source PlantUML](go-c4-diagrams/context/insurance-hub-system-context-diagram.puml)
+* [Generated diagram on www.plantuml.com](//www.plantuml.com/plantuml/png/RLF1RXiv3BtxAxWvkK0S7xgdFTK8YZRO1ZNY57iqE1gEHsj974YK7U_NBucnOtUGevv8liUdfoz5C4kDOVQ7JoxKbg0N6SfVosN6uyFEIr-RMYWxJa997Xp7vH0mMS-YI1jyitpySx4swDVpZsN48fGLsZvQnviy33PzLlO-3PWnGl29v3GGS9QUPpFn4WWs9-sBS6w2rkFEYZlEy9HApPWSmVVQmFmRmxFNI_6Su1NpZWGsWaAVPhCrvS9fZZkLUWztrywL8NSAhS2s0Uv0UWB_Nb0mK851DM60Oy_WCg4eXAc5Y4b7sdNmpbDvk5EkKV7yVSHMdRhbDBKZemjSsqLInGUwXs-yQB2GJlKkiuevUAUposY0BZpI-RGpYT3L4DIpZjp91JBXxunNFR0AGN6XV9u7ZcEioRlHfYAw1kRM_wUyUjwzh1zlbjX-VPCvD_-IasqHphgi2lzfW7ex0hRAvlFYaUEWCnkLCd_swUddSlNF1ZQVFzdzElF1jxQCmu1MSvu6jbRBhaPAKkwXmRGtKK9dm5ncNJS3Pl4TEZ6JR-NjiTkZsJcWKrl-jgDnVZrGCf6PC9fdcaHHjlYR7eH8fPYG9lDUMKmFbbDoVUR4jKpyCZbDpKNWo7aV65le5GjAC94bc349Sr0w3QFlEdYfWSgjRQ-N6ZiORb7AtfdSRCLWSZfKki2yhyCOi1SAboHFG_QhQ9FqazZA9RKteVqWBQRY--lhUhEq62nssd34ap8QuOJfulgwDi6N_lmV76jLr4FB4Nq2iZSeKrDjINRgk-xvyVHfv2xc64ScoPuEbrztkiR7hgS96jC9g_NJnqotp_I3iIs6s6DT_RSN8N0ON0reAIZs25yejJM6_m40)
+* [Explanation of system context and flows](go-c4-diagrams/context/insurance-hub-system-context-analysis.md)
+
+2. **System Containers**
+* [Diagram source PlantUML](go-c4-diagrams/container/insurance-hub-container-diagram.puml)
+* [Generated diagram on www.plantuml.com](//www.plantuml.com/plantuml/png/fLV1Sjiu4hthAtfzYEMgs3eafpt5aUn4ctYjjUoTewi9jYH48C01G3lAr5JDHymNpfSCcY0fcAPJgl79GeFztaEZqTt-u3nQNnLgz2-fXQfoWettfVltP6BnyMmj_QRAAaTM6Er9-pDXYacfKBFFgVEvajba-lvqmQQxgw-J0fqd6qptq-21KfCzAnb_vBPIbsYn01MiVbSI6EitPZJoqYk2kNQLHIq8FbSPB7S1fu2__lWJFXcO5wMYWWAWbqR3UFeUEdYOILm7s9FHw1ZEXJTsj23hZ1xZEdYyXQCzyZbRZeBfpf43lo5maSSRSAGKoExJqYWf93b0dSE3fCVm0zNEI-7EZW9N57Z_qLGwHxiRTvxt8M9CcXxdw0H-6m407CD5lYQOmAMj0vgpTN-MiIin-Fv26Vo_2dBBaiM6dsVV7F-wPSLIhnMTbXXmi2o3oXYKqfe7cOVD-bntSrWP2tK8M72FPusU7d4N8CyNS_WKLynmeH_C3XRMVDyz9OG0P7TG6gbzX5OAsDdIhnKvxs1bJL5phvgpCMrpwlCgR6ZVQbsIVP22UgAsj1FAu3RmVcb-ieRv-HN_-OmwL-I0in7mALxOgat6oX_HKh5gk2v9psTCeKduHC_KM88hAQnnKOg3SPTab8FK8UtwGQjJOdVVU0H9YzhGdeP5VZBfwWerhfj44vRsMfLSaGWd932hbtBEh5Pa1wwkj2QlX4zbHCjXEXAsnasWHsNMGqn1ZLwdJD7oCjCKbQWK-a36tkGuLPvpEiZGKGv6WqShLokmbQ9usE6GenMReSYp_MKvY_fDS40X9sriWKh-eFmjH43C5CMtRLPDy0T5u8xJ8gMFbc7YD5cZ_erHEIUj4ARIFbvlQOqWnsMeWHyWpeseUiopnZHC3MEniQQWl3ofDoYWeAV8M70MT9gW1NSmNimktKdpP5035HdbEN6QPXRjRa0OkarcqEQfijPsm7KuLEIwWjhMM5UXQjxlG3341jD0JCFo02PBg4wzB0ZOFwc9WGyX5Dgb4LloBgaDC_G8IsyikQSIPbcRZtcspy7PnvhGEB-sjFpVLrv5xuFUCuCsBpgYniNFOFtcsUE5SRoz_ool__lnP90aPbb34XS_rTvyuYrgXu8l9Pv3LCwR8add8ROkSmloo9n9vbu5KuuUVyPUjD_mXJLWmqpn9KUAfXoyWVCkioB7XKB7ote_eKcB0dHyyJC-xDEU_pjF61VVFTbWRIOKrmu2mJxUucgBt5DB51k2BxoiwH_g5-ijOS6tj53e0r71UvSef98-lbAtq_o0jQaS25CKbMuxN4R-aKX3ym1OJyeSOAK9QDVPDn9CPIokO-sNUduDu-Mxqm1O1h1CqKaIWdLJ8_Bd1O43aA7UWcDvlDMdzMXHUsCKZmgnaDzm8Ky5tBRV9AHDPubLluxv2fq7PSosAfc48tr3AjQ2ZImT6-wuyy-r9nlp4IwLUHo5pzf9pvNOp7Pr3RwzNIm357zGx-o7dYlSagkd5u5AEV2cSu3npSNoTi8F2Txi2yH9rDHCIk2xQkD2RFUtzhRB3xKBFqlZA8yAEl9aofcH8hQx_ZmJzJoTNevwEC-caHjJCLGtZoM7cl2P-W1D2NaDGjgTNuCJQyqh43XtNmdHzRHNOFHw58_HNFv5lC7zpNPf5REgpkdJjeTFquVVowwvZjaLUVify7nWkscLynQ1QCOp1kPndRMiRnRJeq6yWGov92ysvDeToCcZLAuFnl-9fRKi5a1-heCyRTrSL9cIZl6FOtETMkBIT0p408tA-FMBoJSrsbN5WHWnyVwXDoVTAzoJX3lSVnJd4nwVkJwtXRPNB8U2d8ukDuHvlBGQvD5AJvpTZS1dzzuO3dFknpGQ3dD-7jB-9760WE74YEk340PkPjYxPUo_kxGlVZNyTVflJkSwUE3OohjMoVeiUIlf8Qn2OzxtwRgXlkCsrWzz7sjUbCPwr-_cKKYAClf0EgyAzJS0)
+* [Explanation of system containers and flows](go-c4-diagrams/container/insurance-hub-container-analysis.md)
 
 ### Phase 1: Foundational Infrastructure & Environment Migration (Lift and Shift)
 
