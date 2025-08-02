@@ -1,7 +1,7 @@
 ### Explanation of System Context and Flows
 
-This diagram provides a high-level overview of the **Insurance Hub** system, its primary user, and
-its key external dependencies.
+This diagram provides a high-level overview of the Java-based **Insurance Hub** system, its primary
+user, and its key external dependencies.
 
 #### Actors and Systems
 
