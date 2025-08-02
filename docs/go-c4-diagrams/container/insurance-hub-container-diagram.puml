@@ -1,0 +1,79 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+skinparam linetype ortho
+
+title Insurance Hub System — Go Implementation (C4 Container Diagram)
+
+' Actor
+Person(agent, "Insurance Agent", "Uses the system to sell insurance policies and view analytics.")
+
+System_Boundary(insurance_hub, "Insurance Hub") {
+    ' Edge / Frontend
+    Container(spa, "Web Vue App", "Vue.js", "The single-page application providing the UI for agents.")
+    Container(gateway, "API Gateway", "Envoy Proxy", "The single entry point for all API requests from the frontend.")
+
+    ' Authentication Service
+    Container(keycloak, "Keycloak", "IAM", "Handles user authentication and authorization using OpenID Connect.")
+
+    ' Core Microservices (Implemented in Go)
+    Container(policy_service, "Policy Service", "Go Service", "Manages the creation and lifecycle of insurance policies and offers.")
+    Container(product_service, "Product Service", "Go Service", "Manages the insurance product catalog.")
+    Container(pricing_service, "Pricing Service", "Go Service", "Calculates prices for insurance products based on tariff rules.")
+    Container(policy_search_service, "Policy Search Service", "Go Service", "Provides a denormalized, searchable view of policies.")
+    Container(payment_service, "Payment Service", "Go Service", "Handles policyholder accounts and processes payments.")
+    Container(document_service, "Document Service", "Go Service (chromedp)", "Generates and manages policy documents (PDFs) using an embedded library.")
+    Container(dashboard_service, "Dashboard Service", "Go Service", "Provides sales analytics and visualizations.")
+    Container(chat_service, "Chat Service", "Go Service", "Provides real-time chat for agents via WebSockets.")
+
+    ' Data Stores
+    ContainerDb(policy_db, "Policy DB", "PostgreSQL", "Stores policies, offers, and product catalog (JSONB).")
+    ContainerDb(payment_db, "Payment DB", "PostgreSQL", "Stores payment transactions and customer accounts.")
+    ContainerDb(document_meta_db, "Document Metadata DB", "PostgreSQL", "Stores metadata for documents.")
+    ContainerDb(search_db, "Search & Analytics DB", "Elasticsearch", "Stores denormalized data for search and analytics.")
+    Container(minio, "Object Storage", "MinIO (S3-compatible)", "Stores generated documents (PDFs) and bank statements.")
+    Container(tariff_rules, "Tariff Rules Storage", "Tarantool", "Stores pricing rules for fast lookups.")
+}
+
+' External Systems
+System_Ext(kafka, "Apache Kafka", "Event Streaming Platform", "Facilitates asynchronous communication between services.")
+
+' Relationships
+
+' User Interaction Flow
+Rel(agent, spa, "Uses", "HTTPS")
+Rel(spa, gateway, "Makes API calls to", "HTTPS (REST/JSON & WebSocket)")
+
+' Gateway to Services (Synchronous, Externally Exposed)
+Rel(gateway, keycloak, "Delegates authentication to", "OpenID Connect")
+Rel(gateway, policy_service, "Routes requests to", "HTTPS/REST")
+Rel(gateway, product_service, "Routes requests to", "HTTPS/REST")
+Rel(gateway, policy_search_service, "Routes requests to", "HTTPS/REST")
+Rel(gateway, payment_service, "Routes requests to", "HTTPS/REST")
+Rel(gateway, document_service, "Routes requests to", "HTTPS/REST")
+Rel(gateway, dashboard_service, "Routes requests to", "HTTPS/REST")
+Rel(gateway, chat_service, "Proxies connection to", "WebSocket")
+
+' Inter-Service Communication (Synchronous, Internal)
+Rel(policy_service, pricing_service, "Requests price calculation from", "gRPC")
+Rel(policy_service, product_service, "Fetches product details from", "gRPC")
+
+' Asynchronous Event Flow
+Rel(policy_service, kafka, "Publishes 'PolicyCreated' event")
+Rel(kafka, policy_search_service, "Consumes 'PolicyCreated' event")
+Rel(kafka, payment_service, "Consumes 'PolicyCreated' event")
+Rel(kafka, document_service, "Consumes 'PolicyCreated' event")
+Rel(kafka, dashboard_service, "Consumes 'PolicyCreated' event")
+
+' Database and Storage Relationships
+Rel(policy_service, policy_db, "Reads from and writes to")
+Rel(product_service, policy_db, "Reads from and writes to")
+Rel(payment_service, payment_db, "Reads from and writes to")
+Rel(document_service, document_meta_db, "Reads from and writes to")
+Rel(policy_search_service, search_db, "Reads from and writes to")
+Rel(dashboard_service, search_db, "Reads from")
+Rel(pricing_service, tariff_rules, "Loads tariff rules from")
+Rel(document_service, minio, "Stores and retrieves PDF documents", "S3 API")
+Rel(payment_service, minio, "Imports bank statements from", "S3 API")
+
+@enduml
