@@ -582,25 +582,25 @@ stable foundation for the next, minimizing risk throughout the process.
 **Goal:** Move the existing Java application to a Kubernetes environment with minimal code changes.
 This validates the new platform and de-risks subsequent, more complex changes.
 
-1. **Provision Kubernetes Cluster:** Set up a production-ready Kubernetes cluster.
+1. **Provision Kubernetes Clusters:** Set up simple local dev and production-like local Kubernetes clusters.
 2. **Deploy Core Infrastructure:**
-    * Deploy **PostgreSQL**, **Elasticsearch**, and **Apache Kafka** to the Kubernetes cluster.
+    * Deploy **PostgreSQL**, **MongoDB**, **Elasticsearch**, and **Apache Kafka** to the Kubernetes cluster.
     * Deploy **MinIO** as the new S3-compatible object storage solution, which will replace the
       existing file system storage.
 3. **Targeted Code Modification (Java):**
-    * As you noted, this step is unavoidable. Modify the existing Java services (e.g.,
-      `document-service`) that interact with the file system. Update them to use an S3-compatible
-      SDK pointed at the new MinIO service endpoint.
+    * Modify the existing Java services (e.g., `document-service`) that interact with the file
+      system. Update them to use an S3-compatible SDK pointed at the new MinIO service endpoint.
 4. **Containerize and Deploy Java Services:**
     * Create production-grade container images for all Java microservices.
     * Deploy these services to Kubernetes.
-    * **Replace Consul:** As per the [analysis](migration-reasoning/replace-consul.md), 
-      decommission Consul and switch to Kubernetes-native service discovery. This is primarily 
-      a configuration change in the Micronaut services to use Kubernetes' internal DNS for 
-      service-to-service communication.
+   * As per this [analysis](migration-reasoning/replace-consul.md), decommission Consul and switch to
+     Kubernetes-native service discovery. This is primarily a configuration change in the Micronaut
+     services to use Kubernetes' internal DNS for service-to-service communication.
 5. **Deploy Existing Gateway:** Deploy the current Java-based `agent-portal-gateway` to Kubernetes
    and configure it to use the new K8s service discovery mechanism to route traffic to the backend
    services.
+6. **Implement GitOps:** Automate CI/CD pipelines for the services using a GitOps tool like
+   ArgoCD or Flux for declarative, version-controlled deployments.
 
 **Outcome:** The entire Java application is now running in the target Kubernetes environment. All
 dependencies are containerized, and object storage is handled by MinIO. The system is functional,
@@ -735,14 +735,12 @@ and optimize for performance, security, and cost.
     * Execute a one-time migration to move historical trace data from the file system to **MinIO**
       for long-term storage.
     * Reconfigure **Tempo** to use **MinIO** as its primary, scalable storage backend.
-2. **Implement GitOps:** Automate CI/CD pipelines for the Go services using a GitOps tool like
-   ArgoCD or Flux for declarative, version-controlled deployments.
-3. **Advanced Kubernetes Management:**
+2. **Advanced Kubernetes Management:**
     * Implement Horizontal Pod Autoscalers (HPA) to automatically scale services.
     * Enforce Kubernetes Network Policies to create a zero-trust network environment.
     * Fine-tune resource requests and limits for all services to maximize cluster efficiency and
       stability.
-4. **Continuous Improvement:**
+3. **Continuous Improvement:**
     * Use the rich data from the observability stack to continuously identify performance
       bottlenecks and optimize resource usage.
     * Ensure all new architecture and processes are thoroughly documented.
