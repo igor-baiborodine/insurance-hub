@@ -582,7 +582,8 @@ stable foundation for the next, minimizing risk throughout the process.
 **Goal:** Move the existing Java application to a Kubernetes environment with minimal code changes.
 This validates the new platform and de-risks subsequent, more complex changes.
 
-1. **Provision Kubernetes Clusters:** Set up simple local dev and production-like local Kubernetes clusters.
+1. **Provision Kubernetes Clusters:** Set up simple local dev (Kind) and production-like (MicroK8S) 
+   local Kubernetes clusters.
 2. **Deploy Core Infrastructure:**
     * Deploy **PostgreSQL**, **MongoDB**, **Elasticsearch**, and **Apache Kafka** to the Kubernetes cluster.
     * Deploy **MinIO** as the new S3-compatible object storage solution, which will replace the
