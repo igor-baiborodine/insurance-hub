@@ -5,7 +5,7 @@
 </template>
 
 <script>
-    import PolicyList from "../components/PolicyList";
+    import PolicyList from "../components/PolicyList.vue";
 
     export default {
         name: 'policies',

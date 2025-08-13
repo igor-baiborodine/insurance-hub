@@ -5,7 +5,7 @@
 </template>
 
 <script>
-    import PolicyCreate from "../components/PolicyCreate";
+    import PolicyCreate from "../components/PolicyCreate.vue";
 
     export default {
         name: "PolicyCreateView",
