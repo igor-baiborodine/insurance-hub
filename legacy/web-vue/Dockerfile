@@ -7,7 +7,7 @@ ENV \
 
 COPY ./dist /usr/share/nginx/html
 
-COPY ./nginx-app.conf /etc/nginx/conf.d/default.tmpl
+COPY nginx-app.conf /etc/nginx/conf.d/default.tmpl
 
 COPY entrypoint.sh /
 

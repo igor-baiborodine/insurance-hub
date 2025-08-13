@@ -5,7 +5,7 @@
 </template>
 
 <script>
-    import ProductDetails from "../components/ProductDetails";
+    import ProductDetails from "../components/ProductDetails.vue";
 
     export default {
         name: "ProductDetailsView",

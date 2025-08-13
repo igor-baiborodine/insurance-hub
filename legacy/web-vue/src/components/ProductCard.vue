@@ -15,7 +15,7 @@
 </template>
 
 <script>
-    import CoverList from "./CoverList";
+    import CoverList from "./CoverList.vue";
 
     export default {
         name: 'ProductCard',

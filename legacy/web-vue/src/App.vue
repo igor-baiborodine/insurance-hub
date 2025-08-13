@@ -27,7 +27,7 @@
         </div>
 
         <footer>
-            <img src="./assets/logo_horizontal.png" alt="Logo Footer"/>
+            <img src="assets/logo_horizontal.png" alt="Logo Footer"/>
             <p><a href="https://altkomsoftware.pl">Altkom Software & Consulting LAB @ 2019</a></p>
         </footer>
     </div>

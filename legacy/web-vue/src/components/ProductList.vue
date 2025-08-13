@@ -7,7 +7,7 @@
 </template>
 
 <script>
-    import ProductCard from "./ProductCard";
+    import ProductCard from "./ProductCard.vue";
     import {HTTP} from "./http/ApiClient";
 
     export default {

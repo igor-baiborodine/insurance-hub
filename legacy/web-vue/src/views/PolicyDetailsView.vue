@@ -5,7 +5,7 @@
 </template>
 
 <script>
-    import PolicyDetails from "../components/PolicyDetails";
+    import PolicyDetails from "../components/PolicyDetails.vue";
 
     export default {
         name: "PolicyDetailsView",

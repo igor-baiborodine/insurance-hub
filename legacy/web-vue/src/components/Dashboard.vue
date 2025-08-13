@@ -73,10 +73,10 @@
 
 <script>
 import { HTTP } from "./http/ApiClient";
-import SalesAgents from "./SalesAgents";
-import SalesTrendsLines from "./SalesTrendsLines";
-import SalesDistribution from "./SalesDistribution";
-import TotalSalesCard from "./TotalSalesCard";
+import SalesAgents from "./SalesAgents.vue";
+import SalesTrendsLines from "./SalesTrendsLines.vue";
+import SalesDistribution from "./SalesDistribution.vue";
+import TotalSalesCard from "./TotalSalesCard.vue";
 import {_} from 'vue-underscore';
 import moment from 'moment';
 
