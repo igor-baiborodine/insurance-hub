@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# Get the current branch name
+branch_name=$(git rev-parse --abbrev-ref HEAD)
+
+# Regex pattern to match conventional commits branch name style
+pattern="^(feat|fix|docs|chore|refactor|perf|test|style)/(issue-[0-9]+)?[a-z0-9-]+$"
+
+if [[ ! $branch_name =~ $pattern ]]; then
+  echo "ERROR: Invalid branch name '$branch_name'."
+  echo "Branch name MUST follow the pattern:"
+  echo "  /[issue-]"
+  echo "Where:"
+  echo "  -  is one of feat, fix, docs, chore, refactor, perf, test, style"
+  echo "  - [issue-] is optional (e.g. issue-123)"
+  echo "  -  is lowercase, dash-separated words"
+  echo
+  echo "Examples:"
+  echo "  feat/issue-6-provision-kind-and-microk8s-clusters"
+  echo "  fix/null-pointer-exception"
+  echo "  docs/issue-10-update-readme"
+  exit 1
+fi
+
+exit 0
