@@ -2,9 +2,12 @@
 # Child Makefile for local dev insurance-hub
 ################################################################################
 
+################################################################################
+# Variables
+################################################################################
 KIND_CLUSTER_NAME  := local-dev-insurance-hub
 KIND_CONFIG_FILE   := kind-local-dev-insurance-hub.yaml
-KUBECTL_CONTEXT    := kind-$(KIND_CLUSTER_NAME)
+KUBECTL_CONTEXT    := $(KIND_CLUSTER_NAME)
 
 .PHONY: help
 help:

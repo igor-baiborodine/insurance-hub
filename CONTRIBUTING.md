@@ -23,7 +23,6 @@
 * **Go** `>=1.24`, see [Install Go](https://go.dev/doc/install).
 * **Docker Engine** `>=24.0.0`, see [Install Docker Engine](https://docs.docker.com/engine/install/).
 * **Kind** `>=0.20.0`, see [Install Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation).
-* **MicroK8S** `>=1.29`, see [Install MicroK8S](https://microk8s.io/docs/getting-started).
 * **kubectl** `>=1.29.2`, see [Install kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl).
 
 ### Clone Repository
