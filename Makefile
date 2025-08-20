@@ -6,6 +6,7 @@
 ################################################################################
 # Includes - domain-specific Makefiles
 ################################################################################
+-include k8s/Makefile
 -include k8s/local-dev/Makefile
 -include k8s/qa/Makefile
 

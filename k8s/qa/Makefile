@@ -5,7 +5,9 @@
 ################################################################################
 # Variables
 ################################################################################
-NODE_LIST	:= qa-master qa-worker1 qa-worker2
+NODE_LIST			:= qa-master qa-worker1 qa-worker2
+QA_CLUSTER_NAME  	:= qa-insurance-hub
+QA_KUBECTL_CONTEXT	:= $(QA_CLUSTER_NAME)
 
 .PHONY: help
 help:
@@ -14,7 +16,7 @@ help:
 	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: lxd-install
-lxd-install: ## Install LXD
+lxd-install: ## Install LXD on Ubuntu
 	@if ! command -v lxd >/dev/null 2>&1; then \
 		sudo snap install lxd; \
 		sudo usermod -aG lxd $${SUDO_USER:-$$USER}; \
@@ -54,15 +56,32 @@ qa-nodes-create: ## Create three LXD VMs (master and two workers) with MicroK8s 
 	@echo "All VM nodes have been created and set up."
 
 .PHONY: qa-cluster-create
-qa-cluster-create: qa-nodes-create ## Set up MicroK8s multi-node cluster with DNS, storage, ingress add-ons
+qa-cluster-create: qa-nodes-create ## Set up MicroK8s multi-node cluster with DNS, storage, ingress add-ons and config context
 	@echo "Starting and configuring MicroK8s on master node..."
 	@lxc exec qa-master -- bash -c "microk8s stop || true; microk8s start"
-	@lxc exec qa-master -- microk8s enable dns storage ingress
+	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
+	@lxc exec qa-master -- microk8s enable dns
+	@lxc exec qa-master -- microk8s enable hostpath-storage
+	@lxc exec qa-master -- microk8s enable ingress
+	@echo "Joining qa-worker1 to cluster..."
+	@lxc exec qa-worker1 -- bash -c "microk8s stop || true; microk8s start; microk8s status --wait-ready"
 	@JOIN_CMD=$$(lxc exec qa-master -- microk8s add-node --token-ttl 300 | grep 'microk8s join' | head -n1); \
-	echo "Joining qa-worker1 and qa-worker2 nodes..."; \
-	lxc exec qa-worker1 -- bash -c "microk8s stop || true; microk8s start; $$JOIN_CMD"; \
-	lxc exec qa-worker2 -- bash -c "microk8s stop || true; microk8s start; $$JOIN_CMD"
-	@echo "MicroK8s multi-node cluster is ready. Use 'lxc exec qa-master -- microk8s kubectl get nodes' to verify."
+		lxc exec qa-worker1 -- bash -c "$$JOIN_CMD"
+	@echo "Joining qa-worker2 to cluster..."
+	@lxc exec qa-worker2 -- bash -c "microk8s stop || true; microk8s start; microk8s status --wait-ready"
+	@JOIN_CMD=$$(lxc exec qa-master -- microk8s add-node --token-ttl 300 | grep 'microk8s join' | head -n1); \
+		lxc exec qa-worker2 -- bash -c "$$JOIN_CMD"
+	@echo "MicroK8s multi-node cluster is ready. Setting up kubeconfig context..."
+
+	# Export kubeconfig from qa-master
+	lxc exec qa-master -- bash -c "microk8s kubectl config view --raw" > $(QA_CLUSTER_NAME)-kubeconfig
+
+	# Rename context to desired context
+	KUBECONFIG=$(QA_CLUSTER_NAME)-kubeconfig kubectl config rename-context microk8s $(QA_KUBECTL_CONTEXT)
+
+	@echo "Kubeconfig for cluster exported to $(QA_CLUSTER_NAME)-kubeconfig with context '$(QA_KUBECTL_CONTEXT)'."
+	@echo "To use: export KUBECONFIG=$$(pwd)/$(QA_CLUSTER_NAME)-kubeconfig"
+	@echo "  or copy the kubeconfig to ~/.kube/config as needed."
 
 .PHONY: qa-create
 qa-create: qa-cluster-create ## Create nodes and set up the multi-node MicroK8s cluster with required add-ons
@@ -80,16 +99,16 @@ qa-suspend: ## Suspend (pause) all LXD QA VMs
 	@echo "All QA cluster VMs suspended (paused)."
 
 .PHONY: qa-resume
-qa-resume: ## Resume (unpause) all LXD QA VMs
+qa-resume: ## Resume (start) all LXD QA VMs
 	@for NODE in $(NODE_LIST); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Resuming VM $$NODE..."; \
-			lxc unpause $$NODE; \
+			echo "Resuming (starting) VM $$NODE..."; \
+			lxc start $$NODE; \
 		else \
 			echo "VM $$NODE does not exist, skipping."; \
 		fi; \
 	done
-	@echo "All QA cluster VMs resumed."
+	@echo "All QA cluster VMs resumed (started)."
 
 .PHONY: qa-delete
 qa-delete: ## Delete all LXD VMs used by the multi-node MicroK8s cluster
@@ -102,3 +121,27 @@ qa-delete: ## Delete all LXD VMs used by the multi-node MicroK8s cluster
 		fi; \
 	done
 	@echo "All multi-node cluster VMs deleted."
+
+.PHONY: qa-snapshot
+qa-snapshot: ## Take snapshot of all QA cluster VMs (named 'baseline')
+	@for NODE in $(NODE_LIST); do \
+		if lxc info $$NODE >/dev/null 2>&1; then \
+			echo "Snapshotting VM $$NODE ..."; \
+			lxc snapshot $$NODE baseline; \
+		else \
+			echo "VM $$NODE does not exist, skipping."; \
+		fi; \
+	done
+	@echo "All QA cluster VMs snapshotted as 'baseline'."
+
+.PHONY: qa-restore
+qa-restore: ## Restore all QA cluster VMs to 'baseline' snapshot
+	@for NODE in $(NODE_LIST); do \
+		if lxc info $$NODE >/dev/null 2>&1; then \
+			echo "Restoring VM $$NODE to baseline..."; \
+			lxc restore $$NODE baseline; \
+		else \
+			echo "VM $$NODE does not exist, skipping."; \
+		fi; \
+	done
+	@echo "All QA cluster VMs restored to 'baseline'."

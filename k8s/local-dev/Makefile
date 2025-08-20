@@ -5,9 +5,9 @@
 ################################################################################
 # Variables
 ################################################################################
-KIND_CLUSTER_NAME  := local-dev-insurance-hub
-KIND_CONFIG_FILE   := kind-local-dev-insurance-hub.yaml
-KUBECTL_CONTEXT    := $(KIND_CLUSTER_NAME)
+LOCAL_DEV_CLUSTER_NAME  	:= local-dev-insurance-hub
+KIND_CONFIG_FILE   			:= kind-local-dev-insurance-hub.yaml
+LOCAL_DEV_KUBECTL_CONTEXT	:= $(LOCAL_DEV_CLUSTER_NAME)
 
 .PHONY: help
 help:
@@ -23,33 +23,20 @@ kind-install: ## Install the latest Kind on Ubuntu
 	sudo mv ./kind /usr/local/bin/kind
 	kind --version
 
-.PHONY: kubectl-install
-kubectl-install: ## Install the latest stable kubectl on Ubuntu
-	@KUBECTL_VERSION=$$(curl -L -s https://dl.k8s.io/release/stable.txt); \
-	if [ -z "$$KUBECTL_VERSION" ]; then \
-	  echo "Failed to fetch latest kubectl version!"; \
-	  exit 1; \
-	fi; \
-	curl -LO "https://dl.k8s.io/release/$${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
-	chmod +x kubectl; \
-	echo "Moving kubectl to /usr/local/bin (you may be prompted for your password)..."; \
-	sudo mv kubectl /usr/local/bin/kubectl; \
-	kubectl version --client
-
 .PHONY: local-dev-create
 local-dev-create: ## Create/start the local dev Kind cluster (single-node)
 	mkdir -p /tmp/data/local-dev-storage
-	kind create cluster --name $(KIND_CLUSTER_NAME) --config $(KIND_CONFIG_FILE)
+	kind create cluster --name $(LOCAL_DEV_CLUSTER_NAME) --config $(KIND_CONFIG_FILE)
 
 .PHONY: local-dev-delete
 local-dev-delete: ## Delete/stop the local dev Kind cluster with its persistent storage
 	rm -rf /tmp/data/local-dev-storage
-	kind delete cluster --name $(KIND_CLUSTER_NAME)
+	kind delete cluster --name $(LOCAL_DEV_CLUSTER_NAME)
 
 .PHONY: local-dev-context
 local-dev-context: ## Switch kubectl context to insurance-hub's local dev Kind cluster
-	kubectl config use-context $(KUBECTL_CONTEXT)
+	kubectl config use-context $(LOCAL_DEV_KUBECTL_CONTEXT)
 
 .PHONY: local-dev-status
 local-dev-status: ## Show local dev Kind cluster nodes status
-	kubectl --context $(KUBECTL_CONTEXT) get nodes
+	kubectl --context $(LOCAL_DEV_KUBECTL_CONTEXT) get nodes
