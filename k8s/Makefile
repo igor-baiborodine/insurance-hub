@@ -21,22 +21,3 @@ kubectl-install: ## Install the latest stable kubectl on Ubuntu
 	sudo mv kubectl /usr/local/bin/kubectl; \
 	kubectl version --client
 
-.PHONY: kube-ps1-install
-kube-ps1-install: ## Install kube-ps1 prompt helper (without modifying .bashrc) and show setup instructions
-	@if [ ! -d "$$HOME/.kube-ps1" ]; then \
-		echo "Cloning kube-ps1 repository into $$HOME/.kube-ps1..."; \
-		git clone https://github.com/jonmosco/kube-ps1.git $$HOME/.kube-ps1; \
-	else \
-		echo "kube-ps1 repository already cloned in $$HOME/.kube-ps1."; \
-	fi
-	@echo ""; \
-	echo "kube-ps1 installation complete!"; \
-	echo ""; \
-	echo "To enable kube-ps1, add the following lines to your ~/.bashrc or ~/.zshrc:"; \
-	echo ""; \
-	echo "  # kube-ps1 setup"; \
-	echo "  source \$HOME/.kube-ps1/kube-ps1.sh"; \
-	echo "  export PS1='[\\u@\\h \\W \\$(__kube_ps1)]\\$ '"; \
-	echo ""; \
-	echo "Then run 'source ~/.bashrc' (or 'source ~/.zshrc') to apply the changes."; \
-	echo "Afterwards, your prompt will display the current Kubernetes context and namespace.";
