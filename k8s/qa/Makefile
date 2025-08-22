@@ -5,7 +5,9 @@
 ################################################################################
 # Variables
 ################################################################################
-NODE_LIST			:= qa-master qa-worker1 qa-worker2
+NODES_MASTER		:= qa-master
+NODES_WORKER		:= qa-worker1 qa-worker2
+NODES_ALL			:= $(NODES_MASTER) $(NODES_WORKER)
 QA_CLUSTER_NAME  	:= qa-insurance-hub
 QA_KUBECTL_CONTEXT	:= $(QA_CLUSTER_NAME)
 
@@ -31,13 +33,44 @@ lxd-install: ## Install LXD on Ubuntu
 qa-create: qa-cluster-create ## Create nodes and set up the multi-node MicroK8s cluster with required add-ons
 
 .PHONY: qa-cluster-create
-qa-cluster-create: qa-nodes-create ## Set up MicroK8s multi-node cluster with DNS, storage, ingress add-ons and dynamic context rename
+qa-cluster-create: qa-nodes-create ## Set up MicroK8s multi-node cluster with DNS, storage, ingress add-ons and config context
 	@echo "Starting and configuring MicroK8s on master node..."
 	@lxc exec qa-master -- bash -c "microk8s stop || true; microk8s start"
 	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
+
+	# Wait for API server on port 16443 to be ready and responsive
+	@echo "Waiting for Kubernetes API server to become accessible..."
+	@lxc exec qa-master -- bash -c '\
+		for i in {1..20}; do \
+			curl --insecure -s https://127.0.0.1:16443/metadata || true; \
+			if [ $$? -eq 0 ]; then break; fi; \
+			echo "Waiting for API server..."; sleep 5; \
+		done'
+
+	# Wait until essential ingress resources can be queried without error
+	@echo "Waiting for ingress API resources to be ready..."
+	@lxc exec qa-master -- bash -c '\
+		for i in {1..20}; do \
+			microk8s kubectl get daemonsets -n ingress > /dev/null 2>&1 && break; \
+			echo "Waiting for ingress daemonsets..."; sleep 5; \
+		done'
+
 	@lxc exec qa-master -- microk8s enable dns
-	@lxc exec qa-master -- microk8s enable hostpath-storage
+	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
+	@lxc exec qa-master -- bash -c 'for i in {1..12}; do microk8s kubectl get nodes >/dev/null 2>&1 && break; sleep 5; done'
+
+	@echo "Enabling hostpath-storage (with retries if API not available)..."
+	@lxc exec qa-master -- bash -c '\
+	  for i in {1..5}; do \
+		microk8s enable hostpath-storage && break; \
+		echo "hostpath-storage enable failed, retrying in 15s..."; sleep 15; \
+	  done'
+	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
+
 	@lxc exec qa-master -- microk8s enable ingress
+	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
+	@lxc exec qa-master -- bash -c 'for i in {1..12}; do microk8s kubectl get daemonsets -n ingress >/dev/null 2>&1 && break; sleep 5; done'
+
 	@echo "Joining qa-worker1 to cluster..."
 	@lxc exec qa-worker1 -- bash -c "microk8s stop || true; microk8s start; microk8s status --wait-ready"
 	@JOIN_CMD=$$(lxc exec qa-master -- microk8s add-node --token-ttl 300 | grep 'microk8s join' | head -n1); \
@@ -46,12 +79,14 @@ qa-cluster-create: qa-nodes-create ## Set up MicroK8s multi-node cluster with DN
 	@lxc exec qa-worker2 -- bash -c "microk8s stop || true; microk8s start; microk8s status --wait-ready"
 	@JOIN_CMD=$$(lxc exec qa-master -- microk8s add-node --token-ttl 300 | grep 'microk8s join' | head -n1); \
 		lxc exec qa-worker2 -- bash -c "$$JOIN_CMD"
-	@echo "MicroK8s multi-node cluster is ready. Setting up kubeconfig context..."
+	@echo "MicroK8s multi-node cluster is ready. Saving kubeconfig inside qa-master and pulling to host..."
 
-	# Export kubeconfig from qa-master
-	lxc exec qa-master -- bash -c "microk8s kubectl config view --raw" > $(QA_CLUSTER_NAME)-kubeconfig
+	# Save kubeconfig inside VM
+	lxc exec qa-master -- bash -c "microk8s kubectl config view --raw > /home/ubuntu/kubeconfig.yaml"
+	# Pull the kubeconfig file to host
+	lxc file pull qa-master/home/ubuntu/kubeconfig.yaml ./$(QA_CLUSTER_NAME)-kubeconfig
 
-	# Extract original context name
+	# Rename context dynamically
 	ORIGINAL_CONTEXT=$$(kubectl --kubeconfig=$(QA_CLUSTER_NAME)-kubeconfig config current-context); \
 	echo "Original kubeconfig context is '$$ORIGINAL_CONTEXT'"; \
 	if [ "$$ORIGINAL_CONTEXT" != "$(QA_KUBECTL_CONTEXT)" ]; then \
@@ -64,7 +99,7 @@ qa-cluster-create: qa-nodes-create ## Set up MicroK8s multi-node cluster with DN
 
 .PHONY: qa-cluster-reset
 qa-cluster-reset: ## Reset MicroK8s on all QA nodes (remove cluster state without deleting VMs)
-	@for NODE in $(NODE_LIST); do \
+	@for NODE in $(NODES_ALL); do \
 		echo "Resetting MicroK8s on $$NODE..."; \
 		lxc exec $$NODE -- microk8s reset; \
 	done
@@ -73,21 +108,21 @@ qa-cluster-reset: ## Reset MicroK8s on all QA nodes (remove cluster state withou
 .PHONY: qa-cluster-snapshot
 qa-cluster-snapshot: ## Pause all VMs, take snapshot 'baseline' consistently, then resume VMs
 	@echo "Pausing all QA cluster VMs for consistent snapshots..."
-	@for NODE in $(NODE_LIST); do \
+	@for NODE in $(NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Pausing VM $$NODE..."; \
 			lxc pause $$NODE; \
 		fi; \
 	done
 	@echo "Taking snapshots named 'baseline'..."
-	@for NODE in $(NODE_LIST); do \
+	@for NODE in $(NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Snapshotting VM $$NODE ..."; \
 			lxc snapshot $$NODE baseline; \
 		fi; \
 	done
 	@echo "Resuming all QA cluster VMs..."
-	@for NODE in $(NODE_LIST); do \
+	@for NODE in $(NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Starting VM $$NODE..."; \
 			lxc start $$NODE; \
@@ -98,7 +133,7 @@ qa-cluster-snapshot: ## Pause all VMs, take snapshot 'baseline' consistently, th
 .PHONY: qa-cluster-restore
 qa-cluster-restore: ## Restore all QA cluster VMs from 'baseline' snapshot and start them
 	@echo "Restoring all QA cluster VMs from 'baseline' snapshot..."
-	@for NODE in $(NODE_LIST); do \
+	@for NODE in $(NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Restoring VM $$NODE to baseline..."; \
 			lxc restore $$NODE baseline; \
@@ -110,7 +145,7 @@ qa-cluster-restore: ## Restore all QA cluster VMs from 'baseline' snapshot and s
 
 .PHONY: qa-nodes-create
 qa-nodes-create: ## Create three LXD VMs (master and two workers) with MicroK8s installed
-	@for NODE in $(NODE_LIST); do \
+	@for NODE in $(NODES_ALL); do \
 		if ! lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Launching VM $$NODE..."; \
 			lxc launch ubuntu:24.04 --vm $$NODE; \
@@ -138,7 +173,7 @@ qa-nodes-create: ## Create three LXD VMs (master and two workers) with MicroK8s 
 
 .PHONY: qa-nodes-suspend
 qa-nodes-suspend: ## Suspend (pause) all LXD QA VMs
-	@for NODE in $(NODE_LIST); do \
+	@for NODE in $(NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Suspending VM $$NODE..."; \
 			lxc pause $$NODE; \
@@ -150,7 +185,7 @@ qa-nodes-suspend: ## Suspend (pause) all LXD QA VMs
 
 .PHONY: qa-nodes-resume
 qa-nodes-resume: ## Resume (start) all LXD QA VMs
-	@for NODE in $(NODE_LIST); do \
+	@for NODE in $(NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Resuming (starting) VM $$NODE..."; \
 			lxc start $$NODE; \
@@ -162,7 +197,7 @@ qa-nodes-resume: ## Resume (start) all LXD QA VMs
 
 .PHONY: qa-nodes-delete
 qa-nodes-delete: ## Delete all LXD VMs used by the multi-node MicroK8s cluster
-	@for NODE in $(NODE_LIST); do \
+	@for NODE in $(NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Deleting VM $$NODE..."; \
 			lxc delete $$NODE --force; \
