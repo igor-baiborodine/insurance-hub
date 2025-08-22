@@ -85,12 +85,17 @@ qa-cluster-create: qa-nodes-create ## Set up a multi-node k3s cluster (Rancher) 
 	@echo "Merged kubeconfigs. You can now switch contexts with kubectl config use-context $(QA_KUBECTL_CONTEXT)."
 
 .PHONY: qa-cluster-reset
-qa-cluster-reset: ## Reset MicroK8s on all QA nodes (remove cluster state without deleting VMs)
+qa-cluster-reset: ## Reset k3s on all QA nodes (remove cluster state without deleting VMs)
 	@for NODE in $(NODES_ALL); do \
-		echo "Resetting MicroK8s on $$NODE..."; \
-		lxc exec $$NODE -- microk8s reset; \
+		echo "Resetting k3s on $$NODE..."; \
+		lxc exec $$NODE -- bash -c "set -e; \
+			[ -f /usr/local/bin/k3s-uninstall.sh ] && /usr/local/bin/k3s-uninstall.sh || true; \
+			[ -f /usr/local/bin/k3s-agent-uninstall.sh ] && /usr/local/bin/k3s-agent-uninstall.sh || true; \
+			rm -rf /var/lib/rancher/k3s /etc/rancher/k3s || true"; \
 	done
-	@echo "MicroK8s cluster reset on all QA nodes."
+	@echo "k3s cluster reset on all QA nodes."
+	@echo "Removing local kubeconfig file ($(QA_CLUSTER_NAME)-kubeconfig) if it exists..."
+	@rm -f ./$(QA_CLUSTER_NAME)-kubeconfig
 
 .PHONY: qa-cluster-snapshot
 qa-cluster-snapshot: ## Pause all VMs, take snapshot 'baseline' consistently, then resume VMs
