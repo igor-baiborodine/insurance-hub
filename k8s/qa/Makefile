@@ -15,7 +15,7 @@ QA_KUBECTL_CONTEXT	:= $(QA_CLUSTER_NAME)
 help:
 	@echo "QA insurance-hub cluster Makefile targets:"
 	@grep -E '^\S+:.*## ' $(MAKEFILE_LIST) | sort | \
-	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-32s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: lxd-install
 lxd-install: ## Install LXD on Ubuntu
@@ -55,22 +55,6 @@ qa-cluster-create: qa-nodes-create ## Set up MicroK8s multi-node cluster with DN
 			echo "Waiting for ingress daemonsets..."; sleep 5; \
 		done'
 
-	@lxc exec qa-master -- microk8s enable dns
-	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
-	@lxc exec qa-master -- bash -c 'for i in {1..12}; do microk8s kubectl get nodes >/dev/null 2>&1 && break; sleep 5; done'
-
-	@echo "Enabling hostpath-storage (with retries if API not available)..."
-	@lxc exec qa-master -- bash -c '\
-	  for i in {1..5}; do \
-		microk8s enable hostpath-storage && break; \
-		echo "hostpath-storage enable failed, retrying in 15s..."; sleep 15; \
-	  done'
-	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
-
-	@lxc exec qa-master -- microk8s enable ingress
-	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
-	@lxc exec qa-master -- bash -c 'for i in {1..12}; do microk8s kubectl get daemonsets -n ingress >/dev/null 2>&1 && break; sleep 5; done'
-
 	@echo "Joining qa-worker1 to cluster..."
 	@lxc exec qa-worker1 -- bash -c "microk8s stop || true; microk8s start; microk8s status --wait-ready"
 	@JOIN_CMD=$$(lxc exec qa-master -- microk8s add-node --token-ttl 300 | grep 'microk8s join' | head -n1); \
@@ -93,9 +77,13 @@ qa-cluster-create: qa-nodes-create ## Set up MicroK8s multi-node cluster with DN
 		kubectl --kubeconfig=$(QA_CLUSTER_NAME)-kubeconfig config rename-context "$$ORIGINAL_CONTEXT" "$(QA_KUBECTL_CONTEXT)"; \
 	fi
 
-	@echo "Kubeconfig for cluster exported to $(QA_CLUSTER_NAME)-kubeconfig with context '$(QA_KUBECTL_CONTEXT)'."
-	@echo "To use: export KUBECONFIG=$$(pwd)/$(QA_CLUSTER_NAME)-kubeconfig"
-	@echo "  or copy the kubeconfig to ~/.kube/config as needed."
+	# Merge kubeconfig into default kubeconfig (usually Kind's at ~/.kube/config)
+	@echo "Merging $(QA_CLUSTER_NAME)-kubeconfig into default kubeconfig (~/.kube/config)..."
+	@export KUBECONFIG=~/.kube/config:$(PWD)/$(QA_CLUSTER_NAME)-kubeconfig; \
+	kubectl config view --flatten > $(HOME)/.kube/config.merged && \
+	mv $(HOME)/.kube/config.merged $(HOME)/.kube/config
+
+	@echo "Merged kubeconfigs. You can now switch contexts with kubectl config use-context $(QA_KUBECTL_CONTEXT)."
 
 .PHONY: qa-cluster-reset
 qa-cluster-reset: ## Reset MicroK8s on all QA nodes (remove cluster state without deleting VMs)
@@ -142,6 +130,39 @@ qa-cluster-restore: ## Restore all QA cluster VMs from 'baseline' snapshot and s
 		fi; \
 	done
 	@echo "All QA cluster VMs restored to 'baseline' snapshot and started."
+
+.PHONY: qa-cluster-enable-all-addons
+qa-cluster-enable-all-addons: qa-cluster-enable-dns qa-cluster-enable-storage qa-cluster-enable-ingress ## Enable all MicroK8s addons
+
+.PHONY: qa-cluster-enable-dns
+qa-cluster-enable-dns: ## Enable MicroK8s DNS addon with readiness waits and retry
+	@echo "Enabling dns (with retries if API not available)..."
+	@for i in {1..5}; do \
+		lxc exec qa-master -- microk8s enable dns && break; \
+		echo "dns enable failed, retrying in 15s..."; sleep 15; \
+	done
+	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
+	@lxc exec qa-master -- bash -c 'for i in {1..12}; do microk8s kubectl get nodes >/dev/null 2>&1 && break; sleep 5; done'
+
+.PHONY: qa-cluster-enable-storage
+qa-cluster-enable-storage: ## Enable MicroK8s hostpath-storage addon with readiness waits and retry
+	@echo "Enabling hostpath-storage (with retries if API not available)..."
+	@for i in {1..5}; do \
+		lxc exec qa-master -- microk8s enable hostpath-storage && break; \
+		echo "hostpath-storage enable failed, retrying in 15s..."; sleep 15; \
+	done
+	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
+	@lxc exec qa-master -- bash -c 'for i in {1..12}; do microk8s kubectl get storageclass >/dev/null 2>&1 && break; sleep 5; done'
+
+.PHONY: qa-cluster-enable-ingress
+qa-cluster-enable-ingress: ## Enable MicroK8s ingress addon with readiness waits and retry
+	@echo "Enabling ingress (with retries if API not available)..."
+	@for i in {1..5}; do \
+		lxc exec qa-master -- microk8s enable ingress && break; \
+		echo "ingress enable failed, retrying in 15s..."; sleep 15; \
+	done
+	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
+	@lxc exec qa-master -- bash -c 'for i in {1..12}; do microk8s kubectl get daemonsets -n ingress >/dev/null 2>&1 && break; sleep 5; done'
 
 .PHONY: qa-nodes-create
 qa-nodes-create: ## Create three LXD VMs (master and two workers) with MicroK8s installed
