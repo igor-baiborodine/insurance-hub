@@ -136,37 +136,44 @@ qa-cluster-restore: ## Restore all QA cluster VMs from 'baseline' snapshot and s
 	@echo "All QA cluster VMs restored to 'baseline' snapshot and started."
 
 .PHONY: qa-cluster-enable-all-addons
-qa-cluster-enable-all-addons: qa-cluster-enable-dns qa-cluster-enable-storage qa-cluster-enable-ingress ## Enable all MicroK8s addons
+qa-cluster-enable-all-addons: qa-cluster-enable-dns qa-cluster-enable-storage qa-cluster-enable-ingress ## Validate core k3s components (CoreDNS, local-path storage, Traefik)
 
 .PHONY: qa-cluster-enable-dns
-qa-cluster-enable-dns: ## Enable MicroK8s DNS addon with readiness waits and retry
-	@echo "Enabling dns (with retries if API not available)..."
-	@for i in {1..5}; do \
-		lxc exec qa-master -- microk8s enable dns && break; \
-		echo "dns enable failed, retrying in 15s..."; sleep 15; \
-	done
-	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
-	@lxc exec qa-master -- bash -c 'for i in {1..12}; do microk8s kubectl get nodes >/dev/null 2>&1 && break; sleep 5; done'
+qa-cluster-enable-dns: ## Validate CoreDNS is running and Ready in k3s
+	@echo "Validating CoreDNS readiness in k3s..."
+	@lxc exec qa-master -- bash -c '\
+		for i in {1..24}; do \
+			READY=$$(k3s kubectl -n kube-system get deploy coredns -o jsonpath="{.status.readyReplicas}" 2>/dev/null || echo 0); \
+			[ "$$READY" != "" ] && [ $$READY -ge 1 ] && echo "CoreDNS is Ready." && exit 0; \
+			echo "Waiting for CoreDNS to be Ready..."; sleep 5; \
+		done; \
+		echo "CoreDNS not Ready after timeout." >&2; exit 1'
 
 .PHONY: qa-cluster-enable-storage
-qa-cluster-enable-storage: ## Enable MicroK8s hostpath-storage addon with readiness waits and retry
-	@echo "Enabling hostpath-storage (with retries if API not available)..."
-	@for i in {1..5}; do \
-		lxc exec qa-master -- microk8s enable hostpath-storage && break; \
-		echo "hostpath-storage enable failed, retrying in 15s..."; sleep 15; \
-	done
-	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
-	@lxc exec qa-master -- bash -c 'for i in {1..12}; do microk8s kubectl get storageclass >/dev/null 2>&1 && break; sleep 5; done'
+qa-cluster-enable-storage: ## Validate local-path storage class and provisioner in k3s
+	@echo "Validating local-path storage in k3s..."
+	@lxc exec qa-master -- bash -c '\
+		for i in {1..24}; do \
+			k3s kubectl get storageclass local-path >/dev/null 2>&1 && break; \
+			echo "Waiting for storageclass/local-path..."; sleep 5; \
+		done; \
+		for i in {1..24}; do \
+			READY=$$(k3s kubectl -n kube-system get deploy local-path-provisioner -o jsonpath="{.status.readyReplicas}" 2>/dev/null || echo 0); \
+			[ "$$READY" != "" ] && [ $$READY -ge 1 ] && echo "local-path-provisioner is Ready." && exit 0; \
+			echo "Waiting for local-path-provisioner to be Ready..."; sleep 5; \
+		done; \
+		echo "local-path-provisioner not Ready after timeout." >&2; exit 1'
 
 .PHONY: qa-cluster-enable-ingress
-qa-cluster-enable-ingress: ## Enable MicroK8s ingress addon with readiness waits and retry
-	@echo "Enabling ingress (with retries if API not available)..."
-	@for i in {1..5}; do \
-		lxc exec qa-master -- microk8s enable ingress && break; \
-		echo "ingress enable failed, retrying in 15s..."; sleep 15; \
-	done
-	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
-	@lxc exec qa-master -- bash -c 'for i in {1..12}; do microk8s kubectl get daemonsets -n ingress >/dev/null 2>&1 && break; sleep 5; done'
+qa-cluster-enable-ingress: ## Validate Traefik ingress controller in k3s
+	@echo "Validating Traefik ingress controller in k3s..."
+	@lxc exec qa-master -- bash -c '\
+		for i in {1..24}; do \
+			READY=$$(k3s kubectl -n kube-system get deploy traefik -o jsonpath="{.status.readyReplicas}" 2>/dev/null || echo 0); \
+			[ "$$READY" != "" ] && [ $$READY -ge 1 ] && echo "Traefik is Ready." && exit 0; \
+			echo "Waiting for Traefik to be Ready..."; sleep 5; \
+		done; \
+		echo "Traefik not Ready after timeout." >&2; exit 1'
 
 .PHONY: qa-nodes-create
 qa-nodes-create: ## Create three LXD VMs (master and two workers) prepared for k3s (Rancher)
@@ -211,7 +218,7 @@ qa-nodes-resume: ## Resume (start) all LXD QA VMs
 	@echo "All QA cluster VMs resumed (started)."
 
 .PHONY: qa-nodes-delete
-qa-nodes-delete: ## Delete all LXD VMs used by the multi-node MicroK8s cluster
+qa-nodes-delete: ## Delete all LXD VMs used by the multi-node k3s cluster
 	@for NODE in $(NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Deleting VM $$NODE..."; \
@@ -221,7 +228,3 @@ qa-nodes-delete: ## Delete all LXD VMs used by the multi-node MicroK8s cluster
 		fi; \
 	done
 	@echo "All multi-node cluster VMs deleted."
-
-################################################################################
-# MicroK8s
-################################################################################
