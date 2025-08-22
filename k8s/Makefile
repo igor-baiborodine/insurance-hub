@@ -22,19 +22,21 @@ kubectl-install: ## Install the latest stable kubectl on Ubuntu
 	kubectl version --client
 
 .PHONY: kube-ps1-install
-kube-ps1-install: ## Install kube-ps1 prompt helper on Ubuntu
+kube-ps1-install: ## Install kube-ps1 prompt helper (without modifying .bashrc) and show setup instructions
 	@if [ ! -d "$$HOME/.kube-ps1" ]; then \
-		echo "Cloning kube-ps1 repository..."; \
+		echo "Cloning kube-ps1 repository into $$HOME/.kube-ps1..."; \
 		git clone https://github.com/jonmosco/kube-ps1.git $$HOME/.kube-ps1; \
 	else \
-		echo "kube-ps1 repository already cloned."; \
+		echo "kube-ps1 repository already cloned in $$HOME/.kube-ps1."; \
 	fi
-	@echo "Adding kube-ps1 initialization to your shell profile (~/.bashrc)..."
-	@if ! grep -q 'kube-ps1.sh' $$HOME/.bashrc; then \
-		echo '\n# kube-ps1 setup' >> $$HOME/.bashrc; \
-		echo 'source $$HOME/.kube-ps1/kube-ps1.sh' >> $$HOME/.bashrc; \
-		echo "export PS1='[\\u@\\h \\W \\$(__kube_ps1)]\\$ '" >> $$HOME/.bashrc; \
-		echo "kube-ps1 initialization added to ~/.bashrc. Please reload your shell or run 'source ~/.bashrc'."; \
-	else \
-		echo "kube-ps1 already configured in ~/.bashrc."; \
-	fi
+	@echo ""; \
+	echo "kube-ps1 installation complete!"; \
+	echo ""; \
+	echo "To enable kube-ps1, add the following lines to your ~/.bashrc or ~/.zshrc:"; \
+	echo ""; \
+	echo "  # kube-ps1 setup"; \
+	echo "  source \$HOME/.kube-ps1/kube-ps1.sh"; \
+	echo "  export PS1='[\\u@\\h \\W \\$(__kube_ps1)]\\$ '"; \
+	echo ""; \
+	echo "Then run 'source ~/.bashrc' (or 'source ~/.zshrc') to apply the changes."; \
+	echo "Afterwards, your prompt will display the current Kubernetes context and namespace.";
