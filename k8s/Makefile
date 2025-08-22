@@ -21,3 +21,22 @@ kubectl-install: ## Install the latest stable kubectl on Ubuntu
 	sudo mv kubectl /usr/local/bin/kubectl; \
 	kubectl version --client
 
+.PHONY: kind-install
+kind-install: ## Install the latest Kind on Ubuntu
+	curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+	chmod +x ./kind
+	echo "Moving kind binary to /usr/local/bin (you may be prompted for your password)..."
+	sudo mv ./kind /usr/local/bin/kind
+	kind --version
+
+.PHONY: lxd-install
+lxd-install: ## Install LXD on Ubuntu
+	@if ! command -v lxd >/dev/null 2>&1; then \
+		sudo snap install lxd; \
+		sudo usermod -aG lxd $${SUDO_USER:-$$USER}; \
+		echo "Initializing LXD with default settings..."; \
+		sudo lxd init --auto; \
+		echo "LXD installed. Please log out and log back in for group changes to take effect."; \
+	else \
+		echo "LXD is already installed."; \
+	fi

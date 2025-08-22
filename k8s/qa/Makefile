@@ -17,56 +17,55 @@ help:
 	@grep -E '^\S+:.*## ' $(MAKEFILE_LIST) | sort | \
 	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-32s\033[0m %s\n", $$1, $$2}'
 
-.PHONY: lxd-install
-lxd-install: ## Install LXD on Ubuntu
-	@if ! command -v lxd >/dev/null 2>&1; then \
-		sudo snap install lxd; \
-		sudo usermod -aG lxd $${SUDO_USER:-$$USER}; \
-		echo "Initializing LXD with default settings..."; \
-		sudo lxd init --auto; \
-		echo "LXD installed. Please log out and log back in for group changes to take effect."; \
-	else \
-		echo "LXD is already installed."; \
-	fi
-
 .PHONY: qa-create
-qa-create: qa-cluster-create ## Create nodes and set up the multi-node MicroK8s cluster with required add-ons
+qa-create: qa-cluster-create ## Create nodes and set up the multi-node k3s cluster and configure kubeconfig
 
 .PHONY: qa-cluster-create
-qa-cluster-create: qa-nodes-create ## Set up MicroK8s multi-node cluster with DNS, storage, ingress add-ons and config context
-	@echo "Starting and configuring MicroK8s on master node..."
-	@lxc exec qa-master -- bash -c "microk8s stop || true; microk8s start"
-	@lxc exec qa-master -- bash -c "microk8s status --wait-ready"
+qa-cluster-create: qa-nodes-create ## Set up a multi-node k3s cluster (Rancher) and configure kubeconfig context
+	@echo "Starting and configuring k3s server on master node..."
+	@lxc exec qa-master -- bash -c "set -e; apt-get update -y && apt-get install -y curl ca-certificates; \
+		curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--write-kubeconfig-mode 644' sh -s - server"
 
-	# Wait for API server on port 16443 to be ready and responsive
-	@echo "Waiting for Kubernetes API server to become accessible..."
+	# Wait for API server on port 6443 to be ready and responsive
+	@echo "Waiting for Kubernetes API server to become accessible on k3s..."
 	@lxc exec qa-master -- bash -c '\
-		for i in {1..20}; do \
-			curl --insecure -s https://127.0.0.1:16443/metadata || true; \
-			if [ $$? -eq 0 ]; then break; fi; \
+		for i in {1..40}; do \
+			curl -sk https://127.0.0.1:6443/readyz >/dev/null 2>&1 && break; \
 			echo "Waiting for API server..."; sleep 5; \
 		done'
 
-	# Wait until essential ingress resources can be queried without error
-	@echo "Waiting for ingress API resources to be ready..."
+	# Determine master IP and fetch node token
+	@MASTER_IP=$$(lxc exec qa-master -- bash -c "hostname -I | awk '{print \$1}'"); \
+	TOKEN=$$(lxc exec qa-master -- bash -c "cat /var/lib/rancher/k3s/server/node-token"); \
+	echo "Master IP: $$MASTER_IP"; echo "Joining workers using token..."; \
+	for NODE in qa-worker1 qa-worker2; do \
+		echo "Installing k3s agent on $$NODE and joining cluster..."; \
+		lxc exec $$NODE -- bash -c "set -e; apt-get update -y && apt-get install -y curl ca-certificates; \
+			for i in {1..5}; do \
+				curl -sfL https://get.k3s.io | K3S_URL=https://$$MASTER_IP:6443 K3S_TOKEN=$$TOKEN sh -s - agent && exit 0; \
+				echo 'k3s agent install failed, retrying in 10s...'; sleep 10; \
+			done; \
+			echo 'k3s agent installation failed after retries.' >&2; exit 1"; \
+	done
+
+	# Wait until kubectl works on master and all nodes are registered
+	@echo "Waiting for nodes to become Ready..."
 	@lxc exec qa-master -- bash -c '\
-		for i in {1..20}; do \
-			microk8s kubectl get daemonsets -n ingress > /dev/null 2>&1 && break; \
-			echo "Waiting for ingress daemonsets..."; sleep 5; \
+		for i in {1..40}; do \
+			k3s kubectl get nodes >/dev/null 2>&1 && [ $$(k3s kubectl get nodes --no-headers 2>/dev/null | wc -l) -ge 3 ] && break; \
+			echo "Waiting for nodes to register..."; sleep 5; \
+		done; \
+		for i in {1..60}; do \
+			READY=$$(k3s kubectl get nodes --no-headers | awk '{print $$2}' | grep -c '^Ready'); \
+			[ $$READY -ge 3 ] && break; \
+			echo "Waiting for nodes to be Ready..."; sleep 5; \
 		done'
 
-	@echo "Joining qa-worker1 to cluster..."
-	@lxc exec qa-worker1 -- bash -c "microk8s stop || true; microk8s start; microk8s status --wait-ready"
-	@JOIN_CMD=$$(lxc exec qa-master -- microk8s add-node --token-ttl 300 | grep 'microk8s join' | head -n1); \
-		lxc exec qa-worker1 -- bash -c "$$JOIN_CMD"
-	@echo "Joining qa-worker2 to cluster..."
-	@lxc exec qa-worker2 -- bash -c "microk8s stop || true; microk8s start; microk8s status --wait-ready"
-	@JOIN_CMD=$$(lxc exec qa-master -- microk8s add-node --token-ttl 300 | grep 'microk8s join' | head -n1); \
-		lxc exec qa-worker2 -- bash -c "$$JOIN_CMD"
-	@echo "MicroK8s multi-node cluster is ready. Saving kubeconfig inside qa-master and pulling to host..."
+	@echo "k3s multi-node cluster is ready. Saving kubeconfig inside qa-master and pulling to host..."
 
-	# Save kubeconfig inside VM
-	lxc exec qa-master -- bash -c "microk8s kubectl config view --raw > /home/ubuntu/kubeconfig.yaml"
+	# Save kubeconfig inside VM and adjust server address to master IP
+	@MASTER_IP=$$(lxc exec qa-master -- bash -c "hostname -I | awk '{print \$1}'"); \
+	lxc exec qa-master -- bash -c "cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/kubeconfig.yaml && chown ubuntu:ubuntu /home/ubuntu/kubeconfig.yaml && sed -i 's/127.0.0.1/$$MASTER_IP/' /home/ubuntu/kubeconfig.yaml"
 	# Pull the kubeconfig file to host
 	lxc file pull qa-master/home/ubuntu/kubeconfig.yaml ./$(QA_CLUSTER_NAME)-kubeconfig
 
@@ -77,7 +76,7 @@ qa-cluster-create: qa-nodes-create ## Set up MicroK8s multi-node cluster with DN
 		kubectl --kubeconfig=$(QA_CLUSTER_NAME)-kubeconfig config rename-context "$$ORIGINAL_CONTEXT" "$(QA_KUBECTL_CONTEXT)"; \
 	fi
 
-	# Merge kubeconfig into default kubeconfig (usually Kind's at ~/.kube/config)
+	# Merge kubeconfig into default kubeconfig (~/.kube/config)
 	@echo "Merging $(QA_CLUSTER_NAME)-kubeconfig into default kubeconfig (~/.kube/config)..."
 	@export KUBECONFIG=~/.kube/config:$(PWD)/$(QA_CLUSTER_NAME)-kubeconfig; \
 	kubectl config view --flatten > $(HOME)/.kube/config.merged && \
@@ -165,32 +164,22 @@ qa-cluster-enable-ingress: ## Enable MicroK8s ingress addon with readiness waits
 	@lxc exec qa-master -- bash -c 'for i in {1..12}; do microk8s kubectl get daemonsets -n ingress >/dev/null 2>&1 && break; sleep 5; done'
 
 .PHONY: qa-nodes-create
-qa-nodes-create: ## Create three LXD VMs (master and two workers) with MicroK8s installed
+qa-nodes-create: ## Create three LXD VMs (master and two workers) prepared for k3s (Rancher)
 	@for NODE in $(NODES_ALL); do \
 		if ! lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Launching VM $$NODE..."; \
 			lxc launch ubuntu:24.04 --vm $$NODE; \
 			echo "Waiting for LXD VM agent in $$NODE..."; \
 			until lxc exec $$NODE -- true 2>/dev/null; do sleep 5; done; \
-			echo "Installing and starting snapd in $$NODE..."; \
-			lxc exec $$NODE -- bash -c "apt update && apt install -y snapd"; \
-			lxc exec $$NODE -- bash -c "systemctl enable snapd --now"; \
-			lxc exec $$NODE -- bash -c "sleep 10"; \
 			echo "Ensuring network works inside $$NODE..."; \
-			lxc exec $$NODE -- bash -c "until ping -c1 api.snapcraft.io >/dev/null 2>&1; do echo Waiting for network...; sleep 5; done"; \
-			echo "Installing MicroK8s in $$NODE..."; \
-			lxc exec $$NODE -- bash -c '\
-				for i in {1..5}; do \
-					if snap install microk8s --classic && usermod -aG microk8s ubuntu; then exit 0; \
-					else echo "Snap install or usermod failed, retrying in 10s..."; sleep 10; \
-					fi; \
-				done; \
-				echo "MicroK8s installation failed after retries." >&2; exit 1' \
+			lxc exec $$NODE -- bash -c "until ping -c1 1.1.1.1 >/dev/null 2>&1; do echo Waiting for network...; sleep 5; done"; \
+			echo "Installing prerequisites (curl, ca-certificates) in $$NODE..."; \
+			lxc exec $$NODE -- bash -c "apt-get update -y && apt-get install -y curl ca-certificates"; \
 		else \
 			echo "VM $$NODE already exists, skipping."; \
 		fi; \
 	done
-	@echo "All VM nodes have been created and set up."
+	@echo "All VM nodes have been created and prepared for k3s."
 
 .PHONY: qa-nodes-suspend
 qa-nodes-suspend: ## Suspend (pause) all LXD QA VMs
@@ -227,3 +216,7 @@ qa-nodes-delete: ## Delete all LXD VMs used by the multi-node MicroK8s cluster
 		fi; \
 	done
 	@echo "All multi-node cluster VMs deleted."
+
+################################################################################
+# MicroK8s
+################################################################################
