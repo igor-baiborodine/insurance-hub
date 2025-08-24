@@ -1,5 +1,5 @@
 ################################################################################
-# Child Makefile for QA insurance-hub
+# Child Makefile for QA insurance-hub k8s cluster
 ################################################################################
 
 ################################################################################
@@ -21,68 +21,49 @@ help:
 qa-create: qa-cluster-create ## Create nodes and set up the multi-node k3s cluster and configure kubeconfig
 
 .PHONY: qa-cluster-create
-qa-cluster-create: qa-nodes-create ## Set up a multi-node k3s cluster (Rancher) and configure kubeconfig context
-	@echo "Starting and configuring k3s server on master node..."
-	@lxc exec qa-master -- bash -c "set -e; apt-get update -y && apt-get install -y curl ca-certificates; \
-		curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--write-kubeconfig-mode 644' sh -s - server"
+qa-cluster-create: qa-nodes-create ## Set up multi-node Rancher k3s cluster and export kubeconfig
+	@echo "Setting up Rancher k3s cluster on qa-master node..."
 
-	# Wait for API server on port 6443 to be ready and responsive
-	@echo "Waiting for Kubernetes API server to become accessible on k3s..."
-	@lxc exec qa-master -- bash -c '\
-		for i in {1..40}; do \
-			curl -sk https://127.0.0.1:6443/readyz >/dev/null 2>&1 && break; \
-			echo "Waiting for API server..."; sleep 5; \
-		done'
+	# Install k3s server on master
+	@lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--write-kubeconfig-mode 644' sh -"
 
-	# Determine master IP and fetch node token
-	@MASTER_IP=$$(lxc exec qa-master -- bash -c "hostname -I | awk '{print \$1}'"); \
-	TOKEN=$$(lxc exec qa-master -- bash -c "cat /var/lib/rancher/k3s/server/node-token"); \
-	echo "Master IP: $$MASTER_IP"; echo "Joining workers using token..."; \
-	for NODE in qa-worker1 qa-worker2; do \
-		echo "Installing k3s agent on $$NODE and joining cluster..."; \
-		lxc exec $$NODE -- bash -c "set -e; apt-get update -y && apt-get install -y curl ca-certificates; \
-			for i in {1..5}; do \
-				curl -sfL https://get.k3s.io | K3S_URL=https://$$MASTER_IP:6443 K3S_TOKEN=$$TOKEN sh -s - agent && exit 0; \
-				echo 'k3s agent install failed, retrying in 10s...'; sleep 10; \
-			done; \
-			echo 'k3s agent installation failed after retries.' >&2; exit 1"; \
+	# Wait for k3s server to be active
+	@echo "Waiting for k3s server on qa-master to become active..."
+	@lxc exec qa-master -- bash -c 'for i in {1..20}; do systemctl is-active k3s && break || (echo Waiting for k3s server...; sleep 5); done'
+
+	# Get node token and master IP for joining workers
+	@MASTER_IP=$$(lxc list qa-master -c 4 --format json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address'); \
+		TOKEN=$$(lxc exec qa-master -- sudo cat /var/lib/rancher/k3s/server/node-token); \
+		echo "Master IP: $$MASTER_IP"; \
+		echo "Node Token: $$TOKEN"; \
+
+	# Join worker nodes to master
+	@for WORKER in qa-worker1 qa-worker2; do \
+		echo "Installing k3s agent on $$WORKER..."; \
+		lxc exec $$WORKER -- bash -c "curl -sfL https://get.k3s.io | K3S_URL=https://$$MASTER_IP:6443 K3S_TOKEN=$$TOKEN sh -"; \
 	done
 
-	# Wait until kubectl works on master and all nodes are registered
-	@echo "Waiting for nodes to become Ready..."
-	@lxc exec qa-master -- bash -c '\
-		for i in {1..40}; do \
-			k3s kubectl get nodes >/dev/null 2>&1 && [ $$(k3s kubectl get nodes --no-headers 2>/dev/null | wc -l) -ge 3 ] && break; \
-			echo "Waiting for nodes to register..."; sleep 5; \
-		done; \
-		for i in {1..60}; do \
-			READY=$$(k3s kubectl get nodes --no-headers | awk '{print $$2}' | grep -c '^Ready'); \
-			[ $$READY -ge 3 ] && break; \
-			echo "Waiting for nodes to be Ready..."; sleep 5; \
-		done'
+	# Wait for nodes to join cluster
+	@echo "Waiting for all nodes to register in the cluster..."
+	@lxc exec qa-master -- bash -c 'for i in {1..20}; do kubectl get nodes &>/dev/null && break || (echo Waiting for nodes...; sleep 5); done'
 
-	@echo "k3s multi-node cluster is ready. Saving kubeconfig inside qa-master and pulling to host..."
+	# Export kubeconfig from master and pull to host
+	@echo "Exporting kubeconfig from qa-master..."
+	@lxc exec qa-master -- bash -c "sudo cat /etc/rancher/k3s/k3s.yaml" > ./$(QA_CLUSTER_NAME)-kubeconfig
 
-	# Save kubeconfig inside VM and adjust server address to master IP
-	@MASTER_IP=$$(lxc exec qa-master -- bash -c "hostname -I | awk '{print \$1}'"); \
-	lxc exec qa-master -- bash -c "cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/kubeconfig.yaml && chown ubuntu:ubuntu /home/ubuntu/kubeconfig.yaml && sed -i 's/127.0.0.1/$$MASTER_IP/' /home/ubuntu/kubeconfig.yaml"
-	# Pull the kubeconfig file to host
-	lxc file pull qa-master/home/ubuntu/kubeconfig.yaml ./$(QA_CLUSTER_NAME)-kubeconfig
+	# Adjust kubeconfig server address from 127.0.0.1 to actual master IP
+	@MASTER_IP=$$(lxc list qa-master -c 4 --format json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address'); \
+		sed -i "s/127.0.0.1/$$MASTER_IP/g" ./$(QA_CLUSTER_NAME)-kubeconfig
 
-	# Rename context dynamically
-	ORIGINAL_CONTEXT=$$(kubectl --kubeconfig=$(QA_CLUSTER_NAME)-kubeconfig config current-context); \
-	echo "Original kubeconfig context is '$$ORIGINAL_CONTEXT'"; \
+	# Rename context to qa-insurance-hub
+	@ORIGINAL_CONTEXT=$$(kubectl --kubeconfig=$(QA_CLUSTER_NAME)-kubeconfig config current-context); \
 	if [ "$$ORIGINAL_CONTEXT" != "$(QA_KUBECTL_CONTEXT)" ]; then \
 		kubectl --kubeconfig=$(QA_CLUSTER_NAME)-kubeconfig config rename-context "$$ORIGINAL_CONTEXT" "$(QA_KUBECTL_CONTEXT)"; \
 	fi
 
-	# Merge kubeconfig into default kubeconfig (~/.kube/config)
-	@echo "Merging $(QA_CLUSTER_NAME)-kubeconfig into default kubeconfig (~/.kube/config)..."
-	@export KUBECONFIG=~/.kube/config:$(PWD)/$(QA_CLUSTER_NAME)-kubeconfig; \
-	kubectl config view --flatten > $(HOME)/.kube/config.merged && \
-	mv $(HOME)/.kube/config.merged $(HOME)/.kube/config
-
-	@echo "Merged kubeconfigs. You can now switch contexts with kubectl config use-context $(QA_KUBECTL_CONTEXT)."
+	@echo "Cluster kubeconfig saved to $(QA_CLUSTER_NAME)-kubeconfig with context '$(QA_KUBECTL_CONTEXT)'."
+	@echo "To use the cluster run the following command:"
+	@echo "  export KUBECONFIG=$$(pwd)/$(QA_CLUSTER_NAME)-kubeconfig"
 
 .PHONY: qa-cluster-reset
 qa-cluster-reset: ## Reset k3s on all QA nodes (remove cluster state without deleting VMs)
@@ -96,44 +77,6 @@ qa-cluster-reset: ## Reset k3s on all QA nodes (remove cluster state without del
 	@echo "k3s cluster reset on all QA nodes."
 	@echo "Removing local kubeconfig file ($(QA_CLUSTER_NAME)-kubeconfig) if it exists..."
 	@rm -f ./$(QA_CLUSTER_NAME)-kubeconfig
-
-.PHONY: qa-cluster-snapshot
-qa-cluster-snapshot: ## Pause all VMs, take snapshot 'baseline' consistently, then resume VMs
-	@echo "Pausing all QA cluster VMs for consistent snapshots..."
-	@for NODE in $(NODES_ALL); do \
-		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Pausing VM $$NODE..."; \
-			lxc pause $$NODE; \
-		fi; \
-	done
-	@echo "Taking snapshots named 'baseline'..."
-	@for NODE in $(NODES_ALL); do \
-		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Snapshotting VM $$NODE ..."; \
-			lxc snapshot $$NODE baseline; \
-		fi; \
-	done
-	@echo "Resuming all QA cluster VMs..."
-	@for NODE in $(NODES_ALL); do \
-		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Starting VM $$NODE..."; \
-			lxc start $$NODE; \
-		fi; \
-	done
-	@echo "All QA cluster VMs snapshotted consistently as 'baseline'."
-
-.PHONY: qa-cluster-restore
-qa-cluster-restore: ## Restore all QA cluster VMs from 'baseline' snapshot and start them
-	@echo "Restoring all QA cluster VMs from 'baseline' snapshot..."
-	@for NODE in $(NODES_ALL); do \
-		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Restoring VM $$NODE to baseline..."; \
-			lxc restore $$NODE baseline; \
-			echo "Starting VM $$NODE..."; \
-			lxc start $$NODE; \
-		fi; \
-	done
-	@echo "All QA cluster VMs restored to 'baseline' snapshot and started."
 
 .PHONY: qa-cluster-enable-all-addons
 qa-cluster-enable-all-addons: qa-cluster-enable-dns qa-cluster-enable-storage qa-cluster-enable-ingress ## Validate core k3s components (CoreDNS, local-path storage, Traefik)
@@ -216,6 +159,44 @@ qa-nodes-resume: ## Resume (start) all LXD QA VMs
 		fi; \
 	done
 	@echo "All QA cluster VMs resumed (started)."
+
+.PHONY: qa-nodes-snapshot
+qa-nodes-snapshot: ## Pause all VMs, take snapshot 'baseline' consistently, then resume VMs
+	@echo "Pausing all QA cluster VMs for consistent snapshots..."
+	@for NODE in $(NODES_ALL); do \
+		if lxc info $$NODE >/dev/null 2>&1; then \
+			echo "Pausing VM $$NODE..."; \
+			lxc pause $$NODE; \
+		fi; \
+	done
+	@echo "Taking snapshots named 'baseline'..."
+	@for NODE in $(NODES_ALL); do \
+		if lxc info $$NODE >/dev/null 2>&1; then \
+			echo "Snapshotting VM $$NODE ..."; \
+			lxc snapshot $$NODE baseline; \
+		fi; \
+	done
+	@echo "Resuming all QA cluster VMs..."
+	@for NODE in $(NODES_ALL); do \
+		if lxc info $$NODE >/dev/null 2>&1; then \
+			echo "Starting VM $$NODE..."; \
+			lxc start $$NODE; \
+		fi; \
+	done
+	@echo "All QA cluster VMs snapshotted consistently as 'baseline'."
+
+.PHONY: qa-nodes-restore
+qa-nodes-restore: ## Restore all QA cluster VMs from 'baseline' snapshot and start them
+	@echo "Restoring all QA cluster VMs from 'baseline' snapshot..."
+	@for NODE in $(NODES_ALL); do \
+		if lxc info $$NODE >/dev/null 2>&1; then \
+			echo "Restoring VM $$NODE to baseline..."; \
+			lxc restore $$NODE baseline; \
+			echo "Starting VM $$NODE..."; \
+			lxc start $$NODE; \
+		fi; \
+	done
+	@echo "All QA cluster VMs restored to 'baseline' snapshot and started."
 
 .PHONY: qa-nodes-delete
 qa-nodes-delete: ## Delete all LXD VMs used by the multi-node k3s cluster
