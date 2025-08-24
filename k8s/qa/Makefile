@@ -146,7 +146,8 @@ qa-nodes-suspend: ## Suspend (pause) all LXD QA VMs
 			echo "VM $$NODE does not exist, skipping."; \
 		fi; \
 	done
-	@echo "All QA cluster VMs suspended (paused)."
+	@echo "All QA cluster VMs suspended (paused):"
+	@lxc list
 
 .PHONY: qa-nodes-resume
 qa-nodes-resume: ## Resume (start) all LXD QA VMs
@@ -158,7 +159,8 @@ qa-nodes-resume: ## Resume (start) all LXD QA VMs
 			echo "VM $$NODE does not exist, skipping."; \
 		fi; \
 	done
-	@echo "All QA cluster VMs resumed (started)."
+	@echo "All QA cluster VMs resumed (started):"
+	@lxc list
 
 .PHONY: qa-nodes-snapshot
 qa-nodes-snapshot: ## Pause all VMs, take snapshot 'baseline' consistently, then resume VMs
@@ -190,13 +192,12 @@ qa-nodes-restore: ## Restore all QA cluster VMs from 'baseline' snapshot and sta
 	@echo "Restoring all QA cluster VMs from 'baseline' snapshot..."
 	@for NODE in $(NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Restoring VM $$NODE to baseline..."; \
+			echo "Restoring and starting VM $$NODE..."; \
 			lxc restore $$NODE baseline; \
-			echo "Starting VM $$NODE..."; \
-			lxc start $$NODE; \
 		fi; \
 	done
-	@echo "All QA cluster VMs restored to 'baseline' snapshot and started."
+	@echo "All QA cluster VMs restored to 'baseline' snapshot and started:"
+	@lxc list
 
 .PHONY: qa-nodes-delete
 qa-nodes-delete: ## Delete all LXD VMs used by the multi-node k3s cluster
