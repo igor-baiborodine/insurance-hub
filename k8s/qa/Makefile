@@ -55,14 +55,16 @@ qa-cluster-create: qa-nodes-create ## Set up multi-node Rancher k3s cluster and 
 	@echo "Waiting for all nodes to register in the cluster..."
 	@lxc exec qa-master -- bash -c 'for i in {1..20}; do kubectl get nodes &>/dev/null && break || (echo Waiting for nodes...; sleep 5); done'
 
-	# Export kubeconfig from master and pull to host
+	# Wait for kubeconfig to be present and non-empty in VM
 	@echo "Waiting for qa-master to generate kubeconfig..."
-	@for i in {1..20}; do \
-		lxc exec qa-master -- bash -c "test -s /etc/rancher/k3s/k3s.yaml" && break; \
-		echo "Waiting for k3s.yaml to be written..."; sleep 5; \
+	@for i in {1..24}; do \
+		@lxc exec qa-master -- bash -c "test -s /etc/rancher/k3s/k3s.yaml" && break; \
+		@echo "Waiting for /etc/rancher/k3s/k3s.yaml to be ready..."; sleep 5; \
 	done
-	@echo "Exporting kubeconfig from qa-master..."
-	@lxc exec qa-master -- bash -c "sudo cat /etc/rancher/k3s/k3s.yaml" > ./$(QA_CLUSTER_NAME)-kubeconfig
+
+	# Copy kubeconfig file from qa-master to host
+	@echo "Pulling kubeconfig from qa-master to host..."
+	@lxc file pull qa-master/etc/rancher/k3s/k3s.yaml ./$(QA_CLUSTER_NAME)-kubeconfig
 
 	# Adjust kubeconfig server address from 127.0.0.1 to actual master IP
 	@MASTER_IP=""; \
@@ -80,13 +82,18 @@ qa-cluster-create: qa-nodes-create ## Set up multi-node Rancher k3s cluster and 
 
 	# Rename context to qa-insurance-hub
 	@ORIGINAL_CONTEXT=$$(kubectl --kubeconfig=$(QA_CLUSTER_NAME)-kubeconfig config current-context); \
+	echo "Original kubeconfig context is '$$ORIGINAL_CONTEXT'"; \
 	if [ "$$ORIGINAL_CONTEXT" != "$(QA_KUBECTL_CONTEXT)" ]; then \
 		kubectl --kubeconfig=$(QA_CLUSTER_NAME)-kubeconfig config rename-context "$$ORIGINAL_CONTEXT" "$(QA_KUBECTL_CONTEXT)"; \
 	fi
 
-	@echo "Cluster kubeconfig saved to $(QA_CLUSTER_NAME)-kubeconfig with context '$(QA_KUBECTL_CONTEXT)'."
-	@echo "To use the cluster run the following command:"
-	@echo "  export KUBECONFIG=$$(pwd)/$(QA_CLUSTER_NAME)-kubeconfig"
+	# Merge kubeconfig into default kubeconfig (~/.kube/config)
+	@echo "Merging $(QA_CLUSTER_NAME)-kubeconfig into default kubeconfig (~/.kube/config)..."
+	@export KUBECONFIG=~/.kube/config:$(PWD)/$(QA_CLUSTER_NAME)-kubeconfig; \
+	kubectl config view --flatten > $(HOME)/.kube/config.merged && \
+	mv $(HOME)/.kube/config.merged $(HOME)/.kube/config
+
+	@echo "Merged kubeconfigs. You can now switch contexts with kubectl config use-context $(QA_KUBECTL_CONTEXT)."
 
 .PHONY: qa-cluster-reset
 qa-cluster-reset: ## Reset k3s on all QA nodes (remove cluster state without deleting VMs)
