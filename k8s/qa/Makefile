@@ -35,12 +35,13 @@ qa-cluster-create: qa-nodes-create ## Set up multi-node Rancher k3s cluster and 
 	@echo "Waiting for qa-master to get a valid IPv4 address..."
 	@MASTER_IP=""; \
 	for i in {1..20}; do \
-		MASTER_IP=$$(lxc list qa-master -c 4 --format json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet" and .scope=="global") | .address'); \
-		[ -n "$$MASTER_IP" ] && break; \
-		echo "Waiting for qa-master IP address..."; sleep 5; \
+	  MASTER_IP=$$(lxc list qa-master -c 4 --format json | \
+		jq -r '.[0].state.network | to_entries | map(.value.addresses // []) | add | map(select(.family=="inet" and .scope=="global" and .address != "127.0.0.1")) | .[0].address'); \
+	  [ -n "$$MASTER_IP" ] && break; \
+	  echo "Waiting for qa-master IP address..."; sleep 5; \
 	done; \
 	if [ -z "$$MASTER_IP" ]; then \
-		echo "Failed to get qa-master IP address!" >&2; exit 1; \
+	  echo "Failed to get qa-master IP address!" >&2; exit 1; \
 	fi; \
 	echo "Master IP: $$MASTER_IP"; \
 	TOKEN=$$(lxc exec qa-master -- sudo cat /var/lib/rancher/k3s/server/node-token); \
