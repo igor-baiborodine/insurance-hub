@@ -31,14 +31,23 @@ qa-cluster-create: qa-nodes-create ## Set up multi-node Rancher k3s cluster and 
 	@echo "Waiting for k3s server on qa-master to become active..."
 	@lxc exec qa-master -- bash -c 'for i in {1..20}; do systemctl is-active k3s && break || (echo Waiting for k3s server...; sleep 5); done'
 
-	# Get node token and master IP for joining workers
-	@MASTER_IP=$$(lxc list qa-master -c 4 --format json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address'); \
-		TOKEN=$$(lxc exec qa-master -- sudo cat /var/lib/rancher/k3s/server/node-token); \
-		echo "Master IP: $$MASTER_IP"; \
-		echo "Node Token: $$TOKEN"; \
+	# Wait for master node to have a valid IPv4 address
+	@echo "Waiting for qa-master to get a valid IPv4 address..."
+	@MASTER_IP=""; \
+	for i in {1..20}; do \
+		MASTER_IP=$$(lxc list qa-master -c 4 --format json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet" and .scope=="global") | .address'); \
+		[ -n "$$MASTER_IP" ] && break; \
+		echo "Waiting for qa-master IP address..."; sleep 5; \
+	done; \
+	if [ -z "$$MASTER_IP" ]; then \
+		echo "Failed to get qa-master IP address!" >&2; exit 1; \
+	fi; \
+	echo "Master IP: $$MASTER_IP"; \
+	TOKEN=$$(lxc exec qa-master -- sudo cat /var/lib/rancher/k3s/server/node-token); \
+	echo "Node Token: $$TOKEN"; \
 
 	# Join worker nodes to master
-	@for WORKER in qa-worker1 qa-worker2; do \
+	for WORKER in qa-worker1 qa-worker2; do \
 		echo "Installing k3s agent on $$WORKER..."; \
 		lxc exec $$WORKER -- bash -c "curl -sfL https://get.k3s.io | K3S_URL=https://$$MASTER_IP:6443 K3S_TOKEN=$$TOKEN sh -"; \
 	done
