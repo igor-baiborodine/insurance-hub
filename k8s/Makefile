@@ -8,6 +8,12 @@ help:
 	@grep -E '^\S+:.*## ' $(MAKEFILE_LIST) | sort | \
 	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 
+.PHONY: kubeconfig-clear
+kubeconfig-clear: ## Empty the ~/.kube/config file
+	@echo "Clearing the ~/.kube/config file..."
+	@> ~/.kube/config
+	@echo "~/.kube/config file has been emptied."
+
 .PHONY: kubectl-install
 kubectl-install: ## Install latest kubectl on Ubuntu
 	@KUBECTL_VERSION=$$(curl -L -s https://dl.k8s.io/release/stable.txt); \
