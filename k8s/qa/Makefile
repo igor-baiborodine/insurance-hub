@@ -10,6 +10,7 @@ NODES_WORKER		:= qa-worker1 qa-worker2
 NODES_ALL			:= $(NODES_MASTER) $(NODES_WORKER)
 QA_CLUSTER_NAME  	:= qa-insurance-hub
 QA_KUBECTL_CONTEXT	:= $(QA_CLUSTER_NAME)
+SNAPSHOT_NAME 		?= baseline
 
 .PHONY: help
 help:
@@ -109,29 +110,8 @@ qa-nodes-resume: ## Resume (start) all LXD QA VMs
 	@lxc list
 
 .PHONY: qa-nodes-snapshot
-qa-nodes-snapshot: ## Pause all VMs, take snapshot 'baseline' consistently, then resume VMs
-	@echo "Pausing all QA cluster VMs for consistent snapshots..."
-	@for NODE in $(NODES_ALL); do \
-		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Pausing VM $$NODE..."; \
-			lxc pause $$NODE; \
-		fi; \
-	done
-	@echo "Taking snapshots named 'baseline'..."
-	@for NODE in $(NODES_ALL); do \
-		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Snapshotting VM $$NODE ..."; \
-			lxc snapshot $$NODE baseline; \
-		fi; \
-	done
-	@echo "Resuming all QA cluster VMs..."
-	@for NODE in $(NODES_ALL); do \
-		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Starting VM $$NODE..."; \
-			lxc start $$NODE; \
-		fi; \
-	done
-	@echo "All QA cluster VMs snapshotted consistently as 'baseline'."
+qa-nodes-snapshot: ## Pause all VMs, delete existing baseline snapshot, snapshot VMs, and resume
+	bash ./scripts/qa-nodes-snapshot.sh $(SNAPSHOT_NAME)
 
 .PHONY: qa-nodes-restore
 qa-nodes-restore: ## Restore all QA cluster VMs from 'baseline' snapshot and start them
