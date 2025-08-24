@@ -51,23 +51,32 @@ qa-cluster-create: qa-nodes-create ## Set up multi-node Rancher k3s cluster and 
 		lxc exec $$WORKER -- bash -c "curl -sfL https://get.k3s.io | K3S_URL=https://$$MASTER_IP:6443 K3S_TOKEN=$$TOKEN sh -"; \
 	done
 
-	# Join worker nodes to master
-	for WORKER in qa-worker1 qa-worker2; do \
-		echo "Installing k3s agent on $$WORKER..."; \
-		lxc exec $$WORKER -- bash -c "curl -sfL https://get.k3s.io | K3S_URL=https://$$MASTER_IP:6443 K3S_TOKEN=$$TOKEN sh -"; \
-	done
-
 	# Wait for nodes to join cluster
 	@echo "Waiting for all nodes to register in the cluster..."
 	@lxc exec qa-master -- bash -c 'for i in {1..20}; do kubectl get nodes &>/dev/null && break || (echo Waiting for nodes...; sleep 5); done'
 
 	# Export kubeconfig from master and pull to host
+	@echo "Waiting for qa-master to generate kubeconfig..."
+	@for i in {1..20}; do \
+		lxc exec qa-master -- bash -c "test -s /etc/rancher/k3s/k3s.yaml" && break; \
+		echo "Waiting for k3s.yaml to be written..."; sleep 5; \
+	done
 	@echo "Exporting kubeconfig from qa-master..."
 	@lxc exec qa-master -- bash -c "sudo cat /etc/rancher/k3s/k3s.yaml" > ./$(QA_CLUSTER_NAME)-kubeconfig
 
 	# Adjust kubeconfig server address from 127.0.0.1 to actual master IP
-	@MASTER_IP=$$(lxc list qa-master -c 4 --format json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address'); \
-		sed -i "s/127.0.0.1/$$MASTER_IP/g" ./$(QA_CLUSTER_NAME)-kubeconfig
+	@MASTER_IP=""; \
+	for i in {1..20}; do \
+	  MASTER_IP=$$(lxc list qa-master -c 4 --format json | \
+		jq -r '.[0].state.network | to_entries | map(.value.addresses // []) | add | map(select(.family=="inet" and .scope=="global" and .address != "127.0.0.1")) | .[0].address'); \
+	  [ -n "$$MASTER_IP" ] && break; \
+	  echo "Waiting for qa-master IP address..."; sleep 5; \
+	done; \
+	if [ -z "$$MASTER_IP" ]; then \
+	  echo "Failed to get qa-master IP address!" >&2; exit 1; \
+	fi; \
+	echo "Master IP: $$MASTER_IP"; \
+	sed -i "s/127.0.0.1/$$MASTER_IP/g" ./$(QA_CLUSTER_NAME)-kubeconfig; \
 
 	# Rename context to qa-insurance-hub
 	@ORIGINAL_CONTEXT=$$(kubectl --kubeconfig=$(QA_CLUSTER_NAME)-kubeconfig config current-context); \
