@@ -31,8 +31,8 @@ qa-cluster-create: qa-nodes-create ## Set up multi-node Rancher k3s cluster and 
 	@echo "Waiting for k3s server on qa-master to become active..."
 	@lxc exec qa-master -- bash -c 'for i in {1..20}; do systemctl is-active k3s && break || (echo Waiting for k3s server...; sleep 5); done'
 
-	# Wait for master node to have a valid IPv4 address
-	@echo "Waiting for qa-master to get a valid IPv4 address..."
+	# Wait for master node to have a valid IPv4 address and get token
+	@echo "Waiting for qa-master to get a valid IPv4 address and node token..."
 	@MASTER_IP=""; \
 	for i in {1..20}; do \
 	  MASTER_IP=$$(lxc list qa-master -c 4 --format json | \
@@ -46,6 +46,10 @@ qa-cluster-create: qa-nodes-create ## Set up multi-node Rancher k3s cluster and 
 	echo "Master IP: $$MASTER_IP"; \
 	TOKEN=$$(lxc exec qa-master -- sudo cat /var/lib/rancher/k3s/server/node-token); \
 	echo "Node Token: $$TOKEN"; \
+	for WORKER in qa-worker1 qa-worker2; do \
+		echo "Installing k3s agent on $$WORKER..."; \
+		lxc exec $$WORKER -- bash -c "curl -sfL https://get.k3s.io | K3S_URL=https://$$MASTER_IP:6443 K3S_TOKEN=$$TOKEN sh -"; \
+	done
 
 	# Join worker nodes to master
 	for WORKER in qa-worker1 qa-worker2; do \
