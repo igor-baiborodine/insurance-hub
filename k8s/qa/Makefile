@@ -110,11 +110,11 @@ qa-nodes-resume: ## Resume (start) all LXD QA VMs
 	@lxc list
 
 .PHONY: qa-nodes-snapshot
-qa-nodes-snapshot: ## Pause all VMs, delete existing baseline snapshot, snapshot VMs, and resume
+qa-nodes-snapshot: ## Pause all VMs, delete existing snapshot, snapshot VMs, and resume
 	bash ./scripts/qa-nodes-snapshot.sh $(SNAPSHOT_NAME)
 
 .PHONY: qa-nodes-snapshots-list
-qa-nodes-snapshots-list: ## List all snapshots for cluster nodes without error messages for missing nodes
+qa-nodes-snapshots-list: ## List all snapshots for cluster nodes
 	@for NODE in $(NODES_ALL); do \
 		echo "Snapshots for $$NODE:"; \
 		SNAPS=$$(lxc query "/1.0/instances/$$NODE/snapshots" 2>/dev/null | jq -r '.[] | split("/") | .[-1]' || echo ""); \
@@ -127,15 +127,15 @@ qa-nodes-snapshots-list: ## List all snapshots for cluster nodes without error m
 	done
 
 .PHONY: qa-nodes-restore
-qa-nodes-restore: ## Restore all QA cluster VMs from 'baseline' snapshot and start them
-	@echo "Restoring all QA cluster VMs from 'baseline' snapshot..."
+qa-nodes-restore: ## Restore all QA cluster VMs from specified snapshot and start them
+	@echo "Restoring all QA cluster VMs from '$(SNAPSHOT_NAME)' snapshot..."
 	@for NODE in $(NODES_ALL); do \
-		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Restoring and starting VM $$NODE..."; \
-			lxc restore $$NODE baseline; \
+		if lxc info $$NODE &>/dev/null; then \
+			echo "Restoring and starting VM $$NODE from snapshot '$(SNAPSHOT_NAME)'..."; \
+			lxc restore $$NODE $(SNAPSHOT_NAME); \
 		fi; \
 	done
-	@echo "All QA cluster VMs restored to 'baseline' snapshot and started:"
+	@echo "All QA cluster VMs restored to '$(SNAPSHOT_NAME)' snapshot and started:"
 	@lxc list
 
 .PHONY: qa-nodes-delete
