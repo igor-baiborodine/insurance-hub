@@ -113,6 +113,19 @@ qa-nodes-resume: ## Resume (start) all LXD QA VMs
 qa-nodes-snapshot: ## Pause all VMs, delete existing baseline snapshot, snapshot VMs, and resume
 	bash ./scripts/qa-nodes-snapshot.sh $(SNAPSHOT_NAME)
 
+.PHONY: qa-nodes-snapshots-list
+qa-nodes-snapshots-list: ## List all snapshots for cluster nodes without error messages for missing nodes
+	@for NODE in $(NODES_ALL); do \
+		echo "Snapshots for $$NODE:"; \
+		SNAPS=$$(lxc query "/1.0/instances/$$NODE/snapshots" 2>/dev/null | jq -r '.[] | split("/") | .[-1]' || echo ""); \
+		if [ -z "$$SNAPS" ]; then \
+			echo "  No snapshots exist for $$NODE"; \
+		else \
+			echo "$$SNAPS" | sed 's/^/  /'; \
+		fi; \
+		echo ""; \
+	done
+
 .PHONY: qa-nodes-restore
 qa-nodes-restore: ## Restore all QA cluster VMs from 'baseline' snapshot and start them
 	@echo "Restoring all QA cluster VMs from 'baseline' snapshot..."
@@ -126,7 +139,7 @@ qa-nodes-restore: ## Restore all QA cluster VMs from 'baseline' snapshot and sta
 	@lxc list
 
 .PHONY: qa-nodes-delete
-qa-nodes-delete: ## Delete all LXD VMs used by the multi-node k3s cluster
+qa-nodes-delete: ## Delete all LXD VMs and its snapshots used by the multi-node k3s cluster
 	@for NODE in $(NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Deleting VM $$NODE..."; \
