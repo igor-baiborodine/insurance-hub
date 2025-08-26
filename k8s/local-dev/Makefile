@@ -5,9 +5,9 @@
 ################################################################################
 # Variables
 ################################################################################
-LOCAL_DEV_CLUSTER_NAME  	:= local-dev-insurance-hub
-KIND_CONFIG_FILE   			:= kind-local-dev-insurance-hub.yaml
-LOCAL_DEV_KUBECTL_CONTEXT	:= $(LOCAL_DEV_CLUSTER_NAME)
+LOCAL_DEV_CLUSTER_NAME  	:= dev-insurance-hub
+KIND_CONFIG_FILE   			:= kind-insurance-hub.yaml
+LOCAL_DEV_KUBECTL_CONTEXT	:= kind-$(LOCAL_DEV_CLUSTER_NAME)
 
 .PHONY: help
 help:
