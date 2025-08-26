@@ -22,9 +22,10 @@
 * **Git** `>=2.43.0`, see [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
 * **Go** `>=1.24`, see [Install Go](https://go.dev/doc/install).
 * **Docker Engine** `>=24.0.0`, see [Install Docker Engine](https://docs.docker.com/engine/install/).
-* **Kind** `>=0.20.0`, see [Install Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation).
-* **MicroK8S** `>=1.29`, see [Install MicroK8S](https://microk8s.io/docs/getting-started).
 * **kubectl** `>=1.29.2`, see [Install kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl).
+* **kubectx** `>=0.9.1`, see [Install kubectx](https://github.com/ahmetb/kubectx#installation).
+* **Kind** `>=0.20.0`, see [Install Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation).
+* **LXD** `>=4.22`, see [Install LXD](https://linuxcontainers.org/lxd/getting-started-cli/).
 
 ### Clone Repository
 
