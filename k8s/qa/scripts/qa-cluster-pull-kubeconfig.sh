@@ -7,16 +7,16 @@ QA_KUBECTL_CONTEXT="$QA_CLUSTER_NAME"
 echo "Pulling kubeconfig from qa-master to host..."
 lxc file pull qa-master/etc/rancher/k3s/k3s.yaml "./${QA_CLUSTER_NAME}-kubeconfig"
 
-# Adjust kubeconfig server address from 127.0.0.1 to actual master IP
+# Adjust kubeconfig server address from 127.0.0.1 to master IP reachable from host
 MASTER_IP=""
 for i in {1..20}; do
   MASTER_IP=$(lxc list qa-master -c 4 --format json | \
-    jq -r '.[0].state.network | to_entries | map(.value.addresses // []) | add
-      | map(select(.family=="inet" and .address != "127.0.0.1")) | .[0].address')
+  jq -r '.[0].state.network.eth0.addresses[] | select(.family == "inet" and .address != "127.0.0.1") | .address' | head -n1)
   [ -n "$MASTER_IP" ] && break
   echo "Waiting for qa-master IP address..."
   sleep 5
 done
+
 echo "Master IP: $MASTER_IP"
 sed -i "s/127.0.0.1/$MASTER_IP/g" "./${QA_CLUSTER_NAME}-kubeconfig"
 
