@@ -27,4 +27,8 @@ if [ "$ORIGINAL_CONTEXT" != "$QA_KUBECTL_CONTEXT" ] && [ -n "$ORIGINAL_CONTEXT" 
   kubectl --kubeconfig="./${QA_CLUSTER_NAME}-kubeconfig" config rename-context "$ORIGINAL_CONTEXT" "$QA_KUBECTL_CONTEXT"
 fi
 
-echo "Successfully pulled kubeconfig from qa-master and renamed context to '$QA_KUBECTL_CONTEXT'"
+export KUBECONFIG=$HOME/.kube/config:./qa-insurance-hub-kubeconfig
+kubectl config view --flatten > $HOME/.kube/config.merged
+mv $HOME/.kube/config.merged $HOME/.kube/config
+
+echo "Successfully pulled kubeconfig from qa-master and set current context to '$QA_KUBECTL_CONTEXT'"
