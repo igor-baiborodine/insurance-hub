@@ -8,7 +8,7 @@ echo "Setting up Rancher k3s cluster on qa-master node..."
 
 # Install k3s server on master with explicit cluster DNS IP (adjust based on your CoreDNS ClusterIP)
 # Assuming default CoreDNS service IP: 10.43.0.10
-lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--write-kubeconfig-mode 644 --cluster-dns=10.43.0.10' sh -"
+lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --write-kubeconfig-mode 644' sh -"
 
 echo "Waiting for k3s server on qa-master to become active..."
 lxc exec qa-master -- bash -c 'for i in {1..20}; do systemctl is-active k3s && break || (echo Waiting for k3s server...; sleep 5); done'

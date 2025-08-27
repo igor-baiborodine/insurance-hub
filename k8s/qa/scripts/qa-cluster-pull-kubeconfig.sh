@@ -33,13 +33,14 @@ ORIGINAL_CONTEXT=$(kubectl --kubeconfig="./${QA_CLUSTER_NAME}-kubeconfig" config
 echo "Original kubeconfig context is '$ORIGINAL_CONTEXT'"
 
 if [ "$ORIGINAL_CONTEXT" != "$QA_KUBECTL_CONTEXT" ] && [ -n "$ORIGINAL_CONTEXT" ]; then
-  kubectl --kubeconfig="./${QA_CLUSTER_NAME}-kubeconfig" config rename-context "$ORIGINAL_CONTEXT" "$QA_KUBECTL_CONTEXT"
+  # Replace the original context name in all relevant places (cluster, user, context)
+  sed -i "s/${ORIGINAL_CONTEXT}/${QA_KUBECTL_CONTEXT}/g" "./${QA_CLUSTER_NAME}-kubeconfig"
 fi
 
 # Remove old qa-insurance-hub config from default kubeconfig (if exists)
 kubectl config delete-context "$QA_KUBECTL_CONTEXT" 2>/dev/null || true
 kubectl config delete-cluster "$QA_KUBECTL_CONTEXT" 2>/dev/null || true
-kubectl config unset "users.$QA_KUBECTL_CONTEXT" 2>/dev/null || true
+kubectl config delete-user "$QA_KUBECTL_CONTEXT" 2>/dev/null || true
 
 # Merge the updated kubeconfig into the default kubeconfig
 export KUBECONFIG=$HOME/.kube/config:./${QA_CLUSTER_NAME}-kubeconfig

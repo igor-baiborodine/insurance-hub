@@ -77,7 +77,7 @@ qa-nodes-create: ## Create three LXD VMs (master and two workers) for QA cluster
 			echo "Ensuring network works inside $$NODE..."; \
 			lxc exec $$NODE -- bash -c "until ping -c1 1.1.1.1 >/dev/null 2>&1; do echo Waiting for network...; sleep 5; done"; \
 			echo "Installing prerequisites (curl, ca-certificates) in $$NODE..."; \
-			lxc exec $$NODE -- bash -c "apt-get update -y && apt-get install -y curl ca-certificates"; \
+			lxc exec $$NODE -- bash -c "sudo apt-get update -y && sudo apt-get install -y curl ca-certificates"; \
 		else \
 			echo "VM $$NODE already exists, skipping."; \
 		fi; \
