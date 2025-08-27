@@ -1,12 +1,14 @@
 #!/bin/bash
+
 set -euo pipefail
 
 QA_CLUSTER_NAME="qa-insurance-hub"
 
 echo "Setting up Rancher k3s cluster on qa-master node..."
 
-# Install k3s server on master
-lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--write-kubeconfig-mode 644' sh -"
+# Install k3s server on master with explicit cluster DNS IP (adjust based on your CoreDNS ClusterIP)
+# Assuming default CoreDNS service IP: 10.43.0.10
+lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--write-kubeconfig-mode 644 --cluster-dns=10.43.0.10' sh -"
 
 echo "Waiting for k3s server on qa-master to become active..."
 lxc exec qa-master -- bash -c 'for i in {1..20}; do systemctl is-active k3s && break || (echo Waiting for k3s server...; sleep 5); done'
@@ -30,8 +32,8 @@ TOKEN=$(lxc exec qa-master -- sudo cat /var/lib/rancher/k3s/server/node-token)
 echo "Node Token: $TOKEN"
 
 for WORKER in qa-worker1 qa-worker2; do
-  echo "Installing k3s agent on $WORKER..."
-  lxc exec "$WORKER" -- bash -c "curl -sfL https://get.k3s.io | K3S_URL=https://$MASTER_IP:6443 K3S_TOKEN=$TOKEN sh -"
+  echo "Installing k3s agent on $WORKER with cluster DNS..."
+  lxc exec "$WORKER" -- bash -c "curl -sfL https://get.k3s.io | K3S_URL=https://$MASTER_IP:6443 K3S_TOKEN=$TOKEN INSTALL_K3S_EXEC='--cluster-dns=10.43.0.10' sh -"
 done
 
 echo "Waiting for all nodes to register in the cluster..."
