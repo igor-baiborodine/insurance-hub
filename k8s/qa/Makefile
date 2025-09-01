@@ -18,8 +18,11 @@ help:
 	@grep -E '^\S+:.*## ' $(MAKEFILE_LIST) | sort | \
 	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-32s\033[0m %s\n", $$1, $$2}'
 
+.PHONY: qa-create
+qa-create: qa-nodes-create qa-cluster-create qa-cluster-pull-kubeconfig ## Create and configure QA cluster
+
 .PHONY: qa-cluster-create
-qa-cluster-create: qa-nodes-create ## Set up multi-node Rancher K3s QA cluster
+qa-cluster-create: ## Set up multi-node Rancher K3s QA cluster
 	bash ./scripts/qa-cluster-create.sh
 
 .PHONY: qa-cluster-pull-kubeconfig
