@@ -29,8 +29,8 @@ echo "Master Interface: $MASTER_IFACE"
 
 echo "Setting up Rancher k3s cluster on qa-master node..."
 
-# Install k3s server on master, advertising its public IP, specifying the flannel interface, and using the host-gw backend
-lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --write-kubeconfig-mode 644 --tls-san=$MASTER_IP --flannel-iface=$MASTER_IFACE --flannel-backend=host-gw' sh -"
+# Install k3s server on master, advertising its public IP and specifying the flannel interface
+lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --write-kubeconfig-mode 644 --tls-san=$MASTER_IP --flannel-iface=$MASTER_IFACE' sh -"
 
 echo "Waiting for k3s server on qa-master to become active..."
 lxc exec qa-master -- bash -c 'for i in {1..20}; do systemctl is-active k3s && break || (echo Waiting for k3s server...; sleep 5); done'
@@ -40,7 +40,8 @@ echo "Node Token: $TOKEN"
 
 for WORKER in qa-worker1 qa-worker2; do
   echo "Installing k3s agent on $WORKER..."
-  lxc exec "$WORKER" -- bash -c "curl -sfL https://get.k3s.io | K3S_URL=https://$MASTER_IP:6443 K3S_TOKEN=$TOKEN sh -"
+  # Correctly specify the 'agent' subcommand and pass the flannel interface
+  lxc exec "$WORKER" -- bash -c "curl -sfL https://get.k3s.io | K3S_URL=https://$MASTER_IP:6443 K3S_TOKEN=$TOKEN INSTALL_K3S_EXEC='agent --flannel-iface=$MASTER_IFACE' sh -"
 done
 
 echo "Waiting for all nodes to register in the cluster..."
