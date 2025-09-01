@@ -68,21 +68,7 @@ qa-cluster-add-ingress: ## Add Traefik ingress controller to QA cluster
 
 .PHONY: qa-nodes-create
 qa-nodes-create: ## Create three LXD VMs (master and two workers) for QA cluster
-	@for NODE in $(NODES_ALL); do \
-		if ! lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Launching VM $$NODE..."; \
-			lxc launch ubuntu:24.04 --vm $$NODE; \
-			echo "Waiting for LXD VM agent in $$NODE..."; \
-			until lxc exec $$NODE -- true 2>/dev/null; do sleep 5; done; \
-			echo "Ensuring network works inside $$NODE..."; \
-			lxc exec $$NODE -- bash -c "until ping -c1 1.1.1.1 >/dev/null 2>&1; do echo Waiting for network...; sleep 5; done"; \
-			echo "Installing prerequisites (curl, ca-certificates) in $$NODE..."; \
-			lxc exec $$NODE -- bash -c "sudo apt-get update -y && sudo apt-get install -y curl ca-certificates"; \
-		else \
-			echo "VM $$NODE already exists, skipping."; \
-		fi; \
-	done
-	@echo "All VM nodes have been created and prepared for k3s."
+	bash ./scripts/qa-nodes-create.sh
 
 .PHONY: qa-nodes-suspend
 qa-nodes-suspend: ## Suspend (pause) all LXD QA VMs
