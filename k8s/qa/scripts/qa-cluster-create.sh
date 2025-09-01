@@ -19,10 +19,18 @@ if [ -z "$MASTER_IP" ]; then
 fi
 echo "Master IP: $MASTER_IP"
 
+MASTER_IFACE=$(lxc list qa-master -c 4 --format json | \
+  jq -r '.[0].state.network | to_entries[] | select(.value.addresses[].family == "inet" and .value.addresses[].scope == "global") | .key')
+if [ -z "$MASTER_IFACE" ]; then
+  echo "Failed to get qa-master network interface!" >&2
+  exit 1
+fi
+echo "Master Interface: $MASTER_IFACE"
+
 echo "Setting up Rancher k3s cluster on qa-master node..."
 
-# Install k3s server on master, advertising its public IP
-lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --write-kubeconfig-mode 644 --tls-san=$MASTER_IP' sh -"
+# Install k3s server on master, advertising its public IP and specifying the flannel interface
+lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --write-kubeconfig-mode 644 --tls-san=$MASTER_IP --flannel-iface=$MASTER_IFACE' sh -"
 
 echo "Waiting for k3s server on qa-master to become active..."
 lxc exec qa-master -- bash -c 'for i in {1..20}; do systemctl is-active k3s && break || (echo Waiting for k3s server...; sleep 5); done'
