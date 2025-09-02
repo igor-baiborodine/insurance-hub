@@ -18,6 +18,12 @@ for NODE in $NODES_ALL; do
         lxc exec "$NODE" -- bash -c "sudo apt-get update -y && sudo apt-get install -y curl ca-certificates"
         echo "Disabling firewall (ufw) in $NODE to ensure k3s networking works correctly..."
         lxc exec "$NODE" -- bash -c "if command -v ufw >/dev/null 2>&1; then sudo ufw disable; else echo 'ufw not found, skipping.'; fi"
+        echo "Enabling iptables on bridged traffic in $NODE..."
+        lxc exec "$NODE" -- bash -c '\
+            sudo modprobe br_netfilter; \
+            echo "net.bridge.bridge-nf-call-iptables=1" | sudo tee /etc/sysctl.d/k8s.conf; \
+            sudo sysctl --system; \
+        '
     else
         echo "VM $NODE already exists, skipping."
     fi
