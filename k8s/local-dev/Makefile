@@ -5,9 +5,8 @@
 ################################################################################
 # Variables
 ################################################################################
-LOCAL_DEV_CLUSTER_NAME  	:= dev-insurance-hub
-KIND_CONFIG_FILE   			:= kind-insurance-hub.yaml
-LOCAL_DEV_KUBECTL_CONTEXT	:= kind-$(LOCAL_DEV_CLUSTER_NAME)
+KIND_CONFIG_FILE   			:= local-dev-insurance-hub.yaml
+LOCAL_DEV_CLUSTER_NAME  	:= local-dev-insurance-hub
 
 .PHONY: help
 help:
@@ -16,19 +15,23 @@ help:
 	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: local-dev-create
-local-dev-create: ## Create/start the local dev Kind cluster (single-node)
-	mkdir -p /tmp/data/local-dev-storage
-	kind create cluster --name $(LOCAL_DEV_CLUSTER_NAME) --config $(KIND_CONFIG_FILE)
+local-dev-create: ## Create and start the local dev Kind cluster (single-node)
+	@mkdir -p /tmp/data/local-dev-storage
+	@kind create cluster --name $(LOCAL_DEV_CLUSTER_NAME) --config $(KIND_CONFIG_FILE)
 
 .PHONY: local-dev-delete
-local-dev-delete: ## Delete/stop the local dev Kind cluster with its persistent storage
-	rm -rf /tmp/data/local-dev-storage
-	kind delete cluster --name $(LOCAL_DEV_CLUSTER_NAME)
+local-dev-delete: ## Stop and delete the local dev Kind cluster with its persistent storage
+	@rm -rf /tmp/data/local-dev-storage
+	@kind delete cluster --name $(LOCAL_DEV_CLUSTER_NAME)
 
-.PHONY: local-dev-context
-local-dev-context: ## Switch kubectl context to insurance-hub's local dev Kind cluster
-	kubectl config use-context $(LOCAL_DEV_KUBECTL_CONTEXT)
+.PHONY: local-dev-suspend
+local-dev-suspend: ## Suspend (stop) the local dev Kind cluster
+	@echo "Suspending Kind cluster '$(LOCAL_DEV_CLUSTER_NAME)'..."
+	@docker stop $(LOCAL_DEV_CLUSTER_NAME)-control-plane
+	@echo "Kind cluster '$(LOCAL_DEV_CLUSTER_NAME)' suspended."
 
-.PHONY: local-dev-status
-local-dev-status: ## Show local dev Kind cluster nodes status
-	kubectl --context $(LOCAL_DEV_KUBECTL_CONTEXT) get nodes
+.PHONY: local-dev-resume
+local-dev-resume: ## Resume (start) the local dev Kind cluster
+	@echo "Resuming Kind cluster '$(LOCAL_DEV_CLUSTER_NAME)'..."
+	@docker start $(LOCAL_DEV_CLUSTER_NAME)-control-plane
+	@echo "Kind cluster '$(LOCAL_DEV_CLUSTER_NAME)' resumed."
