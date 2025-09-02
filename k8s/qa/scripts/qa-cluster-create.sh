@@ -54,4 +54,26 @@ for i in {1..24}; do
   sleep 5
 done
 
+echo "Waiting for CoreDNS addon to become ready..."
+lxc exec qa-master -- bash -c '
+  for i in {1..24}; do
+    READY=$(kubectl -n kube-system get deploy coredns -o jsonpath="{.status.readyReplicas}" 2>/dev/null || echo 0);
+    [ "$READY" != "" ] && [ $READY -ge 1 ] && echo "CoreDNS is Ready." && break;
+    echo "Waiting for CoreDNS to be Ready...";
+    sleep 5;
+  done;
+'
+
+echo "Applying custom CoreDNS configuration to fix DNS resolution..."
+lxc exec qa-master -- kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  rewrite.override: |
+    rewrite name kubernetes.default kubernetes.default.svc.cluster.local
+EOF
+
 echo "QA cluster '$QA_CLUSTER_NAME' has been successfully created!"
