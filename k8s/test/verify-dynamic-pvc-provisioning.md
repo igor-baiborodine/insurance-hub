@@ -110,6 +110,3 @@ Once you are done, you can remove the test resources from your cluster:
 kubectl delete pod test-pvc-pod
 kubectl delete pvc test-pvc
 ```
-
-This completes the end-to-end verification. Your cluster is correctly provisioning persistent
-storage on demand.
