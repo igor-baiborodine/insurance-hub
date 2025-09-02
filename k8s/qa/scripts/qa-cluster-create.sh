@@ -29,7 +29,7 @@ echo "Master Interface: $MASTER_IFACE"
 
 echo "Setting up Rancher k3s cluster on qa-master node..."
 
-# Install k3s server on master, advertising its public IP and specifying the flannel interface
+# Install k3s server, using the host's default nftables mode.
 lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --write-kubeconfig-mode 644 --tls-san=$MASTER_IP --flannel-iface=$MASTER_IFACE' sh -"
 
 echo "Waiting for k3s server on qa-master to become active..."
@@ -40,7 +40,7 @@ echo "Node Token: $TOKEN"
 
 for WORKER in qa-worker1 qa-worker2; do
   echo "Installing k3s agent on $WORKER..."
-  # Correctly specify the 'agent' subcommand and pass the flannel interface
+  # The agent will also use the host's nftables mode.
   lxc exec "$WORKER" -- bash -c "curl -sfL https://get.k3s.io | K3S_URL=https://$MASTER_IP:6443 K3S_TOKEN=$TOKEN INSTALL_K3S_EXEC='agent --flannel-iface=$MASTER_IFACE' sh -"
 done
 
