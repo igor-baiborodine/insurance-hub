@@ -43,4 +43,8 @@
 # Micronaut
 **/dependency-reduced-pom.xml
 
+# Kubernetes
+/k8s/qa/qa-insurance-hub-kubeconfig
+
+# Dev
 **/research/*
