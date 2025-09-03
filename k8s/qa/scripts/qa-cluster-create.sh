@@ -30,7 +30,7 @@ echo "Master Interface: $MASTER_IFACE"
 echo "Setting up Rancher k3s cluster on qa-master node..."
 
 # Install k3s server, using the host's default nftables mode.
-lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --write-kubeconfig-mode 644 --tls-san=$MASTER_IP --flannel-iface=$MASTER_IFACE' sh -"
+lxc exec qa-master -- bash -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --disable=traefik --write-kubeconfig-mode 644 --tls-san=$MASTER_IP --flannel-iface=$MASTER_IFACE' sh -"
 
 echo "Waiting for k3s server on qa-master to become active..."
 lxc exec qa-master -- bash -c 'for i in {1..20}; do systemctl is-active k3s && break || (echo Waiting for k3s server...; sleep 5); done'
