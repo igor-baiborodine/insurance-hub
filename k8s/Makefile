@@ -72,8 +72,8 @@ prerequisites-install-all: kubectl-install kubectx-install kubens-install lxd-in
 ################################################################################
 # PostgreSQL deployment
 ################################################################################
-.PHONY: postgresql-deploy
-postgresql-deploy: ## Deploy PostgreSQL with ENV_NAME=(local-dev|qa)
+.PHONY: postgres-deploy
+postgres-deploy: ## Deploy PostgreSQL with ENV_NAME=(local-dev|qa)
 	@if [ -z "$(ENV_NAME)" ]; then \
 		echo "ERROR: ENV_NAME is required. Use 'local-dev' or 'qa'."; \
 		exit 1; \
@@ -83,35 +83,35 @@ postgresql-deploy: ## Deploy PostgreSQL with ENV_NAME=(local-dev|qa)
 		exit 1; \
 	fi
 	@echo "--- Linting PostgreSQL chart for $(ENV_NAME) ---"
-	@helm lint ./apps/infra/postgresql -f "env/$(ENV_NAME)/postgresql-values.yaml"
+	@helm lint ./apps/infra/postgres -f "env/$(ENV_NAME)/postgres-values.yaml"
 
 	@echo "--- Updating Helm dependencies for PostgreSQL ---"
-	@helm dependency update ./apps/infra/postgresql
+	@helm dependency update ./apps/infra/postgres
 
 	@echo "--- Deploying PostgreSQL to $(ENV_NAME) cluster ---"
-	@VALUES_FILE="env/$(ENV_NAME)/postgresql-values.yaml"; \
+	@VALUES_FILE="env/$(ENV_NAME)/postgres-values.yaml"; \
 	if [ ! -f "$$VALUES_FILE" ]; then \
 		echo "ERROR: $$VALUES_FILE not found"; \
 		exit 1; \
 	fi; \
-	helm upgrade --install postgresql ./apps/infra/postgresql \
+	helm upgrade --install postgres ./apps/infra/postgres \
 		-f $$VALUES_FILE \
 		--namespace database \
 		--create-namespace \
 		--wait
 
 
-.PHONY: postgresql-status
-postgresql-status: ## Show PostgreSQL release and k8s resource status
-	@echo "Helm release status (database/postgresql):"
-	@helm status postgresql --namespace database || true
+.PHONY: postgres-status
+postgres-status: ## Show PostgreSQL release and k8s resource status
+	@echo "Helm release status (database/postgres):"
+	@helm status postgres --namespace database || true
 	@echo ""
-	@echo "Kubernetes resources in namespace 'database' (labeled instance=postgresql):"
-	@kubectl get pods,svc,pvc -n database -l app.kubernetes.io/instance=postgresql || true
+	@echo "Kubernetes resources in namespace 'database' (labeled instance=postgres):"
+	@kubectl get pods,svc,pvc -n database -l app.kubernetes.io/instance=postgres || true
 
-.PHONY: postgresql-remove
-postgresql-remove: ## Uninstall PostgreSQL Helm release from current cluster (namespace 'database')
-	@echo "Uninstalling Helm release 'postgresql' from namespace 'database'..."
-	@helm uninstall postgresql --namespace database || true
+.PHONY: postgres-remove
+postgres-remove: ## Uninstall PostgreSQL Helm release from current cluster (namespace 'database')
+	@echo "Uninstalling Helm release 'postgres' from namespace 'database'..."
+	@helm uninstall postgres --namespace database || true
 	@echo "Remaining PVCs in namespace 'database' (if any):"
 	@kubectl get pvc -n database 2>/dev/null || true
