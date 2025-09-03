@@ -38,6 +38,15 @@ kind-install: ## Install latest Kind on Ubuntu
 	sudo mv ./kind /usr/local/bin/kind
 	kind --version
 
+.PHONY: helm-install
+helm-install: ## Install latest Helm on Ubuntu
+	@echo "Installing Helm..."
+	@curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+	@chmod 700 get_helm.sh
+	@./get_helm.sh
+	@rm -f get_helm.sh
+	@echo "Helm installed."
+
 .PHONY: lxd-install
 lxd-install: ## Install LXD on Ubuntu
 	@if ! command -v lxd >/dev/null 2>&1; then \
@@ -67,7 +76,7 @@ kubens-install: ## Install latest kubens on Ubuntu
 	@echo "kubens installed at /usr/local/bin/kubens"
 
 .PHONY: prerequisites-install-all
-prerequisites-install-all: kubectl-install kubectx-install kubens-install lxd-install ## Install all k8s prerequisites
+prerequisites-install-all: kubectl-install kubectx-install kubens-install helm-install lxd-install ## Install all k8s prerequisites
 
 ################################################################################
 # PostgreSQL deployment
