@@ -82,8 +82,13 @@ postgresql-deploy: ## Deploy PostgreSQL with ENV_NAME=(local-dev|qa)
 		echo "ERROR: ENV_NAME must be 'local-dev' or 'qa'. Received: '$(ENV_NAME)'"; \
 		exit 1; \
 	fi
-	@echo "Deploying PostgreSQL to $(ENV_NAME) cluster..."
-	@cd apps/infra/postgresql && helm dependency update
+	@echo "--- Linting PostgreSQL chart for $(ENV_NAME) ---"
+	@helm lint ./apps/infra/postgresql -f "env/$(ENV_NAME)/postgresql-values.yaml"
+
+	@echo "--- Updating Helm dependencies for PostgreSQL ---"
+	@helm dependency update ./apps/infra/postgresql
+
+	@echo "--- Deploying PostgreSQL to $(ENV_NAME) cluster ---"
 	@VALUES_FILE="env/$(ENV_NAME)/postgresql-values.yaml"; \
 	if [ ! -f "$$VALUES_FILE" ]; then \
 		echo "ERROR: $$VALUES_FILE not found"; \
@@ -96,16 +101,16 @@ postgresql-deploy: ## Deploy PostgreSQL with ENV_NAME=(local-dev|qa)
 		--wait
 
 
-.PHONY: postgres-status
-postgres-status: ## Show PostgreSQL release and k8s resource status
+.PHONY: postgresql-status
+postgresql-status: ## Show PostgreSQL release and k8s resource status
 	@echo "Helm release status (database/postgresql):"
 	@helm status postgresql --namespace database || true
 	@echo ""
 	@echo "Kubernetes resources in namespace 'database' (labeled instance=postgresql):"
 	@kubectl get pods,svc,pvc -n database -l app.kubernetes.io/instance=postgresql || true
 
-.PHONY: postgres-remove
-postgres-remove: ## Uninstall PostgreSQL Helm release from current cluster (namespace 'database')
+.PHONY: postgresql-remove
+postgresql-remove: ## Uninstall PostgreSQL Helm release from current cluster (namespace 'database')
 	@echo "Uninstalling Helm release 'postgresql' from namespace 'database'..."
 	@helm uninstall postgresql --namespace database || true
 	@echo "Remaining PVCs in namespace 'database' (if any):"
