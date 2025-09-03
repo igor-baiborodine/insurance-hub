@@ -1,0 +1,11 @@
+apiVersion: v2
+name: postgresql
+description: PostgreSQL database for Insurance Hub
+type: application
+version: 0.1.0
+appVersion: "15"
+
+dependencies:
+  - name: postgresql
+    version: "12.12.10"
+    repository: "https://charts.bitnami.com/bitnami"
