@@ -1,5 +1,5 @@
 ################################################################################
-# Child Makefile common for local dev/qa insurance-hub
+# Child Makefile common for local dev and qa insurance-hub cluster
 ################################################################################
 
 .PHONY: help
@@ -14,6 +14,9 @@ kubeconfig-clear: ## Empty the ~/.kube/config file
 	@> ~/.kube/config
 	@echo "~/.kube/config file has been emptied."
 
+################################################################################
+# Kubernetes prerequisites
+################################################################################
 .PHONY: kubectl-install
 kubectl-install: ## Install latest kubectl on Ubuntu
 	@KUBECTL_VERSION=$$(curl -L -s https://dl.k8s.io/release/stable.txt); \
@@ -34,6 +37,15 @@ kind-install: ## Install latest Kind on Ubuntu
 	echo "Moving kind binary to /usr/local/bin (you may be prompted for your password)..."
 	sudo mv ./kind /usr/local/bin/kind
 	kind --version
+
+.PHONY: helm-install
+helm-install: ## Install latest Helm on Ubuntu
+	@echo "Installing Helm..."
+	@curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+	@chmod 700 get_helm.sh
+	@./get_helm.sh
+	@rm -f get_helm.sh
+	@echo "Helm installed."
 
 .PHONY: lxd-install
 lxd-install: ## Install LXD on Ubuntu
@@ -64,4 +76,51 @@ kubens-install: ## Install latest kubens on Ubuntu
 	@echo "kubens installed at /usr/local/bin/kubens"
 
 .PHONY: prerequisites-install-all
-prerequisites-install-all: kubectl-install kubectx-install kubens-install lxd-install ## Install all k8s prerequisites
+prerequisites-install-all: kubectl-install kubectx-install kubens-install helm-install lxd-install ## Install all k8s prerequisites
+
+################################################################################
+# PostgreSQL deployment
+################################################################################
+.PHONY: postgres-deploy
+postgres-deploy: ## Deploy PostgreSQL with ENV_NAME=(local-dev|qa)
+	@if [ -z "$(ENV_NAME)" ]; then \
+		echo "ERROR: ENV_NAME is required. Use 'local-dev' or 'qa'."; \
+		exit 1; \
+	fi
+	@if [ "$(ENV_NAME)" != "local-dev" ] && [ "$(ENV_NAME)" != "qa" ]; then \
+		echo "ERROR: ENV_NAME must be 'local-dev' or 'qa'. Received: '$(ENV_NAME)'"; \
+		exit 1; \
+	fi
+	@echo "--- Linting PostgreSQL chart for $(ENV_NAME) ---"
+	@helm lint ./apps/infra/postgres -f "env/$(ENV_NAME)/postgres-values.yaml"
+
+	@echo "--- Updating Helm dependencies for PostgreSQL ---"
+	@helm dependency update ./apps/infra/postgres
+
+	@echo "--- Deploying PostgreSQL to $(ENV_NAME) cluster ---"
+	@VALUES_FILE="env/$(ENV_NAME)/postgres-values.yaml"; \
+	if [ ! -f "$$VALUES_FILE" ]; then \
+		echo "ERROR: $$VALUES_FILE not found"; \
+		exit 1; \
+	fi; \
+	helm upgrade --install postgres ./apps/infra/postgres \
+		-f $$VALUES_FILE \
+		--namespace database \
+		--create-namespace \
+		--wait
+
+
+.PHONY: postgres-status
+postgres-status: ## Show PostgreSQL release and k8s resource status
+	@echo "Helm release status (database/postgres):"
+	@helm status postgres --namespace database || true
+	@echo ""
+	@echo "Kubernetes resources in namespace 'database' (labeled instance=postgres):"
+	@kubectl get pods,svc,pvc -n database -l app.kubernetes.io/instance=postgres || true
+
+.PHONY: postgres-remove
+postgres-remove: ## Uninstall PostgreSQL Helm release from current cluster (namespace 'database')
+	@echo "Uninstalling Helm release 'postgres' from namespace 'database'..."
+	@helm uninstall postgres --namespace database || true
+	@echo "Remaining PVCs in namespace 'database' (if any):"
+	@kubectl get pvc -n database 2>/dev/null || true

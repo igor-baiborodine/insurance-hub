@@ -26,6 +26,7 @@
 * **kubectx** `>=0.9.1`, see [Install kubectx](https://github.com/ahmetb/kubectx#installation).
 * **Kind** `>=0.20.0`, see [Install Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation).
 * **LXD** `>=4.22`, see [Install LXD](https://linuxcontainers.org/lxd/getting-started-cli/).
+* **Helm** `>=3.14.0`, see [Install Helm](https://helm.sh/docs/intro/install/).
 
 ### Clone Repository
 

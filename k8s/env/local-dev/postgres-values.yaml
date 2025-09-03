@@ -1,0 +1,33 @@
+# Values for Bitnami PostgreSQL chart tailored for local Kind (single-node) cluster
+# Both environments are considered local; this one is minimal for developer laptops.
+
+# Use standalone for local-dev
+architecture: standalone
+
+primary:
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: "standard"  # Kind's default storage class (often named 'standard')
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+# No replicas for local-dev
+readReplicas:
+  replicaCount: 0
+
+# Basic auth suitable for local usage only
+auth:
+  postgresPassword: "dev-password"
+  database: "insurance_hub_dev"
+
+# Metrics enabled but no ServiceMonitor in local-dev
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
