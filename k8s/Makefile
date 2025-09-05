@@ -79,48 +79,90 @@ kubens-install: ## Install latest kubens on Ubuntu
 prerequisites-install-all: kubectl-install kubectx-install kubens-install helm-install lxd-install ## Install all k8s prerequisites
 
 ################################################################################
-# PostgreSQL deployment
+# PostgreSQL Deployment
+# Manages PostgreSQL Helm releases for different environments.
+# All targets require ENV_NAME to be set, e.g., 'make postgres-status ENV_NAME=qa'
 ################################################################################
-.PHONY: postgres-deploy
-postgres-deploy: ## Deploy PostgreSQL with ENV_NAME=(local-dev|qa)
+
+# Set variables based on ENV_NAME.
+ifeq ($(ENV_NAME), qa)
+    NAMESPACE = qa-data
+else
+    NAMESPACE = local-dev
+endif
+VALUES_FILE = env/$(ENV_NAME)/postgres-values.yaml
+BACKUP_DIR = backups/$(ENV_NAME)
+
+# Helper to ensure ENV_NAME is provided and valid for all postgres targets.
+.PHONY: _check_env
+_check_env:
 	@if [ -z "$(ENV_NAME)" ]; then \
-		echo "ERROR: ENV_NAME is required. Use 'local-dev' or 'qa'."; \
+		echo "ERROR: ENV_NAME is required. Use 'make <target> ENV_NAME=(local-dev|qa)'"; \
 		exit 1; \
 	fi
 	@if [ "$(ENV_NAME)" != "local-dev" ] && [ "$(ENV_NAME)" != "qa" ]; then \
 		echo "ERROR: ENV_NAME must be 'local-dev' or 'qa'. Received: '$(ENV_NAME)'"; \
 		exit 1; \
 	fi
-	@echo "--- Linting PostgreSQL chart for $(ENV_NAME) ---"
-	@helm lint ./apps/infra/postgres -f "env/$(ENV_NAME)/postgres-values.yaml"
 
+.PHONY: postgres-deploy
+postgres-deploy: _check_env ## Deploy PostgreSQL to the specified environment. ENV_NAME=(local-dev|qa)
+	@echo "--- Linting PostgreSQL chart for $(ENV_NAME) ---"
+	@helm lint ./apps/infra/postgres -f "$(VALUES_FILE)" --namespace "$(NAMESPACE)"
 	@echo "--- Updating Helm dependencies for PostgreSQL ---"
 	@helm dependency update ./apps/infra/postgres
-
-	@echo "--- Deploying PostgreSQL to $(ENV_NAME) cluster ---"
-	@VALUES_FILE="env/$(ENV_NAME)/postgres-values.yaml"; \
-	if [ ! -f "$$VALUES_FILE" ]; then \
-		echo "ERROR: $$VALUES_FILE not found"; \
-		exit 1; \
-	fi; \
-	helm upgrade --install postgres ./apps/infra/postgres \
-		-f $$VALUES_FILE \
-		--namespace database \
+	@echo "--- Deploying PostgreSQL to $(ENV_NAME) cluster in namespace $(NAMESPACE) ---"
+	@helm upgrade --install postgres ./apps/infra/postgres \
+		-f "$(VALUES_FILE)" \
+		--namespace "$(NAMESPACE)" \
 		--create-namespace \
 		--wait
 
-
 .PHONY: postgres-status
-postgres-status: ## Show PostgreSQL release and k8s resource status
-	@echo "Helm release status (database/postgres):"
-	@helm status postgres --namespace database || true
-	@echo ""
-	@echo "Kubernetes resources in namespace 'database' (labeled instance=postgres):"
-	@kubectl get pods,svc,pvc -n database -l app.kubernetes.io/instance=postgres || true
+postgres-status: _check_env ## Show PostgreSQL release and resource status. ENV_NAME=(local-dev|qa)
+	@echo "--> Status for environment: $(ENV_NAME) (Namespace: $(NAMESPACE))"
+	@echo "--- Helm Release Status (helm status postgres) ---"
+	@helm status postgres --namespace "$(NAMESPACE)" || true
+	@echo "\n--- Kubernetes Resources (kubectl get pods,svc,pvc) ---"
+	@kubectl get pods,svc,pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
 
 .PHONY: postgres-remove
-postgres-remove: ## Uninstall PostgreSQL Helm release from current cluster (namespace 'database')
-	@echo "Uninstalling Helm release 'postgres' from namespace 'database'..."
-	@helm uninstall postgres --namespace database || true
-	@echo "Remaining PVCs in namespace 'database' (if any):"
-	@kubectl get pvc -n database 2>/dev/null || true
+postgres-remove: _check_env ## Uninstall PostgreSQL Helm release from an environment. ENV_NAME=(local-dev|qa)
+	@echo "Uninstalling Helm release 'postgres' from namespace '$(NAMESPACE)'..."
+	@helm uninstall postgres --namespace "$(NAMESPACE)" || true
+	@echo "\nRemaining PVCs in namespace '$(NAMESPACE)' (if any):"
+	@kubectl get pvc -n "$(NAMESPACE)" 2>/dev/null || true
+
+.PHONY: postgres-connect
+postgres-connect: _check_env ## Connect to the PostgreSQL primary instance using an interactive psql shell. ENV_NAME=(local-dev|qa)
+	@echo "Connecting to PostgreSQL in namespace '$(NAMESPACE)'..."
+	@PG_PASSWORD=$$(kubectl get secret --namespace "$(NAMESPACE)" postgres-postgresql -o jsonpath="{.data.postgres-password}" | base64 -d); \
+	if [ -z "$$PG_PASSWORD" ]; then \
+		echo "ERROR: Could not retrieve PostgreSQL password from secret 'postgres-postgresql'."; \
+		exit 1; \
+	fi; \
+	kubectl run postgres-client --rm --tty -i --restart='Never' --namespace "$(NAMESPACE)" \
+		--image docker.io/bitnami/postgresql:latest \
+		--env="PGPASSWORD=$$PG_PASSWORD" \
+		--command -- psql --host postgres-primary -U postgres -d insurance_hub_$(ENV_NAME)
+
+.PHONY: postgres-backup
+postgres-backup: _check_env ## Create a logical backup of the PostgreSQL database. ENV_NAME=(local-dev|qa)
+	@echo "Backing up PostgreSQL database from namespace '$(NAMESPACE)'..."
+	@mkdir -p "$(BACKUP_DIR)"
+	@BACKUP_FILE="$(BACKUP_DIR)/dump-$$(date +%Y-%m-%d_%H-%M-%S).sql"; \
+	echo "Saving backup to $$BACKUP_FILE"; \
+	kubectl exec -n "$(NAMESPACE)" postgres-primary-0 -- pg_dumpall -U postgres > $$BACKUP_FILE
+
+.PHONY: postgres-restore
+postgres-restore: _check_env ## Restore a PostgreSQL database from a backup file. Pass file with FILE=path/to/dump.sql ENV_NAME=(local-dev|qa)
+	@if [ -z "$(FILE)" ]; then \
+		echo "ERROR: FILE is required. Use 'make postgres-restore FILE=<path-to-backup>.sql ENV_NAME=...'"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(FILE)" ]; then \
+		echo "ERROR: Backup file not found at $(FILE)"; \
+		exit 1; \
+	fi
+	@echo "Restoring PostgreSQL database in namespace '$(NAMESPACE)' from file $(FILE)..."
+	@cat "$(FILE)" | kubectl exec -i -n "$(NAMESPACE)" postgres-primary-0 -- psql -U postgres
