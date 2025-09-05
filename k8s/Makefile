@@ -107,11 +107,11 @@ _check_env:
 
 .PHONY: postgres-deploy
 postgres-deploy: _check_env ## Deploy PostgreSQL to the specified environment. ENV_NAME=(local-dev|qa)
-	@echo "--- Linting PostgreSQL chart for $(ENV_NAME) ---"
+	@echo "Linting PostgreSQL chart for $(ENV_NAME)..."
 	@helm lint ./apps/infra/postgres -f "$(VALUES_FILE)" --namespace "$(NAMESPACE)"
-	@echo "--- Updating Helm dependencies for PostgreSQL ---"
+	@echo "Updating Helm dependencies for PostgreSQL..."
 	@helm dependency update ./apps/infra/postgres
-	@echo "--- Deploying PostgreSQL to $(ENV_NAME) cluster in namespace $(NAMESPACE) ---"
+	@echo "Deploying PostgreSQL to $(ENV_NAME) cluster in namespace $(NAMESPACE)..."
 	@helm upgrade --install postgres ./apps/infra/postgres \
 		-f "$(VALUES_FILE)" \
 		--namespace "$(NAMESPACE)" \
@@ -120,10 +120,10 @@ postgres-deploy: _check_env ## Deploy PostgreSQL to the specified environment. E
 
 .PHONY: postgres-status
 postgres-status: _check_env ## Show PostgreSQL release and resource status. ENV_NAME=(local-dev|qa)
-	@echo "--> Status for environment: $(ENV_NAME) (Namespace: $(NAMESPACE))"
-	@echo "--- Helm Release Status (helm status postgres) ---"
+	@echo "Status for environment: $(ENV_NAME) (Namespace: $(NAMESPACE))"
+	@echo "Getting Helm release status (helm status postgres)..."
 	@helm status postgres --namespace "$(NAMESPACE)" || true
-	@echo "\n--- Kubernetes Resources (kubectl get pods,svc,pvc) ---"
+	@echo "\nKubernetes Resources (kubectl get pods,svc,pvc)..."
 	@kubectl get pods,svc,pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
 
 .PHONY: postgres-remove
