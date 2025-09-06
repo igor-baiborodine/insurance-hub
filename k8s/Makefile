@@ -80,38 +80,40 @@ prerequisites-install-all: kubectl-install kubectx-install kubens-install helm-i
 
 ################################################################################
 # PostgreSQL Deployment
-# Manages PostgreSQL Helm releases for different environments.
-# All targets require ENV_NAME to be set, e.g., 'make postgres-status ENV_NAME=qa'
+# Namespace is auto-detected from the current kubectl context.
 ################################################################################
 
-# Set variables based on ENV_NAME.
-ifeq ($(ENV_NAME), qa)
-    NAMESPACE = qa-data
-else
-    NAMESPACE = local-dev
-endif
-VALUES_FILE = env/$(ENV_NAME)/postgres-values.yaml
-BACKUP_DIR = backups/$(ENV_NAME)
+# Helper to determine namespace based on current kubectl context.
+NAMESPACE := $(shell \
+	ctx="$$(kubectl config current-context 2>/dev/null)"; \
+	if [ "$$ctx" = "qa-insurance-hub" ]; then \
+		echo "qa-data"; \
+	elif [ "$$ctx" = "kind-local-dev-insurance-hub" ]; then \
+		echo "local-dev"; \
+	else \
+		echo "INVALID"; \
+	fi)
 
-# Helper to ensure ENV_NAME is provided and valid for all postgres targets.
-.PHONY: _check_env
-_check_env:
-	@if [ -z "$(ENV_NAME)" ]; then \
-		echo "ERROR: ENV_NAME is required. Use 'make <target> ENV_NAME=(local-dev|qa)'"; \
+VALUES_FILE = env/$(NAMESPACE)/postgres-values.yaml
+BACKUP_DIR = backups/$(NAMESPACE)
+
+.PHONY: _context_namespace_check
+_context_namespace_check:
+	@CUR_CTX=$$(kubectl config current-context 2>/dev/null); \
+	if [ "$(NAMESPACE)" = "INVALID" ]; then \
+		echo "ERROR: kubectl context '$$CUR_CTX' is not supported! Must be 'qa-insurance-hub' or 'kind-local-dev-insurance-hub'."; \
 		exit 1; \
-	fi
-	@if [ "$(ENV_NAME)" != "local-dev" ] && [ "$(ENV_NAME)" != "qa" ]; then \
-		echo "ERROR: ENV_NAME must be 'local-dev' or 'qa'. Received: '$(ENV_NAME)'"; \
-		exit 1; \
+	else \
+		echo "Using namespace: $(NAMESPACE) (kubectl context: $$CUR_CTX)"; \
 	fi
 
 .PHONY: postgres-deploy
-postgres-deploy: _check_env ## Deploy PostgreSQL to the specified environment. ENV_NAME=(local-dev|qa)
-	@echo "Linting PostgreSQL chart for $(ENV_NAME)..."
+postgres-deploy: _context_namespace_check ## Deploy PostgreSQL to cluster context (auto-detects env)
+	@echo "Linting PostgreSQL Helm chart for $(NAMESPACE)..."
 	@helm lint ./apps/infra/postgres -f "$(VALUES_FILE)" --namespace "$(NAMESPACE)"
-	@echo "Updating Helm dependencies for PostgreSQL..."
+	@echo "Updating Helm dependencies..."
 	@helm dependency update ./apps/infra/postgres
-	@echo "Deploying PostgreSQL to $(ENV_NAME) cluster in namespace $(NAMESPACE)..."
+	@echo "Deploying PostgreSQL to $(NAMESPACE)..."
 	@helm upgrade --install postgres ./apps/infra/postgres \
 		-f "$(VALUES_FILE)" \
 		--namespace "$(NAMESPACE)" \
@@ -119,50 +121,46 @@ postgres-deploy: _check_env ## Deploy PostgreSQL to the specified environment. E
 		--wait
 
 .PHONY: postgres-status
-postgres-status: _check_env ## Show PostgreSQL release and resource status. ENV_NAME=(local-dev|qa)
-	@echo "Status for environment: $(ENV_NAME) (Namespace: $(NAMESPACE))"
-	@echo "Getting Helm release status (helm status postgres)..."
+postgres-status: _context_namespace_check ## Show PostgreSQL release/resource status (auto-detects env)
+	@echo "Status for namespace: $(NAMESPACE)"
 	@helm status postgres --namespace "$(NAMESPACE)" || true
-	@echo "\nKubernetes Resources (kubectl get pods,svc,pvc)..."
+	@echo "\nKubernetes Resources:"
 	@kubectl get pods,svc,pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
 
 .PHONY: postgres-remove
-postgres-remove: _check_env ## Uninstall PostgreSQL Helm release from an environment. ENV_NAME=(local-dev|qa)
+postgres-remove: _context_namespace_check ## Uninstall PostgreSQL Helm release (auto-detects env)
 	@echo "Uninstalling Helm release 'postgres' from namespace '$(NAMESPACE)'..."
 	@helm uninstall postgres --namespace "$(NAMESPACE)" || true
 	@echo "\nRemaining PVCs in namespace '$(NAMESPACE)' (if any):"
 	@kubectl get pvc -n "$(NAMESPACE)" 2>/dev/null || true
 
 .PHONY: postgres-connect
-postgres-connect: _check_env ## Connect to the PostgreSQL primary instance using an interactive psql shell. ENV_NAME=(local-dev|qa)
-	@echo "Connecting to PostgreSQL in namespace '$(NAMESPACE)'..."
+postgres-connect: _context_namespace_check ## Connect via psql to primary instance (auto-detects env)
 	@PG_PASSWORD=$$(kubectl get secret --namespace "$(NAMESPACE)" postgres-postgresql -o jsonpath="{.data.postgres-password}" | base64 -d); \
 	if [ -z "$$PG_PASSWORD" ]; then \
-		echo "ERROR: Could not retrieve PostgreSQL password from secret 'postgres-postgresql'."; \
+		echo "ERROR: Could not retrieve password."; \
 		exit 1; \
 	fi; \
 	kubectl run postgres-client --rm --tty -i --restart='Never' --namespace "$(NAMESPACE)" \
 		--image docker.io/bitnami/postgresql:latest \
 		--env="PGPASSWORD=$$PG_PASSWORD" \
-		--command -- psql --host postgres-primary -U postgres -d insurance_hub_$(ENV_NAME)
+		--command -- psql --host postgres-primary -U postgres -d insurance_hub_$(NAMESPACE)
 
 .PHONY: postgres-backup
-postgres-backup: _check_env ## Create a logical backup of the PostgreSQL database. ENV_NAME=(local-dev|qa)
-	@echo "Backing up PostgreSQL database from namespace '$(NAMESPACE)'..."
+postgres-backup: _context_namespace_check ## Create a logical backup of the PostgreSQL database (auto-detects env)
 	@mkdir -p "$(BACKUP_DIR)"
 	@BACKUP_FILE="$(BACKUP_DIR)/dump-$$(date +%Y-%m-%d_%H-%M-%S).sql"; \
 	echo "Saving backup to $$BACKUP_FILE"; \
 	kubectl exec -n "$(NAMESPACE)" postgres-primary-0 -- pg_dumpall -U postgres > $$BACKUP_FILE
 
 .PHONY: postgres-restore
-postgres-restore: _check_env ## Restore a PostgreSQL database from a backup file. Pass file with FILE=path/to/dump.sql ENV_NAME=(local-dev|qa)
+postgres-restore: _context_namespace_check ## Restore from backup. Pass FILE=path/to/dump.sql
 	@if [ -z "$(FILE)" ]; then \
-		echo "ERROR: FILE is required. Use 'make postgres-restore FILE=<path-to-backup>.sql ENV_NAME=...'"; \
+		echo "ERROR: FILE is required. Use 'make postgres-restore FILE=<path-to-backup>.sql'"; \
 		exit 1; \
 	fi
 	@if [ ! -f "$(FILE)" ]; then \
 		echo "ERROR: Backup file not found at $(FILE)"; \
 		exit 1; \
 	fi
-	@echo "Restoring PostgreSQL database in namespace '$(NAMESPACE)' from file $(FILE)..."
 	@cat "$(FILE)" | kubectl exec -i -n "$(NAMESPACE)" postgres-primary-0 -- psql -U postgres
