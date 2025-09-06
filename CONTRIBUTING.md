@@ -263,8 +263,8 @@ recommendations ensures automation is consistent, maintainable, and easy to exte
       ```
 12. Prefix Helper Targets with an Underscore
 
-- All helper or internal-use targets (not intended to be called directly by users, but used by other
-  targets) must be prefixed with an underscore (`_`), e.g. `_prepare`, `_cleanup`.
-- This convention makes the Makefile easier to read and maintain, and distinguishes between public 
-  (user-facing) and private (internal helper) targets.
-- Document the purpose of helper targets in comments as with any other target.
+    - All helper or internal-use targets (not intended to be called directly by users, but used by other
+      targets) must be prefixed with an underscore (`_`), e.g. `_prepare`, `_cleanup`.
+    - This convention makes the Makefile easier to read and maintain, and distinguishes between public
+      (user-facing) and private (internal helper) targets.
+    - Document the purpose of helper targets in comments as with any other target.
