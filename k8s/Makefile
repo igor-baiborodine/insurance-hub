@@ -83,19 +83,22 @@ prerequisites-install-all: kubectl-install kubectx-install kubens-install helm-i
 # Namespace is auto-detected from the current kubectl context.
 ################################################################################
 
-# Helper to determine namespace based on current kubectl context.
-NAMESPACE := $(shell \
-	ctx="$$(kubectl config current-context 2>/dev/null)"; \
-	if [ "$$ctx" = "qa-insurance-hub" ]; then \
-		echo "qa-data"; \
-	elif [ "$$ctx" = "kind-local-dev-insurance-hub" ]; then \
-		echo "local-dev"; \
-	else \
-		echo "INVALID"; \
-	fi)
+# Helper to determine environment name and namespace based on current kubectl context.
+CTX := $(shell kubectl config current-context 2>/dev/null)
 
-VALUES_FILE = env/$(NAMESPACE)/postgres-values.yaml
-BACKUP_DIR = backups/$(NAMESPACE)
+ifeq ($(CTX), qa-insurance-hub)
+	ENV_NAME := qa
+	NAMESPACE := qa-data
+else ifeq ($(CTX), kind-local-dev-insurance-hub)
+	ENV_NAME := local-dev
+	NAMESPACE := local-dev
+else
+	ENV_NAME := INVALID
+	NAMESPACE := INVALID
+endif
+
+VALUES_FILE = env/$(ENV_NAME)/postgres-values.yaml
+BACKUP_DIR = backups/$(ENV_NAME)
 
 .PHONY: _context_namespace_check
 _context_namespace_check:
@@ -119,6 +122,18 @@ postgres-deploy: _context_namespace_check ## Deploy PostgreSQL to cluster contex
 		--namespace "$(NAMESPACE)" \
 		--create-namespace \
 		--wait
+
+.PHONY: postgres-create-secret
+postgres-create-secret: _context_namespace_check ## Create/update PostgreSQL password secret. Usage: make postgres-create-secret PGPASSWORD=your_password
+	@if [ -z "$(PGPASSWORD)" ]; then \
+		echo "ERROR: PGPASSWORD argument is required. Usage: make postgres-create-secret PGPASSWORD=your_password"; \
+		exit 1; \
+	fi
+	@kubectl create secret generic custom-postgres-secret \
+		--namespace "$(NAMESPACE)" \
+		--from-literal=postgres-password="$(PGPASSWORD)" \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@echo "Secret 'custom-postgres-secret' successfully created/updated in namespace $(NAMESPACE)."
 
 .PHONY: postgres-status
 postgres-status: _context_namespace_check ## Show PostgreSQL release/resource status (auto-detects env)

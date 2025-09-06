@@ -1,4 +1,4 @@
-# Values for Bitnami PostgreSQL chart tailored for QA on local multi-node K3s (LXD VMs)
+# Values for Bitnami PostgreSQL chart tailored for QA on local multi-node K3s with 3 LXD VMs
 # Although QA is local, it emulates production-like topology with replication.
 
 # Use replication for QA to validate HA patterns on multi-node
@@ -19,7 +19,7 @@ primary:
 
 # Enable a single read replica for QA testing
 readReplicas:
-  replicaCount: 1
+  replicaCount: 2
   resources:
     requests:
       memory: "256Mi"
