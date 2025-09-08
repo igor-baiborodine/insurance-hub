@@ -1,40 +1,42 @@
-# Values for Bitnami PostgreSQL chart tailored for QA on local multi-node K3s with 3 LXD VMs
+# Values for Bitnami PostgreSQL wrapper chart tailored for QA on local multi-node K3s with 3 LXD VMs.
 # Although QA is local, it emulates production-like topology with replication.
+postgresql:
+  # Use replication for QA to validate HA patterns on multi-node
+  architecture: replication
 
-# Use replication for QA to validate HA patterns on multi-node
-architecture: replication
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: "local-path"  # K3s local-path provisioner
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "500m"
+      limits:
+        memory: "1Gi"
+        cpu: "1000m"
 
-primary:
-  persistence:
+  # Enable 2 read replicas for QA testing
+  readReplicas:
+    replicaCount: 2
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "250m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+
+  auth:
+    # Use the secret created by the 'postgres-create-secret' Makefile target.
+    existingSecret: "qa-postgres-secret"
+    # Explicitly define the key within that secret.
+    secretKeys:
+      postgresPasswordKey: "postgres-password"
+
+  # Enable metrics and ServiceMonitor for QA clusters with Prometheus installed
+  metrics:
     enabled: true
-    size: 10Gi
-    storageClass: "local-path"  # K3s local-path provisioner
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "500m"
-    limits:
-      memory: "1Gi"
-      cpu: "1000m"
-
-# Enable a single read replica for QA testing
-readReplicas:
-  replicaCount: 2
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "250m"
-    limits:
-      memory: "512Mi"
-      cpu: "500m"
-
-# Basic auth values (replace via secrets/CI for real usage)
-auth:
-  postgresPassword: "qa-secure-password"
-  database: "insurance_hub_qa"
-
-# Enable metrics and ServiceMonitor for QA clusters with Prometheus installed
-metrics:
-  enabled: true
-  serviceMonitor:
-    enabled: true
+    serviceMonitor:
+      enabled: true

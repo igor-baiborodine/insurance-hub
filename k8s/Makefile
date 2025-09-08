@@ -17,8 +17,8 @@ kubeconfig-clear: ## Empty the ~/.kube/config file
 ################################################################################
 # Kubernetes prerequisites
 ################################################################################
-.PHONY: kubectl-install
-kubectl-install: ## Install latest kubectl on Ubuntu
+.PHONY: install-kubectl
+install-kubectl: ## Install latest kubectl on Ubuntu
 	@KUBECTL_VERSION=$$(curl -L -s https://dl.k8s.io/release/stable.txt); \
 	if [ -z "$$KUBECTL_VERSION" ]; then \
 	  echo "Failed to fetch latest kubectl version!"; \
@@ -30,16 +30,16 @@ kubectl-install: ## Install latest kubectl on Ubuntu
 	sudo mv kubectl /usr/local/bin/kubectl; \
 	kubectl version --client
 
-.PHONY: kind-install
-kind-install: ## Install latest Kind on Ubuntu
+.PHONY: install-kind
+install-kind: ## Install latest Kind on Ubuntu
 	curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
 	chmod +x ./kind
 	echo "Moving kind binary to /usr/local/bin (you may be prompted for your password)..."
 	sudo mv ./kind /usr/local/bin/kind
 	kind --version
 
-.PHONY: helm-install
-helm-install: ## Install latest Helm on Ubuntu
+.PHONY: install-helm
+install-helm: ## Install latest Helm on Ubuntu
 	@echo "Installing Helm..."
 	@curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
 	@chmod 700 get_helm.sh
@@ -47,8 +47,8 @@ helm-install: ## Install latest Helm on Ubuntu
 	@rm -f get_helm.sh
 	@echo "Helm installed."
 
-.PHONY: lxd-install
-lxd-install: ## Install LXD on Ubuntu
+.PHONY: install-lxd
+install-lxd: ## Install LXD on Ubuntu
 	@if ! command -v lxd >/dev/null 2>&1; then \
 		sudo snap install lxd; \
 		sudo usermod -aG lxd $${SUDO_USER:-$$USER}; \
@@ -59,24 +59,24 @@ lxd-install: ## Install LXD on Ubuntu
 		echo "LXD is already installed."; \
 	fi
 
-.PHONY: kubectx-install
-kubectx-install: ## Install latest kubectx on Ubuntu
+.PHONY: install-kubectx
+install-kubectx: ## Install latest kubectx on Ubuntu
 	@echo "Installing kubectx..."
 	@curl -LO https://github.com/ahmetb/kubectx/releases/latest/download/kubectx
 	@chmod +x kubectx
 	@sudo mv kubectx /usr/local/bin/kubectx
 	@echo "kubectx installed at /usr/local/bin/kubectx"
 
-.PHONY: kubens-install
-kubens-install: ## Install latest kubens on Ubuntu
+.PHONY: install-kubens
+install-kubens: ## Install latest kubens on Ubuntu
 	@echo "Installing kubens..."
 	@curl -LO https://github.com/ahmetb/kubectx/releases/latest/download/kubens
 	@chmod +x kubens
 	@sudo mv kubens /usr/local/bin/kubens
 	@echo "kubens installed at /usr/local/bin/kubens"
 
-.PHONY: prerequisites-install-all
-prerequisites-install-all: kubectl-install kubectx-install kubens-install helm-install lxd-install ## Install all k8s prerequisites
+.PHONY: install-all
+install-all: install-kubectl install-kubectx install-kubens install-helm install-lxd ## Install all k8s prerequisites
 
 ################################################################################
 # PostgreSQL Deployment
@@ -108,6 +108,7 @@ _context_namespace_check:
 		exit 1; \
 	else \
 		echo "Using namespace: $(NAMESPACE) (kubectl context: $$CUR_CTX)"; \
+		echo "Using values file: $(VALUES_FILE)"; \
 	fi
 
 .PHONY: postgres-deploy
@@ -116,24 +117,24 @@ postgres-deploy: _context_namespace_check ## Deploy PostgreSQL to cluster contex
 	@helm lint ./apps/infra/postgres -f "$(VALUES_FILE)" --namespace "$(NAMESPACE)"
 	@echo "Updating Helm dependencies..."
 	@helm dependency update ./apps/infra/postgres
-	@echo "Deploying PostgreSQL to $(NAMESPACE)..."
+	@echo "Deploying PostgreSQL with explicit secret configuration..."
 	@helm upgrade --install postgres ./apps/infra/postgres \
 		-f "$(VALUES_FILE)" \
 		--namespace "$(NAMESPACE)" \
 		--create-namespace \
 		--wait
 
-.PHONY: postgres-create-secret
-postgres-create-secret: _context_namespace_check ## Create/update PostgreSQL password secret. Usage: make postgres-create-secret PGPASSWORD=your_password
-	@if [ -z "$(PGPASSWORD)" ]; then \
-		echo "ERROR: PGPASSWORD argument is required. Usage: make postgres-create-secret PGPASSWORD=your_password"; \
+.PHONY: postgres-create-secret-qa
+postgres-create-secret-qa: _context_namespace_check ## Create/update PostgreSQL password secret in QA. Usage: make postgres-create-secret-qa POSTGRES_PASSWORD=your_password
+	@if [ -z "$(POSTGRES_PASSWORD)" ]; then \
+		echo "ERROR: POSTGRES_PASSWORD argument is required. Usage: make postgres-create-secret-qa POSTGRES_PASSWORD=your_password"; \
 		exit 1; \
 	fi
-	@kubectl create secret generic custom-postgres-secret \
-		--namespace "$(NAMESPACE)" \
-		--from-literal=postgres-password="$(PGPASSWORD)" \
+	@kubectl create secret generic qa-postgres-secret \
+		--namespace qa-data \
+		--from-literal=postgres-password="$(POSTGRES_PASSWORD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "Secret 'custom-postgres-secret' successfully created/updated in namespace $(NAMESPACE)."
+	@echo "Secret 'qa-postgres-secret' successfully created/updated in namespace qa-data."
 
 .PHONY: postgres-status
 postgres-status: _context_namespace_check ## Show PostgreSQL release/resource status (auto-detects env)
@@ -142,40 +143,13 @@ postgres-status: _context_namespace_check ## Show PostgreSQL release/resource st
 	@echo "\nKubernetes Resources:"
 	@kubectl get pods,svc,pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
 
-.PHONY: postgres-remove
-postgres-remove: _context_namespace_check ## Uninstall PostgreSQL Helm release (auto-detects env)
+.PHONY: postgres-uninstall
+postgres-uninstall: _context_namespace_check ## Uninstall PostgreSQL Helm release (chart only, auto-detects env)
 	@echo "Uninstalling Helm release 'postgres' from namespace '$(NAMESPACE)'..."
 	@helm uninstall postgres --namespace "$(NAMESPACE)" || true
-	@echo "\nRemaining PVCs in namespace '$(NAMESPACE)' (if any):"
-	@kubectl get pvc -n "$(NAMESPACE)" 2>/dev/null || true
 
-.PHONY: postgres-connect
-postgres-connect: _context_namespace_check ## Connect via psql to primary instance (auto-detects env)
-	@PG_PASSWORD=$$(kubectl get secret --namespace "$(NAMESPACE)" postgres-postgresql -o jsonpath="{.data.postgres-password}" | base64 -d); \
-	if [ -z "$$PG_PASSWORD" ]; then \
-		echo "ERROR: Could not retrieve password."; \
-		exit 1; \
-	fi; \
-	kubectl run postgres-client --rm --tty -i --restart='Never' --namespace "$(NAMESPACE)" \
-		--image docker.io/bitnami/postgresql:latest \
-		--env="PGPASSWORD=$$PG_PASSWORD" \
-		--command -- psql --host postgres-primary -U postgres -d insurance_hub_$(NAMESPACE)
-
-.PHONY: postgres-backup
-postgres-backup: _context_namespace_check ## Create a logical backup of the PostgreSQL database (auto-detects env)
-	@mkdir -p "$(BACKUP_DIR)"
-	@BACKUP_FILE="$(BACKUP_DIR)/dump-$$(date +%Y-%m-%d_%H-%M-%S).sql"; \
-	echo "Saving backup to $$BACKUP_FILE"; \
-	kubectl exec -n "$(NAMESPACE)" postgres-primary-0 -- pg_dumpall -U postgres > $$BACKUP_FILE
-
-.PHONY: postgres-restore
-postgres-restore: _context_namespace_check ## Restore from backup. Pass FILE=path/to/dump.sql
-	@if [ -z "$(FILE)" ]; then \
-		echo "ERROR: FILE is required. Use 'make postgres-restore FILE=<path-to-backup>.sql'"; \
-		exit 1; \
-	fi
-	@if [ ! -f "$(FILE)" ]; then \
-		echo "ERROR: Backup file not found at $(FILE)"; \
-		exit 1; \
-	fi
-	@cat "$(FILE)" | kubectl exec -i -n "$(NAMESPACE)" postgres-primary-0 -- psql -U postgres
+.PHONY: postgres-purge
+postgres-purge: postgres-uninstall ## Uninstall chart AND permanently remove related secrets and PVCs (auto-detects env)
+	@echo "\nDeleting PostgreSQL-related secrets and PVCs in namespace '$(NAMESPACE)'..."
+	@kubectl delete secret -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
+	@kubectl delete pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
