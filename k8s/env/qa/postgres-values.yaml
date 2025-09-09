@@ -34,6 +34,10 @@ postgresql:
     # Explicitly define the key within that secret.
     secretKeys:
       postgresPasswordKey: "postgres-password"
+    # Although this is a production-like environment, using the default 'postgres'
+    # database is acceptable for this project's QA purposes. This value is required
+    # for the metrics exporter to connect to a database.
+    database: "postgres"
 
   # Enable metrics and ServiceMonitor for QA clusters with Prometheus installed
   metrics:
