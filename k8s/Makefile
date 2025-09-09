@@ -174,12 +174,10 @@ _prometheus-operator-crds-install: ## (Internal) Installs only the CRDs for Prom
 	@echo "Fetching Prometheus Operator chart to install CRDs..."
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
-	@# Create a predictable temporary directory for the chart files
+	@echo "Creating temporary directory and fetching Prometheus chart version $(CHART_VERSION_PROMETHEUS_STACK)..."
 	@mkdir -p ./prometheus-chart-tmp
-	@# Fetch and explicitly untar into our temporary directory
 	@helm fetch prometheus-community/kube-prometheus-stack --version $(CHART_VERSION_PROMETHEUS_STACK) --untar --untardir ./prometheus-chart-tmp
 	@echo "Applying CRDs from explicit path... (This may take a moment)"
-	@# Apply CRDs using the corrected, deeply nested path
 	@kubectl apply --server-side -f ./prometheus-chart-tmp/kube-prometheus-stack/charts/crds/crds
 	@echo "Cleaning up temporary chart files..."
 	@rm -rf ./prometheus-chart-tmp
@@ -201,3 +199,9 @@ prometheus-operator-install: _prometheus-operator-crds-install ## Install Promet
 		--skip-crds \
 		--wait \
 		--timeout 15m
+
+.PHONY: prometheus-ui
+prometheus-ui: ## Access the Prometheus UI via port-forward
+	@echo "Forwarding Prometheus UI to http://localhost:9090"
+	@echo "Press Ctrl+C to stop."
+	@kubectl port-forward svc/prometheus-prometheus-operator-kube-p-prometheus 9090:9090 --namespace qa-monitoring
