@@ -163,8 +163,8 @@ postgres-purge: postgres-uninstall ## Uninstall chart AND permanently remove rel
 # Version 77.5.0 was identified from previous pod logs.
 CHART_VERSION_PROMETHEUS_STACK := 77.5.0
 
-.PHONY: prometheus-operator-crds-install
-prometheus-operator-crds-install: ## (Internal) Installs only the CRDs for Prometheus Operator.
+.PHONY: _prometheus-operator-crds-install
+_prometheus-operator-crds-install:
 	@CUR_CTX=$$(kubectl config current-context); \
 	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
 		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
@@ -173,14 +173,16 @@ prometheus-operator-crds-install: ## (Internal) Installs only the CRDs for Prome
 	@echo "Fetching Prometheus Operator chart to install CRDs..."
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
-	@helm fetch prometheus-community/kube-prometheus-stack --version $(CHART_VERSION_PROMETHEUS_STACK) --untar
+	@helm fetch prometheus-community/kube-prometheus-stack --version $(CHART_VERSION_PROMETHEUS_STACK)
+	@tar -zxvf kube-prometheus-stack-$(CHART_VERSION_PROMETHEUS_STACK).tgz > /dev/null
 	@echo "Applying CRDs... (This may take a moment)"
 	@kubectl apply -f kube-prometheus-stack/crds
 	@echo "Cleaning up fetched chart files..."
 	@rm -rf kube-prometheus-stack
+	@rm -f kube-prometheus-stack-$(CHART_VERSION_PROMETHEUS_STACK).tgz
 
 .PHONY: prometheus-operator-install
-prometheus-operator-install: prometheus-operator-crds-install ## Install Prometheus Operator with custom low-resource values in QA
+prometheus-operator-install: _prometheus-operator-crds-install ## Install Prometheus Operator with custom low-resource values in QA
 	@CUR_CTX=$$(kubectl config current-context); \
 	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
 		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
