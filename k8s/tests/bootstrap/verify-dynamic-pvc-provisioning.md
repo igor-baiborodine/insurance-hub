@@ -54,7 +54,7 @@ that dynamic provisioning worked! You can also see the dynamically created PV by
 
 ### Step 4: Create a Test Pod to Use the PVC
 
-Now, let's use this claim in a pod. Create a file named `test-pod.yaml` with the following content.
+Now, let's use this claim in a pod. Create a file named `test-pvc-pod.yaml` with the following content.
 This pod will mount your PVC into a `/data` directory.
 
 ```yaml

@@ -6,7 +6,7 @@
 help:
 	@echo "Common local dev/qa insurance-hub cluster Makefile targets:"
 	@grep -E '^\S+:.*## ' $(MAKEFILE_LIST) | sort | \
-	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
+	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: kubeconfig-clear
 kubeconfig-clear: ## Empty the ~/.kube/config file
@@ -153,3 +153,46 @@ postgres-purge: postgres-uninstall ## Uninstall chart AND permanently remove rel
 	@echo "\nDeleting PostgreSQL-related secrets and PVCs in namespace '$(NAMESPACE)'..."
 	@kubectl delete secret -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
 	@kubectl delete pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
+
+################################################################################
+# Monitoring Deployment
+# Current context must be "qa-insurance-hub"
+################################################################################
+
+# We specify a chart version to ensure the CRDs we install match the chart itself.
+# Version 77.5.0 was identified from previous pod logs.
+CHART_VERSION_PROMETHEUS_STACK := 77.5.0
+
+.PHONY: prometheus-operator-crds-install
+prometheus-operator-crds-install: ## (Internal) Installs only the CRDs for Prometheus Operator.
+	@CUR_CTX=$$(kubectl config current-context); \
+	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
+		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
+		exit 1; \
+	fi
+	@echo "Fetching Prometheus Operator chart to install CRDs..."
+	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
+	@helm repo update
+	@helm fetch prometheus-community/kube-prometheus-stack --version $(CHART_VERSION_PROMETHEUS_STACK) --untar
+	@echo "Applying CRDs... (This may take a moment)"
+	@kubectl apply -f kube-prometheus-stack/crds
+	@echo "Cleaning up fetched chart files..."
+	@rm -rf kube-prometheus-stack
+
+.PHONY: prometheus-operator-install
+prometheus-operator-install: prometheus-operator-crds-install ## Install Prometheus Operator with custom low-resource values in QA
+	@CUR_CTX=$$(kubectl config current-context); \
+	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
+		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
+		exit 1; \
+	fi
+	@kubectl get namespace qa-monitoring >/dev/null 2>&1 || kubectl create namespace qa-monitoring
+	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
+	@helm repo update
+	@helm upgrade --install prometheus-operator prometheus-community/kube-prometheus-stack \
+		--version $(CHART_VERSION_PROMETHEUS_STACK) \
+		--namespace qa-monitoring \
+		--values ./env/qa/prometheus-values.yaml \
+		--skip-crds \
+		--wait \
+		--timeout 15m
