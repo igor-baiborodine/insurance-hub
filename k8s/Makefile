@@ -124,16 +124,18 @@ postgres-deploy: _context_namespace_check ## Deploy PostgreSQL to cluster contex
 		--create-namespace \
 		--wait
 
-.PHONY: postgres-create-secret-qa
+PHONY: postgres-create-secret-qa
 postgres-create-secret-qa: _context_namespace_check ## Create/update PostgreSQL password secret in QA. Usage: make postgres-create-secret-qa POSTGRES_PASSWORD=your_password
 	@if [ -z "$(POSTGRES_PASSWORD)" ]; then \
 		echo "ERROR: POSTGRES_PASSWORD argument is required. Usage: make postgres-create-secret-qa POSTGRES_PASSWORD=your_password"; \
 		exit 1; \
 	fi
+	@echo "Ensuring namespace 'qa-data' exists..."
+	@kubectl create namespace qa-data --dry-run=client -o yaml | kubectl apply -f -
 	@kubectl create secret generic qa-postgres-secret \
 		--namespace qa-data \
 		--from-literal=postgres-password="$(POSTGRES_PASSWORD)" \
-		--dry-run=client -o yaml | kubectl apply --validate=false --timeout=2m -f -
+		--dry-run=client -o yaml | kubectl apply -f -
 	@echo "Secret 'qa-postgres-secret' successfully created/updated in namespace qa-data."
 
 .PHONY: postgres-status
