@@ -111,8 +111,22 @@ _context_namespace_check:
 		echo "Using values file: $(VALUES_FILE)"; \
 	fi
 
+PHONY: postgres-secret-create-qa
+postgres-secret-create-qa: _context_namespace_check ## Create/update PostgreSQL password secret in QA. Usage: make postgres-secret-create-qa POSTGRES_PASSWORD=your_password
+	@if [ -z "$(POSTGRES_PASSWORD)" ]; then \
+		echo "ERROR: POSTGRES_PASSWORD argument is required. Usage: make postgres-secret-create-qa POSTGRES_PASSWORD=your_password"; \
+		exit 1; \
+	fi
+	@echo "Ensuring namespace 'qa-data' exists..."
+	@kubectl create namespace qa-data --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl create secret generic qa-postgres-secret \
+		--namespace qa-data \
+		--from-literal=postgres-password="$(POSTGRES_PASSWORD)" \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@echo "Secret 'qa-postgres-secret' successfully created/updated in namespace qa-data."
+
 .PHONY: postgres-deploy
-postgres-deploy: _context_namespace_check ## Deploy PostgreSQL to cluster context (auto-detects env)
+postgres-deploy: _context_namespace_check ## Deploy PostgreSQL to cluster context (auto-detects env). QA prerequisite: postgres-secret-create-qa
 	@echo "Linting PostgreSQL Helm chart for $(NAMESPACE)..."
 	@helm lint ./apps/infra/postgres -f "$(VALUES_FILE)" --namespace "$(NAMESPACE)"
 	@echo "Updating Helm dependencies..."
@@ -123,20 +137,6 @@ postgres-deploy: _context_namespace_check ## Deploy PostgreSQL to cluster contex
 		--namespace "$(NAMESPACE)" \
 		--create-namespace \
 		--wait
-
-PHONY: postgres-create-secret-qa
-postgres-create-secret-qa: _context_namespace_check ## Create/update PostgreSQL password secret in QA. Usage: make postgres-create-secret-qa POSTGRES_PASSWORD=your_password
-	@if [ -z "$(POSTGRES_PASSWORD)" ]; then \
-		echo "ERROR: POSTGRES_PASSWORD argument is required. Usage: make postgres-create-secret-qa POSTGRES_PASSWORD=your_password"; \
-		exit 1; \
-	fi
-	@echo "Ensuring namespace 'qa-data' exists..."
-	@kubectl create namespace qa-data --dry-run=client -o yaml | kubectl apply -f -
-	@kubectl create secret generic qa-postgres-secret \
-		--namespace qa-data \
-		--from-literal=postgres-password="$(POSTGRES_PASSWORD)" \
-		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "Secret 'qa-postgres-secret' successfully created/updated in namespace qa-data."
 
 .PHONY: postgres-status
 postgres-status: _context_namespace_check ## Show PostgreSQL release/resource status (auto-detects env)
