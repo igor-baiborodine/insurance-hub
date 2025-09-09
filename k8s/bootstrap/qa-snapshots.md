@@ -8,6 +8,7 @@
 
 ### Current Snapshots
 
-| Name                             | Description                                           |
-|----------------------------------|-------------------------------------------------------|
-| **qa-cluster-create-2025-09-03** | Base cluster image with CoreDNS and storage installed |
+| Name                                       | Description                                           |
+|--------------------------------------------|-------------------------------------------------------|
+| **qa-cluster-create-2025-09-03**           | Base cluster image with CoreDNS and storage installed |
+| **prometheus-operator-install-2025-09-09** | Cluster image with Prometheus operator installed      |

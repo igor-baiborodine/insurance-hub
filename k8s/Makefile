@@ -133,7 +133,7 @@ postgres-create-secret-qa: _context_namespace_check ## Create/update PostgreSQL 
 	@kubectl create secret generic qa-postgres-secret \
 		--namespace qa-data \
 		--from-literal=postgres-password="$(POSTGRES_PASSWORD)" \
-		--dry-run=client -o yaml | kubectl apply -f -
+		--dry-run=client -o yaml | kubectl apply --validate=false -f -
 	@echo "Secret 'qa-postgres-secret' successfully created/updated in namespace qa-data."
 
 .PHONY: postgres-status
@@ -163,7 +163,7 @@ postgres-purge: postgres-uninstall ## Uninstall chart AND permanently remove rel
 CHART_VERSION_PROMETHEUS_STACK := 77.0.2
 
 .PHONY: _prometheus-operator-crds-install
-_prometheus-operator-crds-install: ## (Internal) Installs only the CRDs for Prometheus Operator.
+_prometheus-operator-crds-install:
 	@CUR_CTX=$$(kubectl config current-context); \
 	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
 		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
