@@ -164,7 +164,7 @@ postgres-purge: postgres-uninstall ## Uninstall chart AND permanently remove rel
 CHART_VERSION_PROMETHEUS_STACK := 77.5.0
 
 .PHONY: _prometheus-operator-crds-install
-_prometheus-operator-crds-install:
+_prometheus-operator-crds-install: ## (Internal) Installs only the CRDs for Prometheus Operator.
 	@CUR_CTX=$$(kubectl config current-context); \
 	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
 		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
@@ -173,13 +173,15 @@ _prometheus-operator-crds-install:
 	@echo "Fetching Prometheus Operator chart to install CRDs..."
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
-	@helm fetch prometheus-community/kube-prometheus-stack --version $(CHART_VERSION_PROMETHEUS_STACK)
-	@tar -zxvf kube-prometheus-stack-$(CHART_VERSION_PROMETHEUS_STACK).tgz > /dev/null
-	@echo "Applying CRDs... (This may take a moment)"
-	@kubectl apply -f kube-prometheus-stack/crds
-	@echo "Cleaning up fetched chart files..."
-	@rm -rf kube-prometheus-stack
-	@rm -f kube-prometheus-stack-$(CHART_VERSION_PROMETHEUS_STACK).tgz
+	@# Create a predictable temporary directory for the chart files
+	@mkdir -p ./prometheus-chart-tmp
+	@# Fetch and explicitly untar into temporary directory
+	@helm fetch prometheus-community/kube-prometheus-stack --version $(CHART_VERSION_PROMETHEUS_STACK) --untar --untardir ./prometheus-chart-tmp
+	@echo "Applying CRDs from explicit path... (This may take a moment)"
+	@# Apply CRDs using the full, explicit path
+	@kubectl apply -f ./prometheus-chart-tmp/kube-prometheus-stack/crds
+	@echo "Cleaning up temporary chart files..."
+	@rm -rf ./prometheus-chart-tmp
 
 .PHONY: prometheus-operator-install
 prometheus-operator-install: _prometheus-operator-crds-install ## Install Prometheus Operator with custom low-resource values in QA
