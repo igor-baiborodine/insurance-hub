@@ -133,7 +133,7 @@ postgres-create-secret-qa: _context_namespace_check ## Create/update PostgreSQL 
 	@kubectl create secret generic qa-postgres-secret \
 		--namespace qa-data \
 		--from-literal=postgres-password="$(POSTGRES_PASSWORD)" \
-		--dry-run=client -o yaml | kubectl apply --validate=false -f -
+		--dry-run=client -o yaml | kubectl apply --validate=false --timeout=2m -f -
 	@echo "Secret 'qa-postgres-secret' successfully created/updated in namespace qa-data."
 
 .PHONY: postgres-status
