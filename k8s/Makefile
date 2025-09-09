@@ -180,7 +180,7 @@ _prometheus-operator-crds-install: ## (Internal) Installs only the CRDs for Prom
 	@helm fetch prometheus-community/kube-prometheus-stack --version $(CHART_VERSION_PROMETHEUS_STACK) --untar --untardir ./prometheus-chart-tmp
 	@echo "Applying CRDs from explicit path... (This may take a moment)"
 	@# Apply CRDs using the corrected, deeply nested path
-	@kubectl apply -f ./prometheus-chart-tmp/kube-prometheus-stack/charts/crds/crds
+	@kubectl apply --server-side -f ./prometheus-chart-tmp/kube-prometheus-stack/charts/crds/crds
 	@echo "Cleaning up temporary chart files..."
 	@rm -rf ./prometheus-chart-tmp
 
