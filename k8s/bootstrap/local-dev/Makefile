@@ -1,5 +1,5 @@
 ################################################################################
-# Child Makefile for local dev insurance-hub k8s cluster
+# Child Makefile for local dev insurance-hub K8s cluster
 ################################################################################
 
 ################################################################################
@@ -8,11 +8,7 @@
 KIND_CONFIG_FILE   			:= local-dev-insurance-hub.yaml
 LOCAL_DEV_CLUSTER_NAME  	:= local-dev-insurance-hub
 
-.PHONY: help
-help:
-	@echo "Local dev insurance-hub cluster Makefile targets:"
-	@grep -E '^\S+:.*## ' $(MAKEFILE_LIST) | sort | \
-	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
 
 .PHONY: local-dev-create
 local-dev-create: ## Create and start the local dev Kind cluster (single-node)

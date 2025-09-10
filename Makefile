@@ -31,8 +31,8 @@ all: help
 .PHONY: help
 help:
 	@echo "Available Make targets:"
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | sort | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-25s\033[0m %s\n", $$1, $$2}'
+	@grep -h -E '^\S+:.*## ' $(MAKEFILE_LIST) | sort | \
+		awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 ################################################################################
 # Go Targets
@@ -45,7 +45,6 @@ build: ## Compile the Go application
 ################################################################################
 # Placeholder Targets (extend as project grows)
 ################################################################################
-
 .PHONY: lint
 lint: ## Run linters (placeholder)
 	@echo ">> Running linters... (not yet implemented)"
@@ -53,7 +52,3 @@ lint: ## Run linters (placeholder)
 .PHONY: docker-build
 docker-build: ## Build Docker image (placeholder)
 	@echo ">> Building Docker image... (not yet implemented)"
-
-.PHONY: k8s-deploy
-k8s-deploy: ## Deploy to local Kubernetes cluster (placeholder)
-	@echo ">> Deploying to local cluster... (not yet implemented)"

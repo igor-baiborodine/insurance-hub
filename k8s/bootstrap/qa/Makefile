@@ -1,5 +1,5 @@
 ################################################################################
-# Child Makefile for QA insurance-hub k8s cluster
+# Child Makefile for QA insurance-hub K8s cluster
 ################################################################################
 
 ################################################################################
@@ -12,12 +12,10 @@ QA_CLUSTER_NAME  	:= qa-insurance-hub
 QA_KUBECTL_CONTEXT	:= $(QA_CLUSTER_NAME)
 SNAPSHOT_NAME 		?= baseline
 
-.PHONY: help
-help:
-	@echo "QA insurance-hub cluster Makefile targets:"
-	@grep -E '^\S+:.*## ' $(MAKEFILE_LIST) | sort | \
-	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-32s\033[0m %s\n", $$1, $$2}'
-
+################################################################################
+# QA Cluster Management Targets
+# Targets for creating and managing the K3s cluster configuration
+################################################################################
 .PHONY: qa-create
 qa-create: qa-nodes-create qa-cluster-create qa-cluster-pull-kubeconfig ## Create and configure QA cluster
 
@@ -29,6 +27,10 @@ qa-cluster-create: ## Set up multi-node Rancher K3s QA cluster
 qa-cluster-pull-kubeconfig: ## Pull kubeconfig from QA cluster
 	bash ./scripts/qa-cluster-pull-kubeconfig.sh
 
+################################################################################
+# QA Nodes Management Targets 
+# Targets for creating and managing the LXD virtual machines for QA cluster
+################################################################################
 .PHONY: qa-nodes-create
 qa-nodes-create: ## Create three LXD VMs (master and two workers) for QA cluster
 	bash ./scripts/qa-nodes-create.sh

@@ -1,15 +1,9 @@
 ################################################################################
-# Child Makefile common for local dev and qa insurance-hub cluster
+# Child Makefile common for local dev and QA insurance-hub cluster
 ################################################################################
 
-.PHONY: help
-help:
-	@echo "Common local dev/qa insurance-hub cluster Makefile targets:"
-	@grep -E '^\S+:.*## ' $(MAKEFILE_LIST) | sort | \
-	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-30s\033[0m %s\n", $$1, $$2}'
-
-.PHONY: kubeconfig-clear
-kubeconfig-clear: ## Empty the ~/.kube/config file
+.PHONY: k8s-kubeconfig-clear
+k8s-kubeconfig-clear: ## Empty the ~/.kube/config file
 	@echo "Clearing the ~/.kube/config file..."
 	@> ~/.kube/config
 	@echo "~/.kube/config file has been emptied."
@@ -17,8 +11,8 @@ kubeconfig-clear: ## Empty the ~/.kube/config file
 ################################################################################
 # Kubernetes prerequisites
 ################################################################################
-.PHONY: install-kubectl
-install-kubectl: ## Install latest kubectl on Ubuntu
+.PHONY: k8s-prereq-kubectl
+k8s-prereq-kubectl: ## Install latest kubectl on Ubuntu
 	@KUBECTL_VERSION=$$(curl -L -s https://dl.k8s.io/release/stable.txt); \
 	if [ -z "$$KUBECTL_VERSION" ]; then \
 	  echo "Failed to fetch latest kubectl version!"; \
@@ -30,16 +24,16 @@ install-kubectl: ## Install latest kubectl on Ubuntu
 	sudo mv kubectl /usr/local/bin/kubectl; \
 	kubectl version --client
 
-.PHONY: install-kind
-install-kind: ## Install latest Kind on Ubuntu
+.PHONY: k8s-prereq-kind
+k8s-prereq-kind: ## Install latest Kind on Ubuntu
 	curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
 	chmod +x ./kind
 	echo "Moving kind binary to /usr/local/bin (you may be prompted for your password)..."
 	sudo mv ./kind /usr/local/bin/kind
 	kind --version
 
-.PHONY: install-helm
-install-helm: ## Install latest Helm on Ubuntu
+.PHONY: k8s-prereq-helm
+k8s-prereq-helm: ## Install latest Helm on Ubuntu
 	@echo "Installing Helm..."
 	@curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
 	@chmod 700 get_helm.sh
@@ -47,8 +41,8 @@ install-helm: ## Install latest Helm on Ubuntu
 	@rm -f get_helm.sh
 	@echo "Helm installed."
 
-.PHONY: install-lxd
-install-lxd: ## Install LXD on Ubuntu
+.PHONY: k8s-prereq-lxd
+k8s-prereq-lxd: ## Install LXD on Ubuntu
 	@if ! command -v lxd >/dev/null 2>&1; then \
 		sudo snap install lxd; \
 		sudo usermod -aG lxd $${SUDO_USER:-$$USER}; \
@@ -59,28 +53,29 @@ install-lxd: ## Install LXD on Ubuntu
 		echo "LXD is already installed."; \
 	fi
 
-.PHONY: install-kubectx
-install-kubectx: ## Install latest kubectx on Ubuntu
+.PHONY: k8s-prereq-kubectx
+k8s-prereq-kubectx: ## Install latest kubectx on Ubuntu
 	@echo "Installing kubectx..."
 	@curl -LO https://github.com/ahmetb/kubectx/releases/latest/download/kubectx
 	@chmod +x kubectx
 	@sudo mv kubectx /usr/local/bin/kubectx
 	@echo "kubectx installed at /usr/local/bin/kubectx"
 
-.PHONY: install-kubens
-install-kubens: ## Install latest kubens on Ubuntu
+.PHONY: k8s-prereq-kubens
+k8s-prereq-kubens: ## Install latest kubens on Ubuntu
 	@echo "Installing kubens..."
 	@curl -LO https://github.com/ahmetb/kubectx/releases/latest/download/kubens
 	@chmod +x kubens
 	@sudo mv kubens /usr/local/bin/kubens
 	@echo "kubens installed at /usr/local/bin/kubens"
 
-.PHONY: install-all
-install-all: install-kubectl install-kubectx install-kubens install-helm install-lxd ## Install all k8s prerequisites
+.PHONY: k8s-prereq-all
+k8s-prereq-all: k8s-prereq-kubectl k8s-prereq-kubectx k8s-prereq-kubens k8s-prereq-helm k8s-prereq-lxd ## Install all k8s prerequisites
 
 ################################################################################
-# PostgreSQL Deployment
-# Namespace is auto-detected from the current kubectl context.
+# PostgreSQL Deployment Targets
+# Targets for deploying and managing PostgreSQL in local dev and QA cluster
+# Namespace is auto-detected from the current kubectl context
 ################################################################################
 
 # Helper to determine environment name and namespace based on current kubectl context.
@@ -158,11 +153,12 @@ postgres-purge: postgres-uninstall ## Uninstall chart AND permanently remove rel
 	@kubectl delete pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
 
 ################################################################################
-# Monitoring Deployment
+# Monitoring Deployment Targets
+# Targes for deploying and managing monitoring infrastructure
 # Current context must be "qa-insurance-hub"
 ################################################################################
 
-# We specify a chart version to ensure the CRDs we install match the chart itself.
+# Specify a chart version to ensure the CRDs installed match the chart itself.
 CHART_VERSION_PROMETHEUS_STACK := 77.0.2
 
 .PHONY: _prometheus-operator-crds-install
