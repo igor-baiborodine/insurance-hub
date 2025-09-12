@@ -160,4 +160,4 @@ Log of current snapshots on your local machine.
 | **qa-nodes-create-2025-09-10**             | Base cluster image without K8s installed           |
 | **qa-cluster-create-2025-09-10**           | Cluster image with K8s, DNS, and storage installed |
 | **prometheus-operator-install-2025-09-10** | Cluster image with Prometheus operator installed   |
-| **postgres-deploy-2025-09-10**             | Cluster image with PostgreSQL installed            |
+| **postgres-deploy-2025-09-12**             | Cluster image with PostgreSQL installed            |
