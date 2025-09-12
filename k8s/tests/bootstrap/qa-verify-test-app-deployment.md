@@ -1,13 +1,11 @@
 ## Verify Test Application Deployment
 
-Here is a complete, step-by-step guide to deploy and test your application on the QA cluster.
-
 ### Step 1: Deploy the Application
 
 First, apply the manifest file to your cluster using `kubectl`. This will create both the
 `Deployment` (which manages the pod) and the `Service` (which exposes the pod to network traffic).
 
-```shell script
+```shell
 kubectl apply -f k8s/test/hello-world.yaml
 ```
 
@@ -15,14 +13,14 @@ kubectl apply -f k8s/test/hello-world.yaml
 
 Next, check that the deployment was successful and that the pod is running correctly.
 
-```shell script
+```shell
 kubectl get deployment hello-world
 ```
 
 Look for `1/1` in the `READY` column, which indicates the pod is running. You can also check the pod
 directly:
 
-```shell script
+```shell
 kubectl get pods -l app=hello-world
 ```
 
@@ -32,7 +30,7 @@ You should see a pod with the `STATUS` of `Running`.
 
 Now, check that the service has been created and is configured correctly.
 
-```shell script
+```shell
 kubectl get service hello-world
 ```
 
@@ -50,13 +48,13 @@ You can get its IP from the `lxc list` command. Let's assume the IP is `10.43.24
 
 Now, use `curl` from your **host machine's terminal** to send a request to the service:
 
-```shell script
+```shell
 curl http://<IP-of-any-cluster-node>:30080
 ```
 
 For example:
 
-```shell script
+```shell
 curl http://10.43.248.193:30080
 ```
 
@@ -77,7 +75,7 @@ correctly routing traffic, and your cluster's networking is functioning end-to-e
 Once you are done with your test, you can remove the application from your cluster by deleting the
 resources you created. The simplest way is to use the same manifest file:
 
-```shell script
+```shell
 kubectl delete -f k8s/test/hello-world.yaml
 ```
 

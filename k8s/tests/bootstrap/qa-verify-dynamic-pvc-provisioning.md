@@ -1,14 +1,13 @@
 ## Verify Dynamic PVC Provisioning
 
-Here is a simple, step-by-step process to test it using `kubectl`. We will create a
-PersistentVolumeClaim (PVC), see if a PersistentVolume (PV) is automatically created for it, and
-then attach it to a pod to confirm we can read and write data.
+Create a PersistentVolumeClaim (PVC), see if a PersistentVolume (PV) is automatically created for
+it, and then attach it to a pod to confirm we can read and write data.
 
 ### Step 1: Check the Available `StorageClass`
 
 First, let's confirm the `StorageClass` that `k3s` provides. You should see one named `local-path`.
 
-```shell script
+```shell
 kubectl get storageclass
 ```
 
@@ -35,7 +34,7 @@ spec:
 
 Apply this manifest to your cluster:
 
-```shell script
+```shell
 kubectl apply -f test-pvc.yaml
 ```
 
@@ -44,7 +43,7 @@ kubectl apply -f test-pvc.yaml
 Check the status of your PVC. The `local-path` provisioner should see this request and automatically
 create a PersistentVolume to satisfy it.
 
-```shell script
+```shell
 kubectl get pvc test-pvc
 ```
 
@@ -54,7 +53,7 @@ that dynamic provisioning worked! You can also see the dynamically created PV by
 
 ### Step 4: Create a Test Pod to Use the PVC
 
-Now, let's use this claim in a pod. Create a file named `test-pod.yaml` with the following content.
+Now, let's use this claim in a pod. Create a file named `test-pvc-pod.yaml` with the following content.
 This pod will mount your PVC into a `/data` directory.
 
 ```yaml
@@ -79,7 +78,7 @@ spec:
 
 Apply this manifest to create the pod:
 
-```shell script
+```shell
 kubectl apply -f test-pvc-pod.yaml
 ```
 
@@ -88,14 +87,14 @@ kubectl apply -f test-pvc-pod.yaml
 Wait for the `test-pvc-pod` to be in the `Running` state (`kubectl get pods`). Once it is running, let's
 write a file to the mounted volume from outside the pod:
 
-```shell script
+```shell
 kubectl exec test-pvc-pod -- touch /data/hello_from_pvc.txt
 ```
 
 Now, let's list the contents of the directory inside the pod to prove the file was created
 successfully:
 
-```shell script
+```shell
 kubectl exec test-pvc-pod -- ls /data
 ```
 
@@ -106,7 +105,7 @@ data to the dynamically provisioned volume.
 
 Once you are done, you can remove the test resources from your cluster:
 
-```shell script
+```shell
 kubectl delete pod test-pvc-pod
 kubectl delete pvc test-pvc
 ```

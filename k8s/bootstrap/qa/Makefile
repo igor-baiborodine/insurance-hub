@@ -1,5 +1,5 @@
 ################################################################################
-# Child Makefile for QA insurance-hub k8s cluster
+# Child Makefile for QA insurance-hub K8s cluster
 ################################################################################
 
 ################################################################################
@@ -12,12 +12,10 @@ QA_CLUSTER_NAME  	:= qa-insurance-hub
 QA_KUBECTL_CONTEXT	:= $(QA_CLUSTER_NAME)
 SNAPSHOT_NAME 		?= baseline
 
-.PHONY: help
-help:
-	@echo "QA insurance-hub cluster Makefile targets:"
-	@grep -E '^\S+:.*## ' $(MAKEFILE_LIST) | sort | \
-	  awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-32s\033[0m %s\n", $$1, $$2}'
-
+################################################################################
+# QA Cluster Management Targets
+# Targets for creating and managing the K3s cluster configuration
+################################################################################
 .PHONY: qa-create
 qa-create: qa-nodes-create qa-cluster-create qa-cluster-pull-kubeconfig ## Create and configure QA cluster
 
@@ -29,46 +27,10 @@ qa-cluster-create: ## Set up multi-node Rancher K3s QA cluster
 qa-cluster-pull-kubeconfig: ## Pull kubeconfig from QA cluster
 	bash ./scripts/qa-cluster-pull-kubeconfig.sh
 
-.PHONY: qa-cluster-add-all-addons
-qa-cluster-add-all-addons: qa-cluster-add-dns qa-cluster-add-storage qa-cluster-add-ingress ## Add core K3s components (DNS, storage, ingress) to QA cluster
-
-.PHONY: qa-cluster-add-dns
-qa-cluster-add-dns: ## Add CoreDNS to QA cluster
-	@echo "Adding CoreDNS in k3s..."
-	@lxc exec qa-master -- bash -c '\
-		for i in {1..24}; do \
-			READY=$$(k3s kubectl -n kube-system get deploy coredns -o jsonpath="{.status.readyReplicas}" 2>/dev/null || echo 0); \
-			[ "$$READY" != "" ] && [ $$READY -ge 1 ] && echo "CoreDNS is Ready." && exit 0; \
-			echo "Waiting for CoreDNS to be Ready..."; sleep 5; \
-		done; \
-		echo "CoreDNS not Ready after timeout." >&2; exit 1'
-
-.PHONY: qa-cluster-add-storage
-qa-cluster-add-storage: ## Add local-path storage to QA cluster
-	@echo "Adding local-path storage in k3s..."
-	@lxc exec qa-master -- bash -c '\
-		for i in {1..24}; do \
-			k3s kubectl get storageclass local-path >/dev/null 2>&1 && break; \
-			echo "Waiting for storageclass/local-path..."; sleep 5; \
-		done; \
-		for i in {1..24}; do \
-			READY=$$(k3s kubectl -n kube-system get deploy local-path-provisioner -o jsonpath="{.status.readyReplicas}" 2>/dev/null || echo 0); \
-			[ "$$READY" != "" ] && [ $$READY -ge 1 ] && echo "local-path-provisioner is Ready." && exit 0; \
-			echo "Waiting for local-path-provisioner to be Ready..."; sleep 5; \
-		done; \
-		echo "local-path-provisioner not Ready after timeout." >&2; exit 1'
-
-.PHONY: qa-cluster-add-ingress
-qa-cluster-add-ingress: ## Add Traefik ingress controller to QA cluster
-	@echo "Adding Traefik ingress controller in k3s..."
-	@lxc exec qa-master -- bash -c '\
-		for i in {1..24}; do \
-			READY=$$(k3s kubectl -n kube-system get deploy traefik -o jsonpath="{.status.readyReplicas}" 2>/dev/null || echo 0); \
-			[ "$$READY" != "" ] && [ $$READY -ge 1 ] && echo "Traefik is Ready." && exit 0; \
-			echo "Waiting for Traefik to be Ready..."; sleep 5; \
-		done; \
-		echo "Traefik not Ready after timeout." >&2; exit 1'
-
+################################################################################
+# QA Nodes Management Targets 
+# Targets for creating and managing the LXD virtual machines for QA cluster
+################################################################################
 .PHONY: qa-nodes-create
 qa-nodes-create: ## Create three LXD VMs (master and two workers) for QA cluster
 	bash ./scripts/qa-nodes-create.sh
@@ -100,7 +62,7 @@ qa-nodes-resume: ## Resume (start) all LXD QA VMs
 	@lxc list
 
 .PHONY: qa-nodes-snapshot
-qa-nodes-snapshot: ## Pause all VMs, delete existing snapshot, snapshot VMs, and resume
+qa-nodes-snapshot: ## Pause all VMs, delete existing snapshot, snapshot VMs, and resume. Usage: make qa-nodes-snapshot SNAPSHOT_NAME=your_new_snapshot
 	bash ./scripts/qa-nodes-snapshot.sh $(SNAPSHOT_NAME)
 
 .PHONY: qa-nodes-snapshots-list
@@ -117,7 +79,7 @@ qa-nodes-snapshots-list: ## List all snapshots for QA cluster nodes
 	done
 
 .PHONY: qa-nodes-restore
-qa-nodes-restore: ## Restore all QA cluster VMs from specified snapshot and start them
+qa-nodes-restore: ## Restore all QA cluster VMs from specified snapshot and start them. Usage: make qa-nodes-restore SNAPSHOT_NAME=your_existing_snapshot
 	@echo "Restoring all QA cluster VMs from '$(SNAPSHOT_NAME)' snapshot..."
 	@for NODE in $(NODES_ALL); do \
 		if lxc info $$NODE &>/dev/null; then \

@@ -9,7 +9,7 @@ NODES_ALL="$NODES_MASTER $NODES_WORKER"
 for NODE in $NODES_ALL; do
     if ! lxc info "$NODE" &>/dev/null; then
         echo "Launching VM $NODE..."
-        lxc launch ubuntu:24.04 --vm "$NODE"
+        lxc launch ubuntu:24.04 --vm "$NODE" -c limits.cpu=2 -c limits.memory=2GiB
         echo "Waiting for LXD VM agent in $NODE..."
         until lxc exec "$NODE" -- true &>/dev/null; do sleep 5; done
         echo "Ensuring network works inside $NODE..."
