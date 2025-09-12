@@ -1,0 +1,25 @@
+# Values for Bitnami PostgreSQL wrapper chart tailored for local Kind (single-node) cluster.
+# Both environments are considered local; this one is minimal for developer laptops.
+mongodb:
+  # Use standalone for local-dev
+  architecture: standalone
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: "standard"
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  replicaSet:
+    enabled: false
+  auth:
+    enabled: true
+    rootPassword: "mongodbpassword"
+  metrics:
+    enabled: false
+  serviceMonitor:
+    enabled: false

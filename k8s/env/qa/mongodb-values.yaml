@@ -1,0 +1,25 @@
+# Values for Bitnami PostgreSQL wrapper chart tailored for QA on local multi-node K3s with 3 LXD VMs.
+# Both environments are considered local; this one is minimal for developer laptops.
+mongodb:
+  # Use standalone for QA
+  architecture: standalone
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: "standard"
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+  replicaSet:
+    enabled: false
+  auth:
+    enabled: true
+    rootPassword: "mongodbpassword"
+  metrics:
+    enabled: false
+  serviceMonitor:
+    enabled: false
