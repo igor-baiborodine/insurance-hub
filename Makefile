@@ -7,8 +7,6 @@
 # Includes - domain-specific Makefiles
 ################################################################################
 -include k8s/Makefile
--include k8s/bootstrap/local-dev/Makefile
--include k8s/bootstrap/qa/Makefile
 
 ################################################################################
 # Variables
@@ -37,18 +35,7 @@ help:
 ################################################################################
 # Go Targets
 ################################################################################
-.PHONY: build
-build: ## Compile the Go application
+.PHONY: go-build
+go-build: ## Compile the Go application
 	@echo ">> Building $(APP_NAME) (Go $(GO_VERSION))"
 	@go build -o $(BIN_DIR)/$(APP_NAME) ./...
-
-################################################################################
-# Placeholder Targets (extend as project grows)
-################################################################################
-.PHONY: lint
-lint: ## Run linters (placeholder)
-	@echo ">> Running linters... (not yet implemented)"
-
-.PHONY: docker-build
-docker-build: ## Build Docker image (placeholder)
-	@echo ">> Building Docker image... (not yet implemented)"

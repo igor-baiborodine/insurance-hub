@@ -8,8 +8,6 @@
 KIND_CONFIG_FILE   			:= local-dev-insurance-hub.yaml
 LOCAL_DEV_CLUSTER_NAME  	:= local-dev-insurance-hub
 
-
-
 .PHONY: local-dev-create
 local-dev-create: ## Create and start the local dev Kind cluster (single-node)
 	@mkdir -p /tmp/data/local-dev-storage

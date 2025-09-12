@@ -2,6 +2,12 @@
 # Child Makefile common for local dev and QA insurance-hub cluster
 ################################################################################
 
+################################################################################
+# Includes - subdomain-specific Makefiles
+################################################################################
+-include k8s/bootstrap/local-dev/Makefile
+-include k8s/bootstrap/qa/Makefile
+
 .PHONY: k8s-kubeconfig-clear
 k8s-kubeconfig-clear: ## Empty the ~/.kube/config file
 	@echo "Clearing the ~/.kube/config file..."

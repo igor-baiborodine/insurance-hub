@@ -17,9 +17,10 @@ postgresql:
         memory: "1Gi"
         cpu: "1000m"
 
-  # Enable 2 read replicas for QA testing
+  # Enable 1 read replica for QA testing
+  # Might be increased to 2 depending on the available resources in the cluster.
   readReplicas:
-    replicaCount: 2
+    replicaCount: 1
     resources:
       requests:
         memory: "256Mi"
