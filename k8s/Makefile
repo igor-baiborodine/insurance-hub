@@ -79,12 +79,9 @@ k8s-prereq-kubens: ## Install latest kubens on Ubuntu
 k8s-prereq-all: k8s-prereq-kubectl k8s-prereq-kubectx k8s-prereq-kubens k8s-prereq-helm k8s-prereq-lxd ## Install all k8s prerequisites
 
 ################################################################################
-# PostgreSQL Deployment Targets
-# Targets for deploying and managing PostgreSQL in local dev and QA cluster
-# Namespace is auto-detected from the current kubectl context
+# Internal Helper Targets
 ################################################################################
 
-# Helper to determine environment name and namespace based on current kubectl context.
 CTX := $(shell kubectl config current-context 2>/dev/null)
 
 ifeq ($(CTX), qa-insurance-hub)
@@ -98,9 +95,10 @@ else
 	NAMESPACE := INVALID
 endif
 
-VALUES_FILE = env/$(ENV_NAME)/postgres-values.yaml
+VALUES_FILE_PREFIX = env/$(ENV_NAME)
 BACKUP_DIR = backups/$(ENV_NAME)
 
+# Helper to determine environment name and namespace based on current kubectl context.
 .PHONY: _context_namespace_check
 _context_namespace_check:
 	@CUR_CTX=$$(kubectl config current-context 2>/dev/null); \
@@ -109,9 +107,14 @@ _context_namespace_check:
 		exit 1; \
 	else \
 		echo "Using namespace: $(NAMESPACE) (kubectl context: $$CUR_CTX)"; \
-		echo "Using values file: $(VALUES_FILE)"; \
+		echo "Using values file prefix: $(VALUES_FILE_PREFIX)"; \
 	fi
 
+################################################################################
+# PostgreSQL Deployment Targets
+# Targets for deploying and managing PostgreSQL in local dev and QA cluster
+# Namespace is auto-detected from the current kubectl context
+################################################################################
 PHONY: postgres-secret-create-qa
 postgres-secret-create-qa: _context_namespace_check ## Create/update PostgreSQL password secret in QA. Usage: make postgres-secret-create-qa POSTGRES_PASSWORD=your_password
 	@if [ -z "$(POSTGRES_PASSWORD)" ]; then \
@@ -130,12 +133,12 @@ postgres-secret-create-qa: _context_namespace_check ## Create/update PostgreSQL 
 .PHONY: postgres-deploy
 postgres-deploy: _context_namespace_check ## Deploy PostgreSQL to cluster context (auto-detects env). QA prerequisite: postgres-secret-create-qa
 	@echo "Linting PostgreSQL Helm chart for $(NAMESPACE)..."
-	@helm lint ./apps/infra/postgres -f "$(VALUES_FILE)" --namespace "$(NAMESPACE)"
+	@helm lint ./apps/infra/postgres -f "$(VALUES_FILE_PREFIX)"/postgres-values.yaml --namespace "$(NAMESPACE)"
 	@echo "Updating Helm dependencies..."
 	@helm dependency update ./apps/infra/postgres
 	@echo "Deploying PostgreSQL with explicit secret configuration..."
 	@helm upgrade --install postgres ./apps/infra/postgres \
-		-f "$(VALUES_FILE)" \
+		-f "$(VALUES_FILE_PREFIX)"/postgres-values.yaml \
 		--namespace "$(NAMESPACE)" \
 		--create-namespace \
 		--wait
