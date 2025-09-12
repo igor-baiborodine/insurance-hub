@@ -161,6 +161,42 @@ postgres-purge: postgres-uninstall ## Uninstall chart AND permanently remove rel
 	@kubectl delete pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
 
 ################################################################################
+# MongoDB Deployment Targets
+# Targets for deploying and managing MongoDB in local dev and QA cluster
+# Namespace and environment auto-detected from current kubectl context
+################################################################################
+.PHONY: mongodb-deploy
+mongodb-deploy: _context_namespace_check ## Deploy MongoDB to current cluster context (auto-detect env). Prerequisite: mongodb-secret-create-qa for QA
+	@echo "Linting MongoDB Helm chart for $(NAMESPACE)..."
+	@helm lint ./apps/infra/mongodb -f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml --namespace "$(NAMESPACE)"
+	@echo "Updating Helm dependencies..."
+	@helm dependency update ./apps/infra/mongodb
+	@echo "Deploying MongoDB Helm chart..."
+	@helm upgrade --install mongodb ./apps/infra/mongodb \
+		-f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml \
+		--namespace "$(NAMESPACE)" \
+		--create-namespace \
+		--wait
+
+.PHONY: mongodb-status
+mongodb-status: _context_namespace_check ## Show MongoDB release/resource status (auto-detect env)
+	@echo "Status for namespace: $(NAMESPACE)"
+	@helm status mongodb --namespace "$(NAMESPACE)" || true
+	@echo "\nKubernetes Resources:"
+	@kubectl get pods,svc,pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=mongodb || true
+
+.PHONY: mongodb-uninstall
+mongodb-uninstall: _context_namespace_check ## Uninstall MongoDB Helm release (chart only, auto-detect env)
+	@echo "Uninstalling Helm release 'mongodb' from namespace $(NAMESPACE)..."
+	@helm uninstall mongodb --namespace "$(NAMESPACE)" || true
+
+.PHONY: mongodb-purge
+mongodb-purge: mongodb-uninstall ## Uninstall chart AND permanently remove related secrets and PVCs (auto-detect env)
+	@echo "\nDeleting MongoDB-related secrets and PVCs in namespace $(NAMESPACE)..."
+	@kubectl delete secret -n "$(NAMESPACE)" -l app.kubernetes.io/instance=mongodb || true
+	@kubectl delete pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=mongodb || true
+
+################################################################################
 # Monitoring Deployment Targets
 # Targes for deploying and managing monitoring infrastructure
 # Current context must be "qa-insurance-hub"
