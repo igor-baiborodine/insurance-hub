@@ -96,7 +96,6 @@ else
 endif
 
 VALUES_FILE_PREFIX = env/$(ENV_NAME)
-BACKUP_DIR = backups/$(ENV_NAME)
 
 # Helper to determine environment name and namespace based on current kubectl context.
 .PHONY: _context_namespace_check
