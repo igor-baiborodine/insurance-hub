@@ -8,8 +8,8 @@
 -include k8s/bootstrap/local-dev/Makefile
 -include k8s/bootstrap/qa/Makefile
 
-.PHONY: k8s-kubeconfig-clear
-k8s-kubeconfig-clear: ## Empty the ~/.kube/config file
+.PHONY: kubeconfig-clear
+kubeconfig-clear: ## Empty the ~/.kube/config file
 	@echo "Clearing the ~/.kube/config file..."
 	@> ~/.kube/config
 	@echo "~/.kube/config file has been emptied."
@@ -17,8 +17,8 @@ k8s-kubeconfig-clear: ## Empty the ~/.kube/config file
 ################################################################################
 # Kubernetes prerequisites
 ################################################################################
-.PHONY: k8s-prereq-kubectl
-k8s-prereq-kubectl: ## Install latest kubectl on Ubuntu
+.PHONY: prereq-k8s-kubectl
+prereq-k8s-kubectl: ## Install latest kubectl on Ubuntu
 	@KUBECTL_VERSION=$$(curl -L -s https://dl.k8s.io/release/stable.txt); \
 	if [ -z "$$KUBECTL_VERSION" ]; then \
 	  echo "Failed to fetch latest kubectl version!"; \
@@ -30,16 +30,16 @@ k8s-prereq-kubectl: ## Install latest kubectl on Ubuntu
 	sudo mv kubectl /usr/local/bin/kubectl; \
 	kubectl version --client
 
-.PHONY: k8s-prereq-kind
-k8s-prereq-kind: ## Install latest Kind on Ubuntu
+.PHONY: prereq-k8s-kind
+prereq-k8s-kind: ## Install latest Kind on Ubuntu
 	curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
 	chmod +x ./kind
 	echo "Moving kind binary to /usr/local/bin (you may be prompted for your password)..."
 	sudo mv ./kind /usr/local/bin/kind
 	kind --version
 
-.PHONY: k8s-prereq-helm
-k8s-prereq-helm: ## Install latest Helm on Ubuntu
+.PHONY: prereq-k8s-helm
+prereq-k8s-helm: ## Install latest Helm on Ubuntu
 	@echo "Installing Helm..."
 	@curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
 	@chmod 700 get_helm.sh
@@ -47,8 +47,8 @@ k8s-prereq-helm: ## Install latest Helm on Ubuntu
 	@rm -f get_helm.sh
 	@echo "Helm installed."
 
-.PHONY: k8s-prereq-lxd
-k8s-prereq-lxd: ## Install LXD on Ubuntu
+.PHONY: prereq-k8s-lxd
+prereq-k8s-lxd: ## Install LXD on Ubuntu
 	@if ! command -v lxd >/dev/null 2>&1; then \
 		sudo snap install lxd; \
 		sudo usermod -aG lxd $${SUDO_USER:-$$USER}; \
@@ -59,24 +59,46 @@ k8s-prereq-lxd: ## Install LXD on Ubuntu
 		echo "LXD is already installed."; \
 	fi
 
-.PHONY: k8s-prereq-kubectx
-k8s-prereq-kubectx: ## Install latest kubectx on Ubuntu
+.PHONY: prereq-k8s-kubectx
+prereq-k8s-kubectx: ## Install latest kubectx on Ubuntu
 	@echo "Installing kubectx..."
 	@curl -LO https://github.com/ahmetb/kubectx/releases/latest/download/kubectx
 	@chmod +x kubectx
 	@sudo mv kubectx /usr/local/bin/kubectx
 	@echo "kubectx installed at /usr/local/bin/kubectx"
 
-.PHONY: k8s-prereq-kubens
-k8s-prereq-kubens: ## Install latest kubens on Ubuntu
+.PHONY: prereq-k8s-kubens
+prereq-k8s-kubens: ## Install latest kubens on Ubuntu
 	@echo "Installing kubens..."
 	@curl -LO https://github.com/ahmetb/kubectx/releases/latest/download/kubens
 	@chmod +x kubens
 	@sudo mv kubens /usr/local/bin/kubens
 	@echo "kubens installed at /usr/local/bin/kubens"
 
-.PHONY: k8s-prereq-all
-k8s-prereq-all: k8s-prereq-kubectl k8s-prereq-kubectx k8s-prereq-kubens k8s-prereq-helm k8s-prereq-lxd ## Install all k8s prerequisites
+.PHONY: prereq-k8s-all
+prereq-k8s-all: k8s-prereq-kubectl k8s-prereq-kubectx k8s-prereq-kubens k8s-prereq-helm k8s-prereq-lxd k8s-prereq-kind ## Install all Kubernetes prerequisites
+
+.PHONY: prereq-db-psql
+prereq-db-psql: ## Install latest psql (PostgreSQL CLI) on Ubuntu
+	@echo "Installing PostgreSQL client (psql)..."
+	@sudo apt-get update
+	@sudo apt-get install -y postgresql-client
+	@psql --version
+
+.PHONY: prereq-db-mongosh
+prereq-db-mongosh: ## Install latest mongosh (MongoDB Shell) on Ubuntu
+	@echo "Installing MongoDB Shell (mongosh)..."
+	@curl -fsSL https://pgp.mongodb.com/server-6.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-6.0.gpg
+	@echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+	@sudo apt-get update
+	@sudo apt-get install -y mongodb-mongosh
+	@mongosh --version
+
+.PHONY: prereq-db-all
+prereq-db-all: prereq-db-psql prereq-db-mongosh ## Install all database CLI tool prerequisites
+
+.PHONY: prereq-all
+prereq-all: prereq-k8s-all prereq-db-all ## Install all prerequisites
 
 ################################################################################
 # Internal Helper Targets
