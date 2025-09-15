@@ -5,9 +5,8 @@
 **Table of Contents**
 
 - [Create Cluster](#create-cluster)
-    - [Prerequisites](#prerequisites)
-    - [Create Kind Cluster](#create-kind-cluster)
-    - [Install `local-dev` Resources](#install-local-dev-resources)
+  - [Create Kind Cluster](#create-kind-cluster)
+  - [Install `local-dev` Resources](#install-local-dev-resources)
 - [Suspend and Resume Cluster](#suspend-and-resume-cluster)
 - [Delete Cluster](#delete-cluster)
 
