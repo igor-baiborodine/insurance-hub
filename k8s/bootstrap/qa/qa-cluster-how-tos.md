@@ -2,7 +2,7 @@
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+**Table of Contents**
 
 - [Create Cluster](#create-cluster)
   - [Create LXD Virtual Machines](#create-lxd-virtual-machines)
@@ -17,7 +17,7 @@
 ## Create Cluster
 
 Use the following sequence of [Make](https://www.gnu.org/software/make/) targets and shell commands
-to create a new cluster.
+to create and manage the QA cluster based on [K3s](https://www.rancher.com/products/k3s).
 
 ### Create LXD Virtual Machines
 
@@ -82,6 +82,9 @@ to create a new cluster.
     qa-worker2   Ready    <none>                 7h41m   v1.33.4+k3s1
     ```
 - `qa-nodes-snapshot SNAPSHOT_NAME=qa-cluster-create-<iso-date>`
+
+> Please note that after this step the `kubectl` current context will be automatically set to
+`qa-insurance-hub`.
 
 ### Install qa-data Resources
 
