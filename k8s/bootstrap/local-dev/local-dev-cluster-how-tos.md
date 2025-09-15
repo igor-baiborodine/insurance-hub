@@ -56,27 +56,29 @@ Once the cluster is running, deploy the necessary data stores into the `local-de
 ## Suspend and Resume Cluster
 
 You can suspend the cluster to save resources and resume it later.
+- `cd k8s/bootstrap/local-dev`
 
 1. **Suspend the cluster**:
-    - `make local-dev-suspend`
-    - `docker ps -a`
-        ```bash
-        CONTAINER ID   IMAGE                  COMMAND                  CREATED          STATUS                       PORTS                       NAMES
-        xxxxxxxxxxxx   kindest/node:v1.29.2   "/usr/local/bin/entry…"   10 minutes ago   Exited (137) 2 seconds ago                               local-dev-insurance-hub-control-plane
-        ```
+- `make local-dev-suspend`
+    ```bash
+    Suspending Kind cluster 'local-dev-insurance-hub'...
+    local-dev-insurance-hub-control-plane
+    Kind cluster 'local-dev-insurance-hub' suspended.
+    ```
 
 2. **Resume the cluster**:
-    - `make local-dev-resume`
-    - `kubectl get nodes`
-        ```bash
-        NAME                                STATUS   ROLES           AGE    VERSION
-        local-dev-insurance-hub-control-plane   Ready    control-plane   12m    v1.29.2
-        ```
+- `make local-dev-resume`
+- `kubectl get nodes`
+    ```bash
+    NAME                                    STATUS   ROLES           AGE   VERSION
+    local-dev-insurance-hub-control-plane   Ready    control-plane   92m   v1.33.2
+    ```
 
 ## Delete Cluster
 
 This command will permanently delete the cluster and its associated storage.
 
+- `cd k8s/bootstrap/local-dev` 
 - `make local-dev-delete`
 - `kind get clusters`
     ```bash
