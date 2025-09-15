@@ -3,22 +3,28 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-### Table of Contents
-
 - [Getting Started](#getting-started)
-    - [Prerequisites](#prerequisites)
-    - [Clone Repository](#clone-repository)
+  - [Prerequisites](#prerequisites)
+  - [Clone Repository](#clone-repository)
+  - [Install Dependencies](#install-dependencies)
 - [Style Guides](#style-guides)
-    - [Go](#go)
-    - [Branch Names](#branch-names)
-    - [Commit Messages](#commit-messages)
-    - [Makefile](#makefile)
+  - [Go](#go)
+  - [Branch Names](#branch-names)
+  - [Commit Messages](#commit-messages)
+  - [Makefile](#makefile)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ## Getting Started
 
+Please note that the following instructions were tested on **Ubuntu 24.04.2 LTS** only. Please feel
+free to implement the same steps for other operating systems, like **macOS** or **Windows**. Your pull
+requests are welcome and will be reviewed and merged as soon as possible.
+
 ### Prerequisites
+
+Please note that the Kubernetes cluster dependencies can be installed by using the Make
+`k8s/Makefile prereq-all` target after cloning the repository.
 
 * **Git** `>=2.43.0`,
   see [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
@@ -31,6 +37,9 @@
   see [Install Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation).
 * **LXD** `>=4.22`, see [Install LXD](https://linuxcontainers.org/lxd/getting-started-cli/).
 * **Helm** `>=3.14.0`, see [Install Helm](https://helm.sh/docs/intro/install/).
+* **PostgreSQL** `>=15.0`, see [Install PostgreSQL](https://www.postgresql.org/download/).
+* **MongoDB Shell** `>=2.1.1`,
+  see [Install MongoDB Shell](https://www.mongodb.com/docs/mongodb-shell/install/).
 
 ### Clone Repository
 
@@ -38,6 +47,12 @@
 git clone git@github.com:your-org/insurance-hub.git
 cd insurance-hub
 ```
+
+### Install Dependencies
+
+1. Kubernetes Cluster Dependencies
+- `cd k8s`
+- `make k8s-prereq-all`
 
 ## Style Guides
 
