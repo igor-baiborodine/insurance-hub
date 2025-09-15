@@ -5,9 +5,10 @@
 **Table of Contents**
 
 - [Create Cluster](#create-cluster)
+  - [Prerequisites](#prerequisites)
   - [Create LXD Virtual Machines](#create-lxd-virtual-machines)
   - [Create Multi-node Rancher's K3s Cluster](#create-multi-node-ranchers-k3s-cluster)
-  - [Install qa-data Resources](#install-qa-data-resources)
+  - [Deploy qa-data Resources](#deploy-qa-data-resources)
 - [Monitor Cluster Load](#monitor-cluster-load)
 - [Suspend and Resume Cluster](#suspend-and-resume-cluster)
 - [Current Snapshots](#current-snapshots)
@@ -18,6 +19,45 @@
 
 Use the following sequence of [Make](https://www.gnu.org/software/make/) targets and shell commands
 to create and manage the QA cluster based on [K3s](https://www.rancher.com/products/k3s).
+
+### Prerequisites
+
+- Make sure that the host uses the `nftables` instead of `iptables-legacy`:
+    ```bash
+    sudo update-alternatives --config iptables
+    There are 2 choices for the alternative iptables (providing /usr/sbin/iptables).
+    
+      Selection    Path                       Priority   Status
+    ------------------------------------------------------------
+      0            /usr/sbin/iptables-nft      20        auto mode
+      1            /usr/sbin/iptables-legacy   10        manual mode
+    * 2            /usr/sbin/iptables-nft      20        manual mode
+    ```
+
+- `iptables` rules should be modified to allow your host's firewall to let forward traffic by
+  default.
+    ```bash
+    sudo iptables -P FORWARD ACCEPT
+    ``` 
+
+- Make changes to `iptables` rules permanent:
+    ```bash
+    sudo apt-get update
+    sudo apt-get install iptables-persistent
+    sudo netfilter-persistent save
+    ```
+
+- Restart key services:
+    ```bash
+    sudo systemctl restart docker
+    sudo snap restart lxd
+    ```
+
+- Validate if the rule was applied:
+    ```bash
+    sudo iptables -L FORWARD -v -n | grep "Chain FORWARD"
+    Chain FORWARD (policy ACCEPT 340 packets, 335K bytes)
+    ```
 
 ### Create LXD Virtual Machines
 
@@ -86,7 +126,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 > Please note that after this step the `kubectl` current context will be automatically set to
 `qa-insurance-hub`.
 
-### Install qa-data Resources
+### Deploy qa-data Resources
 
 - `cd ../..`, change current directory to `k8s`
 - `prometheus-operator-install`, Prometheus operator is a prerequisite for installing PostgreSQL
@@ -110,7 +150,8 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     postgres-postgresql-read-0      2/2     Running   0          3m20s
     ```
 - `make postgres-status`
-- `make -C k8s/bootstrap/qa qa-nodes-snapshot qa-nodes-snapshot SNAPSHOT_NAME=postgres-deploy-<iso-date>`
+-
+`make -C k8s/bootstrap/qa qa-nodes-snapshot qa-nodes-snapshot SNAPSHOT_NAME=postgres-deploy-<iso-date>`
 
 ## Monitor Cluster Load
 
@@ -125,6 +166,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 - `cd k8s/bootstrap/qa`
 
 1. Suspend the cluster:
+
 - `make qa-nodes-suspend`
 - `lxc list`
     ```bash
