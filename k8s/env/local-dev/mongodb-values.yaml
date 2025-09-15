@@ -18,7 +18,7 @@ mongodb:
     enabled: false
   auth:
     enabled: true
-    rootPassword: "mongodbpassword"
+    rootPassword: "mongodb"
   metrics:
     enabled: false
   serviceMonitor:
