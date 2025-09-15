@@ -18,7 +18,7 @@ kubeconfig-clear: ## Empty the ~/.kube/config file
 # Kubernetes prerequisites
 ################################################################################
 .PHONY: prereq-k8s-kubectl
-prereq-k8s-kubectl: ## Install latest kubectl on Ubuntu
+prereq-k8s-kubectl: ## Install latest kubectl on Ubuntu 24.04.2 LTS
 	@KUBECTL_VERSION=$$(curl -L -s https://dl.k8s.io/release/stable.txt); \
 	if [ -z "$$KUBECTL_VERSION" ]; then \
 	  echo "Failed to fetch latest kubectl version!"; \
@@ -31,7 +31,7 @@ prereq-k8s-kubectl: ## Install latest kubectl on Ubuntu
 	kubectl version --client
 
 .PHONY: prereq-k8s-kind
-prereq-k8s-kind: ## Install latest Kind on Ubuntu
+prereq-k8s-kind: ## Install latest Kind on Ubuntu 24.04.2 LTS
 	curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
 	chmod +x ./kind
 	echo "Moving kind binary to /usr/local/bin (you may be prompted for your password)..."
@@ -39,7 +39,7 @@ prereq-k8s-kind: ## Install latest Kind on Ubuntu
 	kind --version
 
 .PHONY: prereq-k8s-helm
-prereq-k8s-helm: ## Install latest Helm on Ubuntu
+prereq-k8s-helm: ## Install latest Helm on Ubuntu 24.04.2 LTS
 	@echo "Installing Helm..."
 	@curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
 	@chmod 700 get_helm.sh
@@ -48,7 +48,7 @@ prereq-k8s-helm: ## Install latest Helm on Ubuntu
 	@echo "Helm installed."
 
 .PHONY: prereq-k8s-lxd
-prereq-k8s-lxd: ## Install LXD on Ubuntu
+prereq-k8s-lxd: ## Install LXD on Ubuntu 24.04.2 LTS
 	@if ! command -v lxd >/dev/null 2>&1; then \
 		sudo snap install lxd; \
 		sudo usermod -aG lxd $${SUDO_USER:-$$USER}; \
@@ -60,7 +60,7 @@ prereq-k8s-lxd: ## Install LXD on Ubuntu
 	fi
 
 .PHONY: prereq-k8s-kubectx
-prereq-k8s-kubectx: ## Install latest kubectx on Ubuntu
+prereq-k8s-kubectx: ## Install latest kubectx on Ubuntu 24.04.2 LTS
 	@echo "Installing kubectx..."
 	@curl -LO https://github.com/ahmetb/kubectx/releases/latest/download/kubectx
 	@chmod +x kubectx
@@ -68,7 +68,7 @@ prereq-k8s-kubectx: ## Install latest kubectx on Ubuntu
 	@echo "kubectx installed at /usr/local/bin/kubectx"
 
 .PHONY: prereq-k8s-kubens
-prereq-k8s-kubens: ## Install latest kubens on Ubuntu
+prereq-k8s-kubens: ## Install latest kubens on Ubuntu 24.04.2 LTS
 	@echo "Installing kubens..."
 	@curl -LO https://github.com/ahmetb/kubectx/releases/latest/download/kubens
 	@chmod +x kubens
@@ -79,17 +79,19 @@ prereq-k8s-kubens: ## Install latest kubens on Ubuntu
 prereq-k8s-all: k8s-prereq-kubectl k8s-prereq-kubectx k8s-prereq-kubens k8s-prereq-helm k8s-prereq-lxd k8s-prereq-kind ## Install all Kubernetes prerequisites
 
 .PHONY: prereq-db-psql
-prereq-db-psql: ## Install latest psql (PostgreSQL CLI) on Ubuntu
+prereq-db-psql: ## Install latest psql (PostgreSQL CLI) on Ubuntu 24.04.2 LTS
 	@echo "Installing PostgreSQL client (psql)..."
 	@sudo apt-get update
 	@sudo apt-get install -y postgresql-client
 	@psql --version
 
 .PHONY: prereq-db-mongosh
-prereq-db-mongosh: ## Install latest mongosh (MongoDB Shell) on Ubuntu
+prereq-db-mongosh: ## Install latest mongosh (MongoDB Shell) on Ubuntu 24.04.2 LTS
 	@echo "Installing MongoDB Shell (mongosh)..."
-	@curl -fsSL https://pgp.mongodb.com/server-6.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-6.0.gpg
-	@echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+	@sudo apt-get update
+	@sudo apt-get install -y gnupg curl
+	@curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+	@echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
 	@sudo apt-get update
 	@sudo apt-get install -y mongodb-mongosh
 	@mongosh --version
