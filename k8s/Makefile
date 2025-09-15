@@ -190,7 +190,7 @@ postgres-purge: postgres-uninstall ## Uninstall chart AND permanently remove rel
 # Namespace and environment auto-detected from current kubectl context
 ################################################################################
 .PHONY: mongodb-deploy
-mongodb-deploy: _context_namespace_check ## Deploy MongoDB to current cluster context (auto-detect env). Prerequisite: mongodb-secret-create-qa for QA
+mongodb-deploy: _context_namespace_check ## Deploy MongoDB to current cluster context (auto-detect env).
 	@echo "Linting MongoDB Helm chart for $(NAMESPACE)..."
 	@helm lint ./apps/infra/mongodb -f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml --namespace "$(NAMESPACE)"
 	@echo "Updating Helm dependencies..."

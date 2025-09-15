@@ -31,7 +31,7 @@ on [Kind](https://github.com/kubernetes-sigs/kind?tab=readme-ov-file).
 > Please note that after this step the `kubectl` current context will be automatically set to
 `kind-local-dev-insurance-hub`.
 
-### Install `local-dev` Resources
+### Deploy `local-dev` Resources
 
 Once the cluster is running, deploy the necessary data stores into the `local-dev` namespace.
 
