@@ -6,7 +6,7 @@ mongodb:
   persistence:
     enabled: true
     size: 5Gi
-    storageClass: "standard"
+    storageClass: "local-path" # K3s local-path provisioner
   resources:
     requests:
       memory: "512Mi"
@@ -18,7 +18,7 @@ mongodb:
     enabled: false
   auth:
     enabled: true
-    rootPassword: "mongodbpassword"
+    rootPassword: "mongodb"
   metrics:
     enabled: false
   serviceMonitor:
