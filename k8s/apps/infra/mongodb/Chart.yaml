@@ -1,0 +1,11 @@
+apiVersion: v2
+name: mongodb
+description: A wrapper Helm chart around the Bitnami MongoDB chart for deploying a MongoDB database for the insurance-hub application.
+type: application
+version: 0.1.0
+appVersion: "8.0"
+icon: https://www.mongodb.com/assets/images/global/leaf.svg
+dependencies:
+  - name: mongodb
+    version: ">=14.0.0" # Bitnami Helm chart version supporting MongoDB 8.x
+    repository: "https://charts.bitnami.com/bitnami"

@@ -8,7 +8,7 @@ postgresql:
     persistence:
       enabled: true
       size: 2Gi
-      storageClass: "standard"  # Kind's default storage class (often named 'standard')
+      storageClass: "standard"  # Kind's default storage class
     resources:
       requests:
         memory: "256Mi"

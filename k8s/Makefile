@@ -8,8 +8,8 @@
 -include k8s/bootstrap/local-dev/Makefile
 -include k8s/bootstrap/qa/Makefile
 
-.PHONY: k8s-kubeconfig-clear
-k8s-kubeconfig-clear: ## Empty the ~/.kube/config file
+.PHONY: kubeconfig-clear
+kubeconfig-clear: ## Empty the ~/.kube/config file
 	@echo "Clearing the ~/.kube/config file..."
 	@> ~/.kube/config
 	@echo "~/.kube/config file has been emptied."
@@ -17,8 +17,8 @@ k8s-kubeconfig-clear: ## Empty the ~/.kube/config file
 ################################################################################
 # Kubernetes prerequisites
 ################################################################################
-.PHONY: k8s-prereq-kubectl
-k8s-prereq-kubectl: ## Install latest kubectl on Ubuntu
+.PHONY: prereq-k8s-kubectl
+prereq-k8s-kubectl: ## Install latest kubectl on Ubuntu 24.04.2 LTS
 	@KUBECTL_VERSION=$$(curl -L -s https://dl.k8s.io/release/stable.txt); \
 	if [ -z "$$KUBECTL_VERSION" ]; then \
 	  echo "Failed to fetch latest kubectl version!"; \
@@ -30,16 +30,16 @@ k8s-prereq-kubectl: ## Install latest kubectl on Ubuntu
 	sudo mv kubectl /usr/local/bin/kubectl; \
 	kubectl version --client
 
-.PHONY: k8s-prereq-kind
-k8s-prereq-kind: ## Install latest Kind on Ubuntu
+.PHONY: prereq-k8s-kind
+prereq-k8s-kind: ## Install latest Kind on Ubuntu 24.04.2 LTS
 	curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
 	chmod +x ./kind
 	echo "Moving kind binary to /usr/local/bin (you may be prompted for your password)..."
 	sudo mv ./kind /usr/local/bin/kind
 	kind --version
 
-.PHONY: k8s-prereq-helm
-k8s-prereq-helm: ## Install latest Helm on Ubuntu
+.PHONY: prereq-k8s-helm
+prereq-k8s-helm: ## Install latest Helm on Ubuntu 24.04.2 LTS
 	@echo "Installing Helm..."
 	@curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
 	@chmod 700 get_helm.sh
@@ -47,8 +47,8 @@ k8s-prereq-helm: ## Install latest Helm on Ubuntu
 	@rm -f get_helm.sh
 	@echo "Helm installed."
 
-.PHONY: k8s-prereq-lxd
-k8s-prereq-lxd: ## Install LXD on Ubuntu
+.PHONY: prereq-k8s-lxd
+prereq-k8s-lxd: ## Install LXD on Ubuntu 24.04.2 LTS
 	@if ! command -v lxd >/dev/null 2>&1; then \
 		sudo snap install lxd; \
 		sudo usermod -aG lxd $${SUDO_USER:-$$USER}; \
@@ -59,32 +59,53 @@ k8s-prereq-lxd: ## Install LXD on Ubuntu
 		echo "LXD is already installed."; \
 	fi
 
-.PHONY: k8s-prereq-kubectx
-k8s-prereq-kubectx: ## Install latest kubectx on Ubuntu
+.PHONY: prereq-k8s-kubectx
+prereq-k8s-kubectx: ## Install latest kubectx on Ubuntu 24.04.2 LTS
 	@echo "Installing kubectx..."
 	@curl -LO https://github.com/ahmetb/kubectx/releases/latest/download/kubectx
 	@chmod +x kubectx
 	@sudo mv kubectx /usr/local/bin/kubectx
 	@echo "kubectx installed at /usr/local/bin/kubectx"
 
-.PHONY: k8s-prereq-kubens
-k8s-prereq-kubens: ## Install latest kubens on Ubuntu
+.PHONY: prereq-k8s-kubens
+prereq-k8s-kubens: ## Install latest kubens on Ubuntu 24.04.2 LTS
 	@echo "Installing kubens..."
 	@curl -LO https://github.com/ahmetb/kubectx/releases/latest/download/kubens
 	@chmod +x kubens
 	@sudo mv kubens /usr/local/bin/kubens
 	@echo "kubens installed at /usr/local/bin/kubens"
 
-.PHONY: k8s-prereq-all
-k8s-prereq-all: k8s-prereq-kubectl k8s-prereq-kubectx k8s-prereq-kubens k8s-prereq-helm k8s-prereq-lxd ## Install all k8s prerequisites
+.PHONY: prereq-k8s-all
+prereq-k8s-all: k8s-prereq-kubectl k8s-prereq-kubectx k8s-prereq-kubens k8s-prereq-helm k8s-prereq-lxd k8s-prereq-kind ## Install all Kubernetes prerequisites
+
+.PHONY: prereq-db-psql
+prereq-db-psql: ## Install latest psql (PostgreSQL CLI) on Ubuntu 24.04.2 LTS
+	@echo "Installing PostgreSQL client (psql)..."
+	@sudo apt-get update
+	@sudo apt-get install -y postgresql-client
+	@psql --version
+
+.PHONY: prereq-db-mongosh
+prereq-db-mongosh: ## Install latest mongosh (MongoDB Shell) on Ubuntu 24.04.2 LTS
+	@echo "Installing MongoDB Shell (mongosh)..."
+	@sudo apt-get update
+	@sudo apt-get install -y gnupg curl
+	@curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+	@echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+	@sudo apt-get update
+	@sudo apt-get install -y mongodb-mongosh
+	@mongosh --version
+
+.PHONY: prereq-db-all
+prereq-db-all: prereq-db-psql prereq-db-mongosh ## Install all database CLI tool prerequisites
+
+.PHONY: prereq-all
+prereq-all: prereq-k8s-all prereq-db-all ## Install all prerequisites
 
 ################################################################################
-# PostgreSQL Deployment Targets
-# Targets for deploying and managing PostgreSQL in local dev and QA cluster
-# Namespace is auto-detected from the current kubectl context
+# Internal Helper Targets
 ################################################################################
 
-# Helper to determine environment name and namespace based on current kubectl context.
 CTX := $(shell kubectl config current-context 2>/dev/null)
 
 ifeq ($(CTX), qa-insurance-hub)
@@ -98,9 +119,9 @@ else
 	NAMESPACE := INVALID
 endif
 
-VALUES_FILE = env/$(ENV_NAME)/postgres-values.yaml
-BACKUP_DIR = backups/$(ENV_NAME)
+VALUES_FILE_PREFIX = env/$(ENV_NAME)
 
+# Helper to determine environment name and namespace based on current kubectl context.
 .PHONY: _context_namespace_check
 _context_namespace_check:
 	@CUR_CTX=$$(kubectl config current-context 2>/dev/null); \
@@ -109,9 +130,14 @@ _context_namespace_check:
 		exit 1; \
 	else \
 		echo "Using namespace: $(NAMESPACE) (kubectl context: $$CUR_CTX)"; \
-		echo "Using values file: $(VALUES_FILE)"; \
+		echo "Using values file prefix: $(VALUES_FILE_PREFIX)"; \
 	fi
 
+################################################################################
+# PostgreSQL Deployment Targets
+# Targets for deploying and managing PostgreSQL in local dev and QA cluster
+# Namespace is auto-detected from the current kubectl context
+################################################################################
 PHONY: postgres-secret-create-qa
 postgres-secret-create-qa: _context_namespace_check ## Create/update PostgreSQL password secret in QA. Usage: make postgres-secret-create-qa POSTGRES_PASSWORD=your_password
 	@if [ -z "$(POSTGRES_PASSWORD)" ]; then \
@@ -130,12 +156,12 @@ postgres-secret-create-qa: _context_namespace_check ## Create/update PostgreSQL 
 .PHONY: postgres-deploy
 postgres-deploy: _context_namespace_check ## Deploy PostgreSQL to cluster context (auto-detects env). QA prerequisite: postgres-secret-create-qa
 	@echo "Linting PostgreSQL Helm chart for $(NAMESPACE)..."
-	@helm lint ./apps/infra/postgres -f "$(VALUES_FILE)" --namespace "$(NAMESPACE)"
+	@helm lint ./apps/infra/postgres -f "$(VALUES_FILE_PREFIX)"/postgres-values.yaml --namespace "$(NAMESPACE)"
 	@echo "Updating Helm dependencies..."
 	@helm dependency update ./apps/infra/postgres
 	@echo "Deploying PostgreSQL with explicit secret configuration..."
 	@helm upgrade --install postgres ./apps/infra/postgres \
-		-f "$(VALUES_FILE)" \
+		-f "$(VALUES_FILE_PREFIX)"/postgres-values.yaml \
 		--namespace "$(NAMESPACE)" \
 		--create-namespace \
 		--wait
@@ -157,6 +183,42 @@ postgres-purge: postgres-uninstall ## Uninstall chart AND permanently remove rel
 	@echo "\nDeleting PostgreSQL-related secrets and PVCs in namespace '$(NAMESPACE)'..."
 	@kubectl delete secret -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
 	@kubectl delete pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
+
+################################################################################
+# MongoDB Deployment Targets
+# Targets for deploying and managing MongoDB in local dev and QA cluster
+# Namespace and environment auto-detected from current kubectl context
+################################################################################
+.PHONY: mongodb-deploy
+mongodb-deploy: _context_namespace_check ## Deploy MongoDB to current cluster context (auto-detect env).
+	@echo "Linting MongoDB Helm chart for $(NAMESPACE)..."
+	@helm lint ./apps/infra/mongodb -f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml --namespace "$(NAMESPACE)"
+	@echo "Updating Helm dependencies..."
+	@helm dependency update ./apps/infra/mongodb
+	@echo "Deploying MongoDB Helm chart..."
+	@helm upgrade --install mongodb ./apps/infra/mongodb \
+		-f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml \
+		--namespace "$(NAMESPACE)" \
+		--create-namespace \
+		--wait
+
+.PHONY: mongodb-status
+mongodb-status: _context_namespace_check ## Show MongoDB release/resource status (auto-detect env)
+	@echo "Status for namespace: $(NAMESPACE)"
+	@helm status mongodb --namespace "$(NAMESPACE)" || true
+	@echo "\nKubernetes Resources:"
+	@kubectl get pods,svc,pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=mongodb || true
+
+.PHONY: mongodb-uninstall
+mongodb-uninstall: _context_namespace_check ## Uninstall MongoDB Helm release (chart only, auto-detect env)
+	@echo "Uninstalling Helm release 'mongodb' from namespace $(NAMESPACE)..."
+	@helm uninstall mongodb --namespace "$(NAMESPACE)" || true
+
+.PHONY: mongodb-purge
+mongodb-purge: mongodb-uninstall ## Uninstall chart AND permanently remove related secrets and PVCs (auto-detect env)
+	@echo "\nDeleting MongoDB-related secrets and PVCs in namespace $(NAMESPACE)..."
+	@kubectl delete secret -n "$(NAMESPACE)" -l app.kubernetes.io/instance=mongodb || true
+	@kubectl delete pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=mongodb || true
 
 ################################################################################
 # Monitoring Deployment Targets
