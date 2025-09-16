@@ -196,13 +196,15 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 
 Log of current snapshots on your local machine.
 
+- `cd k8s/bootstrap/qa`
 - Create a new snapshot: `make qa-nodes-snapshot SNAPSHOT_NAME=your_new_snapshot`
 - Restore from existing snapshot: `make qa-nodes-restore SNAPSHOT_NAME=your_existing_snapshot`
 - List snapshots: `make qa-nodes-snapshots-list`
 
-| Name                                       | Description                                        |
-|--------------------------------------------|----------------------------------------------------|
-| **qa-nodes-create-2025-09-10**             | Base cluster image without K8s installed           |
-| **qa-cluster-create-2025-09-10**           | Cluster image with K8s, DNS, and storage installed |
-| **prometheus-operator-install-2025-09-10** | Cluster image with Prometheus operator installed   |
-| **postgres-deploy-2025-09-12**             | Cluster image with PostgreSQL installed            |
+| Name                                          | Description                                        |
+|-----------------------------------------------|----------------------------------------------------|
+| **qa-nodes-create-2025-09-10**                | Base cluster image without K8s installed           |
+| **qa-cluster-create-2025-09-10**              | Cluster image with K8s, DNS, and storage installed |
+| **qa-prometheus-operator-install-2025-09-10** | Cluster image with Prometheus operator installed   |
+| **qa-postgres-deploy-2025-09-16**             | Cluster image with PostgreSQL installed            |
+| **qa-mongodb-deploy-2025-09-16**              | Cluster image with MongoDB installed               |
