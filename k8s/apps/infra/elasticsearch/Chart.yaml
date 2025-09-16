@@ -1,0 +1,11 @@
+apiVersion: v2
+name: elasticsearch
+description: A wrapper Helm chart around the Bitnami Elasticsearch chart for deploying Elasticsearch 9.1.2 for the insurance-hub application.
+type: application
+version: 0.1.0
+appVersion: "9.1.2"
+icon: https://www.elastic.co/static/images/elastic-logo.svg
+dependencies:
+  - name: elasticsearch
+    version: "9.1.2"
+    repository: "https://charts.bitnami.com/bitnami"
