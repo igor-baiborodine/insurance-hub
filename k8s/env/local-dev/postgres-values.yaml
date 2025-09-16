@@ -3,8 +3,12 @@
 postgresql:
   # Use standalone for local-dev
   architecture: standalone
-
   primary:
+    image:
+      registry: docker.io
+      repository: bitnami/postgresql
+      tag: "17.6.0"
+      pullPolicy: IfNotPresent
     persistence:
       enabled: true
       size: 2Gi
@@ -16,14 +20,11 @@ postgresql:
       limits:
         memory: "512Mi"
         cpu: "500m"
-
   # No replicas for local-dev
   readReplicas:
     replicaCount: 0
-
   auth:
     postgresPassword: "postgres"
-
   # Metrics are not enabled
   metrics:
     enabled: false
