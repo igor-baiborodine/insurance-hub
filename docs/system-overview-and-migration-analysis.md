@@ -208,7 +208,7 @@ characteristics of the target state include:
 | Payment Database            | PostgreSQL    | PostgreSQL         |
 | Search & Analytics Database | Elasticsearch | Elasticsearch      |
 
-[Reasoning for using PostgreSQL with JSONB for storing insurance products](migration-reasoning/replace-mongodb.md)
+[Reasoning for using PostgreSQL with JSONB for storing insurance products](migration/component-replacement-reasoning/replace-mongodb.md)
 
 ### External systems
 
@@ -221,11 +221,11 @@ characteristics of the target state include:
 | Tariff rules storage     | File system | Tarantool         |
 | PDF reports generator    | JSReports   | chromedp(library) |
 
-[Reasoning for replacing Consul with Kubernetes-native service discovery](migration-reasoning/replace-consul.md)
+[Reasoning for replacing Consul with Kubernetes-native service discovery](migration/component-replacement-reasoning/replace-consul.md)
 
-[Reasoning for using Tarantool for tariff rule scripts storage and execution](migration-reasoning/replace-old-pricing.md)
+[Reasoning for using Tarantool for tariff rule scripts storage and execution](migration/component-replacement-reasoning/replace-old-pricing.md)
 
-[Reasoning for chromedp for generating PDF documents](migration-reasoning/replace-jsreport.md)
+[Reasoning for chromedp for generating PDF documents](migration/component-replacement-reasoning/replace-jsreport.md)
 
 ### External Exposure and Interservice Communication
 
@@ -233,7 +233,7 @@ Use gRPC for internal service communication while exposing select services via g
 provide HTTP/OpenAPI functionality, combining the performance benefits of gRPC with the universal
 compatibility of REST APIs.
 
-[Reasoning for using gRPC for internal service communication](migration-reasoning/replace-rest.md)
+[Reasoning for using gRPC for internal service communication](migration/component-replacement-reasoning/replace-rest.md)
 
 ## System Container Components
 
@@ -328,7 +328,7 @@ compatibility of REST APIs.
      - **Cloud-Native Integration**: Deploy using Envoy's Kubernetes-native configuration management
        with enhanced observability, traffic shaping, and fault injection capabilities.
 
-[Reasoning for replacing agent-portal-gateway with Envoy Proxy](migration-reasoning/replace-agent-portal-gateway.md)
+[Reasoning for replacing agent-portal-gateway with Envoy Proxy](migration/component-replacement-reasoning/replace-agent-portal-gateway.md)
 
 2. **auth-service**
 
@@ -344,7 +344,7 @@ compatibility of REST APIs.
      - **Cloud-Native Integration**: Deploy using Keycloak's Kubernetes operator with horizontal
        scaling, while Go microservices validate JWT tokens using standard libraries.
 
-[Reasoning for replacing auth-service with Keycloak](migration-reasoning/replace-auth-service.md)
+[Reasoning for replacing auth-service with Keycloak](migration/component-replacement-reasoning/replace-auth-service.md)
 
 3. **chat-service**
 
@@ -507,7 +507,7 @@ microservices architecture at scale.
       metrics
     - Object storage backend (MinIO) aligning with cloud-native storage strategy
 
-[Reasoning for OpenTelemetry-based distributed tracing](migration-reasoning/replace-zipkin.md)
+[Reasoning for OpenTelemetry-based distributed tracing](migration/component-replacement-reasoning/replace-zipkin.md)
 
 2. **Centralized Logging**
 
@@ -594,7 +594,7 @@ This validates the new platform and de-risks subsequent, more complex changes.
 4. **Containerize and Deploy Java Services:**
     * Create production-grade container images for all Java microservices.
     * Deploy these services to Kubernetes.
-   * As per this [analysis](migration-reasoning/replace-consul.md), decommission Consul and switch to
+   * As per this [analysis](migration/component-replacement-reasoning/replace-consul.md), decommission Consul and switch to
      Kubernetes-native service discovery. This is primarily a configuration change in the Micronaut
      services to use Kubernetes' internal DNS for service-to-service communication.
 5. **Deploy Existing Gateway:** Deploy the current Java-based `agent-portal-gateway` to Kubernetes
@@ -632,7 +632,7 @@ for new Go services to integrate directly with Tempo.
 reducing operational complexity and unifying the persistence strategy.
 
 1. **Adapt Database Schema:** Modify the PostgreSQL schema to accommodate the data currently stored
-   in MongoDB. As per this [analysis](migration-reasoning/replace-mongodb.md), use the `JSONB` data 
+   in MongoDB. As per this [analysis](migration/component-replacement-reasoning/replace-mongodb.md), use the `JSONB` data 
    type to store flexible insurance product definitions.
 2. **Develop and Test Migration Scripts:** Create scripts to perform the ETL (Extract, Transform,
    Load) process from MongoDB to the new PostgreSQL tables. Thoroughly validate the data integrity
@@ -713,7 +713,7 @@ industry-standard, cloud-native solutions. This phase can run in parallel with P
     * Migrate user data and authentication logic to Keycloak.
     * Update frontends and all backend services (both Go and any remaining Java services) to use
       Keycloak for authentication via standard OIDC/OAuth2 protocols.
-    * Decommission the custom Java `auth-service`, as justified in this [analysis](migration-reasoning/replace-auth-service.md).
+    * Decommission the custom Java `auth-service`, as justified in this [analysis](migration/component-replacement-reasoning/replace-auth-service.md).
 2. **Replace `agent-portal-gateway` with Envoy Proxy:**
     * Deploy Envoy Proxy as the new ingress gateway.
     * Configure Envoy to manage all incoming traffic, handle TLS termination, and perform routing.
