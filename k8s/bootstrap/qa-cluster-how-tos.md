@@ -61,7 +61,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 
 ### Create LXD Virtual Machines
 
-- `cd k8s/bootstrap/qa`
+- `cd k8s/bootstrap`
 - `lxc list`
     ```bash
     +------+-------+------+------+------+-----------+
@@ -128,7 +128,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 
 ### Deploy qa-data Resources
 
-- `cd ../..`, change current directory to `k8s`
+- `cd ..`, change current directory to `k8s`
 - `prometheus-operator-install`, Prometheus operator is a prerequisite for installing PostgreSQL
 - `kubectl get pods -n qa-monitoring`
     ```bash
@@ -140,7 +140,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     prometheus-operator-prometheus-node-exporter-w98bg        1/1     Running   0          4m9s
     prometheus-prometheus-operator-kube-p-prometheus-0        2/2     Running   0          3m46s  
     ```
-- `make -C k8s/bootstrap/qa qa-nodes-snapshot SNAPSHOT_NAME=prometheus-operator-install-<iso-date>`
+- `make -C k8s/bootstrap qa-nodes-snapshot SNAPSHOT_NAME=prometheus-operator-install-<iso-date>`
 - `make postgres-secret-create-qa POSTGRES_PASSWORD=your_password`
 - `make postgres-deploy`
 - `kubectl get pods -n qa-data`
@@ -151,7 +151,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     ```
 - `make postgres-status`
 -
-`make -C k8s/bootstrap/qa qa-nodes-snapshot qa-nodes-snapshot SNAPSHOT_NAME=postgres-deploy-<iso-date>`
+`make -C k8s/bootstrap qa-nodes-snapshot qa-nodes-snapshot SNAPSHOT_NAME=postgres-deploy-<iso-date>`
 
 ## Monitor Cluster Load
 
@@ -163,7 +163,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 
 ## Suspend and Resume Cluster
 
-- `cd k8s/bootstrap/qa`
+- `cd k8s/bootstrap`
 
 1. Suspend the cluster:
 
@@ -196,7 +196,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 
 Log of current snapshots on your local machine.
 
-- `cd k8s/bootstrap/qa`
+- `cd k8s/bootstrap`
 - Create a new snapshot: `make qa-nodes-snapshot SNAPSHOT_NAME=your_new_snapshot`
 - Restore from existing snapshot: `make qa-nodes-restore SNAPSHOT_NAME=your_existing_snapshot`
 - List snapshots: `make qa-nodes-snapshots-list`

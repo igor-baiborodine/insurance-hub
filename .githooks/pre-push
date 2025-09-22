@@ -9,14 +9,14 @@ pattern="^(feat|fix|docs|chore|refactor|perf|test|style)/(issue-[0-9]+)?[a-z0-9-
 if [[ ! $branch_name =~ $pattern ]]; then
   echo "ERROR: Invalid branch name '$branch_name'."
   echo "Branch name MUST follow the pattern:"
-  echo "  /[issue-]"
+  echo "<type>/[issue-]<description>"
   echo "Where:"
-  echo "  -  is one of feat, fix, docs, chore, refactor, perf, test, style"
-  echo "  - [issue-] is optional (e.g. issue-123)"
-  echo "  -  is lowercase, dash-separated words"
+  echo " <type> -  is one of feat, fix, docs, chore, refactor, perf, test, style"
+  echo " [issue-] - is optional (e.g. issue-123)"
+  echo " <description> - is lowercase, dash-separated words"
   echo
   echo "Examples:"
-  echo "  feat/issue-6-provision-kind-and-microk8s-clusters"
+  echo "  feat/issue-6-provision-local-dev-and-qa-clusters"
   echo "  fix/null-pointer-exception"
   echo "  docs/issue-10-update-readme"
   exit 1
