@@ -18,31 +18,31 @@ insurance-hub/
 └── k8s/
     ├── apps/
     │   ├── infra/      # All third-party, operator-managed infra
-    │   │   ├── postgresql-operator/
-    │   │   ├── mongodb-operator/
-    │   │   ├── kafka-operator/
-    │   │   ├── elasticsearch-operator/
-    │   │   └── minio-operator/
+    │   │   ├── postgres/
+    │   │   ├── mongodb/
+    │   │   ├── kafka/
+    │   │   ├── elasticsearch/
+    │   │   └── minio/
     │   └── svc/
     │       ├── auth-service/
     │       ├── policy-service/
     │       └── ...
     ├── env/
     │   ├── local-dev/
-    │   │   ├── postgresql.yaml         # Operator manifest, minimal dev config
+    │   │   ├── postgres.yaml         # Operator manifest, minimal dev config
     │   │   ├── kafka.yaml
     │   │   ├── elasticsearch.yaml
     │   │   └── kustomization.yaml
     │   └── qa/
-    │       ├── postgresql.yaml         # Operator manifest, HA config
+    │       ├── postgres.yaml         # Operator manifest, HA config
     │       ├── kafka.yaml
     │       ├── elasticsearch.yaml
     │       └── kustomization.yaml
     └── tests/
 ```
 
-- Operator manifests reside in `apps/infra/component-operator/`.
-- Environment-specific configuration overlays in `env/local-dev/`, `env/qa/`.
+- Operator manifests reside in `apps/infra/<component>/`.
+- Environment-specific Kubernetes manifests and Kustomize overlays are in `env/local-dev/`, `env/qa/`.
 
 ### Namespace Isolation
 
@@ -128,19 +128,19 @@ spec:
 .PHONY: deploy-postgresql-local-dev
 deploy-postgresql-local-dev: ## Deploy PostgreSQL Operator (single node, dev)
 	@echo "Applying PostgreSQL operator and dev instance..."
-	@kubectl apply -f apps/infra/postgresql-operator/
-	@kubectl apply -f env/local-dev/postgresql.yaml
+	@kubectl apply -f apps/infra/postgres/
+	@kubectl apply -f env/local-dev/postgres.yaml
 
 .PHONY: deploy-postgresql-qa
 deploy-postgresql-qa: ## Deploy PostgreSQL Operator (HA, production-like)
 	@echo "Applying PostgreSQL operator and QA HA instance..."
-	@kubectl apply -f apps/infra/postgresql-operator/
-	@kubectl apply -f env/qa/postgresql.yaml
+	@kubectl apply -f apps/infra/postgres/
+	@kubectl apply -f env/qa/postgres.yaml
 
 .PHONY: undeploy-postgresql
 undeploy-postgresql: ## Remove PostgreSQL resources
-	@kubectl delete -f env/local-dev/postgresql.yaml || true
-	@kubectl delete -f env/qa/postgresql.yaml || true
+	@kubectl delete -f env/local-dev/postgres.yaml || true
+	@kubectl delete -f env/qa/postgres.yaml || true
 
 .PHONY: postgresql-status
 postgresql-status: ## Check PostgreSQL resource status

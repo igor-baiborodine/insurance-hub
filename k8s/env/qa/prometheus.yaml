@@ -1,0 +1,26 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: prometheus-qa
+  namespace: qa-monitoring
+spec:
+  replicas: 2
+  serviceAccountName: prometheus-qa
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  storage:
+    volumeClaimTemplate:
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 8Gi
+  retention: 24h
+  alerting:
+    alertmanagers: []

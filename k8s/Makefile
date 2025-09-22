@@ -134,10 +134,69 @@ _context_namespace_check:
 	fi
 
 ################################################################################
+# Monitoring Deployment Targets
+# Targes for deploying and managing monitoring infrastructure
+# Current context must be "qa-insurance-hub"
+################################################################################
+
+PROMETHEUS_OPERATOR_VERSION := v0.85.0
+
+.PHONY: _prometheus-operator-deploy-qa
+_prometheus-operator-deploy-qa:
+	@CUR_CTX=$$(kubectl config current-context); \
+	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
+	   echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
+	   exit 1; \
+	fi
+	@echo "Ensuring clean state by removing previous operator directory..."
+	@rm -rf apps/infra/prometheus/operator
+	@echo "Downloading Prometheus Operator bundle version $(PROMETHEUS_OPERATOR_VERSION)..."
+	@mkdir -p apps/infra/prometheus/operator
+	@curl -L -o apps/infra/prometheus/operator/bundle.yaml https://github.com/prometheus-operator/prometheus-operator/releases/download/$(PROMETHEUS_OPERATOR_VERSION)/bundle.yaml
+	@echo "Deploy Prometheus Operator..."
+	@kubectl apply --server-side -f apps/infra/prometheus/operator/bundle.yaml
+
+.PHONY: prometheus-deploy-qa
+prometheus-deploy-qa: _prometheus-operator-deploy-qa ## Deploy Prometheus in QA(qa-monitoring)
+	@CUR_CTX=$$(kubectl config current-context); \
+	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
+		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
+		exit 1; \
+	fi
+	@echo "Ensuring namespace qa-monitoring exists..."
+	@kubectl get namespace qa-monitoring >/dev/null 2>&1 || kubectl create namespace qa-monitoring
+	@echo "Deploying Prometheus..."
+	@kubectl apply --server-side -f env/qa/prometheus.yaml
+
+.PHONY: prometheus-ui-qa
+prometheus-ui-qa: ## Access Prometheus UI via port-forward
+	@echo "Forwarding Prometheus UI to http://localhost:9090"
+	@echo "Press Ctrl+C to stop."
+	@kubectl port-forward svc/prometheus-prometheus-operator-kube-p-prometheus 9090:9090 --namespace qa-monitoring
+
+################################################################################
 # PostgreSQL Deployment Targets
 # Targets for deploying and managing PostgreSQL in local dev and QA cluster
 # Namespace is auto-detected from the current kubectl context
 ################################################################################
+
+CNPG_OPERATOR_VERSION := v1.27.0
+
+.PHONY: _postgres-operator-crds-install
+_postgres-operator-crds-install:
+	@CUR_CTX=$$(kubectl config current-context); \
+	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
+		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
+		exit 1; \
+	fi
+	@echo "Ensuring clean state by removing previous operator CRD directory..."
+	@rm -rf ./apps/infra/postgres/crds
+	@echo "Downloading CloudNativePG operator CRDs version $(CNPG_OPERATOR_VERSION)..."
+	@mkdir -p ./apps/infra/postgres/crds
+	@curl -L -o ./apps/infra/postgres/crds/cnpg-crds.yaml https://github.com/cloudnative-pg/cloudnative-pg/releases/download/$(CNPG_OPERATOR_VERSION)/cloudnative-pg.crds.yaml
+	@echo "Applying CloudNativePG CRDs..."
+	@kubectl apply --server-side -f ./apps/infra/postgres/crds/cnpg-crds.yaml
+
 PHONY: postgres-secret-create-qa
 postgres-secret-create-qa: _context_namespace_check ## Create/update PostgreSQL password secret in QA. Usage: make postgres-secret-create-qa POSTGRES_PASSWORD=your_password
 	@if [ -z "$(POSTGRES_PASSWORD)" ]; then \
@@ -219,56 +278,3 @@ mongodb-purge: mongodb-uninstall ## Uninstall chart AND permanently remove relat
 	@echo "\nDeleting MongoDB-related secrets and PVCs in namespace $(NAMESPACE)..."
 	@kubectl delete secret -n "$(NAMESPACE)" -l app.kubernetes.io/instance=mongodb || true
 	@kubectl delete pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=mongodb || true
-
-################################################################################
-# Monitoring Deployment Targets
-# Targes for deploying and managing monitoring infrastructure
-# Current context must be "qa-insurance-hub"
-################################################################################
-
-# Specify a chart version to ensure the CRDs installed match the chart itself.
-CHART_VERSION_PROMETHEUS_STACK := 77.0.2
-
-.PHONY: _prometheus-operator-crds-install
-_prometheus-operator-crds-install:
-	@CUR_CTX=$$(kubectl config current-context); \
-	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
-		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
-		exit 1; \
-	fi
-	@echo "Ensuring clean state by removing previous chart directory..."
-	@rm -rf ./apps/infra/prometheus/kube-prometheus-stack
-	@echo "Fetching Prometheus Operator chart to install CRDs..."
-	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
-	@helm repo update
-	@echo "Creating directory and fetching Prometheus chart version $(CHART_VERSION_PROMETHEUS_STACK)..."
-	@mkdir -p ./apps/infra/prometheus
-	@helm fetch prometheus-community/kube-prometheus-stack --version $(CHART_VERSION_PROMETHEUS_STACK) --untar --untardir ./apps/infra/prometheus
-	@echo "Applying CRDs from explicit path... (This may take a moment)"
-	@kubectl apply --server-side -f ./apps/infra/prometheus/kube-prometheus-stack/charts/crds/crds
-	@echo "Deleting kube-prometheus-stack-$(CHART_VERSION_PROMETHEUS_STACK).tgz..."
-	@rm -rf ./kube-prometheus-stack-$(CHART_VERSION_PROMETHEUS_STACK).tgz
-
-.PHONY: prometheus-operator-install
-prometheus-operator-install: _prometheus-operator-crds-install ## Install Prometheus Operator with custom low-resource values in QA
-	@CUR_CTX=$$(kubectl config current-context); \
-	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
-		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
-		exit 1; \
-	fi
-	@kubectl get namespace qa-monitoring >/dev/null 2>&1 || kubectl create namespace qa-monitoring
-	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
-	@helm repo update
-	@helm upgrade --install prometheus-operator prometheus-community/kube-prometheus-stack \
-		--version $(CHART_VERSION_PROMETHEUS_STACK) \
-		--namespace qa-monitoring \
-		--values ./env/qa/prometheus-values.yaml \
-		--skip-crds \
-		--wait \
-		--timeout 15m
-
-.PHONY: prometheus-ui
-prometheus-ui: ## Access the Prometheus UI via port-forward
-	@echo "Forwarding Prometheus UI to http://localhost:9090"
-	@echo "Press Ctrl+C to stop."
-	@kubectl port-forward svc/prometheus-prometheus-operator-kube-p-prometheus 9090:9090 --namespace qa-monitoring
