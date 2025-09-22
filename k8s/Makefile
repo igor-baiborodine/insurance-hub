@@ -236,18 +236,18 @@ _prometheus-operator-crds-install:
 		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
 		exit 1; \
 	fi
-	@echo "Ensuring clean state by removing any previous temporary chart directory..."
-	@rm -rf ./prometheus-chart-tmp
+	@echo "Ensuring clean state by removing previous chart directory..."
+	@rm -rf ./apps/infra/prometheus/kube-prometheus-stack
 	@echo "Fetching Prometheus Operator chart to install CRDs..."
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
-	@echo "Creating temporary directory and fetching Prometheus chart version $(CHART_VERSION_PROMETHEUS_STACK)..."
-	@mkdir -p ./prometheus-chart-tmp
-	@helm fetch prometheus-community/kube-prometheus-stack --version $(CHART_VERSION_PROMETHEUS_STACK) --untar --untardir ./prometheus-chart-tmp
+	@echo "Creating directory and fetching Prometheus chart version $(CHART_VERSION_PROMETHEUS_STACK)..."
+	@mkdir -p ./apps/infra/prometheus
+	@helm fetch prometheus-community/kube-prometheus-stack --version $(CHART_VERSION_PROMETHEUS_STACK) --untar --untardir ./apps/infra/prometheus
 	@echo "Applying CRDs from explicit path... (This may take a moment)"
-	@kubectl apply --server-side -f ./prometheus-chart-tmp/kube-prometheus-stack/charts/crds/crds
-	@echo "Cleaning up temporary chart files..."
-	@rm -rf ./prometheus-chart-tmp
+	@kubectl apply --server-side -f ./apps/infra/prometheus/kube-prometheus-stack/charts/crds/crds
+	@echo "Deleting kube-prometheus-stack-$(CHART_VERSION_PROMETHEUS_STACK).tgz..."
+	@rm -rf ./kube-prometheus-stack-$(CHART_VERSION_PROMETHEUS_STACK).tgz
 
 .PHONY: prometheus-operator-install
 prometheus-operator-install: _prometheus-operator-crds-install ## Install Prometheus Operator with custom low-resource values in QA

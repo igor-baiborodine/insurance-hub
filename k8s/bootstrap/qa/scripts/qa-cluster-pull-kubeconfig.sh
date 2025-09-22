@@ -6,7 +6,7 @@ QA_CLUSTER_NAME="qa-insurance-hub"
 QA_KUBECTL_CONTEXT="$QA_CLUSTER_NAME"
 
 echo "Pulling kubeconfig from qa-master to host..."
-lxc file pull qa-master/etc/rancher/k3s/k3s.yaml "./${QA_CLUSTER_NAME}-kubeconfig"
+lxc file pull qa-master/etc/rancher/k3s/k3s.yaml "./qa/${QA_CLUSTER_NAME}-kubeconfig"
 
 # Adjust kubeconfig server address from 127.0.0.1 to actual master IP
 MASTER_IP=""
@@ -26,15 +26,15 @@ if [ -z "$MASTER_IP" ]; then
 fi
 
 echo "Master IP: $MASTER_IP"
-sed -i "s/127.0.0.1/$MASTER_IP/g" "./${QA_CLUSTER_NAME}-kubeconfig"
+sed -i "s/127.0.0.1/$MASTER_IP/g" "./qa/${QA_CLUSTER_NAME}-kubeconfig"
 
 # Rename context to qa-insurance-hub
-ORIGINAL_CONTEXT=$(kubectl --kubeconfig="./${QA_CLUSTER_NAME}-kubeconfig" config current-context 2>/dev/null || echo "")
+ORIGINAL_CONTEXT=$(kubectl --kubeconfig="./qa/${QA_CLUSTER_NAME}-kubeconfig" config current-context 2>/dev/null || echo "")
 echo "Original kubeconfig context is '$ORIGINAL_CONTEXT'"
 
 if [ "$ORIGINAL_CONTEXT" != "$QA_KUBECTL_CONTEXT" ] && [ -n "$ORIGINAL_CONTEXT" ]; then
   # Replace the original context name in all relevant places (cluster, user, context)
-  sed -i "s/${ORIGINAL_CONTEXT}/${QA_KUBECTL_CONTEXT}/g" "./${QA_CLUSTER_NAME}-kubeconfig"
+  sed -i "s/${ORIGINAL_CONTEXT}/${QA_KUBECTL_CONTEXT}/g" "./qa/${QA_CLUSTER_NAME}-kubeconfig"
 fi
 
 # Remove old qa-insurance-hub config from default kubeconfig (if exists)
@@ -43,7 +43,7 @@ kubectl config delete-cluster "$QA_KUBECTL_CONTEXT" 2>/dev/null || true
 kubectl config delete-user "$QA_KUBECTL_CONTEXT" 2>/dev/null || true
 
 # Merge the updated kubeconfig into the default kubeconfig
-export KUBECONFIG=$HOME/.kube/config:./${QA_CLUSTER_NAME}-kubeconfig
+export KUBECONFIG=$HOME/.kube/config:./qa/${QA_CLUSTER_NAME}-kubeconfig
 kubectl config view --flatten > $HOME/.kube/config.merged
 mv $HOME/.kube/config.merged $HOME/.kube/config
 

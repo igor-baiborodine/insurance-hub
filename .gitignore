@@ -44,11 +44,8 @@
 **/dependency-reduced-pom.xml
 
 # Kubernetes
-**/charts/
-**/Chart.lock
 /k8s/bootstrap/qa/qa-insurance-hub-kubeconfig
-/k8s/kube-prometheus-stack/
-/k8s/kube-prometheus-stack-**.tgz
+/k8s/apps/infra/prometheus/kube-prometheus-stack
 
 # Dev
 **/research/*

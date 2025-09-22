@@ -8,6 +8,7 @@
   - [Prerequisites](#prerequisites)
   - [Create LXD Virtual Machines](#create-lxd-virtual-machines)
   - [Create Multi-node Rancher's K3s Cluster](#create-multi-node-ranchers-k3s-cluster)
+  - [Deploy qa-monitoring Resources](#deploy-qa-monitoring-resources)
   - [Deploy qa-data Resources](#deploy-qa-data-resources)
 - [Monitor Cluster Load](#monitor-cluster-load)
 - [Suspend and Resume Cluster](#suspend-and-resume-cluster)
@@ -81,7 +82,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     | qa-worker2 | RUNNING | 10.43.248.113 (enp5s0) | fd42:454f:1973:a457:216:3eff:fe59:c479 (enp5s0) | VIRTUAL-MACHINE | 0         |
     +------------+---------+------------------------+-------------------------------------------------+-----------------+-----------+
     ```
-- `make qa-nodes-snapshot SNAPSHOT_NAME=qa-nodes-create-<iso-date>`
+- `make qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-nodes-create-<iso-date>`
 - `make qa-nodes-snapshots-list`
     ```bash
     Snapshots for qa-master:
@@ -121,26 +122,29 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     qa-worker1   Ready    <none>                 7h41m   v1.33.4+k3s1
     qa-worker2   Ready    <none>                 7h41m   v1.33.4+k3s1
     ```
-- `qa-nodes-snapshot SNAPSHOT_NAME=qa-cluster-create-<iso-date>`
+- `qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-create-<iso-date>`
 
 > Please note that after this step the `kubectl` current context will be automatically set to
 `qa-insurance-hub`.
 
-### Deploy qa-data Resources
-
-- `cd ..`, change current directory to `k8s`
-- `prometheus-operator-install`, Prometheus operator is a prerequisite for installing PostgreSQL
+### Deploy qa-monitoring Resources
+- `cd ..`, change directory from `k8s/bootstrap` to `k8s`
+- `make prometheus-operator-install`
 - `kubectl get pods -n qa-monitoring`
     ```bash
     NAME                                                      READY   STATUS    RESTARTS   AGE
-    prometheus-operator-kube-p-operator-bf675cb9d-8p7vk       1/1     Running   0          4m9s
-    prometheus-operator-kube-state-metrics-6fcf458c69-l826d   1/1     Running   0          4m9s
-    prometheus-operator-prometheus-node-exporter-pfq7v        1/1     Running   0          4m9s
-    prometheus-operator-prometheus-node-exporter-sqfsr        1/1     Running   0          4m9s
-    prometheus-operator-prometheus-node-exporter-w98bg        1/1     Running   0          4m9s
-    prometheus-prometheus-operator-kube-p-prometheus-0        2/2     Running   0          3m46s  
-    ```
-- `make -C k8s/bootstrap qa-nodes-snapshot SNAPSHOT_NAME=prometheus-operator-install-<iso-date>`
+    NAME                                                      READY   STATUS    RESTARTS   AGE
+    prometheus-operator-kube-p-operator-bf675cb9d-f47vb       1/1     Running   0          59s
+    prometheus-operator-kube-state-metrics-6fcf458c69-67vkz   1/1     Running   0          59s
+    prometheus-operator-prometheus-node-exporter-2bq9s        1/1     Running   0          59s
+    prometheus-operator-prometheus-node-exporter-f9gd6        1/1     Running   0          59s
+    prometheus-operator-prometheus-node-exporter-sh9b9        1/1     Running   0          59s
+    prometheus-prometheus-operator-kube-p-prometheus-0        2/2     Running   0          44s    ```
+- `make -C k8s/bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=prometheus-operator-install-<iso-date>`
+
+
+### Deploy qa-data Resources
+
 - `make postgres-secret-create-qa POSTGRES_PASSWORD=your_password`
 - `make postgres-deploy`
 - `kubectl get pods -n qa-data`
@@ -150,8 +154,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     postgres-postgresql-read-0      2/2     Running   0          3m20s
     ```
 - `make postgres-status`
--
-`make -C k8s/bootstrap qa-nodes-snapshot qa-nodes-snapshot SNAPSHOT_NAME=postgres-deploy-<iso-date>`
+- `make -C bootstrap qa-nodes-snapshot qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
 
 ## Monitor Cluster Load
 
@@ -197,8 +200,8 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 Log of current snapshots on your local machine.
 
 - `cd k8s/bootstrap`
-- Create a new snapshot: `make qa-nodes-snapshot SNAPSHOT_NAME=your_new_snapshot`
-- Restore from existing snapshot: `make qa-nodes-restore SNAPSHOT_NAME=your_existing_snapshot`
+- Create a new snapshot: `make qa-nodes-snapshot QA_SNAPSHOT_NAME=your_new_snapshot`
+- Restore from existing snapshot: `make qa-nodes-restore QA_SNAPSHOT_NAME=your_existing_snapshot`
 - List snapshots: `make qa-nodes-snapshots-list`
 
 | Name                                          | Description                                        |

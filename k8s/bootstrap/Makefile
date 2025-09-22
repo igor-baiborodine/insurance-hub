@@ -90,7 +90,7 @@ qa-nodes-resume: ## Resume (start) all LXD QA VMs
 	@lxc list
 
 .PHONY: qa-nodes-snapshot
-qa-nodes-snapshot: ## Pause all VMs, delete existing snapshot, snapshot VMs, and resume. Usage: make qa-nodes-snapshot SNAPSHOT_NAME=your_new_snapshot
+qa-nodes-snapshot: ## Pause all VMs, delete existing snapshot, snapshot VMs, and resume. Usage: make qa-nodes-snapshot QA_SNAPSHOT_NAME=your_new_snapshot
 	bash ./qa/scripts/qa-nodes-snapshot.sh $(QA_SNAPSHOT_NAME)
 
 .PHONY: qa-nodes-snapshots-list
@@ -107,7 +107,7 @@ qa-nodes-snapshots-list: ## List all snapshots for QA cluster nodes
 	done
 
 .PHONY: qa-nodes-restore
-qa-nodes-restore: ## Restore all QA cluster VMs from specified snapshot and start them. Usage: make qa-nodes-restore SNAPSHOT_NAME=your_existing_snapshot
+qa-nodes-restore: ## Restore all QA cluster VMs from specified snapshot and start them. Usage: make qa-nodes-restore QA_SNAPSHOT_NAME=your_existing_snapshot
 	@echo "Restoring all QA cluster VMs from '$(QA_SNAPSHOT_NAME)' snapshot..."
 	@for NODE in $(QA_NODES_ALL); do \
 		if lxc info $$NODE &>/dev/null; then \
