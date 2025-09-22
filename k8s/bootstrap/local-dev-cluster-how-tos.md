@@ -6,7 +6,7 @@
 
 - [Create Cluster](#create-cluster)
   - [Create Kind Cluster](#create-kind-cluster)
-  - [Install `local-dev` Resources](#install-local-dev-resources)
+  - [Deploy `local-dev` Resources](#deploy-local-dev-resources)
 - [Suspend and Resume Cluster](#suspend-and-resume-cluster)
 - [Delete Cluster](#delete-cluster)
 
@@ -20,7 +20,7 @@ on [Kind](https://github.com/kubernetes-sigs/kind?tab=readme-ov-file).
 
 ### Create Kind Cluster
 
-- `cd k8s/bootstrap/local-dev`
+- `cd k8s/bootstrap`
 - `make local-dev-create`
 - `kubectl get nodes`
     ```bash
@@ -55,7 +55,7 @@ Once the cluster is running, deploy the necessary data stores into the `local-de
 ## Suspend and Resume Cluster
 
 You can suspend the cluster to save resources and resume it later.
-- `cd k8s/bootstrap/local-dev`
+- `cd k8s/bootstrap`
 
 1. **Suspend the cluster**:
 - `make local-dev-suspend`
@@ -77,7 +77,7 @@ You can suspend the cluster to save resources and resume it later.
 
 This command will permanently delete the cluster and its associated storage.
 
-- `cd k8s/bootstrap/local-dev` 
+- `cd k8s/bootstrap` 
 - `make local-dev-delete`
 - `kind get clusters`
     ```bash
