@@ -122,17 +122,16 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     qa-worker1   Ready    <none>                 7h41m   v1.33.4+k3s1
     qa-worker2   Ready    <none>                 7h41m   v1.33.4+k3s1
     ```
-- `qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-create-<iso-date>`
+- `make qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-create-<iso-date>`
 
 > Please note that after this step the `kubectl` current context will be automatically set to
 `qa-insurance-hub`.
 
 ### Deploy qa-monitoring Resources
 - `cd ..`, change directory from `k8s/bootstrap` to `k8s`
-- `make prometheus-operator-install`
+- `make prometheus-install-qa`
 - `kubectl get pods -n qa-monitoring`
     ```bash
-    NAME                                                      READY   STATUS    RESTARTS   AGE
     NAME                                                      READY   STATUS    RESTARTS   AGE
     prometheus-operator-kube-p-operator-bf675cb9d-f47vb       1/1     Running   0          59s
     prometheus-operator-kube-state-metrics-6fcf458c69-67vkz   1/1     Running   0          59s
@@ -140,7 +139,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     prometheus-operator-prometheus-node-exporter-f9gd6        1/1     Running   0          59s
     prometheus-operator-prometheus-node-exporter-sh9b9        1/1     Running   0          59s
     prometheus-prometheus-operator-kube-p-prometheus-0        2/2     Running   0          44s    ```
-- `make -C k8s/bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=prometheus-operator-install-<iso-date>`
+- `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=prometheus-install-qa-<iso-date>`
 
 
 ### Deploy qa-data Resources

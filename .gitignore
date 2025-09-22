@@ -45,7 +45,7 @@
 
 # Kubernetes
 /k8s/bootstrap/qa/qa-insurance-hub-kubeconfig
-**/operator/bundle.yaml
+/k8s/apps/infra/prometheus/kube-prometheus-stack
 
 # Dev
 **/research/*

@@ -68,7 +68,7 @@ insurance-hub/
 
 ### PostgreSQL Deployment Example (Operator-based)
 
-**Operator manifest directory**: `k8s/apps/infra/postgresql-operator/`
+**Operator manifest directory**: `k8s/apps/infra/postgres/`
 
 - Contains the Operator CRDs, RBAC, and controller manifests.
 

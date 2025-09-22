@@ -2,12 +2,6 @@
 # Child Makefile common for local dev and QA insurance-hub cluster
 ################################################################################
 
-################################################################################
-# Includes - subdomain-specific Makefiles
-################################################################################
--include k8s/bootstrap/local-dev/Makefile
--include k8s/bootstrap/qa/Makefile
-
 .PHONY: kubeconfig-clear
 kubeconfig-clear: ## Empty the ~/.kube/config file
 	@echo "Clearing the ~/.kube/config file..."
@@ -139,34 +133,46 @@ _context_namespace_check:
 # Current context must be "qa-insurance-hub"
 ################################################################################
 
-PROMETHEUS_OPERATOR_VERSION := v0.85.0
+# Specify a chart version to ensure the CRDs installed match the chart itself.
+CHART_PROMETHEUS_STACK_VERSION := 77.0.2
 
-.PHONY: _prometheus-operator-deploy-qa
-_prometheus-operator-deploy-qa:
+.PHONY: _prometheus-operator-crds-install
+_prometheus-operator-crds-install:
 	@CUR_CTX=$$(kubectl config current-context); \
 	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
 	   echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
 	   exit 1; \
 	fi
-	@echo "Ensuring clean state by removing previous operator directory..."
-	@rm -rf apps/infra/prometheus/operator
-	@echo "Downloading Prometheus Operator bundle version $(PROMETHEUS_OPERATOR_VERSION)..."
-	@mkdir -p apps/infra/prometheus/operator
-	@curl -L -o apps/infra/prometheus/operator/bundle.yaml https://github.com/prometheus-operator/prometheus-operator/releases/download/$(PROMETHEUS_OPERATOR_VERSION)/bundle.yaml
-	@echo "Deploy Prometheus Operator..."
-	@kubectl apply --server-side -f apps/infra/prometheus/operator/bundle.yaml
+	@echo "Ensuring clean state by removing previous chart directory..."
+	@rm -rf ./apps/infra/prometheus/kube-prometheus-stack
+	@echo "Fetching Prometheus Operator chart to install CRDs..."
+	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
+	@helm repo update
+	@echo "Creating directory and fetching Prometheus chart version $(CHART_PROMETHEUS_STACK_VERSION)..."
+	@mkdir -p ./apps/infra/prometheus
+	@helm fetch prometheus-community/kube-prometheus-stack --version $(CHART_PROMETHEUS_STACK_VERSION) --untar --untardir ./apps/infra/prometheus
+	@echo "Applying CRDs from explicit path... (This may take a moment)"
+	@kubectl apply --server-side -f ./apps/infra/prometheus/kube-prometheus-stack/charts/crds/crds
+	@echo "Deleting kube-prometheus-stack-$(CHART_PROMETHEUS_STACK_VERSION).tgz..."
+	@rm -rf ./kube-prometheus-stack-$(CHART_PROMETHEUS_STACK_VERSION).tgz
 
-.PHONY: prometheus-deploy-qa
-prometheus-deploy-qa: _prometheus-operator-deploy-qa ## Deploy Prometheus in QA(qa-monitoring)
+.PHONY: prometheus-install-qa
+prometheus-install-qa: _prometheus-operator-crds-install ## Install Prometheus in QA
 	@CUR_CTX=$$(kubectl config current-context); \
 	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
 		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
 		exit 1; \
 	fi
-	@echo "Ensuring namespace qa-monitoring exists..."
 	@kubectl get namespace qa-monitoring >/dev/null 2>&1 || kubectl create namespace qa-monitoring
-	@echo "Deploying Prometheus..."
-	@kubectl apply --server-side -f env/qa/prometheus.yaml
+	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
+	@helm repo update
+	@helm upgrade --install prometheus-operator prometheus-community/kube-prometheus-stack \
+		--version $(CHART_PROMETHEUS_STACK_VERSION) \
+		--namespace qa-monitoring \
+		--values ./env/qa/prometheus-values.yaml \
+		--skip-crds \
+		--wait \
+		--timeout 15m
 
 .PHONY: prometheus-ui-qa
 prometheus-ui-qa: ## Access Prometheus UI via port-forward
