@@ -129,17 +129,15 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 
 ### Deploy qa-monitoring Resources
 - `cd ..`, change directory from `k8s/bootstrap` to `k8s`
-- `make prometheus-install-qa`
+- `make prometheus-stack-install-qa`
 - `kubectl get pods -n qa-monitoring`
     ```bash
-    NAME                                                      READY   STATUS    RESTARTS   AGE
-    prometheus-operator-kube-p-operator-bf675cb9d-f47vb       1/1     Running   0          59s
-    prometheus-operator-kube-state-metrics-6fcf458c69-67vkz   1/1     Running   0          59s
-    prometheus-operator-prometheus-node-exporter-2bq9s        1/1     Running   0          59s
-    prometheus-operator-prometheus-node-exporter-f9gd6        1/1     Running   0          59s
-    prometheus-operator-prometheus-node-exporter-sh9b9        1/1     Running   0          59s
-    prometheus-prometheus-operator-kube-p-prometheus-0        2/2     Running   0          44s    ```
-- `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=prometheus-install-qa-<iso-date>`
+    alertmanager-prometheus-community-kube-alertmanager-0      2/2     Running   0          2m4s
+    prometheus-community-grafana-7d9b9c8496-4v7bl              3/3     Running   0          2m36s
+    prometheus-community-kube-operator-7bfc556b55-cmgzf        1/1     Running   0          2m35s
+    prometheus-community-kube-state-metrics-699f796bb6-dnjd8   1/1     Running   0          2m35s
+    prometheus-prometheus-community-kube-prometheus-0          2/2     Running   0          2m4s
+- `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=prometheus-stack-install-qa-<iso-date>`
 
 
 ### Deploy qa-data Resources

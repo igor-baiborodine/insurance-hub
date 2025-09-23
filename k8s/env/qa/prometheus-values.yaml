@@ -59,12 +59,25 @@ prometheus:
 
 grafana:
   enabled: true
-  # -- the grafana admin password
   adminPassword: prom-operator
   defaultDashboardsEnabled: false
   sidecar:
     dashboards:
       enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
 
 alertmanager:
   enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
