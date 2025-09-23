@@ -1,16 +1,49 @@
-# Disable Alertmanager as it's unnecessary for now.
-alertmanager:
+enabled: true
+
+kubeControllerManager:
   enabled: false
 
-# Disable Grafana as it's unnecessary for now.
-grafana:
-  enabled: false
+nodeExporter:
+  enabled: true
 
-# Keep Prometheus enabled (default) and configure it for a QA environment.
+kubeStateMetrics:
+  enabled: true
+
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: false
+    configReloaders: false
+    general: true
+    k8s: true
+    kubeApiserver: true
+    kubeApiserverAvailability: false
+    kubeApiserverSlos: false
+    kubelet: true
+    kubeProxy: false
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
+    kubeScheduler: false
+    kubeStateMetrics: true
+    network: true
+    node: true
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
+    prometheusOperator: true
+
 prometheus:
   enabled: true
   prometheusSpec:
-    # Set low resource requests and limits for the QA environment.
+    podMonitorSelectorNilUsesHelmValues: true
+    ruleSelectorNilUsesHelmValues: true
+    serviceMonitorSelectorNilUsesHelmValues: true
+    probeSelectorNilUsesHelmValues: true
     resources:
       requests:
         cpu: 200m
@@ -18,61 +51,37 @@ prometheus:
       limits:
         cpu: 500m
         memory: 512Mi
-    # Use a persistent volume of 8Gi.
     storageSpec:
       volumeClaimTemplate:
         spec:
           accessModes: ["ReadWriteOnce"]
-          # Explicitly use the 'local-path' storage class provided by k3s.
           storageClassName: "local-path"
           resources:
             requests:
-              storage: 8Gi
-    # Lower data retention to save space in the QA environment.
-    retention: 24h
+              storage: 5Gi
+    retention: 48h
 
-# Configure resource settings for the Prometheus Operator.
-prometheusOperator:
-  # This completely disables the admission webhooks, which is a common
-  # workaround for installation on resource-constrained clusters like k3s.
-  # A race condition can occur where the webhook becomes active before the
-  # operator pod is ready to serve it. This can be re-enabled later.
-  admissionWebhooks:
-    enabled: false
-
-  # Explicitly disable TLS for the operator itself. This prevents the operator
-  # pod from trying to mount the TLS secret that fails to be created when
-  # the webhooks are disabled.
-  tls:
-    enabled: false
-
-  # Set low resource requests and limits for the operator itself.
+grafana:
+  enabled: true
+  adminPassword: adminpwd
+  defaultDashboardsEnabled: true
+  sidecar:
+    dashboards:
+      enabled: true
   resources:
     requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
       cpu: 200m
       memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
-# Configure resource settings for kube-state-metrics.
-kube-state-metrics:
-  # Set low resource requests and limits.
+alertmanager:
+  enabled: true
   resources:
     requests:
       cpu: 100m
       memory: 128Mi
     limits:
-      cpu: 200m
+      cpu: 250m
       memory: 256Mi
-
-# Configure resource settings for prometheus-node-exporter.
-prometheus-node-exporter:
-  # Set low resource requests and limits.
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 100m
-      memory: 128Mi

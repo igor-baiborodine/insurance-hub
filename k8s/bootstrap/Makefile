@@ -49,11 +49,11 @@ qa-create: qa-nodes-create qa-cluster-create qa-cluster-pull-kubeconfig ## Creat
 
 .PHONY: qa-cluster-create
 qa-cluster-create: ## Set up multi-node Rancher K3s QA cluster
-	bash ./qa/scripts/qa-cluster-create.sh
+	bash qa/scripts/qa-cluster-create.sh
 
 .PHONY: qa-cluster-pull-kubeconfig
 qa-cluster-pull-kubeconfig: ## Pull kubeconfig from QA cluster
-	bash ./qa/scripts/qa-cluster-pull-kubeconfig.sh
+	bash qa/scripts/qa-cluster-pull-kubeconfig.sh
 
 ################################################################################
 # QA Nodes Management Targets 
@@ -61,7 +61,7 @@ qa-cluster-pull-kubeconfig: ## Pull kubeconfig from QA cluster
 ################################################################################
 .PHONY: qa-nodes-create
 qa-nodes-create: ## Create three LXD VMs (master and two workers) for QA cluster
-	bash ./qa/scripts/qa-nodes-create.sh
+	bash qa/scripts/qa-nodes-create.sh
 
 .PHONY: qa-nodes-suspend
 qa-nodes-suspend: ## Suspend (pause) all LXD QA VMs
@@ -90,8 +90,8 @@ qa-nodes-resume: ## Resume (start) all LXD QA VMs
 	@lxc list
 
 .PHONY: qa-nodes-snapshot
-qa-nodes-snapshot: ## Pause all VMs, delete existing snapshot, snapshot VMs, and resume. Usage: make qa-nodes-snapshot SNAPSHOT_NAME=your_new_snapshot
-	bash ./qa/scripts/qa-nodes-snapshot.sh $(QA_SNAPSHOT_NAME)
+qa-nodes-snapshot: ## Pause all VMs, delete existing snapshot, snapshot VMs, and resume. Usage: make qa-nodes-snapshot QA_SNAPSHOT_NAME=your_new_snapshot
+	bash qa/scripts/qa-nodes-snapshot.sh $(QA_SNAPSHOT_NAME)
 
 .PHONY: qa-nodes-snapshots-list
 qa-nodes-snapshots-list: ## List all snapshots for QA cluster nodes
@@ -107,7 +107,7 @@ qa-nodes-snapshots-list: ## List all snapshots for QA cluster nodes
 	done
 
 .PHONY: qa-nodes-restore
-qa-nodes-restore: ## Restore all QA cluster VMs from specified snapshot and start them. Usage: make qa-nodes-restore SNAPSHOT_NAME=your_existing_snapshot
+qa-nodes-restore: ## Restore all QA cluster VMs from specified snapshot and start them. Usage: make qa-nodes-restore QA_SNAPSHOT_NAME=your_existing_snapshot
 	@echo "Restoring all QA cluster VMs from '$(QA_SNAPSHOT_NAME)' snapshot..."
 	@for NODE in $(QA_NODES_ALL); do \
 		if lxc info $$NODE &>/dev/null; then \
