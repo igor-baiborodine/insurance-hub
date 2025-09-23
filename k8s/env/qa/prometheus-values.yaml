@@ -1,43 +1,49 @@
 enabled: true
+
 kubeControllerManager:
   enabled: false
+
 nodeExporter:
-  enabled: false
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
+
 defaultRules:
   create: true
   rules:
-    alertmanager: false
+    alertmanager: true
     etcd: false
     configReloaders: false
-    general: false
+    general: true
     k8s: true
-    kubeApiserver: false
+    kubeApiserver: true
     kubeApiserverAvailability: false
     kubeApiserverSlos: false
     kubelet: true
     kubeProxy: false
-    kubePrometheusGeneral: false
-    kubePrometheusNodeRecording: false
-    kubernetesApps: false
-    kubernetesResources: false
-    kubernetesStorage: false
-    kubernetesSystem: false
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
     kubeScheduler: false
-    kubeStateMetrics: false
-    network: false
+    kubeStateMetrics: true
+    network: true
     node: true
-    nodeExporterAlerting: false
+    nodeExporterAlerting: true
     nodeExporterRecording: true
-    prometheus: false
-    prometheusOperator: false
+    prometheus: true
+    prometheusOperator: true
 
 prometheus:
   enabled: true
   prometheusSpec:
-    podMonitorSelectorNilUsesHelmValues: false
-    ruleSelectorNilUsesHelmValues: false
-    serviceMonitorSelectorNilUsesHelmValues: false
-    probeSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: true
+    ruleSelectorNilUsesHelmValues: true
+    serviceMonitorSelectorNilUsesHelmValues: true
+    probeSelectorNilUsesHelmValues: true
     resources:
       requests:
         cpu: 200m
@@ -49,28 +55,26 @@ prometheus:
       volumeClaimTemplate:
         spec:
           accessModes: ["ReadWriteOnce"]
-          # Explicitly use the 'local-path' storage class provided by k3s.
           storageClassName: "local-path"
           resources:
             requests:
-              storage: 8Gi
-    # Lower data retention to save space in the QA environment.
-    retention: 24h
+              storage: 5Gi
+    retention: 48h
 
 grafana:
   enabled: true
-  adminPassword: prom-operator
-  defaultDashboardsEnabled: false
+  adminPassword: adminpwd
+  defaultDashboardsEnabled: true
   sidecar:
     dashboards:
       enabled: true
   resources:
     requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 250m
+      cpu: 200m
       memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 alertmanager:
   enabled: true

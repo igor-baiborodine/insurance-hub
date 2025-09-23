@@ -46,6 +46,8 @@
 # Kubernetes
 /k8s/bootstrap/qa/qa-insurance-hub-kubeconfig
 /k8s/apps/infra/prometheus/kube-prometheus-stack
+**/Chart.lock
 
 # Dev
 **/research/*
+*.tgz

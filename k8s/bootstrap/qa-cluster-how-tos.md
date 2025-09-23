@@ -7,10 +7,10 @@
 - [Create Cluster](#create-cluster)
   - [Prerequisites](#prerequisites)
   - [Create LXD Virtual Machines](#create-lxd-virtual-machines)
-  - [Create Multi-node Rancher's K3s Cluster](#create-multi-node-ranchers-k3s-cluster)
-  - [Deploy qa-monitoring Resources](#deploy-qa-monitoring-resources)
-  - [Deploy qa-data Resources](#deploy-qa-data-resources)
-- [Monitor Cluster Load](#monitor-cluster-load)
+  - [Deploy K3s Cluster](#deploy-k3s-cluster)
+  - [Deploy Base Observability](#deploy-base-observability)
+  - [Monitor Cluster Load](#monitor-cluster-load)
+- [Deploy qa-data Resources](#deploy-qa-data-resources)
 - [Suspend and Resume Cluster](#suspend-and-resume-cluster)
 - [Current Snapshots](#current-snapshots)
 
@@ -95,7 +95,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
       qa-nodes-create-2025-09-10
     ```
 
-### Create Multi-node Rancher's K3s Cluster
+### Deploy K3s Cluster
 
 - `make qa-cluster-create`
 - `lxc list`
@@ -127,21 +127,53 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 > Please note that after this step the `kubectl` current context will be automatically set to
 `qa-insurance-hub`.
 
-### Deploy qa-monitoring Resources
+### Deploy Base Observability
+
 - `cd ..`, change directory from `k8s/bootstrap` to `k8s`
-- `make prometheus-stack-install-qa`
+- `make prometheus-stack-install`
 - `kubectl get pods -n qa-monitoring`
     ```bash
-    alertmanager-prometheus-community-kube-alertmanager-0      2/2     Running   0          2m4s
-    prometheus-community-grafana-7d9b9c8496-4v7bl              3/3     Running   0          2m36s
-    prometheus-community-kube-operator-7bfc556b55-cmgzf        1/1     Running   0          2m35s
-    prometheus-community-kube-state-metrics-699f796bb6-dnjd8   1/1     Running   0          2m35s
-    prometheus-prometheus-community-kube-prometheus-0          2/2     Running   0          2m4s
-- `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=prometheus-stack-install-qa-<iso-date>`
+    NAME                                                     READY   STATUS    RESTARTS   AGE
+    alertmanager-prometheus-kube-prometheus-alertmanager-0   2/2     Running   0          3m53s
+    prometheus-grafana-7cb7dbd896-xp6qf                      3/3     Running   0          4m14s
+    prometheus-kube-prometheus-operator-6694cc948f-5fx6f     1/1     Running   0          4m14s
+    prometheus-kube-state-metrics-7c5fb9d798-pw9bt           1/1     Running   0          4m14s
+    prometheus-prometheus-kube-prometheus-prometheus-0       2/2     Running   0          3m53s
+    prometheus-prometheus-node-exporter-dgvnj                1/1     Running   0          4m14s
+    prometheus-prometheus-node-exporter-svptt                1/1     Running   0          4m14s
+    prometheus-prometheus-node-exporter-tg9xs                1/1     Running   0          4m14s
+    ```
+- `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=prometheus-stack-install-<iso-date>`
 
+### Monitor Cluster Load
 
-### Deploy qa-data Resources
+**Prometheus**
 
+- `make prometheus-ui` and go to `http://localhost:9090`
+- In Prometheus UI, go to `Status -> Target Health` and verify that all targets are `UP`
+
+**Grafana**
+
+- `make grafana-ui` and go to `http://localhost:3000`
+- In Grafana UI, go to `Home -> Manage -> Dashboard` and verify that the default dashboards are
+  available:
+    - Kubernetes / Compute Resources / Cluster
+    - Kubernetes / Compute Resources / Node
+    - Kubernetes / Compute Resources / Pod
+    - etc.
+
+**htop**
+
+- `kubectl get nodes`
+- `lxc exec <node-name> -- /bin/bash`
+    ```bash
+    lxc exec qa-master -- /bin/bash
+    root@qa-master:~# htop
+    ```
+
+## Deploy qa-data Resources
+
+**PostgreSQL**
 - `make postgres-secret-create-qa POSTGRES_PASSWORD=your_password`
 - `make postgres-deploy`
 - `kubectl get pods -n qa-data`
@@ -153,19 +185,11 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 - `make postgres-status`
 - `make -C bootstrap qa-nodes-snapshot qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
 
-## Monitor Cluster Load
-
-- `lxc exec <node-name> -- /bin/bash`
-    ```bash
-    lxc exec qa-master -- /bin/bash
-    root@qa-master:~# htop
-    ```
-
 ## Suspend and Resume Cluster
 
 - `cd k8s/bootstrap`
 
-1. Suspend the cluster:
+**Suspend Cluster**
 
 - `make qa-nodes-suspend`
 - `lxc list`
@@ -181,7 +205,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     +------------+--------+----------------------+-----------------------------------------------+-----------------+-----------+
     ```
 
-2. Resume the cluster:
+**Resume Cluster**
 
 - `make qa-nodes-resume`, wait until all nodes are in `Ready` state
 - `kubectl get nodes`
@@ -201,10 +225,8 @@ Log of current snapshots on your local machine.
 - Restore from existing snapshot: `make qa-nodes-restore QA_SNAPSHOT_NAME=your_existing_snapshot`
 - List snapshots: `make qa-nodes-snapshots-list`
 
-| Name                                          | Description                                        |
-|-----------------------------------------------|----------------------------------------------------|
-| **qa-nodes-create-2025-09-10**                | Base cluster image without K8s installed           |
-| **qa-cluster-create-2025-09-10**              | Cluster image with K8s, DNS, and storage installed |
-| **qa-prometheus-operator-install-2025-09-10** | Cluster image with Prometheus operator installed   |
-| **qa-postgres-deploy-2025-09-16**             | Cluster image with PostgreSQL installed            |
-| **qa-mongodb-deploy-2025-09-16**              | Cluster image with MongoDB installed               |
+| Name                                       | Description                                        |
+|--------------------------------------------|----------------------------------------------------|
+| **qa-nodes-create-2025-09-22**             | Base cluster image without K8s installed           |
+| **qa-cluster-create-2025-09-22**           | Cluster image with K8s, DNS, and storage installed |
+| **prometheus-operator-install-2025-09-23** | Cluster image with Prometheus operator installed   |

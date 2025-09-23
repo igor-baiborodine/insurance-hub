@@ -135,8 +135,8 @@ _context_namespace_check:
 
 KUBE_PROMETHEUS_STACK_VERSION := 77.10.0
 
-.PHONY: prometheus-stack-install-qa
-prometheus-stack-install-qa: ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
+.PHONY: prometheus-stack-install
+prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
 	@CUR_CTX=$$(kubectl config current-context); \
 	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
 		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
@@ -145,18 +145,24 @@ prometheus-stack-install-qa: ## Install Kube Prometheus Stack (Prometheus, Grafa
 	@kubectl get namespace qa-monitoring >/dev/null 2>&1 || kubectl create namespace qa-monitoring
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
-	@helm upgrade --install prometheus-community prometheus-community/kube-prometheus-stack \
+	@helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
 		--version $(KUBE_PROMETHEUS_STACK_VERSION) \
 		--namespace qa-monitoring \
 		--values ./env/qa/prometheus-values.yaml \
 		--wait \
 		--timeout 15m
 
-.PHONY: prometheus-ui-qa
-prometheus-ui-qa: ## Access Prometheus UI via port-forward
+.PHONY: prometheus-ui
+prometheus-ui: ## Access Prometheus UI via port-forward
 	@echo "Forwarding Prometheus UI to http://localhost:9090"
 	@echo "Press Ctrl+C to stop."
-	@kubectl port-forward svc/prometheus-prometheus-operator-kube-p-prometheus 9090:9090 --namespace qa-monitoring
+	@kubectl port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090 --namespace qa-monitoring
+
+.PHONY: grafana-ui
+grafana-ui: ## Access Grafana UI via port-forward
+	@echo "Forwarding Grafana UI to http://localhost:3000"
+	@echo "Login with admin/adminpwd. Press Ctrl+C to stop."
+	@kubectl port-forward svc/prometheus-grafana 3000:80 --namespace qa-monitoring
 
 ################################################################################
 # PostgreSQL Deployment Targets
