@@ -164,23 +164,6 @@ prometheus-ui-qa: ## Access Prometheus UI via port-forward
 # Namespace is auto-detected from the current kubectl context
 ################################################################################
 
-CNPG_OPERATOR_VERSION := v1.27.0
-
-.PHONY: _postgres-operator-crds-install
-_postgres-operator-crds-install:
-	@CUR_CTX=$$(kubectl config current-context); \
-	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
-		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
-		exit 1; \
-	fi
-	@echo "Ensuring clean state by removing previous operator CRD directory..."
-	@rm -rf ./apps/infra/postgres/crds
-	@echo "Downloading CloudNativePG operator CRDs version $(CNPG_OPERATOR_VERSION)..."
-	@mkdir -p ./apps/infra/postgres/crds
-	@curl -L -o ./apps/infra/postgres/crds/cnpg-crds.yaml https://github.com/cloudnative-pg/cloudnative-pg/releases/download/$(CNPG_OPERATOR_VERSION)/cloudnative-pg.crds.yaml
-	@echo "Applying CloudNativePG CRDs..."
-	@kubectl apply --server-side -f ./apps/infra/postgres/crds/cnpg-crds.yaml
-
 PHONY: postgres-secret-create-qa
 postgres-secret-create-qa: _context_namespace_check ## Create/update PostgreSQL password secret in QA. Usage: make postgres-secret-create-qa POSTGRES_PASSWORD=your_password
 	@if [ -z "$(POSTGRES_PASSWORD)" ]; then \
