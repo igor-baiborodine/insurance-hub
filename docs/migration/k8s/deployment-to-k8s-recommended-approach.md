@@ -64,7 +64,7 @@ insurance-hub/
 | Loki                  | qa-monitoring |
 | Tempo                 | qa-monitoring |
 
-- **Local dev:** All resources are in the `local-dev` namespace.
+- **Local dev:** All resources are in the `local-dev-all` namespace.
 
 ### PostgreSQL Deployment Example (Operator-based)
 
@@ -81,7 +81,7 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: postgresql-dev
-  namespace: local-dev
+  namespace: local-dev-all
 spec:
   instances: 1
   storage:
