@@ -11,7 +11,7 @@ QA_NODES_ALL			:= $(QA_NODES_MASTER) $(QA_NODES_WORKER)
 QA_CLUSTER_NAME  		:= qa-insurance-hub
 QA_KUBECTL_CONTEXT		:= $(QA_CLUSTER_NAME)
 QA_SNAPSHOT_NAME 		?= baseline
-KIND_CONFIG_FILE   		:= local-dev-insurance-hub.yaml
+KIND_CONFIG_FILE   		:= local-dev/local-dev-insurance-hub.yaml
 LOCAL_DEV_CLUSTER_NAME  := local-dev-insurance-hub
 
 ################################################################################
@@ -20,7 +20,7 @@ LOCAL_DEV_CLUSTER_NAME  := local-dev-insurance-hub
 ################################################################################
 .PHONY: local-dev-create
 local-dev-create: ## Create and start the local dev Kind cluster (single-node)
-	@mkdir -p /tmp/data/local-dev-storage
+	@mkdir -p $(HOME)/tmp/data/local-dev-storage
 	@kind create cluster --name $(LOCAL_DEV_CLUSTER_NAME) --config $(KIND_CONFIG_FILE)
 
 .PHONY: local-dev-delete
