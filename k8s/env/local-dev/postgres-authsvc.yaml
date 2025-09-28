@@ -1,0 +1,23 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres-authsvc
+  namespace: local-dev-all
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  storage:
+    size: 1Gi
+  bootstrap:
+    initdb:
+      database: authsvc
+      owner: authsvc
+      secret:
+        name: postgres-authsvc-creds-local-dev
+  resources:
+    requests:
+      cpu: "125m"
+      memory: "256Mi"
+    limits:
+      cpu: "250m"
+      memory: "512Mi"

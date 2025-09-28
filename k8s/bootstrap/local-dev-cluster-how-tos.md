@@ -24,25 +24,23 @@ on [Kind](https://github.com/kubernetes-sigs/kind?tab=readme-ov-file).
 - `make local-dev-create`
 - `kubectl get nodes`
     ```bash
-    NAME                                    STATUS     ROLES           AGE   VERSION
-    local-dev-insurance-hub-control-plane   NotReady   control-plane   16s   v1.33.2
+    NAME                                    STATUS   ROLES           AGE     VERSION
+    local-dev-insurance-hub-control-plane   Ready    control-plane   2m19s   v1.33.2
     ```
 
 > Please note that after this step the `kubectl` current context will be automatically set to
 `kind-local-dev-insurance-hub`.
 
-### Deploy `local-dev` Resources
+### Deploy Data Resources
 
-Once the cluster is running, deploy the necessary data stores into the `local-dev` namespace.
+Once the cluster is running, deploy the necessary data resources into the `local-dev-all` namespace.
 
 1. **Postgres**
-- `make postgres-deploy`
-- `kubectl get pods -n local-dev | grep postgres`
-    ```bash
-    NAME                    READY   STATUS    RESTARTS   AGE
-    postgres-postgresql-0   1/1     Running   0          3m3s    
-    ```
-- `make postgres-status`
+- `make postgres-operator-deploy`
+- `auth` service: `make postgres-svc-secret-create SVC_NAME=auth PG_SVC_USER_PWD=<user-pwd>`
+- `make postgres-svc-deploy SVC_NAME=auth`, wait at least one minute for the cluster to be ready.
+- `make postgres-svc-status SVC_NAME=auth`
+- Repeat for other services: `document`, `payment`, `policy`, `product`.
 
 2. **MongoDB**  
 - `make mongodb-deploy`

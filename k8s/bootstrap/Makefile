@@ -25,7 +25,7 @@ local-dev-create: ## Create and start the local dev Kind cluster (single-node)
 
 .PHONY: local-dev-delete
 local-dev-delete: ## Stop and delete the local dev Kind cluster with its persistent storage
-	@rm -rf /tmp/data/local-dev-storage
+	@rm -rf $(HOME)/tmp/data/local-dev-storage
 	@kind delete cluster --name $(LOCAL_DEV_CLUSTER_NAME)
 
 .PHONY: local-dev-suspend
