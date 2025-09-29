@@ -22,4 +22,4 @@ spec:
       cpu: "500m"
       memory: "1Gi"
   monitoring:
-    enabledPodMonitor: true
+    enablePodMonitor: true

@@ -162,7 +162,7 @@ prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana,
 	@helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
 		--namespace qa-monitoring \
-		--values ./env/qa/prometheus-values.yaml \
+		--values "$(VALUES_FILE_PREFIX)"/prometheus-values.yaml \
 		--wait \
 		--timeout 15m
 
