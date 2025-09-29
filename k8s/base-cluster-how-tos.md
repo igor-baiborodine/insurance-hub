@@ -61,6 +61,17 @@
 
 ## Local Dev
 
+- `cd k8s/bootstrap`
+- `make local-dev-create`
+- `kubectl get nodes`
+    ```bash
+    NAME                                    STATUS   ROLES           AGE     VERSION
+    local-dev-insurance-hub-control-plane   Ready    control-plane   2m19s   v1.33.2
+    ```
+
+> Please note that after this step the `kubectl` current context will be automatically set to
+`kind-local-dev-insurance-hub`.
+
 ## QA
 
 Use the following sequence of [Make](https://www.gnu.org/software/make/) targets and shell commands
