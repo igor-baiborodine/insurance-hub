@@ -1,28 +1,27 @@
-# QA Cluster How-To's
+# Base Cluster How-To's
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**
 
-- [Create Cluster](#create-cluster)
-  - [Prerequisites](#prerequisites)
+- [Prerequisites](#prerequisites)
+- [Local Dev](#local-dev)
+- [QA](#qa)
   - [Create LXD Virtual Machines](#create-lxd-virtual-machines)
   - [Deploy K3s Cluster](#deploy-k3s-cluster)
   - [Deploy Base Observability](#deploy-base-observability)
   - [Monitor Cluster Load](#monitor-cluster-load)
-- [Deploy qa-data Resources](#deploy-qa-data-resources)
-- [Suspend and Resume Cluster](#suspend-and-resume-cluster)
-- [Current Snapshots](#current-snapshots)
+  - [Manage Cluster](#manage-cluster)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-## Create Cluster
+## Prerequisites
 
-Use the following sequence of [Make](https://www.gnu.org/software/make/) targets and shell commands
-to create and manage the QA cluster based on [K3s](https://www.rancher.com/products/k3s).
+1. **Kubernetes cluster dependencies**
+- `cd k8s`
+- `make k8s-prereq-all`
 
-### Prerequisites
-
+2. **QA cluster configuration**
 - Make sure that the host uses the `nftables` instead of `iptables-legacy`:
     ```bash
     sudo update-alternatives --config iptables
@@ -59,6 +58,13 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     sudo iptables -L FORWARD -v -n | grep "Chain FORWARD"
     Chain FORWARD (policy ACCEPT 340 packets, 335K bytes)
     ```
+
+## Local Dev
+
+## QA
+
+Use the following sequence of [Make](https://www.gnu.org/software/make/) targets and shell commands
+to create and manage the QA cluster based on [K3s](https://www.rancher.com/products/k3s).
 
 ### Create LXD Virtual Machines
 
@@ -147,12 +153,13 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 
 ### Monitor Cluster Load
 
-**Prometheus**
+1. **Prometheus**
 
+- `cd k8s`
 - `make prometheus-ui` and go to `http://localhost:9090`
 - In Prometheus UI, go to `Status -> Target Health` and verify that all targets are `UP`
 
-**Grafana**
+2. **Grafana**
 
 - `make grafana-ui` and go to `http://localhost:3000`
 - In Grafana UI, go to `Home -> Manage -> Dashboard` and verify that the default dashboards are
@@ -162,7 +169,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     - Kubernetes / Compute Resources / Pod
     - etc.
 
-**htop**
+3. **htop**
 
 - `kubectl get nodes`
 - `lxc exec <node-name> -- /bin/bash`
@@ -171,25 +178,11 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     root@qa-master:~# htop
     ```
 
-## Deploy qa-data Resources
-
-**PostgreSQL**
-- `make postgres-secret-create POSTGRES_PWD=<your-postgres-pwd>`
-- `make postgres-deploy`
-- `kubectl get pods -n qa-data`
-    ```bash
-    NAME                            READY   STATUS    RESTARTS   AGE
-    postgres-postgresql-primary-0   2/2     Running   0          3m20s
-    postgres-postgresql-read-0      2/2     Running   0          3m20s
-    ```
-- `make postgres-status`
-- `make -C bootstrap qa-nodes-snapshot qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
-
-## Suspend and Resume Cluster
+### Manage Cluster
 
 - `cd k8s/bootstrap`
 
-**Suspend Cluster**
+1. **Suspend cluster**
 
 - `make qa-nodes-suspend`
 - `lxc list`
@@ -205,7 +198,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     +------------+--------+----------------------+-----------------------------------------------+-----------------+-----------+
     ```
 
-**Resume Cluster**
+2. **Resume cluster**
 
 - `make qa-nodes-resume`, wait until all nodes are in `Ready` state
 - `kubectl get nodes`
@@ -216,9 +209,9 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     qa-worker2   Ready    <none>                 7h41m   v1.33.4+k3s1
     ```
 
-## Current Snapshots
+3. **Current QA Snapshots**
 
-Log of current snapshots on your local machine.
+Log of current QA snapshots on your local machine.
 
 - `cd k8s/bootstrap`
 - Create a new snapshot: `make qa-nodes-snapshot QA_SNAPSHOT_NAME=your_new_snapshot`
