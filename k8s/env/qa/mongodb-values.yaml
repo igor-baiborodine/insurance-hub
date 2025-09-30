@@ -27,7 +27,7 @@ mongodb:
     enabled: false
   auth:
     enabled: true
-    rootPassword: "mongodb"
+    rootPassword: "rootpwd"
     usePasswordSecret: false
   metrics:
     enabled: false

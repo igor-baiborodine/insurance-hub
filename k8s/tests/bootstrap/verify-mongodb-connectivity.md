@@ -12,7 +12,7 @@ command-line tool.
    machine's port `27017` to the MongoDB service running in the cluster.
 
     ```shell
-    kubectl port-forward svc/mongodb 27017:27017 -n local-dev
+    kubectl port-forward svc/local-dev-mongodb 27017:27017 -n local-dev-all
     Forwarding from 127.0.0.1:27017 -> 27017
     Forwarding from [::1]:27017 -> 27017
     ```
@@ -20,11 +20,11 @@ command-line tool.
 2. **Connect Using mongosh**
 
    With the port-forwarding active, open a **new** terminal window and run the following command to
-   connect to the database. The password is `mongodb` as configured in the
+   connect to the database. The password is `rootpwd` as configured in the
    `mongodb-values.yaml` for the local dev environment.
 
     ```shell
-    mongosh "mongodb://root:mongodb@localhost:27017/admin"
+    mongosh "mongodb://root:rootpwd@localhost:27017/admin"
     ```
 
 3. **Verify the Connection**
@@ -58,7 +58,8 @@ command-line tool.
    the shell:
 
     ```shell
-    kubectl run mongosh-test --rm -it --image=bitnami/mongodb --namespace=default -- bash -c "mongosh mongodb://root:mongodb@mongodb.qa-data.svc.cluster.local:27017/admin"
+    kubectl run mongosh-test --rm -it --image=bitnami/mongodb --namespace=default -- bash \ 
+        -c "mongosh mongodb://root:rootpwd@mongodb.qa-data.svc.cluster.local:27017/admin"
     ```
 
 3. **Verify the Connection**
