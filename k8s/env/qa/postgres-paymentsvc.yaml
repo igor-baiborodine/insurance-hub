@@ -1,0 +1,25 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: qa-postgres-paymentsvc
+  namespace: qa-data
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  storage:
+    size: 1Gi
+  bootstrap:
+    initdb:
+      database: paymentsvc
+      owner: paymentsvc
+      secret:
+        name: qa-postgres-paymentsvc-creds
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+  monitoring:
+    enablePodMonitor: true

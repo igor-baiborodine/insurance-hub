@@ -40,10 +40,15 @@ defaultRules:
 prometheus:
   enabled: true
   prometheusSpec:
-    podMonitorSelectorNilUsesHelmValues: true
-    ruleSelectorNilUsesHelmValues: true
-    serviceMonitorSelectorNilUsesHelmValues: true
-    probeSelectorNilUsesHelmValues: true
+    podMonitorNamespaceSelector: {}
+    podMonitorSelector: {}
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleNamespaceSelector: {}
+    ruleSelector: {}
+    ruleSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector: {}
+    serviceMonitorSelector: {}
+    serviceMonitorSelectorNilUsesHelmValues: false
     resources:
       requests:
         cpu: 200m

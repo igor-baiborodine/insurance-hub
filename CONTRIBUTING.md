@@ -38,6 +38,7 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
 * **LXD** `>=4.22`, see [Install LXD](https://linuxcontainers.org/lxd/getting-started-cli/).
 * **Helm** `>=3.14.0`, see [Install Helm](https://helm.sh/docs/intro/install/).
 * **PostgreSQL** `>=15.0`, see [Install PostgreSQL](https://www.postgresql.org/download/).
+* **CloudNativePG kubectl plugin** `>=1.26.0`, see [Install CloudNativePG Plugin](https://cloudnative-pg.io/documentation/current/installation_upgrade/#kubectl-plugin).
 * **MongoDB Shell** `>=2.1.1`,
   see [Install MongoDB Shell](https://www.mongodb.com/docs/mongodb-shell/install/).
 
@@ -51,8 +52,11 @@ cd insurance-hub
 ### Install Dependencies
 
 1. Kubernetes Cluster Dependencies
-- `cd k8s`
-- `make k8s-prereq-all`
+- `make -C k8s k8s-prereq-all`
+
+### Create Kubernetes Cluster
+
+TODO
 
 ## Style Guides
 

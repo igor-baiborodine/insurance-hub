@@ -14,23 +14,23 @@ kubeconfig-clear: ## Empty the ~/.kube/config file
 .PHONY: prereq-k8s-kubectl
 prereq-k8s-kubectl: ## Install latest kubectl on Ubuntu 24.04.2 LTS
 	@KUBECTL_VERSION=$$(curl -L -s https://dl.k8s.io/release/stable.txt); \
-	if [ -z "$$KUBECTL_VERSION" ]; then \
+	@if [ -z "$$KUBECTL_VERSION" ]; then \
 	  echo "Failed to fetch latest kubectl version!"; \
 	  exit 1; \
 	fi; \
-	curl -LO "https://dl.k8s.io/release/$${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
-	chmod +x kubectl; \
-	echo "Moving kubectl to /usr/local/bin (you may be prompted for your password)..."; \
-	sudo mv kubectl /usr/local/bin/kubectl; \
-	kubectl version --client
+	@curl -LO "https://dl.k8s.io/release/$${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
+	@chmod +x kubectl; \
+	@echo "Moving kubectl to /usr/local/bin (you may be prompted for your password)..."; \
+	@sudo mv kubectl /usr/local/bin/kubectl; \
+	@kubectl version --client
 
 .PHONY: prereq-k8s-kind
 prereq-k8s-kind: ## Install latest Kind on Ubuntu 24.04.2 LTS
-	curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
-	chmod +x ./kind
-	echo "Moving kind binary to /usr/local/bin (you may be prompted for your password)..."
-	sudo mv ./kind /usr/local/bin/kind
-	kind --version
+	@curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+	@chmod +x ./kind
+	@echo "Moving kind binary to /usr/local/bin (you may be prompted for your password)..."
+	@sudo mv ./kind /usr/local/bin/kind
+	@kind --version
 
 .PHONY: prereq-k8s-helm
 prereq-k8s-helm: ## Install latest Helm on Ubuntu 24.04.2 LTS
@@ -79,6 +79,12 @@ prereq-db-psql: ## Install latest psql (PostgreSQL CLI) on Ubuntu 24.04.2 LTS
 	@sudo apt-get install -y postgresql-client
 	@psql --version
 
+.PHONY: prereq-k8s-cnpg-plugin
+prereq-k8s-cnpg-plugin: ## Install CloudNativePG kubectl plugin on Ubuntu 24.04.2 LTS
+	@echo "Installing CloudNativePG kubectl plugin..."
+	@curl -sSfL https://github.com/cloudnative-pg/cloudnative-pg/raw/main/hack/install-cnpg-plugin.sh | sudo sh -s -- -b /usr/local/bin
+	@echo "kubectl-cnpg plugin installed at /usr/local/bin"
+
 .PHONY: prereq-db-mongosh
 prereq-db-mongosh: ## Install latest mongosh (MongoDB Shell) on Ubuntu 24.04.2 LTS
 	@echo "Installing MongoDB Shell (mongosh)..."
@@ -100,31 +106,39 @@ prereq-all: prereq-k8s-all prereq-db-all ## Install all prerequisites
 # Internal Helper Targets
 ################################################################################
 
-CTX := $(shell kubectl config current-context 2>/dev/null)
+CUR_CTX := $(shell kubectl config current-context 2>/dev/null)
 
-ifeq ($(CTX), qa-insurance-hub)
-	ENV_NAME := qa
-	NAMESPACE := qa-data
-else ifeq ($(CTX), kind-local-dev-insurance-hub)
-	ENV_NAME := local-dev
-	NAMESPACE := local-dev
+ifeq ($(CUR_CTX), qa-insurance-hub)
+    ENV_NAME := qa
+    SVC_NS := $(ENV_NAME)-svc
+    DATA_NS := $(ENV_NAME)-data
+	AUTH_NS := $(ENV_NAME)-auth
+	NETWORKING_NS := $(ENV_NAME)-networking
+	MONITORING_NS := $(ENV_NAME)-monitoring
 else
-	ENV_NAME := INVALID
-	NAMESPACE := INVALID
+    ifeq ($(CUR_CTX), kind-local-dev-insurance-hub)
+        ENV_NAME := local-dev
+        LOCAL_DEV_NS := $(ENV_NAME)-all
+		SVC_NS := $(LOCAL_DEV_NS)
+		DATA_NS := $(LOCAL_DEV_NS)
+		AUTH_NS := $(LOCAL_DEV_NS)
+		NETWORKING_NS := $(LOCAL_DEV_NS)
+		MONITORING_NS := $(LOCAL_DEV_NS)
+    else
+        ENV_NAME := INVALID
+    endif
 endif
 
 VALUES_FILE_PREFIX = env/$(ENV_NAME)
 
-# Helper to determine environment name and namespace based on current kubectl context.
-.PHONY: _context_namespace_check
-_context_namespace_check:
-	@CUR_CTX=$$(kubectl config current-context 2>/dev/null); \
-	if [ "$(NAMESPACE)" = "INVALID" ]; then \
+# Helper to validate environment, i.e., current kubectl context.
+.PHONY: _env_check
+_env_check:
+	@if [ "$(ENV_NAME)" = "INVALID" ]; then \
 		echo "ERROR: kubectl context '$$CUR_CTX' is not supported! Must be 'qa-insurance-hub' or 'kind-local-dev-insurance-hub'."; \
 		exit 1; \
 	else \
-		echo "Using namespace: $(NAMESPACE) (kubectl context: $$CUR_CTX)"; \
-		echo "Using values file prefix: $(VALUES_FILE_PREFIX)"; \
+		echo "Using ENV_NAME=$(ENV_NAME), CUR_CTX=$(CUR_CTX)"; \
 	fi
 
 ################################################################################
@@ -145,10 +159,10 @@ prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana,
 	@kubectl get namespace qa-monitoring >/dev/null 2>&1 || kubectl create namespace qa-monitoring
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
-	@helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
-		--version $(KUBE_PROMETHEUS_STACK_VERSION) \
+	@helm upgrade --install qa-prometheus prometheus-community/kube-prometheus-stack \
+		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
 		--namespace qa-monitoring \
-		--values ./env/qa/prometheus-values.yaml \
+		--values "$(VALUES_FILE_PREFIX)"/prometheus-values.yaml \
 		--wait \
 		--timeout 15m
 
@@ -156,65 +170,76 @@ prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana,
 prometheus-ui: ## Access Prometheus UI via port-forward
 	@echo "Forwarding Prometheus UI to http://localhost:9090"
 	@echo "Press Ctrl+C to stop."
-	@kubectl port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090 --namespace qa-monitoring
+	@kubectl port-forward svc/qa-prometheus-kube-prometh-prometheus 9090:9090 --namespace qa-monitoring
 
 .PHONY: grafana-ui
 grafana-ui: ## Access Grafana UI via port-forward
 	@echo "Forwarding Grafana UI to http://localhost:3000"
 	@echo "Login with admin/adminpwd. Press Ctrl+C to stop."
-	@kubectl port-forward svc/prometheus-grafana 3000:80 --namespace qa-monitoring
+	@kubectl port-forward svc/qa-prometheus-grafana 3000:80 --namespace qa-monitoring
 
 ################################################################################
 # PostgreSQL Deployment Targets
-# Targets for deploying and managing PostgreSQL in local dev and QA cluster
+# Targets for deploying and managing PostgreSQL cluster per app service in local dev and QA cluster
 # Namespace is auto-detected from the current kubectl context
 ################################################################################
 
-PHONY: postgres-secret-create-qa
-postgres-secret-create-qa: _context_namespace_check ## Create/update PostgreSQL password secret in QA. Usage: make postgres-secret-create-qa POSTGRES_PASSWORD=your_password
-	@if [ -z "$(POSTGRES_PASSWORD)" ]; then \
-		echo "ERROR: POSTGRES_PASSWORD argument is required. Usage: make postgres-secret-create-qa POSTGRES_PASSWORD=your_password"; \
+CLOUDNATIVE_PG_VERSION := 1.27.0
+PG_SVC_USER_PWD ?= pgsvcpwd
+
+.PHONY: postgres-svc-secret-create
+postgres-svc-secret-create: _env_check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
+	@if [ -z "$$SVC_NAME" ]; then \
+		echo "Argument 'SVC_NAME' is required!"; \
 		exit 1; \
 	fi
-	@echo "Ensuring namespace 'qa-data' exists..."
-	@kubectl create namespace qa-data --dry-run=client -o yaml | kubectl apply -f -
-	@kubectl create secret generic qa-postgres-secret \
-		--namespace qa-data \
-		--from-literal=postgres-password="$(POSTGRES_PASSWORD)" \
-		--from-literal=replication-password="$(POSTGRES_PASSWORD)" \
+	@echo "Ensuring namespace $(DATA_NS) exists..."
+	@kubectl create namespace "$(DATA_NS)" --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl config set-context --current --namespace="$(DATA_NS)"
+
+	@echo "Creating secret with user creds for '$(SVC_NAME)svc' database in PostgreSQL..."
+	# username value should match spec.bootstrap.initdb.owner value from `env/<env-name>/postgres-<service-name>svc.yaml` manifest
+	@kubectl create secret generic ""$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds" \
+	    --namespace "$(DATA_NS)" \
+	    --type kubernetes.io/basic-auth \
+	    --from-literal=username=$(SVC_NAME)svc \
+	    --from-literal=password="$(PG_SVC_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "Secret 'qa-postgres-secret' successfully created/updated in namespace qa-data."
+	@echo "Secret '"$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds' successfully created/updated in namespace $(DATA_NS)"
 
-.PHONY: postgres-deploy
-postgres-deploy: _context_namespace_check ## Deploy PostgreSQL to cluster context (auto-detects env). QA prerequisite: postgres-secret-create-qa
-	@echo "Linting PostgreSQL Helm chart for $(NAMESPACE)..."
-	@helm lint ./apps/infra/postgres -f "$(VALUES_FILE_PREFIX)"/postgres-values.yaml --namespace "$(NAMESPACE)"
-	@echo "Updating Helm dependencies..."
-	@helm dependency update ./apps/infra/postgres
-	@echo "Deploying PostgreSQL with explicit secret configuration..."
-	@helm upgrade --install postgres ./apps/infra/postgres \
-		-f "$(VALUES_FILE_PREFIX)"/postgres-values.yaml \
-		--namespace "$(NAMESPACE)" \
-		--create-namespace \
-		--wait
+.PHONY: postgres-operator-deploy
+postgres-operator-deploy: _env_check ## Install CloudNativePG operator
+	@echo "Deploying CloudNativePG operator (if not present)..."
+	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
 
-.PHONY: postgres-status
-postgres-status: _context_namespace_check ## Show PostgreSQL release/resource status (auto-detects env)
-	@echo "Status for namespace: $(NAMESPACE)"
-	@helm status postgres --namespace "$(NAMESPACE)" || true
-	@echo "\nKubernetes Resources:"
-	@kubectl get pods,svc,pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
+.PHONY: postgres-svc-deploy
+postgres-svc-deploy: _env_check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
+	@if [ -z "$$SVC_NAME" ]; then \
+		echo "Argument 'SVC_NAME' is required!"; \
+		exit 1; \
+	fi
+	@echo "Deploying PostgreSQL cluster for '$(SVC_NAME)svc' to '$(DATA_NS)' namespace...";
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/postgres-"$(SVC_NAME)"svc.yaml;
 
-.PHONY: postgres-uninstall
-postgres-uninstall: _context_namespace_check ## Uninstall PostgreSQL Helm release (chart only, auto-detects env)
-	@echo "Uninstalling Helm release 'postgres' from namespace '$(NAMESPACE)'..."
-	@helm uninstall postgres --namespace "$(NAMESPACE)" || true
+.PHONY: postgres-svc-status
+postgres-svc-status: _env_check ## Show PostgreSQL cluster/resource status for service. Usage: make postgres-svc-status SVC_NAME=<svc-name>
+	@if [ -z "$$SVC_NAME" ]; then \
+		echo "Argument 'SVC_NAME' is required!"; \
+		exit 1; \
+	fi
+	@echo "Status for namespace: $(DATA_NS)"
+	@kubectl cnpg status "$(ENV_NAME)-postgres-$(SVC_NAME)svc" || true
 
-.PHONY: postgres-purge
-postgres-purge: postgres-uninstall ## Uninstall chart AND permanently remove related secrets and PVCs (auto-detects env)
-	@echo "\nDeleting PostgreSQL-related secrets and PVCs in namespace '$(NAMESPACE)'..."
-	@kubectl delete secret -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
-	@kubectl delete pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=postgres || true
+.PHONY: postgres-svc-purge
+postgres-svc-purge: _env_check ## Uninstall cluster and permanently remove related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
+	@echo "Removing PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
+	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)"svc || true
+	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
+	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)svc-creds || true
+
+.PHONY: postgres-purge-all
+postgres-purge-ll: _env_check ## Uninstall cluster and permanently remove related secrets for all service databases
+	@echo "TODO"
 
 ################################################################################
 # MongoDB Deployment Targets
@@ -222,32 +247,32 @@ postgres-purge: postgres-uninstall ## Uninstall chart AND permanently remove rel
 # Namespace and environment auto-detected from current kubectl context
 ################################################################################
 .PHONY: mongodb-deploy
-mongodb-deploy: _context_namespace_check ## Deploy MongoDB to current cluster context (auto-detect env).
-	@echo "Linting MongoDB Helm chart for $(NAMESPACE)..."
-	@helm lint ./apps/infra/mongodb -f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml --namespace "$(NAMESPACE)"
+mongodb-deploy: _env_check ## Deploy MongoDB to current cluster context (auto-detect env).
+	@echo "Linting MongoDB Helm chart for $(ENV_NAME)..."
+	@helm lint ./apps/infra/mongodb -f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml --namespace "$(ENV_NAME)"
 	@echo "Updating Helm dependencies..."
 	@helm dependency update ./apps/infra/mongodb
 	@echo "Deploying MongoDB Helm chart..."
 	@helm upgrade --install mongodb ./apps/infra/mongodb \
 		-f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml \
-		--namespace "$(NAMESPACE)" \
+		--namespace "$(ENV_NAME)" \
 		--create-namespace \
 		--wait
 
 .PHONY: mongodb-status
-mongodb-status: _context_namespace_check ## Show MongoDB release/resource status (auto-detect env)
-	@echo "Status for namespace: $(NAMESPACE)"
-	@helm status mongodb --namespace "$(NAMESPACE)" || true
+mongodb-status: _env_check ## Show MongoDB release/resource status (auto-detect env)
+	@echo "Status for namespace: $(ENV_NAME)"
+	@helm status mongodb --namespace "$(ENV_NAME)" || true
 	@echo "\nKubernetes Resources:"
-	@kubectl get pods,svc,pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=mongodb || true
+	@kubectl get pods,svc,pvc -n "$(ENV_NAME)" -l app.kubernetes.io/instance=mongodb || true
 
 .PHONY: mongodb-uninstall
-mongodb-uninstall: _context_namespace_check ## Uninstall MongoDB Helm release (chart only, auto-detect env)
-	@echo "Uninstalling Helm release 'mongodb' from namespace $(NAMESPACE)..."
-	@helm uninstall mongodb --namespace "$(NAMESPACE)" || true
+mongodb-uninstall: _env_check ## Uninstall MongoDB Helm release (chart only, auto-detect env)
+	@echo "Uninstalling Helm release 'mongodb' from namespace $(ENV_NAME)..."
+	@helm uninstall mongodb --namespace "$(ENV_NAME)" || true
 
 .PHONY: mongodb-purge
 mongodb-purge: mongodb-uninstall ## Uninstall chart AND permanently remove related secrets and PVCs (auto-detect env)
-	@echo "\nDeleting MongoDB-related secrets and PVCs in namespace $(NAMESPACE)..."
-	@kubectl delete secret -n "$(NAMESPACE)" -l app.kubernetes.io/instance=mongodb || true
-	@kubectl delete pvc -n "$(NAMESPACE)" -l app.kubernetes.io/instance=mongodb || true
+	@echo "\nDeleting MongoDB-related secrets and PVCs in namespace $(ENV_NAME)..."
+	@kubectl delete secret -n "$(ENV_NAME)" -l app.kubernetes.io/instance=mongodb || true
+	@kubectl delete pvc -n "$(ENV_NAME)" -l app.kubernetes.io/instance=mongodb || true
