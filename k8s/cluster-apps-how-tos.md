@@ -4,11 +4,9 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**
 
-- [Create Cluster](#create-cluster)
-  - [Create Kind Cluster](#create-kind-cluster)
-  - [Deploy `local-dev` Resources](#deploy-local-dev-resources)
-- [Suspend and Resume Cluster](#suspend-and-resume-cluster)
-- [Delete Cluster](#delete-cluster)
+- [QA—Observability](#qaobservability)
+- [Data](#data)
+- [QA—Cluster Load Monitoring](#qacluster-load-monitoring)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -54,7 +52,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
     ```
 - `make mongodb-status`  
 
-### QA—Cluster Load Monitoring
+## QA—Cluster Load Monitoring
 
 1. **Prometheus**
 

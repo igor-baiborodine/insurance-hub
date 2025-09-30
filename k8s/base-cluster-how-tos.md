@@ -9,8 +9,6 @@
 - [QA](#qa)
   - [Create LXD Virtual Machines](#create-lxd-virtual-machines)
   - [Deploy K3s Cluster](#deploy-k3s-cluster)
-  - [Deploy Base Observability](#deploy-base-observability)
-  - [Monitor Cluster Load](#monitor-cluster-load)
   - [Manage Cluster](#manage-cluster)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
