@@ -28,7 +28,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
     qa-prometheus-prometheus-node-exporter-97p7f             1/1     Running   0          5m28s
     qa-prometheus-prometheus-node-exporter-hn696             1/1     Running   0          5m28s
     qa-prometheus-prometheus-node-exporter-zcd5z             1/1     Running   0          5m28s    ```
-- `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=observability-install-<iso-date>`
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=observability-install-<iso-date>`
 
 ## Data
 
@@ -36,21 +36,23 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 
 1. **Postgres**
 - **Grafana**: Download the file [grafana-dashboard.json](https://github.com/cloudnative-pg/grafana-dashboards/blob/main/charts/cluster/grafana-dashboard.json)
-  and manually import it via the GUI (menu: Dashboards > New > Import). Also, instead of the JSON
+  and manually import it via the GUI (menu: Dashboards > New > Import). Or, instead of the JSON
   file, it can be imported via the following URL: https://grafana.com/grafana/dashboards/20417-cloudnativepg/
 - `make postgres-operator-deploy`
 - `auth` service: `make postgres-svc-secret-create SVC_NAME=auth PG_SVC_USER_PWD=<user-pwd>`
 - `make postgres-svc-deploy SVC_NAME=auth`, wait at least one minute for the cluster to be ready.
 - `make postgres-svc-status SVC_NAME=auth`
 - Repeat for other services: `document`, `payment`, `policy`, `product`.
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
 
 2. **MongoDB**  
-- `make mongodb-deploy`
-- `kubectl get pods -n local-dev | grep mongodb`
+- `make mongodb-install`
+- `kubectl get pods -n local-dev-all | grep mongodb`
     ```bash
     mongodb-74d8b777cc-fr8xx   1/1     Running   0          109s
     ```
 - `make mongodb-status`  
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=mongodb-deploy-<iso-date>`
 
 ## QA—Cluster Load Monitoring
 

@@ -246,33 +246,33 @@ postgres-purge-ll: _env_check ## Uninstall cluster and permanently remove relate
 # Targets for deploying and managing MongoDB in local dev and QA cluster
 # Namespace and environment auto-detected from current kubectl context
 ################################################################################
-.PHONY: mongodb-deploy
-mongodb-deploy: _env_check ## Deploy MongoDB to current cluster context (auto-detect env).
+.PHONY: mongodb-install
+mongodb-install: _env_check ## Install MongoDB to current cluster context (auto-detect env).
 	@echo "Linting MongoDB Helm chart for $(ENV_NAME)..."
-	@helm lint ./apps/infra/mongodb -f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml --namespace "$(ENV_NAME)"
+	@helm lint ./apps/infra/mongodb -f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml --namespace "$(DATA_NS)"
 	@echo "Updating Helm dependencies..."
 	@helm dependency update ./apps/infra/mongodb
-	@echo "Deploying MongoDB Helm chart..."
-	@helm upgrade --install mongodb ./apps/infra/mongodb \
+	@echo "Installing MongoDB Helm chart..."
+	@helm upgrade --install $(ENV_NAME)-mongodb ./apps/infra/mongodb \
 		-f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml \
-		--namespace "$(ENV_NAME)" \
+		--namespace "$(DATA_NS)" \
 		--create-namespace \
 		--wait
 
 .PHONY: mongodb-status
 mongodb-status: _env_check ## Show MongoDB release/resource status (auto-detect env)
-	@echo "Status for namespace: $(ENV_NAME)"
-	@helm status mongodb --namespace "$(ENV_NAME)" || true
+	@echo "Status for namespace: $(DATA_NS)"
+	@helm status $(ENV_NAME)-mongodb --namespace "$(DATA_NS)" || true
 	@echo "\nKubernetes Resources:"
-	@kubectl get pods,svc,pvc -n "$(ENV_NAME)" -l app.kubernetes.io/instance=mongodb || true
+	@kubectl get pods,svc,pvc -n "$(DATA_NS)" -l app.kubernetes.io/instance=$(ENV_NAME)-mongodb || true
 
 .PHONY: mongodb-uninstall
 mongodb-uninstall: _env_check ## Uninstall MongoDB Helm release (chart only, auto-detect env)
-	@echo "Uninstalling Helm release 'mongodb' from namespace $(ENV_NAME)..."
-	@helm uninstall mongodb --namespace "$(ENV_NAME)" || true
+	@echo "Uninstalling Helm release '$(ENV_NAME)-mongodb' from namespace $(DATA_NS)..."
+	@helm uninstall $(ENV_NAME)-mongodb --namespace "$(DATA_NS)" || true
 
 .PHONY: mongodb-purge
 mongodb-purge: mongodb-uninstall ## Uninstall chart AND permanently remove related secrets and PVCs (auto-detect env)
 	@echo "\nDeleting MongoDB-related secrets and PVCs in namespace $(ENV_NAME)..."
-	@kubectl delete secret -n "$(ENV_NAME)" -l app.kubernetes.io/instance=mongodb || true
-	@kubectl delete pvc -n "$(ENV_NAME)" -l app.kubernetes.io/instance=mongodb || true
+	@kubectl delete secret -n "$(ENV_NAME)" -l app.kubernetes.io/instance=$(ENV_NAME)-mongodb || true
+	@kubectl delete pvc -n "$(ENV_NAME)" -l app.kubernetes.io/instance=$(ENV_NAME)-mongodb || true
