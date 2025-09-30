@@ -144,51 +144,6 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 > Please note that after this step the `kubectl` current context will be automatically set to
 `qa-insurance-hub`.
 
-### Deploy Base Observability
-
-- `cd ..`, change directory from `k8s/bootstrap` to `k8s`
-- `make prometheus-stack-install`
-- `kubectl get pods -n qa-monitoring`
-    ```bash
-    NAME                                                     READY   STATUS    RESTARTS   AGE
-    alertmanager-prometheus-kube-prometheus-alertmanager-0   2/2     Running   0          3m53s
-    prometheus-grafana-7cb7dbd896-xp6qf                      3/3     Running   0          4m14s
-    prometheus-kube-prometheus-operator-6694cc948f-5fx6f     1/1     Running   0          4m14s
-    prometheus-kube-state-metrics-7c5fb9d798-pw9bt           1/1     Running   0          4m14s
-    prometheus-prometheus-kube-prometheus-prometheus-0       2/2     Running   0          3m53s
-    prometheus-prometheus-node-exporter-dgvnj                1/1     Running   0          4m14s
-    prometheus-prometheus-node-exporter-svptt                1/1     Running   0          4m14s
-    prometheus-prometheus-node-exporter-tg9xs                1/1     Running   0          4m14s
-    ```
-- `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=prometheus-stack-install-<iso-date>`
-
-### Monitor Cluster Load
-
-1. **Prometheus**
-
-- `cd k8s`
-- `make prometheus-ui` and go to `http://localhost:9090`
-- In Prometheus UI, go to `Status -> Target Health` and verify that all targets are `UP`
-
-2. **Grafana**
-
-- `make grafana-ui` and go to `http://localhost:3000`
-- In Grafana UI, go to `Home -> Manage -> Dashboard` and verify that the default dashboards are
-  available:
-    - Kubernetes / Compute Resources / Cluster
-    - Kubernetes / Compute Resources / Node
-    - Kubernetes / Compute Resources / Pod
-    - etc.
-
-3. **htop**
-
-- `kubectl get nodes`
-- `lxc exec <node-name> -- /bin/bash`
-    ```bash
-    lxc exec qa-master -- /bin/bash
-    root@qa-master:~# htop
-    ```
-
 ### Manage Cluster
 
 - `cd k8s/bootstrap`
@@ -229,8 +184,8 @@ Log of current QA snapshots on your local machine.
 - Restore from existing snapshot: `make qa-nodes-restore QA_SNAPSHOT_NAME=your_existing_snapshot`
 - List snapshots: `make qa-nodes-snapshots-list`
 
-| Name                                       | Description                                        |
-|--------------------------------------------|----------------------------------------------------|
-| **qa-nodes-create-2025-09-22**             | Base cluster image without K8s installed           |
-| **qa-cluster-create-2025-09-22**           | Cluster image with K8s, DNS, and storage installed |
-| **prometheus-operator-install-2025-09-23** | Cluster image with Prometheus operator installed   |
+| Name                                    | Description                                        |
+|-----------------------------------------|----------------------------------------------------|
+| **qa-nodes-create-2025-09-29**          | Base cluster image without K8s installed           |
+| **qa-cluster-create-2025-09-29**        | Cluster image with K8s, DNS, and storage installed |
+| **qa-observability-install-2025-09-29** | Cluster image with observability apps installed    |

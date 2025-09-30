@@ -1,7 +1,7 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: qa-postgres-authsvc
+  name: qa-postgres-policysvc
   namespace: qa-data
 spec:
   instances: 2
@@ -10,10 +10,10 @@ spec:
     size: 1Gi
   bootstrap:
     initdb:
-      database: authsvc
-      owner: authsvc
+      database: policysvc
+      owner: policysvc
       secret:
-        name: qa-postgres-authsvc-creds
+        name: qa-postgres-policysvc-creds
   resources:
     requests:
       cpu: "250m"

@@ -159,7 +159,7 @@ prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana,
 	@kubectl get namespace qa-monitoring >/dev/null 2>&1 || kubectl create namespace qa-monitoring
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
-	@helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+	@helm upgrade --install qa-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
 		--namespace qa-monitoring \
 		--values "$(VALUES_FILE_PREFIX)"/prometheus-values.yaml \
@@ -170,13 +170,13 @@ prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana,
 prometheus-ui: ## Access Prometheus UI via port-forward
 	@echo "Forwarding Prometheus UI to http://localhost:9090"
 	@echo "Press Ctrl+C to stop."
-	@kubectl port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090 --namespace qa-monitoring
+	@kubectl port-forward svc/qa-prometheus-kube-prometh-prometheus 9090:9090 --namespace qa-monitoring
 
 .PHONY: grafana-ui
 grafana-ui: ## Access Grafana UI via port-forward
 	@echo "Forwarding Grafana UI to http://localhost:3000"
 	@echo "Login with admin/adminpwd. Press Ctrl+C to stop."
-	@kubectl port-forward svc/prometheus-grafana 3000:80 --namespace qa-monitoring
+	@kubectl port-forward svc/qa-prometheus-grafana 3000:80 --namespace qa-monitoring
 
 ################################################################################
 # PostgreSQL Deployment Targets
@@ -199,13 +199,13 @@ postgres-svc-secret-create: _env_check ## Create/update secret for DB service us
 
 	@echo "Creating secret with user creds for '$(SVC_NAME)svc' database in PostgreSQL..."
 	# username value should match spec.bootstrap.initdb.owner value from `env/<env-name>/postgres-<service-name>svc.yaml` manifest
-	@kubectl create secret generic "postgres-"$(SVC_NAME)"svc-creds-$(ENV_NAME)" \
+	@kubectl create secret generic ""$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds" \
 	    --namespace "$(DATA_NS)" \
 	    --type kubernetes.io/basic-auth \
 	    --from-literal=username=$(SVC_NAME)svc \
 	    --from-literal=password="$(PG_SVC_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "Secret 'postgres-"$(SVC_NAME)"svc-creds-"$(ENV_NAME)"' successfully created/updated in namespace $(DATA_NS)"
+	@echo "Secret '"$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds' successfully created/updated in namespace $(DATA_NS)"
 
 .PHONY: postgres-operator-deploy
 postgres-operator-deploy: _env_check ## Install CloudNativePG operator
@@ -228,17 +228,18 @@ postgres-svc-status: _env_check ## Show PostgreSQL cluster/resource status for s
 		exit 1; \
 	fi
 	@echo "Status for namespace: $(DATA_NS)"
-	@kubectl cnpg status "postgres-$(SVC_NAME)svc" || true
+	@kubectl cnpg status "$(ENV_NAME)-postgres-$(SVC_NAME)svc" || true
 
 .PHONY: postgres-svc-purge
 postgres-svc-purge: _env_check ## Uninstall cluster and permanently remove related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
-	@echo "Removing PostgreSQL cluster 'postgres-$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
-	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" postgres-"$(SVC_NAME)"svc || true
+	@echo "Removing PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
+	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)"svc || true
 	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
-	@kubectl delete secret -n "$(DATA_NS)" postgres-$(SVC_NAME)svc-creds-"$(ENV_NAME)" || true
+	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)svc-creds || true
 
 .PHONY: postgres-purge-all
 postgres-purge-ll: _env_check ## Uninstall cluster and permanently remove related secrets for all service databases
+	@echo "TODO"
 
 ################################################################################
 # MongoDB Deployment Targets

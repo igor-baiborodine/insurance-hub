@@ -13,7 +13,7 @@ PostgreSQL cluster.
     machine's port `5432` to the PostgreSQL service running in the cluster.
     
     ```shell
-    kubectl port-forward postgres-authsvc-1 -n local-dev-all 5432:5432
+    kubectl port-forward local-dev-postgres-authsvc-1 -n local-dev-all 5432:5432
     Forwarding from 127.0.0.1:5432 -> 5432
     Forwarding from [::1]:5432 -> 5432
     ```
@@ -55,7 +55,7 @@ PostgreSQL cluster.
     and export it as an environment variable with the following command:
     
     ```shell
-    export PGSVCUSERPWD=$(kubectl get secret postgres-authsvc-creds-qa -n qa-data -o jsonpath='{.data.password}' | base64 --decode)
+    export PGSVCUSERPWD=$(kubectl get secret qa-postgres-authsvc-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)
     echo "$PGSVCUSERPWD"   
     ```
 
@@ -67,7 +67,7 @@ PostgreSQL cluster.
     
     ```shell
     kubectl run psql-test --rm -it --image=postgres --namespace=default -- \
-        psql "postgresql://authsvc:$PGSVCUSERPWD@postgres-authsvc-rw.qa-data.svc.cluster.local:5432/authsvc"
+        psql "postgresql://authsvc:$PGSVCUSERPWD@qa-postgres-authsvc-rw.qa-data.svc.cluster.local:5432/authsvc"
     ```
     
     Once connected, the `psql` prompt should be displayed. Then run SQL commands (like `\dt` to list

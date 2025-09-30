@@ -1,7 +1,7 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: local-dev-postgres-authsvc
+  name: local-dev-postgres-productsvc
   namespace: local-dev-all
 spec:
   instances: 1
@@ -10,10 +10,10 @@ spec:
     size: 1Gi
   bootstrap:
     initdb:
-      database: authsvc
-      owner: authsvc
+      database: productsvc
+      owner: productsvc
       secret:
-        name: local-dev-postgres-authsvc-creds
+        name: local-dev-postgres-productsvc-creds
   resources:
     requests:
       cpu: "125m"
