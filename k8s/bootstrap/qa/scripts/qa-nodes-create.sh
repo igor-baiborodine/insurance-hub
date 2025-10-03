@@ -5,11 +5,21 @@ set -euo pipefail
 NODES_MASTER="qa-master"
 NODES_WORKER="qa-worker1 qa-worker2"
 NODES_ALL="$NODES_MASTER $NODES_WORKER"
+BASE_LIMITS_CPU=3
+BASE_LIMITS_MEMORY=8
 
 for NODE in $NODES_ALL; do
     if ! lxc info "$NODE" &>/dev/null; then
         echo "Launching VM $NODE..."
-        lxc launch ubuntu:24.04 --vm "$NODE" -c limits.cpu=2 -c limits.memory=2GiB
+        if [[ $NODES_MASTER =~ $NODE ]]; then
+            CPU_LIMIT=$((BASE_LIMITS_CPU * 2))
+            MEMORY_DOUBLE=$((BASE_LIMITS_MEMORY * 2))
+            MEMORY_LIMIT="${MEMORY_DOUBLE}GiB"
+        else
+            CPU_LIMIT=$BASE_LIMITS_CPU
+            MEMORY_LIMIT="${BASE_LIMITS_MEMORY}GiB"
+        fi
+        lxc launch ubuntu:24.04 --vm "$NODE" -c limits.cpu="$CPU_LIMIT" -c limits.memory="$MEMORY_LIMIT"
         echo "Waiting for LXD VM agent in $NODE..."
         until lxc exec "$NODE" -- true &>/dev/null; do sleep 5; done
         echo "Ensuring network works inside $NODE..."
