@@ -39,10 +39,27 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   and manually import it via the GUI (menu: Dashboards > New > Import). Or, instead of the JSON
   file, it can be imported via the following URL: https://grafana.com/grafana/dashboards/20417-cloudnativepg/
 - `make postgres-operator-deploy`
-- `auth` service: `make postgres-svc-secret-create SVC_NAME=auth PG_SVC_USER_PWD=<user-pwd>`
-- `make postgres-svc-deploy SVC_NAME=auth`, wait at least one minute for the cluster to be ready.
-- `make postgres-svc-status SVC_NAME=auth`
-- Repeat for other services: `document`, `payment`, `policy`, `product`.
+
+  **auth** service: 
+  - `make postgres-svc-secret-create SVC_NAME=auth PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-deploy SVC_NAME=auth`, wait at least one minute for the cluster to be ready.
+  
+  **document** service: 
+  - `make postgres-svc-secret-create SVC_NAME=document PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-deploy SVC_NAME=document`, wait at least one minute for the cluster to be ready.
+  
+  **payment** service: 
+  - `make postgres-svc-secret-create SVC_NAME=payment PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-deploy SVC_NAME=payment`, wait at least one minute for the cluster to be ready.
+  
+  **policy** service: 
+  - `make postgres-svc-secret-create SVC_NAME=policy PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-status SVC_NAME=policy`
+
+  **product** service: 
+  - `make postgres-svc-secret-create SVC_NAME=product PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-deploy SVC_NAME=product`, wait at least one minute for the cluster to be ready.
+
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
 
 2. **MongoDB** 
@@ -75,11 +92,12 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
     - Kubernetes / Compute Resources / Pod
     - etc.
 
-3. **htop**
+3. **htop & df**
 
 - `kubectl get nodes`
 - `lxc exec <node-name> -- /bin/bash`
     ```bash
     lxc exec qa-master -- /bin/bash
     root@qa-master:~# htop
+    root@qa-master:~# df -h
     ```
