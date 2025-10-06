@@ -64,7 +64,7 @@ command-line tool.
    and export it as an environment variable with the following command:
 
     ```shell
-    export MONGOROOTUSERPWD="$(kubectl get secret local-dev-mongodb-root-creds -n local-dev-all -o jsonpath='{.data.password}' | base64 --decode)"
+    export MONGOROOTUSERPWD="$(kubectl get secret qa-mongodb-root-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)"
     echo "$MONGOROOTUSERPWD"   
     ```
 
@@ -76,8 +76,8 @@ command-line tool.
    the shell:
 
     ```shell
-    kubectl run mongosh-test --rm -it --image=bitnami/mongodb --namespace=default -- bash \ 
-        -c "mongosh mongodb://root:$MONGOROOTUSERPWD@mongodb.qa-data.svc.cluster.local:27017/admin"
+    kubectl run mongosh-test --rm -it --image=bitnami/mongodb --namespace=qa-data -- bash \
+        -c "mongosh mongodb://root:$MONGOROOTUSERPWD@qa-mongodb-svc.qa-data.svc.cluster.local:27017/admin"
     ```
 
 3. **Verify the Connection**
@@ -86,10 +86,11 @@ command-line tool.
    list the available databases and confirm connectivity:
 
     ```shell
-    admin> show dbs
-    admin   100.00 KiB
-    config   12.00 KiB
-    local    72.00 KiB
+    qa-mongodb [direct: secondary] admin> show dbs
+    admin   360.00 KiB
+    config  176.00 KiB
+    local   468.00 KiB
+    qa-mongodb [direct: secondary] admin>
     ```
 
    To exit the `mongosh` shell, type `exit` and press Enter.
