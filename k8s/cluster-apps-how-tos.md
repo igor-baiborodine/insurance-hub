@@ -28,7 +28,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
     qa-prometheus-prometheus-node-exporter-97p7f             1/1     Running   0          5m28s
     qa-prometheus-prometheus-node-exporter-hn696             1/1     Running   0          5m28s
     qa-prometheus-prometheus-node-exporter-zcd5z             1/1     Running   0          5m28s    ```
-- `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=observability-install-<iso-date>`
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=observability-install-<iso-date>`
 
 ## Data
 
@@ -36,21 +36,43 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 
 1. **Postgres**
 - **Grafana**: Download the file [grafana-dashboard.json](https://github.com/cloudnative-pg/grafana-dashboards/blob/main/charts/cluster/grafana-dashboard.json)
-  and manually import it via the GUI (menu: Dashboards > New > Import). Also, instead of the JSON
+  and manually import it via the GUI (menu: Dashboards > New > Import). Or, instead of the JSON
   file, it can be imported via the following URL: https://grafana.com/grafana/dashboards/20417-cloudnativepg/
 - `make postgres-operator-deploy`
-- `auth` service: `make postgres-svc-secret-create SVC_NAME=auth PG_SVC_USER_PWD=<user-pwd>`
-- `make postgres-svc-deploy SVC_NAME=auth`, wait at least one minute for the cluster to be ready.
-- `make postgres-svc-status SVC_NAME=auth`
-- Repeat for other services: `document`, `payment`, `policy`, `product`.
 
-2. **MongoDB**  
+  **auth** service: 
+  - `make postgres-svc-secret-create SVC_NAME=auth PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-deploy SVC_NAME=auth`, wait at least one minute for the cluster to be ready.
+  
+  **document** service: 
+  - `make postgres-svc-secret-create SVC_NAME=document PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-deploy SVC_NAME=document`, wait at least one minute for the cluster to be ready.
+  
+  **payment** service: 
+  - `make postgres-svc-secret-create SVC_NAME=payment PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-deploy SVC_NAME=payment`, wait at least one minute for the cluster to be ready.
+  
+  **policy** service: 
+  - `make postgres-svc-secret-create SVC_NAME=policy PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-status SVC_NAME=policy`
+
+  **product** service: 
+  - `make postgres-svc-secret-create SVC_NAME=product PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-deploy SVC_NAME=product`, wait at least one minute for the cluster to be ready.
+
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
+
+2. **MongoDB** 
+- `make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>`
+- `make mongodb-operator-install`
 - `make mongodb-deploy`
-- `kubectl get pods -n local-dev | grep mongodb`
+- `kubectl get pods -n local-dev-all | grep mongodb`
     ```bash
-    mongodb-74d8b777cc-fr8xx   1/1     Running   0          109s
+    local-dev-mongodb-0                            2/2     Running   0          4m41s
+    mongodb-kubernetes-operator-7898cfb5f8-rkc7r   1/1     Running   0          5m34s
     ```
 - `make mongodb-status`  
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=mongodb-deploy-<iso-date>`
 
 ## QA—Cluster Load Monitoring
 
@@ -70,11 +92,12 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
     - Kubernetes / Compute Resources / Pod
     - etc.
 
-3. **htop**
+3. **htop & df**
 
 - `kubectl get nodes`
 - `lxc exec <node-name> -- /bin/bash`
     ```bash
     lxc exec qa-master -- /bin/bash
     root@qa-master:~# htop
+    root@qa-master:~# df -h
     ```

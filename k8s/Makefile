@@ -159,6 +159,7 @@ prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana,
 	@kubectl get namespace qa-monitoring >/dev/null 2>&1 || kubectl create namespace qa-monitoring
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
+	@echo "Installing Kube Prometheus Stack v$(KUBE_PROMETHEUS_STACK_VERSION)..."
 	@helm upgrade --install qa-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
 		--namespace qa-monitoring \
@@ -199,10 +200,10 @@ postgres-svc-secret-create: _env_check ## Create/update secret for DB service us
 
 	@echo "Creating secret with user creds for '$(SVC_NAME)svc' database in PostgreSQL..."
 	# username value should match spec.bootstrap.initdb.owner value from `env/<env-name>/postgres-<service-name>svc.yaml` manifest
-	@kubectl create secret generic ""$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds" \
+	@kubectl create secret generic "$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds \
 	    --namespace "$(DATA_NS)" \
 	    --type kubernetes.io/basic-auth \
-	    --from-literal=username=$(SVC_NAME)svc \
+	    --from-literal=username="$(SVC_NAME)"svc \
 	    --from-literal=password="$(PG_SVC_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@echo "Secret '"$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds' successfully created/updated in namespace $(DATA_NS)"
@@ -237,42 +238,63 @@ postgres-svc-purge: _env_check ## Uninstall cluster and permanently remove relat
 	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
 	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)svc-creds || true
 
-.PHONY: postgres-purge-all
-postgres-purge-ll: _env_check ## Uninstall cluster and permanently remove related secrets for all service databases
-	@echo "TODO"
-
 ################################################################################
 # MongoDB Deployment Targets
 # Targets for deploying and managing MongoDB in local dev and QA cluster
 # Namespace and environment auto-detected from current kubectl context
 ################################################################################
+
+MONGODB_OPERATOR_VERSION := 0.13.0
+MONGO_ROOT_USER_PWD ?= rootpwd
+
+.PHONY: mongodb-operator-install
+mongodb-operator-install: _env_check ## Install MongoDB Community Kubernetes Operator
+	@helm repo add mongodb https://mongodb.github.io/helm-charts
+	@helm repo update
+	@echo "Installing MongoDB Community Kubernetes Operator v$(MONGODB_OPERATOR_VERSION)..."
+	@helm upgrade --install mongodb-operator mongodb/community-operator \
+		--version "$(MONGODB_OPERATOR_VERSION)" \
+		--namespace $(DATA_NS) \
+		--create-namespace
+
+.PHONY: mongodb-root-secret-create
+mongodb-root-secret-create: _env_check ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>
+	@echo "Ensuring namespace $(DATA_NS) exists..."
+	@kubectl create namespace "$(DATA_NS)" --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl config set-context --current --namespace="$(DATA_NS)"
+
+	@echo "Creating secret with user creds for 'admin' database in MongoDB..."
+	@kubectl create secret generic "$(ENV_NAME)"-mongodb-root-creds \
+	    --namespace "$(DATA_NS)" \
+	    --type Opaque \
+	    --from-literal=password="$(MONGO_ROOT_USER_PWD)" \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@echo "Secret '"$(ENV_NAME)"-mongodb-root-creds' successfully created/updated in namespace $(DATA_NS)"
+
 .PHONY: mongodb-deploy
-mongodb-deploy: _env_check ## Deploy MongoDB to current cluster context (auto-detect env).
-	@echo "Linting MongoDB Helm chart for $(ENV_NAME)..."
-	@helm lint ./apps/infra/mongodb -f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml --namespace "$(ENV_NAME)"
-	@echo "Updating Helm dependencies..."
-	@helm dependency update ./apps/infra/mongodb
-	@echo "Deploying MongoDB Helm chart..."
-	@helm upgrade --install mongodb ./apps/infra/mongodb \
-		-f "$(VALUES_FILE_PREFIX)"/mongodb-values.yaml \
-		--namespace "$(ENV_NAME)" \
-		--create-namespace \
-		--wait
+mongodb-deploy: _env_check ## Deploy MongoDB cluster
+	@echo "Deploying MongoDB cluster to '$(DATA_NS)' namespace...";
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/mongodb.yaml;
 
 .PHONY: mongodb-status
-mongodb-status: _env_check ## Show MongoDB release/resource status (auto-detect env)
-	@echo "Status for namespace: $(ENV_NAME)"
-	@helm status mongodb --namespace "$(ENV_NAME)" || true
-	@echo "\nKubernetes Resources:"
-	@kubectl get pods,svc,pvc -n "$(ENV_NAME)" -l app.kubernetes.io/instance=mongodb || true
+mongodb-status: _env_check ## Show MongoDB cluster status
+	@echo "Status for namespace: $(DATA_NS)"
+	@echo "\nMongoDB Pods:"
+	@kubectl get pods -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
+	@echo "\nMongoDB Services:"
+	@kubectl get svc -n "$(DATA_NS)" | grep "$(ENV_NAME)"-mongodb || true
+	@echo "\nMongoDB PersistentVolumeClaims:"
+	@kubectl get pvc -n "$(DATA_NS)" | grep "$(ENV_NAME)"-mongodb || true
+	@echo "\nStatefulSets:"
+	@kubectl get statefulset -n "$(DATA_NS)" | grep "$(ENV_NAME)"-mongodb || true
 
-.PHONY: mongodb-uninstall
-mongodb-uninstall: _env_check ## Uninstall MongoDB Helm release (chart only, auto-detect env)
-	@echo "Uninstalling Helm release 'mongodb' from namespace $(ENV_NAME)..."
-	@helm uninstall mongodb --namespace "$(ENV_NAME)" || true
+.PHONY: mongodb-delete
+mongodb-delete: _env_check ## Delete MongoDB cluster only
+	@echo "Deleting MongoDB cluster '$(ENV_NAME)-mongodb' from namespace $(DATA_NS)..."
+	@kubectl delete mongodbcommunity "$(ENV_NAME)"-mongodb -n "$(DATA_NS)" --ignore-not-found || true
 
 .PHONY: mongodb-purge
-mongodb-purge: mongodb-uninstall ## Uninstall chart AND permanently remove related secrets and PVCs (auto-detect env)
-	@echo "\nDeleting MongoDB-related secrets and PVCs in namespace $(ENV_NAME)..."
-	@kubectl delete secret -n "$(ENV_NAME)" -l app.kubernetes.io/instance=mongodb || true
-	@kubectl delete pvc -n "$(ENV_NAME)" -l app.kubernetes.io/instance=mongodb || true
+mongodb-purge: mongodb-delete ## Delete MongoDB cluster and permanently remove related secrets and PVCs
+	@echo "Deleting MongoDB-related secrets and PVCs in namespace $(DATA_NS)..."
+	@kubectl delete secret -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
+	@kubectl delete pvc -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
