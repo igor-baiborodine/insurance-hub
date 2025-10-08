@@ -285,6 +285,16 @@ elasticsearch-purge: elasticsearch-delete ## Delete Elasticsearch cluster and re
 	@kubectl delete secret -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
 	@kubectl delete pvc -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
 
+.PHONY: elasticsearch-exporter-deploy
+elasticsearch-exporter-deploy: _env-check ## Deploy Prometheus Elasticsearch Exporter for monitoring
+	@echo "Deploying Elasticsearch Exporter into '$(DATA_NS)' namespace..."
+	@kubectl apply -f "$(VALUES_FILE_PREFIX)"/elasticsearch-exporter.yaml
+
+.PHONY: elasticsearch-exporter-delete
+elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exporter
+	@echo "Deleting Elasticsearch Exporter from namespace $(DATA_NS)..."
+	@kubectl delete -f "$(VALUES_FILE_PREFIX)"/elasticsearch-exporter.yaml --ignore-not-found || true
+
 ################################################################################
 # MongoDB Deployment Targets
 # Targets for deploying and managing MongoDB in local dev and QA cluster

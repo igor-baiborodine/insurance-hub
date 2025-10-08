@@ -35,9 +35,6 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
 Deploy the necessary data resources into the either `local-dev-all` or `qa-data` namespaces.
 
 1. **Postgres**
-- **Grafana**: Download the file [grafana-dashboard.json](https://github.com/cloudnative-pg/grafana-dashboards/blob/main/charts/cluster/grafana-dashboard.json)
-  and manually import it via the GUI (menu: Dashboards > New > Import). Or, instead of the JSON
-  file, it can be imported via the following URL: https://grafana.com/grafana/dashboards/20417-cloudnativepg/
 - `make postgres-operator-deploy`
 
   **auth** service: 
@@ -59,6 +56,10 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   **product** service: 
   - `make postgres-svc-secret-create SVC_NAME=product PG_SVC_USER_PWD=<user-pwd>`
   - `make postgres-svc-deploy SVC_NAME=product`, wait at least one minute for the cluster to be ready.
+
+- `make grafana-ui`
+- **Grafana**: In _Dashboards > New > Import_, add the "CloudNativePG" dashboard using the following
+  URL: https://grafana.com/grafana/dashboards/20417-cloudnativepg/.
 
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
 
@@ -83,6 +84,10 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
     local-dev-elasticsearch-es-default-0   1/1     Running   0          111s    
     ```
 - `make elasticsearch-status`
+- `make elasticsearch-exporter-deploy`
+- `make grafana-ui`
+- **Grafana**: In _Dashboards > New > Import_, add the "ElasticSearch" dashboard using the following
+  URL: https://grafana.com/grafana/dashboards/2322-elasticsearch/.
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
 
 ## QA—Cluster Load Monitoring
