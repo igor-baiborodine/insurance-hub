@@ -74,6 +74,17 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 - `make mongodb-status`  
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=mongodb-deploy-<iso-date>`
 
+3. **Elasticsearch**
+- `make eck-operator-deploy`
+- `make elasticsearch-deploy`
+- `kubectl get pods -n local-dev-all | grep elasticsearch`
+    ```bash
+    kubectl get pods -n local-dev-all | grep elasticsearch
+    local-dev-elasticsearch-es-default-0   1/1     Running   0          111s    
+    ```
+- `make mongodb-status`
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
+
 ## QA—Cluster Load Monitoring
 
 1. **Prometheus**

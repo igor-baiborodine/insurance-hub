@@ -132,14 +132,20 @@ endif
 VALUES_FILE_PREFIX = env/$(ENV_NAME)
 
 # Helper to validate environment, i.e., current kubectl context.
-.PHONY: _env_check
-_env_check:
+.PHONY: _env-check
+_env-check:
 	@if [ "$(ENV_NAME)" = "INVALID" ]; then \
-		echo "ERROR: kubectl context '$$CUR_CTX' is not supported! Must be 'qa-insurance-hub' or 'kind-local-dev-insurance-hub'."; \
+		echo "ERROR: kubectl context '$$CUR_CTX' is not supported! Must be 'kind-local-dev-insurance-hub' or 'qa-insurance-hub'."; \
 		exit 1; \
 	else \
 		echo "Using ENV_NAME=$(ENV_NAME), CUR_CTX=$(CUR_CTX)"; \
 	fi
+
+.PHONY: _data-ns-ensure
+_data-ns-ensure: ## Ensure data namespace exists and set it as the current context
+	@echo "Ensuring namespace $(DATA_NS) exists and is set as current..."
+	@kubectl create namespace "$(DATA_NS)" --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl config set-context --current --namespace="$(DATA_NS)"
 
 ################################################################################
 # Monitoring Deployment Targets
@@ -189,14 +195,11 @@ CLOUDNATIVE_PG_VERSION := 1.27.0
 PG_SVC_USER_PWD ?= pgsvcpwd
 
 .PHONY: postgres-svc-secret-create
-postgres-svc-secret-create: _env_check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
+postgres-svc-secret-create: _env-check _data-ns-ensure ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
 	@if [ -z "$$SVC_NAME" ]; then \
 		echo "Argument 'SVC_NAME' is required!"; \
 		exit 1; \
 	fi
-	@echo "Ensuring namespace $(DATA_NS) exists..."
-	@kubectl create namespace "$(DATA_NS)" --dry-run=client -o yaml | kubectl apply -f -
-	@kubectl config set-context --current --namespace="$(DATA_NS)"
 
 	@echo "Creating secret with user creds for '$(SVC_NAME)svc' database in PostgreSQL..."
 	# username value should match spec.bootstrap.initdb.owner value from `env/<env-name>/postgres-<service-name>svc.yaml` manifest
@@ -209,12 +212,12 @@ postgres-svc-secret-create: _env_check ## Create/update secret for DB service us
 	@echo "Secret '"$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds' successfully created/updated in namespace $(DATA_NS)"
 
 .PHONY: postgres-operator-deploy
-postgres-operator-deploy: _env_check ## Install CloudNativePG operator
+postgres-operator-deploy: _env-check ## Install CloudNativePG operator
 	@echo "Deploying CloudNativePG operator v$(CLOUDNATIVE_PG_VERSION) into `cnpg-system` namespace..."
 	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
 
 .PHONY: postgres-svc-deploy
-postgres-svc-deploy: _env_check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
+postgres-svc-deploy: _env-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
 	@if [ -z "$$SVC_NAME" ]; then \
 		echo "Argument 'SVC_NAME' is required!"; \
 		exit 1; \
@@ -223,7 +226,7 @@ postgres-svc-deploy: _env_check ## Deploy PostgresSQL cluster for service. Usage
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/postgres-"$(SVC_NAME)"svc.yaml;
 
 .PHONY: postgres-svc-status
-postgres-svc-status: _env_check ## Show PostgreSQL cluster/resource status for service. Usage: make postgres-svc-status SVC_NAME=<svc-name>
+postgres-svc-status: _env-check ## Show PostgreSQL cluster/resource status for service. Usage: make postgres-svc-status SVC_NAME=<svc-name>
 	@if [ -z "$$SVC_NAME" ]; then \
 		echo "Argument 'SVC_NAME' is required!"; \
 		exit 1; \
@@ -232,7 +235,7 @@ postgres-svc-status: _env_check ## Show PostgreSQL cluster/resource status for s
 	@kubectl cnpg status "$(ENV_NAME)-postgres-$(SVC_NAME)svc" || true
 
 .PHONY: postgres-svc-purge
-postgres-svc-purge: _env_check ## Uninstall cluster and permanently remove related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
+postgres-svc-purge: _env-check ## Uninstall cluster and permanently remove related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
 	@echo "Removing PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
 	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)"svc || true
 	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
@@ -247,13 +250,13 @@ postgres-svc-purge: _env_check ## Uninstall cluster and permanently remove relat
 ECK_OPERATOR_VERSION := 3.1.0
 
 .PHONY: eck-operator-deploy
-eck-operator-deploy: _env_check ## Install Elastic Cloud on Kubernetes (ECK) Operator
+eck-operator-deploy: _env-check ## Install Elastic Cloud on Kubernetes (ECK) Operator
 	@echo "Installing ECK operator v$(ECK_OPERATOR_VERSION) into 'elastic-system' namespace..."
 	@kubectl create -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml || true
 	@kubectl apply --server-side -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml
 
 .PHONY: elasticsearch-deploy
-elasticsearch-deploy: _env_check ## Deploy Elasticsearch cluster
+elasticsearch-deploy: _env-check ## Deploy Elasticsearch cluster
 	@echo "Deploying Elasticsearch cluster into '$(DATA_NS)' namespace...";
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/elasticsearch.yaml;
 
@@ -267,7 +270,7 @@ MONGODB_OPERATOR_VERSION := 0.13.0
 MONGO_ROOT_USER_PWD ?= rootpwd
 
 .PHONY: mongodb-operator-install
-mongodb-operator-install: _env_check ## Install MongoDB Community Kubernetes Operator
+mongodb-operator-install: _env-check ## Install MongoDB Community Kubernetes Operator
 	@helm repo add mongodb https://mongodb.github.io/helm-charts
 	@helm repo update
 	@echo "Installing MongoDB Community Kubernetes Operator v$(MONGODB_OPERATOR_VERSION)..."
@@ -277,11 +280,7 @@ mongodb-operator-install: _env_check ## Install MongoDB Community Kubernetes Ope
 		--create-namespace
 
 .PHONY: mongodb-root-secret-create
-mongodb-root-secret-create: _env_check ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>
-	@echo "Ensuring namespace $(DATA_NS) exists..."
-	@kubectl create namespace "$(DATA_NS)" --dry-run=client -o yaml | kubectl apply -f -
-	@kubectl config set-context --current --namespace="$(DATA_NS)"
-
+mongodb-root-secret-create: _env-check _data-ns-ensure ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>
 	@echo "Creating secret with user creds for 'admin' database in MongoDB..."
 	@kubectl create secret generic "$(ENV_NAME)"-mongodb-root-creds \
 	    --namespace "$(DATA_NS)" \
@@ -291,12 +290,12 @@ mongodb-root-secret-create: _env_check ## Create/update secret for MongoDB 'root
 	@echo "Secret '"$(ENV_NAME)"-mongodb-root-creds' successfully created/updated in namespace $(DATA_NS)"
 
 .PHONY: mongodb-deploy
-mongodb-deploy: _env_check ## Deploy MongoDB cluster
+mongodb-deploy: _env-check _data-ns-ensure ## Deploy MongoDB cluster
 	@echo "Deploying MongoDB cluster to '$(DATA_NS)' namespace...";
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/mongodb.yaml;
 
 .PHONY: mongodb-status
-mongodb-status: _env_check ## Show MongoDB cluster status
+mongodb-status: _env-check ## Show MongoDB cluster status
 	@echo "Status for namespace: $(DATA_NS)"
 	@echo "\nMongoDB Pods:"
 	@kubectl get pods -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
@@ -308,7 +307,7 @@ mongodb-status: _env_check ## Show MongoDB cluster status
 	@kubectl get statefulset -n "$(DATA_NS)" | grep "$(ENV_NAME)"-mongodb || true
 
 .PHONY: mongodb-delete
-mongodb-delete: _env_check ## Delete MongoDB cluster only
+mongodb-delete: _env-check ## Delete MongoDB cluster only
 	@echo "Deleting MongoDB cluster '$(ENV_NAME)-mongodb' from namespace $(DATA_NS)..."
 	@kubectl delete mongodbcommunity "$(ENV_NAME)"-mongodb -n "$(DATA_NS)" --ignore-not-found || true
 
