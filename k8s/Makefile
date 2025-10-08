@@ -210,7 +210,7 @@ postgres-svc-secret-create: _env_check ## Create/update secret for DB service us
 
 .PHONY: postgres-operator-deploy
 postgres-operator-deploy: _env_check ## Install CloudNativePG operator
-	@echo "Deploying CloudNativePG operator (if not present)..."
+	@echo "Deploying CloudNativePG operator v$(CLOUDNATIVE_PG_VERSION) into `cnpg-system` namespace..."
 	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
 
 .PHONY: postgres-svc-deploy
@@ -237,6 +237,20 @@ postgres-svc-purge: _env_check ## Uninstall cluster and permanently remove relat
 	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)"svc || true
 	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
 	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)svc-creds || true
+
+################################################################################
+# Elastic Cloud Deployment Targets
+# Targets for deploying and managing Elastic Cloud in local dev and QA cluster
+# Namespace and environment auto-detected from current kubectl context
+################################################################################
+
+ELASTIC_OPERATOR_VERSION := 3.1.0
+
+.PHONY: elastic-operator-deploy
+elastic-operator-deploy: _env_check ## Install Elastic Cloud on Kubernetes (ECK) Operator
+	@echo "Installing ECK operator v$(ELASTIC_OPERATOR_VERSION) into 'elastic-system' namespace..."
+	@kubectl create -f https://download.elastic.co/downloads/eck/$(ELASTIC_OPERATOR_VERSION)/crds.yaml || true
+	@kubectl apply --server-side -f https://download.elastic.co/downloads/eck/$(ELASTIC_OPERATOR_VERSION)/operator.yaml
 
 ################################################################################
 # MongoDB Deployment Targets
