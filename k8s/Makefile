@@ -219,7 +219,7 @@ postgres-svc-deploy: _env_check ## Deploy PostgresSQL cluster for service. Usage
 		echo "Argument 'SVC_NAME' is required!"; \
 		exit 1; \
 	fi
-	@echo "Deploying PostgreSQL cluster for '$(SVC_NAME)svc' to '$(DATA_NS)' namespace...";
+	@echo "Deploying PostgreSQL cluster for '$(SVC_NAME)svc' into '$(DATA_NS)' namespace...";
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/postgres-"$(SVC_NAME)"svc.yaml;
 
 .PHONY: postgres-svc-status
@@ -244,13 +244,18 @@ postgres-svc-purge: _env_check ## Uninstall cluster and permanently remove relat
 # Namespace and environment auto-detected from current kubectl context
 ################################################################################
 
-ELASTIC_OPERATOR_VERSION := 3.1.0
+ECK_OPERATOR_VERSION := 3.1.0
 
-.PHONY: elastic-operator-deploy
-elastic-operator-deploy: _env_check ## Install Elastic Cloud on Kubernetes (ECK) Operator
-	@echo "Installing ECK operator v$(ELASTIC_OPERATOR_VERSION) into 'elastic-system' namespace..."
-	@kubectl create -f https://download.elastic.co/downloads/eck/$(ELASTIC_OPERATOR_VERSION)/crds.yaml || true
-	@kubectl apply --server-side -f https://download.elastic.co/downloads/eck/$(ELASTIC_OPERATOR_VERSION)/operator.yaml
+.PHONY: eck-operator-deploy
+eck-operator-deploy: _env_check ## Install Elastic Cloud on Kubernetes (ECK) Operator
+	@echo "Installing ECK operator v$(ECK_OPERATOR_VERSION) into 'elastic-system' namespace..."
+	@kubectl create -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml || true
+	@kubectl apply --server-side -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml
+
+.PHONY: elasticsearch-deploy
+elasticsearch-deploy: _env_check ## Deploy Elasticsearch cluster
+	@echo "Deploying Elasticsearch cluster into '$(DATA_NS)' namespace...";
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/elasticsearch.yaml;
 
 ################################################################################
 # MongoDB Deployment Targets
