@@ -260,6 +260,31 @@ elasticsearch-deploy: _env-check ## Deploy Elasticsearch cluster
 	@echo "Deploying Elasticsearch cluster into '$(DATA_NS)' namespace...";
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/elasticsearch.yaml;
 
+.PHONY: elasticsearch-status
+elasticsearch-status: _env-check ## Show Elasticsearch cluster status
+	@echo "Status for namespace: $(DATA_NS)"
+	@echo "\nElasticsearch Pods:"
+	@kubectl get pods -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
+	@echo "\nElasticsearch Services:"
+	@kubectl get svc -n "$(DATA_NS)" | grep "$(ENV_NAME)-elasticsearch" || true
+	@echo "\nElasticsearch PersistentVolumeClaims:"
+	@kubectl get pvc -n "$(DATA_NS)" | grep "$(ENV_NAME)-elasticsearch" || true
+	@echo "\nElasticsearch StatefulSets:"
+	@kubectl get statefulset -n "$(DATA_NS)" | grep "$(ENV_NAME)-elasticsearch" || true
+	@echo "\nElasticsearch Cluster:"
+	@kubectl get elasticsearch -n "$(DATA_NS)" "$(ENV_NAME)-elasticsearch" -o wide || true
+
+.PHONY: elasticsearch-delete
+elasticsearch-delete: _env-check ## Delete Elasticsearch cluster only
+	@echo "Deleting Elasticsearch cluster '$(ENV_NAME)-elasticsearch' from namespace $(DATA_NS)..."
+	@kubectl delete elasticsearch "$(ENV_NAME)-elasticsearch" -n "$(DATA_NS)" --ignore-not-found || true
+
+.PHONY: elasticsearch-purge
+elasticsearch-purge: elasticsearch-delete ## Delete Elasticsearch cluster and related secrets and PVCs
+	@echo "Deleting Elasticsearch-related secrets and PVCs in namespace $(DATA_NS)..."
+	@kubectl delete secret -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
+	@kubectl delete pvc -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
+
 ################################################################################
 # MongoDB Deployment Targets
 # Targets for deploying and managing MongoDB in local dev and QA cluster
