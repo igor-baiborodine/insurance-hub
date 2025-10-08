@@ -23,8 +23,8 @@ command-line tool.
    and export it as an environment variable with the following command:
 
     ```shell
-    export MONGOROOTUSERPWD="$(kubectl get secret local-dev-mongodb-root-creds -n local-dev-all -o jsonpath='{.data.password}' | base64 --decode)"
-    echo "$MONGOROOTUSERPWD"   
+    export MONGO_ROOT_USER_PWD="$(kubectl get secret local-dev-mongodb-root-creds -n local-dev-all -o jsonpath='{.data.password}' | base64 --decode)"
+    echo "$MONGO_ROOT_USER_PWD"   
     ```
 
 2. **Connect Using mongosh**
@@ -33,7 +33,7 @@ command-line tool.
    connect to the database.
 
     ```shell
-    mongosh "mongodb://root:$MONGOROOTUSERPWD@localhost:27017/admin"
+    mongosh "mongodb://root:$MONGO_ROOT_USER_PWD@localhost:27017/admin"
     ```
 
 3. **Verify the Connection**
@@ -64,8 +64,8 @@ command-line tool.
    and export it as an environment variable with the following command:
 
     ```shell
-    export MONGOROOTUSERPWD="$(kubectl get secret qa-mongodb-root-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)"
-    echo "$MONGOROOTUSERPWD"   
+    export MONGO_ROOT_USER_PWD="$(kubectl get secret qa-mongodb-root-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)"
+    echo "$MONGO_ROOT_USER_PWD"   
     ```
 
 
@@ -77,7 +77,7 @@ command-line tool.
 
     ```shell
     kubectl run mongosh-test --rm -it --image=bitnami/mongodb --namespace=qa-data -- bash \
-        -c "mongosh mongodb://root:$MONGOROOTUSERPWD@qa-mongodb-svc.qa-data.svc.cluster.local:27017/admin"
+        -c "mongosh mongodb://root:$MONGO_ROOT_USER_PWD@qa-mongodb-svc.qa-data.svc.cluster.local:27017/admin"
     ```
 
 3. **Verify the Connection**

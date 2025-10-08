@@ -82,7 +82,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
     kubectl get pods -n local-dev-all | grep elasticsearch
     local-dev-elasticsearch-es-default-0   1/1     Running   0          111s    
     ```
-- `make mongodb-status`
+- `make elasticsearch-status`
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
 
 ## QA—Cluster Load Monitoring
