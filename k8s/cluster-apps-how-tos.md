@@ -90,6 +90,9 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   URL: https://grafana.com/grafana/dashboards/2322-elasticsearch/.
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
 
+4. **MinIO**
+- `make minio-operator-deploy`
+
 ## QA—Cluster Load Monitoring
 
 1. **Prometheus**

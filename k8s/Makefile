@@ -296,6 +296,19 @@ elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exp
 	@kubectl delete -f "$(VALUES_FILE_PREFIX)"/elasticsearch-exporter.yaml --ignore-not-found || true
 
 ################################################################################
+# MinIO Deployment Targets
+# Targets for deploying and managing MinIO in local dev and QA cluster
+# Namespace and environment auto-detected from current kubectl context
+################################################################################
+
+MINIO_OPERATOR_VERSION := 7.1.1
+
+.PHONY: minio-operator-deploy
+minio-operator-deploy: _env-check ## Install MinIO Operator using Kustomize
+	@echo "Installing MinIO Operator v$(MINIO_OPERATOR_VERSION)..."
+	@kubectl kustomize github.com/minio/operator\?ref=v$(MINIO_OPERATOR_VERSION) | kubectl apply -f -
+
+################################################################################
 # MongoDB Deployment Targets
 # Targets for deploying and managing MongoDB in local dev and QA cluster
 # Namespace and environment auto-detected from current kubectl context
