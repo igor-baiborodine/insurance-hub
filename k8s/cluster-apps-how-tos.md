@@ -93,6 +93,8 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 4. **MinIO**
 - `make minio-operator-deploy`
 
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=minio-deploy-<iso-date>`
+
 ## QA—Cluster Load Monitoring
 
 1. **Prometheus**
