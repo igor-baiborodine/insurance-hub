@@ -304,6 +304,8 @@ elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exp
 MINIO_OPERATOR_VERSION := 7.1.1
 MINIO_CONSOLE_ACCESS_KEY ?= consoleaccess
 MINIO_CONSOLE_SECRET_KEY ?= consolesecret
+MINIO_ROOT_USER ?= rootuser
+MINIO_ROOT_PASSWORD ?= rootpwd
 
 .PHONY: minio-operator-deploy
 minio-operator-deploy: _env-check ## Install MinIO Operator using Kustomize
@@ -311,7 +313,7 @@ minio-operator-deploy: _env-check ## Install MinIO Operator using Kustomize
 	@kubectl kustomize github.com/minio/operator\?ref=v$(MINIO_OPERATOR_VERSION) | kubectl apply -f -
 
 .PHONY: minio-storage-user-secret-create
-minio-storage-user-secret-create: _env-check ## Create/update MinIO Console credentials secret. Usage: make minio-storage-user-secret-create SVC_NAME=<svc-name> MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>
+minio-storage-user-secret-create: _env-check ## Create/update MinIO storage user credentials secret. Usage: make minio-storage-user-secret-create SVC_NAME=<svc-name> MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>
 	@if [ -z "$$SVC_NAME" ]; then \
 	   echo "Argument 'SVC_NAME' is required!"; \
 	   exit 1; \
@@ -325,6 +327,23 @@ minio-storage-user-secret-create: _env-check ## Create/update MinIO Console cred
 	   --type Opaque \
 	   --from-literal=CONSOLE_ACCESS_KEY="$(MINIO_CONSOLE_ACCESS_KEY)" \
 	   --from-literal=CONSOLE_SECRET_KEY="$(MINIO_CONSOLE_SECRET_KEY)" \
+	   --dry-run=client -o yaml | kubectl apply -f -; \
+	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE"
+
+.PHONY: minio-storage-config-secret-create
+minio-storage-config-secret-create: _env-check ## Create/update MinIO storage configuration secret. Usage: make minio-storage-config-secret-create SVC_NAME=<svc-name> MINIO_ROOT_USER=<root-user> MINIO_ROOT_PASSWORD=<root-password>
+	@if [ -z "$$SVC_NAME" ]; then \
+	   echo "Argument 'SVC_NAME' is required!"; \
+	   exit 1; \
+	fi
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	SECRET_NAME="$$NAMESPACE-storage-config"; \
+	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
+	echo "Creating MinIO storage configuration secret in namespace $$NAMESPACE..."; \
+	kubectl create secret generic "$$SECRET_NAME" \
+	   --namespace "$$NAMESPACE" \
+	   --type Opaque \
+	   --from-literal=config.env="export MINIO_ROOT_USER=\"$(MINIO_ROOT_USER)\"\nexport MINIO_ROOT_PASSWORD=\"$(MINIO_ROOT_PASSWORD)\"\nexport MINIO_STORAGE_CLASS_STANDARD=\"EC:2\"\nexport MINIO_BROWSER=\"on\"" \
 	   --dry-run=client -o yaml | kubectl apply -f -; \
 	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE"
 
