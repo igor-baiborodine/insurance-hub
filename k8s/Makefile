@@ -96,11 +96,21 @@ prereq-db-mongosh: ## Install latest mongosh (MongoDB Shell) on Ubuntu 24.04.2 L
 	@sudo apt-get install -y mongodb-mongosh
 	@mongosh --version
 
-.PHONY: prereq-db-all
-prereq-db-all: prereq-db-psql prereq-db-mongosh ## Install all database CLI tool prerequisites
+.PHONY: prereq-minio-mc
+prereq-minio-mc: ## Install MinIO mc command line utility on Ubuntu 24.04.2 LTS
+	@echo "Installing MinIO mc (MinIO Client)..."
+	@sudo apt-get update
+	@sudo apt-get install -y curl
+	@curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o mc
+	@chmod +x mc
+	@sudo mv mc /usr/local/bin/
+	@mc --version
+
+.PHONY: prereq-data-all
+prereq-data-all: prereq-db-psql prereq-db-mongosh prereq-minio-mc ## Install all database CLI tool prerequisites
 
 .PHONY: prereq-all
-prereq-all: prereq-k8s-all prereq-db-all ## Install all prerequisites
+prereq-all: prereq-k8s-all prereq-data-all ## Install all prerequisites
 
 ################################################################################
 # Internal Helper Targets
