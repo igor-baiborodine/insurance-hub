@@ -304,13 +304,20 @@ elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exp
 MINIO_OPERATOR_VERSION := 7.1.1
 MINIO_CONSOLE_ACCESS_KEY ?= consoleaccess
 MINIO_CONSOLE_SECRET_KEY ?= consolesecret
+# Length should be at least 3 characters
 MINIO_ROOT_USER ?= rootuser
-MINIO_ROOT_PASSWORD ?= rootpwd
+# Length should be at least 8 characters
+MINIO_ROOT_PASSWORD ?= rootpassword
 
 .PHONY: minio-operator-deploy
 minio-operator-deploy: _env-check ## Install MinIO Operator using Kustomize
 	@echo "Installing MinIO Operator v$(MINIO_OPERATOR_VERSION)..."
-	@kubectl kustomize github.com/minio/operator\?ref=v$(MINIO_OPERATOR_VERSION) | kubectl apply -f -
+	@kubectl apply -k "$(VALUES_FILE_PREFIX)"/minio/operator
+
+.PHONY: minio-operator-delete
+minio-operator-delete: _env-check ## Delete MinIO Operator using Kustomize
+	@echo "Deleting MinIO Operator v$(MINIO_OPERATOR_VERSION)..."
+	@kubectl delete -k "$(VALUES_FILE_PREFIX)"/minio/operator
 
 .PHONY: minio-storage-user-secret-create
 minio-storage-user-secret-create: _env-check ## Create/update MinIO storage user credentials secret. Usage: make minio-storage-user-secret-create SVC_NAME=<svc-name> MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>
@@ -340,12 +347,66 @@ minio-storage-config-secret-create: _env-check ## Create/update MinIO storage co
 	SECRET_NAME="$$NAMESPACE-storage-config"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
 	echo "Creating MinIO storage configuration secret in namespace $$NAMESPACE..."; \
+	printf "export MINIO_ROOT_USER=\"$(MINIO_ROOT_USER)\"\nexport MINIO_ROOT_PASSWORD=\"$(MINIO_ROOT_PASSWORD)\"" | \
 	kubectl create secret generic "$$SECRET_NAME" \
 	   --namespace "$$NAMESPACE" \
 	   --type Opaque \
-	   --from-literal=config.env="export MINIO_ROOT_USER=\"$(MINIO_ROOT_USER)\"\nexport MINIO_ROOT_PASSWORD=\"$(MINIO_ROOT_PASSWORD)\"\nexport MINIO_STORAGE_CLASS_STANDARD=\"EC:2\"\nexport MINIO_BROWSER=\"on\"" \
+	   --from-file=config.env=/dev/stdin \
 	   --dry-run=client -o yaml | kubectl apply -f -; \
 	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE"
+
+.PHONY: minio-tenant-deploy
+minio-tenant-deploy: _env-check ## Deploy MinIO tenant for service. Usage: make minio-tenant-deploy SVC_NAME=<svc-name>
+	@if [ -z "$$SVC_NAME" ]; then \
+		echo "Argument 'SVC_NAME' is required!"; \
+		exit 1; \
+	fi
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
+	echo "Deploying MinIO tenant for '$$SVC_NAME' into '$$NAMESPACE' namespace..."; \
+	kubectl apply -n "$$NAMESPACE" -f "$(VALUES_FILE_PREFIX)/minio/$$SVC_NAME/minio-$$SVC_NAME-patch.yaml"
+
+.PHONY: minio-tenant-status
+minio-tenant-status: _env-check ## Show MinIO tenant status for service. Usage: make minio-tenant-status SVC_NAME=<svc-name>
+	@if [ -z "$$SVC_NAME" ]; then \
+		echo "Argument 'SVC_NAME' is required!"; \
+		exit 1; \
+	fi
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	TENANT_NAME="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	echo "Status for MinIO tenant in namespace: $$NAMESPACE"; \
+	echo "\nMinIO Tenant:"; \
+	kubectl get tenant "$$TENANT_NAME" -n "$$NAMESPACE" -o wide || true; \
+	echo "\nMinIO Pods:"; \
+	kubectl get pods -n "$$NAMESPACE" || true; \
+	echo "\nMinIO Services:"; \
+	kubectl get svc -n "$$NAMESPACE" || true; \
+	echo "\nMinIO PersistentVolumeClaims:"; \
+	kubectl get pvc -n "$$NAMESPACE" || true
+
+.PHONY: minio-tenant-delete
+minio-tenant-delete: _env-check ## Delete MinIO tenant for service. Usage: make minio-tenant-delete SVC_NAME=<svc-name>
+	@if [ -z "$$SVC_NAME" ]; then \
+		echo "Argument 'SVC_NAME' is required!"; \
+		exit 1; \
+	fi
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	TENANT_NAME="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	echo "Deleting MinIO tenant '$$TENANT_NAME' from namespace $$NAMESPACE..."; \
+	kubectl delete tenant "$$TENANT_NAME" -n "$$NAMESPACE" --ignore-not-found || true
+
+.PHONY: minio-tenant-purge
+minio-tenant-purge: minio-tenant-delete ## Delete MinIO tenant and related secrets/PVCs. Usage: make minio-tenant-purge SVC_NAME=<svc-name>
+	@if [ -z "$$SVC_NAME" ]; then \
+		echo "Argument 'SVC_NAME' is required!"; \
+		exit 1; \
+	fi
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	echo "Deleting MinIO-related secrets and PVCs in namespace $$NAMESPACE..."; \
+	kubectl delete secret -n "$$NAMESPACE" --all || true; \
+	kubectl delete pvc -n "$$NAMESPACE" --all || true; \
+	echo "Deleting namespace $$NAMESPACE..."; \
+	kubectl delete namespace "$$NAMESPACE" --ignore-not-found || true
 
 ################################################################################
 # MongoDB Deployment Targets

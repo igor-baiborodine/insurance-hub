@@ -1,0 +1,36 @@
+apiVersion: minio.min.io/v2
+kind: Tenant
+metadata:
+  name: qa-minio-document
+  namespace: qa-minio-document
+  labels:
+    app: qa-minio-document
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9000"
+    prometheus.io/path: /minio/v2/metrics/cluster
+spec:
+  env:
+    - name: MINIO_STORAGE_CLASS_STANDARD
+      value: "EC:2"
+  requestAutoCert: true
+  pools:
+    - servers: 2
+      name: pool-0
+      volumesPerServer: 2
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          storageClassName: local-path
+          resources:
+            requests:
+              storage: 2Gi
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+  users:
+    - name: qa-minio-document-storage-user-creds
+  configuration:
+    name: qa-minio-document-storage-config
