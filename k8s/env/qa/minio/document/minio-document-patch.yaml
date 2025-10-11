@@ -1,24 +1,25 @@
 apiVersion: minio.min.io/v2
 kind: Tenant
 metadata:
-  name: qa-minio-document
-  namespace: qa-minio-document
+  name: minio-tenant
   labels:
     app: qa-minio-document
   annotations:
-    # These annotations are good to have but not used by kube-prometheus-stack
     prometheus.io/scrape: "true"
     prometheus.io/port: "9000"
     prometheus.io/path: /minio/v2/metrics/cluster
 spec:
+  env:
+    - name: MINIO_STORAGE_CLASS_STANDARD
+      value: "EC:2"
   requestAutoCert: true
-  prometheusOperator:
-    create: true
-    labels:
-      release: qa-prometheus
+  users:
+    - name: qa-minio-document-storage-user-creds
+  configuration:
+    name: qa-minio-document-storage-config
   pools:
-    - servers: 2
-      name: pool-0
+    - name: pool-0
+      servers: 2
       volumesPerServer: 2
       volumeClaimTemplate:
         spec:
@@ -32,7 +33,3 @@ spec:
         requests:
           cpu: 500m
           memory: 1Gi
-  users:
-    - name: qa-minio-document-storage-user-creds
-  configuration:
-    name: qa-minio-document-storage-config

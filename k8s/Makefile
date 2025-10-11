@@ -355,7 +355,17 @@ minio-tenant-deploy: _env-check _svc-name-check ## Deploy MinIO tenant for servi
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
 	echo "Deploying MinIO tenant for '$$SVC_NAME' into '$$NAMESPACE' namespace..."; \
-	kubectl apply -n "$$NAMESPACE" -f "$(VALUES_FILE_PREFIX)/minio/$$SVC_NAME/minio-$$SVC_NAME-patch.yaml"
+	kubectl apply -n "$$NAMESPACE" -f "$(VALUES_FILE_PREFIX)/minio/$$SVC_NAME/minio-$$SVC_NAME-patch.yaml"; \
+	\
+	echo "Waiting for 'minio' Service to exist in namespace $$NAMESPACE..."; \
+	for i in $$(seq 1 30); do \
+	  kubectl get svc minio -n "$$NAMESPACE" >/dev/null 2>&1 && break; \
+	  echo "  waiting for minio service... ($$i)"; \
+	  sleep 2; \
+	done; \
+	\
+	echo "Patching 'minio' service with label app=$$SVC_NAME in namespace $$NAMESPACE..."; \
+	kubectl label svc minio app="$$SVC_NAME" -n "$$NAMESPACE" --overwrite
 
 .PHONY: minio-tenant-status
 minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for service. Usage: make minio-tenant-status SVC_NAME=<svc-name>
@@ -374,9 +384,10 @@ minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for 
 .PHONY: minio-tenant-delete
 minio-tenant-delete: _env-check _svc-name-check ## Delete MinIO tenant for service. Usage: make minio-tenant-delete SVC_NAME=<svc-name>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
-	TENANT_NAME="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	TENANT_NAME="$(ENV_NAME)-minio-tenant"; \
 	echo "Deleting MinIO tenant '$$TENANT_NAME' from namespace $$NAMESPACE..."; \
-	kubectl delete tenant "$$TENANT_NAME" -n "$$NAMESPACE" --ignore-not-found || true
+	kubectl delete tenant "$$TENANT_NAME" -n "$$NAMESPACE" --ignore-not-found || true; \
+	kubectl delete servicemonitor "$(ENV_NAME)-minio-$$SVC_NAME-service-monitor" -n "$$NAMESPACE" --ignore-not-found || true
 
 .PHONY: minio-tenant-purge
 minio-tenant-purge: minio-tenant-delete _svc-name-check ## Delete MinIO tenant and related secrets/PVCs. Usage: make minio-tenant-purge SVC_NAME=<svc-name>
