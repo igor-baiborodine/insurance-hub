@@ -355,7 +355,7 @@ minio-tenant-deploy: _env-check _svc-name-check ## Deploy MinIO tenant for servi
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
 	echo "Deploying MinIO tenant for '$$SVC_NAME' into '$$NAMESPACE' namespace..."; \
-	kubectl apply -n "$$NAMESPACE" -f "$(VALUES_FILE_PREFIX)/minio/$$SVC_NAME/minio-$$SVC_NAME-patch.yaml"; \
+	kubectl kustomize "$(VALUES_FILE_PREFIX)/minio/$$SVC_NAME" | kubectl apply --server-side -f -
 	\
 	echo "Waiting for 'minio' Service to exist in namespace $$NAMESPACE..."; \
 	for i in $$(seq 1 30); do \
