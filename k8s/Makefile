@@ -305,12 +305,12 @@ elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exp
 ################################################################################
 
 MINIO_OPERATOR_VERSION := 7.1.1
-MINIO_CONSOLE_ACCESS_KEY ?= consoleaccess
-MINIO_CONSOLE_SECRET_KEY ?= consolesecret
+MINIO_CONSOLE_ACCESS_KEY ?= consoleAccess
+MINIO_CONSOLE_SECRET_KEY ?= consoleSecret
 # Length should be at least 3 characters
-MINIO_ROOT_USER ?= rootuser
+MINIO_ROOT_USER ?= rootUser
 # Length should be at least 8 characters
-MINIO_ROOT_PASSWORD ?= rootpassword
+MINIO_ROOT_PASSWORD ?= rootPassword
 
 .PHONY: minio-operator-deploy
 minio-operator-deploy: _env-check ## Install MinIO Operator using Kustomize
@@ -342,7 +342,7 @@ minio-storage-config-secret-create: _env-check _svc-name-check ## Create/update 
 	SECRET_NAME="$$NAMESPACE-storage-config"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
 	echo "Creating MinIO storage configuration secret in namespace $$NAMESPACE..."; \
-	printf "export MINIO_ROOT_USER=\"$(MINIO_ROOT_USER)\"\nexport MINIO_ROOT_PASSWORD=\"$(MINIO_ROOT_PASSWORD)\"" | \
+	printf "export MINIO_ROOT_USER=\"$(MINIO_ROOT_USER)\"\nexport MINIO_ROOT_PASSWORD=\"$(MINIO_ROOT_PASSWORD)\"\nexport MINIO_PROMETHEUS_AUTH_TYPE=\"public\"" | \
 	kubectl create secret generic "$$SECRET_NAME" \
 	   --namespace "$$NAMESPACE" \
 	   --type Opaque \
@@ -355,22 +355,22 @@ minio-tenant-deploy: _env-check _svc-name-check ## Deploy MinIO tenant for servi
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
 	echo "Deploying MinIO tenant for '$$SVC_NAME' into '$$NAMESPACE' namespace..."; \
-	kubectl kustomize "$(VALUES_FILE_PREFIX)/minio/$$SVC_NAME" | kubectl apply --server-side -f -
+	kubectl kustomize "$(VALUES_FILE_PREFIX)/minio/$$SVC_NAME" | kubectl apply --server-side -f -; \
 	\
 	echo "Waiting for 'minio' Service to exist in namespace $$NAMESPACE..."; \
-	for i in $$(seq 1 30); do \
+	for i in $$(seq 1 120); do \
 	  kubectl get svc minio -n "$$NAMESPACE" >/dev/null 2>&1 && break; \
 	  echo "  waiting for minio service... ($$i)"; \
-	  sleep 2; \
+	  sleep 5; \
 	done; \
 	\
-	echo "Patching 'minio' service with label app=$$SVC_NAME in namespace $$NAMESPACE..."; \
-	kubectl label svc minio app="$$SVC_NAME" -n "$$NAMESPACE" --overwrite
+	echo "Patching 'minio' service with label app=$$NAMESPACE in namespace $$NAMESPACE..."; \
+	kubectl label svc minio app="$$NAMESPACE" -n "$$NAMESPACE" --overwrite
 
 .PHONY: minio-tenant-status
 minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for service. Usage: make minio-tenant-status SVC_NAME=<svc-name>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
-	TENANT_NAME="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	TENANT_NAME="$(ENV_NAME)-minio-tenant"; \
 	echo "Status for MinIO tenant in namespace: $$NAMESPACE"; \
 	echo "\nMinIO Tenant:"; \
 	kubectl get tenant "$$TENANT_NAME" -n "$$NAMESPACE" -o wide || true; \
