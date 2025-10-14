@@ -96,11 +96,21 @@ prereq-db-mongosh: ## Install latest mongosh (MongoDB Shell) on Ubuntu 24.04.2 L
 	@sudo apt-get install -y mongodb-mongosh
 	@mongosh --version
 
-.PHONY: prereq-db-all
-prereq-db-all: prereq-db-psql prereq-db-mongosh ## Install all database CLI tool prerequisites
+.PHONY: prereq-minio-mc
+prereq-minio-mc: ## Install MinIO mc command line utility on Ubuntu 24.04.2 LTS
+	@echo "Installing MinIO mc (MinIO Client)..."
+	@sudo apt-get update
+	@sudo apt-get install -y curl
+	@curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o mc
+	@chmod +x mc
+	@sudo mv mc /usr/local/bin/
+	@mc --version
+
+.PHONY: prereq-data-all
+prereq-data-all: prereq-db-psql prereq-db-mongosh prereq-minio-mc ## Install all database CLI tool prerequisites
 
 .PHONY: prereq-all
-prereq-all: prereq-k8s-all prereq-db-all ## Install all prerequisites
+prereq-all: prereq-k8s-all prereq-data-all ## Install all prerequisites
 
 ################################################################################
 # Internal Helper Targets
@@ -131,9 +141,8 @@ endif
 
 VALUES_FILE_PREFIX = env/$(ENV_NAME)
 
-# Helper to validate environment, i.e., current kubectl context.
 .PHONY: _env-check
-_env-check:
+_env-check: ## Ensure env name is valid and set based on the current context
 	@if [ "$(ENV_NAME)" = "INVALID" ]; then \
 		echo "ERROR: kubectl context '$$CUR_CTX' is not supported! Must be 'kind-local-dev-insurance-hub' or 'qa-insurance-hub'."; \
 		exit 1; \
@@ -141,11 +150,18 @@ _env-check:
 		echo "Using ENV_NAME=$(ENV_NAME), CUR_CTX=$(CUR_CTX)"; \
 	fi
 
-.PHONY: _data-ns-ensure
-_data-ns-ensure: ## Ensure data namespace exists and set it as the current context
+.PHONY: _data-ns-check
+_data-ns-check: ## Ensure data namespace exists and set it as the current context
 	@echo "Ensuring namespace $(DATA_NS) exists and is set as current..."
 	@kubectl create namespace "$(DATA_NS)" --dry-run=client -o yaml | kubectl apply -f -
 	@kubectl config set-context --current --namespace="$(DATA_NS)"
+
+.PHONY: _svc-name-check
+_svc-name-check: ## Ensure that the SVC_NAME argument is provided 
+	@if [ -z "$$SVC_NAME" ]; then \
+		echo "Argument 'SVC_NAME' is required!"; \
+		exit 1; \
+	fi
 
 ################################################################################
 # Monitoring Deployment Targets
@@ -195,12 +211,7 @@ CLOUDNATIVE_PG_VERSION := 1.27.0
 PG_SVC_USER_PWD ?= pgsvcpwd
 
 .PHONY: postgres-svc-secret-create
-postgres-svc-secret-create: _env-check _data-ns-ensure ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
-	@if [ -z "$$SVC_NAME" ]; then \
-		echo "Argument 'SVC_NAME' is required!"; \
-		exit 1; \
-	fi
-
+postgres-svc-secret-create: _env-check _data-ns-check _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
 	@echo "Creating secret with user creds for '$(SVC_NAME)svc' database in PostgreSQL..."
 	# username value should match spec.bootstrap.initdb.owner value from `env/<env-name>/postgres-<service-name>svc.yaml` manifest
 	@kubectl create secret generic "$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds \
@@ -217,20 +228,12 @@ postgres-operator-deploy: _env-check ## Install CloudNativePG operator
 	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
 
 .PHONY: postgres-svc-deploy
-postgres-svc-deploy: _env-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
-	@if [ -z "$$SVC_NAME" ]; then \
-		echo "Argument 'SVC_NAME' is required!"; \
-		exit 1; \
-	fi
+postgres-svc-deploy: _env-check _svc-name-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
 	@echo "Deploying PostgreSQL cluster for '$(SVC_NAME)svc' into '$(DATA_NS)' namespace...";
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/postgres-"$(SVC_NAME)"svc.yaml;
 
 .PHONY: postgres-svc-status
-postgres-svc-status: _env-check ## Show PostgreSQL cluster/resource status for service. Usage: make postgres-svc-status SVC_NAME=<svc-name>
-	@if [ -z "$$SVC_NAME" ]; then \
-		echo "Argument 'SVC_NAME' is required!"; \
-		exit 1; \
-	fi
+postgres-svc-status: _env-check _svc-name-check ## Show PostgreSQL cluster/resource status for service. Usage: make postgres-svc-status SVC_NAME=<svc-name>
 	@echo "Status for namespace: $(DATA_NS)"
 	@kubectl cnpg status "$(ENV_NAME)-postgres-$(SVC_NAME)svc" || true
 
@@ -296,6 +299,106 @@ elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exp
 	@kubectl delete -f "$(VALUES_FILE_PREFIX)"/elasticsearch-exporter.yaml --ignore-not-found || true
 
 ################################################################################
+# MinIO Deployment Targets
+# Targets for deploying and managing MinIO in local dev and QA cluster
+# Namespace and environment auto-detected from current kubectl context
+################################################################################
+
+MINIO_OPERATOR_VERSION := 7.1.1
+MINIO_CONSOLE_ACCESS_KEY ?= consoleAccess
+MINIO_CONSOLE_SECRET_KEY ?= consoleSecret
+# Length should be at least 3 characters
+MINIO_ROOT_USER ?= rootUser
+# Length should be at least 8 characters
+MINIO_ROOT_PASSWORD ?= rootPassword
+
+.PHONY: minio-operator-deploy
+minio-operator-deploy: _env-check ## Install MinIO Operator using Kustomize
+	@echo "Installing MinIO Operator v$(MINIO_OPERATOR_VERSION)..."
+	@kubectl apply -k "$(VALUES_FILE_PREFIX)"/minio/operator
+
+.PHONY: minio-operator-delete
+minio-operator-delete: _env-check ## Delete MinIO Operator using Kustomize
+	@echo "Deleting MinIO Operator v$(MINIO_OPERATOR_VERSION)..."
+	@kubectl delete -k "$(VALUES_FILE_PREFIX)"/minio/operator
+
+.PHONY: minio-storage-user-secret-create
+minio-storage-user-secret-create: _env-check _svc-name-check ## Create/update MinIO storage user credentials secret. Usage: make minio-storage-user-secret-create SVC_NAME=<svc-name> MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	SECRET_NAME="$$NAMESPACE-storage-user-creds"; \
+	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
+	echo "Creating MinIO Console credentials secret in namespace $$NAMESPACE..."; \
+	kubectl create secret generic "$$SECRET_NAME" \
+	   --namespace "$$NAMESPACE" \
+	   --type Opaque \
+	   --from-literal=CONSOLE_ACCESS_KEY="$(MINIO_CONSOLE_ACCESS_KEY)" \
+	   --from-literal=CONSOLE_SECRET_KEY="$(MINIO_CONSOLE_SECRET_KEY)" \
+	   --dry-run=client -o yaml | kubectl apply -f -; \
+	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE"
+
+.PHONY: minio-storage-config-secret-create
+minio-storage-config-secret-create: _env-check _svc-name-check ## Create/update MinIO storage configuration secret. Usage: make minio-storage-config-secret-create SVC_NAME=<svc-name> MINIO_ROOT_USER=<root-user> MINIO_ROOT_PASSWORD=<root-password>
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	SECRET_NAME="$$NAMESPACE-storage-config"; \
+	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
+	echo "Creating MinIO storage configuration secret in namespace $$NAMESPACE..."; \
+	printf "export MINIO_ROOT_USER=\"$(MINIO_ROOT_USER)\"\nexport MINIO_ROOT_PASSWORD=\"$(MINIO_ROOT_PASSWORD)\"\nexport MINIO_PROMETHEUS_AUTH_TYPE=\"public\"" | \
+	kubectl create secret generic "$$SECRET_NAME" \
+	   --namespace "$$NAMESPACE" \
+	   --type Opaque \
+	   --from-file=config.env=/dev/stdin \
+	   --dry-run=client -o yaml | kubectl apply -f -; \
+	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE"
+
+.PHONY: minio-tenant-deploy
+minio-tenant-deploy: _env-check _svc-name-check ## Deploy MinIO tenant for service. Usage: make minio-tenant-deploy SVC_NAME=<svc-name>
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
+	echo "Deploying MinIO tenant for '$$SVC_NAME' into '$$NAMESPACE' namespace..."; \
+	kubectl kustomize "$(VALUES_FILE_PREFIX)/minio/$$SVC_NAME" | kubectl apply --server-side -f -; \
+	\
+	echo "Waiting for 'minio' Service to exist in namespace $$NAMESPACE..."; \
+	for i in $$(seq 1 120); do \
+	  kubectl get svc minio -n "$$NAMESPACE" >/dev/null 2>&1 && break; \
+	  echo "  waiting for minio service... ($$i)"; \
+	  sleep 5; \
+	done; \
+	\
+	echo "Patching 'minio' service with label app=$$NAMESPACE in namespace $$NAMESPACE..."; \
+	kubectl label svc minio app="$$NAMESPACE" -n "$$NAMESPACE" --overwrite
+
+.PHONY: minio-tenant-status
+minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for service. Usage: make minio-tenant-status SVC_NAME=<svc-name>
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	TENANT_NAME="$(ENV_NAME)-minio-tenant"; \
+	echo "Status for MinIO tenant in namespace: $$NAMESPACE"; \
+	echo "\nMinIO Tenant:"; \
+	kubectl get tenant "$$TENANT_NAME" -n "$$NAMESPACE" -o wide || true; \
+	echo "\nMinIO Pods:"; \
+	kubectl get pods -n "$$NAMESPACE" || true; \
+	echo "\nMinIO Services:"; \
+	kubectl get svc -n "$$NAMESPACE" || true; \
+	echo "\nMinIO PersistentVolumeClaims:"; \
+	kubectl get pvc -n "$$NAMESPACE" || true
+
+.PHONY: minio-tenant-delete
+minio-tenant-delete: _env-check _svc-name-check ## Delete MinIO tenant for service. Usage: make minio-tenant-delete SVC_NAME=<svc-name>
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	TENANT_NAME="$(ENV_NAME)-minio-tenant"; \
+	echo "Deleting MinIO tenant '$$TENANT_NAME' from namespace $$NAMESPACE..."; \
+	kubectl delete tenant "$$TENANT_NAME" -n "$$NAMESPACE" --ignore-not-found || true; \
+	kubectl delete servicemonitor "$(ENV_NAME)-minio-$$SVC_NAME-service-monitor" -n "$$NAMESPACE" --ignore-not-found || true
+
+.PHONY: minio-tenant-purge
+minio-tenant-purge: minio-tenant-delete _svc-name-check ## Delete MinIO tenant and related secrets/PVCs. Usage: make minio-tenant-purge SVC_NAME=<svc-name>
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	echo "Deleting MinIO-related secrets and PVCs in namespace $$NAMESPACE..."; \
+	kubectl delete secret -n "$$NAMESPACE" --all || true; \
+	kubectl delete pvc -n "$$NAMESPACE" --all || true; \
+	echo "Deleting namespace $$NAMESPACE..."; \
+	kubectl delete namespace "$$NAMESPACE" --ignore-not-found || true
+
+################################################################################
 # MongoDB Deployment Targets
 # Targets for deploying and managing MongoDB in local dev and QA cluster
 # Namespace and environment auto-detected from current kubectl context
@@ -315,7 +418,7 @@ mongodb-operator-install: _env-check ## Install MongoDB Community Kubernetes Ope
 		--create-namespace
 
 .PHONY: mongodb-root-secret-create
-mongodb-root-secret-create: _env-check _data-ns-ensure ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>
+mongodb-root-secret-create: _env-check _data-ns-check ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>
 	@echo "Creating secret with user creds for 'admin' database in MongoDB..."
 	@kubectl create secret generic "$(ENV_NAME)"-mongodb-root-creds \
 	    --namespace "$(DATA_NS)" \
@@ -325,7 +428,7 @@ mongodb-root-secret-create: _env-check _data-ns-ensure ## Create/update secret f
 	@echo "Secret '"$(ENV_NAME)"-mongodb-root-creds' successfully created/updated in namespace $(DATA_NS)"
 
 .PHONY: mongodb-deploy
-mongodb-deploy: _env-check _data-ns-ensure ## Deploy MongoDB cluster
+mongodb-deploy: _env-check _data-ns-check ## Deploy MongoDB cluster
 	@echo "Deploying MongoDB cluster to '$(DATA_NS)' namespace...";
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/mongodb.yaml;
 

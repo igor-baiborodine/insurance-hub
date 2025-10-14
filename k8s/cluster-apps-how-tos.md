@@ -58,10 +58,10 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   - `make postgres-svc-deploy SVC_NAME=product`, wait at least one minute for the cluster to be ready.
 
 - `make grafana-ui`
-- **Grafana**: In _Dashboards > New > Import_, add the "CloudNativePG" dashboard using the following
+- **QA/Grafana**: In _Dashboards > New > Import_, add the "CloudNativePG" dashboard using the following
   URL: https://grafana.com/grafana/dashboards/20417-cloudnativepg/.
 
-- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
 
 2. **MongoDB** 
 - `make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>`
@@ -86,9 +86,25 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 - `make elasticsearch-status`
 - `make elasticsearch-exporter-deploy`
 - `make grafana-ui`
-- **Grafana**: In _Dashboards > New > Import_, add the "ElasticSearch" dashboard using the following
+- **QA/Grafana**: In _Dashboards > New > Import_, add the "ElasticSearch" dashboard using the following
   URL: https://grafana.com/grafana/dashboards/2322-elasticsearch/.
-- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
+
+4. **MinIO**
+- `make minio-operator-deploy`
+
+  **document** service:
+  - `make minio-storage-user-secret-create SVC_NAME=document MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>`
+  - `make minio-storage-config-secret-create SVC_NAME=document MINIO_ROOT_USER=<root-user> MINIO_ROOT_PASSWORD=<root-password>`
+  - `make minio-tenant-deploy SVC_NAME=document`
+  - `kubectl get pods -n local-dev-minio-document`
+    ```shell
+    NAME                                READY   STATUS    RESTARTS   AGE
+    local-dev-minio-document-pool-0-0   2/2     Running   0          101s
+    ```
+  - `make minio-tenant-status SVC_NAME=document`
+  
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=minio-deploy-<iso-date>`
 
 ## QA—Cluster Load Monitoring
 

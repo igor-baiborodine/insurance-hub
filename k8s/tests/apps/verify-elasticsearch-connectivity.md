@@ -61,7 +61,7 @@ To verify connectivity to the Elasticsearch instance running in your local Kind 
 
    Start a temporary pod in the `default` namespace to test connection with the `curl` command:
     ```bash
-    kubectl run es-curl-test --rm -it --image=curlimages/curl -n default \
+    kubectl run es-connect-test --rm -it --image=curlimages/curl -n default \
         --env ELASTIC_USER_PWD="$ELASTIC_USER_PWD" -- sh
     ``` 
 

@@ -38,33 +38,18 @@ defaultRules:
     prometheusOperator: true
 
 prometheus:
-  enabled: true
   prometheusSpec:
-    podMonitorNamespaceSelector: {}
-    podMonitorSelector: {}
-    podMonitorSelectorNilUsesHelmValues: false
-    ruleNamespaceSelector: {}
-    ruleSelector: {}
-    ruleSelectorNilUsesHelmValues: false
+    # This tells Prometheus to look for ServiceMonitors in ANY namespace.
     serviceMonitorNamespaceSelector: {}
-    serviceMonitorSelector: {}
-    serviceMonitorSelectorNilUsesHelmValues: false
-    resources:
-      requests:
-        cpu: 200m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    storageSpec:
-      volumeClaimTemplate:
-        spec:
-          accessModes: ["ReadWriteOnce"]
-          storageClassName: "local-path"
-          resources:
-            requests:
-              storage: 5Gi
-    retention: 48h
+    # This tells Prometheus to select any ServiceMonitor that has this label.
+    serviceMonitorSelector:
+      matchLabels:
+        release: qa-prometheus
+    # This is for PodMonitors, good to have for consistency
+    podMonitorNamespaceSelector: {}
+    podMonitorSelector:
+      matchLabels:
+        release: qa-prometheus
 
 grafana:
   enabled: true

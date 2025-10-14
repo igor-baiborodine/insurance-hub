@@ -1,0 +1,37 @@
+apiVersion: minio.min.io/v2
+kind: Tenant
+metadata:
+  name: minio-tenant
+  labels:
+    app: qa-minio-payment
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9000"
+    prometheus.io/path: /minio/v2/metrics/cluster
+spec:
+  env:
+    - name: MINIO_STORAGE_CLASS_STANDARD
+      value: "EC:2"
+    - name: MINIO_PROMETHEUS_AUTH_TYPE
+      value: "public"
+  requestAutoCert: true
+  users:
+    - name: qa-minio-payment-storage-user-creds
+  configuration:
+    name: qa-minio-payment-storage-config
+  pools:
+    - name: pool-0
+      servers: 3
+      volumesPerServer: 2
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          storageClassName: local-path
+          resources:
+            requests:
+              storage: 10Gi
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
