@@ -3,7 +3,7 @@ kind: Tenant
 metadata:
   name: minio-tenant
   labels:
-    app: qa-minio-document
+    app: qa-minio-payment
   annotations:
     prometheus.io/scrape: "true"
     prometheus.io/port: "9000"
@@ -16,9 +16,9 @@ spec:
       value: "public"
   requestAutoCert: true
   users:
-    - name: qa-minio-document-storage-user-creds
+    - name: qa-minio-payment-storage-user-creds
   configuration:
-    name: qa-minio-document-storage-config
+    name: qa-minio-payment-storage-config
   pools:
     - name: pool-0
       servers: 3
