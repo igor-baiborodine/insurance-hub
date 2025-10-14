@@ -1,8 +1,7 @@
 apiVersion: minio.min.io/v2
 kind: Tenant
 metadata:
-  name: local-dev-minio-document
-  namespace: local-dev-minio-document
+  name: minio-tenant
   labels:
     app: local-dev-minio-document
   annotations: {}

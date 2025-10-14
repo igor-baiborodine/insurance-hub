@@ -30,7 +30,7 @@ spec:
           storageClassName: local-path
           resources:
             requests:
-              storage: 10Gi
+              storage: 5Gi
       resources:
         requests:
           cpu: 500m
