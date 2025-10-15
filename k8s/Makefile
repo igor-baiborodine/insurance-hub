@@ -188,6 +188,8 @@ prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana,
 		--values "$(VALUES_FILE_PREFIX)"/prometheus-values.yaml \
 		--wait \
 		--timeout 15m
+	@echo "✅ Kube Prometheus Stack installed. Verifying pods..."
+	@kubectl get pods -n qa-monitoring -l app.kubernetes.io/instance=qa-prometheus
 
 .PHONY: prometheus-ui
 prometheus-ui: ## Access Prometheus UI via port-forward
@@ -306,27 +308,24 @@ elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exp
 
 STRIMZI_OPERATOR_VERSION := 0.48.0
 
-.PHONY: kafka-strimzi-operator-deploy
-kafka-strimzi-operator-deploy: _env-check ## Install Strimzi Kafka Operator into kafka-system namespace
-	@echo "Deploying Strimzi Kafka Operator v$(STRIMZI_OPERATOR_VERSION) into 'kafka-system' namespace..."
-	@kubectl create namespace kafka-system >/dev/null 2>&1 || true
-	@echo "Applying Strimzi CRDs..."
-	@kubectl apply -f "https://github.com/strimzi/strimzi-kafka-operator/releases/download/$(STRIMZI_OPERATOR_VERSION)/strimzi-crds-$(STRIMZI_OPERATOR_VERSION).yaml"
-	@echo "Deploying Strimzi Cluster Operator..."
-	@kubectl apply -n kafka-system -f "https://github.com/strimzi/strimzi-kafka-operator/releases/download/$(STRIMZI_OPERATOR_VERSION)/strimzi-cluster-operator-$(STRIMZI_OPERATOR_VERSION).yaml"
-	@echo "Applying RBAC patch for KafkaMirrorMaker2 resources..."
-	@kubectl apply -f ./apps/infra/kafka/operator-rbac-patch.yaml
-	@echo "✅ Strimzi Kafka Operator deployed. Verifying pods..."
+kafka-strimzi-operator-install:  _env-check ## Install Strimzi Kafka Operator into kafka-system namespace
+	@kubectl get namespace kafka-system >/dev/null 2>&1 || kubectl create namespace kafka-system
+	@helm repo add strimzi https://strimzi.io/charts/ || true
+	@helm repo update
+	@echo "Installing Strimzi Kafka operator v$(STRIMZI_OPERATOR_VERSION)..."
+	@helm upgrade --install strimzi-operator strimzi/strimzi-kafka-operator \
+		--version $(STRIMZI_OPERATOR_VERSION) \
+		--namespace kafka-system \
+		--wait \
+		--timeout 10m
+	@echo "✅ Strimzi Kafka Operator installed. Verifying pods..."
 	@kubectl get pods -n kafka-system --selector=name=strimzi-cluster-operator
 
-.PHONY: kafka-strimzi-operator-delete
-kafka-strimzi-operator-delete: ## Delete Strimzi Kafka Operator from kafka-system namespace
-	@echo "Deleting Strimzi Kafka Operator v$(STRIMZI_OPERATOR_VERSION) from 'kafka-system' namespace..."
-	@kubectl delete -n kafka-system -f ./apps/infra/kafka/operator-rbac-patch.yaml --ignore-not-found=true
-	@kubectl delete -n kafka-system -f "https://github.com/strimzi/strimzi-kafka-operator/releases/download/$(STRIMZI_OPERATOR_VERSION)/strimzi-cluster-operator-$(STRIMZI_OPERATOR_VERSION).yaml" --ignore-not-found=true
-	@kubectl delete -n kafka-system -f "https://github.com/strimzi/strimzi-kafka-operator/releases/download/$(STRIMZI_OPERATOR_VERSION)/strimzi-crds-$(STRIMZI_OPERATOR_VERSION).yaml" --ignore-not-found=true
-	@kubectl delete namespace kafka-system --ignore-not-found=true
-	@echo "🗑️  Strimzi Kafka Operator deleted."
+kafka-strimzi-operator-uninstall:  _env-check ## Uninstall Strimzi Kafka Operator from kafka-system namespace
+	@echo "Uninstalling Strimzi Kafka Operator from 'kafka-system' namespace..."
+	@helm uninstall strimzi-operator --namespace kafka-system || true
+	@kubectl delete namespace kafka-system || true
+	@echo "🗑 Strimzi Kafka Operator uninstalled and namespace 'kafka-system' deleted."
 
 ################################################################################
 # MinIO Deployment Targets
@@ -438,14 +437,18 @@ MONGODB_OPERATOR_VERSION := 0.13.0
 MONGO_ROOT_USER_PWD ?= rootpwd
 
 .PHONY: mongodb-operator-install
-mongodb-operator-install: _env-check ## Install MongoDB Community Kubernetes Operator
+mongodb-operator-install: _env-check ## Install MongoDB Community Operator
+	@kubectl get namespace "$(DATA_NS)" >/dev/null 2>&1 || kubectl create namespace "$(DATA_NS)"
 	@helm repo add mongodb https://mongodb.github.io/helm-charts
 	@helm repo update
-	@echo "Installing MongoDB Community Kubernetes Operator v$(MONGODB_OPERATOR_VERSION)..."
+	@echo "Installing MongoDB Community Operator v$(MONGODB_OPERATOR_VERSION)..."
 	@helm upgrade --install mongodb-operator mongodb/community-operator \
 		--version "$(MONGODB_OPERATOR_VERSION)" \
-		--namespace $(DATA_NS) \
-		--create-namespace
+		--namespace "$(DATA_NS)" \
+		--wait
+		--timeout 10m
+	@echo "✅ MongoDB Community Operator installed. Verifying pods..."
+	@kubectl get pods -n "$(DATA_NS)" -l name=mongodb-kubernetes-operator
 
 .PHONY: mongodb-root-secret-create
 mongodb-root-secret-create: _env-check _data-ns-check ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>
