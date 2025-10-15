@@ -299,6 +299,32 @@ elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exp
 	@kubectl delete -f "$(VALUES_FILE_PREFIX)"/elasticsearch-exporter.yaml --ignore-not-found || true
 
 ################################################################################
+# Kafka Deployment Targets
+# Targets for deploying and managing Kafka in local dev and QA cluster
+# Namespace and environment auto-detected from current kubectl context
+################################################################################
+
+STRIMZI_OPERATOR_VERSION := 0.48.0
+
+.PHONY: kafka-strimzi-operator-deploy
+kafka-strimzi-operator-deploy: _env-check ## Install Strimzi Kafka Operator into kafka-system namespace
+	@echo "Deploying Strimzi Kafka Operator v$(STRIMZI_OPERATOR_VERSION) into 'kafka-system' namespace..."
+	@kubectl create namespace kafka-system >/dev/null 2>&1 || true
+	@echo "Applying Strimzi CRDs..."
+	@kubectl apply -f "https://github.com/strimzi/strimzi-kafka-operator/releases/download/$(STRIMZI_OPERATOR_VERSION)/strimzi-crds-$(STRIMZI_OPERATOR_VERSION).yaml"
+	@echo "Deploying Strimzi Cluster Operator..."
+	@kubectl apply -n kafka-system -f "https://github.com/strimzi/strimzi-kafka-operator/releases/download/$(STRIMZI_OPERATOR_VERSION)/strimzi-cluster-operator-$(STRIMZI_OPERATOR_VERSION).yaml"
+	@echo "✅ Strimzi Kafka Operator deployed. Verifying pods..."
+	@kubectl get pods -n kafka-system --selector=name=strimzi-cluster-operator
+
+.PHONY: kafka-strimzi-operator-delete
+kafka-strimzi-operator-delete: ## Delete Strimzi Kafka Operator from kafka-system namespace
+	@echo "Deleting Strimzi Kafka Operator from 'kafka-system' namespace..."
+	@kubectl delete -f "https://strimzi.io/install/$(STRIMZI_OPERATOR_VERSION)?namespace=kafka-system" -n kafka-system --ignore-not-found=true
+	@kubectl delete namespace kafka-system --ignore-not-found=true
+	@echo "🗑️  Strimzi Kafka Operator deleted."
+
+################################################################################
 # MinIO Deployment Targets
 # Targets for deploying and managing MinIO in local dev and QA cluster
 # Namespace and environment auto-detected from current kubectl context
