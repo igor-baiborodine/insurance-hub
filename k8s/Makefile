@@ -314,13 +314,17 @@ kafka-strimzi-operator-deploy: _env-check ## Install Strimzi Kafka Operator into
 	@kubectl apply -f "https://github.com/strimzi/strimzi-kafka-operator/releases/download/$(STRIMZI_OPERATOR_VERSION)/strimzi-crds-$(STRIMZI_OPERATOR_VERSION).yaml"
 	@echo "Deploying Strimzi Cluster Operator..."
 	@kubectl apply -n kafka-system -f "https://github.com/strimzi/strimzi-kafka-operator/releases/download/$(STRIMZI_OPERATOR_VERSION)/strimzi-cluster-operator-$(STRIMZI_OPERATOR_VERSION).yaml"
+	@echo "Applying RBAC patch for KafkaMirrorMaker2 resources..."
+	@kubectl apply -f ./apps/infra/kafka/operator-rbac-patch.yaml
 	@echo "✅ Strimzi Kafka Operator deployed. Verifying pods..."
 	@kubectl get pods -n kafka-system --selector=name=strimzi-cluster-operator
 
 .PHONY: kafka-strimzi-operator-delete
 kafka-strimzi-operator-delete: ## Delete Strimzi Kafka Operator from kafka-system namespace
-	@echo "Deleting Strimzi Kafka Operator from 'kafka-system' namespace..."
-	@kubectl delete -f "https://strimzi.io/install/$(STRIMZI_OPERATOR_VERSION)?namespace=kafka-system" -n kafka-system --ignore-not-found=true
+	@echo "Deleting Strimzi Kafka Operator v$(STRIMZI_OPERATOR_VERSION) from 'kafka-system' namespace..."
+	@kubectl delete -n kafka-system -f ./apps/infra/kafka/operator-rbac-patch.yaml --ignore-not-found=true
+	@kubectl delete -n kafka-system -f "https://github.com/strimzi/strimzi-kafka-operator/releases/download/$(STRIMZI_OPERATOR_VERSION)/strimzi-cluster-operator-$(STRIMZI_OPERATOR_VERSION).yaml" --ignore-not-found=true
+	@kubectl delete -n kafka-system -f "https://github.com/strimzi/strimzi-kafka-operator/releases/download/$(STRIMZI_OPERATOR_VERSION)/strimzi-crds-$(STRIMZI_OPERATOR_VERSION).yaml" --ignore-not-found=true
 	@kubectl delete namespace kafka-system --ignore-not-found=true
 	@echo "🗑️  Strimzi Kafka Operator deleted."
 
