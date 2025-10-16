@@ -1,0 +1,212 @@
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: qa-kafka
+  namespace: qa-data
+  labels:
+    app: qa-kafka
+    env: qa
+spec:
+  kafka:
+    version: 4.1.0
+    replicas: 3
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+    config:
+      # High-availability configuration
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      default.replication.factor: 3
+      min.insync.replicas: 2
+      inter.broker.protocol.version: "3.8"
+      # Log retention
+      log.retention.hours: 168
+      log.segment.bytes: 1073741824
+      log.retention.check.interval.ms: 300000
+      # Compression
+      compression.type: producer
+      # Auto-create topics
+      auto.create.topics.enable: true
+      # Leader balancing
+      auto.leader.rebalance.enable: true
+    storage:
+      type: persistent-claim
+      size: 10Gi
+      class: local-path
+      deleteClaim: false
+    resources:
+      requests:
+        memory: 2Gi
+        cpu: 1000m
+      limits:
+        memory: 4Gi
+        cpu: 2000m
+    # Enable metrics for Prometheus
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: kafka-metrics-config.yml
+    # Rack awareness for pod distribution
+    rack:
+      topologyKey: kubernetes.io/hostname
+  zookeeper:
+    replicas: 3
+    storage:
+      type: persistent-claim
+      size: 5Gi
+      class: local-path
+      deleteClaim: false
+    resources:
+      requests:
+        memory: 1Gi
+        cpu: 500m
+      limits:
+        memory: 2Gi
+        cpu: 1000m
+    # Enable metrics for Prometheus
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: zookeeper-metrics-config.yml
+  entityOperator:
+    topicOperator:
+      resources:
+        requests:
+          memory: 512Mi
+          cpu: 200m
+        limits:
+          memory: 1Gi
+          cpu: 500m
+    userOperator:
+      resources:
+        requests:
+          memory: 512Mi
+          cpu: 200m
+        limits:
+          memory: 1Gi
+          cpu: 500m
+  kafkaExporter:
+    # Enable Kafka Exporter for additional metrics
+    topicRegex: ".*"
+    groupRegex: ".*"
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 256Mi
+        cpu: 200m
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-metrics
+  namespace: qa-data
+  labels:
+    app: qa-kafka
+data:
+  kafka-metrics-config.yml: |
+    lowercaseOutputName: true
+    rules:
+      # Kafka broker metrics
+      - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+        labels:
+          clientId: "$3"
+          topic: "$4"
+          partition: "$5"
+      - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), brokerHost=(.+), brokerPort=(.+)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+        labels:
+          clientId: "$3"
+          broker: "$4:$5"
+      - pattern: kafka.server<type=(.+), name=(.+)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+      # Kafka network metrics
+      - pattern: kafka.network<type=(.+), name=(.+)><>Value
+        name: kafka_network_$1_$2
+        type: GAUGE
+      # Kafka log metrics
+      - pattern: kafka.log<type=(.+), name=(.+), topic=(.+), partition=(.+)><>Value
+        name: kafka_log_$1_$2
+        type: GAUGE
+        labels:
+          topic: "$3"
+          partition: "$4"
+      # Kafka controller metrics
+      - pattern: kafka.controller<type=(.+), name=(.+)><>Value
+        name: kafka_controller_$1_$2
+        type: GAUGE
+  zookeeper-metrics-config.yml: |
+    lowercaseOutputName: true
+    rules:
+      # Zookeeper metrics
+      - pattern: "org.apache.ZooKeeperService<name0=(.+)><>(.+):"
+        name: zookeeper_$2
+        type: GAUGE
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qa-kafka-metrics
+  namespace: qa-data
+  labels:
+    app: qa-kafka
+spec:
+  type: ClusterIP
+  ports:
+    - name: tcp-prometheus
+      port: 9404
+      targetPort: 9404
+      protocol: TCP
+  selector:
+    strimzi.io/cluster: qa-kafka
+    strimzi.io/kind: Kafka
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: qa-kafka-metrics
+  namespace: qa-data
+  labels:
+    app: qa-kafka
+spec:
+  selector:
+    matchLabels:
+      app: qa-kafka
+  endpoints:
+    - port: tcp-prometheus
+      interval: 30s
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: qa-kafka-resources
+  namespace: qa-data
+  labels:
+    app: qa-kafka
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/cluster: qa-kafka
+  podMetricsEndpoints:
+    - port: tcp-prometheus
+      interval: 30s
+      path: /metrics

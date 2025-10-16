@@ -308,7 +308,7 @@ elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exp
 
 STRIMZI_OPERATOR_VERSION := 0.48.0
 
-kafka-strimzi-operator-install:  _env-check ## Install Strimzi Kafka Operator into kafka-system namespace
+kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka Operator into kafka-system namespace
 	@kubectl get namespace kafka-system >/dev/null 2>&1 || kubectl create namespace kafka-system
 	@helm repo add strimzi https://strimzi.io/charts/ || true
 	@helm repo update
@@ -316,16 +316,102 @@ kafka-strimzi-operator-install:  _env-check ## Install Strimzi Kafka Operator in
 	@helm upgrade --install strimzi-operator strimzi/strimzi-kafka-operator \
 		--version $(STRIMZI_OPERATOR_VERSION) \
 		--namespace kafka-system \
+		--set watchNamespaces={"$(DATA_NS)"} \
 		--wait \
 		--timeout 10m
 	@echo "✅ Strimzi Kafka Operator installed. Verifying pods..."
 	@kubectl get pods -n kafka-system --selector=name=strimzi-cluster-operator
 
-kafka-strimzi-operator-uninstall:  _env-check ## Uninstall Strimzi Kafka Operator from kafka-system namespace
+kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator from kafka-system namespace
 	@echo "Uninstalling Strimzi Kafka Operator from 'kafka-system' namespace..."
 	@helm uninstall strimzi-operator --namespace kafka-system || true
 	@kubectl delete namespace kafka-system || true
 	@echo "🗑 Strimzi Kafka Operator uninstalled and namespace 'kafka-system' deleted."
+
+.PHONY: kafka-deploy
+kafka-deploy: _env-check ## Deploy Kafka cluster
+	@echo "Deploying Kafka cluster into '$(DATA_NS)' namespace..."
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/kafka.yaml
+	@echo "⏳ Waiting for Kafka cluster to be ready (this may take several minutes)..."
+	@kubectl wait --for=condition=Ready kafka/$(ENV_NAME)-kafka -n "$(DATA_NS)" --timeout=600s || true
+	@echo "✅ Kafka cluster deployment initiated. Check status with: make kafka-status"
+
+.PHONY: kafka-status
+kafka-status: _env-check ## Show Kafka cluster status
+	@echo "Status for Kafka cluster in namespace: $(DATA_NS)"
+	@echo "\n=== Kafka Custom Resource ==="
+	@kubectl get kafka -n "$(DATA_NS)" "$(ENV_NAME)-kafka" -o wide || true
+	@echo "\n=== Kafka Pods ==="
+	@kubectl get pods -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
+	@echo "\n=== Kafka Services ==="
+	@kubectl get svc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
+	@echo "\n=== Kafka PersistentVolumeClaims ==="
+	@kubectl get pvc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
+	@echo "\n=== Kafka StatefulSets ==="
+	@kubectl get statefulset -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
+
+.PHONY: kafka-delete
+kafka-delete: _env-check ## Delete Kafka cluster only (preserves PVCs)
+	@echo "Deleting Kafka cluster '$(ENV_NAME)-kafka' from namespace $(DATA_NS)..."
+	@kubectl delete kafka "$(ENV_NAME)-kafka" -n "$(DATA_NS)" --ignore-not-found || true
+	@echo "⏳ Waiting for Kafka resources to be cleaned up..."
+	@sleep 10
+
+.PHONY: kafka-purge
+kafka-purge: kafka-delete ## Delete Kafka cluster and permanently remove PVCs
+	@echo "Deleting Kafka-related PVCs in namespace $(DATA_NS)..."
+	@kubectl delete pvc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
+	@echo "🗑️  Kafka cluster and all persistent data removed."
+
+.PHONY: kafka-topics-list
+kafka-topics-list: _env-check ## List all Kafka topics
+	@echo "Listing Kafka topics in cluster $(ENV_NAME)-kafka..."
+	@kubectl get kafkatopic -n "$(DATA_NS)" || echo "No KafkaTopics found"
+
+.PHONY: kafka-console-producer
+kafka-console-producer: _env-check ## Access Kafka console producer (requires TOPIC_NAME)
+	@if [ -z "$(TOPIC_NAME)" ]; then \
+		echo "ERROR: TOPIC_NAME is required. Usage: make kafka-console-producer TOPIC_NAME=<topic-name>"; \
+		exit 1; \
+	fi
+	@echo "Starting Kafka console producer for topic: $(TOPIC_NAME)"
+	@echo "Type messages and press Enter to send. Press Ctrl+C to exit."
+	@kubectl run kafka-producer -ti --rm=true --restart=Never \
+		--image=quay.io/strimzi/kafka:0.48.0-kafka-3.8.0 \
+		-n "$(DATA_NS)" -- \
+		bin/kafka-console-producer.sh \
+		--bootstrap-server $(ENV_NAME)-kafka-kafka-bootstrap:9092 \
+		--topic $(TOPIC_NAME)
+
+.PHONY: kafka-console-consumer
+kafka-console-consumer: _env-check ## Access Kafka console consumer (requires TOPIC_NAME)
+	@if [ -z "$(TOPIC_NAME)" ]; then \
+		echo "ERROR: TOPIC_NAME is required. Usage: make kafka-console-consumer TOPIC_NAME=<topic-name>"; \
+		exit 1; \
+	fi
+	@echo "Starting Kafka console consumer for topic: $(TOPIC_NAME)"
+	@echo "Press Ctrl+C to exit."
+	@kubectl run kafka-consumer -ti --rm=true --restart=Never \
+		--image=quay.io/strimzi/kafka:0.48.0-kafka-3.8.0 \
+		-n "$(DATA_NS)" -- \
+		bin/kafka-console-consumer.sh \
+		--bootstrap-server $(ENV_NAME)-kafka-kafka-bootstrap:9092 \
+		--topic $(TOPIC_NAME) \
+		--from-beginning
+
+.PHONY: kafka-metrics-check
+kafka-metrics-check: _env-check ## Check if Kafka metrics are being exposed (QA only)
+	@if [ "$(ENV_NAME)" != "qa" ]; then \
+		echo "ERROR: Metrics are only available in QA environment"; \
+		exit 1; \
+	fi
+	@echo "Checking Kafka metrics endpoints..."
+	@echo "\n=== Kafka Broker Metrics ==="
+	@kubectl exec -n "$(DATA_NS)" $(ENV_NAME)-kafka-kafka-0 -- curl -s localhost:9404/metrics | head -20 || echo "Metrics not available"
+	@echo "\n=== ServiceMonitor Status ==="
+	@kubectl get servicemonitor -n "$(DATA_NS)" qa-kafka-metrics || echo "ServiceMonitor not found"
+	@echo "\n=== PodMonitor Status ==="
+	@kubectl get podmonitor -n "$(DATA_NS)" qa-kafka-resources || echo "PodMonitor not found"
 
 ################################################################################
 # MinIO Deployment Targets
