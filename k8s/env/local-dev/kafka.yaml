@@ -4,6 +4,8 @@ kind: Kafka
 metadata:
   name: local-dev-kafka
   namespace: local-dev-all
+  annotations:
+    strimzi.io/node-pools: enabled
   labels:
     app: local-dev-kafka
     env: local-dev
@@ -58,16 +60,38 @@ spec:
     topicOperator:
       resources:
         requests:
-          memory: 256Mi
-          cpu: 100m
-        limits:
           memory: 512Mi
-          cpu: 200m
+          cpu: 250m
+        limits:
+          memory: 1Gi
+          cpu: 500m
     userOperator:
       resources:
         requests:
-          memory: 256Mi
-          cpu: 100m
-        limits:
           memory: 512Mi
-          cpu: 200m
+          cpu: 250m
+        limits:
+          memory: 1Gi
+          cpu: 500m
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: pool-a
+  namespace: local-dev-all
+  labels:
+    strimzi.io/cluster: local-dev-kafka
+spec:
+  replicas: 1
+  roles:
+    - broker
+    - controller
+  storage:
+    type: ephemeral
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: 500m
