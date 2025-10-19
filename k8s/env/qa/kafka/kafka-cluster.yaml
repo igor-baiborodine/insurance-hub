@@ -12,17 +12,6 @@ spec:
   kafka:
     version: 4.1.0
     replicas: 3
-    cruiseControl:
-      image: quay.io/strimzi/cruise-control:2.5.57
-      resources:
-        requests:
-          cpu: 250m
-          memory: 512Mi
-        limits:
-          cpu: 500m
-          memory: 1Gi
-      port: 9090
-      metricsEnabled: true
     listeners:
       - name: plain
         port: 9092
@@ -55,34 +44,12 @@ spec:
       limits:
         memory: 2Gi
         cpu: 1000m
-    metricsEnabled: true
     metricsConfig:
       type: jmxPrometheusExporter
       valueFrom:
         configMapKeyRef:
           name: kafka-metrics
           key: kafka-metrics-config.yml
-  zookeeper:
-    replicas: 3
-    storage:
-      type: persistent-claim
-      size: 5Gi
-      class: local-path
-      deleteClaim: false
-    resources:
-      requests:
-        memory: 512Mi
-        cpu: 250m
-      limits:
-        memory: 1Gi
-        cpu: 500m
-    metricsEnabled: true
-    metricsConfig:
-      type: jmxPrometheusExporter
-      valueFrom:
-        configMapKeyRef:
-          name: zookeeper-metrics-config
-          key: zookeeper-metrics-config.yml
   entityOperator:
     topicOperator:
       resources:
@@ -191,10 +158,4 @@ data:
           partition: "$4"
       - pattern: kafka.controller<type=(.+), name=(.+)><>Value
         name: kafka_controller_$1_$2
-        type: GAUGE
-  zookeeper-metrics-config.yml: |
-    lowercaseOutputName: true
-    rules:
-      - pattern: "org.apache.ZooKeeperService<name0=(.+)><>(.+):"
-        name: zookeeper_$2
         type: GAUGE
