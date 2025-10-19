@@ -331,7 +331,7 @@ kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator
 .PHONY: kafka-deploy
 kafka-deploy: _env-check ## Deploy Kafka cluster
 	@echo "Deploying Kafka cluster into '$(DATA_NS)' namespace..."
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/kafka.yaml
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/kafka/kafka-cluster.yaml
 	@echo "⏳ Waiting for Kafka cluster to be ready (this may take several minutes)..."
 	@kubectl wait --for=condition=Ready kafka/$(ENV_NAME)-kafka -n "$(DATA_NS)" --timeout=5m || true
 	@echo "✅ Kafka cluster deployment initiated. Check status with: make kafka-status"
@@ -401,6 +401,15 @@ kafka-console-consumer: _env-check ## Access Kafka console consumer (requires TO
 		--bootstrap-server $(ENV_NAME)-kafka-kafka-bootstrap:9092 \
 		--topic $(TOPIC_NAME) \
 		--from-beginning
+
+.PHONY: kafka-cruise-control-deploy
+kafka-cruise-control-deploy: _env-check ## Deploy Cruise Control UI
+	@echo "Deploying Cruise Control UI into '$(DATA_NS)' namespace..."
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/kafka/kafka-cruise-control.yaml
+	@echo "⏳ Waiting for Cruise Control UI deployment to be ready..."
+	@kubectl wait --for=condition=available deployment/$(ENV_NAME)-cruise-control-ui -n "$(DATA_NS)" --timeout=3m || true
+	@echo "✅ Cruise Control UI deployment initiated. Check logs or status with:"
+	@echo "kubectl get pods -n $(DATA_NS) -l app=$(ENV_NAME)-cruise-control-ui"
 
 .PHONY: kafka-metrics-check
 kafka-metrics-check: _env-check ## Check if Kafka metrics are being exposed (QA only)
