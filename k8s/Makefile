@@ -331,7 +331,7 @@ kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator
 .PHONY: kafka-deploy
 kafka-deploy: _env-check ## Deploy Kafka cluster
 	@echo "Deploying Kafka cluster into '$(DATA_NS)' namespace..."
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/kafka/kafka-cluster.yaml
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/kafka.yaml
 	@echo "⏳ Waiting for Kafka cluster to be ready (this may take several minutes)..."
 	@kubectl wait --for=condition=Ready kafka/$(ENV_NAME)-kafka -n "$(DATA_NS)" --timeout=5m || true
 	@echo "✅ Kafka cluster deployment initiated. Check status with: make kafka-status"
@@ -358,13 +358,17 @@ kafka-delete: _env-check ## Delete Kafka cluster only (preserves PVCs and Strimz
 	@sleep 10
 
 .PHONY: kafka-purge
-kafka-purge: kafka-delete ## Delete Kafka cluster and permanently remove PVCs and StrimziPodSets
+kafka-purge: kafka-delete ## Delete Kafka cluster and permanently remove PVCs, NodePools, and StrimziPodSets
+	@echo "Deleting Kafka-related KafkaNodePools in namespace $(DATA_NS)..."
+	@kubectl delete kafkanodepool -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
+
 	@echo "Deleting Kafka-related StrimziPodSets in namespace $(DATA_NS)..."
 	@kubectl delete strimzipodset -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
 
 	@echo "Deleting Kafka-related PVCs in namespace $(DATA_NS)..."
 	@kubectl delete pvc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
-	@echo "🗑️  Kafka cluster, all StrimziPodSets, and all persistent data removed."
+
+	@echo "🗑️  Kafka cluster, all NodePools, StrimziPodSets, and persistent data removed."
 
 .PHONY: kafka-topics-list
 kafka-topics-list: _env-check ## List all Kafka topics
@@ -401,29 +405,6 @@ kafka-console-consumer: _env-check ## Access Kafka console consumer (requires TO
 		--bootstrap-server $(ENV_NAME)-kafka-kafka-bootstrap:9092 \
 		--topic $(TOPIC_NAME) \
 		--from-beginning
-
-.PHONY: kafka-cruise-control-deploy
-kafka-cruise-control-deploy: _env-check ## Deploy Cruise Control UI
-	@echo "Deploying Cruise Control UI into '$(DATA_NS)' namespace..."
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/kafka/kafka-cruise-control.yaml
-	@echo "⏳ Waiting for Cruise Control UI deployment to be ready..."
-	@kubectl wait --for=condition=available deployment/$(ENV_NAME)-cruise-control-ui -n "$(DATA_NS)" --timeout=3m || true
-	@echo "✅ Cruise Control UI deployment initiated. Check logs or status with:"
-	@echo "kubectl get pods -n $(DATA_NS) -l app=$(ENV_NAME)-cruise-control-ui"
-
-.PHONY: kafka-metrics-check
-kafka-metrics-check: _env-check ## Check if Kafka metrics are being exposed (QA only)
-	@if [ "$(ENV_NAME)" != "qa" ]; then \
-		echo "ERROR: Metrics are only available in QA environment"; \
-		exit 1; \
-	fi
-	@echo "Checking Kafka metrics endpoints..."
-	@echo "\n=== Kafka Broker Metrics ==="
-	@kubectl exec -n "$(DATA_NS)" $(ENV_NAME)-kafka-kafka-0 -- curl -s localhost:9404/metrics | head -20 || echo "Metrics not available"
-	@echo "\n=== ServiceMonitor Status ==="
-	@kubectl get servicemonitor -n "$(DATA_NS)" qa-kafka-metrics || echo "ServiceMonitor not found"
-	@echo "\n=== PodMonitor Status ==="
-	@kubectl get podmonitor -n "$(DATA_NS)" qa-kafka-resources || echo "PodMonitor not found"
 
 ################################################################################
 # MinIO Deployment Targets

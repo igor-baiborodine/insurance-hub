@@ -103,7 +103,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
     local-dev-minio-document-pool-0-0   2/2     Running   0          101s
     ```
   - `make minio-tenant-status SVC_NAME=document`
-  
+
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=minio-deploy-<iso-date>`
 
 5. **Kafka**
@@ -116,6 +116,10 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
     local-dev-kafka-pool-a-0                           1/1     Running   0               42h`
     ```
 - `make kafka-status`
+- `make grafana-ui`
+- **QA/Grafana**: In _Dashboards > New > Import_, add the "Strimzi Kafka" dashboard using the
+  following [JSON](https://github.com/strimzi/strimzi-kafka-operator/blob/0.48.0/examples/metrics/grafana-dashboards/strimzi-kafka.json) file
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
 
 ## QA—Cluster Load Monitoring
 
@@ -143,4 +147,16 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
     lxc exec qa-master -- /bin/bash
     root@qa-master:~# htop
     root@qa-master:~# df -h
+    ```
+- Verify node capacity and limits:
+    ```shell
+    kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}: {.status.allocatable.cpu}{"\n"}{end}'
+    qa-master: 6
+    qa-worker1: 3
+    qa-worker2: 3
+    ```
+- Check current pod CPU usage:
+    ```shell
+    kubectl top nodes
+    kubectl top pod --all-namespaces  
     ```
