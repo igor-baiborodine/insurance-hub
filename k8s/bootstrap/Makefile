@@ -14,6 +14,12 @@ QA_SNAPSHOT_NAME 		?= baseline
 KIND_CONFIG_FILE   		:= local-dev/local-dev-insurance-hub.yaml
 LOCAL_DEV_CLUSTER_NAME  := local-dev-insurance-hub
 
+.PHONY: all-suspend
+all-suspend: local-dev-suspend qa-nodes-suspend ## Suspend local dev Kind cluster and all QA LXD VMs
+
+.PHONY: all-resume
+all-resume: local-dev-resume qa-nodes-resume ## Resume local dev Kind cluster and all QA LXD VMs
+
 ################################################################################
 # Local Dev Cluster Management Targets
 # Targets for creating and managing the Kind cluster configuration
@@ -64,7 +70,7 @@ qa-nodes-create: ## Create three LXD VMs (master and two workers) for QA cluster
 	bash qa/scripts/qa-nodes-create.sh
 
 .PHONY: qa-nodes-suspend
-qa-nodes-suspend: ## Suspend (pause) all LXD QA VMs
+qa-nodes-suspend: ## Suspend (pause) all QA LXD VMs
 	@for NODE in $(QA_NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Suspending VM $$NODE..."; \
@@ -77,7 +83,7 @@ qa-nodes-suspend: ## Suspend (pause) all LXD QA VMs
 	@lxc list
 
 .PHONY: qa-nodes-resume
-qa-nodes-resume: ## Resume (start) all LXD QA VMs
+qa-nodes-resume: ## Resume (start) all QA LXD VMs
 	@for NODE in $(QA_NODES_ALL); do \
 		if lxc info $$NODE >/dev/null 2>&1; then \
 			echo "Resuming (starting) VM $$NODE..."; \
