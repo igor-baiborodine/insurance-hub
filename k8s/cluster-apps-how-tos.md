@@ -18,7 +18,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
 - `cd k8s`
 - `make prometheus-stack-install`
 - `kubectl get pods -n qa-monitoring`
-    ```bash
+    ```shell
     NAME                                                     READY   STATUS    RESTARTS   AGE
     alertmanager-qa-prometheus-kube-prometh-alertmanager-0   2/2     Running   0          4m29s
     prometheus-qa-prometheus-kube-prometh-prometheus-0       2/2     Running   0          4m29s
@@ -68,7 +68,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 - `make mongodb-operator-install`
 - `make mongodb-deploy`
 - `kubectl get pods -n local-dev-all | grep mongodb`
-    ```bash
+    ```shell
     local-dev-mongodb-0                            2/2     Running   0          4m41s
     mongodb-kubernetes-operator-7898cfb5f8-rkc7r   1/1     Running   0          5m34s
     ```
@@ -79,7 +79,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 - `make eck-operator-deploy`
 - `make elasticsearch-deploy`
 - `kubectl get pods -n local-dev-all | grep elasticsearch`
-    ```bash
+    ```shell
     kubectl get pods -n local-dev-all | grep elasticsearch
     local-dev-elasticsearch-es-default-0   1/1     Running   0          111s    
     ```
@@ -103,8 +103,23 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
     local-dev-minio-document-pool-0-0   2/2     Running   0          101s
     ```
   - `make minio-tenant-status SVC_NAME=document`
-  
+
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=minio-deploy-<iso-date>`
+
+5. **Kafka**
+
+- `make kafka-strimzi-operator-install`
+- `make kafka-deploy`
+- `kubectl get pods -n local-dev-all | grep kafka`
+    ```shell
+    local-dev-kafka-broker-controller-0                1/1     Running   0             22m
+    local-dev-kafka-entity-operator-76bb947d7c-gzgb6   2/2     Running   0             21m    
+    ```
+- `make kafka-status`
+- `make grafana-ui`
+- **QA/Grafana**: In _Dashboards > New > Import_, add the "Strimzi Kafka" dashboard using the
+  following [JSON](https://github.com/strimzi/strimzi-kafka-operator/blob/0.48.0/examples/metrics/grafana-dashboards/strimzi-kafka.json) file
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
 
 ## QA—Cluster Load Monitoring
 
@@ -128,8 +143,20 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 
 - `kubectl get nodes`
 - `lxc exec <node-name> -- /bin/bash`
-    ```bash
+    ```shell
     lxc exec qa-master -- /bin/bash
     root@qa-master:~# htop
     root@qa-master:~# df -h
+    ```
+- Verify node capacity and limits:
+    ```shell
+    kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}: {.status.allocatable.cpu}{"\n"}{end}'
+    qa-master: 6
+    qa-worker1: 3
+    qa-worker2: 3
+    ```
+- Check current pod CPU usage:
+    ```shell
+    kubectl top nodes
+    kubectl top pod --all-namespaces  
     ```
