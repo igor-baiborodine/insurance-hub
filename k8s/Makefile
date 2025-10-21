@@ -331,7 +331,7 @@ kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator
 .PHONY: kafka-deploy
 kafka-deploy: _env-check ## Deploy Kafka cluster
 	@echo "Deploying Kafka cluster into '$(DATA_NS)' namespace..."
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/kafka.yaml
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/kafka/kafka-resources.yaml
 	@echo "⏳ Waiting for Kafka cluster to be ready (this may take several minutes)..."
 	@kubectl wait --for=condition=Ready kafka/$(ENV_NAME)-kafka -n "$(DATA_NS)" --timeout=5m || true
 	@echo "✅ Kafka cluster deployment initiated. Check status with: make kafka-status"

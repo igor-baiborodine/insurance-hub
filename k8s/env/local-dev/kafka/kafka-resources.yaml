@@ -1,11 +1,31 @@
 ---
 apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: broker-controller
+  namespace: local-dev-all
+  labels:
+    strimzi.io/cluster: local-dev-kafka
+spec:
+  replicas: 1
+  roles:
+    - broker
+    - controller
+  storage:
+    type: ephemeral
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+---
+apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
   name: local-dev-kafka
   namespace: local-dev-all
-  annotations:
-    strimzi.io/node-pools: enabled
   labels:
     app: local-dev-kafka
     env: local-dev
@@ -29,13 +49,14 @@ spec:
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
-      inter.broker.protocol.version: "3.8"
       # Log retention
       log.retention.hours: 168
       log.segment.bytes: 1073741824
       log.retention.check.interval.ms: 300000
-      # Compression
-      compression.type: producer
+      log.cleanup.policy: delete
+      log.cleaner.enable: true
+      # Message compression
+      compression.type: uncompressed
     storage:
       type: ephemeral
     resources:
@@ -45,17 +66,6 @@ spec:
       limits:
         memory: 2Gi
         cpu: 1000m
-  zookeeper:
-    replicas: 1
-    storage:
-      type: ephemeral
-    resources:
-      requests:
-        memory: 512Mi
-        cpu: 250m
-      limits:
-        memory: 1Gi
-        cpu: 500m
   entityOperator:
     topicOperator:
       resources:
@@ -73,25 +83,3 @@ spec:
         limits:
           memory: 1Gi
           cpu: 500m
----
-apiVersion: kafka.strimzi.io/v1beta2
-kind: KafkaNodePool
-metadata:
-  name: pool-a
-  namespace: local-dev-all
-  labels:
-    strimzi.io/cluster: local-dev-kafka
-spec:
-  replicas: 1
-  roles:
-    - broker
-    - controller
-  storage:
-    type: ephemeral
-  resources:
-    requests:
-      memory: 512Mi
-      cpu: 250m
-    limits:
-      memory: 1Gi
-      cpu: 500m
