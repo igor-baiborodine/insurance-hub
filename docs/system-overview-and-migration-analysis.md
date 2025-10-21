@@ -582,19 +582,26 @@ stable foundation for the next, minimizing risk throughout the process.
 **Goal:** Move the existing Java application to a Kubernetes environment with minimal code changes.
 This validates the new platform and de-risks subsequent, more complex changes.
 
-1. **Provision Kubernetes Clusters:** Set up simple local dev (Kind) and production-like (MicroK8S) 
+1. **Provision Kubernetes Clusters:** Set up simple local dev (Kind) and production-like (Rancher K3s) 
    local Kubernetes clusters.
-2. **Deploy Core Infrastructure:**
+2. **Deploy Core Cluster and Insurance Hub Observability:**
+    * Deploy **Prometheus** and **Grafana** to provide base observability for the cluster and core
+      infrastructure.
+    * Deploy **Zipkin** to provide distributed tracing for the Insurance Hub services.
+3. **Deploy Core Infrastructure:**
     * Deploy **PostgreSQL**, **MongoDB**, **Elasticsearch**, and **Apache Kafka** to the Kubernetes cluster.
     * Deploy **MinIO** as the new S3-compatible object storage solution, which will replace the
       existing file system storage.
+4. **Deploy Auxiliary Services:**
+    * Deploy **JSReport** to provide PDF generation for the Insurance Hub services.
 3. **Targeted Code Modification (Java):**
     * Modify the existing Java services (e.g., `document-service`) that interact with the file
       system. Update them to use an S3-compatible SDK pointed at the new MinIO service endpoint.
 4. **Containerize and Deploy Java Services:**
-    * Create production-grade container images for all Java microservices.
+    * Validate existing container images for all Java microservices and if necessary, update them to
+      be more production-ready.
     * Deploy these services to Kubernetes.
-   * As per this [analysis](migration/component-replacement-reasoning/replace-consul.md), decommission Consul and switch to
+    * As per this [analysis](migration/component-replacement-reasoning/replace-consul.md), decommission Consul and switch to
      Kubernetes-native service discovery. This is primarily a configuration change in the Micronaut
      services to use Kubernetes' internal DNS for service-to-service communication.
 5. **Deploy Existing Gateway:** Deploy the current Java-based `agent-portal-gateway` to Kubernetes
@@ -607,7 +614,7 @@ This validates the new platform and de-risks subsequent, more complex changes.
 dependencies are containerized, and object storage is handled by MinIO. The system is functional,
 providing a stable baseline for the next phases.
 
-### Phase 2: Foundational Observability with Shared Trace Storage
+### Phase 2: Foundational Observability
 
 **Goal:** Centralize tracing data storage to enable a unified view via Grafana and prepare for a
 seamless transition to a modern observability stack, all **without modifying the existing Java
