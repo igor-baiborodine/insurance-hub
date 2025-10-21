@@ -112,8 +112,8 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 - `make kafka-deploy`
 - `kubectl get pods -n local-dev-all | grep kafka`
     ```shell
-    local-dev-kafka-entity-operator-5df4b99c44-9tsvx   2/2     Running   0               42h
-    local-dev-kafka-pool-a-0                           1/1     Running   0               42h`
+    local-dev-kafka-broker-controller-0                1/1     Running   0             22m
+    local-dev-kafka-entity-operator-76bb947d7c-gzgb6   2/2     Running   0             21m    
     ```
 - `make kafka-status`
 - `make grafana-ui`
