@@ -506,6 +506,12 @@ microservices architecture at scale.
     - Native integration with Grafana for unified trace analysis and correlation with logs and
       metrics
     - Object storage backend (MinIO) aligning with cloud-native storage strategy
+    - Insertion of an OpenTelemetry Collector as a centralized telemetry pipeline intermediary to
+    translate and route legacy and new trace data
+    - Tempo's native OTLP ingestion coupled with MinIO-based scalable object storage from initial
+    deployment
+    - Flexible, reliable telemetry routing enabling gradual Zipkin decommissioning without service
+    code changes
 
 [Reasoning for OpenTelemetry-based distributed tracing](migration/component-replacement-reasoning/replace-zipkin.md)
 
