@@ -22,7 +22,7 @@
 - [Migration Strategy](#migration-strategy)
   - [Target State](#target-state-1)
   - [Phase 1: Foundational Infrastructure & Environment Migration (Lift and Shift)](#phase-1-foundational-infrastructure--environment-migration-lift-and-shift)
-  - [Phase 2: Foundational Observability with Shared Trace Storage](#phase-2-foundational-observability-with-shared-trace-storage)
+  - [Phase 2: Foundational Observability](#phase-2-foundational-observability)
   - [Phase 3: Data Store Consolidation](#phase-3-data-store-consolidation)
   - [Phase 4: Phased Service Migration to Go (Strangler Fig Pattern)](#phase-4-phased-service-migration-to-go-strangler-fig-pattern)
   - [Phase 5: Modernize Edge and Authentication](#phase-5-modernize-edge-and-authentication)
@@ -506,6 +506,12 @@ microservices architecture at scale.
     - Native integration with Grafana for unified trace analysis and correlation with logs and
       metrics
     - Object storage backend (MinIO) aligning with cloud-native storage strategy
+    - Insertion of an OpenTelemetry Collector as a centralized telemetry pipeline intermediary to
+    translate and route legacy and new trace data
+    - Tempo's native OTLP ingestion coupled with MinIO-based scalable object storage from initial
+    deployment
+    - Flexible, reliable telemetry routing enabling gradual Zipkin decommissioning without service
+    code changes
 
 [Reasoning for OpenTelemetry-based distributed tracing](migration/component-replacement-reasoning/replace-zipkin.md)
 
@@ -582,19 +588,26 @@ stable foundation for the next, minimizing risk throughout the process.
 **Goal:** Move the existing Java application to a Kubernetes environment with minimal code changes.
 This validates the new platform and de-risks subsequent, more complex changes.
 
-1. **Provision Kubernetes Clusters:** Set up simple local dev (Kind) and production-like (MicroK8S) 
-   local Kubernetes clusters.
-2. **Deploy Core Infrastructure:**
+1. **Provision Kubernetes Clusters:** Set up simple Kind-based local dev and Rancher's K3s QA
+   (production-like) local Kubernetes clusters.
+2. **Deploy Core Cluster and Insurance Hub Observability:**
+    * Deploy **Prometheus** and **Grafana** to provide base observability for the QA cluster and core
+      infrastructure.
+    * Deploy **Zipkin** to provide distributed tracing for the Insurance Hub services.
+3. **Deploy Core Infrastructure:**
     * Deploy **PostgreSQL**, **MongoDB**, **Elasticsearch**, and **Apache Kafka** to the Kubernetes cluster.
     * Deploy **MinIO** as the new S3-compatible object storage solution, which will replace the
       existing file system storage.
+4. **Deploy Auxiliary Services:**
+    * Deploy **JSReport** to provide PDF generation for the Insurance Hub services.
 3. **Targeted Code Modification (Java):**
     * Modify the existing Java services (e.g., `document-service`) that interact with the file
       system. Update them to use an S3-compatible SDK pointed at the new MinIO service endpoint.
 4. **Containerize and Deploy Java Services:**
-    * Create production-grade container images for all Java microservices.
+    * Validate existing container images for all Java microservices and if necessary, update them to
+      be more production-ready.
     * Deploy these services to Kubernetes.
-   * As per this [analysis](migration/component-replacement-reasoning/replace-consul.md), decommission Consul and switch to
+    * As per this [analysis](migration/component-replacement-reasoning/replace-consul.md), decommission Consul and switch to
      Kubernetes-native service discovery. This is primarily a configuration change in the Micronaut
      services to use Kubernetes' internal DNS for service-to-service communication.
 5. **Deploy Existing Gateway:** Deploy the current Java-based `agent-portal-gateway` to Kubernetes
@@ -607,24 +620,26 @@ This validates the new platform and de-risks subsequent, more complex changes.
 dependencies are containerized, and object storage is handled by MinIO. The system is functional,
 providing a stable baseline for the next phases.
 
-### Phase 2: Foundational Observability with Shared Trace Storage
+### Phase 2: Foundational Observability
 
 **Goal:** Centralize tracing data storage to enable a unified view via Grafana and prepare for a
 seamless transition to a modern observability stack, all **without modifying the existing Java
 services**.
 
-1. **Deploy Core Observability Stack:**
-    * Deploy **Grafana Tempo**, **Prometheus**, **Loki**, and **Grafana** within the Kubernetes cluster.
-2. **Configure Shared Trace Storage:**
-    * Configure the existing **Zipkin** server to write its trace data to a persistent file system
-      volume within the cluster.
-    * Configure the newly deployed **Grafana Tempo** to read traces from the same file system volume
-      that Zipkin writes to. The Java services continue to send traces to Zipkin as they do today.
+1. **Deploy Additional Observability Stack Components:**
+    * Deploy Grafana's **Tempo** and **Loki** within the QA Kubernetes cluster.
+2. **Configure Trace Flow Transition:**
+    * Deploy an OpenTelemetry Collector that receives Zipkin-format traces from the existing Java
+      services.
+    * Configure the Collector to export traces simultaneously to both Zipkin (for legacy visibility)
+      and Tempo (for unified, modern stack integration).
+    * Over time, phase out Zipkin once Tempo ingestion and visualization are validated.
 
 **Outcome:** Existing tracing infrastructure is preserved with **zero changes to Java application
-code**. The modern observability stack (Grafana, Loki, Prometheus, Tempo) is deployed and can
-visualize traces from the legacy services. This provides a unified view and prepares the environment
-for new Go services to integrate directly with Tempo.
+code** in the short term. The OpenTelemetry Collector provides a bridge for legacy Zipkin traces
+into Tempo, ensuring Grafana dashboards visualize both new and existing services. This setup enables
+a seamless, zero-code migration to Tempo and sets the foundation for Go services to emit native OTLP
+traces.
 
 ### Phase 3: Data Store Consolidation
 
@@ -727,22 +742,36 @@ identity management stack, aligned with cloud-native best practices.
 
 ### Phase 6: Finalization, Automation, and Optimization
 
-**Goal:** Fully decommission legacy components, solidify the new architecture, automate processes,
-and optimize for performance, security, and cost.
+**Goal:** Fully decommission legacy components, finalize the observability stack migration, and
+optimize the architecture for performance, security, and cost efficiency.
 
 1. **Finalize Observability Migration:**
-    * After all Java services have been migrated to Go and are sending traces directly to Tempo
-      (post-Phase 4), decommission the **Zipkin** server.
-    * Execute a one-time migration to move historical trace data from the file system to **MinIO**
-      for long-term storage.
-    * Reconfigure **Tempo** to use **MinIO** as its primary, scalable storage backend.
+    * Following the complete migration of all Java services to Go (post-Phase 4), and their direct
+      OpenTelemetry or OTLP trace emission to **Grafana Tempo**, **Zipkin** is fully decommissioned.
+    * The **OpenTelemetry Collector** configuration is simplified to route traces only to Tempo,
+      retiring the dual-export (Zipkin + Tempo) setup used during earlier phases.
+    * Historical Zipkin traces are archived to MinIO for long-term storage. Tempo already uses MinIO
+      as its primary scalable trace backend; retention and compaction settings are tuned for
+      cost-effective, long-term trace storage.
+    * Grafana dashboards and alerts are standardized on Tempo as the sole tracing datasource for
+      system-wide observability.
+    * This transition finalizes the move to an **OpenTelemetry-native, vendor-neutral observability** 
+      foundation across metrics (Prometheus), logs (Loki), and traces (Tempo).
+
 2. **Advanced Kubernetes Management:**
-    * Implement Horizontal Pod Autoscalers (HPA) to automatically scale services.
-    * Enforce Kubernetes Network Policies to create a zero-trust network environment.
-    * Fine-tune resource requests and limits for all services to maximize cluster efficiency and
-      stability.
+    * Implement **Horizontal Pod Autoscalers (HPA)** to automatically scale critical services based
+      on CPU, memory, and custom metrics exposed via Prometheus.
+    * Apply **Kubernetes Network Policies** to establish a zero-trust service mesh by restricting
+      east–west communication to approved namespaces and labels.
+    * Tune **resource requests and limits** through data gathered from observability metrics to
+      balance cost efficiency and performance under production loads.
+
 3. **Continuous Improvement:**
-    * Use the rich data from the observability stack to continuously identify performance
-      bottlenecks and optimize resource usage.
-    * Ensure all new architecture and processes are thoroughly documented.
-    * Archive or remove all repositories and artifacts from the old system.
+    * Use insights from the consolidated observability stack to identify latency bottlenecks,
+      optimize resource utilization, and enhance reliability.
+    * Conduct regular configuration reviews to ensure all services follow 12-factor app principles
+      and operate according to defined SLOs.
+    * Ensure comprehensive documentation of the final production architecture, monitoring
+      configuration, and operational runbooks.
+    * Archive or remove all deprecated configurations, images, and repositories associated with
+      Consul, Zipkin, and legacy Micronaut services.
