@@ -22,7 +22,7 @@
 - [Migration Strategy](#migration-strategy)
   - [Target State](#target-state-1)
   - [Phase 1: Foundational Infrastructure & Environment Migration (Lift and Shift)](#phase-1-foundational-infrastructure--environment-migration-lift-and-shift)
-  - [Phase 2: Foundational Observability with Shared Trace Storage](#phase-2-foundational-observability-with-shared-trace-storage)
+  - [Phase 2: Foundational Observability](#phase-2-foundational-observability)
   - [Phase 3: Data Store Consolidation](#phase-3-data-store-consolidation)
   - [Phase 4: Phased Service Migration to Go (Strangler Fig Pattern)](#phase-4-phased-service-migration-to-go-strangler-fig-pattern)
   - [Phase 5: Modernize Edge and Authentication](#phase-5-modernize-edge-and-authentication)
@@ -582,10 +582,10 @@ stable foundation for the next, minimizing risk throughout the process.
 **Goal:** Move the existing Java application to a Kubernetes environment with minimal code changes.
 This validates the new platform and de-risks subsequent, more complex changes.
 
-1. **Provision Kubernetes Clusters:** Set up simple local dev (Kind) and production-like (Rancher K3s) 
-   local Kubernetes clusters.
+1. **Provision Kubernetes Clusters:** Set up simple Kind-based local dev and Rancher's K3s QA
+   (production-like) local Kubernetes clusters.
 2. **Deploy Core Cluster and Insurance Hub Observability:**
-    * Deploy **Prometheus** and **Grafana** to provide base observability for the cluster and core
+    * Deploy **Prometheus** and **Grafana** to provide base observability for the QA cluster and core
       infrastructure.
     * Deploy **Zipkin** to provide distributed tracing for the Insurance Hub services.
 3. **Deploy Core Infrastructure:**
@@ -620,18 +620,20 @@ providing a stable baseline for the next phases.
 seamless transition to a modern observability stack, all **without modifying the existing Java
 services**.
 
-1. **Deploy Core Observability Stack:**
-    * Deploy **Grafana Tempo**, **Prometheus**, **Loki**, and **Grafana** within the Kubernetes cluster.
-2. **Configure Shared Trace Storage:**
-    * Configure the existing **Zipkin** server to write its trace data to a persistent file system
-      volume within the cluster.
-    * Configure the newly deployed **Grafana Tempo** to read traces from the same file system volume
-      that Zipkin writes to. The Java services continue to send traces to Zipkin as they do today.
+1. **Deploy Additional Observability Stack Components:**
+    * Deploy Grafana's **Tempo** and **Loki** within the QA Kubernetes cluster.
+2. **Configure Trace Flow Transition:**
+    * Deploy an OpenTelemetry Collector that receives Zipkin-format traces from the existing Java
+      services.
+    * Configure the Collector to export traces simultaneously to both Zipkin (for legacy visibility)
+      and Tempo (for unified, modern stack integration).
+    * Over time, phase out Zipkin once Tempo ingestion and visualization are validated.
 
 **Outcome:** Existing tracing infrastructure is preserved with **zero changes to Java application
-code**. The modern observability stack (Grafana, Loki, Prometheus, Tempo) is deployed and can
-visualize traces from the legacy services. This provides a unified view and prepares the environment
-for new Go services to integrate directly with Tempo.
+code** in the short term. The OpenTelemetry Collector provides a bridge for legacy Zipkin traces
+into Tempo, ensuring Grafana dashboards visualize both new and existing services. This setup enables
+a seamless, zero-code migration to Tempo and sets the foundation for Go services to emit native OTLP
+traces.
 
 ### Phase 3: Data Store Consolidation
 
