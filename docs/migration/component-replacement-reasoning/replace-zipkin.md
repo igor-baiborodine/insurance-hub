@@ -1,50 +1,57 @@
 ## Current State
 
-The Insurance Hub system currently relies on Zipkin for distributed tracing, providing basic request
-tracking across microservices with limited correlation capabilities and manual trace analysis
-requirements. The current implementation offers minimal context propagation between services,
-requires custom instrumentation code for each integration, and lacks standardized observability
-protocols. Trace data analysis is fragmented, with no unified correlation between traces, logs, and
-metrics, making comprehensive root cause analysis difficult during incidents. The Zipkin-based
-approach operates in isolation from other observability components, creating operational overhead
-and preventing holistic system visibility essential for managing complex distributed architectures.
+The Insurance Hub system currently relies on **Zipkin** for distributed tracing, providing basic
+request tracking across microservices but offering limited correlation with logs and metrics.
+Context propagation between services is inconsistent, requiring custom instrumentation per service.
+The tracing pipeline lacks standardization, leading to fragmented analysis and the limited ability to
+perform unified root cause investigations. The Zipkin-based approach operates in isolation from
+other observability components, increasing operational overhead and preventing holistic visibility
+across the distributed system.
 
-## Why OpenTelemetry + Tempo is the Right Choice
+## Why OpenTelemetry + Collector + Tempo is the Right Choice
 
-1. **Industry-Standard Observability Protocol**
+1. **Vendor-Neutral, Unified Telemetry Pipeline**
 
-- OpenTelemetry represents the vendor-agnostic observability framework adopted by major cloud
-  providers, eliminating vendor lock-in through consistent APIs and SDKs
-- Provides comprehensive Go instrumentation libraries with automatic context propagation across gRPC
-  and HTTP calls
-- Offers future-proof observability infrastructure that integrates with any compliant backend system
+- **OpenTelemetry** provides an open, vendor-neutral observability framework that standardizes
+  trace, metric, and log data collection across all services.
+- The **OpenTelemetry Collector** acts as a centralized telemetry gateway, capable of receiving data
+  in multiple protocols (Zipkin, Jaeger, OTLP, Prometheus), transforming it into a common
+  OpenTelemetry format, and exporting it to multiple backends such as **Grafana Tempo**.
+- This design enables consistent data ingestion while reducing the instrumentation complexity in
+  each application.
 
-2. **Unified Grafana Ecosystem Integration**
+2. **Seamless Integration with Grafana Ecosystem**
 
-- Seamlessly integrates with the target Grafana-based observability stack, enabling unified
-  correlation between traces, logs, and metrics
-- Creates a single observability data model within Grafana's interface, eliminating the operational
-  complexity of managing separate tools
-- OpenTelemetry SDK automatically correlates trace data with structured logs through shared
-  identifiers
+- Combined with **Grafana Tempo**, the Collector provides an end-to-end, cloud-native observability
+  stack that unifies traces, logs (via Loki), and metrics (via Prometheus).
+- Tempo’s integration with the Collector ensures all telemetry data flows through a single pipeline,
+  allowing for automatic contextual linking (trace IDs embedded in logs, metrics, and spans) for
+  cross-domain correlation in Grafana.
+- The Collector’s batching and retry mechanisms improve data reliability and throughput for
+  large-scale trace ingestion.
 
-3. **Cloud-Native Architecture and Performance**
+3. **Cloud-Native Architecture and Scalability**
 
-- Tempo's object storage backend (MinIO) aligns with the cloud-native storage strategy, providing
-  infinite scalability for trace data
-- Eliminates performance overhead of traditional database-backed tracing systems through efficient
-  sampling and batching
-- Operates as a stateless, Kubernetes-native service that scales horizontally with the microservices
-  architecture
+- Tempo leverages **MinIO** as its S3-compatible backend, offering horizontally scalable and
+  cost-effective object storage from the initial deployment onward—no reconfiguration required later
+  phases.
+- The Collector offloads telemetry processing (sampling, filtering, enrichment) from the
+  microservices, reducing performance impact and maintaining low latency under production load.
+- As part of the Kubernetes-native ecosystem, both Tempo and the Collector scale independently while
+  maintaining unified observability pipelines.
 
-4. **Comprehensive Context and Developer Experience**
+4. **Consistent Developer Experience and Automation**
 
-- Enables rich trace context including business metadata, custom tags, and detailed service
-  interaction mapping
-- Provides automatic instrumentation for database queries, external API calls, and inter-service
-  communication
-- Reduces instrumentation complexity through automatic discovery and minimal configuration overhead
+- OpenTelemetry SDKs in **Go** and **Java** offer automatic correlation across gRPC, HTTP, and
+  database operations—providing complete trace context with minimal configuration.
+- The Collector centralizes telemetry configurations, eliminating duplication across applications
+  and simplifying rollout in development, QA, and production.
+- With this model, new or migrated services can immediately send standardized telemetry data without
+  individual backend configuration, ensuring repeatable, automated observability rollout.
 
-This approach transforms distributed tracing from a basic, isolated monitoring tool into a
-comprehensive, integrated observability foundation that provides deep system visibility and supports
-the operational requirements of a cloud-native distributed architecture.
+By introducing the **OpenTelemetry Collector** as an intermediary between application
+instrumentation and **Grafana Tempo**, the Insurance Hub platform gains a declarative, extensible,
+and future-proof observability layer. It transforms tracing from a fragmented, Zipkin-based workflow
+into a cohesive, scalable telemetry architecture that equally supports traces, logs, and metrics
+within a unified pipeline. This configuration provides deep system visibility while simplifying
+operations, governance, and cross-team diagnostics.
