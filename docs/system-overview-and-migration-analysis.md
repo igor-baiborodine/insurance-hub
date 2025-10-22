@@ -736,22 +736,36 @@ identity management stack, aligned with cloud-native best practices.
 
 ### Phase 6: Finalization, Automation, and Optimization
 
-**Goal:** Fully decommission legacy components, solidify the new architecture, automate processes,
-and optimize for performance, security, and cost.
+**Goal:** Fully decommission legacy components, finalize the observability stack migration, and
+optimize the architecture for performance, security, and cost efficiency.
 
 1. **Finalize Observability Migration:**
-    * After all Java services have been migrated to Go and are sending traces directly to Tempo
-      (post-Phase 4), decommission the **Zipkin** server.
-    * Execute a one-time migration to move historical trace data from the file system to **MinIO**
-      for long-term storage.
-    * Reconfigure **Tempo** to use **MinIO** as its primary, scalable storage backend.
+    * Following the complete migration of all Java services to Go (post-Phase 4), and their direct
+      OpenTelemetry or OTLP trace emission to **Grafana Tempo**, **Zipkin** is fully decommissioned.
+    * The **OpenTelemetry Collector** configuration is simplified to route traces only to Tempo,
+      retiring the dual-export (Zipkin + Tempo) setup used during earlier phases.
+    * Historical Zipkin traces are archived to MinIO for long-term storage. Tempo already uses MinIO
+      as its primary scalable trace backend; retention and compaction settings are tuned for
+      cost-effective, long-term trace storage.
+    * Grafana dashboards and alerts are standardized on Tempo as the sole tracing datasource for
+      system-wide observability.
+    * This transition finalizes the move to an **OpenTelemetry-native, vendor-neutral observability** 
+      foundation across metrics (Prometheus), logs (Loki), and traces (Tempo).
+
 2. **Advanced Kubernetes Management:**
-    * Implement Horizontal Pod Autoscalers (HPA) to automatically scale services.
-    * Enforce Kubernetes Network Policies to create a zero-trust network environment.
-    * Fine-tune resource requests and limits for all services to maximize cluster efficiency and
-      stability.
+    * Implement **Horizontal Pod Autoscalers (HPA)** to automatically scale critical services based
+      on CPU, memory, and custom metrics exposed via Prometheus.
+    * Apply **Kubernetes Network Policies** to establish a zero-trust service mesh by restricting
+      east–west communication to approved namespaces and labels.
+    * Tune **resource requests and limits** through data gathered from observability metrics to
+      balance cost efficiency and performance under production loads.
+
 3. **Continuous Improvement:**
-    * Use the rich data from the observability stack to continuously identify performance
-      bottlenecks and optimize resource usage.
-    * Ensure all new architecture and processes are thoroughly documented.
-    * Archive or remove all repositories and artifacts from the old system.
+    * Use insights from the consolidated observability stack to identify latency bottlenecks,
+      optimize resource utilization, and enhance reliability.
+    * Conduct regular configuration reviews to ensure all services follow 12-factor app principles
+      and operate according to defined SLOs.
+    * Ensure comprehensive documentation of the final production architecture, monitoring
+      configuration, and operational runbooks.
+    * Archive or remove all deprecated configurations, images, and repositories associated with
+      Consul, Zipkin, and legacy Micronaut services.
