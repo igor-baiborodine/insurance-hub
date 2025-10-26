@@ -24,8 +24,8 @@ insurance-hub/
     │   │   ├── elasticsearch/
     │   │   └── minio/
     │   └── svc/
-    │       ├── auth-service/
-    │       ├── policy-service/
+    │       ├── auth/
+    │       ├── policy/
     │       └── ...
     ├── env/
     │   ├── local-dev/
@@ -51,14 +51,16 @@ insurance-hub/
 | Component             | Namespace     | 
 |-----------------------|---------------|
 | Java/Go microservices | qa-apps       |
+| JSReport              | qa-apps       |
 | PostgreSQL            | qa-data       |
 | MongoDB               | qa-data       |
 | Elasticsearch         | qa-data       |
-| Kafka (and Zookeeper) | qa-data       |
+| Kafka                 | qa-data       |
 | MinIO                 | qa-data       |
 | TarantoolDB           | qa-data       |
 | KeyCloak              | qa-auth       |
 | Envoy Proxy           | qa-networking |
+| Zipkin                | qa-monitoring |
 | Prometheus            | qa-monitoring |
 | Grafana               | qa-monitoring |
 | Loki                  | qa-monitoring |
