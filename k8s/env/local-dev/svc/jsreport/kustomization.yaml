@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: local-dev-all
+namePrefix: local-dev-
+resources:
+  - ../../../../apps/svc/jsreport/base
+patches:
+  - path: pvc-patch.yaml
+    target:
+      kind: PersistentVolumeClaim
+      name: jsreport-cache-pvc

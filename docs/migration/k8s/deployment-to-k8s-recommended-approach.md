@@ -50,8 +50,8 @@ insurance-hub/
 
 | Component             | Namespace     | 
 |-----------------------|---------------|
-| Java/Go microservices | qa-apps       |
-| JSReport              | qa-apps       |
+| Java/Go microservices | qa-svc        |
+| JSReport              | qa-svc        |
 | PostgreSQL            | qa-data       |
 | MongoDB               | qa-data       |
 | Elasticsearch         | qa-data       |

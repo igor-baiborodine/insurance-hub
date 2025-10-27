@@ -260,6 +260,12 @@ eck-operator-deploy: _env-check ## Install Elastic Cloud on Kubernetes (ECK) Ope
 	@kubectl create -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml || true
 	@kubectl apply --server-side -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml
 
+.PHONY: eck-operator-delete
+eck-operator-delete: _env-check ## Uninstall Elastic Cloud on Kubernetes (ECK) Operator
+	@echo "Uninstalling ECK operator v$(ECK_OPERATOR_VERSION) from 'elastic-system' namespace..."
+	@kubectl delete -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml --ignore-not-found
+	@kubectl delete -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml --ignore-not-found
+
 .PHONY: elasticsearch-deploy
 elasticsearch-deploy: _env-check ## Deploy Elasticsearch cluster
 	@echo "Deploying Elasticsearch cluster into '$(DATA_NS)' namespace...";
@@ -566,3 +572,37 @@ mongodb-purge: mongodb-delete ## Delete MongoDB cluster and permanently remove r
 	@echo "Deleting MongoDB-related secrets and PVCs in namespace $(DATA_NS)..."
 	@kubectl delete secret -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
 	@kubectl delete pvc -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
+
+################################################################################
+# JSReport Deployment Targets
+# Targets for deploying and managing JSReport in local dev and QA cluster
+# Namespace and environment auto-detected from current kubectl context
+################################################################################
+
+.PHONY: jsreport-deploy
+jsreport-deploy: _env-check ## Deploy JSReport instance
+	@kubectl get namespace "$(SVC_NS)" >/dev/null 2>&1 || kubectl create namespace "$(SVC_NS)"
+	@echo "Deploying JSReport into '$(SVC_NS)' namespace..."
+	@kubectl kustomize "$(VALUES_FILE_PREFIX)/svc/jsreport" | kubectl apply --server-side -f -
+	@echo "✅ JSReport deployment initiated. Check status with: make jsreport-status"
+
+
+.PHONY: jsreport-status
+jsreport-status: _env-check ## Show JSReport status (pod, service, PVC only)
+	@echo "Status for JSReport in namespace: $(SVC_NS)"
+	@echo "\nJSReport Pod:"
+	@kubectl get pod -n "$(SVC_NS)" -l app=jsreport || true
+	@echo "\nJSReport Service:"
+	@kubectl get svc "$(ENV_NAME)"-jsreport -n "$(SVC_NS)" || true
+	@echo "\nJSReport PVC:"
+	@kubectl get pvc "$(ENV_NAME)"-jsreport-cache-pvc -n "$(SVC_NS)" || true
+
+.PHONY: jsreport-delete
+jsreport-delete: _env-check ## Delete JSReport deployment
+	@echo "Deleting JSReport resources from namespace $(SVC_NS)..."
+	@kubectl delete -k "$(VALUES_FILE_PREFIX)/svc/jsreport" -n "$(SVC_NS)" --ignore-not-found || true
+
+.PHONY: jsreport-purge
+jsreport-purge: jsreport-delete _env-check ## Purge JSReport PVC
+	@echo "Deleting JSReport-related PVC in namespace $(SVC_NS)..."
+	@kubectl delete pvc "$(ENV_NAME)"-jsreport-cache-pvc -n "$(SVC_NS)" --ignore-not-found || true
