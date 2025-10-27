@@ -582,10 +582,9 @@ mongodb-purge: mongodb-delete ## Delete MongoDB cluster and permanently remove r
 .PHONY: jsreport-deploy
 jsreport-deploy: _env-check ## Deploy JSReport instance
 	@kubectl get namespace "$(SVC_NS)" >/dev/null 2>&1 || kubectl create namespace "$(SVC_NS)"
-	@echo "Deploying JSReport into '$(SVC_NS)' namespace..."
+	@echo "Deploying JSReport cluster into '$(SVC_NS)' namespace..."
 	@kubectl kustomize "$(VALUES_FILE_PREFIX)/svc/jsreport" | kubectl apply --server-side -f -
 	@echo "✅ JSReport deployment initiated. Check status with: make jsreport-status"
-
 
 .PHONY: jsreport-status
 jsreport-status: _env-check ## Show JSReport status (pod, service, PVC only)
@@ -601,8 +600,11 @@ jsreport-status: _env-check ## Show JSReport status (pod, service, PVC only)
 jsreport-delete: _env-check ## Delete JSReport deployment
 	@echo "Deleting JSReport resources from namespace $(SVC_NS)..."
 	@kubectl delete -k "$(VALUES_FILE_PREFIX)/svc/jsreport" -n "$(SVC_NS)" --ignore-not-found || true
+	@echo "⏳ Waiting 5s for JSReport resources to be cleaned up..."
+	@sleep 5
 
 .PHONY: jsreport-purge
 jsreport-purge: jsreport-delete _env-check ## Purge JSReport PVC
 	@echo "Deleting JSReport-related PVC in namespace $(SVC_NS)..."
 	@kubectl delete pvc "$(ENV_NAME)"-jsreport-cache-pvc -n "$(SVC_NS)" --ignore-not-found || true
+	@echo "🗑 JSReport cluster and persistent data removed."
