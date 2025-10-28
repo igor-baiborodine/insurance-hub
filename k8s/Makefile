@@ -195,13 +195,13 @@ prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana,
 prometheus-ui: ## Access Prometheus UI via port-forward
 	@echo "Forwarding Prometheus UI to http://localhost:9090"
 	@echo "Press Ctrl+C to stop."
-	@kubectl port-forward svc/qa-prometheus-kube-prometh-prometheus 9090:9090 --namespace qa-monitoring
+	@kubectl port-forward svc/qa-prometheus-kube-prometh-prometheus 9090:9090 -n qa-monitoring
 
 .PHONY: grafana-ui
 grafana-ui: ## Access Grafana UI via port-forward
 	@echo "Forwarding Grafana UI to http://localhost:3000"
 	@echo "Login with admin/adminpwd. Press Ctrl+C to stop."
-	@kubectl port-forward svc/qa-prometheus-grafana 3000:80 --namespace qa-monitoring
+	@kubectl port-forward svc/qa-prometheus-grafana 3000:80 -n qa-monitoring
 
 ################################################################################
 # PostgreSQL Deployment Targets
@@ -330,7 +330,7 @@ kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka Operator int
 
 kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator from kafka-system namespace
 	@echo "Uninstalling Strimzi Kafka Operator from 'kafka-system' namespace..."
-	@helm uninstall strimzi-operator --namespace kafka-system || true
+	@helm uninstall strimzi-operator -n kafka-system || true
 	@kubectl delete namespace kafka-system || true
 	@echo "🗑 Strimzi Kafka Operator uninstalled and namespace 'kafka-system' deleted."
 
@@ -607,4 +607,10 @@ jsreport-delete: _env-check ## Delete JSReport deployment
 jsreport-purge: jsreport-delete _env-check ## Purge JSReport PVC
 	@echo "Deleting JSReport-related PVC in namespace $(SVC_NS)..."
 	@kubectl delete pvc "$(ENV_NAME)"-jsreport-cache-pvc -n "$(SVC_NS)" --ignore-not-found || true
-	@echo "🗑 JSReport cluster and persistent data removed."
+	@echo "🗑 JSReport cluster and its persistent data removed."
+
+.PHONY: jsreport-ui
+jsreport-ui: _env-check ## Access Grafana UI via port-forward
+	@echo "Forwarding JSReport UI to http://localhost:5488"
+	@echo "Press Ctrl+C to stop."
+	@kubectl port-forward svc/"$(ENV_NAME)"-jsreport 5488:5488 -n $(SVC_NS)
