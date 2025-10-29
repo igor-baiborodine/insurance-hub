@@ -121,6 +121,17 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   following [JSON](https://github.com/strimzi/strimzi-kafka-operator/blob/0.48.0/examples/metrics/grafana-dashboards/strimzi-kafka.json) file
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
 
+5. **JSReport**
+
+- `make jsreport-deploy`
+- `kubectl get pods -n local-dev-all | grep jsreport`
+    ```shell
+    local-dev-jsreport-5548585d57-q5sdc   1/1     Running   0          47s
+    ```
+- `make jsreport-status`
+- `make jsreport-ui` and go to `http://localhost:5488`
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=jsreport-deploy-<iso-date>``
+
 ## QA—Cluster Load Monitoring
 
 1. **Prometheus**

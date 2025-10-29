@@ -195,13 +195,13 @@ prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana,
 prometheus-ui: ## Access Prometheus UI via port-forward
 	@echo "Forwarding Prometheus UI to http://localhost:9090"
 	@echo "Press Ctrl+C to stop."
-	@kubectl port-forward svc/qa-prometheus-kube-prometh-prometheus 9090:9090 --namespace qa-monitoring
+	@kubectl port-forward svc/qa-prometheus-kube-prometh-prometheus 9090:9090 -n qa-monitoring
 
 .PHONY: grafana-ui
 grafana-ui: ## Access Grafana UI via port-forward
 	@echo "Forwarding Grafana UI to http://localhost:3000"
 	@echo "Login with admin/adminpwd. Press Ctrl+C to stop."
-	@kubectl port-forward svc/qa-prometheus-grafana 3000:80 --namespace qa-monitoring
+	@kubectl port-forward svc/qa-prometheus-grafana 3000:80 -n qa-monitoring
 
 ################################################################################
 # PostgreSQL Deployment Targets
@@ -259,6 +259,12 @@ eck-operator-deploy: _env-check ## Install Elastic Cloud on Kubernetes (ECK) Ope
 	@echo "Installing ECK operator v$(ECK_OPERATOR_VERSION) into 'elastic-system' namespace..."
 	@kubectl create -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml || true
 	@kubectl apply --server-side -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml
+
+.PHONY: eck-operator-delete
+eck-operator-delete: _env-check ## Uninstall Elastic Cloud on Kubernetes (ECK) Operator
+	@echo "Uninstalling ECK operator v$(ECK_OPERATOR_VERSION) from 'elastic-system' namespace..."
+	@kubectl delete -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml --ignore-not-found
+	@kubectl delete -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml --ignore-not-found
 
 .PHONY: elasticsearch-deploy
 elasticsearch-deploy: _env-check ## Deploy Elasticsearch cluster
@@ -324,7 +330,7 @@ kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka Operator int
 
 kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator from kafka-system namespace
 	@echo "Uninstalling Strimzi Kafka Operator from 'kafka-system' namespace..."
-	@helm uninstall strimzi-operator --namespace kafka-system || true
+	@helm uninstall strimzi-operator -n kafka-system || true
 	@kubectl delete namespace kafka-system || true
 	@echo "🗑 Strimzi Kafka Operator uninstalled and namespace 'kafka-system' deleted."
 
@@ -566,3 +572,45 @@ mongodb-purge: mongodb-delete ## Delete MongoDB cluster and permanently remove r
 	@echo "Deleting MongoDB-related secrets and PVCs in namespace $(DATA_NS)..."
 	@kubectl delete secret -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
 	@kubectl delete pvc -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
+
+################################################################################
+# JSReport Deployment Targets
+# Targets for deploying and managing JSReport in local dev and QA cluster
+# Namespace and environment auto-detected from current kubectl context
+################################################################################
+
+.PHONY: jsreport-deploy
+jsreport-deploy: _env-check ## Deploy JSReport instance
+	@kubectl get namespace "$(SVC_NS)" >/dev/null 2>&1 || kubectl create namespace "$(SVC_NS)"
+	@echo "Deploying JSReport cluster into '$(SVC_NS)' namespace..."
+	@kubectl kustomize "$(VALUES_FILE_PREFIX)/svc/jsreport" | kubectl apply --server-side -f -
+	@echo "✅ JSReport deployment initiated. Check status with: make jsreport-status"
+
+.PHONY: jsreport-status
+jsreport-status: _env-check ## Show JSReport status (pod, service, PVC only)
+	@echo "Status for JSReport in namespace: $(SVC_NS)"
+	@echo "\nJSReport Pod:"
+	@kubectl get pod -n "$(SVC_NS)" -l app=jsreport || true
+	@echo "\nJSReport Service:"
+	@kubectl get svc "$(ENV_NAME)"-jsreport -n "$(SVC_NS)" || true
+	@echo "\nJSReport PVC:"
+	@kubectl get pvc "$(ENV_NAME)"-jsreport-cache-pvc -n "$(SVC_NS)" || true
+
+.PHONY: jsreport-delete
+jsreport-delete: _env-check ## Delete JSReport deployment
+	@echo "Deleting JSReport resources from namespace $(SVC_NS)..."
+	@kubectl delete -k "$(VALUES_FILE_PREFIX)/svc/jsreport" -n "$(SVC_NS)" --ignore-not-found || true
+	@echo "⏳ Waiting 5s for JSReport resources to be cleaned up..."
+	@sleep 5
+
+.PHONY: jsreport-purge
+jsreport-purge: jsreport-delete _env-check ## Purge JSReport PVC
+	@echo "Deleting JSReport-related PVC in namespace $(SVC_NS)..."
+	@kubectl delete pvc "$(ENV_NAME)"-jsreport-cache-pvc -n "$(SVC_NS)" --ignore-not-found || true
+	@echo "🗑 JSReport cluster and its persistent data removed."
+
+.PHONY: jsreport-ui
+jsreport-ui: _env-check ## Access Grafana UI via port-forward
+	@echo "Forwarding JSReport UI to http://localhost:5488"
+	@echo "Press Ctrl+C to stop."
+	@kubectl port-forward svc/"$(ENV_NAME)"-jsreport 5488:5488 -n $(SVC_NS)
