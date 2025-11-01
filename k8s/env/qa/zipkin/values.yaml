@@ -1,6 +1,7 @@
 replicaCount: 1
 image:
   repository: openzipkin/zipkin
+  tag: 3.5.1
   pullPolicy: IfNotPresent
 zipkin:
   storage:

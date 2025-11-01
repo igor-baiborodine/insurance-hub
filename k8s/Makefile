@@ -187,14 +187,14 @@ prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack 
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
 	@echo "Installing Kube Prometheus Stack using Helm chart v$(KUBE_PROMETHEUS_STACK_VERSION)..."
-	@helm upgrade --install qa-prometheus prometheus-community/kube-prometheus-stack \
+	@helm upgrade --install "$(ENV_NAME)"-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
 		--namespace $(MONITORING_NS) \
 		--values "$(VALUES_FILE_PREFIX)"/prometheus-values.yaml \
 		--wait \
 		--timeout 15m
 	@echo "✅ Kube Prometheus Stack installed into '$(MONITORING_NS)' namespace. Verifying pods..."
-	@kubectl get pods -n qa-monitoring -l app.kubernetes.io/instance=qa-prometheus
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/instance="$(ENV_NAME)"-prometheus
 
 .PHONY: prometheus-ui
 prometheus-ui: ## Access Prometheus UI via port-forward
@@ -626,7 +626,7 @@ jsreport-ui: _env-check ## Access Grafana UI via port-forward
 # Namespace is auto-detected from the current kubectl context
 ################################################################################
 
-ZIPKIN_VERSION := zipkin-0.4.0
+ZIPKIN_VERSION := 0.4.0
 ZIPKIN_ES_ROLE := zipkin_role
 ZIPKIN_ES_USER := zipkin_user
 ZIPKIN_ES_USER_PWD ?= zipkinEsUserPwd
@@ -669,13 +669,14 @@ zipkin-es-user-create: _env-check _monitoring-ns-check ## Create role and user f
 	echo "Elasticsearch Zipkin role and user creation completed."
 
 .PHONY: zipkin-install
-zipkin-uninstall: _env-check _monitoring-ns-check ## Deploy Zipkin in QA cluster
-	@echo "Installing Zipkin cluster using Helm chart v$(ZIPKIN_VERSION)..."
+zipkin-install: _env-check _monitoring-ns-check ## Deploy Zipkin in QA cluster
+	@echo "Installing Zipkin cluster using Helm chart '$(ZIPKIN_VERSION)'..."
 	@helm repo add zipkin https://zipkin.io/zipkin-helm
 	@helm repo update
-	@helm upgrade --install zipkin openzipkin/zipkin \
+	@helm upgrade --install $(ENV_NAME)-zipkin zipkin/zipkin \
 		--version $(ZIPKIN_VERSION) \
 		--values "$(VALUES_FILE_PREFIX)"/zipkin/values.yaml \
 		--namespace $(MONITORING_NS) \
 		--wait
 	@echo "✅ Zipkin installed successfully in namespace $(MONITORING_NS). Verifying pods..."
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=$(ENV_NAME)-zipkin
