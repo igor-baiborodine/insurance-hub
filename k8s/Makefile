@@ -635,10 +635,10 @@ ZIPKIN_ES_USER_PWD ?= zipkinEsUserPwd
 zipkin-es-user-secret-create: _env-check _monitoring-ns-check ## Create/update secret for Elasticsearch's Zipkin user. Usage: make zipkin-es-user-secret-create ZIPKIN_ES_USER_PWD=<user-pwd>
 	@echo "Creating secret with user creds for Zipkin user in Elasticsearch..."
 	@kubectl create secret generic "$(ENV_NAME)"-zipkin-es-user-creds \
-	    --namespace "$(MONITORING_NS)" \
-	    --type Opaque \
-   	    --from-literal=username="$(ZIPKIN_ES_USER)" \
-	    --from-literal=password="$(ZIPKIN_ES_USER_PWD)" \
+		--namespace "$(MONITORING_NS)" \
+		--type Opaque \
+		--from-literal=ES_USERNAME="$(ZIPKIN_ES_USER)" \
+		--from-literal=ES_PASSWORD="$(ZIPKIN_ES_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@echo "Secret '"$(ENV_NAME)"-zipkin-es-user-creds' successfully created/updated in namespace $(MONITORING_NS)"
 
