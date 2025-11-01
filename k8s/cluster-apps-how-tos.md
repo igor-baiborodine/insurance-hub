@@ -171,3 +171,12 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
     kubectl top nodes
     kubectl top pod --all-namespaces  
     ```
+
+- get all users
+curl -u elastic:eu3yS3SA54m4WL308AT5fE3k -X GET "https://localhost:9200/_security/user" -k | jq 'keys'
+curl -u elastic:eu3yS3SA54m4WL308AT5fE3k -X GET "https://localhost:9200/_security/user/zipkinEsUser" -k | jq .
+
+- get all roles
+curl -u elastic:eu3yS3SA54m4WL308AT5fE3k -X GET "https://localhost:9200/_security/role" -k | jq 'keys'
+- get zipkin_role
+curl -u elastic:eu3yS3SA54m4WL308AT5fE3k -X GET "https://localhost:9200/_security/role/zipkin_role" -k

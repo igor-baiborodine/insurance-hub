@@ -627,11 +627,12 @@ jsreport-ui: _env-check ## Access Grafana UI via port-forward
 ################################################################################
 
 ZIPKIN_VERSION := zipkin-0.4.0
-ZIPKIN_ES_USER ?= zipkinEsUser
+ZIPKIN_ES_ROLE := zipkin_role
+ZIPKIN_ES_USER := zipkin_user
 ZIPKIN_ES_USER_PWD ?= zipkinEsUserPwd
 
 .PHONY: zipkin-es-user-secret-create
-zipkin-es-user-secret-create: _env-check _monitoring-ns-check ## Create/update secret for Elasticsearch's Zipkin user. Usage: make zipkin-es-user-secret-create ZIPKIN_ES_USER=<user> ZIPKIN_ES_USER_PWD=<user-pwd>
+zipkin-es-user-secret-create: _env-check _monitoring-ns-check ## Create/update secret for Elasticsearch's Zipkin user. Usage: make zipkin-es-user-secret-create ZIPKIN_ES_USER_PWD=<user-pwd>
 	@echo "Creating secret with user creds for Zipkin user in Elasticsearch..."
 	@kubectl create secret generic "$(ENV_NAME)"-zipkin-es-user-creds \
 	    --namespace "$(MONITORING_NS)" \
@@ -646,22 +647,25 @@ zipkin-es-user-create: _env-check _monitoring-ns-check ## Create role and user f
 	@echo "Creating Elasticsearch role and user for Zipkin in QA cluster..."
 	@# Retrieve credentials from secrets
 	@ELASTIC_USER_PWD=$$(kubectl get secret "$(ENV_NAME)"-elasticsearch-es-elastic-user -n $(DATA_NS) -o go-template='{{index .data "elastic"}}' | base64 -d); \
-	ZIPKIN_ES_USER=$$(kubectl get secret "$(ENV_NAME)"-zipkin-es-user-creds -n $(MONITORING_NS) -o go-template='{{index .data "username"}}' | base64 -d); \
 	ZIPKIN_ES_USER_PWD=$$(kubectl get secret "$(ENV_NAME)"-zipkin-es-user-creds -n $(MONITORING_NS) -o go-template='{{index .data "password"}}' | base64 -d); \
 	ES_URL="https://$(ENV_NAME)-elasticsearch-es-http.$(DATA_NS).svc.cluster.local:9200"; \
 	\
 	echo "Creating Elasticsearch Zipkin role via test pod..."; \
 	kubectl run zipkin-es-setup --image=curlimages/curl:latest --rm -i --tty -n $(DATA_NS) --restart=Never -- \
-	  curl -u "elastic:$$ELASTIC_USER_PWD" -k -X PUT "$$ES_URL/_security/role/zipkin_role" \
-	  -H 'Content-Type: application/json' \
-	  -d '{"cluster":[],"indices":[{"names":["zipkin*"],"privileges":["create_index","write","read","manage_index_templates"]}]}'; \
+	  sh -c 'curl -u "elastic:$$ELASTIC_USER_PWD" -k -X POST "$$ES_URL/_security/role/$(ZIPKIN_ES_ROLE)" \
+	  -H "Content-Type: application/json" \
+	  -d "{\"cluster\": [\"manage_index_templates\"],\"indices\":[{\"names\":[\"zipkin*\"],\"privileges\":[\"create_index\",\"write\",\"read\",\"manage\"]}]}"; \
+	  sleep 1; \
+	  curl -u "elastic:$$ELASTIC_USER_PWD" -k -X GET "$$ES_URL/_security/role/$(ZIPKIN_ES_ROLE)"'; \
 	echo ""; \
 	\
 	echo "Creating Elasticsearch Zipkin user via test pod..."; \
 	kubectl run zipkin-es-setup --image=curlimages/curl:latest --rm -i --tty -n $(DATA_NS) --restart=Never -- \
-	  sh -c "curl -u 'elastic:$$ELASTIC_USER_PWD' -k -X POST '$$ES_URL/_security/user/$$ZIPKIN_ES_USER' \
-	  -H 'Content-Type: application/json' \
-	  -d '{\"password\":\"$$ZIPKIN_ES_USER_PWD\",\"roles\":[\"zipkin_role\"],\"full_name\":\"Zipkin Service Account\",\"email\":\"zipkin@insurance-hub.com\"}'"; \
+      sh -c 'curl -u "elastic:$$ELASTIC_USER_PWD" -k -X POST "$$ES_URL/_security/user/$(ZIPKIN_ES_USER)" \
+      -H "Content-Type: application/json" \
+      -d "{\"password\":\"$$ZIPKIN_ES_USER_PWD\",\"roles\":[\"$(ZIPKIN_ES_ROLE)\"],\"full_name\":\"Zipkin Service Account\",\"email\":\"zipkin@insurance-hub.com\"}"; \
+      sleep 1; \
+      curl -u "elastic:$$ELASTIC_USER_PWD" -k -X GET "$$ES_URL/_security/user/$(ZIPKIN_ES_USER)"'; \
 	echo ""; \
 	\
 	echo "Elasticsearch Zipkin role and user creation completed."
