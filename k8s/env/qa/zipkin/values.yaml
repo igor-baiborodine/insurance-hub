@@ -18,11 +18,11 @@ service:
   port: 9411
 resources:
   requests:
-    cpu: 500m
-    memory: 1Gi
+    memory: "256Mi"
+    cpu: "250m"
   limits:
-    cpu: 1000m
-    memory: 2Gi
+    memory: "512Mi"
+    cpu: "500m"
 # PVC Persistence disabled because storage is Elasticsearch
 persistence:
   enabled: false
