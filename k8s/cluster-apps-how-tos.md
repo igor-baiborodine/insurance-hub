@@ -180,3 +180,6 @@ curl -u elastic:eu3yS3SA54m4WL308AT5fE3k -X GET "https://localhost:9200/_securit
 curl -u elastic:eu3yS3SA54m4WL308AT5fE3k -X GET "https://localhost:9200/_security/role" -k | jq 'keys'
 - get zipkin_role
 curl -u elastic:eu3yS3SA54m4WL308AT5fE3k -X GET "https://localhost:9200/_security/role/zipkin_role" -k
+
+curl -u elastic:eu3yS3SA54m4WL308AT5fE3k -X DELETE "https://localhost:9200/_security/role/zipkin_role" -k
+curl -u elastic:eu3yS3SA54m4WL308AT5fE3k -X DELETE "https://localhost:9200/_security/user/zipkin_user" -k

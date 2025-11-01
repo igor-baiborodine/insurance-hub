@@ -652,20 +652,18 @@ zipkin-es-user-create: _env-check _monitoring-ns-check ## Create role and user f
 	\
 	echo "Creating Elasticsearch Zipkin role via test pod..."; \
 	kubectl run zipkin-es-setup --image=curlimages/curl:latest --rm -i --tty -n $(DATA_NS) --restart=Never -- \
-	  sh -c 'curl -u "elastic:$$ELASTIC_USER_PWD" -k -X POST "$$ES_URL/_security/role/$(ZIPKIN_ES_ROLE)" \
-	  -H "Content-Type: application/json" \
-	  -d "{\"cluster\": [\"manage_index_templates\"],\"indices\":[{\"names\":[\"zipkin*\"],\"privileges\":[\"create_index\",\"write\",\"read\",\"manage\"]}]}"; \
-	  sleep 1; \
-	  curl -u "elastic:$$ELASTIC_USER_PWD" -k -X GET "$$ES_URL/_security/role/$(ZIPKIN_ES_ROLE)"'; \
+	  sh -c "curl -u 'elastic:$$ELASTIC_USER_PWD' -k -X POST '$$ES_URL/_security/role/$(ZIPKIN_ES_ROLE)' \
+	  -H 'Content-Type: application/json' \
+	  -d '{\"cluster\": [\"manage_index_templates\"],\"indices\":[{\"names\":[\"zipkin*\"],\"privileges\":[\"create_index\",\"write\",\"read\",\"manage\"]}]}'&& \
+	  curl -u 'elastic:$$ELASTIC_USER_PWD' -k -X GET '$$ES_URL/_security/role/$(ZIPKIN_ES_ROLE)'"; \
 	echo ""; \
 	\
 	echo "Creating Elasticsearch Zipkin user via test pod..."; \
 	kubectl run zipkin-es-setup --image=curlimages/curl:latest --rm -i --tty -n $(DATA_NS) --restart=Never -- \
-      sh -c 'curl -u "elastic:$$ELASTIC_USER_PWD" -k -X POST "$$ES_URL/_security/user/$(ZIPKIN_ES_USER)" \
-      -H "Content-Type: application/json" \
-      -d "{\"password\":\"$$ZIPKIN_ES_USER_PWD\",\"roles\":[\"$(ZIPKIN_ES_ROLE)\"],\"full_name\":\"Zipkin Service Account\",\"email\":\"zipkin@insurance-hub.com\"}"; \
-      sleep 1; \
-      curl -u "elastic:$$ELASTIC_USER_PWD" -k -X GET "$$ES_URL/_security/user/$(ZIPKIN_ES_USER)"'; \
+	  sh -c "curl -u 'elastic:$$ELASTIC_USER_PWD' -k -X POST '$$ES_URL/_security/user/$(ZIPKIN_ES_USER)' \
+	  -H 'Content-Type: application/json' \
+	  -d '{\"password\":\"$$ZIPKIN_ES_USER_PWD\",\"roles\":[\"$(ZIPKIN_ES_ROLE)\"],\"full_name\":\"Zipkin Service Account\",\"email\":\"zipkin@insurance-hub.com\"}'&& \
+	  curl -u 'elastic:$$ELASTIC_USER_PWD' -k -X GET '$$ES_URL/_security/user/$(ZIPKIN_ES_USER)'"; \
 	echo ""; \
 	\
 	echo "Elasticsearch Zipkin role and user creation completed."
