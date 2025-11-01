@@ -334,7 +334,7 @@ kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka Operator int
 	@kubectl get pods -n kafka-system --selector=name=strimzi-cluster-operator
 
 kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator from kafka-system namespace
-	@echo "Uninstalling Strimzi Kafka Operator from 'kafka-system' namespace..."
+	@echo "Uninstalling Strimzi Kafka Operator..."
 	@helm uninstall strimzi-operator -n kafka-system || true
 	@kubectl delete namespace kafka-system || true
 	@echo "🗑 Strimzi Kafka Operator uninstalled and namespace 'kafka-system' deleted."
@@ -678,5 +678,11 @@ zipkin-install: _env-check _monitoring-ns-check ## Deploy Zipkin in QA cluster
 		--values "$(VALUES_FILE_PREFIX)"/zipkin/values.yaml \
 		--namespace $(MONITORING_NS) \
 		--wait
-	@echo "✅ Zipkin installed successfully in namespace $(MONITORING_NS). Verifying pods..."
+	@echo "✅ Zipkin installed successfully in namespace '$(MONITORING_NS)'. Verifying pods..."
 	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=$(ENV_NAME)-zipkin
+
+.PHONY: zipkin-uninstall
+zipkin-uninstall: _env-check _monitoring-ns-check ## Uninstall Zipkin from QA cluster
+	@echo "Uninstalling Zipkin..."
+	@helm uninstall $(ENV_NAME)-zipkin -n $(MONITORING_NS) || true
+	@echo "🗑 Zipkin uninstalled from namespace '$(MONITORING_NS)'."
