@@ -133,7 +133,7 @@ else
 		DATA_NS := $(LOCAL_DEV_NS)
 		AUTH_NS := $(LOCAL_DEV_NS)
 		NETWORKING_NS := $(LOCAL_DEV_NS)
-		MONITORING_NS := $(LOCAL_DEV_NS)
+		MONITORING_NS := INVALID
     else
         ENV_NAME := INVALID
     endif
@@ -156,8 +156,19 @@ _data-ns-check: ## Ensure data namespace exists and set it as the current contex
 	@kubectl create namespace "$(DATA_NS)" --dry-run=client -o yaml | kubectl apply -f -
 	@kubectl config set-context --current --namespace="$(DATA_NS)"
 
+.PHONY: _monitoring-ns-check
+_monitoring-ns-check: ## Ensure monitoring namespace exists and set it as the current context
+	@CUR_CTX=$$(kubectl config current-context); \
+	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
+		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
+		exit 1; \
+	fi
+	@echo "Ensuring namespace $(MONITORING_NS) exists and is set as current..."
+	@kubectl get namespace "$(MONITORING_NS)" >/dev/null 2>&1 || kubectl create namespace "$(MONITORING_NS)"
+	@kubectl config set-context --current --namespace="$(MONITORING_NS)"
+
 .PHONY: _svc-name-check
-_svc-name-check: ## Ensure that the SVC_NAME argument is provided 
+_svc-name-check: ## Ensure that the SVC_NAME argument is provided
 	@if [ -z "$$SVC_NAME" ]; then \
 		echo "Argument 'SVC_NAME' is required!"; \
 		exit 1; \
@@ -172,19 +183,13 @@ _svc-name-check: ## Ensure that the SVC_NAME argument is provided
 KUBE_PROMETHEUS_STACK_VERSION := 77.10.0
 
 .PHONY: prometheus-stack-install
-prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
-	@CUR_CTX=$$(kubectl config current-context); \
-	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
-		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
-		exit 1; \
-	fi
-	@kubectl get namespace qa-monitoring >/dev/null 2>&1 || kubectl create namespace qa-monitoring
+prometheus-stack-install: _qa-monitoring-ns-check ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
 	@echo "Installing Kube Prometheus Stack v$(KUBE_PROMETHEUS_STACK_VERSION)..."
 	@helm upgrade --install qa-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
-		--namespace qa-monitoring \
+		--namespace $(MONITORING_NS) \
 		--values "$(VALUES_FILE_PREFIX)"/prometheus-values.yaml \
 		--wait \
 		--timeout 15m
@@ -614,3 +619,56 @@ jsreport-ui: _env-check ## Access Grafana UI via port-forward
 	@echo "Forwarding JSReport UI to http://localhost:5488"
 	@echo "Press Ctrl+C to stop."
 	@kubectl port-forward svc/"$(ENV_NAME)"-jsreport 5488:5488 -n $(SVC_NS)
+
+################################################################################
+# Zipkin Deployment Targets
+# Targets for deploying and managing Zipkin cluster per app service in QA cluster
+# Namespace is auto-detected from the current kubectl context
+################################################################################
+
+ZIPKIN_VERSION := zipkin-0.4.0
+ZIPKIN_ES_USER ?= zipkinEsUser
+Zipkin_ES_USER_PWD ?= zipkinEsUserPwd
+
+.PHONY: zipkin-es-user-secret-create
+zipkin-es-user-secret-create: _env-check _monitoring-ns-check ## Create/update secret for Elasticsearch's Zipkin user. Usage: make zipkin-es-user-secret-create ZIPKIN_ES_USER=<user> ZIPKIN_ES_USER_PWD=<user-pwd>
+	@echo "Creating secret with user creds for Zipkin user in Elasticsearch..."
+	@kubectl create secret generic "$(ENV_NAME)"-zipkin-es-user-creds \
+	    --namespace "$(MONITORING_NS)" \
+	    --type Opaque \
+   	    --from-literal=username="$(ZIPKIN_ES_USER)" \
+	    --from-literal=password="$(ZIPKIN_ES_USER_PWD)" \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@echo "Secret '"$(ENV_NAME)"-zipkin-es-user-creds' successfully created/updated in namespace $(MONITORING_NS)"
+
+.PHONY: zipkin-es-user-create
+zipkin-es-user-create: _monitoring-ns-check ## Create role and user for Zipkin in Elasticsearch in QA cluster.
+	@echo "Creating Elasticsearch role and user for Zipkin in QA cluster..."
+	# Retrieve elastic user password from secret
+	ELASTIC_USER_PWD=$$(kubectl get secret qa-elasticsearch-es-elastic-user -n qa-data -o go-template='{{index .data "elastic"}}' | base64 -d); \
+	echo "$$ELASTIC_USER_PWD"
+	# Define Elasticsearch HTTP endpoint
+	ES_URL="https://qa-elasticsearch-es-http.qa-data.svc.cluster.local:9200"; \
+	
+	echo "Creating Elasticsearch Zipkin role..."; \
+	curl -u elastic:$$ELASTIC_USER_PWD -k -X PUT "$$ES_URL/_security/role/zipkin_role" -H 'Content-Type: application/json' -d' \
+	{ \
+	  "cluster": [], \
+	  "indices": [ \
+	    { \
+	      "names": ["zipkin*"], \
+	      "privileges": ["create_index", "write", "read", "manage_index_templates"] \
+	    } \
+	  ] \
+	}'; \
+	
+	echo "\nCreating Elasticsearch Zipkin user..."; \
+	curl -u elastic:$$ELASTIC_USER_PWD -k -X POST "$$ES_URL/_security/user/$(ZIPKIN_ES_USER)" -H 'Content-Type: application/json' -d' \
+	{ \
+	  "password": "$(ZIPKIN_ES_USER_PWD)", \
+	  "roles": ["zipkin_role"], \
+	  "full_name": "Zipkin Service Account", \
+	  "email": "zipkin@example.com" \
+	}'; \
+	
+	echo "\nElasticsearch Zipkin role and user creation completed."
