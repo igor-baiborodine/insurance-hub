@@ -628,7 +628,7 @@ jsreport-ui: _env-check ## Access Grafana UI via port-forward
 
 ZIPKIN_VERSION := zipkin-0.4.0
 ZIPKIN_ES_USER ?= zipkinEsUser
-Zipkin_ES_USER_PWD ?= zipkinEsUserPwd
+ZIPKIN_ES_USER_PWD ?= zipkinEsUserPwd
 
 .PHONY: zipkin-es-user-secret-create
 zipkin-es-user-secret-create: _env-check _monitoring-ns-check ## Create/update secret for Elasticsearch's Zipkin user. Usage: make zipkin-es-user-secret-create ZIPKIN_ES_USER=<user> ZIPKIN_ES_USER_PWD=<user-pwd>
@@ -642,17 +642,16 @@ zipkin-es-user-secret-create: _env-check _monitoring-ns-check ## Create/update s
 	@echo "Secret '"$(ENV_NAME)"-zipkin-es-user-creds' successfully created/updated in namespace $(MONITORING_NS)"
 
 .PHONY: zipkin-es-user-create
-zipkin-es-user-create: _monitoring-ns-check ## Create role and user for Zipkin in Elasticsearch in QA cluster.
+zipkin-es-user-create: _env-check _monitoring-ns-check ## Create role and user for Zipkin in Elasticsearch in QA cluster.
 	@echo "Creating Elasticsearch role and user for Zipkin in QA cluster..."
-	# Retrieve elastic user password from secret
-	ELASTIC_USER_PWD=$$(kubectl get secret qa-elasticsearch-es-elastic-user -n qa-data -o go-template='{{index .data "elastic"}}' | base64 -d); \
-	echo "$$ELASTIC_USER_PWD"
-	# Define Elasticsearch HTTP endpoint
+	@# Retrieve elastic superuser password from secret
+	@ELASTIC_USER_PWD=$$(kubectl get secret "$(ENV_NAME)"-elasticsearch-es-elastic-user -n $(DATA_NS) -o go-template='{{index .data "elastic"}}' | base64 -d); \
+	ZIPKIN_ES_USER=$$(kubectl get secret "$(ENV_NAME)"-zipkin-es-user-creds -n $(MONITORING_NS) -o go-template='{{index .data "username"}}' | base64 -d); \
+	ZIPKIN_ES_USER_PWD=$$(kubectl get secret "$(ENV_NAME)"-zipkin-es-user-creds -n $(MONITORING_NS) -o go-template='{{index .data "password"}}' | base64 -d); \
 	ES_URL="https://qa-elasticsearch-es-http.qa-data.svc.cluster.local:9200"; \
-	
+	\
 	echo "Creating Elasticsearch Zipkin role..."; \
-	curl -u elastic:$$ELASTIC_USER_PWD -k -X PUT "$$ES_URL/_security/role/zipkin_role" -H 'Content-Type: application/json' -d' \
-	{ \
+	curl -u elastic:$$ELASTIC_USER_PWD -k -X PUT "$$ES_URL/_security/role/zipkin_role" -H 'Content-Type: application/json' -d'{ \
 	  "cluster": [], \
 	  "indices": [ \
 	    { \
@@ -661,14 +660,15 @@ zipkin-es-user-create: _monitoring-ns-check ## Create role and user for Zipkin i
 	    } \
 	  ] \
 	}'; \
-	
-	echo "\nCreating Elasticsearch Zipkin user..."; \
-	curl -u elastic:$$ELASTIC_USER_PWD -k -X POST "$$ES_URL/_security/user/$(ZIPKIN_ES_USER)" -H 'Content-Type: application/json' -d' \
-	{ \
-	  "password": "$(ZIPKIN_ES_USER_PWD)", \
-	  "roles": ["zipkin_role"], \
-	  "full_name": "Zipkin Service Account", \
-	  "email": "zipkin@example.com" \
-	}'; \
-	
-	echo "\nElasticsearch Zipkin role and user creation completed."
+	echo ""; \
+	\
+	echo "Creating Elasticsearch Zipkin user..."; \
+	curl -u elastic:$$ELASTIC_USER_PWD -k -X POST "$$ES_URL/_security/user/$$ZIPKIN_ES_USER" -H 'Content-Type: application/json' -d"{ \
+	  \"password\": \"$$ZIPKIN_ES_USER_PWD\", \
+	  \"roles\": [\"zipkin_role\"], \
+	  \"full_name\": \"Zipkin Service Account\", \
+	  \"email\": \"zipkin@example.com\" \
+	}"; \
+	echo ""; \
+	\
+	echo "Elasticsearch Zipkin role and user creation completed."
