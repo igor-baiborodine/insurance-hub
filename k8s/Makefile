@@ -535,7 +535,7 @@ mongodb-operator-install: _env-check ## Install MongoDB Community Operator
 	@helm upgrade --install mongodb-operator mongodb/community-operator \
 		--version "$(MONGODB_OPERATOR_VERSION)" \
 		--namespace "$(DATA_NS)" \
-		--wait
+		--wait \
 		--timeout 10m
 	@echo "✅ MongoDB Community Operator installed. Verifying pods..."
 	@kubectl get pods -n "$(DATA_NS)" -l name=mongodb-kubernetes-operator
@@ -629,10 +629,10 @@ jsreport-ui: _env-check ## Access Grafana UI via port-forward
 ZIPKIN_VERSION := 0.4.0
 ZIPKIN_ES_ROLE := zipkin_role
 ZIPKIN_ES_USER := zipkin_user
-ZIPKIN_ES_USER_PWD ?= zipkinEsUserPwd
+ZIPKIN_ES_USER_PWD := zipkinEsUserPwd
 
 .PHONY: zipkin-es-user-secret-create
-zipkin-es-user-secret-create: _env-check _monitoring-ns-check ## Create/update secret for Elasticsearch's Zipkin user. Usage: make zipkin-es-user-secret-create ZIPKIN_ES_USER_PWD=<user-pwd>
+zipkin-es-user-secret-create: _env-check _monitoring-ns-check ## Create/update secret for Elasticsearch's Zipkin user
 	@echo "Creating secret with user creds for Zipkin user in Elasticsearch..."
 	@kubectl create secret generic "$(ENV_NAME)"-zipkin-es-user-creds \
 		--namespace "$(MONITORING_NS)" \
@@ -654,7 +654,7 @@ zipkin-es-user-create: _env-check _monitoring-ns-check ## Create role and user f
 	kubectl run zipkin-es-setup --image=curlimages/curl:latest --rm -i --tty -n $(DATA_NS) --restart=Never -- \
 	  sh -c "curl -u 'elastic:$$ELASTIC_USER_PWD' -k -X POST '$$ES_URL/_security/role/$(ZIPKIN_ES_ROLE)' \
 	  -H 'Content-Type: application/json' \
-	  -d '{\"cluster\": [\"manage_index_templates\"],\"indices\":[{\"names\":[\"zipkin*\"],\"privileges\":[\"create_index\",\"write\",\"read\",\"manage\"]}]}'&& \
+	  -d '{\"cluster\": [\"monitor\",\"manage_index_templates\"],\"indices\":[{\"names\":[\"zipkin*\"],\"privileges\":[\"create_index\",\"write\",\"read\",\"manage\"]}]}'&& \
 	  curl -u 'elastic:$$ELASTIC_USER_PWD' -k -X GET '$$ES_URL/_security/role/$(ZIPKIN_ES_ROLE)'"; \
 	echo ""; \
 	\
@@ -674,12 +674,15 @@ zipkin-install: _env-check _monitoring-ns-check ## Deploy Zipkin in QA cluster
 	@helm repo add zipkin https://zipkin.io/zipkin-helm
 	@helm repo update
 	@helm upgrade --install $(ENV_NAME)-zipkin zipkin/zipkin \
-		--version $(ZIPKIN_VERSION) \
-		--values "$(VALUES_FILE_PREFIX)"/zipkin/values.yaml \
-		--namespace $(MONITORING_NS) \
-		--wait
+	   --version $(ZIPKIN_VERSION) \
+	   --values "$(VALUES_FILE_PREFIX)"/zipkin/values.yaml \
+	   --namespace $(MONITORING_NS)
+	@echo "Patching Zipkin deployment readiness probe..."
+	@kubectl patch deployment $(ENV_NAME)-zipkin -n $(MONITORING_NS) --type=json -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe/initialDelaySeconds", "value": 30}, {"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe/timeoutSeconds", "value": 5}, {"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe/periodSeconds", "value": 10}, {"op": "add", "path": "/spec/template/spec/containers/0/readinessProbe/failureThreshold", "value": 6}]'
+	@echo "Waiting for Zipkin rollout after probe adjustment..."
+	@kubectl rollout status deployment/$(ENV_NAME)-zipkin -n $(MONITORING_NS) --timeout=2m
 	@echo "✅ Zipkin installed successfully in namespace '$(MONITORING_NS)'. Verifying pods..."
-	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=$(ENV_NAME)-zipkin
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=zipkin
 
 .PHONY: zipkin-uninstall
 zipkin-uninstall: _env-check _monitoring-ns-check ## Uninstall Zipkin from QA cluster

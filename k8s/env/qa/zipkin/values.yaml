@@ -7,9 +7,13 @@ zipkin:
   storage:
     type: elasticsearch
     elasticsearch:
-      hosts: "http://qa-elasticsearch-es-http.qa-data.svc.cluster.local:9200"
-      username: ""
-      password: ""
+      # Not appropriate for production
+      sslNoVerify: true
+      hosts: "https://qa-elasticsearch-es-http.qa-data.svc.cluster.local:9200"
+      # Not appropriate for production: should be initialized via secret.
+      # Use the same values as ZIPKIN_ES_USER and ZIPKIN_ES_USER_PWD in k8s/Makefile.
+      username: "zipkin_user"
+      password: "zipkinEsUserPwd"
       index: zipkin
 service:
   type: ClusterIP
@@ -26,3 +30,22 @@ persistence:
   enabled: false
 serviceMonitor:
   enabled: false
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 9411
+  initialDelaySeconds: 90
+  timeoutSeconds: 5
+  periodSeconds: 15
+  failureThreshold: 10
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 9411
+  initialDelaySeconds: 60
+  timeoutSeconds: 5
+  periodSeconds: 30
+  failureThreshold: 3
+env:
+  - name: LOG_LEVEL
+    value: DEBUG
