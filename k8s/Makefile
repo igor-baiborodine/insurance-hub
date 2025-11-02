@@ -681,14 +681,25 @@ zipkin-install: _env-check _monitoring-ns-check ## Deploy Zipkin in QA cluster
 	@kubectl patch deployment $(ENV_NAME)-zipkin -n $(MONITORING_NS) --type=json -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/readinessProbe"}]'
 	@echo "Waiting for Zipkin rollout after disabling probe..."
 	@kubectl rollout status deployment/$(ENV_NAME)-zipkin -n $(MONITORING_NS) --timeout=2m
-	@echo "✅ Zipkin installed successfully in namespace '$(MONITORING_NS)'. Verifying pods..."
-	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=zipkin
+	@echo "✅ Zipkin installation initiated. Check status with: make zipkin-status"
 
 .PHONY: zipkin-uninstall
 zipkin-uninstall: _env-check _monitoring-ns-check ## Uninstall Zipkin from QA cluster
 	@echo "Uninstalling Zipkin..."
 	@helm uninstall $(ENV_NAME)-zipkin -n $(MONITORING_NS) || true
 	@echo "🗑 Zipkin uninstalled from namespace '$(MONITORING_NS)'."
+
+.PHONY: zipkin-status
+zipkin-status: _env-check _monitoring-ns-check ## Show Zipkin deployment status in QA cluster
+	@echo "Status for Zipkin in namespace: $(MONITORING_NS)"
+	@echo "\nZipkin Deployment:"
+	@kubectl get deployment $(ENV_NAME)-zipkin -n $(MONITORING_NS) -o wide || true
+	@echo "\nZipkin Pods:"
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=zipkin || true
+	@echo "\nZipkin Service:"
+	@kubectl get svc $(ENV_NAME)-zipkin -n $(MONITORING_NS) || true
+	@echo "\nZipkin Endpoint Slice:"
+	@kubectl get endpointslice -l kubernetes.io/service-name=$(ENV_NAME)-zipkin -n $(MONITORING_NS) || true
 
 .PHONY: zipkin-ui
 zipkin-ui: ## Access Zipkin UI via port-forward
