@@ -31,13 +31,7 @@ persistence:
 serviceMonitor:
   enabled: false
 readinessProbe:
-  httpGet:
-    path: /health
-    port: 9411
-  initialDelaySeconds: 90
-  timeoutSeconds: 5
-  periodSeconds: 15
-  failureThreshold: 10
+  enabled: false
 livenessProbe:
   httpGet:
     path: /health
@@ -46,6 +40,3 @@ livenessProbe:
   timeoutSeconds: 5
   periodSeconds: 30
   failureThreshold: 3
-env:
-  - name: LOG_LEVEL
-    value: DEBUG

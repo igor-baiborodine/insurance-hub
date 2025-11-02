@@ -677,9 +677,9 @@ zipkin-install: _env-check _monitoring-ns-check ## Deploy Zipkin in QA cluster
 	   --version $(ZIPKIN_VERSION) \
 	   --values "$(VALUES_FILE_PREFIX)"/zipkin/values.yaml \
 	   --namespace $(MONITORING_NS)
-	@echo "Patching Zipkin deployment readiness probe..."
-	@kubectl patch deployment $(ENV_NAME)-zipkin -n $(MONITORING_NS) --type=json -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe/initialDelaySeconds", "value": 30}, {"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe/timeoutSeconds", "value": 5}, {"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe/periodSeconds", "value": 10}, {"op": "add", "path": "/spec/template/spec/containers/0/readinessProbe/failureThreshold", "value": 6}]'
-	@echo "Waiting for Zipkin rollout after probe adjustment..."
+	@echo "Disabling Zipkin deployment readiness probe..."
+	@kubectl patch deployment $(ENV_NAME)-zipkin -n $(MONITORING_NS) --type=json -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/readinessProbe"}]'
+	@echo "Waiting for Zipkin rollout after disabling probe..."
 	@kubectl rollout status deployment/$(ENV_NAME)-zipkin -n $(MONITORING_NS) --timeout=2m
 	@echo "✅ Zipkin installed successfully in namespace '$(MONITORING_NS)'. Verifying pods..."
 	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=zipkin
@@ -689,3 +689,9 @@ zipkin-uninstall: _env-check _monitoring-ns-check ## Uninstall Zipkin from QA cl
 	@echo "Uninstalling Zipkin..."
 	@helm uninstall $(ENV_NAME)-zipkin -n $(MONITORING_NS) || true
 	@echo "🗑 Zipkin uninstalled from namespace '$(MONITORING_NS)'."
+
+.PHONY: zipkin-ui
+zipkin-ui: ## Access Zipkin UI via port-forward
+	@echo "Forwarding Zipkin UI to http://localhost:9411"
+	@echo "Press Ctrl+C to stop."
+	@kubectl port-forward svc/$(ENV_NAME)-zipkin 9411:9411 -n $(MONITORING_NS)
