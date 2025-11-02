@@ -8,8 +8,6 @@ zipkin:
     type: elasticsearch
     elasticsearch:
       hosts: "http://qa-elasticsearch-es-http.qa-data.svc.cluster.local:9200"
-      # Authentication credentials populated from Kubernetes secret
-      # These values will be overridden by environment variables from the secret through Helm
       username: ""
       password: ""
       index: zipkin
@@ -28,6 +26,3 @@ persistence:
   enabled: false
 serviceMonitor:
   enabled: false
-extraEnvFrom:
-  - secretRef:
-      name: qa-zipkin-es-user-creds

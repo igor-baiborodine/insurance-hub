@@ -637,8 +637,8 @@ zipkin-es-user-secret-create: _env-check _monitoring-ns-check ## Create/update s
 	@kubectl create secret generic "$(ENV_NAME)"-zipkin-es-user-creds \
 		--namespace "$(MONITORING_NS)" \
 		--type Opaque \
-		--from-literal=ES_USERNAME="$(ZIPKIN_ES_USER)" \
-		--from-literal=ES_PASSWORD="$(ZIPKIN_ES_USER_PWD)" \
+		--from-literal=username="$(ZIPKIN_ES_USER)" \
+		--from-literal=password="$(ZIPKIN_ES_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@echo "Secret '"$(ENV_NAME)"-zipkin-es-user-creds' successfully created/updated in namespace $(MONITORING_NS)"
 
