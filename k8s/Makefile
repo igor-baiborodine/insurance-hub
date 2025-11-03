@@ -14,15 +14,15 @@ kubeconfig-clear: ## Empty the ~/.kube/config file
 .PHONY: prereq-k8s-kubectl
 prereq-k8s-kubectl: ## Install latest kubectl on Ubuntu 24.04.2 LTS
 	@KUBECTL_VERSION=$$(curl -L -s https://dl.k8s.io/release/stable.txt); \
-	@if [ -z "$$KUBECTL_VERSION" ]; then \
+	if [ -z "$$KUBECTL_VERSION" ]; then \
 	  echo "Failed to fetch latest kubectl version!"; \
 	  exit 1; \
 	fi; \
-	@curl -LO "https://dl.k8s.io/release/$${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
-	@chmod +x kubectl; \
-	@echo "Moving kubectl to /usr/local/bin (you may be prompted for your password)..."; \
-	@sudo mv kubectl /usr/local/bin/kubectl; \
-	@kubectl version --client
+	curl -LO "https://dl.k8s.io/release/$${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
+	chmod +x kubectl; \
+	echo "Moving kubectl to /usr/local/bin (you may be prompted for your password)..."; \
+	sudo mv kubectl /usr/local/bin/kubectl; \
+	kubectl version --client
 
 .PHONY: prereq-k8s-kind
 prereq-k8s-kind: ## Install latest Kind on Ubuntu 24.04.2 LTS
@@ -70,7 +70,7 @@ prereq-k8s-kubens: ## Install latest kubens on Ubuntu 24.04.2 LTS
 	@echo "kubens installed at /usr/local/bin/kubens"
 
 .PHONY: prereq-k8s-all
-prereq-k8s-all: k8s-prereq-kubectl k8s-prereq-kubectx k8s-prereq-kubens k8s-prereq-helm k8s-prereq-lxd k8s-prereq-kind ## Install all Kubernetes prerequisites
+prereq-k8s-all: prereq-k8s-kubectl prereq-k8s-kubectx prereq-k8s-kubens prereq-k8s-helm prereq-k8s-lxd prereq-k8s-kind ## Install all Kubernetes prerequisites
 
 .PHONY: prereq-db-psql
 prereq-db-psql: ## Install latest psql (PostgreSQL CLI) on Ubuntu 24.04.2 LTS

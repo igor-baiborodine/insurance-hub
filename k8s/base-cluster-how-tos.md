@@ -17,7 +17,7 @@
 
 1. **Kubernetes cluster dependencies**
 - `cd k8s`
-- `make k8s-prereq-all`
+- `make prereq-all`
 
 2. **QA cluster configuration**
 - Make sure that the host uses the `nftables` instead of `iptables-legacy`:
