@@ -1,0 +1,42 @@
+replicaCount: 1
+image:
+  repository: openzipkin/zipkin
+  tag: 3.5.1
+  pullPolicy: IfNotPresent
+zipkin:
+  storage:
+    type: elasticsearch
+    elasticsearch:
+      # Not appropriate for production
+      sslNoVerify: true
+      hosts: "https://qa-elasticsearch-es-http.qa-data.svc.cluster.local:9200"
+      # Not appropriate for production: should be initialized via secret.
+      # Use the same values as ZIPKIN_ES_USER and ZIPKIN_ES_USER_PWD in k8s/Makefile.
+      username: "zipkin_user"
+      password: "zipkinEsUserPwd"
+      index: zipkin
+service:
+  type: ClusterIP
+  port: 9411
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "250m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+# PVC Persistence disabled because storage is Elasticsearch
+persistence:
+  enabled: false
+serviceMonitor:
+  enabled: false
+readinessProbe:
+  enabled: false
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 9411
+  initialDelaySeconds: 60
+  timeoutSeconds: 5
+  periodSeconds: 30
+  failureThreshold: 3

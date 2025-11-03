@@ -133,7 +133,7 @@ else
 		DATA_NS := $(LOCAL_DEV_NS)
 		AUTH_NS := $(LOCAL_DEV_NS)
 		NETWORKING_NS := $(LOCAL_DEV_NS)
-		MONITORING_NS := $(LOCAL_DEV_NS)
+		MONITORING_NS := INVALID
     else
         ENV_NAME := INVALID
     endif
@@ -156,8 +156,19 @@ _data-ns-check: ## Ensure data namespace exists and set it as the current contex
 	@kubectl create namespace "$(DATA_NS)" --dry-run=client -o yaml | kubectl apply -f -
 	@kubectl config set-context --current --namespace="$(DATA_NS)"
 
+.PHONY: _monitoring-ns-check
+_monitoring-ns-check: ## Ensure monitoring namespace exists and set it as the current context
+	@CUR_CTX=$$(kubectl config current-context); \
+	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
+		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
+		exit 1; \
+	fi
+	@echo "Ensuring namespace $(MONITORING_NS) exists and is set as current..."
+	@kubectl get namespace "$(MONITORING_NS)" >/dev/null 2>&1 || kubectl create namespace "$(MONITORING_NS)"
+	@kubectl config set-context --current --namespace="$(MONITORING_NS)"
+
 .PHONY: _svc-name-check
-_svc-name-check: ## Ensure that the SVC_NAME argument is provided 
+_svc-name-check: ## Ensure that the SVC_NAME argument is provided
 	@if [ -z "$$SVC_NAME" ]; then \
 		echo "Argument 'SVC_NAME' is required!"; \
 		exit 1; \
@@ -172,24 +183,18 @@ _svc-name-check: ## Ensure that the SVC_NAME argument is provided
 KUBE_PROMETHEUS_STACK_VERSION := 77.10.0
 
 .PHONY: prometheus-stack-install
-prometheus-stack-install: ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
-	@CUR_CTX=$$(kubectl config current-context); \
-	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
-		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
-		exit 1; \
-	fi
-	@kubectl get namespace qa-monitoring >/dev/null 2>&1 || kubectl create namespace qa-monitoring
+prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
-	@echo "Installing Kube Prometheus Stack v$(KUBE_PROMETHEUS_STACK_VERSION)..."
-	@helm upgrade --install qa-prometheus prometheus-community/kube-prometheus-stack \
+	@echo "Installing Kube Prometheus Stack using Helm chart v$(KUBE_PROMETHEUS_STACK_VERSION)..."
+	@helm upgrade --install "$(ENV_NAME)"-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
-		--namespace qa-monitoring \
+		--namespace $(MONITORING_NS) \
 		--values "$(VALUES_FILE_PREFIX)"/prometheus-values.yaml \
 		--wait \
 		--timeout 15m
-	@echo "✅ Kube Prometheus Stack installed. Verifying pods..."
-	@kubectl get pods -n qa-monitoring -l app.kubernetes.io/instance=qa-prometheus
+	@echo "✅ Kube Prometheus Stack installed into '$(MONITORING_NS)' namespace. Verifying pods..."
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/instance="$(ENV_NAME)"-prometheus
 
 .PHONY: prometheus-ui
 prometheus-ui: ## Access Prometheus UI via port-forward
@@ -329,7 +334,7 @@ kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka Operator int
 	@kubectl get pods -n kafka-system --selector=name=strimzi-cluster-operator
 
 kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator from kafka-system namespace
-	@echo "Uninstalling Strimzi Kafka Operator from 'kafka-system' namespace..."
+	@echo "Uninstalling Strimzi Kafka Operator..."
 	@helm uninstall strimzi-operator -n kafka-system || true
 	@kubectl delete namespace kafka-system || true
 	@echo "🗑 Strimzi Kafka Operator uninstalled and namespace 'kafka-system' deleted."
@@ -530,7 +535,7 @@ mongodb-operator-install: _env-check ## Install MongoDB Community Operator
 	@helm upgrade --install mongodb-operator mongodb/community-operator \
 		--version "$(MONGODB_OPERATOR_VERSION)" \
 		--namespace "$(DATA_NS)" \
-		--wait
+		--wait \
 		--timeout 10m
 	@echo "✅ MongoDB Community Operator installed. Verifying pods..."
 	@kubectl get pods -n "$(DATA_NS)" -l name=mongodb-kubernetes-operator
@@ -614,3 +619,90 @@ jsreport-ui: _env-check ## Access Grafana UI via port-forward
 	@echo "Forwarding JSReport UI to http://localhost:5488"
 	@echo "Press Ctrl+C to stop."
 	@kubectl port-forward svc/"$(ENV_NAME)"-jsreport 5488:5488 -n $(SVC_NS)
+
+################################################################################
+# Zipkin Deployment Targets
+# Targets for deploying and managing Zipkin cluster per app service in QA cluster
+# Namespace is auto-detected from the current kubectl context
+################################################################################
+
+ZIPKIN_VERSION := 0.4.0
+ZIPKIN_ES_ROLE := zipkin_role
+ZIPKIN_ES_USER := zipkin_user
+ZIPKIN_ES_USER_PWD := zipkinEsUserPwd
+
+.PHONY: zipkin-es-user-secret-create
+zipkin-es-user-secret-create: _env-check _monitoring-ns-check ## Create/update secret for Elasticsearch's Zipkin user
+	@echo "Creating secret with user creds for Zipkin user in Elasticsearch..."
+	@kubectl create secret generic "$(ENV_NAME)"-zipkin-es-user-creds \
+		--namespace "$(MONITORING_NS)" \
+		--type Opaque \
+		--from-literal=username="$(ZIPKIN_ES_USER)" \
+		--from-literal=password="$(ZIPKIN_ES_USER_PWD)" \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@echo "Secret '"$(ENV_NAME)"-zipkin-es-user-creds' successfully created/updated in namespace $(MONITORING_NS)"
+
+.PHONY: zipkin-es-user-create
+zipkin-es-user-create: _env-check _monitoring-ns-check ## Create role and user for Zipkin in Elasticsearch in QA cluster.
+	@echo "Creating Elasticsearch role and user for Zipkin in QA cluster..."
+	@# Retrieve credentials from secrets
+	@ELASTIC_USER_PWD=$$(kubectl get secret "$(ENV_NAME)"-elasticsearch-es-elastic-user -n $(DATA_NS) -o go-template='{{index .data "elastic"}}' | base64 -d); \
+	ZIPKIN_ES_USER_PWD=$$(kubectl get secret "$(ENV_NAME)"-zipkin-es-user-creds -n $(MONITORING_NS) -o go-template='{{index .data "password"}}' | base64 -d); \
+	ES_URL="https://$(ENV_NAME)-elasticsearch-es-http.$(DATA_NS).svc.cluster.local:9200"; \
+	\
+	echo "Creating Elasticsearch Zipkin role via test pod..."; \
+	kubectl run zipkin-es-setup --image=curlimages/curl:latest --rm -i --tty -n $(DATA_NS) --restart=Never -- \
+	  sh -c "curl -u 'elastic:$$ELASTIC_USER_PWD' -k -X POST '$$ES_URL/_security/role/$(ZIPKIN_ES_ROLE)' \
+	  -H 'Content-Type: application/json' \
+	  -d '{\"cluster\": [\"monitor\",\"manage_index_templates\"],\"indices\":[{\"names\":[\"zipkin*\"],\"privileges\":[\"create_index\",\"write\",\"read\",\"manage\"]}]}'&& \
+	  curl -u 'elastic:$$ELASTIC_USER_PWD' -k -X GET '$$ES_URL/_security/role/$(ZIPKIN_ES_ROLE)'"; \
+	echo ""; \
+	\
+	echo "Creating Elasticsearch Zipkin user via test pod..."; \
+	kubectl run zipkin-es-setup --image=curlimages/curl:latest --rm -i --tty -n $(DATA_NS) --restart=Never -- \
+	  sh -c "curl -u 'elastic:$$ELASTIC_USER_PWD' -k -X POST '$$ES_URL/_security/user/$(ZIPKIN_ES_USER)' \
+	  -H 'Content-Type: application/json' \
+	  -d '{\"password\":\"$$ZIPKIN_ES_USER_PWD\",\"roles\":[\"$(ZIPKIN_ES_ROLE)\"],\"full_name\":\"Zipkin Service Account\",\"email\":\"zipkin@insurance-hub.com\"}'&& \
+	  curl -u 'elastic:$$ELASTIC_USER_PWD' -k -X GET '$$ES_URL/_security/user/$(ZIPKIN_ES_USER)'"; \
+	echo ""; \
+	\
+	echo "Elasticsearch Zipkin role and user creation completed."
+
+.PHONY: zipkin-install
+zipkin-install: _env-check _monitoring-ns-check ## Deploy Zipkin in QA cluster
+	@echo "Installing Zipkin cluster using Helm chart '$(ZIPKIN_VERSION)'..."
+	@helm repo add zipkin https://zipkin.io/zipkin-helm
+	@helm repo update
+	@helm upgrade --install $(ENV_NAME)-zipkin zipkin/zipkin \
+	   --version $(ZIPKIN_VERSION) \
+	   --values "$(VALUES_FILE_PREFIX)"/zipkin/values.yaml \
+	   --namespace $(MONITORING_NS)
+	@echo "Disabling Zipkin deployment readiness probe..."
+	@kubectl patch deployment $(ENV_NAME)-zipkin -n $(MONITORING_NS) --type=json -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/readinessProbe"}]'
+	@echo "Waiting for Zipkin rollout after disabling probe..."
+	@kubectl rollout status deployment/$(ENV_NAME)-zipkin -n $(MONITORING_NS) --timeout=2m
+	@echo "✅ Zipkin installation initiated. Check status with: make zipkin-status"
+
+.PHONY: zipkin-uninstall
+zipkin-uninstall: _env-check _monitoring-ns-check ## Uninstall Zipkin from QA cluster
+	@echo "Uninstalling Zipkin..."
+	@helm uninstall $(ENV_NAME)-zipkin -n $(MONITORING_NS) || true
+	@echo "🗑 Zipkin uninstalled from namespace '$(MONITORING_NS)'."
+
+.PHONY: zipkin-status
+zipkin-status: _env-check _monitoring-ns-check ## Show Zipkin deployment status in QA cluster
+	@echo "Status for Zipkin in namespace: $(MONITORING_NS)"
+	@echo "\nZipkin Deployment:"
+	@kubectl get deployment $(ENV_NAME)-zipkin -n $(MONITORING_NS) -o wide || true
+	@echo "\nZipkin Pods:"
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=zipkin || true
+	@echo "\nZipkin Service:"
+	@kubectl get svc $(ENV_NAME)-zipkin -n $(MONITORING_NS) || true
+	@echo "\nZipkin Endpoint Slice:"
+	@kubectl get endpointslice -l kubernetes.io/service-name=$(ENV_NAME)-zipkin -n $(MONITORING_NS) || true
+
+.PHONY: zipkin-ui
+zipkin-ui: ## Access Zipkin UI via port-forward
+	@echo "Forwarding Zipkin UI to http://localhost:9411"
+	@echo "Press Ctrl+C to stop."
+	@kubectl port-forward svc/$(ENV_NAME)-zipkin 9411:9411 -n $(MONITORING_NS)

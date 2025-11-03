@@ -14,10 +14,10 @@ Use the following sequence of [Make](https://www.gnu.org/software/make/) targets
 to deploy cluster apps including infrastructure and "Insurance Hub" services.
 
 ## QA—Observability
-
 - `cd k8s`
+1. **Prometheus & Grafana**
 - `make prometheus-stack-install`
-- `kubectl get pods -n qa-monitoring`
+- `kubectl get pods -n qa-monitoring | grep prometheus`
     ```shell
     NAME                                                     READY   STATUS    RESTARTS   AGE
     alertmanager-qa-prometheus-kube-prometh-alertmanager-0   2/2     Running   0          4m29s
@@ -27,8 +27,18 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
     qa-prometheus-kube-state-metrics-79cf8d8f9b-dqgm7        1/1     Running   0          5m28s
     qa-prometheus-prometheus-node-exporter-97p7f             1/1     Running   0          5m28s
     qa-prometheus-prometheus-node-exporter-hn696             1/1     Running   0          5m28s
-    qa-prometheus-prometheus-node-exporter-zcd5z             1/1     Running   0          5m28s    ```
-- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=observability-install-<iso-date>`
+    qa-prometheus-prometheus-node-exporter-zcd5z             1/1     Running   0          5m28s    
+    ```
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=observability-install-<iso-date>`
+
+2. **Zipkin**
+- **Prerequisites**: Elasticsearch 
+- `make zipkin-es-user-secret-create`
+- `make zipkin-es-user-create`
+- `make zipkin-install`
+- `make zipkin-status`
+- `make zipkin-ui` and go to `http://localhost:9411`
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=zipkin-install-<iso-date>`
 
 ## Data
 
@@ -78,11 +88,6 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 3. **Elasticsearch**
 - `make eck-operator-deploy`
 - `make elasticsearch-deploy`
-- `kubectl get pods -n local-dev-all | grep elasticsearch`
-    ```shell
-    kubectl get pods -n local-dev-all | grep elasticsearch
-    local-dev-elasticsearch-es-default-0   1/1     Running   0          111s    
-    ```
 - `make elasticsearch-status`
 - `make elasticsearch-exporter-deploy`
 - `make grafana-ui`

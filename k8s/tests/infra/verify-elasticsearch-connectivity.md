@@ -18,7 +18,7 @@ To verify connectivity to the Elasticsearch instance running in your local Kind 
 
 2. **Retrieve the Elastic User Password**
 
-   Obtain the password for the `elastic` user from the Kubernetes secret and export it as an
+   Get the password for the `elastic` user from the Kubernetes secret and export it as an
    environment variable with:
 
     ```shell
