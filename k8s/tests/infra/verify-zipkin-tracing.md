@@ -97,7 +97,10 @@ This guide explains how to test Zipkin tracing functionality in the QA Kubernete
       }]' \
       http://qa-zipkin.qa-monitoring.svc.cluster.local:9411/api/v2/spans
     ```
-
+- Verify indices in Elasticsearch:
+    ```shell
+    curl -u zipkin_user:zipkinEsUserPwd -k https://qa-elasticsearch-es-http.qa-data.svc.cluster.local:9200/_cat/indices/zipkin*?v
+    ```
 - Type `exit` to leave the test pod shell. The pod will automatically terminate.
 
 3. **Verify Traces in the UI**
