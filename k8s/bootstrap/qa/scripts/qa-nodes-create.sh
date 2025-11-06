@@ -20,7 +20,11 @@ for NODE in $NODES_ALL; do
             LIMITS_MEMORY=${BASE_LIMITS_MEMORY}
             ROOT_SIZE=${BASE_ROOT_SIZE}
         fi
-        lxc profile copy default "$NODE-profile"
+        if ! lxc profile show "$NODE-profile" &>/dev/null; then
+            lxc profile copy default "$NODE-profile"
+        else
+            echo "Profile $NODE-profile already exists, reusing."
+        fi
         lxc profile set "$NODE-profile" limits.cpu "$LIMITS_CPU"
         lxc profile set "$NODE-profile" limits.memory "${LIMITS_MEMORY}GiB"
         lxc profile device set "$NODE-profile" root size "${ROOT_SIZE}GB"
