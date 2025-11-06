@@ -219,37 +219,53 @@ PG_SVC_USER_PWD ?= pgsvcpwd
 
 .PHONY: postgres-svc-secret-create
 postgres-svc-secret-create: _env-check _data-ns-check _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
-	@echo "Creating secret with user creds for '$(SVC_NAME)svc' database in PostgreSQL..."
-	# username value should match spec.bootstrap.initdb.owner value from `env/<env-name>/postgres-<service-name>svc.yaml` manifest
-	@kubectl create secret generic "$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds \
+	@echo "Creating secret with user creds for '$(SVC_NAME)' database in PostgreSQL..."
+	@kubectl create secret generic "$(ENV_NAME)"-postgres-"$(SVC_NAME)"-creds \
 	    --namespace "$(DATA_NS)" \
 	    --type kubernetes.io/basic-auth \
-	    --from-literal=username="$(SVC_NAME)"svc \
+	    --from-literal=username="$(SVC_NAME)" \
 	    --from-literal=password="$(PG_SVC_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "Secret '"$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds' successfully created/updated in namespace $(DATA_NS)"
+	@echo "Secret '"$(ENV_NAME)"-postgres-"$(SVC_NAME)"-creds' successfully created/updated in namespace $(DATA_NS)"
 
 .PHONY: postgres-operator-deploy
 postgres-operator-deploy: _env-check ## Install CloudNativePG operator
 	@echo "Deploying CloudNativePG operator v$(CLOUDNATIVE_PG_VERSION) into `cnpg-system` namespace..."
 	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
 
+.PHONY: postgres-operator-delete
+postgres-operator-delete: _env-check ## Delete CloudNativePG operator
+	@echo "Deleting CloudNativePG operator..."
+	@kubectl delete -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
+	@echo "Waiting for namespace deletion..."
+	@kubectl wait --for=delete namespace/cnpg-system --timeout=60s 2>/dev/null || true
+	@echo "🗑 CloudNativePG Operator and namespace 'cnpg-system' deleted."
+
 .PHONY: postgres-svc-deploy
-postgres-svc-deploy: _env-check _svc-name-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
-	@echo "Deploying PostgreSQL cluster for '$(SVC_NAME)svc' into '$(DATA_NS)' namespace...";
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/postgres-"$(SVC_NAME)"svc.yaml;
+postgres-svc-deploy: _env-check _data-ns-check _svc-name-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
+	@echo "Deploying PostgreSQL cluster for '$(SVC_NAME)' into '$(DATA_NS)' namespace...";
+	@kubectl kustomize "$(VALUES_FILE_PREFIX)/infra/postgres/$(SVC_NAME)" | kubectl apply --server-side -f -;
+	@echo "✅ Postgres cluster deployment for '$(SVC_NAME)' initiated. Check status with: make postgres-svc-status SVC_NAME=$(SVC_NAME)"
 
 .PHONY: postgres-svc-status
 postgres-svc-status: _env-check _svc-name-check ## Show PostgreSQL cluster/resource status for service. Usage: make postgres-svc-status SVC_NAME=<svc-name>
 	@echo "Status for namespace: $(DATA_NS)"
-	@kubectl cnpg status "$(ENV_NAME)-postgres-$(SVC_NAME)svc" || true
+	@kubectl cnpg status "$(ENV_NAME)-postgres-$(SVC_NAME)" || true
+
+.PHONY: postgres-svc-delete
+postgres-svc-delete: _env-check ## Delete PostgreSQL cluster for service. Usage: make postgres-svc-delete SVC_NAME=<svc-name>
+	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' in namespace '$(DATA_NS)'..."
+	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true
+	@echo "🗑 Postgres cluster for '$(SVC_NAME)' removed."
+
 
 .PHONY: postgres-svc-purge
-postgres-svc-purge: _env-check ## Uninstall cluster and permanently remove related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
-	@echo "Removing PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
-	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)"svc || true
-	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
-	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)svc-creds || true
+postgres-svc-purge: _env-check ## Delete cluster and permanently remove related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
+	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' in namespace '$(DATA_NS)'..."
+	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true
+	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)' in namespace '$(DATA_NS)'..."
+	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)-creds || true
+	@echo "🗑 Postgres cluster for '$(SVC_NAME)' and its user creds removed."
 
 ################################################################################
 # Elastic Cloud Deployment Targets
@@ -334,10 +350,10 @@ kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka Operator int
 	@kubectl get pods -n kafka-system --selector=name=strimzi-cluster-operator
 
 kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator from kafka-system namespace
-	@echo "Uninstalling Strimzi Kafka Operator..."
+	@echo "Uninstalling Strimzi Kafka operator..."
 	@helm uninstall strimzi-operator -n kafka-system || true
-	@kubectl delete namespace kafka-system || true
-	@echo "🗑 Strimzi Kafka Operator uninstalled and namespace 'kafka-system' deleted."
+	@kubectl wait --for=delete namespace/kafka-system --timeout=60s 2>/dev/null || true
+	@echo "🗑 Strimzi Kafka operator uninstalled and namespace 'kafka-system' deleted."
 
 .PHONY: kafka-deploy
 kafka-deploy: _env-check ## Deploy Kafka cluster
