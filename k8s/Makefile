@@ -215,7 +215,7 @@ grafana-ui: ## Access Grafana UI via port-forward
 ################################################################################
 
 CLOUDNATIVE_PG_VERSION := 1.27.0
-PG_SVC_USER_PWD ?= pgsvcpwd
+PG_SVC_USER_PWD ?= pgSvcUserPwd
 
 .PHONY: postgres-svc-secret-create
 postgres-svc-secret-create: _env-check _data-ns-check _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
