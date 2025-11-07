@@ -186,15 +186,28 @@ KUBE_PROMETHEUS_STACK_VERSION := 77.10.0
 prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
-	@echo "Installing Kube Prometheus Stack using Helm chart v$(KUBE_PROMETHEUS_STACK_VERSION)..."
+	@echo "Installing Kube Prometheus Stack using Helm chart v$(KUBE_PROMETHEUS_STACK_VERSION) into $(MONITORING_NS) namespace..."
 	@helm upgrade --install "$(ENV_NAME)"-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
 		--namespace $(MONITORING_NS) \
-		--values "$(VALUES_FILE_PREFIX)"/prometheus-values.yaml \
-		--wait \
-		--timeout 15m
-	@echo "✅ Kube Prometheus Stack installed into '$(MONITORING_NS)' namespace. Verifying pods..."
-	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/instance="$(ENV_NAME)"-prometheus
+		--values "$(VALUES_FILE_PREFIX)"/prometheus-values.yaml
+	@echo "✅ Kube Prometheus Stack deployment initiated. Check status with: make prometheus-stack-status"
+
+.PHONY: prometheus-stack-status
+prometheus-stack-status: _monitoring-ns-check ## Show Kube Prometheus Stack deployment status
+	@echo "Status for Prometheus Stack in namespace: $(MONITORING_NS)"
+	@echo "\nPrometheus StatefulSet:"
+	@kubectl get statefulset -n $(MONITORING_NS) -l app.kubernetes.io/name=prometheus || true
+	@echo "\nAlertmanager StatefulSet:"
+	@kubectl get statefulset -n $(MONITORING_NS) -l app.kubernetes.io/name=alertmanager || true
+	@echo "\nGrafana Deployment:"
+	@kubectl get deployment -n $(MONITORING_NS) -l app.kubernetes.io/name=grafana || true
+	@echo "\nOperator Deployment:"
+	@kubectl get deployment -n $(MONITORING_NS) -l app.kubernetes.io/name=kube-prometheus-stack-operator || true
+	@echo "\nPrometheus Services:"
+	@kubectl get svc -n $(MONITORING_NS) -l app=kube-prometheus-stack-prometheus || true
+	@echo "\nGrafana Service:"
+	@kubectl get svc -n $(MONITORING_NS) -l app.kubernetes.io/name=grafana || true
 
 .PHONY: prometheus-ui
 prometheus-ui: ## Access Prometheus UI via port-forward

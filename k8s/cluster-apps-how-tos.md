@@ -17,6 +17,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
 - `cd k8s`
 1. **Prometheus & Grafana**
 - `make prometheus-stack-install`
+- `make prometheus-stack-status`
 - `kubectl get pods -n qa-monitoring | grep prometheus`
     ```shell
     NAME                                                     READY   STATUS    RESTARTS   AGE
