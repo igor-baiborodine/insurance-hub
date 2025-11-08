@@ -8,4 +8,4 @@ spec:
       database: policy
       owner: policy
       secret:
-        name: local-dev-postgres-policy-user-creds
+        name: qa-postgres-policy-user-creds

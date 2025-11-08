@@ -180,7 +180,7 @@ _svc-name-check: ## Ensure that the SVC_NAME argument is provided
 # Current context must be "qa-insurance-hub"
 ################################################################################
 
-KUBE_PROMETHEUS_STACK_VERSION := 77.10.0
+KUBE_PROMETHEUS_STACK_VERSION := 79.3.0
 
 .PHONY: prometheus-stack-install
 prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
@@ -190,22 +190,28 @@ prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack 
 	@helm upgrade --install "$(ENV_NAME)"-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
 		--namespace $(MONITORING_NS) \
-		--values "$(VALUES_FILE_PREFIX)"/prometheus-values.yaml
+		--values "$(VALUES_FILE_PREFIX)"/infra/prometheus/values.yaml
 	@echo "✅ Kube Prometheus Stack deployment initiated. Check status with: make prometheus-stack-status"
+
+.PHONY: prometheus-stack-uninstall
+prometheus-stack-uninstall: _monitoring-ns-check ## Uninstall Kube Prometheus Stack
+	@echo "Uninstalling Kube Prometheus Stack..."
+	@helm uninstall "$(ENV_NAME)"-prometheus --namespace $(MONITORING_NS) || true
+	@echo "🗑 Kube Prometheus Stack uninstalled from '$(MONITORING_NS)' namespace...."
 
 .PHONY: prometheus-stack-status
 prometheus-stack-status: _monitoring-ns-check ## Show Kube Prometheus Stack deployment status
 	@echo "Status for Prometheus Stack in namespace: $(MONITORING_NS)"
 	@echo "\nPrometheus StatefulSet:"
 	@kubectl get statefulset -n $(MONITORING_NS) -l app.kubernetes.io/name=prometheus || true
+	@echo "\nPrometheus Services:"
+	@kubectl get svc -n $(MONITORING_NS) -l app=kube-prometheus-stack-prometheus || true
+	@echo "\nPrometheus Pods:"
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=prometheus
 	@echo "\nAlertmanager StatefulSet:"
 	@kubectl get statefulset -n $(MONITORING_NS) -l app.kubernetes.io/name=alertmanager || true
 	@echo "\nGrafana Deployment:"
 	@kubectl get deployment -n $(MONITORING_NS) -l app.kubernetes.io/name=grafana || true
-	@echo "\nOperator Deployment:"
-	@kubectl get deployment -n $(MONITORING_NS) -l app.kubernetes.io/name=kube-prometheus-stack-operator || true
-	@echo "\nPrometheus Services:"
-	@kubectl get svc -n $(MONITORING_NS) -l app=kube-prometheus-stack-prometheus || true
 	@echo "\nGrafana Service:"
 	@kubectl get svc -n $(MONITORING_NS) -l app.kubernetes.io/name=grafana || true
 
@@ -230,21 +236,11 @@ grafana-ui: ## Access Grafana UI via port-forward
 CLOUDNATIVE_PG_VERSION := 1.27.0
 PG_SVC_USER_PWD ?= pgSvcUserPwd
 
-.PHONY: postgres-svc-secret-create
-postgres-svc-secret-create: _env-check _data-ns-check _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
-	@echo "Creating secret with user creds for '$(SVC_NAME)' database in PostgreSQL..."
-	@kubectl create secret generic "$(ENV_NAME)"-postgres-"$(SVC_NAME)"-creds \
-	    --namespace "$(DATA_NS)" \
-	    --type kubernetes.io/basic-auth \
-	    --from-literal=username="$(SVC_NAME)" \
-	    --from-literal=password="$(PG_SVC_USER_PWD)" \
-		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "Secret '"$(ENV_NAME)"-postgres-"$(SVC_NAME)"-creds' successfully created/updated in namespace $(DATA_NS)"
-
 .PHONY: postgres-operator-deploy
 postgres-operator-deploy: _env-check ## Install CloudNativePG operator
-	@echo "Deploying CloudNativePG operator v$(CLOUDNATIVE_PG_VERSION) into `cnpg-system` namespace..."
+	@echo "Deploying CloudNativePG operator v$(CLOUDNATIVE_PG_VERSION) into 'cnpg-system' namespace..."
 	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
+	@echo "✅ CloudNativePG operator deployment initiated."
 
 .PHONY: postgres-operator-delete
 postgres-operator-delete: _env-check ## Delete CloudNativePG operator
@@ -253,6 +249,17 @@ postgres-operator-delete: _env-check ## Delete CloudNativePG operator
 	@echo "Waiting for namespace deletion..."
 	@kubectl wait --for=delete namespace/cnpg-system --timeout=60s 2>/dev/null || true
 	@echo "🗑 CloudNativePG Operator and namespace 'cnpg-system' deleted."
+
+.PHONY: postgres-svc-secret-create
+postgres-svc-secret-create: _env-check _data-ns-check _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
+	@echo "Creating secret with user creds for '$(SVC_NAME)' database in PostgreSQL..."
+	@kubectl create secret generic "$(ENV_NAME)"-postgres-"$(SVC_NAME)"-user-creds \
+	    --namespace "$(DATA_NS)" \
+	    --type kubernetes.io/basic-auth \
+	    --from-literal=username="$(SVC_NAME)" \
+	    --from-literal=password="$(PG_SVC_USER_PWD)" \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@echo "Secret '"$(ENV_NAME)"-postgres-"$(SVC_NAME)"-user-creds' successfully created/updated in namespace $(DATA_NS)"
 
 .PHONY: postgres-svc-deploy
 postgres-svc-deploy: _env-check _data-ns-check _svc-name-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
@@ -271,13 +278,12 @@ postgres-svc-delete: _env-check ## Delete PostgreSQL cluster for service. Usage:
 	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true
 	@echo "🗑 Postgres cluster for '$(SVC_NAME)' removed."
 
-
 .PHONY: postgres-svc-purge
 postgres-svc-purge: _env-check ## Delete cluster and permanently remove related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
 	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' in namespace '$(DATA_NS)'..."
 	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true
 	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)' in namespace '$(DATA_NS)'..."
-	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)-creds || true
+	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)-user-creds || true
 	@echo "🗑 Postgres cluster for '$(SVC_NAME)' and its user creds removed."
 
 ################################################################################

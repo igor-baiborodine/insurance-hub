@@ -8,4 +8,4 @@ spec:
       database: product
       owner: product
       secret:
-        name: local-dev-postgres-product-creds
+        name: local-dev-postgres-product-user-creds

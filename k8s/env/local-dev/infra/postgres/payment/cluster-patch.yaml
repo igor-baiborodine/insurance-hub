@@ -8,4 +8,4 @@ spec:
       database: payment
       owner: payment
       secret:
-        name: local-dev-postgres-payment-creds
+        name: local-dev-postgres-payment-user-creds

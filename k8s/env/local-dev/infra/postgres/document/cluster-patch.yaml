@@ -8,4 +8,4 @@ spec:
       database: document
       owner: document
       secret:
-        name: local-dev-postgres-document-creds
+        name: local-dev-postgres-document-user-creds

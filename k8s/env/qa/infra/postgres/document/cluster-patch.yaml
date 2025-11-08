@@ -5,7 +5,7 @@ metadata:
 spec:
   bootstrap:
     initdb:
-      database: policy
-      owner: policy
+      database: document
+      owner: document
       secret:
-        name: local-dev-postgres-policy-user-creds
+        name: qa-postgres-document-user-creds

@@ -68,6 +68,20 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   - `make postgres-svc-secret-create SVC_NAME=product PG_SVC_USER_PWD=<user-pwd>`
   - `make postgres-svc-deploy SVC_NAME=product`, wait at least one minute for the cluster to be ready.
 
+- `kubectl get pods -n qa-data | grep postgres`
+    ```shell
+    NAME                     READY   STATUS    RESTARTS   AGE
+    qa-postgres-auth-1       1/1     Running   0          47m
+    qa-postgres-auth-2       1/1     Running   0          45m
+    qa-postgres-document-1   1/1     Running   0          36m
+    qa-postgres-document-2   1/1     Running   0          35m
+    qa-postgres-payment-1    1/1     Running   0          28m
+    qa-postgres-payment-2    1/1     Running   0          27m
+    qa-postgres-policy-1     1/1     Running   0          11m
+    qa-postgres-policy-2     1/1     Running   0          11m
+    qa-postgres-product-1    1/1     Running   0          33s
+    qa-postgres-product-2    1/1     Running   0          12s
+    ```
 - `make grafana-ui`
 - **QA/Grafana**: In _Dashboards > New > Import_, add the "CloudNativePG" dashboard using the following
   URL: https://grafana.com/grafana/dashboards/20417-cloudnativepg/.

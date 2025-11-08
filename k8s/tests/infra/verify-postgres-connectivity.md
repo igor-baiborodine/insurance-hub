@@ -24,7 +24,7 @@ PostgreSQL cluster.
     connect to the database. 
     
     ```shell
-    echo "PG_SVC_USER_PWD=$(kubectl get secret local-dev-postgres-auth-creds -n local-dev-all -o jsonpath='{.data.password}' | base64 --decode)"
+    echo "PG_SVC_USER_PWD=$(kubectl get secret local-dev-postgres-auth-user-creds -n local-dev-all -o jsonpath='{.data.password}' | base64 --decode)"
     psql --host=localhost -U auth -d auth -p 5432
     ```
 
@@ -55,7 +55,7 @@ PostgreSQL cluster.
     and export it as an environment variable with the following command:
     
     ```shell
-    export PG_SVC_USER_PWD=$(kubectl get secret qa-postgres-authsvc-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)
+    export PG_SVC_USER_PWD=$(kubectl get secret qa-postgres-auth-user-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)
     echo "$PG_SVC_USER_PWD"   
     ```
 
@@ -67,7 +67,7 @@ PostgreSQL cluster.
     
     ```shell
     kubectl run psql-test --rm -it --image=postgres --namespace=default -- \
-        psql "postgresql://authsvc:$PG_SVC_USER_PWD@qa-postgres-authsvc-rw.qa-data.svc.cluster.local:5432/authsvc"
+        psql "postgresql://auth:$PG_SVC_USER_PWD@qa-postgres-auth-rw.qa-data.svc.cluster.local:5432/auth"
     ```
     
     Once connected, the `psql` prompt should be displayed. Then run SQL commands (like `\dt` to list

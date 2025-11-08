@@ -8,4 +8,4 @@ spec:
       database: auth
       owner: auth
       secret:
-        name: local-dev-postgres-auth-creds
+        name: local-dev-postgres-auth-user-creds
