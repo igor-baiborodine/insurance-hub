@@ -39,17 +39,13 @@ defaultRules:
 
 prometheus:
   prometheusSpec:
-    # This tells Prometheus to look for ServiceMonitors in ANY namespace.
     serviceMonitorNamespaceSelector: {}
-    # This tells Prometheus to select any ServiceMonitor that has this label.
     serviceMonitorSelector:
       matchLabels:
         release: qa-prometheus
-    # This is for PodMonitors, good to have for consistency
     podMonitorNamespaceSelector: {}
     podMonitorSelector:
-      matchLabels:
-        release: qa-prometheus
+      matchLabels: {}
 
 grafana:
   enabled: true
