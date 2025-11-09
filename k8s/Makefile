@@ -195,9 +195,9 @@ prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack 
 
 .PHONY: prometheus-stack-uninstall
 prometheus-stack-uninstall: _monitoring-ns-check ## Uninstall Kube Prometheus Stack
-	@echo "Uninstalling Kube Prometheus Stack..."
+	@echo "Uninstalling Kube Prometheus Stack from '$(MONITORING_NS)' namespace..."
 	@helm uninstall "$(ENV_NAME)"-prometheus --namespace $(MONITORING_NS) || true
-	@echo "🗑 Kube Prometheus Stack uninstalled from '$(MONITORING_NS)' namespace...."
+	@echo "🗑 Kube Prometheus Stack uninstalled."
 
 .PHONY: prometheus-stack-status
 prometheus-stack-status: _monitoring-ns-check ## Show Kube Prometheus Stack deployment status
@@ -237,18 +237,18 @@ CLOUDNATIVE_PG_VERSION := 1.27.0
 PG_SVC_USER_PWD ?= pgSvcUserPwd
 
 .PHONY: postgres-operator-deploy
-postgres-operator-deploy: _env-check ## Install CloudNativePG operator
+postgres-operator-deploy: _env-check ## Deploy CloudNativePG operator
 	@echo "Deploying CloudNativePG operator v$(CLOUDNATIVE_PG_VERSION) into 'cnpg-system' namespace..."
 	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
 	@echo "✅ CloudNativePG operator deployment initiated."
 
 .PHONY: postgres-operator-delete
-postgres-operator-delete: _env-check ## Delete CloudNativePG operator
+postgres-operator-delete: _env-check ## Delete CloudNativePG operator with its namespace
 	@echo "Deleting CloudNativePG operator..."
 	@kubectl delete -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
 	@echo "Waiting for namespace deletion..."
 	@kubectl wait --for=delete namespace/cnpg-system --timeout=60s 2>/dev/null || true
-	@echo "🗑 CloudNativePG Operator and namespace 'cnpg-system' deleted."
+	@echo "🗑 CloudNativePG operator and namespace 'cnpg-system' deleted."
 
 .PHONY: postgres-svc-secret-create
 postgres-svc-secret-create: _env-check _data-ns-check _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
@@ -276,15 +276,15 @@ postgres-svc-status: _env-check _svc-name-check ## Show PostgreSQL cluster/resou
 postgres-svc-delete: _env-check ## Delete PostgreSQL cluster for service. Usage: make postgres-svc-delete SVC_NAME=<svc-name>
 	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' in namespace '$(DATA_NS)'..."
 	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true
-	@echo "🗑 Postgres cluster for '$(SVC_NAME)' removed."
+	@echo "🗑 Postgres cluster for '$(SVC_NAME)' deleted."
 
 .PHONY: postgres-svc-purge
-postgres-svc-purge: _env-check ## Delete cluster and permanently remove related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
+postgres-svc-purge: _env-check ## Delete PostgreSQL cluster for service and its related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
 	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' in namespace '$(DATA_NS)'..."
 	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true
 	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)' in namespace '$(DATA_NS)'..."
 	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)-user-creds || true
-	@echo "🗑 Postgres cluster for '$(SVC_NAME)' and its user creds removed."
+	@echo "🗑 Postgres cluster for '$(SVC_NAME)' and its user creds deleted."
 
 ################################################################################
 # Elastic Cloud Deployment Targets
@@ -292,27 +292,32 @@ postgres-svc-purge: _env-check ## Delete cluster and permanently remove related 
 # Namespace and environment auto-detected from current kubectl context
 ################################################################################
 
-ECK_OPERATOR_VERSION := 3.1.0
+ECK_OPERATOR_VERSION := 3.2.0
 
-.PHONY: eck-operator-deploy
-eck-operator-deploy: _env-check ## Install Elastic Cloud on Kubernetes (ECK) Operator
-	@echo "Installing ECK operator v$(ECK_OPERATOR_VERSION) into 'elastic-system' namespace..."
+.PHONY: es-operator-deploy
+es-operator-deploy: _env-check ## Deploy Elastic Cloud on Kubernetes (ECK) Operator
+	@echo "Deploying ECK operator v$(ECK_OPERATOR_VERSION) into 'elastic-system' namespace..."
 	@kubectl create -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml || true
 	@kubectl apply --server-side -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml
-
-.PHONY: eck-operator-delete
-eck-operator-delete: _env-check ## Uninstall Elastic Cloud on Kubernetes (ECK) Operator
-	@echo "Uninstalling ECK operator v$(ECK_OPERATOR_VERSION) from 'elastic-system' namespace..."
+	@echo "✅ ECK operator deployment initiated."
+	
+.PHONY: es-operator-delete
+es-operator-delete: _env-check ## Delete Elastic Cloud on Kubernetes (ECK) Operator
+	@echo "Deleting ECK operator v$(ECK_OPERATOR_VERSION) from 'elastic-system' namespace..."
 	@kubectl delete -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml --ignore-not-found
 	@kubectl delete -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml --ignore-not-found
+	@echo "Waiting for namespace deletion..."
+	@kubectl wait --for=delete namespace/elastic-system --timeout=60s 2>/dev/null || true
+	@echo "🗑 ECK operator and namespace 'elastic-system' deleted."
 
-.PHONY: elasticsearch-deploy
-elasticsearch-deploy: _env-check ## Deploy Elasticsearch cluster
+.PHONY: es-deploy
+es-deploy: _env-check ## Deploy Elasticsearch cluster
 	@echo "Deploying Elasticsearch cluster into '$(DATA_NS)' namespace...";
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/elasticsearch.yaml;
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/infra/elastic/elasticsearch.yaml;
+	@echo "✅ Elasticsearch cluster deployment initiated. Check status with: make es-status"
 
-.PHONY: elasticsearch-status
-elasticsearch-status: _env-check ## Show Elasticsearch cluster status
+.PHONY: es-status
+es-status: _env-check ## Show Elasticsearch cluster status
 	@echo "Status for namespace: $(DATA_NS)"
 	@echo "\nElasticsearch Pods:"
 	@kubectl get pods -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
@@ -325,26 +330,30 @@ elasticsearch-status: _env-check ## Show Elasticsearch cluster status
 	@echo "\nElasticsearch Cluster:"
 	@kubectl get elasticsearch -n "$(DATA_NS)" "$(ENV_NAME)-elasticsearch" -o wide || true
 
-.PHONY: elasticsearch-delete
-elasticsearch-delete: _env-check ## Delete Elasticsearch cluster only
+.PHONY: es-delete
+es-delete: _env-check ## Delete Elasticsearch cluster only
 	@echo "Deleting Elasticsearch cluster '$(ENV_NAME)-elasticsearch' from namespace $(DATA_NS)..."
 	@kubectl delete elasticsearch "$(ENV_NAME)-elasticsearch" -n "$(DATA_NS)" --ignore-not-found || true
+	@echo "🗑 Elasticsearch cluster deleted."
 
-.PHONY: elasticsearch-purge
-elasticsearch-purge: elasticsearch-delete ## Delete Elasticsearch cluster and related secrets and PVCs
+.PHONY: es-purge
+es-purge: es-delete ## Delete Elasticsearch cluster and its related secrets and PVCs
 	@echo "Deleting Elasticsearch-related secrets and PVCs in namespace $(DATA_NS)..."
 	@kubectl delete secret -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
 	@kubectl delete pvc -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
+	@echo "🗑 Elasticsearch cluster and its related secrets and PVCs deleted."
 
-.PHONY: elasticsearch-exporter-deploy
-elasticsearch-exporter-deploy: _env-check ## Deploy Prometheus Elasticsearch Exporter for monitoring
-	@echo "Deploying Elasticsearch Exporter into '$(DATA_NS)' namespace..."
-	@kubectl apply -f "$(VALUES_FILE_PREFIX)"/elasticsearch-exporter.yaml
+.PHONY: es-exporter-deploy
+es-exporter-deploy: _env-check ## Deploy Prometheus Elasticsearch exporter for monitoring
+	@echo "Deploying Elasticsearch exporter into '$(DATA_NS)' namespace..."
+	@kubectl apply -f "$(VALUES_FILE_PREFIX)"/infra/elastic/elasticsearch-exporter.yaml
+	@echo "✅ Elasticsearch exporter deployment initiated."
 
-.PHONY: elasticsearch-exporter-delete
-elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exporter
-	@echo "Deleting Elasticsearch Exporter from namespace $(DATA_NS)..."
-	@kubectl delete -f "$(VALUES_FILE_PREFIX)"/elasticsearch-exporter.yaml --ignore-not-found || true
+.PHONY: es-exporter-delete
+es-exporter-delete: _env-check ## Delete Prometheus Elasticsearch exporter
+	@echo "Deleting Elasticsearch exporter from namespace $(DATA_NS)..."
+	@kubectl delete -f "$(VALUES_FILE_PREFIX)"/infra/elastic/elasticsearch-exporter.yaml --ignore-not-found || true
+	@echo "🗑 Elasticsearch exporter deleted."
 
 ################################################################################
 # Kafka Deployment Targets
@@ -414,7 +423,7 @@ kafka-purge: kafka-delete ## Delete Kafka cluster and permanently remove PVCs, N
 	@echo "Deleting Kafka-related PVCs in namespace $(DATA_NS)..."
 	@kubectl delete pvc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
 
-	@echo "🗑️  Kafka cluster, all NodePools, StrimziPodSets, and persistent data removed."
+	@echo "🗑️  Kafka cluster, all NodePools, StrimziPodSets, and persistent data deleted."
 
 .PHONY: kafka-topics-list
 kafka-topics-list: _env-check ## List all Kafka topics
@@ -647,7 +656,7 @@ jsreport-delete: _env-check ## Delete JSReport deployment
 jsreport-purge: jsreport-delete _env-check ## Purge JSReport PVC
 	@echo "Deleting JSReport-related PVC in namespace $(SVC_NS)..."
 	@kubectl delete pvc "$(ENV_NAME)"-jsreport-cache-pvc -n "$(SVC_NS)" --ignore-not-found || true
-	@echo "🗑 JSReport cluster and its persistent data removed."
+	@echo "🗑 JSReport cluster and its persistent data deleted."
 
 .PHONY: jsreport-ui
 jsreport-ui: _env-check ## Access Grafana UI via port-forward

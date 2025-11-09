@@ -31,7 +31,7 @@ To verify connectivity to the Elasticsearch instance running in your local Kind 
    With port-forward active, open a **new** terminal and run:
 
     ```shell
-    curl -u elastic:$ELASTIC_USER_PWD -k https://localhost:9200/_cluster/health
+    curl -u elastic:$ELASTIC_USER_PWD -k https://localhost:9200/_cluster/health | jq .
     ```
 
    You should receive a JSON response indicating cluster health status:

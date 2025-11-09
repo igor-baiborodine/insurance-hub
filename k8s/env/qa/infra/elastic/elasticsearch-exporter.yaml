@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: elasticsearch-exporter
+  name: qa-elasticsearch-exporter
   namespace: qa-data
   labels:
     app: elasticsearch-exporter
@@ -18,7 +18,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: elasticsearch-exporter
+  name: qa-elasticsearch-exporter
   namespace: qa-data
   labels:
     app: elasticsearch-exporter
@@ -77,7 +77,7 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: elasticsearch-exporter
+  name: qa-elasticsearch-exporter
   namespace: qa-data
   labels:
     app: elasticsearch-exporter
