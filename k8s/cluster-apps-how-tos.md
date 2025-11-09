@@ -94,14 +94,9 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 
 ### MongoDB
 
-- `make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>`
 - `make mongodb-operator-install`
+- `make mongodb-root-user-secret-create MONGO_ROOT_USER_PWD=<user-pwd>`
 - `make mongodb-deploy`
-- `kubectl get pods -n local-dev-all | grep mongodb`
-    ```shell
-    local-dev-mongodb-0                            2/2     Running   0          4m41s
-    mongodb-kubernetes-operator-7898cfb5f8-rkc7r   1/1     Running   0          5m34s
-    ```
 - `make mongodb-status`  
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=mongodb-deploy-<iso-date>`
 

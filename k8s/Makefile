@@ -341,7 +341,7 @@ es-purge: es-delete ## Delete Elasticsearch cluster and its related secrets and 
 	@echo "Deleting Elasticsearch-related secrets and PVCs in namespace $(DATA_NS)..."
 	@kubectl delete secret -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
 	@kubectl delete pvc -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
-	@echo "🗑 Elasticsearch cluster and its related secrets and PVCs deleted."
+	@echo "🗑 Elasticsearch-related secrets and PVCs deleted."
 
 .PHONY: es-exporter-deploy
 es-exporter-deploy: _env-check ## Deploy Prometheus Elasticsearch exporter for monitoring
@@ -367,15 +367,12 @@ kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka Operator int
 	@kubectl get namespace kafka-system >/dev/null 2>&1 || kubectl create namespace kafka-system
 	@helm repo add strimzi https://strimzi.io/charts/ || true
 	@helm repo update
-	@echo "Installing Strimzi Kafka operator v$(STRIMZI_OPERATOR_VERSION)..."
+	@echo "Installing Strimzi Kafka operator v$(STRIMZI_OPERATOR_VERSION) in 'kafka-system' namespace..."
 	@helm upgrade --install strimzi-operator strimzi/strimzi-kafka-operator \
 		--version $(STRIMZI_OPERATOR_VERSION) \
 		--namespace kafka-system \
-		--set watchNamespaces={"$(DATA_NS)"} \
-		--wait \
-		--timeout 5m
-	@echo "✅ Strimzi Kafka Operator installed. Verifying pods..."
-	@kubectl get pods -n kafka-system --selector=name=strimzi-cluster-operator
+		--set watchNamespaces={"$(DATA_NS)"}
+	@echo "✅ Strimzi Kafka operator installation initiated."
 
 kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator from kafka-system namespace
 	@echo "Uninstalling Strimzi Kafka operator..."
@@ -568,36 +565,40 @@ minio-tenant-purge: minio-tenant-delete _svc-name-check ## Delete MinIO tenant a
 ################################################################################
 
 MONGODB_OPERATOR_VERSION := 0.13.0
-MONGO_ROOT_USER_PWD ?= rootpwd
+MONGO_ROOT_USER_PWD ?= mongoRootUserPwd
 
 .PHONY: mongodb-operator-install
 mongodb-operator-install: _env-check ## Install MongoDB Community Operator
 	@kubectl get namespace "$(DATA_NS)" >/dev/null 2>&1 || kubectl create namespace "$(DATA_NS)"
 	@helm repo add mongodb https://mongodb.github.io/helm-charts
 	@helm repo update
-	@echo "Installing MongoDB Community Operator v$(MONGODB_OPERATOR_VERSION)..."
+	@echo "Installing MongoDB operator v$(MONGODB_OPERATOR_VERSION) into $(DATA_NS) namespace..."
 	@helm upgrade --install mongodb-operator mongodb/community-operator \
 		--version "$(MONGODB_OPERATOR_VERSION)" \
-		--namespace "$(DATA_NS)" \
-		--wait \
-		--timeout 10m
-	@echo "✅ MongoDB Community Operator installed. Verifying pods..."
-	@kubectl get pods -n "$(DATA_NS)" -l name=mongodb-kubernetes-operator
+		--namespace "$(DATA_NS)"
+	@echo "✅ MongoDB operator installation initiated."
 
-.PHONY: mongodb-root-secret-create
-mongodb-root-secret-create: _env-check _data-ns-check ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>
-	@echo "Creating secret with user creds for 'admin' database in MongoDB..."
-	@kubectl create secret generic "$(ENV_NAME)"-mongodb-root-creds \
+.PHONY: mongodb-operator-uninstall
+mongodb-operator-uninstall: _env-check ## Delete MongoDB Community Operator
+	@echo "Uninstalling MongoDB operator from namespace $(DATA_NS)..."
+	@helm uninstall mongodb-operator -n "$(DATA_NS)" || true
+	@echo "🗑 MongoDB operator uninstalled."
+
+.PHONY: mongodb-root-user-secret-create
+mongodb-root-user-secret-create: _env-check _data-ns-check ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>
+	@echo "Creating secret with 'root' user creds for 'admin' database in MongoDB..."
+	@kubectl create secret generic "$(ENV_NAME)"-mongodb-root-user-creds \
 	    --namespace "$(DATA_NS)" \
 	    --type Opaque \
 	    --from-literal=password="$(MONGO_ROOT_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "Secret '"$(ENV_NAME)"-mongodb-root-creds' successfully created/updated in namespace $(DATA_NS)"
+	@echo "Secret '"$(ENV_NAME)"-mongodb-root-user-creds' successfully created/updated in namespace $(DATA_NS)"
 
 .PHONY: mongodb-deploy
 mongodb-deploy: _env-check _data-ns-check ## Deploy MongoDB cluster
 	@echo "Deploying MongoDB cluster to '$(DATA_NS)' namespace...";
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/mongodb.yaml;
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/infra/mongodb/mongodbcommunity.yaml;
+	@echo "✅ MongoDB cluster deployment initiated. Check status with: make mongodb-status"
 
 .PHONY: mongodb-status
 mongodb-status: _env-check ## Show MongoDB cluster status
@@ -615,12 +616,14 @@ mongodb-status: _env-check ## Show MongoDB cluster status
 mongodb-delete: _env-check ## Delete MongoDB cluster only
 	@echo "Deleting MongoDB cluster '$(ENV_NAME)-mongodb' from namespace $(DATA_NS)..."
 	@kubectl delete mongodbcommunity "$(ENV_NAME)"-mongodb -n "$(DATA_NS)" --ignore-not-found || true
+	@echo "🗑 MongoDB cluster deleted."
 
 .PHONY: mongodb-purge
 mongodb-purge: mongodb-delete ## Delete MongoDB cluster and permanently remove related secrets and PVCs
 	@echo "Deleting MongoDB-related secrets and PVCs in namespace $(DATA_NS)..."
-	@kubectl delete secret -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
+	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-mongodb-root-user-creds || true
 	@kubectl delete pvc -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
+	@echo "🗑 MongoDB-related secrets and PVCs deleted."
 
 ################################################################################
 # JSReport Deployment Targets
