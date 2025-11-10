@@ -1,9 +1,7 @@
 apiVersion: minio.min.io/v2
 kind: Tenant
 metadata:
-  name: minio-tenant
-  labels:
-    app: local-dev-minio-payment
+  name: minio
   annotations: {}
 spec:
   env:
@@ -12,7 +10,7 @@ spec:
   requestAutoCert: false
   pools:
     - servers: 1
-      name: pool-0
+      name: pool
       volumesPerServer: 1
       volumeClaimTemplate:
         spec:

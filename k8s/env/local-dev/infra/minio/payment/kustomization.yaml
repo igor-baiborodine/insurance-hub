@@ -3,10 +3,11 @@ kind: Kustomization
 
 namespace: local-dev-minio-payment
 namePrefix: local-dev-
+nameSuffix: -payment
 resources:
   - ../../../../../apps/infra/minio/base
 patches:
-  - path: minio-payment-patch.yaml
+  - path: tenant-patch.yaml
     target:
       kind: Tenant
-      name: minio-tenant
+      name: minio

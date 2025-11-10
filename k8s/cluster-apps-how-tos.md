@@ -5,7 +5,16 @@
 **Table of Contents**
 
 - [QA—Observability](#qaobservability)
+  - [Prometheus & Grafana](#prometheus--grafana)
+  - [Zipkin](#zipkin)
 - [Data](#data)
+  - [Postgres](#postgres)
+  - [MongoDB](#mongodb)
+  - [Elasticsearch](#elasticsearch)
+  - [MinIO](#minio)
+  - [Kafka](#kafka)
+- [Services](#services)
+  - [JSReport](#jsreport)
 - [QA—Cluster Load Monitoring](#qacluster-load-monitoring)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
