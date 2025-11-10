@@ -526,7 +526,9 @@ minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for 
 	echo "\nMinIO Services:"; \
 	kubectl get svc -n "$$NAMESPACE" || true; \
 	echo "\nMinIO PersistentVolumeClaims:"; \
-	kubectl get pvc -n "$$NAMESPACE" || true
+	kubectl get pvc -n "$$NAMESPACE" || true; \
+	echo "\nMinIO ServiceMonitors:"; \
+	kubectl get servicemonitor -n "$$NAMESPACE" || true
 
 .PHONY: minio-tenant-delete
 minio-tenant-delete: _env-check _svc-name-check ## Delete MinIO tenant for service. Usage: make minio-tenant-delete SVC_NAME=<svc-name>

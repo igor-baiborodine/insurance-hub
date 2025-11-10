@@ -2,13 +2,9 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: minio-service-monitor
-  namespace: qa-minio-document
 spec:
   selector:
     matchLabels: {}
-  namespaceSelector:
-    matchNames:
-      - qa-minio-document
   endpoints:
     - port: https-minio
       path: /minio/v2/metrics/cluster

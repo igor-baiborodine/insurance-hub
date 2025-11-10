@@ -83,33 +83,40 @@ as port-forwarding is less practical for multi-user or production-like environme
    Use internal DNS and services to connect:
 
     ```bash
-    ./mc alias set local https://qa-minio-tenant-hl.qa-minio-document.svc.cluster.local:9000
+    ./mc alias set local https://qa-minio-document-hl.qa-minio-document.svc.cluster.local:9000
     # Use values from the secret created by the target below, for example, qa-minio-document-storage-user-creds
     # make minio-storage-user-secret-create SVC_NAME=<svc-name> MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>
     Enter Access Key: <access-key>
     Enter Secret Key: <secret-key>
     Added `local` successfully.
     ./mc admin info local
-    ●  qa-minio-tenant-pool-0-0.qa-minio-tenant-hl.qa-minio-document.svc.cluster.local:9000
-    Uptime: 1 hour
-    Version: 2025-04-08T15:41:24Z
-    Network: 2/2 OK
+    ●  qa-minio-document-pool-0.qa-minio-document-hl.qa-minio-document.svc.cluster.local:9000
+   Uptime: 12 minutes 
+   Version: 2025-09-07T16:13:09Z
+   Network: 3/3 OK 
+   Drives: 2/2 OK 
+   Pool: 1
+
+    ●  qa-minio-document-pool-1.qa-minio-document-hl.qa-minio-document.svc.cluster.local:9000
+    Uptime: 12 minutes
+    Version: 2025-09-07T16:13:09Z
+    Network: 3/3 OK
     Drives: 2/2 OK
     Pool: 1
     
-    ●  qa-minio-tenant-pool-0-1.qa-minio-temant-hl.qa-minio-document.svc.cluster.local:9000
-    Uptime: 1 hour
-    Version: 2025-04-08T15:41:24Z
-    Network: 2/2 OK
+    ●  qa-minio-document-pool-2.qa-minio-document-hl.qa-minio-document.svc.cluster.local:9000
+    Uptime: 12 minutes
+    Version: 2025-09-07T16:13:09Z
+    Network: 3/3 OK
     Drives: 2/2 OK
     Pool: 1
     
-    ┌──────┬───────────────────────┬─────────────────────┬──────────────┐
-    │ Pool │ Drives Usage          │ Erasure stripe size │ Erasure sets │
-    │ 1st  │ 37.8% (total: 52 GiB) │ 4                   │ 1            │
-    └──────┴───────────────────────┴─────────────────────┴──────────────┘
+    ┌──────┬────────────────────────┬─────────────────────┬──────────────┐
+    │ Pool │ Drives Usage           │ Erasure stripe size │ Erasure sets │
+    │ 1st  │ 43.8% (total: 104 GiB) │ 6                   │ 1            │
+    └──────┴────────────────────────┴─────────────────────┴──────────────┘
     
-    4 drives online, 0 drives offline, EC:2
+    6 drives online, 0 drives offline, EC:2
     ```
 
 3. **Verify Bucket Creation**

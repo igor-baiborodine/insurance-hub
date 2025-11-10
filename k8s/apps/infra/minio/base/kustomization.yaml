@@ -3,3 +3,4 @@ kind: Kustomization
 
 resources:
   - tenant.yaml
+  - service-monitor.yaml

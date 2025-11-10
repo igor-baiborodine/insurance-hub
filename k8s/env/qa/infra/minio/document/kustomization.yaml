@@ -6,9 +6,12 @@ namePrefix: qa-
 nameSuffix: -document
 resources:
   - ../../../../../apps/infra/minio/base
-  - service-monitor.yaml
 patches:
   - path: tenant-patch.yaml
     target:
       kind: Tenant
       name: minio
+  - path: service-monitor-patch.yaml
+    target:
+      kind: ServiceMonitor
+      name: minio-service-monitor
