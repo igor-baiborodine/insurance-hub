@@ -3,11 +3,12 @@ kind: Kustomization
 
 namespace: qa-minio-document
 namePrefix: qa-
+nameSuffix: -document
 resources:
   - ../../../../../apps/infra/minio/base
   - service-monitor.yaml
 patches:
-  - path: minio-document-patch.yaml
+  - path: tenant-patch.yaml
     target:
       kind: Tenant
-      name: minio-tenant
+      name: minio

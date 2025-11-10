@@ -126,16 +126,19 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   
   1. **document** service:
   - `make minio-storage-user-secret-create SVC_NAME=document MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>`
-  - `make minio-storage-config-secret-create SVC_NAME=document MINIO_ROOT_USER=<root-user> MINIO_ROOT_USER_PWD=<root-password>`
+  - `make minio-storage-config-secret-create SVC_NAME=document MINIO_ROOT_USER=<user-name> MINIO_ROOT_USER_PWD=<user-pwd>`
   - `make minio-tenant-deploy SVC_NAME=document`
   - `make minio-tenant-status SVC_NAME=document`
 
   2. **payment** service:
   - `make minio-storage-user-secret-create SVC_NAME=payment MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>`
-  - `make minio-storage-config-secret-create SVC_NAME=payment MINIO_ROOT_USER=<root-user> MINIO_ROOT_USER_PWD=<root-password>`
+  - `make minio-storage-config-secret-create SVC_NAME=payment MINIO_ROOT_USER=<user-name> MINIO_ROOT_USER_PWD=<user-pwd>`
   - `make minio-tenant-deploy SVC_NAME=payment`
   - `make minio-tenant-status SVC_NAME=payment`
- 
+
+- **QA/Grafana**: In _Dashboards > New > Import_, add dashboards using the following URLs: 
+    - https://grafana.com/grafana/dashboards/13502-minio-dashboard/
+    - https://grafana.com/grafana/dashboards/19237-minio-bucket-dashboard/
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=minio-deploy-<iso-date>`
 
 ### Kafka
