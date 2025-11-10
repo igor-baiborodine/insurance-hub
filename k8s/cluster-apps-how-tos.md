@@ -117,13 +117,13 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   
   1. **document** service:
   - `make minio-storage-user-secret-create SVC_NAME=document MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>`
-  - `make minio-storage-config-secret-create SVC_NAME=document MINIO_ROOT_USER=<root-user> MINIO_ROOT_PASSWORD=<root-password>`
+  - `make minio-storage-config-secret-create SVC_NAME=document MINIO_ROOT_USER=<root-user> MINIO_ROOT_USER_PWD=<root-password>`
   - `make minio-tenant-deploy SVC_NAME=document`
   - `make minio-tenant-status SVC_NAME=document`
 
   2. **payment** service:
   - `make minio-storage-user-secret-create SVC_NAME=payment MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>`
-  - `make minio-storage-config-secret-create SVC_NAME=payment MINIO_ROOT_USER=<root-user> MINIO_ROOT_PASSWORD=<root-password>`
+  - `make minio-storage-config-secret-create SVC_NAME=payment MINIO_ROOT_USER=<root-user> MINIO_ROOT_USER_PWD=<root-password>`
   - `make minio-tenant-deploy SVC_NAME=payment`
   - `make minio-tenant-status SVC_NAME=payment`
  

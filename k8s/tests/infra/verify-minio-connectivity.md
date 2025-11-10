@@ -11,7 +11,7 @@ Kind cluster.
    Forward local port `9000` to the MinIO tenant's headless service port `9000`:
 
     ```bash
-    kubectl port-forward svc/local-dev-minio-tenant-hl 9000:9000 -n local-dev-minio-document
+    kubectl port-forward svc/local-dev-minio-document-hl 9000:9000 -n local-dev-minio-document
     Forwarding from 127.0.0.1:9000 -> 9000
     Forwarding from [::1]:9000 -> 9000
     ```

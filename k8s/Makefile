@@ -244,11 +244,9 @@ postgres-operator-deploy: _env-check ## Deploy CloudNativePG operator
 
 .PHONY: postgres-operator-delete
 postgres-operator-delete: _env-check ## Delete CloudNativePG operator with its namespace
-	@echo "Deleting CloudNativePG operator..."
+	@echo "Deleting CloudNativePG operator from 'cnpg-system' namespace..."
 	@kubectl delete -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
-	@echo "Waiting for namespace deletion..."
-	@kubectl wait --for=delete namespace/cnpg-system --timeout=60s 2>/dev/null || true
-	@echo "🗑 CloudNativePG operator and namespace 'cnpg-system' deleted."
+	@echo "🗑 CloudNativePG operator deleted."
 
 .PHONY: postgres-svc-secret-create
 postgres-svc-secret-create: _env-check _data-ns-check _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
@@ -306,8 +304,6 @@ es-operator-delete: _env-check ## Delete Elastic Cloud on Kubernetes (ECK) Opera
 	@echo "Deleting ECK operator v$(ECK_OPERATOR_VERSION) from 'elastic-system' namespace..."
 	@kubectl delete -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml --ignore-not-found
 	@kubectl delete -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml --ignore-not-found
-	@echo "Waiting for namespace deletion..."
-	@kubectl wait --for=delete namespace/elastic-system --timeout=60s 2>/dev/null || true
 	@echo "🗑 ECK operator and namespace 'elastic-system' deleted."
 
 .PHONY: es-deploy
@@ -465,22 +461,22 @@ kafka-console-consumer: _env-check ## Access Kafka console consumer (requires TO
 ################################################################################
 
 MINIO_OPERATOR_VERSION := 7.1.1
-MINIO_CONSOLE_ACCESS_KEY ?= consoleAccess
-MINIO_CONSOLE_SECRET_KEY ?= consoleSecret
-# Length should be at least 3 characters
-MINIO_ROOT_USER ?= rootUser
-# Length should be at least 8 characters
-MINIO_ROOT_PASSWORD ?= rootPassword
+MINIO_CONSOLE_ACCESS_KEY ?= minioConsoleAccessKey
+MINIO_CONSOLE_SECRET_KEY ?= minioConsoleSecretKey
+MINIO_ROOT_USER ?= minioRootUser
+MINIO_ROOT_USER_PWD ?= minioRootUserPwd
 
 .PHONY: minio-operator-deploy
-minio-operator-deploy: _env-check ## Install MinIO Operator using Kustomize
-	@echo "Installing MinIO Operator v$(MINIO_OPERATOR_VERSION)..."
-	@kubectl apply -k "$(VALUES_FILE_PREFIX)"/minio/operator
+minio-operator-deploy: _env-check ## Deploy MinIO operator
+	@echo "Deploying MinIO operator v$(MINIO_OPERATOR_VERSION) into 'minio-operator' namespace..."
+	@kubectl kustomize "$(VALUES_FILE_PREFIX)"/infra/minio/operator | kubectl apply --server-side -f -
+	@echo "✅ MinIO operator deployment initiated."
 
 .PHONY: minio-operator-delete
-minio-operator-delete: _env-check ## Delete MinIO Operator using Kustomize
-	@echo "Deleting MinIO Operator v$(MINIO_OPERATOR_VERSION)..."
-	@kubectl delete -k "$(VALUES_FILE_PREFIX)"/minio/operator
+minio-operator-delete: _env-check ## Delete MinIO operator
+	@echo "Deleting MinIO operator v$(MINIO_OPERATOR_VERSION) from 'minio-operator' namespace..."
+	@kubectl delete -k "$(VALUES_FILE_PREFIX)"/infra/minio/operator
+	@echo "🗑 MinIO operator deleted."
 
 .PHONY: minio-storage-user-secret-create
 minio-storage-user-secret-create: _env-check _svc-name-check ## Create/update MinIO storage user credentials secret. Usage: make minio-storage-user-secret-create SVC_NAME=<svc-name> MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>
@@ -497,12 +493,12 @@ minio-storage-user-secret-create: _env-check _svc-name-check ## Create/update Mi
 	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE"
 
 .PHONY: minio-storage-config-secret-create
-minio-storage-config-secret-create: _env-check _svc-name-check ## Create/update MinIO storage configuration secret. Usage: make minio-storage-config-secret-create SVC_NAME=<svc-name> MINIO_ROOT_USER=<root-user> MINIO_ROOT_PASSWORD=<root-password>
+minio-storage-config-secret-create: _env-check _svc-name-check ## Create/update MinIO storage configuration secret. Usage: make minio-storage-config-secret-create SVC_NAME=<svc-name> MINIO_ROOT_USER=<root-user> MINIO_ROOT_USER_PWD=<root-password>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
 	SECRET_NAME="$$NAMESPACE-storage-config"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
 	echo "Creating MinIO storage configuration secret in namespace $$NAMESPACE..."; \
-	printf "export MINIO_ROOT_USER=\"$(MINIO_ROOT_USER)\"\nexport MINIO_ROOT_PASSWORD=\"$(MINIO_ROOT_PASSWORD)\"\nexport MINIO_PROMETHEUS_AUTH_TYPE=\"public\"" | \
+	printf "export MINIO_ROOT_USER=\"$(MINIO_ROOT_USER)\"\nexport MINIO_ROOT_PASSWORD=\"$(MINIO_ROOT_USER_PWD)\"\nexport MINIO_PROMETHEUS_AUTH_TYPE=\"public\"" | \
 	kubectl create secret generic "$$SECRET_NAME" \
 	   --namespace "$$NAMESPACE" \
 	   --type Opaque \
@@ -515,22 +511,13 @@ minio-tenant-deploy: _env-check _svc-name-check ## Deploy MinIO tenant for servi
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
 	echo "Deploying MinIO tenant for '$$SVC_NAME' into '$$NAMESPACE' namespace..."; \
-	kubectl kustomize "$(VALUES_FILE_PREFIX)/minio/$$SVC_NAME" | kubectl apply --server-side -f -; \
-	\
-	echo "Waiting for 'minio' Service to exist in namespace $$NAMESPACE..."; \
-	for i in $$(seq 1 120); do \
-	  kubectl get svc minio -n "$$NAMESPACE" >/dev/null 2>&1 && break; \
-	  echo "  waiting for minio service... ($$i)"; \
-	  sleep 5; \
-	done; \
-	\
-	echo "Patching 'minio' service with label app=$$NAMESPACE in namespace $$NAMESPACE..."; \
-	kubectl label svc minio app="$$NAMESPACE" -n "$$NAMESPACE" --overwrite
+	kubectl kustomize "$(VALUES_FILE_PREFIX)/infra/minio/$$SVC_NAME" | kubectl apply --server-side -f -; \
+	echo "✅ MinIO cluster for '$$SVC_NAME' deployment initiated. Check status with: make minio-tenant-status SVC_NAME=$$SVC_NAME"
 
 .PHONY: minio-tenant-status
 minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for service. Usage: make minio-tenant-status SVC_NAME=<svc-name>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
-	TENANT_NAME="$(ENV_NAME)-minio-tenant"; \
+	TENANT_NAME="$$NAMESPACE"; \
 	echo "Status for MinIO tenant in namespace: $$NAMESPACE"; \
 	echo "\nMinIO Tenant:"; \
 	kubectl get tenant "$$TENANT_NAME" -n "$$NAMESPACE" -o wide || true; \
@@ -544,8 +531,8 @@ minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for 
 .PHONY: minio-tenant-delete
 minio-tenant-delete: _env-check _svc-name-check ## Delete MinIO tenant for service. Usage: make minio-tenant-delete SVC_NAME=<svc-name>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
-	TENANT_NAME="$(ENV_NAME)-minio-tenant"; \
-	echo "Deleting MinIO tenant '$$TENANT_NAME' from namespace $$NAMESPACE..."; \
+	TENANT_NAME="$$NAMESPACE"; \
+	echo "Deleting MinIO tenant '$$TENANT_NAME' from namespace '$$NAMESPACE'..."; \
 	kubectl delete tenant "$$TENANT_NAME" -n "$$NAMESPACE" --ignore-not-found || true; \
 	kubectl delete servicemonitor "$(ENV_NAME)-minio-$$SVC_NAME-service-monitor" -n "$$NAMESPACE" --ignore-not-found || true
 
