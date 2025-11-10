@@ -359,18 +359,18 @@ es-exporter-delete: _env-check ## Delete Prometheus Elasticsearch exporter
 
 STRIMZI_OPERATOR_VERSION := 0.48.0
 
-kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka Operator into kafka-system namespace
+kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka operator
 	@kubectl get namespace kafka-system >/dev/null 2>&1 || kubectl create namespace kafka-system
 	@helm repo add strimzi https://strimzi.io/charts/ || true
 	@helm repo update
-	@echo "Installing Strimzi Kafka operator v$(STRIMZI_OPERATOR_VERSION) in 'kafka-system' namespace..."
+	@echo "Installing Strimzi Kafka operator v$(STRIMZI_OPERATOR_VERSION) into 'kafka-system' namespace..."
 	@helm upgrade --install strimzi-operator strimzi/strimzi-kafka-operator \
 		--version $(STRIMZI_OPERATOR_VERSION) \
 		--namespace kafka-system \
 		--set watchNamespaces={"$(DATA_NS)"}
 	@echo "✅ Strimzi Kafka operator installation initiated."
 
-kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator from kafka-system namespace
+kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka operator
 	@echo "Uninstalling Strimzi Kafka operator..."
 	@helm uninstall strimzi-operator -n kafka-system || true
 	@kubectl wait --for=delete namespace/kafka-system --timeout=60s 2>/dev/null || true
@@ -379,31 +379,30 @@ kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator
 .PHONY: kafka-deploy
 kafka-deploy: _env-check ## Deploy Kafka cluster
 	@echo "Deploying Kafka cluster into '$(DATA_NS)' namespace..."
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/kafka/kafka-resources.yaml
-	@echo "⏳ Waiting for Kafka cluster to be ready (this may take several minutes)..."
-	@kubectl wait --for=condition=Ready kafka/$(ENV_NAME)-kafka -n "$(DATA_NS)" --timeout=5m || true
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/infra/kafka/resources.yaml
 	@echo "✅ Kafka cluster deployment initiated. Check status with: make kafka-status"
 
 .PHONY: kafka-status
 kafka-status: _env-check ## Show Kafka cluster status
 	@echo "Status for Kafka cluster in namespace: $(DATA_NS)"
-	@echo "\n=== Kafka Custom Resource ==="
+	@echo "\nKafka Custom Resource:"
 	@kubectl get kafka -n "$(DATA_NS)" "$(ENV_NAME)-kafka" -o wide || true
-	@echo "\n=== Kafka Pods ==="
+	@echo "\nKafka Pods:"
 	@kubectl get pods -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
-	@echo "\n=== Kafka Services ==="
+	@echo "\nKafka Services:"
 	@kubectl get svc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
-	@echo "\n=== Kafka PersistentVolumeClaims ==="
+	@echo "\nKafka PersistentVolumeClaims:"
 	@kubectl get pvc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
-	@echo "\n=== Kafka StrimziPodSets ==="
+	@echo "\nKafka StrimziPodSets:"
 	@kubectl get strimzipodsets -n "$(DATA_NS)"
 
 .PHONY: kafka-delete
 kafka-delete: _env-check ## Delete Kafka cluster only (preserves PVCs and StrimziPodSets)
 	@echo "Deleting Kafka cluster '$(ENV_NAME)-kafka' from namespace $(DATA_NS)..."
 	@kubectl delete kafka "$(ENV_NAME)-kafka" -n "$(DATA_NS)" --ignore-not-found || true
-	@echo "⏳ Waiting 10s for Kafka resources to be cleaned up..."
-	@sleep 10
+	@echo "⏳ Waiting 5s for Kafka resources to be cleaned up..."
+	@sleep 5
+	@echo "🗑️ Kafka cluster deleted."
 
 .PHONY: kafka-purge
 kafka-purge: kafka-delete ## Delete Kafka cluster and permanently remove PVCs, NodePools, and StrimziPodSets
@@ -416,7 +415,7 @@ kafka-purge: kafka-delete ## Delete Kafka cluster and permanently remove PVCs, N
 	@echo "Deleting Kafka-related PVCs in namespace $(DATA_NS)..."
 	@kubectl delete pvc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
 
-	@echo "🗑️  Kafka cluster, all NodePools, StrimziPodSets, and persistent data deleted."
+	@echo "🗑️ Kafka-related NodePools, StrimziPodSets, and PVCs deleted."
 
 .PHONY: kafka-topics-list
 kafka-topics-list: _env-check ## List all Kafka topics
@@ -424,7 +423,7 @@ kafka-topics-list: _env-check ## List all Kafka topics
 	@kubectl get kafkatopic -n "$(DATA_NS)" || echo "No KafkaTopics found"
 
 .PHONY: kafka-console-producer
-kafka-console-producer: _env-check ## Access Kafka console producer (requires TOPIC_NAME)
+kafka-console-producer: _env-check ## Access Kafka console producer. Usage: make kafka-console-producer TOPIC_NAME=<topic-name>"
 	@if [ -z "$(TOPIC_NAME)" ]; then \
 		echo "ERROR: TOPIC_NAME is required. Usage: make kafka-console-producer TOPIC_NAME=<topic-name>"; \
 		exit 1; \
@@ -439,7 +438,7 @@ kafka-console-producer: _env-check ## Access Kafka console producer (requires TO
 		--topic $(TOPIC_NAME)
 
 .PHONY: kafka-console-consumer
-kafka-console-consumer: _env-check ## Access Kafka console consumer (requires TOPIC_NAME)
+kafka-console-consumer: _env-check ## Access Kafka console consumer. Usage: make kafka-console-consumer TOPIC_NAME=<topic-name>"
 	@if [ -z "$(TOPIC_NAME)" ]; then \
 		echo "ERROR: TOPIC_NAME is required. Usage: make kafka-console-consumer TOPIC_NAME=<topic-name>"; \
 		exit 1; \

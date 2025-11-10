@@ -144,11 +144,6 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 ### Kafka
 - `make kafka-strimzi-operator-install`
 - `make kafka-deploy`
-- `kubectl get pods -n local-dev-all | grep kafka`
-    ```shell
-    local-dev-kafka-broker-controller-0                1/1     Running   0             22m
-    local-dev-kafka-entity-operator-76bb947d7c-gzgb6   2/2     Running   0             21m    
-    ```
 - `make kafka-status`
 - `make grafana-ui`
 - **QA/Grafana**: In _Dashboards > New > Import_, add the "Strimzi Kafka" dashboard using the
