@@ -1,9 +1,7 @@
 apiVersion: minio.min.io/v2
 kind: Tenant
 metadata:
-  name: minio-tenant
-  labels:
-    app: qa-minio-payment
+  name: minio
   annotations:
     prometheus.io/scrape: "true"
     prometheus.io/port: "9000"
@@ -20,7 +18,7 @@ spec:
   configuration:
     name: qa-minio-payment-storage-config
   pools:
-    - name: pool-0
+    - name: pool
       servers: 3
       volumesPerServer: 2
       volumeClaimTemplate:

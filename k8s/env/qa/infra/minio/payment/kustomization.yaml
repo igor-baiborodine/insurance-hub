@@ -3,11 +3,15 @@ kind: Kustomization
 
 namespace: qa-minio-payment
 namePrefix: qa-
+nameSuffix: -payment
 resources:
   - ../../../../../apps/infra/minio/base
-  - service-monitor.yaml
 patches:
-  - path: minio-payment-patch.yaml
+  - path: tenant-patch.yaml
     target:
       kind: Tenant
-      name: minio-tenant
+      name: minio
+  - path: service-monitor-patch.yaml
+    target:
+      kind: ServiceMonitor
+      name: minio-service-monitor
