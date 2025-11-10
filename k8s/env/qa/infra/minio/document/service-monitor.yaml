@@ -1,10 +1,11 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: qa-minio-document-service-monitor
+  name: minio-service-monitor
   namespace: qa-minio-document
 spec:
-  selector: {}
+  selector:
+    matchLabels: {}
   namespaceSelector:
     matchNames:
       - qa-minio-document
