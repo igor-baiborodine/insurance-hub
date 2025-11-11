@@ -12,7 +12,7 @@ command-line tool.
    machine's port `27017` to the MongoDB service running in the cluster.
 
     ```shell
-    kubectl port-forward svc/local-dev-mongodb 27017:27017 -n local-dev-all
+    kubectl port-forward svc/local-dev-mongodb-svc 27017:27017 -n local-dev-all
     Forwarding from 127.0.0.1:27017 -> 27017
     Forwarding from [::1]:27017 -> 27017
     ```
@@ -23,7 +23,7 @@ command-line tool.
    and export it as an environment variable with the following command:
 
     ```shell
-    export MONGO_ROOT_USER_PWD="$(kubectl get secret local-dev-mongodb-root-creds -n local-dev-all -o jsonpath='{.data.password}' | base64 --decode)"
+    export MONGO_ROOT_USER_PWD="$(kubectl get secret local-dev-mongodb-root-user-creds -n local-dev-all -o jsonpath='{.data.password}' | base64 --decode)"
     echo "$MONGO_ROOT_USER_PWD"   
     ```
 
@@ -64,7 +64,7 @@ command-line tool.
    and export it as an environment variable with the following command:
 
     ```shell
-    export MONGO_ROOT_USER_PWD="$(kubectl get secret qa-mongodb-root-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)"
+    export MONGO_ROOT_USER_PWD="$(kubectl get secret qa-mongodb-root-user-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)"
     echo "$MONGO_ROOT_USER_PWD"   
     ```
 

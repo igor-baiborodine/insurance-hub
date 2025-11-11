@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: minio-service-monitor
+spec:
+  selector:
+    matchLabels: {}
+  endpoints:
+    - port: https-minio
+      path: /minio/v2/metrics/cluster
+      interval: 30s
+      scheme: https
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_service_name]
+          action: keep
+          regex: minio

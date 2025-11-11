@@ -47,4 +47,6 @@ export KUBECONFIG=$HOME/.kube/config:./qa/${QA_CLUSTER_NAME}-kubeconfig
 kubectl config view --flatten > $HOME/.kube/config.merged
 mv $HOME/.kube/config.merged $HOME/.kube/config
 
+kubectl config use-context "$QA_KUBECTL_CONTEXT" 2>/dev/null || true
+
 echo "Successfully pulled kubeconfig from qa-master, updated server IP and merged kubeconfig."

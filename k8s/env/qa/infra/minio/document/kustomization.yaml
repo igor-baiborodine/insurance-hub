@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: qa-minio-document
+namePrefix: qa-
+nameSuffix: -document
+resources:
+  - ../../../../../apps/infra/minio/base
+patches:
+  - path: tenant-patch.yaml
+    target:
+      kind: Tenant
+      name: minio
+  - path: service-monitor-patch.yaml
+    target:
+      kind: ServiceMonitor
+      name: minio-service-monitor

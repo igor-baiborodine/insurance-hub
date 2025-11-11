@@ -1,0 +1,11 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  bootstrap:
+    initdb:
+      database: policy
+      owner: policy
+      secret:
+        name: local-dev-postgres-policy-user-creds

@@ -22,11 +22,11 @@ This guide explains how to test Zipkin tracing functionality in the QA Kubernete
         ```
     - Get Zipkin role:
         ```shell
-        curl -u elastic:$ELASTIC_USER_PWD -k https://localhost:9200/_security/role/zipkin_role
+        curl -u elastic:$ELASTIC_USER_PWD -k https://localhost:9200/_security/role/zipkin_role | jq .
         ```
     - Get Zipkin user:
         ```shell
-        curl -u elastic:$ELASTIC_USER_PWD -k https://localhost:9200/_security/user/zipkin_user
+        curl -u elastic:$ELASTIC_USER_PWD -k https://localhost:9200/_security/user/zipkin_user | jq .
         ```
 - Confirm Zipkin is deployed and running by executing:
   ```shell

@@ -14,15 +14,15 @@ kubeconfig-clear: ## Empty the ~/.kube/config file
 .PHONY: prereq-k8s-kubectl
 prereq-k8s-kubectl: ## Install latest kubectl on Ubuntu 24.04.2 LTS
 	@KUBECTL_VERSION=$$(curl -L -s https://dl.k8s.io/release/stable.txt); \
-	@if [ -z "$$KUBECTL_VERSION" ]; then \
+	if [ -z "$$KUBECTL_VERSION" ]; then \
 	  echo "Failed to fetch latest kubectl version!"; \
 	  exit 1; \
 	fi; \
-	@curl -LO "https://dl.k8s.io/release/$${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
-	@chmod +x kubectl; \
-	@echo "Moving kubectl to /usr/local/bin (you may be prompted for your password)..."; \
-	@sudo mv kubectl /usr/local/bin/kubectl; \
-	@kubectl version --client
+	curl -LO "https://dl.k8s.io/release/$${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
+	chmod +x kubectl; \
+	echo "Moving kubectl to /usr/local/bin (you may be prompted for your password)..."; \
+	sudo mv kubectl /usr/local/bin/kubectl; \
+	kubectl version --client
 
 .PHONY: prereq-k8s-kind
 prereq-k8s-kind: ## Install latest Kind on Ubuntu 24.04.2 LTS
@@ -70,7 +70,7 @@ prereq-k8s-kubens: ## Install latest kubens on Ubuntu 24.04.2 LTS
 	@echo "kubens installed at /usr/local/bin/kubens"
 
 .PHONY: prereq-k8s-all
-prereq-k8s-all: k8s-prereq-kubectl k8s-prereq-kubectx k8s-prereq-kubens k8s-prereq-helm k8s-prereq-lxd k8s-prereq-kind ## Install all Kubernetes prerequisites
+prereq-k8s-all: prereq-k8s-kubectl prereq-k8s-kubectx prereq-k8s-kubens prereq-k8s-helm prereq-k8s-lxd prereq-k8s-kind ## Install all Kubernetes prerequisites
 
 .PHONY: prereq-db-psql
 prereq-db-psql: ## Install latest psql (PostgreSQL CLI) on Ubuntu 24.04.2 LTS
@@ -180,21 +180,40 @@ _svc-name-check: ## Ensure that the SVC_NAME argument is provided
 # Current context must be "qa-insurance-hub"
 ################################################################################
 
-KUBE_PROMETHEUS_STACK_VERSION := 77.10.0
+KUBE_PROMETHEUS_STACK_VERSION := 79.3.0
 
 .PHONY: prometheus-stack-install
 prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
-	@echo "Installing Kube Prometheus Stack using Helm chart v$(KUBE_PROMETHEUS_STACK_VERSION)..."
+	@echo "Installing Kube Prometheus Stack using Helm chart v$(KUBE_PROMETHEUS_STACK_VERSION) into $(MONITORING_NS) namespace..."
 	@helm upgrade --install "$(ENV_NAME)"-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
 		--namespace $(MONITORING_NS) \
-		--values "$(VALUES_FILE_PREFIX)"/prometheus-values.yaml \
-		--wait \
-		--timeout 15m
-	@echo "✅ Kube Prometheus Stack installed into '$(MONITORING_NS)' namespace. Verifying pods..."
-	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/instance="$(ENV_NAME)"-prometheus
+		--values "$(VALUES_FILE_PREFIX)"/infra/prometheus/values.yaml
+	@echo "✅ Kube Prometheus Stack deployment initiated. Check status with: make prometheus-stack-status"
+
+.PHONY: prometheus-stack-uninstall
+prometheus-stack-uninstall: _monitoring-ns-check ## Uninstall Kube Prometheus Stack
+	@echo "Uninstalling Kube Prometheus Stack from '$(MONITORING_NS)' namespace..."
+	@helm uninstall "$(ENV_NAME)"-prometheus --namespace $(MONITORING_NS) || true
+	@echo "🗑 Kube Prometheus Stack uninstalled."
+
+.PHONY: prometheus-stack-status
+prometheus-stack-status: _monitoring-ns-check ## Show Kube Prometheus Stack deployment status
+	@echo "Status for Prometheus Stack in namespace: $(MONITORING_NS)"
+	@echo "\nPrometheus StatefulSet:"
+	@kubectl get statefulset -n $(MONITORING_NS) -l app.kubernetes.io/name=prometheus || true
+	@echo "\nPrometheus Services:"
+	@kubectl get svc -n $(MONITORING_NS) -l app=kube-prometheus-stack-prometheus || true
+	@echo "\nPrometheus Pods:"
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=prometheus
+	@echo "\nAlertmanager StatefulSet:"
+	@kubectl get statefulset -n $(MONITORING_NS) -l app.kubernetes.io/name=alertmanager || true
+	@echo "\nGrafana Deployment:"
+	@kubectl get deployment -n $(MONITORING_NS) -l app.kubernetes.io/name=grafana || true
+	@echo "\nGrafana Service:"
+	@kubectl get svc -n $(MONITORING_NS) -l app.kubernetes.io/name=grafana || true
 
 .PHONY: prometheus-ui
 prometheus-ui: ## Access Prometheus UI via port-forward
@@ -215,41 +234,55 @@ grafana-ui: ## Access Grafana UI via port-forward
 ################################################################################
 
 CLOUDNATIVE_PG_VERSION := 1.27.0
-PG_SVC_USER_PWD ?= pgsvcpwd
+PG_SVC_USER_PWD ?= pgSvcUserPwd
+
+.PHONY: postgres-operator-deploy
+postgres-operator-deploy: _env-check ## Deploy CloudNativePG operator
+	@echo "Deploying CloudNativePG operator v$(CLOUDNATIVE_PG_VERSION) into 'cnpg-system' namespace..."
+	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
+	@echo "✅ CloudNativePG operator deployment initiated."
+
+.PHONY: postgres-operator-delete
+postgres-operator-delete: _env-check ## Delete CloudNativePG operator with its namespace
+	@echo "Deleting CloudNativePG operator from 'cnpg-system' namespace..."
+	@kubectl delete -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
+	@echo "🗑 CloudNativePG operator deleted."
 
 .PHONY: postgres-svc-secret-create
 postgres-svc-secret-create: _env-check _data-ns-check _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
-	@echo "Creating secret with user creds for '$(SVC_NAME)svc' database in PostgreSQL..."
-	# username value should match spec.bootstrap.initdb.owner value from `env/<env-name>/postgres-<service-name>svc.yaml` manifest
-	@kubectl create secret generic "$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds \
+	@echo "Creating secret with user creds for '$(SVC_NAME)' database in PostgreSQL..."
+	@kubectl create secret generic "$(ENV_NAME)"-postgres-"$(SVC_NAME)"-user-creds \
 	    --namespace "$(DATA_NS)" \
 	    --type kubernetes.io/basic-auth \
-	    --from-literal=username="$(SVC_NAME)"svc \
+	    --from-literal=username="$(SVC_NAME)" \
 	    --from-literal=password="$(PG_SVC_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "Secret '"$(ENV_NAME)"-postgres-"$(SVC_NAME)"svc-creds' successfully created/updated in namespace $(DATA_NS)"
-
-.PHONY: postgres-operator-deploy
-postgres-operator-deploy: _env-check ## Install CloudNativePG operator
-	@echo "Deploying CloudNativePG operator v$(CLOUDNATIVE_PG_VERSION) into `cnpg-system` namespace..."
-	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
+	@echo "Secret '"$(ENV_NAME)"-postgres-"$(SVC_NAME)"-user-creds' successfully created/updated in namespace $(DATA_NS)"
 
 .PHONY: postgres-svc-deploy
-postgres-svc-deploy: _env-check _svc-name-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
-	@echo "Deploying PostgreSQL cluster for '$(SVC_NAME)svc' into '$(DATA_NS)' namespace...";
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/postgres-"$(SVC_NAME)"svc.yaml;
+postgres-svc-deploy: _env-check _data-ns-check _svc-name-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
+	@echo "Deploying PostgreSQL cluster for '$(SVC_NAME)' into '$(DATA_NS)' namespace...";
+	@kubectl kustomize "$(VALUES_FILE_PREFIX)/infra/postgres/$(SVC_NAME)" | kubectl apply --server-side -f -;
+	@echo "✅ Postgres cluster deployment for '$(SVC_NAME)' initiated. Check status with: make postgres-svc-status SVC_NAME=$(SVC_NAME)"
 
 .PHONY: postgres-svc-status
 postgres-svc-status: _env-check _svc-name-check ## Show PostgreSQL cluster/resource status for service. Usage: make postgres-svc-status SVC_NAME=<svc-name>
 	@echo "Status for namespace: $(DATA_NS)"
-	@kubectl cnpg status "$(ENV_NAME)-postgres-$(SVC_NAME)svc" || true
+	@kubectl cnpg status "$(ENV_NAME)-postgres-$(SVC_NAME)" || true
+
+.PHONY: postgres-svc-delete
+postgres-svc-delete: _env-check ## Delete PostgreSQL cluster for service. Usage: make postgres-svc-delete SVC_NAME=<svc-name>
+	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' in namespace '$(DATA_NS)'..."
+	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true
+	@echo "🗑 Postgres cluster for '$(SVC_NAME)' deleted."
 
 .PHONY: postgres-svc-purge
-postgres-svc-purge: _env-check ## Uninstall cluster and permanently remove related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
-	@echo "Removing PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
-	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)"svc || true
-	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)svc' in namespace '$(DATA_NS)'..."
-	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)svc-creds || true
+postgres-svc-purge: _env-check ## Delete PostgreSQL cluster for service and its related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
+	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' in namespace '$(DATA_NS)'..."
+	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true
+	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)' in namespace '$(DATA_NS)'..."
+	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)-user-creds || true
+	@echo "🗑 Postgres cluster for '$(SVC_NAME)' and its user creds deleted."
 
 ################################################################################
 # Elastic Cloud Deployment Targets
@@ -257,27 +290,30 @@ postgres-svc-purge: _env-check ## Uninstall cluster and permanently remove relat
 # Namespace and environment auto-detected from current kubectl context
 ################################################################################
 
-ECK_OPERATOR_VERSION := 3.1.0
+ECK_OPERATOR_VERSION := 3.2.0
 
-.PHONY: eck-operator-deploy
-eck-operator-deploy: _env-check ## Install Elastic Cloud on Kubernetes (ECK) Operator
-	@echo "Installing ECK operator v$(ECK_OPERATOR_VERSION) into 'elastic-system' namespace..."
+.PHONY: es-operator-deploy
+es-operator-deploy: _env-check ## Deploy Elastic Cloud on Kubernetes (ECK) Operator
+	@echo "Deploying ECK operator v$(ECK_OPERATOR_VERSION) into 'elastic-system' namespace..."
 	@kubectl create -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml || true
 	@kubectl apply --server-side -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml
-
-.PHONY: eck-operator-delete
-eck-operator-delete: _env-check ## Uninstall Elastic Cloud on Kubernetes (ECK) Operator
-	@echo "Uninstalling ECK operator v$(ECK_OPERATOR_VERSION) from 'elastic-system' namespace..."
+	@echo "✅ ECK operator deployment initiated."
+	
+.PHONY: es-operator-delete
+es-operator-delete: _env-check ## Delete Elastic Cloud on Kubernetes (ECK) Operator
+	@echo "Deleting ECK operator v$(ECK_OPERATOR_VERSION) from 'elastic-system' namespace..."
 	@kubectl delete -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml --ignore-not-found
 	@kubectl delete -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml --ignore-not-found
+	@echo "🗑 ECK operator and namespace 'elastic-system' deleted."
 
-.PHONY: elasticsearch-deploy
-elasticsearch-deploy: _env-check ## Deploy Elasticsearch cluster
+.PHONY: es-deploy
+es-deploy: _env-check ## Deploy Elasticsearch cluster
 	@echo "Deploying Elasticsearch cluster into '$(DATA_NS)' namespace...";
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/elasticsearch.yaml;
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/infra/elastic/elasticsearch.yaml;
+	@echo "✅ Elasticsearch cluster deployment initiated. Check status with: make es-status"
 
-.PHONY: elasticsearch-status
-elasticsearch-status: _env-check ## Show Elasticsearch cluster status
+.PHONY: es-status
+es-status: _env-check ## Show Elasticsearch cluster status
 	@echo "Status for namespace: $(DATA_NS)"
 	@echo "\nElasticsearch Pods:"
 	@kubectl get pods -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
@@ -290,26 +326,30 @@ elasticsearch-status: _env-check ## Show Elasticsearch cluster status
 	@echo "\nElasticsearch Cluster:"
 	@kubectl get elasticsearch -n "$(DATA_NS)" "$(ENV_NAME)-elasticsearch" -o wide || true
 
-.PHONY: elasticsearch-delete
-elasticsearch-delete: _env-check ## Delete Elasticsearch cluster only
+.PHONY: es-delete
+es-delete: _env-check ## Delete Elasticsearch cluster only
 	@echo "Deleting Elasticsearch cluster '$(ENV_NAME)-elasticsearch' from namespace $(DATA_NS)..."
 	@kubectl delete elasticsearch "$(ENV_NAME)-elasticsearch" -n "$(DATA_NS)" --ignore-not-found || true
+	@echo "🗑 Elasticsearch cluster deleted."
 
-.PHONY: elasticsearch-purge
-elasticsearch-purge: elasticsearch-delete ## Delete Elasticsearch cluster and related secrets and PVCs
+.PHONY: es-purge
+es-purge: es-delete ## Delete Elasticsearch cluster and its related secrets and PVCs
 	@echo "Deleting Elasticsearch-related secrets and PVCs in namespace $(DATA_NS)..."
 	@kubectl delete secret -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
 	@kubectl delete pvc -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
+	@echo "🗑 Elasticsearch-related secrets and PVCs deleted."
 
-.PHONY: elasticsearch-exporter-deploy
-elasticsearch-exporter-deploy: _env-check ## Deploy Prometheus Elasticsearch Exporter for monitoring
-	@echo "Deploying Elasticsearch Exporter into '$(DATA_NS)' namespace..."
-	@kubectl apply -f "$(VALUES_FILE_PREFIX)"/elasticsearch-exporter.yaml
+.PHONY: es-exporter-deploy
+es-exporter-deploy: _env-check ## Deploy Prometheus Elasticsearch exporter for monitoring
+	@echo "Deploying Elasticsearch exporter into '$(DATA_NS)' namespace..."
+	@kubectl apply -f "$(VALUES_FILE_PREFIX)"/infra/elastic/elasticsearch-exporter.yaml
+	@echo "✅ Elasticsearch exporter deployment initiated."
 
-.PHONY: elasticsearch-exporter-delete
-elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exporter
-	@echo "Deleting Elasticsearch Exporter from namespace $(DATA_NS)..."
-	@kubectl delete -f "$(VALUES_FILE_PREFIX)"/elasticsearch-exporter.yaml --ignore-not-found || true
+.PHONY: es-exporter-delete
+es-exporter-delete: _env-check ## Delete Prometheus Elasticsearch exporter
+	@echo "Deleting Elasticsearch exporter from namespace $(DATA_NS)..."
+	@kubectl delete -f "$(VALUES_FILE_PREFIX)"/infra/elastic/elasticsearch-exporter.yaml --ignore-not-found || true
+	@echo "🗑 Elasticsearch exporter deleted."
 
 ################################################################################
 # Kafka Deployment Targets
@@ -319,54 +359,50 @@ elasticsearch-exporter-delete: _env-check ## Delete Prometheus Elasticsearch Exp
 
 STRIMZI_OPERATOR_VERSION := 0.48.0
 
-kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka Operator into kafka-system namespace
+kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka operator
 	@kubectl get namespace kafka-system >/dev/null 2>&1 || kubectl create namespace kafka-system
 	@helm repo add strimzi https://strimzi.io/charts/ || true
 	@helm repo update
-	@echo "Installing Strimzi Kafka operator v$(STRIMZI_OPERATOR_VERSION)..."
+	@echo "Installing Strimzi Kafka operator v$(STRIMZI_OPERATOR_VERSION) into 'kafka-system' namespace..."
 	@helm upgrade --install strimzi-operator strimzi/strimzi-kafka-operator \
 		--version $(STRIMZI_OPERATOR_VERSION) \
 		--namespace kafka-system \
-		--set watchNamespaces={"$(DATA_NS)"} \
-		--wait \
-		--timeout 5m
-	@echo "✅ Strimzi Kafka Operator installed. Verifying pods..."
-	@kubectl get pods -n kafka-system --selector=name=strimzi-cluster-operator
+		--set watchNamespaces={"$(DATA_NS)"}
+	@echo "✅ Strimzi Kafka operator installation initiated."
 
-kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka Operator from kafka-system namespace
-	@echo "Uninstalling Strimzi Kafka Operator..."
+kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka operator
+	@echo "Uninstalling Strimzi Kafka operator..."
 	@helm uninstall strimzi-operator -n kafka-system || true
-	@kubectl delete namespace kafka-system || true
-	@echo "🗑 Strimzi Kafka Operator uninstalled and namespace 'kafka-system' deleted."
+	@kubectl wait --for=delete namespace/kafka-system --timeout=60s 2>/dev/null || true
+	@echo "🗑 Strimzi Kafka operator uninstalled and namespace 'kafka-system' deleted."
 
 .PHONY: kafka-deploy
 kafka-deploy: _env-check ## Deploy Kafka cluster
 	@echo "Deploying Kafka cluster into '$(DATA_NS)' namespace..."
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/kafka/kafka-resources.yaml
-	@echo "⏳ Waiting for Kafka cluster to be ready (this may take several minutes)..."
-	@kubectl wait --for=condition=Ready kafka/$(ENV_NAME)-kafka -n "$(DATA_NS)" --timeout=5m || true
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/infra/kafka/resources.yaml
 	@echo "✅ Kafka cluster deployment initiated. Check status with: make kafka-status"
 
 .PHONY: kafka-status
 kafka-status: _env-check ## Show Kafka cluster status
 	@echo "Status for Kafka cluster in namespace: $(DATA_NS)"
-	@echo "\n=== Kafka Custom Resource ==="
+	@echo "\nKafka Custom Resource:"
 	@kubectl get kafka -n "$(DATA_NS)" "$(ENV_NAME)-kafka" -o wide || true
-	@echo "\n=== Kafka Pods ==="
+	@echo "\nKafka Pods:"
 	@kubectl get pods -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
-	@echo "\n=== Kafka Services ==="
+	@echo "\nKafka Services:"
 	@kubectl get svc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
-	@echo "\n=== Kafka PersistentVolumeClaims ==="
+	@echo "\nKafka PersistentVolumeClaims:"
 	@kubectl get pvc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
-	@echo "\n=== Kafka StrimziPodSets ==="
+	@echo "\nKafka StrimziPodSets:"
 	@kubectl get strimzipodsets -n "$(DATA_NS)"
 
 .PHONY: kafka-delete
 kafka-delete: _env-check ## Delete Kafka cluster only (preserves PVCs and StrimziPodSets)
 	@echo "Deleting Kafka cluster '$(ENV_NAME)-kafka' from namespace $(DATA_NS)..."
 	@kubectl delete kafka "$(ENV_NAME)-kafka" -n "$(DATA_NS)" --ignore-not-found || true
-	@echo "⏳ Waiting 10s for Kafka resources to be cleaned up..."
-	@sleep 10
+	@echo "⏳ Waiting 5s for Kafka resources to be cleaned up..."
+	@sleep 5
+	@echo "🗑️ Kafka cluster deleted."
 
 .PHONY: kafka-purge
 kafka-purge: kafka-delete ## Delete Kafka cluster and permanently remove PVCs, NodePools, and StrimziPodSets
@@ -379,7 +415,7 @@ kafka-purge: kafka-delete ## Delete Kafka cluster and permanently remove PVCs, N
 	@echo "Deleting Kafka-related PVCs in namespace $(DATA_NS)..."
 	@kubectl delete pvc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
 
-	@echo "🗑️  Kafka cluster, all NodePools, StrimziPodSets, and persistent data removed."
+	@echo "🗑️ Kafka-related NodePools, StrimziPodSets, and PVCs deleted."
 
 .PHONY: kafka-topics-list
 kafka-topics-list: _env-check ## List all Kafka topics
@@ -387,7 +423,7 @@ kafka-topics-list: _env-check ## List all Kafka topics
 	@kubectl get kafkatopic -n "$(DATA_NS)" || echo "No KafkaTopics found"
 
 .PHONY: kafka-console-producer
-kafka-console-producer: _env-check ## Access Kafka console producer (requires TOPIC_NAME)
+kafka-console-producer: _env-check ## Access Kafka console producer. Usage: make kafka-console-producer TOPIC_NAME=<topic-name>"
 	@if [ -z "$(TOPIC_NAME)" ]; then \
 		echo "ERROR: TOPIC_NAME is required. Usage: make kafka-console-producer TOPIC_NAME=<topic-name>"; \
 		exit 1; \
@@ -402,7 +438,7 @@ kafka-console-producer: _env-check ## Access Kafka console producer (requires TO
 		--topic $(TOPIC_NAME)
 
 .PHONY: kafka-console-consumer
-kafka-console-consumer: _env-check ## Access Kafka console consumer (requires TOPIC_NAME)
+kafka-console-consumer: _env-check ## Access Kafka console consumer. Usage: make kafka-console-consumer TOPIC_NAME=<topic-name>"
 	@if [ -z "$(TOPIC_NAME)" ]; then \
 		echo "ERROR: TOPIC_NAME is required. Usage: make kafka-console-consumer TOPIC_NAME=<topic-name>"; \
 		exit 1; \
@@ -424,22 +460,22 @@ kafka-console-consumer: _env-check ## Access Kafka console consumer (requires TO
 ################################################################################
 
 MINIO_OPERATOR_VERSION := 7.1.1
-MINIO_CONSOLE_ACCESS_KEY ?= consoleAccess
-MINIO_CONSOLE_SECRET_KEY ?= consoleSecret
-# Length should be at least 3 characters
-MINIO_ROOT_USER ?= rootUser
-# Length should be at least 8 characters
-MINIO_ROOT_PASSWORD ?= rootPassword
+MINIO_CONSOLE_ACCESS_KEY ?= minioConsoleAccessKey
+MINIO_CONSOLE_SECRET_KEY ?= minioConsoleSecretKey
+MINIO_ROOT_USER ?= minioRootUser
+MINIO_ROOT_USER_PWD ?= minioRootUserPwd
 
 .PHONY: minio-operator-deploy
-minio-operator-deploy: _env-check ## Install MinIO Operator using Kustomize
-	@echo "Installing MinIO Operator v$(MINIO_OPERATOR_VERSION)..."
-	@kubectl apply -k "$(VALUES_FILE_PREFIX)"/minio/operator
+minio-operator-deploy: _env-check ## Deploy MinIO operator
+	@echo "Deploying MinIO operator v$(MINIO_OPERATOR_VERSION) into 'minio-operator' namespace..."
+	@kubectl kustomize "$(VALUES_FILE_PREFIX)"/infra/minio/operator | kubectl apply --server-side -f -
+	@echo "✅ MinIO operator deployment initiated."
 
 .PHONY: minio-operator-delete
-minio-operator-delete: _env-check ## Delete MinIO Operator using Kustomize
-	@echo "Deleting MinIO Operator v$(MINIO_OPERATOR_VERSION)..."
-	@kubectl delete -k "$(VALUES_FILE_PREFIX)"/minio/operator
+minio-operator-delete: _env-check ## Delete MinIO operator
+	@echo "Deleting MinIO operator v$(MINIO_OPERATOR_VERSION) from 'minio-operator' namespace..."
+	@kubectl delete -k "$(VALUES_FILE_PREFIX)"/infra/minio/operator
+	@echo "🗑 MinIO operator deleted."
 
 .PHONY: minio-storage-user-secret-create
 minio-storage-user-secret-create: _env-check _svc-name-check ## Create/update MinIO storage user credentials secret. Usage: make minio-storage-user-secret-create SVC_NAME=<svc-name> MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>
@@ -456,12 +492,12 @@ minio-storage-user-secret-create: _env-check _svc-name-check ## Create/update Mi
 	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE"
 
 .PHONY: minio-storage-config-secret-create
-minio-storage-config-secret-create: _env-check _svc-name-check ## Create/update MinIO storage configuration secret. Usage: make minio-storage-config-secret-create SVC_NAME=<svc-name> MINIO_ROOT_USER=<root-user> MINIO_ROOT_PASSWORD=<root-password>
+minio-storage-config-secret-create: _env-check _svc-name-check ## Create/update MinIO storage configuration secret. Usage: make minio-storage-config-secret-create SVC_NAME=<svc-name> MINIO_ROOT_USER=<root-user> MINIO_ROOT_USER_PWD=<root-password>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
 	SECRET_NAME="$$NAMESPACE-storage-config"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
 	echo "Creating MinIO storage configuration secret in namespace $$NAMESPACE..."; \
-	printf "export MINIO_ROOT_USER=\"$(MINIO_ROOT_USER)\"\nexport MINIO_ROOT_PASSWORD=\"$(MINIO_ROOT_PASSWORD)\"\nexport MINIO_PROMETHEUS_AUTH_TYPE=\"public\"" | \
+	printf "export MINIO_ROOT_USER=\"$(MINIO_ROOT_USER)\"\nexport MINIO_ROOT_PASSWORD=\"$(MINIO_ROOT_USER_PWD)\"\nexport MINIO_PROMETHEUS_AUTH_TYPE=\"public\"" | \
 	kubectl create secret generic "$$SECRET_NAME" \
 	   --namespace "$$NAMESPACE" \
 	   --type Opaque \
@@ -474,22 +510,13 @@ minio-tenant-deploy: _env-check _svc-name-check ## Deploy MinIO tenant for servi
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
 	echo "Deploying MinIO tenant for '$$SVC_NAME' into '$$NAMESPACE' namespace..."; \
-	kubectl kustomize "$(VALUES_FILE_PREFIX)/minio/$$SVC_NAME" | kubectl apply --server-side -f -; \
-	\
-	echo "Waiting for 'minio' Service to exist in namespace $$NAMESPACE..."; \
-	for i in $$(seq 1 120); do \
-	  kubectl get svc minio -n "$$NAMESPACE" >/dev/null 2>&1 && break; \
-	  echo "  waiting for minio service... ($$i)"; \
-	  sleep 5; \
-	done; \
-	\
-	echo "Patching 'minio' service with label app=$$NAMESPACE in namespace $$NAMESPACE..."; \
-	kubectl label svc minio app="$$NAMESPACE" -n "$$NAMESPACE" --overwrite
+	kubectl kustomize "$(VALUES_FILE_PREFIX)/infra/minio/$$SVC_NAME" | kubectl apply --server-side -f -; \
+	echo "✅ MinIO cluster for '$$SVC_NAME' deployment initiated. Check status with: make minio-tenant-status SVC_NAME=$$SVC_NAME"
 
 .PHONY: minio-tenant-status
 minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for service. Usage: make minio-tenant-status SVC_NAME=<svc-name>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
-	TENANT_NAME="$(ENV_NAME)-minio-tenant"; \
+	TENANT_NAME="$$NAMESPACE"; \
 	echo "Status for MinIO tenant in namespace: $$NAMESPACE"; \
 	echo "\nMinIO Tenant:"; \
 	kubectl get tenant "$$TENANT_NAME" -n "$$NAMESPACE" -o wide || true; \
@@ -498,13 +525,15 @@ minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for 
 	echo "\nMinIO Services:"; \
 	kubectl get svc -n "$$NAMESPACE" || true; \
 	echo "\nMinIO PersistentVolumeClaims:"; \
-	kubectl get pvc -n "$$NAMESPACE" || true
+	kubectl get pvc -n "$$NAMESPACE" || true; \
+	echo "\nMinIO ServiceMonitors:"; \
+	kubectl get servicemonitor -n "$$NAMESPACE" || true
 
 .PHONY: minio-tenant-delete
 minio-tenant-delete: _env-check _svc-name-check ## Delete MinIO tenant for service. Usage: make minio-tenant-delete SVC_NAME=<svc-name>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
-	TENANT_NAME="$(ENV_NAME)-minio-tenant"; \
-	echo "Deleting MinIO tenant '$$TENANT_NAME' from namespace $$NAMESPACE..."; \
+	TENANT_NAME="$$NAMESPACE"; \
+	echo "Deleting MinIO tenant '$$TENANT_NAME' from namespace '$$NAMESPACE'..."; \
 	kubectl delete tenant "$$TENANT_NAME" -n "$$NAMESPACE" --ignore-not-found || true; \
 	kubectl delete servicemonitor "$(ENV_NAME)-minio-$$SVC_NAME-service-monitor" -n "$$NAMESPACE" --ignore-not-found || true
 
@@ -524,36 +553,40 @@ minio-tenant-purge: minio-tenant-delete _svc-name-check ## Delete MinIO tenant a
 ################################################################################
 
 MONGODB_OPERATOR_VERSION := 0.13.0
-MONGO_ROOT_USER_PWD ?= rootpwd
+MONGO_ROOT_USER_PWD ?= mongoRootUserPwd
 
 .PHONY: mongodb-operator-install
 mongodb-operator-install: _env-check ## Install MongoDB Community Operator
 	@kubectl get namespace "$(DATA_NS)" >/dev/null 2>&1 || kubectl create namespace "$(DATA_NS)"
 	@helm repo add mongodb https://mongodb.github.io/helm-charts
 	@helm repo update
-	@echo "Installing MongoDB Community Operator v$(MONGODB_OPERATOR_VERSION)..."
+	@echo "Installing MongoDB operator v$(MONGODB_OPERATOR_VERSION) into $(DATA_NS) namespace..."
 	@helm upgrade --install mongodb-operator mongodb/community-operator \
 		--version "$(MONGODB_OPERATOR_VERSION)" \
-		--namespace "$(DATA_NS)" \
-		--wait \
-		--timeout 10m
-	@echo "✅ MongoDB Community Operator installed. Verifying pods..."
-	@kubectl get pods -n "$(DATA_NS)" -l name=mongodb-kubernetes-operator
+		--namespace "$(DATA_NS)"
+	@echo "✅ MongoDB operator installation initiated."
 
-.PHONY: mongodb-root-secret-create
-mongodb-root-secret-create: _env-check _data-ns-check ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>
-	@echo "Creating secret with user creds for 'admin' database in MongoDB..."
-	@kubectl create secret generic "$(ENV_NAME)"-mongodb-root-creds \
+.PHONY: mongodb-operator-uninstall
+mongodb-operator-uninstall: _env-check ## Delete MongoDB Community Operator
+	@echo "Uninstalling MongoDB operator from namespace $(DATA_NS)..."
+	@helm uninstall mongodb-operator -n "$(DATA_NS)" || true
+	@echo "🗑 MongoDB operator uninstalled."
+
+.PHONY: mongodb-root-user-secret-create
+mongodb-root-user-secret-create: _env-check _data-ns-check ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD=<root-pwd>
+	@echo "Creating secret with 'root' user creds for 'admin' database in MongoDB..."
+	@kubectl create secret generic "$(ENV_NAME)"-mongodb-root-user-creds \
 	    --namespace "$(DATA_NS)" \
 	    --type Opaque \
 	    --from-literal=password="$(MONGO_ROOT_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "Secret '"$(ENV_NAME)"-mongodb-root-creds' successfully created/updated in namespace $(DATA_NS)"
+	@echo "Secret '"$(ENV_NAME)"-mongodb-root-user-creds' successfully created/updated in namespace $(DATA_NS)"
 
 .PHONY: mongodb-deploy
 mongodb-deploy: _env-check _data-ns-check ## Deploy MongoDB cluster
 	@echo "Deploying MongoDB cluster to '$(DATA_NS)' namespace...";
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/mongodb.yaml;
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/infra/mongodb/mongodbcommunity.yaml;
+	@echo "✅ MongoDB cluster deployment initiated. Check status with: make mongodb-status"
 
 .PHONY: mongodb-status
 mongodb-status: _env-check ## Show MongoDB cluster status
@@ -571,12 +604,14 @@ mongodb-status: _env-check ## Show MongoDB cluster status
 mongodb-delete: _env-check ## Delete MongoDB cluster only
 	@echo "Deleting MongoDB cluster '$(ENV_NAME)-mongodb' from namespace $(DATA_NS)..."
 	@kubectl delete mongodbcommunity "$(ENV_NAME)"-mongodb -n "$(DATA_NS)" --ignore-not-found || true
+	@echo "🗑 MongoDB cluster deleted."
 
 .PHONY: mongodb-purge
 mongodb-purge: mongodb-delete ## Delete MongoDB cluster and permanently remove related secrets and PVCs
 	@echo "Deleting MongoDB-related secrets and PVCs in namespace $(DATA_NS)..."
-	@kubectl delete secret -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
+	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-mongodb-root-user-creds || true
 	@kubectl delete pvc -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
+	@echo "🗑 MongoDB-related secrets and PVCs deleted."
 
 ################################################################################
 # JSReport Deployment Targets
@@ -612,7 +647,7 @@ jsreport-delete: _env-check ## Delete JSReport deployment
 jsreport-purge: jsreport-delete _env-check ## Purge JSReport PVC
 	@echo "Deleting JSReport-related PVC in namespace $(SVC_NS)..."
 	@kubectl delete pvc "$(ENV_NAME)"-jsreport-cache-pvc -n "$(SVC_NS)" --ignore-not-found || true
-	@echo "🗑 JSReport cluster and its persistent data removed."
+	@echo "🗑 JSReport cluster and its persistent data deleted."
 
 .PHONY: jsreport-ui
 jsreport-ui: _env-check ## Access Grafana UI via port-forward
@@ -669,13 +704,13 @@ zipkin-es-user-create: _env-check _monitoring-ns-check ## Create role and user f
 	echo "Elasticsearch Zipkin role and user creation completed."
 
 .PHONY: zipkin-install
-zipkin-install: _env-check _monitoring-ns-check ## Deploy Zipkin in QA cluster
-	@echo "Installing Zipkin cluster using Helm chart '$(ZIPKIN_VERSION)'..."
+zipkin-install: _env-check _monitoring-ns-check ## Install Zipkin in QA cluster
+	@echo "Installing Zipkin using Helm chart v$(ZIPKIN_VERSION) into $(MONITORING_NS) namespace..."
 	@helm repo add zipkin https://zipkin.io/zipkin-helm
 	@helm repo update
 	@helm upgrade --install $(ENV_NAME)-zipkin zipkin/zipkin \
 	   --version $(ZIPKIN_VERSION) \
-	   --values "$(VALUES_FILE_PREFIX)"/zipkin/values.yaml \
+	   --values "$(VALUES_FILE_PREFIX)"/infra/zipkin/values.yaml \
 	   --namespace $(MONITORING_NS)
 	@echo "Disabling Zipkin deployment readiness probe..."
 	@kubectl patch deployment $(ENV_NAME)-zipkin -n $(MONITORING_NS) --type=json -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/readinessProbe"}]'
@@ -685,9 +720,9 @@ zipkin-install: _env-check _monitoring-ns-check ## Deploy Zipkin in QA cluster
 
 .PHONY: zipkin-uninstall
 zipkin-uninstall: _env-check _monitoring-ns-check ## Uninstall Zipkin from QA cluster
-	@echo "Uninstalling Zipkin..."
+	@echo "Uninstalling Zipkin from namespace '$(MONITORING_NS)'..."
 	@helm uninstall $(ENV_NAME)-zipkin -n $(MONITORING_NS) || true
-	@echo "🗑 Zipkin uninstalled from namespace '$(MONITORING_NS)'."
+	@echo "🗑 Zipkin uninstalled."
 
 .PHONY: zipkin-status
 zipkin-status: _env-check _monitoring-ns-check ## Show Zipkin deployment status in QA cluster

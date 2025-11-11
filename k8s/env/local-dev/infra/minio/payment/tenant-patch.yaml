@@ -1,0 +1,31 @@
+apiVersion: minio.min.io/v2
+kind: Tenant
+metadata:
+  name: minio
+  annotations: {}
+spec:
+  env:
+    - name: MINIO_STORAGE_CLASS_STANDARD
+      value: "EC:0"
+  requestAutoCert: false
+  pools:
+    - servers: 1
+      name: pool
+      volumesPerServer: 1
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          storageClassName: standard
+          resources:
+            requests:
+              storage: 10Gi
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+  users:
+    - name: local-dev-minio-payment-storage-user-creds
+  configuration:
+    name: local-dev-minio-payment-storage-config
+  # Monitoring/Prometheus annotations can be omitted for local dev

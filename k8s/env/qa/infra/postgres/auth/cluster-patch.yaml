@@ -1,0 +1,11 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  bootstrap:
+    initdb:
+      database: auth
+      owner: auth
+      secret:
+        name: qa-postgres-auth-user-creds

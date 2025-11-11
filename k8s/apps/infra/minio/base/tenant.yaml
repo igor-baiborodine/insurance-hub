@@ -1,13 +1,7 @@
 apiVersion: minio.min.io/v2
 kind: Tenant
 metadata:
-  ## Examples for name, namespace, and labels.app: local-dev-minio-document, qa-minio-payment
-  name: minio-tenant
-  namespace: minio-tenant
-  ## Optionally pass labels to be applied to the statefulset pods
-  labels:
-    app: minio-tenant
-  ## Optionally pass annotations to be applied to the statefulset pods
+  name: minio
   annotations:
     prometheus.io/path: /minio/v2/metrics/cluster
     prometheus.io/port: "9000"
