@@ -704,13 +704,13 @@ zipkin-es-user-create: _env-check _monitoring-ns-check ## Create role and user f
 	echo "Elasticsearch Zipkin role and user creation completed."
 
 .PHONY: zipkin-install
-zipkin-install: _env-check _monitoring-ns-check ## Deploy Zipkin in QA cluster
-	@echo "Installing Zipkin cluster using Helm chart '$(ZIPKIN_VERSION)'..."
+zipkin-install: _env-check _monitoring-ns-check ## Install Zipkin in QA cluster
+	@echo "Installing Zipkin using Helm chart v$(ZIPKIN_VERSION) into $(MONITORING_NS) namespace..."
 	@helm repo add zipkin https://zipkin.io/zipkin-helm
 	@helm repo update
 	@helm upgrade --install $(ENV_NAME)-zipkin zipkin/zipkin \
 	   --version $(ZIPKIN_VERSION) \
-	   --values "$(VALUES_FILE_PREFIX)"/zipkin/values.yaml \
+	   --values "$(VALUES_FILE_PREFIX)"/infra/zipkin/values.yaml \
 	   --namespace $(MONITORING_NS)
 	@echo "Disabling Zipkin deployment readiness probe..."
 	@kubectl patch deployment $(ENV_NAME)-zipkin -n $(MONITORING_NS) --type=json -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/readinessProbe"}]'
@@ -720,9 +720,9 @@ zipkin-install: _env-check _monitoring-ns-check ## Deploy Zipkin in QA cluster
 
 .PHONY: zipkin-uninstall
 zipkin-uninstall: _env-check _monitoring-ns-check ## Uninstall Zipkin from QA cluster
-	@echo "Uninstalling Zipkin..."
+	@echo "Uninstalling Zipkin from namespace '$(MONITORING_NS)'..."
 	@helm uninstall $(ENV_NAME)-zipkin -n $(MONITORING_NS) || true
-	@echo "🗑 Zipkin uninstalled from namespace '$(MONITORING_NS)'."
+	@echo "🗑 Zipkin uninstalled."
 
 .PHONY: zipkin-status
 zipkin-status: _env-check _monitoring-ns-check ## Show Zipkin deployment status in QA cluster
