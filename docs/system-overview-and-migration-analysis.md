@@ -128,7 +128,7 @@ characteristics of the target state include:
      transactional database-stored procedures (e.g., Tarantool with Lua).
        - Ensures scalability, performance, and robust change management/versioning.
    - **PDF Generation**: Centralized, stateless Go service using browser-based rendering (e.g.,
-     chromedp/Chrome headless), removing legacy JSReports.
+     chromedp/Chrome headless), removing legacy jsreport.
 
 6. **Communication: gRPC Internally, REST at the Edge**
 
@@ -219,7 +219,7 @@ characteristics of the target state include:
 | Bank statements storage  | File system | MinIO             |
 | Documents storage        | File system | MinIO             |
 | Tariff rules storage     | File system | Tarantool         |
-| PDF reports generator    | JSReports   | chromedp(library) |
+| PDF reports generator    | jsreport    | chromedp(library) |
 
 [Reasoning for replacing Consul with Kubernetes-native service discovery](migration/component-replacement-reasoning/replace-consul.md)
 
@@ -676,7 +676,7 @@ integrating full observability and modernizing core components along the way.
         * **Full Observability:** Instrument the new service from day one to export structured logs
           to Loki, metrics to Prometheus, and traces to Tempo.
         * **Component Modernization:** As part of the rewrite, modernize underlying dependencies.
-            * When rewriting the `document-service`, replace the JSReports dependency with a
+            * When rewriting the `document-service`, replace the jsreport dependency with a
               new Go service using the `chromedp` library.
             * When rewriting the `pricing-service`, migrate the file-based tariff rules to
               **Tarantool** for scalable, in-memory execution.
@@ -698,7 +698,7 @@ integrating full observability and modernizing core components along the way.
    building experience and confidence throughout the migration.
     * **1. `document-service` (Low Risk):** This service has relatively isolated functionality
       (document generation). Migrating it first provides an excellent test case for the new Go stack
-      and the `chromedp` library replacement for JSReports without impacting core transactional
+      and the `chromedp` library replacement for jsreport without impacting core transactional
       flows.
     * **2. `product-service` (Low-to-Medium Risk):** With its data store already migrated to
       PostgreSQL in Phase 3, rewriting the service itself in Go is a logical next step. It provides

@@ -1,4 +1,4 @@
-# Local Dev Cluster How-To's
+# Cluster Apps How-To's
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
@@ -14,7 +14,7 @@
   - [MinIO](#minio)
   - [Kafka](#kafka)
 - [Services](#services)
-  - [JSReport](#jsreport)
+  - [jsreport](#jsreport)
 - [QA—Cluster Load Monitoring](#qacluster-load-monitoring)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -154,7 +154,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 
 Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` namespaces.
 
-### JSReport
+### jsreport
 
 - `make jsreport-deploy`
 - `kubectl get pods -n local-dev-all | grep jsreport`

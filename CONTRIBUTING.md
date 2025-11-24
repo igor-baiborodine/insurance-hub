@@ -30,6 +30,7 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
   see [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
 * **Go** `>=1.24`, see [Install Go](https://go.dev/doc/install).
 * **jq** `>=1.6`, see [Install jq](https://stedolan.github.io/jq/download/).
+* **Make** `>=4.3`, see [Install Make](https://www.gnu.org/software/make/).
 * **Docker Engine** `>=24.0.0`,
   see [Install Docker Engine](https://docs.docker.com/engine/install/).
 * **kubectl** `>=1.29.2`, see [Install kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl).
