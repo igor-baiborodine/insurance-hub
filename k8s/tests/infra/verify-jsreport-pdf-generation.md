@@ -1,12 +1,12 @@
-## Verify JSReport PDF Generation
+## Verify jsreport PDF Generation
 
-This guide explains how to test JSReport connectivity and PDF rendering in both **Local Dev** and **QA** Kubernetes environments using a consistent procedure. The process uses Makefile targets and temporary test pods to validate service DNS, HTTP connectivity, and PDF generation.
+This guide explains how to test jsreport connectivity and PDF rendering in both **Local Dev** and **QA** Kubernetes environments using a consistent procedure. The process uses Makefile targets and temporary test pods to validate service DNS, HTTP connectivity, and PDF generation.
 
 ### Local Dev and QA
 
 1. **Prerequisites**
 - Ensure your Kubernetes context is set for your target environment (`local-dev` or `QA`).
-- Confirm JSReport is deployed and running by executing:
+- Confirm jsreport is deployed and running by executing:
 
   ```shell
   make jsreport-status
@@ -17,7 +17,7 @@ This guide explains how to test JSReport connectivity and PDF rendering in both 
 
 2. **Run Test Pod to Verify Connectivity**
 
-- Start a temporary test pod in the JSReport namespace:
+- Start a temporary test pod in the jsreport namespace:
    ```shell
    kubectl run -it jsreport-test --rm --restart=Never --image=curlimages/curl:latest -n <svc-ns> -- sh
    ```

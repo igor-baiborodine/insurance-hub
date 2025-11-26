@@ -76,7 +76,7 @@ command-line tool.
    the shell:
 
     ```shell
-    kubectl run mongosh-test --rm -it --image=bitnami/mongodb --namespace=qa-data -- bash \
+    kubectl run mongosh-test --rm -it --image=bitnami/mongodb --namespace=default -- bash \
         -c "mongosh mongodb://root:$MONGO_ROOT_USER_PWD@qa-mongodb-svc.qa-data.svc.cluster.local:27017/admin"
     ```
 

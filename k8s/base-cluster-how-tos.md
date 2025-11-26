@@ -17,7 +17,7 @@
 
 1. **Kubernetes cluster dependencies**
 - `cd k8s`
-- `make prereq-all`
+- `make prereq-k8s-all`
 
 2. **QA cluster configuration**
 - Make sure that the host uses the `nftables` instead of `iptables-legacy`:
@@ -69,6 +69,19 @@
 
 > Please note that after this step the `kubectl` current context will be automatically set to
 `kind-local-dev-insurance-hub`.
+
+### Manage Cluster
+
+- `cd k8s/bootstrap`
+
+1. **Suspend cluster**
+- `make local-dev-suspend`
+
+2. **Resume cluster**
+- `make local-dev-resume`
+
+3. **Delete cluster**
+- `make local-dev-delete`
 
 ## QA
 
