@@ -133,7 +133,9 @@ characteristics of the target state include:
 6. **Communication: gRPC Internally, REST at the Edge**
 
    - **Internal Service Calls**: All interservice communication standardized on gRPC for performance,
-     streaming support, strict contracts, and code generation.
+     streaming support, strict contracts, and code generation. Additionally, a service mesh will be
+     implemented to manage and secure internal traffic, providing capabilities such as mTLS, traffic
+     management, and advanced observability without requiring changes to service code.
    - **External APIs**: Select services exposed via REST/HTTP using gRPC-gateway for compatibility with
      third parties, web frontends, and OpenAPI/Swagger generation.
    - **Benefits**: Strongly typed API interactions, improved developer productivity, easier backward
@@ -163,7 +165,9 @@ characteristics of the target state include:
      (logging, metrics, error handling).
    - **Resilience & Scalability**: Stateless Go microservices support rapid horizontal scaling;
      leverage Kubernetes' pod autoscaling and distributed message streaming (Kafka) for burst
-     workloads.
+     workloads. Furthermore, a service mesh like Linkerd will enforce resilience patterns such
+     as automatic retries, circuit breakers, timeouts, and connection pooling to enhance
+     fault tolerance and system stability.
 
 ## System Context
 
