@@ -21,7 +21,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <micronaut.version>2.4.0</micronaut.version>
         <exec.mainClass>pl.altkom.asc.lab.micronaut.poc.documents.DocumentsApplication</exec.mainClass>
-        <kotlinVersion>1.4.10</kotlinVersion>
+        <kotlinVersion>1.7.22</kotlinVersion>
         <maven-surefire-plugin.version>2.22.2</maven-surefire-plugin.version>
         <maven-failsafe-plugin.version>2.22.2</maven-failsafe-plugin.version>
     </properties>
