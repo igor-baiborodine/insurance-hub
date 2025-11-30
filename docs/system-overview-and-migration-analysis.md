@@ -133,7 +133,9 @@ characteristics of the target state include:
 6. **Communication: gRPC Internally, REST at the Edge**
 
    - **Internal Service Calls**: All interservice communication standardized on gRPC for performance,
-     streaming support, strict contracts, and code generation.
+     streaming support, strict contracts, and code generation. Additionally, a service mesh will be
+     implemented to manage and secure internal traffic, providing capabilities such as mTLS, traffic
+     management, and advanced observability without requiring changes to service code.
    - **External APIs**: Select services exposed via REST/HTTP using gRPC-gateway for compatibility with
      third parties, web frontends, and OpenAPI/Swagger generation.
    - **Benefits**: Strongly typed API interactions, improved developer productivity, easier backward
@@ -163,7 +165,9 @@ characteristics of the target state include:
      (logging, metrics, error handling).
    - **Resilience & Scalability**: Stateless Go microservices support rapid horizontal scaling;
      leverage Kubernetes' pod autoscaling and distributed message streaming (Kafka) for burst
-     workloads.
+     workloads. Furthermore, a service mesh like Linkerd will enforce resilience patterns such
+     as automatic retries, circuit breakers, timeouts, and connection pooling to enhance
+     fault tolerance and system stability.
 
 ## System Context
 
@@ -693,27 +697,38 @@ integrating full observability and modernizing core components along the way.
           the Java baseline.
     * **Decommission:** Once the Go service reliably handles 100% of traffic, decommission and
       remove the old Java service.
-3. **Recommended Migration Sequence:** The following sequence is designed to start with lower-risk
+3. **Recommended Service Migration Sequence:** The following sequence is designed to start with lower-risk
    services and progressively move to the most critical, high-impact components. This allows
    building experience and confidence throughout the migration.
-    * **1. `document-service` (Low Risk):** This service has relatively isolated functionality
+    * `document-service` - **low risk**: This service has relatively isolated functionality
       (document generation). Migrating it first provides an excellent test case for the new Go stack
       and the `chromedp` library replacement for jsreport without impacting core transactional
       flows.
-    * **2. `product-service` (Low-to-Medium Risk):** With its data store already migrated to
+    * `product-service` - **low-to-medium risk**: With its data store already migrated to
       PostgreSQL in Phase 3, rewriting the service itself in Go is a logical next step. It provides
       foundational data to other services, but its logic is likely less complex than the core
       transactional services.
-    * **3. `pricing-service` (Medium-to-High Risk):** Pricing is a critical business function. This
-      migration involves not only a language change but also a shift in how tariff rules are
-      managed (moving to Tarantool). It should be undertaken after the team is comfortable with the
-      migration process.
-    * **4. `policy-service` (High Risk):** As the service managing core insurance policies, this is
-      a high-impact, critical component. It likely has complex business logic and dependencies on
-      the services migrated earlier.
-    * **5. `payment-service` (High Risk):** Handling financial transactions makes this service
-      extremely critical. It should be one of the last services to be migrated, ensuring maximum
-      stability of the surrounding new ecosystem.
+   * `dashboard-service` - **low-to-medium risk**: This service focuses on retrieving and
+     displaying data from existing data stores (PostgreSQL and Elasticsearch) and configurations.
+     Its migration is less critical to core transactional flows and can serve as an early-to-medium
+     complexity migration step.
+   * `policy-search-service` - **low-to-medium risk**: As an internal-only service primarily
+     querying Elasticsearch, its migration is relatively isolated and can serve as a good
+     practice run for converting REST APIs to gRPC and integrating with existing data stores
+     without impacting critical transactional paths.
+   * `chat-service` - **medium risk**: This service involves real-time communication and
+     persistence of chat history. While not as critical as policy or payment, its real-time nature
+     makes it a good candidate to tackle after simpler data-focused services.
+   * `pricing-service` - **medium-to-high risk**: Pricing is a critical business function. This
+     migration involves not only a language change but also a shift in how tariff rules are
+     managed (moving to Tarantool). It should be undertaken after the team is comfortable with the
+     migration process.
+   * `policy-service` - **high risk**: As the service managing core insurance policies, this is
+     a high-impact, critical component. It likely has complex business logic and dependencies on
+     the services migrated earlier.
+   * `payment-service` - **high risk**: Handling financial transactions makes this service
+     extremely critical. It should be one of the last services to be migrated, ensuring maximum
+     stability of the surrounding new ecosystem.
 
 **Outcome:** The core business logic is progressively migrated to a modern, performant, and fully
 observable Go-based microservices architecture, with key legacy components updated in the process.
