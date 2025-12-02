@@ -3,7 +3,7 @@ micronaut:
     name: payment-service
   server:
     host: localhost
-    port: ${SERVICE_PORT:-1}
+    port: 8080
 ---
 kafka:
   bootstrap:
@@ -20,6 +20,9 @@ consul:
 endpoints:
   health:
     enabled: true
+    sensitive: false
+  env:
+    enabled: false
     sensitive: false
 ---
 hystrix:
