@@ -8,6 +8,29 @@ kubeconfig-clear: ## Empty the ~/.kube/config file
 	@> ~/.kube/config
 	@echo "~/.kube/config file has been emptied."
 
+.PHONY: local-dev-port-forwarding
+local-dev-port-forwarding: ## Set up local port-forwarding for Kafka and PostgreSQL services in local-dev.
+	@echo "Starting local-dev port-forwards. Use 'killall kubectl' or stop manually when done."
+	@echo "  Kafka (local:9094 -> cluster:9094)..."
+	@# For Kafka, we typically port-forward to the external bootstrap service that Strimzi creates.
+	@kubectl port-forward svc/local-dev-kafka-kafka-external-bootstrap 9094:9094 --namespace=local-dev-all > /dev/null 2>&1 &
+	@echo "  PostgreSQL auth (local:5442 -> cluster:5432)..."
+	@kubectl port-forward svc/local-dev-postgres-auth-rw 5442:5432 --namespace=local-dev-all > /dev/null 2>&1 &
+	@echo "  PostgreSQL document (local:5452 -> cluster:5432)..."
+	@kubectl port-forward svc/local-dev-postgres-document-rw 5452:5432 --namespace=local-dev-all > /dev/null 2>&1 &
+	@echo "  PostgreSQL payment (local:5462 -> cluster:5432)..."
+	@kubectl port-forward svc/local-dev-postgres-payment-rw 5462:5432 --namespace=local-dev-all > /dev/null 2>&1 &
+	@echo "  PostgreSQL policy (local:5472 -> cluster:5432)..."
+	@kubectl port-forward svc/local-dev-postgres-policy-rw 5472:5432 --namespace=local-dev-all > /dev/null 2>&1 &
+	@echo "  PostgreSQL product (local:5482 -> cluster:5432)..."
+	@kubectl port-forward svc/local-dev-postgres-product-rw 5482:5432 --namespace=local-dev-all > /dev/null 2>&1 &
+	@echo "  MinIO document (local:9001 -> cluster:9000)..."
+	@kubectl port-forward svc/local-dev-minio-document-hl 9001:9000 --namespace=local-dev-minio-document > /dev/null 2>&1 &
+	@echo "  MinIO payment (local:9002 -> cluster:9000)..."
+	@kubectl port-forward svc/local-dev-minio-payment-hl 9002:9000 --namespace=local-dev-minio-payment > /dev/null 2>&1 &
+	@echo "All local-dev port-forwards initiated in the background."
+	@echo "To stop them, you can use 'killall kubectl' or find their process IDs and kill them individually."
+
 ################################################################################
 # Kubernetes prerequisites
 ################################################################################
@@ -529,6 +552,13 @@ minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for 
 	echo "\nMinIO ServiceMonitors:"; \
 	kubectl get servicemonitor -n "$$NAMESPACE" || true
 
+.PHONY: minio-console-ui
+minio-console-ui: _env-check _svc-name-check ## Access MinIO Console UI via port-forward. Usage: make minio-console-ui SVC_NAME=<svc-name>
+	@NAMESPACE="$(ENV_NAME)-minio-$(SVC_NAME)"; \
+	echo "Forwarding MinIO Console for '$(SVC_NAME)' to http://localhost:9090"; \
+	echo "Press Ctrl+C to stop."; \
+	kubectl port-forward svc/$$NAMESPACE-console 9090:9090 -n $$NAMESPACE
+
 .PHONY: minio-tenant-delete
 minio-tenant-delete: _env-check _svc-name-check ## Delete MinIO tenant for service. Usage: make minio-tenant-delete SVC_NAME=<svc-name>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
@@ -545,6 +575,46 @@ minio-tenant-purge: minio-tenant-delete _svc-name-check ## Delete MinIO tenant a
 	kubectl delete pvc -n "$$NAMESPACE" --all || true; \
 	echo "Deleting namespace $$NAMESPACE..."; \
 	kubectl delete namespace "$$NAMESPACE" --ignore-not-found || true
+
+################################################################################
+# MinIO Management Targets
+# Targets for managing MinIO buckets and policies for services.
+# Namespace and environment auto-detected from current kubectl context
+################################################################################
+
+MINIO_SVC_ACCESS_KEY ?= minioSvcAccessKey
+MINIO_SVC_SECRET_KEY ?= minioSvcSecretKey
+
+.PHONY: minio-svc-bucket-create
+minio-svc-bucket-create: _env-check _svc-name-check ## Create a MinIO bucket for service. Usage: make minio-svc-bucket-create SVC_NAME=<svc-name> BUCKET_NAME=<bucket-name>
+	@if [ -z "$(BUCKET_NAME)" ]; then \
+		echo "ERROR: BUCKET_NAME is required. Usage: make minio-tenant-bucket-create SVC_NAME=<svc-name> BUCKET_NAME=<bucket-name>"; \
+		exit 1; \
+	fi
+	@bash env/scripts/minio-tenant-bucket-create.sh "$(ENV_NAME)" "$(SVC_NAME)" "$(BUCKET_NAME)"
+
+.PHONY: minio-svc-secret-create
+minio-svc-secret-create: _env-check _svc-name-check ## Create/update MinIO credentials secret for service account. Usage: make minio-svc-secret-create SVC_NAME=<svc-name> MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>
+	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
+	SECRET_NAME="$$NAMESPACE-svc-creds"; \
+	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
+	echo "Creating MinIO service credentials secret in namespace $$NAMESPACE..."; \
+	kubectl create secret generic "$$SECRET_NAME" \
+	   --namespace "$$NAMESPACE" \
+	   --type Opaque \
+	   --from-literal=MINIO_SVC_ACCESS_KEY="$(MINIO_SVC_ACCESS_KEY)" \
+	   --from-literal=MINIO_SVC_SECRET_KEY="$(MINIO_SVC_SECRET_KEY)" \
+	   --dry-run=client -o yaml | kubectl apply -f -; \
+	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE"
+
+.PHONY: minio-svc-account-with-policy-create
+minio-svc-account-with-policy-create: _env-check _svc-name-check ## Create a MinIO service account and apply an S3 policy. Usage: make minio-svc-account-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>
+	@if [ -z "$(POLICY_FILE)" ]; then \
+		echo "ERROR: POLICY_FILE is required. Usage: make minio-svc-account-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>"; \
+		exit 1; \
+	fi
+	@bash k8s/scripts/minio-svc-account-with-policy-create.sh "$(SVC_NAME)" "$(ENV_NAME)" "$(POLICY_FILE)"
+
 
 ################################################################################
 # MongoDB Deployment Targets
