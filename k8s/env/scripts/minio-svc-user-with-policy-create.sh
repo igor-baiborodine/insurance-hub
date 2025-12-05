@@ -9,7 +9,7 @@ NAMESPACE="${ENV_NAME}-minio-${SVC_NAME}"
 echo "Using NAMESPACE=${NAMESPACE}"
 MINIO_TENANT_ALIAS="${NAMESPACE}"
 MINIO_STORAGE_CONFIG_SECRET_NAME="${NAMESPACE}-storage-config"
-MINIO_SVC_CREDS_SECRET_NAME="${NAMESPACE}-svc-creds"
+MINIO_SVC_USER_CREDS_SECRET_NAME="${NAMESPACE}-svc-user-creds"
 
 echo "Retrieving MinIO root credentials from secret '${MINIO_STORAGE_CONFIG_SECRET_NAME}' in namespace '${NAMESPACE}'..."
 MINIO_ROOT_USER=$(kubectl get secret "${MINIO_STORAGE_CONFIG_SECRET_NAME}" -n "${NAMESPACE}" -o jsonpath='{.data.config\.env}' | base64 -d | grep MINIO_ROOT_USER | cut -d'"' -f2)
@@ -19,11 +19,11 @@ if [ -z "${MINIO_ROOT_USER}" ] || [ -z "${MINIO_ROOT_PASSWORD}" ]; then
     exit 1
 fi
 
-echo "Retrieving service account credentials from secret '${MINIO_SVC_CREDS_SECRET_NAME}' in namespace '${NAMESPACE}'..."
-MINIO_SVC_ACCESS_KEY=$(kubectl get secret "${MINIO_SVC_CREDS_SECRET_NAME}" -n "${NAMESPACE}" -o jsonpath='{.data.MINIO_SVC_ACCESS_KEY}' | base64 -d)
-MINIO_SVC_SECRET_KEY=$(kubectl get secret "${MINIO_SVC_CREDS_SECRET_NAME}" -n "${NAMESPACE}" -o jsonpath='{.data.MINIO_SVC_SECRET_KEY}' | base64 -d)
+echo "Retrieving service account credentials from secret '${MINIO_SVC_USER_CREDS_SECRET_NAME}' in namespace '${NAMESPACE}'..."
+MINIO_SVC_ACCESS_KEY=$(kubectl get secret "${MINIO_SVC_USER_CREDS_SECRET_NAME}" -n "${NAMESPACE}" -o jsonpath='{.data.MINIO_SVC_ACCESS_KEY}' | base64 -d)
+MINIO_SVC_SECRET_KEY=$(kubectl get secret "${MINIO_SVC_USER_CREDS_SECRET_NAME}" -n "${NAMESPACE}" -o jsonpath='{.data.MINIO_SVC_SECRET_KEY}' | base64 -d)
 if [ -z "${MINIO_SVC_ACCESS_KEY}" ] || [ -z "${MINIO_SVC_SECRET_KEY}" ]; then
-    echo "ERROR: Failed to retrieve MinIO service account credentials from secret '${MINIO_SVC_CREDS_SECRET_NAME}'." >&2
+    echo "ERROR: Failed to retrieve MinIO service account credentials from secret '${MINIO_SVC_USER_CREDS_SECRET_NAME}'." >&2
     exit 1
 fi
 
@@ -44,11 +44,11 @@ kubectl exec -it "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- \
 
 POLICY_NAME=$(basename "${POLICY_FILE}" .json)
 echo "Copying local policy file '${POLICY_FILE}' into MinIO console pod '${MINIO_CONSOLE_POD_NAME}'..."
-kubectl cp "${POLICY_FILE}" "${NAMESPACE}/${MINIO_CONSOLE_POD_NAME}:/tmp/policy.json"
+kubectl cp "${POLICY_FILE}" "${NAMESPACE}/${MINIO_CONSOLE_POD_NAME}:/tmp/${POLICY_NAME}.json"
 
 echo "Applying MinIO policy '${POLICY_NAME}'..."
 kubectl exec -it "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- \
-  mc admin policy add "${MINIO_TENANT_ALIAS}" "${POLICY_NAME}" /tmp/policy.json
+  mc admin policy add "${MINIO_TENANT_ALIAS}" "${POLICY_NAME}" "/tmp/${POLICY_NAME}.json"
 
 echo "Attaching policy '${POLICY_NAME}' to user '${MINIO_SVC_ACCESS_KEY}' for tenant in namespace '${NAMESPACE}'..."
 kubectl exec -it "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- \

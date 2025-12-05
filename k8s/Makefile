@@ -593,10 +593,10 @@ minio-svc-bucket-create: _env-check _svc-name-check ## Create a MinIO bucket for
 	fi
 	@bash env/scripts/minio-svc-bucket-create.sh "$(ENV_NAME)" "$(SVC_NAME)" "$(BUCKET_NAME)"
 
-.PHONY: minio-svc-secret-create
-minio-svc-secret-create: _env-check _svc-name-check ## Create/update MinIO credentials secret for service account. Usage: make minio-svc-secret-create SVC_NAME=<svc-name> MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>
+.PHONY: minio-svc-user-secret-create
+minio-svc-user-secret-create: _env-check _svc-name-check ## Create/update MinIO credentials secret for service account. Usage: make minio-svc-user-secret-create SVC_NAME=<svc-name> MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
-	SECRET_NAME="$$NAMESPACE-svc-creds"; \
+	SECRET_NAME="$$NAMESPACE-svc-user-creds"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
 	echo "Creating MinIO service credentials secret in namespace $$NAMESPACE..."; \
 	kubectl create secret generic "$$SECRET_NAME" \
@@ -607,13 +607,13 @@ minio-svc-secret-create: _env-check _svc-name-check ## Create/update MinIO crede
 	   --dry-run=client -o yaml | kubectl apply -f -; \
 	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE"
 
-.PHONY: minio-svc-account-with-policy-create
-minio-svc-account-with-policy-create: _env-check _svc-name-check ## Create a MinIO service account and apply an S3 policy. Usage: make minio-svc-account-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>
+.PHONY: minio-svc-user-with-policy-create
+minio-svc-user-with-policy-create: _env-check _svc-name-check ## Create a MinIO service account and apply an S3 policy. Usage: make minio-svc-user-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>
 	@if [ -z "$(POLICY_FILE)" ]; then \
-		echo "ERROR: POLICY_FILE is required. Usage: make minio-svc-account-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>"; \
+		echo "ERROR: POLICY_FILE is required. Usage: make minio-svc-user-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>"; \
 		exit 1; \
 	fi
-	@bash k8s/scripts/minio-svc-account-with-policy-create.sh "$(SVC_NAME)" "$(ENV_NAME)" "$(POLICY_FILE)"
+	@bash env/scripts/minio-svc-user-with-policy-create.sh "$(SVC_NAME)" "$(ENV_NAME)" "$(POLICY_FILE)"
 
 
 ################################################################################
