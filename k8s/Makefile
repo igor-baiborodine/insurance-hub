@@ -588,10 +588,10 @@ MINIO_SVC_SECRET_KEY ?= minioSvcSecretKey
 .PHONY: minio-svc-bucket-create
 minio-svc-bucket-create: _env-check _svc-name-check ## Create a MinIO bucket for service. Usage: make minio-svc-bucket-create SVC_NAME=<svc-name> BUCKET_NAME=<bucket-name>
 	@if [ -z "$(BUCKET_NAME)" ]; then \
-		echo "ERROR: BUCKET_NAME is required. Usage: make minio-tenant-bucket-create SVC_NAME=<svc-name> BUCKET_NAME=<bucket-name>"; \
+		echo "ERROR: BUCKET_NAME is required. Usage: make minio-svc-bucket-create SVC_NAME=<svc-name> BUCKET_NAME=<bucket-name>"; \
 		exit 1; \
 	fi
-	@bash env/scripts/minio-tenant-bucket-create.sh "$(ENV_NAME)" "$(SVC_NAME)" "$(BUCKET_NAME)"
+	@bash env/scripts/minio-svc-bucket-create.sh "$(ENV_NAME)" "$(SVC_NAME)" "$(BUCKET_NAME)"
 
 .PHONY: minio-svc-secret-create
 minio-svc-secret-create: _env-check _svc-name-check ## Create/update MinIO credentials secret for service account. Usage: make minio-svc-secret-create SVC_NAME=<svc-name> MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>
