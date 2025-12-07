@@ -38,7 +38,11 @@ tracing:
         probability: 1.0 # Configuration taking 100% of the request to be processed by Zipkin. In a real production system, that could be overwhelming.
 ---
 payments:
-    importDir: c:\bank_imports
+    import-s3-bucket: payments-import
+---
+minio:
+  svc-access-key: "${MINIO_SVC_ACCESS_KEY:minioSvcAccessKey}"
+  svc-secret-key: "${MINIO_SVC_SECRET_KEY:minioSvcSecretKey}"
 ---
 datasources:
   default:

@@ -8,5 +8,5 @@ import lombok.Setter;
 @Getter
 @Setter
 class BankStatementImportJobCfg {
-    private String importDir = "c:\\temp\\bank_imports";  
+    private String importS3Bucket = "payments-import";
 }
