@@ -45,14 +45,14 @@ kubectl exec -it "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- \
 
 POLICY_NAME=$(basename "${POLICY_FILE}" .json)
 echo "Copying local policy file '${POLICY_FILE}' into MinIO console pod '${MINIO_CONSOLE_POD_NAME}'..."
-kubectl cp "${POLICY_FILE}" "${NAMESPACE}/${MINIO_CONSOLE_POD_NAME}:/tmp/${POLICY_NAME}.json"
+cat "${POLICY_FILE}" | kubectl exec -i "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- sh -c "cat > /tmp/${POLICY_NAME}.json"
 
 echo "Applying MinIO policy '${POLICY_NAME}'..."
 kubectl exec -it "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- \
-  mc admin policy add "${MINIO_TENANT_ALIAS}" "${POLICY_NAME}" "/tmp/${POLICY_NAME}.json"
+  mc admin policy create "${MINIO_TENANT_ALIAS}" "${POLICY_NAME}" "/tmp/${POLICY_NAME}.json"
 
 echo "Attaching policy '${POLICY_NAME}' to user '${MINIO_SVC_ACCESS_KEY}' for tenant in namespace '${NAMESPACE}'..."
 kubectl exec -it "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- \
-  mc admin policy set "${MINIO_TENANT_ALIAS}" "${POLICY_NAME}" user="${MINIO_SVC_ACCESS_KEY}"
+  mc admin policy attach "${MINIO_TENANT_ALIAS}" "${POLICY_NAME}" --user "${MINIO_SVC_ACCESS_KEY}"
 
 echo "✅ MinIO user '${MINIO_SVC_ACCESS_KEY}' created and policy '${POLICY_NAME}' applied."
