@@ -8,8 +8,8 @@ kubeconfig-clear: ## Empty the ~/.kube/config file
 	@> ~/.kube/config
 	@echo "~/.kube/config file has been emptied."
 
-.PHONY: local-dev-port-forwarding
-local-dev-port-forwarding: ## Set up local port-forwarding for Kafka and PostgreSQL services in local-dev.
+.PHONY: local-dev-port-forward
+local-dev-port-forward: ## Set up local port-forwarding for Kafka and PostgreSQL services in local-dev.
 	@echo "Starting local-dev port-forwards. Use 'killall kubectl' or stop manually when done."
 	@echo "  Kafka (local:9094 -> cluster:9094)..."
 	@# For Kafka, we typically port-forward to the external bootstrap service that Strimzi creates.
