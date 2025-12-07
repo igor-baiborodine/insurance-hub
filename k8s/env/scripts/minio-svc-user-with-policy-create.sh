@@ -27,11 +27,12 @@ if [ -z "${MINIO_SVC_ACCESS_KEY}" ] || [ -z "${MINIO_SVC_SECRET_KEY}" ]; then
     exit 1
 fi
 
-MINIO_CONSOLE_POD_NAME=$(kubectl get pods -n "${NAMESPACE}" -l v1.min.io/tenant="${NAMESPACE}" -o name | head -n 1)
-if [ -z "${MINIO_CONSOLE_POD_NAME}" ]; then
+MINIO_CONSOLE_POD_NAME_WITH_PREFIX=$(kubectl get pods -n "${NAMESPACE}" -l v1.min.io/tenant="${NAMESPACE}" -o name | head -n 1)
+if [ -z "${MINIO_CONSOLE_POD_NAME_WITH_PREFIX}" ]; then
     echo "ERROR: MinIO console pod not found in namespace '${NAMESPACE}'. Is the tenant deployed for '${SVC_NAME}'?" >&2
     exit 1
 fi
+MINIO_CONSOLE_POD_NAME="${MINIO_CONSOLE_POD_NAME_WITH_PREFIX#pod/}"
 
 MINIO_S3_API_HOSTNAME="${NAMESPACE}-hl"
 echo "Adding MinIO alias for tenant '${SVC_NAME}' S3 API (if not existing)..."
@@ -54,4 +55,4 @@ echo "Attaching policy '${POLICY_NAME}' to user '${MINIO_SVC_ACCESS_KEY}' for te
 kubectl exec -it "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- \
   mc admin policy set "${MINIO_TENANT_ALIAS}" "${POLICY_NAME}" user="${MINIO_SVC_ACCESS_KEY}"
 
-echo "✅ MinIO service account '${MINIO_SVC_ACCESS_KEY}' created and policy '${POLICY_NAME}' applied."
+echo "✅ MinIO user '${MINIO_SVC_ACCESS_KEY}' created and policy '${POLICY_NAME}' applied."

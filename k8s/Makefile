@@ -193,7 +193,7 @@ _monitoring-ns-check: ## Ensure monitoring namespace exists and set it as the cu
 .PHONY: _svc-name-check
 _svc-name-check: ## Ensure that the SVC_NAME argument is provided
 	@if [ -z "$$SVC_NAME" ]; then \
-		echo "Argument 'SVC_NAME' is required!"; \
+		echo "ERROR: Argument 'SVC_NAME' is required!"; \
 		exit 1; \
 	fi
 
@@ -448,7 +448,7 @@ kafka-topics-list: _env-check ## List all Kafka topics
 .PHONY: kafka-console-producer
 kafka-console-producer: _env-check ## Access Kafka console producer. Usage: make kafka-console-producer TOPIC_NAME=<topic-name>"
 	@if [ -z "$(TOPIC_NAME)" ]; then \
-		echo "ERROR: TOPIC_NAME is required. Usage: make kafka-console-producer TOPIC_NAME=<topic-name>"; \
+		echo "ERROR: Argument 'TOPIC_NAME' is required! Usage: make kafka-console-producer TOPIC_NAME=<topic-name>"; \
 		exit 1; \
 	fi
 	@echo "Starting Kafka console producer for topic: $(TOPIC_NAME)"
@@ -463,7 +463,7 @@ kafka-console-producer: _env-check ## Access Kafka console producer. Usage: make
 .PHONY: kafka-console-consumer
 kafka-console-consumer: _env-check ## Access Kafka console consumer. Usage: make kafka-console-consumer TOPIC_NAME=<topic-name>"
 	@if [ -z "$(TOPIC_NAME)" ]; then \
-		echo "ERROR: TOPIC_NAME is required. Usage: make kafka-console-consumer TOPIC_NAME=<topic-name>"; \
+		echo "ERROR: Argument 'TOPIC_NAME' is required! Usage: make kafka-console-consumer TOPIC_NAME=<topic-name>"; \
 		exit 1; \
 	fi
 	@echo "Starting Kafka console consumer for topic: $(TOPIC_NAME)"
@@ -588,7 +588,7 @@ MINIO_SVC_SECRET_KEY ?= minioSvcSecretKey
 .PHONY: minio-svc-bucket-create
 minio-svc-bucket-create: _env-check _svc-name-check ## Create a MinIO bucket for service. Usage: make minio-svc-bucket-create SVC_NAME=<svc-name> BUCKET_NAME=<bucket-name>
 	@if [ -z "$(BUCKET_NAME)" ]; then \
-		echo "ERROR: BUCKET_NAME is required. Usage: make minio-svc-bucket-create SVC_NAME=<svc-name> BUCKET_NAME=<bucket-name>"; \
+		echo "ERROR: Argument 'BUCKET_NAME' is required! Usage: make minio-svc-bucket-create SVC_NAME=<svc-name> BUCKET_NAME=<bucket-name>"; \
 		exit 1; \
 	fi
 	@bash env/scripts/minio-svc-bucket-create.sh "$(ENV_NAME)" "$(SVC_NAME)" "$(BUCKET_NAME)"
@@ -610,7 +610,7 @@ minio-svc-user-secret-create: _env-check _svc-name-check ## Create/update MinIO 
 .PHONY: minio-svc-user-with-policy-create
 minio-svc-user-with-policy-create: _env-check _svc-name-check ## Create a MinIO service account and apply an S3 policy. Usage: make minio-svc-user-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>
 	@if [ -z "$(POLICY_FILE)" ]; then \
-		echo "ERROR: POLICY_FILE is required. Usage: make minio-svc-user-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>"; \
+		echo "ERROR: Argument 'POLICY_FILE' is required! Usage: make minio-svc-user-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>"; \
 		exit 1; \
 	fi
 	@bash env/scripts/minio-svc-user-with-policy-create.sh "$(SVC_NAME)" "$(ENV_NAME)" "$(POLICY_FILE)"
