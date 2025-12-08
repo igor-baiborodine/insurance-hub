@@ -39,8 +39,10 @@ tracing:
 ---
 payments:
     import-s3-bucket: payments-import
+    import-fixed-rate: "8h"
 ---
 minio:
+  tenant-endpoint: "${MINIO_TENANT_ENDPOINT:http://localhost:9000}"
   svc-access-key: "${MINIO_SVC_ACCESS_KEY:minioSvcAccessKey}"
   svc-secret-key: "${MINIO_SVC_SECRET_KEY:minioSvcSecretKey}"
 ---

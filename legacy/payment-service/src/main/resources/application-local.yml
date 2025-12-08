@@ -15,3 +15,9 @@ endpoints:
 tracing:
   zipkin:
     enabled: false
+---
+payments:
+  import-fixed-rate: "3m"
+---
+minio:
+  tenant-endpoint: "http://localhost:9002"

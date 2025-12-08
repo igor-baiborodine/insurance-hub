@@ -152,8 +152,7 @@ public class InPaymentRegistrationService {
     private void registerInPayment(BankStatement bankStatement) {
         policyAccountRepository
                 .findByPolicyAccountNumber(bankStatement.getAccountNumber())
-                .ifPresent(account -> {
-                    account.inPayment(bankStatement.getAmount(), bankStatement.getAccountingDate());
-                });
+                .ifPresent(account ->
+                        account.inPayment(bankStatement.getAmount(), bankStatement.getAccountingDate()));
     }
 }
