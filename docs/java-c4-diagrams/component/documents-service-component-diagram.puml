@@ -10,7 +10,8 @@ System_Ext(gateway, "Agent Portal Gateway", "API Gateway", "Allows users to down
 System_Ext(policy_service, "Policy Service", "Microservice", "Publishes an event when a new policy is created.")
 System_Ext(kafka, "Apache Kafka", "Event Streaming Platform", "Message broker for asynchronous events.")
 System_Ext(jsreport, "JSReport Service", "External PDF Generation Engine", "Renders HTML/data into a PDF document.")
-System_Ext(fs, "Document Storage", "File System / Blob Storage", "Provides persistent storage for the generated PDF files.")
+' Updated external system to reflect PostgreSQL as the storage for document blobs and metadata
+System_Ext(documents_db, "Document Database", "PostgreSQL Database", "Stores generated PDF documents as byte arrays (blobs) and their metadata.")
 
 Container_Boundary(documents_service, "Documents Service") {
     ' API Layer
@@ -22,10 +23,11 @@ Container_Boundary(documents_service, "Documents Service") {
 
     ' Application/Domain Logic
     Component(gen_service, "Document Generation Service", "Kotlin Service", "Orchestrates fetching data and calling the PDF generator.")
-    
+
     ' Infrastructure / Clients
     Component(pdf_generator, "PDF Generator Client", "JSReport Client", "Sends template and data to the JSReport Service for rendering.")
-    Component(doc_repo, "Document Repository", "File System Adapter", "Handles storing and retrieving PDF files from Document Storage.")
+    ' Updated Document Repository to reflect database interaction
+    Component(doc_repo, "Document Repository", "Micronaut Data JPA / PostgreSQL", "Handles storing and retrieving PDF files (byte arrays) and metadata from PostgreSQL.")
 
     ' Relationships within the service
     Rel(api, doc_repo, "Uses to fetch documents")
@@ -40,10 +42,12 @@ Container_Boundary(documents_service, "Documents Service") {
 ' Asynchronous Event Flow for PDF Generation
 Rel(policy_service, kafka, "Publishes 'PolicyCreated' event to")
 Rel(pdf_generator, jsreport, "Generates PDF using", "HTTP/REST")
-Rel(doc_repo, fs, "Writes PDF to", "File I/O")
+' Updated relationship to PostgreSQL for storing documents
+Rel(doc_repo, documents_db, "Writes PDF bytes and metadata to", "JDBC/SQL")
 
 ' Synchronous Flow for Document Download
 Rel(gateway, api, "Makes API calls to download", "HTTPS/REST")
-Rel(doc_repo, fs, "Reads PDF from", "File I/O")
+' Updated relationship to PostgreSQL for reading documents
+Rel(doc_repo, documents_db, "Reads PDF bytes and metadata from", "JDBC/SQL")
 
 @enduml
