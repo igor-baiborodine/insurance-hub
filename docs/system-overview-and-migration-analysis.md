@@ -113,8 +113,9 @@ characteristics of the target state include:
 
 4. **Cloud-Native Object Storage**
 
-   - **File Storage Migration**: All previous direct file system or blob storage accesses for documents, statements,
-     and other artifacts migrate to S3-compatible object storage, such as MinIO or AWS S3.
+    - **File/Blob Storage Migration**: All previous direct file system or blob storage accesses for
+      documents, statements, and other artifacts migrate to S3-compatible object storage, such as
+      MinIO or AWS S3.
        - Enables infinite scale, strong durability, and decouples storage lifecycle from application
          lifecycle.
        - Access controls, encryption, versioning, and policies are managed at the storage/service layer.
@@ -184,7 +185,7 @@ characteristics of the target state include:
    Kubernetes-first architecture, requiring updates to service discovery, load balancing, and
    external connectivity patterns.
 
-3. **Object Storage Migration**: Document and file and blob storage interactions move from local filesystem
+3. **Object Storage Migration**: Document and local file/blob storage interactions move 
    to S3-compatible object storage (MinIO), changing how the system handles document persistence and
    retrieval for external integrations.
 
@@ -303,18 +304,18 @@ compatibility of REST APIs.
 
 ### Component Migration Strategy
 
-| Component                 | Current Stack                                  | Go Migration Approach                                                                                                                                                   |
-|---------------------------|------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **agent-portal-gateway**  | Micronaut Gateway                              | Replaced by [Envoy Proxy](https://www.envoyproxy.io/) for routing and load balancing                                                                                    |
-| **auth-service**          | Micronaut Security + Micronaut Data JPA        | Replaced by [Keycloak](https://www.keycloak.org/) for identity and access management                                                                                    |
-| **chat-service**          | Micronaut + WebSocket + Micronaut Data JPA     | gRPC service + [gorilla/websocket](https://github.com/gorilla/websocket) + [GORM](https://gorm.io/)                                                                     |
-| **dashboard-service**     | Micronaut + Micronaut Data JPA + Elasticsearch | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [olivere/elastic](https://github.com/olivere/elastic)        |
-| **document-service**      | Micronaut + Micronaut Data JPA + Blob Storage  | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [MinIO Go SDK](https://github.com/minio/minio-go) + chromedp |
-| **policy-service**        | Micronaut + Micronaut Data JPA                 | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/)                                                                |
-| **payment-service**       | Micronaut + Micronaut Data JPA + File Storage  | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [MinIO Go SDK](https://github.com/minio/minio-go)            |
-| **pricing-service**       | Micronaut + File Scripts                       | gRPC service + [Tarantool Go Connector](https://github.com/tarantool/go-tarantool)                                                                                      |
-| **product-service**       | Micronaut + MongoDB                            | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + PostgreSQL JSONB                                             |
-| **policy-search-service** | Micronaut + Elasticsearch                      | gRPC service + [olivere/elastic](https://github.com/olivere/elastic)                                                                                                    |
+| Component                 | Current Stack                                    | Go Migration Approach                                                                                                                                                   |
+|---------------------------|--------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **agent-portal-gateway**  | Micronaut Gateway                                | Replaced by [Envoy Proxy](https://www.envoyproxy.io/) for routing and load balancing                                                                                    |
+| **auth-service**          | Micronaut Security + Micronaut Data JPA          | Replaced by [Keycloak](https://www.keycloak.org/) for identity and access management                                                                                    |
+| **chat-service**          | Micronaut + WebSocket + Micronaut Data JPA       | gRPC service + [gorilla/websocket](https://github.com/gorilla/websocket) + [GORM](https://gorm.io/)                                                                     |
+| **dashboard-service**     | Micronaut + Micronaut Data JPA + Elasticsearch   | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [olivere/elastic](https://github.com/olivere/elastic)        |
+| **document-service**      | Micronaut + Micronaut Data JPA with Blob Storage | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [MinIO Go SDK](https://github.com/minio/minio-go) + chromedp |
+| **policy-service**        | Micronaut + Micronaut Data JPA                   | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/)                                                                |
+| **payment-service**       | Micronaut + Micronaut Data JPA + File Storage    | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [MinIO Go SDK](https://github.com/minio/minio-go)            |
+| **pricing-service**       | Micronaut + File Scripts                         | gRPC service + [Tarantool Go Connector](https://github.com/tarantool/go-tarantool)                                                                                      |
+| **product-service**       | Micronaut + MongoDB                              | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + PostgreSQL JSONB                                             |
+| **policy-search-service** | Micronaut + Elasticsearch                        | gRPC service + [olivere/elastic](https://github.com/olivere/elastic)                                                                                                    |
 
 ### Component-Specific Migration Details
 
