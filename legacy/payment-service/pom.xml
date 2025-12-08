@@ -119,12 +119,10 @@
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>
             <version>8.2.1</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.google.guava</groupId>
-                    <artifactId>guava</artifactId>
-                </exclusion>
-            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
         </dependency>
         <!-- MINIO -->
 
@@ -177,11 +175,6 @@
         <dependency>
             <groupId>io.micronaut.test</groupId>
             <artifactId>micronaut-test-junit5</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.google.guava</groupId>
-            <artifactId>guava</artifactId>
             <scope>test</scope>
         </dependency>
         <!-- TESTS -->
