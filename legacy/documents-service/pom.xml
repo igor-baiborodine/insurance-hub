@@ -136,11 +136,12 @@
         <!-- DATABASE, JPA, HIBERNATE -->
 
         <!-- DISCOVERY CLIENT -->
-        <dependency>
-            <groupId>io.micronaut</groupId>
-            <artifactId>micronaut-discovery-client</artifactId>
-            <scope>compile</scope>
-        </dependency>
+<!--        Disabled given that Consul will be deprecated-->
+<!--        <dependency>-->
+<!--            <groupId>io.micronaut</groupId>-->
+<!--            <artifactId>micronaut-discovery-client</artifactId>-->
+<!--            <scope>compile</scope>-->
+<!--        </dependency>-->
         <!-- DISCOVERY CLIENT -->
 
         <!-- TRACING WITH ZIPKIN -->

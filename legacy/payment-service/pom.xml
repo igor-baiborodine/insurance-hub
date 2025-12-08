@@ -89,7 +89,7 @@
             <scope>compile</scope>
         </dependency>
 
-<!--        Disable given that Consul will be deprecated-->
+<!--        Disabled given that Consul will be deprecated-->
 <!--        <dependency>-->
 <!--            <groupId>io.micronaut</groupId>-->
 <!--            <artifactId>micronaut-discovery-client</artifactId>-->

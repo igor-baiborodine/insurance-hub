@@ -1,0 +1,20 @@
+micronaut:
+  server:
+    host: localhost
+    port: 8084
+---
+kafka:
+  bootstrap:
+    servers: "localhost:9094"
+---
+endpoints:
+  env:
+    enabled: true
+    sensitive: false
+---
+tracing:
+  zipkin:
+    enabled: false
+---
+minio:
+  tenant-endpoint: "http://localhost:9001"
