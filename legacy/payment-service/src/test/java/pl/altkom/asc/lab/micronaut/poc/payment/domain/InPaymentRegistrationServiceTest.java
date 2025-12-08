@@ -49,38 +49,44 @@ public class InPaymentRegistrationServiceTest {
         doNothing().when(minioClient).removeObject(any(RemoveObjectArgs.class));    }
 
     @Test
-    void canRegisterInPaymentsFromMinio() throws IOException, MinioException, NoSuchAlgorithmException, InvalidKeyException {
+    void testRegisterInPayments() throws IOException, MinioException, NoSuchAlgorithmException, InvalidKeyException {
         // given
         LocalDate statementDate = LocalDate.of(2018, Month.AUGUST, 2);
         String csvContent = "TransactionId,TransactionType,AccountingDate,AccountNumber,Amount\r\n"
                 + "1,A,2018-08-01,231232132131,10.21\r\n"
                 + "1,A,2018-08-01,0rju130fhj20,99.25\r\n";
-        ByteArrayInputStream realInputStream = new ByteArrayInputStream(csvContent.getBytes());
 
-        GetObjectResponse mockGetObjectResponse = mock(GetObjectResponse.class);
-        when(mockGetObjectResponse.read()).thenAnswer(invocation -> realInputStream.read());
-        when(mockGetObjectResponse.read(any(byte[].class))).thenAnswer(invocation -> realInputStream.read(invocation.getArgument(0)));
-        when(mockGetObjectResponse.read(any(byte[].class), anyInt(), anyInt())).thenAnswer(invocation -> realInputStream.read(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)));
-        when(mockGetObjectResponse.available()).thenAnswer(invocation -> realInputStream.available());
-        doAnswer(invocation -> { realInputStream.close(); return null; }).when(mockGetObjectResponse).close();
-        when(minioClient.getObject(any(GetObjectArgs.class))).thenReturn(mockGetObjectResponse);
+        ByteArrayInputStream firstInputStream = new ByteArrayInputStream(csvContent.getBytes());
+        GetObjectResponse firstGetObjectResponse = mock(GetObjectResponse.class);
+        when(firstGetObjectResponse.read(any(byte[].class), anyInt(), anyInt())).thenAnswer(invocation -> firstInputStream.read(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)));
+        when(firstGetObjectResponse.available()).thenAnswer(invocation -> firstInputStream.available());
+        doAnswer(invocation -> { firstInputStream.close(); return null; }).when(firstGetObjectResponse).close();
+
+        ByteArrayInputStream secondInputStream = new ByteArrayInputStream(csvContent.getBytes());
+        GetObjectResponse secondGetObjectResponse = mock(GetObjectResponse.class);
+        doAnswer(invocation -> { secondInputStream.close(); return null; }).when(secondGetObjectResponse).close();
+
+        when(minioClient.getObject(any(GetObjectArgs.class)))
+                .thenReturn(firstGetObjectResponse) // Response for the first call (readBankStatementsFromMinio)
+                .thenReturn(secondGetObjectResponse); // Response for the second call (markBankStatementProcessedInMinio)
 
         PolicyAccount mockAccount = mock(PolicyAccount.class);
-        when(mockAccount.balanceAt(LocalDate.of(2019, 12, 31))).thenReturn(BigDecimal.ZERO); // Initial balance
         when(policyAccountRepository.findByPolicyAccountNumber("231232132131")).thenReturn(Optional.of(mockAccount));
-        when(policyAccountRepository.findByPolicyAccountNumber("0rju130fhj20")).thenReturn(Optional.empty()); // No account for second entry
+        when(policyAccountRepository.findByPolicyAccountNumber("0rju130fhj20")).thenReturn(Optional.empty());
+
         // when
         classUnderTest.registerInPayments(TEST_BUCKET, statementDate);
         // then
         verify(minioClient).statObject(argThat(args ->
                 args.bucket().equals(TEST_BUCKET) && args.object().equals("bankStatements_2018_8_2.csv")));
-        verify(minioClient).getObject(argThat(args ->
+        verify(minioClient, times(2)).getObject(argThat(args ->
                 args.bucket().equals(TEST_BUCKET) && args.object().equals("bankStatements_2018_8_2.csv")));
         verify(mockAccount).inPayment(new BigDecimal("10.21"), LocalDate.of(2018, 8, 1));
+
         verify(minioClient).putObject(putObjectArgsCaptor.capture());
         PutObjectArgs capturedPutArgs = putObjectArgsCaptor.getValue();
         assertEquals(TEST_BUCKET, capturedPutArgs.bucket());
-        assertEquals("bankStatements_2018_8_2.csv.processed", capturedPutArgs.object());
+        assertEquals("_processed_bankStatements_2018_8_2.csv", capturedPutArgs.object());
 
         verify(minioClient).removeObject(removeObjectArgsCaptor.capture());
         RemoveObjectArgs capturedRemoveArgs = removeObjectArgsCaptor.getValue();
