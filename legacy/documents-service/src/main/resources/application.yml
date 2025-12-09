@@ -5,6 +5,9 @@ micronaut:
     host: localhost
     port: 8080
 ---
+documents:
+  policies-s3-bucket: policies
+---
 minio:
   tenant-endpoint: "${MINIO_TENANT_ENDPOINT:http://localhost:9000}"
   svc-access-key: "${MINIO_SVC_ACCESS_KEY:minioSvcAccessKey}"

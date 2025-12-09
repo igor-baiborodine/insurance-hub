@@ -5,14 +5,13 @@ import io.micronaut.http.HttpResponse
 import io.minio.MinioClient
 import io.minio.PutObjectArgs
 import io.minio.GetObjectArgs
-import lombok.extern.slf4j.Slf4j
+import org.slf4j.LoggerFactory
 import pl.altkom.asc.lab.micronaut.poc.policy.service.api.v1.events.PolicyRegisteredEvent
 import java.io.ByteArrayInputStream
 import java.time.format.DateTimeFormatter
 import java.nio.charset.StandardCharsets
 import javax.inject.Singleton
 
-@Slf4j
 @Singleton
 class PolicyDocumentService(
     private val policyDocumentRepository: PolicyDocumentRepository,
@@ -49,8 +48,7 @@ class PolicyDocumentService(
                 policyDocumentRepository.add(document)
                 return document
             } catch (e: Exception) {
-                System.err.println("Error adding policy document to S3 storage or database: ${e.message}")
-                e.printStackTrace()
+                log.error("Error adding policy document to S3 storage or database: {}", e.message, e)
                 return null
             }
         }
@@ -82,16 +80,18 @@ class PolicyDocumentService(
                         stream.readBytes()
                     }
                 } catch (e: Exception) {
-                    System.err.println("Error retrieving object from MinIO with key $potentialS3ObjectKey: ${e.message}")
-                    e.printStackTrace()
+                    log.error("Error retrieving object from S3 storage with key {}: {}", potentialS3ObjectKey, e.message, e)
                     null
                 }
             } else {
                 return storedBytes // PDF bytes (legacy storage)
             }
         } catch (e: Exception) {
-            System.err.println("Error decoding bytes as UTF-8 or pattern mismatch, assuming legacy PDF data: ${e.message}")
-            return storedBytes
-        }
+            log.error("Error decoding bytes as UTF-8 or pattern mismatch, assuming legacy PDF data: {}", e.message, e)
+            return storedBytes        }
+    }
+
+    companion object {
+        private val log = LoggerFactory.getLogger(PolicyDocumentService::class.java)
     }
 }

@@ -8,8 +8,8 @@ import pl.altkom.asc.lab.micronaut.poc.payment.domain.InPaymentRegistrationServi
 
 import javax.inject.Singleton;
 
-@Singleton
 @Slf4j
+@Singleton
 @RequiredArgsConstructor
 public class BankStatementImportJob {
 
