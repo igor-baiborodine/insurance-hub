@@ -446,7 +446,7 @@ kafka-topics-list: _env-check ## List all Kafka topics
 	@kubectl get kafkatopic -n "$(DATA_NS)" || echo "No KafkaTopics found"
 
 .PHONY: kafka-console-producer
-kafka-console-producer: _env-check ## Access Kafka console producer. Usage: make kafka-console-producer TOPIC_NAME=<topic-name>"
+kafka-console-producer: _env-check ## Access Kafka console producer. Usage: make kafka-console-producer TOPIC_NAME=<topic-name>
 	@if [ -z "$(TOPIC_NAME)" ]; then \
 		echo "ERROR: Argument 'TOPIC_NAME' is required! Usage: make kafka-console-producer TOPIC_NAME=<topic-name>"; \
 		exit 1; \

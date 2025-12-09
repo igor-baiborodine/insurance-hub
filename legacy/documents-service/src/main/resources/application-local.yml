@@ -18,3 +18,7 @@ tracing:
 ---
 minio:
   tenant-endpoint: "http://localhost:9001"
+---
+jsreport:
+  host: localhost
+  port: 5488
