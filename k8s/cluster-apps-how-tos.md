@@ -15,6 +15,8 @@
   - [Kafka](#kafka)
 - [Services](#services)
   - [jsreport](#jsreport)
+  - [document](#document)
+  - [payment](#payment)
 - [QA—Cluster Load Monitoring](#qacluster-load-monitoring)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -164,6 +166,28 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 - `make jsreport-status`
 - `make jsreport-ui` and go to `http://localhost:5488`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=jsreport-deploy-<iso-date>``
+
+### document
+
+- `make minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies`
+- `make minio-svc-user-secret-create SVC_NAME=document MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>`
+- `make minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json`
+- `make minio-console-ui SVC_NAME=document`
+  - Go to `http://localhost:9090`
+  - Log in with the credentials provided in the `minio-svc-user-secret-create` target.
+- TODO: add targets to deploy `document` service. 
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=document-deploy-<iso-date>``
+
+### payment
+
+- `make minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import`
+- `make minio-svc-user-secret-create SVC_NAME=payment MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>`
+- `make minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json`
+- `make minio-console-ui SVC_NAME=payment`
+    - Go to `http://localhost:9090`
+    - Log in with the credentials provided in the `minio-svc-user-secret-create` target.
+- TODO: add targets to deploy `payment` service.
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=payment-deploy-<iso-date>``
 
 ## QA—Cluster Load Monitoring
 
