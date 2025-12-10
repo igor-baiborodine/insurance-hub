@@ -13,21 +13,23 @@ local-dev-port-forward: ## Set up local port-forwarding for Kafka and PostgreSQL
 	@echo "Starting local-dev port-forwards. Use 'killall kubectl' or stop manually when done."
 	@echo "  Kafka (local:9094 -> cluster:9094)..."
 	@# For Kafka, we typically port-forward to the external bootstrap service that Strimzi creates.
-	@kubectl port-forward svc/local-dev-kafka-kafka-external-bootstrap 9094:9094 --namespace=local-dev-all > /dev/null 2>&1 &
+	@kubectl port-forward svc/local-dev-kafka-kafka-external-bootstrap 9094:9094 -n local-dev-all > /dev/null 2>&1 &
 	@echo "  PostgreSQL auth (local:5442 -> cluster:5432)..."
-	@kubectl port-forward svc/local-dev-postgres-auth-rw 5442:5432 --namespace=local-dev-all > /dev/null 2>&1 &
+	@kubectl port-forward svc/local-dev-postgres-auth-rw 5442:5432 -n local-dev-all > /dev/null 2>&1 &
 	@echo "  PostgreSQL document (local:5452 -> cluster:5432)..."
-	@kubectl port-forward svc/local-dev-postgres-document-rw 5452:5432 --namespace=local-dev-all > /dev/null 2>&1 &
+	@kubectl port-forward svc/local-dev-postgres-document-rw 5452:5432 -n local-dev-all > /dev/null 2>&1 &
 	@echo "  PostgreSQL payment (local:5462 -> cluster:5432)..."
-	@kubectl port-forward svc/local-dev-postgres-payment-rw 5462:5432 --namespace=local-dev-all > /dev/null 2>&1 &
+	@kubectl port-forward svc/local-dev-postgres-payment-rw 5462:5432 -n local-dev-all > /dev/null 2>&1 &
 	@echo "  PostgreSQL policy (local:5472 -> cluster:5432)..."
-	@kubectl port-forward svc/local-dev-postgres-policy-rw 5472:5432 --namespace=local-dev-all > /dev/null 2>&1 &
+	@kubectl port-forward svc/local-dev-postgres-policy-rw 5472:5432 -n local-dev-all > /dev/null 2>&1 &
 	@echo "  PostgreSQL product (local:5482 -> cluster:5432)..."
-	@kubectl port-forward svc/local-dev-postgres-product-rw 5482:5432 --namespace=local-dev-all > /dev/null 2>&1 &
+	@kubectl port-forward svc/local-dev-postgres-product-rw 5482:5432 -n local-dev-all > /dev/null 2>&1 &
 	@echo "  MinIO document (local:9001 -> cluster:9000)..."
-	@kubectl port-forward svc/local-dev-minio-document-hl 9001:9000 --namespace=local-dev-minio-document > /dev/null 2>&1 &
+	@kubectl port-forward svc/local-dev-minio-document-hl 9001:9000 -n local-dev-minio-document > /dev/null 2>&1 &
 	@echo "  MinIO payment (local:9002 -> cluster:9000)..."
-	@kubectl port-forward svc/local-dev-minio-payment-hl 9002:9000 --namespace=local-dev-minio-payment > /dev/null 2>&1 &
+	@kubectl port-forward svc/local-dev-minio-payment-hl 9002:9000 -n local-dev-minio-payment > /dev/null 2>&1 &
+	@echo "  jsreport (local:5488 -> cluster:5488)..."
+	@kubectl port-forward svc/local-dev-jsreport 5488:5488 -n local-dev-all > /dev/null 2>&1 &
 	@echo "All local-dev port-forwards initiated in the background."
 	@echo "To stop them, you can use 'killall kubectl' or find their process IDs and kill them individually."
 
@@ -177,7 +179,7 @@ _env-check: ## Ensure env name is valid and set based on the current context
 _data-ns-check: ## Ensure data namespace exists and set it as the current context
 	@echo "Ensuring namespace $(DATA_NS) exists and is set as current..."
 	@kubectl create namespace "$(DATA_NS)" --dry-run=client -o yaml | kubectl apply -f -
-	@kubectl config set-context --current --namespace="$(DATA_NS)"
+	@kubectl config set-context --current -n "$(DATA_NS)"
 
 .PHONY: _monitoring-ns-check
 _monitoring-ns-check: ## Ensure monitoring namespace exists and set it as the current context
@@ -188,7 +190,7 @@ _monitoring-ns-check: ## Ensure monitoring namespace exists and set it as the cu
 	fi
 	@echo "Ensuring namespace $(MONITORING_NS) exists and is set as current..."
 	@kubectl get namespace "$(MONITORING_NS)" >/dev/null 2>&1 || kubectl create namespace "$(MONITORING_NS)"
-	@kubectl config set-context --current --namespace="$(MONITORING_NS)"
+	@kubectl config set-context --current -n "$(MONITORING_NS)"
 
 .PHONY: _svc-name-check
 _svc-name-check: ## Ensure that the SVC_NAME argument is provided
