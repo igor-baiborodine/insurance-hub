@@ -21,9 +21,10 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <micronaut.version>2.4.0</micronaut.version>
         <exec.mainClass>pl.altkom.asc.lab.micronaut.poc.documents.DocumentsApplication</exec.mainClass>
-        <kotlinVersion>1.4.10</kotlinVersion>
+        <kotlinVersion>1.7.22</kotlinVersion>
         <maven-surefire-plugin.version>2.22.2</maven-surefire-plugin.version>
         <maven-failsafe-plugin.version>2.22.2</maven-failsafe-plugin.version>
+        <guava.version>25.0-jre</guava.version>
     </properties>
 
     <repositories>
@@ -32,6 +33,16 @@
             <url>https://jcenter.bintray.com</url>
         </repository>
     </repositories>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${guava.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -53,6 +64,10 @@
             <groupId>io.micronaut</groupId>
             <artifactId>micronaut-http-client</artifactId>
             <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.micronaut</groupId>
+            <artifactId>micronaut-management</artifactId>
         </dependency>
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
@@ -85,6 +100,12 @@
             <groupId>com.fasterxml.jackson.module</groupId>
             <artifactId>jackson-module-kotlin</artifactId>
             <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>1.18.16</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -135,12 +156,25 @@
         </dependency>
         <!-- DATABASE, JPA, HIBERNATE -->
 
-        <!-- DISCOVERY CLIENT -->
+        <!-- MINIO -->
         <dependency>
-            <groupId>io.micronaut</groupId>
-            <artifactId>micronaut-discovery-client</artifactId>
-            <scope>compile</scope>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.2.1</version>
         </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
+        <!-- MINIO -->
+
+        <!-- DISCOVERY CLIENT -->
+<!--        Disabled given that Consul will be deprecated-->
+<!--        <dependency>-->
+<!--            <groupId>io.micronaut</groupId>-->
+<!--            <artifactId>micronaut-discovery-client</artifactId>-->
+<!--            <scope>compile</scope>-->
+<!--        </dependency>-->
         <!-- DISCOVERY CLIENT -->
 
         <!-- TRACING WITH ZIPKIN -->

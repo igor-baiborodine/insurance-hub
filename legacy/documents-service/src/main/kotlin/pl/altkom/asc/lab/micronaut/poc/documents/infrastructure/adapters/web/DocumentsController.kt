@@ -8,15 +8,26 @@ import pl.altkom.asc.lab.micronaut.poc.documents.api.DocumentsOperations
 import pl.altkom.asc.lab.micronaut.poc.documents.api.queries.finddocuments.FindDocumentsResult
 import pl.altkom.asc.lab.micronaut.poc.documents.api.queries.finddocuments.GeneratedDocument
 import pl.altkom.asc.lab.micronaut.poc.documents.domain.PolicyDocumentRepository
+import pl.altkom.asc.lab.micronaut.poc.documents.domain.PolicyDocumentService
 
 @ExecuteOn(TaskExecutors.IO)
 @Validated
 @Controller("/documents")
-class DocumentsController(private val policyDocumentRepository: PolicyDocumentRepository) : DocumentsOperations {
+class DocumentsController(
+    private val policyDocumentRepository: PolicyDocumentRepository,
+    private val policyDocumentService: PolicyDocumentService // Inject PolicyDocumentService
+) : DocumentsOperations {
 
     override fun find(policyNumber: String): FindDocumentsResult {
-        val findByPolicyNumber = policyDocumentRepository.findByPolicyNumber(policyNumber)
-        val list = findByPolicyNumber.map { policyDocument -> GeneratedDocument(policyNumber, policyDocument.bytes) }
-        return FindDocumentsResult(list)
+        val policyDocuments = policyDocumentRepository.findByPolicyNumber(policyNumber)
+        val generatedDocuments = policyDocuments.mapNotNull { policyDocument ->
+            val actualBytes = policyDocumentService.retrieveDocumentContent(policyDocument.bytes)
+            if (actualBytes != null) {
+                GeneratedDocument(policyNumber, actualBytes)
+            } else {
+                null
+            }
+        }
+        return FindDocumentsResult(generatedDocuments)
     }
 }

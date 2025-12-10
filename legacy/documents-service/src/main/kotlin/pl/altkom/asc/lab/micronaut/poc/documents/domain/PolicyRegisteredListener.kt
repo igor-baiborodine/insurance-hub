@@ -8,19 +8,12 @@ import pl.altkom.asc.lab.micronaut.poc.policy.service.api.v1.events.PolicyRegist
 
 @KafkaListener(clientId = "policy-registered-listener", offsetReset = OffsetReset.EARLIEST)
 @Header(name = "Content-Type", value = "application/json")
-class PolicyRegisteredListener(private val policyDocumentRepository: PolicyDocumentRepository,
-                               private val reportGenerator: ReportGenerator) {
+class PolicyRegisteredListener(
+    private val policyDocumentService: PolicyDocumentService
+) {
 
     @Topic("policy-registered")
     fun onPolicyRegistered(event: PolicyRegisteredEvent) {
-        val generatedDocument = reportGenerator.generate(event)
-
-        val policyDocument = PolicyDocument(
-                id = null,
-                policyNumber = event.policy.number,
-                bytes = generatedDocument?.body()!!
-        )
-
-        policyDocumentRepository.add(policyDocument)
+        policyDocumentService.add(event)
     }
 }

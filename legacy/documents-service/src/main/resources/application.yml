@@ -3,7 +3,15 @@ micronaut:
     name: documents-service
   server:
     host: localhost
-    port: ${SERVICE_PORT:-1}
+    port: 8080
+---
+documents:
+  policies-s3-bucket: policies
+---
+minio:
+  tenant-endpoint: "${MINIO_TENANT_ENDPOINT:http://localhost:9000}"
+  svc-access-key: "${MINIO_SVC_ACCESS_KEY:minioSvcAccessKey}"
+  svc-secret-key: "${MINIO_SVC_SECRET_KEY:minioSvcSecretKey}"
 ---
 datasources:
   default:
@@ -42,6 +50,9 @@ consul:
 endpoints:
   health:
     enabled: true
+    sensitive: false
+  env:
+    enabled: false
     sensitive: false
 ---
 tracing:
