@@ -179,7 +179,7 @@ _env-check: ## Ensure env name is valid and set based on the current context
 _data-ns-check: ## Ensure data namespace exists and set it as the current context
 	@echo "Ensuring namespace $(DATA_NS) exists and is set as current..."
 	@kubectl create namespace "$(DATA_NS)" --dry-run=client -o yaml | kubectl apply -f -
-	@kubectl config set-context --current -n "$(DATA_NS)"
+	@kubectl config set-context --current --namespace="$(DATA_NS)"
 
 .PHONY: _monitoring-ns-check
 _monitoring-ns-check: ## Ensure monitoring namespace exists and set it as the current context
@@ -190,7 +190,7 @@ _monitoring-ns-check: ## Ensure monitoring namespace exists and set it as the cu
 	fi
 	@echo "Ensuring namespace $(MONITORING_NS) exists and is set as current..."
 	@kubectl get namespace "$(MONITORING_NS)" >/dev/null 2>&1 || kubectl create namespace "$(MONITORING_NS)"
-	@kubectl config set-context --current -n "$(MONITORING_NS)"
+	@kubectl config set-context --current --namespace="$(MONITORING_NS)"
 
 .PHONY: _svc-name-check
 _svc-name-check: ## Ensure that the SVC_NAME argument is provided
