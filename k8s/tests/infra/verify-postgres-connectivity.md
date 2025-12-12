@@ -74,9 +74,9 @@ PostgreSQL cluster.
     tables) to verify the connection:
     
     ```shell
-    authsvc=> \dt
+    auth=> \dt
     Did not find any tables.
-    authsvc=> \q 
+    auth=> \q 
     ```
     
     To exit the `psql` shell, you can type `\q` and press Enter.

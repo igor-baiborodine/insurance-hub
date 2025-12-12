@@ -22,3 +22,7 @@ minio:
 jsreport:
   host: localhost
   port: 5488
+---
+postgres:
+  host: localhost
+  port: 5452

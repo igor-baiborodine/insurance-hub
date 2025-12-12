@@ -4,6 +4,7 @@ import javax.persistence.Column
 import javax.persistence.Entity
 import javax.persistence.GeneratedValue
 import javax.persistence.Id
+import javax.persistence.Lob
 
 
 /**
@@ -26,6 +27,7 @@ data class PolicyDocument(
         @GeneratedValue
         val id: Long? = -1,
         val policyNumber: String = "",
-        @Column(columnDefinition = "BINARY(200000)")
+        @Lob
+        @Column(columnDefinition = "bytea")
         val bytes: ByteArray = ByteArray(1)
 )

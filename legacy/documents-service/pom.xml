@@ -130,9 +130,9 @@
 
         <!-- DATABASE, JPA, HIBERNATE -->
         <dependency>
-            <groupId>com.h2database</groupId>
-            <artifactId>h2</artifactId>
-            <version>1.4.197</version>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.4</version>
         </dependency>
         <dependency>
             <groupId>io.micronaut.sql</groupId>
