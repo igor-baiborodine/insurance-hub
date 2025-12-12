@@ -18,7 +18,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AuthProvider implements AuthenticationProvider {
 
-    //private final InsuranceAgents insuranceAgents;
     private final InsuranceAgentsRepository insuranceAgents;
 
     @Override
@@ -33,6 +32,6 @@ public class AuthProvider implements AuthenticationProvider {
     }
 
     private InsuranceAgentDetails createUserDetails(InsuranceAgent agent) {
-        return new InsuranceAgentDetails(agent.login(), agent.avatar(), agent.availableProductCodes());
+        return new InsuranceAgentDetails(agent.getLogin(), agent.getAvatar(), agent.availableProductCodes());
     }
 }
