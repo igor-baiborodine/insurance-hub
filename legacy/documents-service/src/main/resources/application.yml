@@ -29,6 +29,7 @@ datasources:
     url: "jdbc:postgresql://localhost:5432/document"
     username: ${PG_USER:document}
     password: ${PG_PASSWORD:document}
+---
 jpa:
   default:
     packages-to-scan:

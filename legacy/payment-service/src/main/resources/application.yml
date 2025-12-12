@@ -46,12 +46,23 @@ minio:
   svc-access-key: "${MINIO_SVC_ACCESS_KEY:minioSvcAccessKey}"
   svc-secret-key: "${MINIO_SVC_SECRET_KEY:minioSvcSecretKey}"
 ---
+---
+postgres:
+  host: ${PG_HOST:localhost}
+  port: ${PG_PORT:5432}
+  database: ${PG_DBNAME:payment}
+  username: ${PG_USER:payment}
+  password: ${PG_PASSWORD:payment}
+  ssl: ${PG_SSL:false}
+---
+# This is only to allow Micronaut to bootstrap DataSource + JPA;
+# overridden at runtime by PostgresDatasourceConfigurationListener#onCreated(BeanCreatedEvent<DatasourceConfiguration>)
 datasources:
   default:
-    url: jdbc:h2:mem:default;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    username: sa
-    password: ""
-    driverClassName: org.h2.Driver
+    driverClassName: org.postgresql.Driver
+    url: "jdbc:postgresql://localhost:5432/payment"
+    username: ${PG_USER:payment}
+    password: ${PG_PASSWORD:payment}
 ---
 jpa:
  default:

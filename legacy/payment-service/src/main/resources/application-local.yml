@@ -21,3 +21,7 @@ payments:
 ---
 minio:
   tenant-endpoint: "http://localhost:9002"
+---
+postgres:
+  host: localhost
+  port: 5462

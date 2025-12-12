@@ -98,9 +98,9 @@
 
         <!-- DATABASE, JPA, HIBERNATE -->
         <dependency>
-            <groupId>com.h2database</groupId>
-            <artifactId>h2</artifactId>
-            <version>1.4.197</version>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.4</version>
         </dependency>
         <dependency>
             <groupId>io.micronaut.sql</groupId>
@@ -260,6 +260,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
+                    <release>${jdk.version}</release>
                     <!-- Uncomment to enable incremental compilation -->
                     <!-- <useIncrementalCompilation>false</useIncrementalCompilation> -->
                     <annotationProcessorPaths>
@@ -292,6 +293,7 @@
                             <goal>testCompile</goal>
                         </goals>
                         <configuration>
+                            <release>${jdk.version}</release>
                             <annotationProcessorPaths>
                                 <path>
                                     <groupId>org.projectlombok</groupId>
