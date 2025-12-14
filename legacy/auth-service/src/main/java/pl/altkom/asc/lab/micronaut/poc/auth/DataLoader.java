@@ -17,19 +17,19 @@ public class DataLoader implements ApplicationEventListener<ServerStartupEvent> 
     @Override
     public void onApplicationEvent(ServerStartupEvent event) {
         if (!insuranceAgentsRepository.findByLogin("admin").isPresent()) {
-            insuranceAgentsRepository.save(new InsuranceAgent(UUID.randomUUID(), "admin", "admin", "static/avatars/admin.png", Arrays.asList("TRI", "HSI")));
+            insuranceAgentsRepository.save(InsuranceAgent.of(UUID.randomUUID(), "admin", "admin", "static/avatars/admin.png", Arrays.asList("TRI", "HSI")));
         }
 
         if (!insuranceAgentsRepository.findByLogin("jimmy.solid").isPresent()) {
-            insuranceAgentsRepository.save(new InsuranceAgent(UUID.randomUUID(), "jimmy.solid", "secret", "static/avatars/jimmy_solid.png", Arrays.asList("TRI", "HSI", "FAI", "CAR")));
+            insuranceAgentsRepository.save(InsuranceAgent.of(UUID.randomUUID(), "jimmy.solid", "secret", "static/avatars/jimmy_solid.png", Arrays.asList("TRI", "HSI", "FAI", "CAR")));
         }
 
         if (!insuranceAgentsRepository.findByLogin("danny.solid").isPresent()) {
-            insuranceAgentsRepository.save(new InsuranceAgent(UUID.randomUUID(),"danny.solid", "secret", "static/avatars/danny_solid.png", Arrays.asList("TRI", "HSI")));
+            insuranceAgentsRepository.save(InsuranceAgent.of(UUID.randomUUID(),"danny.solid", "secret", "static/avatars/danny_solid.png", Arrays.asList("TRI", "HSI")));
         }
 
         if (!insuranceAgentsRepository.findByLogin("agent1").isPresent()) {
-            insuranceAgentsRepository.save(new InsuranceAgent(UUID.randomUUID(),"agent1", "agent1", "static/avatars/agent1.png", Arrays.asList("TRI", "HSI")));
+            insuranceAgentsRepository.save(InsuranceAgent.of(UUID.randomUUID(),"agent1", "agent1", "static/avatars/agent1.png", Arrays.asList("TRI", "HSI")));
         }
     }
 }

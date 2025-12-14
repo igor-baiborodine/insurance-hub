@@ -1,0 +1,8 @@
+micronaut:
+  server:
+    host: localhost
+    port: 8081
+---
+postgres:
+  host: localhost
+  port: 5442

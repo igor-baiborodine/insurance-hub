@@ -1,7 +1,7 @@
 micronaut:
   server:
     host: localhost
-    port: 8084
+    port: 8085
 ---
 kafka:
   bootstrap:
@@ -16,13 +16,6 @@ tracing:
   zipkin:
     enabled: false
 ---
-minio:
-  tenant-endpoint: "http://localhost:9001"
----
-jsreport:
-  host: localhost
-  port: 5488
----
 postgres:
   host: localhost
-  port: 5452
+  port: 5472

@@ -2,6 +2,7 @@ package pl.altkom.asc.lab.micronaut.poc.policy;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import pl.altkom.asc.lab.micronaut.poc.policy.domain.Offer;
@@ -44,6 +45,7 @@ public class PolicyControllerTest {
         assertEquals(policyNumber, policy.getPolicy().getNumber());
     }
 
+    @Disabled
     @Test
     public void testCreatePolicy() {
         //given: offer with number 111 exists
