@@ -3,7 +3,7 @@ micronaut:
     name: pricing-service
   server:
     host: localhost
-    port: ${SERVICE_PORT:-1}
+    port: 8080
 ---
 jackson:
   bean-introspection-module: true
@@ -20,6 +20,9 @@ endpoints:
   health:
     enabled: true
     sensitive: false
+  env:
+    enabled: false
+    sensitive: false
 ---
 tracing:
   zipkin:
@@ -31,12 +34,22 @@ tracing:
         # Configuration taking 100% of the request to be processed by Zipkin.
         # In a real production system, that could be overwhelming.
 ---
+postgres:
+  host: ${PG_HOST:localhost}
+  port: ${PG_PORT:5432}
+  database: ${PG_DBNAME:pricing}
+  username: ${PG_USER:pricing}
+  password: ${PG_PASSWORD:pricing}
+  ssl: ${PG_SSL:false}
+---
+# This is only to allow Micronaut to bootstrap DataSource + JPA;
+# overridden at runtime by PostgresDatasourceConfigurationListener#onCreated(BeanCreatedEvent<DatasourceConfiguration>)
 datasources:
   default:
-    url: jdbc:h2:mem:default;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    username: sa
-    password: ""
-    driverClassName: org.h2.Driver
+    driverClassName: org.postgresql.Driver
+    url: "jdbc:postgresql://localhost:5432/pricing"
+    username: ${PG_USER:pricing}
+    password: ${PG_PASSWORD:pricing}
 ---
 jpa:
  default:
