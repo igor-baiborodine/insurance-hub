@@ -78,9 +78,13 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   
   4. **policy** service: 
   - `make postgres-svc-secret-create SVC_NAME=policy PG_SVC_USER_PWD=<user-pwd>`
-  - `make postgres-svc-status SVC_NAME=policy`
+  - `make postgres-svc-deploy SVC_NAME=policy`
 
-  5. **product** service: 
+  5. **pricing** service:
+  - `make postgres-svc-secret-create SVC_NAME=pricing PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-deploy SVC_NAME=pricing`, wait at least one minute for the cluster to be ready.
+
+  6. **product** service: 
   - `make postgres-svc-secret-create SVC_NAME=product PG_SVC_USER_PWD=<user-pwd>`
   - `make postgres-svc-deploy SVC_NAME=product`, wait at least one minute for the cluster to be ready.
 
@@ -95,8 +99,10 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
     qa-postgres-payment-2    1/1     Running   0          27m
     qa-postgres-policy-1     1/1     Running   0          11m
     qa-postgres-policy-2     1/1     Running   0          11m
-    qa-postgres-product-1    1/1     Running   0          33s
-    qa-postgres-product-2    1/1     Running   0          12s
+    qa-postgres-product-1    1/1     Running   0          9m
+    qa-postgres-product-2    1/1     Running   0          9m
+    qa-postgres-pricing-1    1/1     Running   0          4m
+    qa-postgres-pricing-2    1/1     Running   0          4m
     ```
 - **QA**: `make grafana-ui`
 - **QA/Grafana**: In _Dashboards > New > Import_, add the "CloudNativePG" dashboard using the following

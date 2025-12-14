@@ -1,0 +1,21 @@
+micronaut:
+  server:
+    host: localhost
+    port: 8085
+---
+kafka:
+  bootstrap:
+    servers: "localhost:9094"
+---
+endpoints:
+  env:
+    enabled: true
+    sensitive: false
+---
+tracing:
+  zipkin:
+    enabled: false
+---
+postgres:
+  host: localhost
+  port: 5472
