@@ -125,9 +125,6 @@ characteristics of the target state include:
 
 5. **Replacing Legacy Integrations with Cloud Alternatives**
 
-   - **Tariff Rules Execution**: Legacy file-based rules and script execution replaced by in-memory,
-     transactional database-stored procedures (e.g., Tarantool with Lua).
-       - Ensures scalability, performance, and robust change management/versioning.
    - **PDF Generation**: Centralized, stateless Go service using browser-based rendering (e.g.,
      chromedp/Chrome headless), removing legacy jsreport.
 
@@ -211,24 +208,23 @@ characteristics of the target state include:
 | Document Database           | PostgreSQL    | PostgreSQL         |
 | Product Database            | MongoDB       | PostgreSQL + JSONB |
 | Payment Database            | PostgreSQL    | PostgreSQL         |
+| Pricing Database            | PostgreSQL    | PostgreSQL         |
 | Search & Analytics Database | Elasticsearch | Elasticsearch      |
 
 [Reasoning for using PostgreSQL with JSONB for storing insurance products](migration/component-replacement-reasoning/replace-mongodb.md)
 
 ### External systems
 
-| External System          | Java         | Go                |
-|--------------------------|--------------|-------------------|
-| Service Discovery        | Consul       | Kubernetes-native |
-| Event streaming platform | Kafka        | Kafka             |
-| Bank statements storage  | File system  | MinIO             |
-| Documents storage        | Blob storage | MinIO             |
-| Tariff rules storage     | File system  | Tarantool         |
-| PDF reports generator    | jsreport     | chromedp(library) |
+| External System          | Java         | Go                                              |
+|--------------------------|--------------|-------------------------------------------------|
+| Service Discovery        | Consul       | Kubernetes-native                               |
+| Event streaming platform | Kafka        | Kafka                                           |
+| Bank statements storage  | File system  | MinIO                                           |
+| Documents storage        | Blob storage | MinIO                                           |
+| Tariff rules storage     | Postgres     | PostgreSQL (MVEL-style rules evaluated from DB) |
+| PDF reports generator    | jsreport     | chromedp(library)                               |
 
 [Reasoning for replacing Consul with Kubernetes-native service discovery](migration/component-replacement-reasoning/replace-consul.md)
-
-[Reasoning for using Tarantool for tariff rule scripts storage and execution](migration/component-replacement-reasoning/replace-old-pricing.md)
 
 [Reasoning for chromedp for generating PDF documents](migration/component-replacement-reasoning/replace-jsreport.md)
 
@@ -313,7 +309,7 @@ compatibility of REST APIs.
 | **document-service**      | Micronaut + Micronaut Data JPA with Blob Storage | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [MinIO Go SDK](https://github.com/minio/minio-go) + chromedp |
 | **policy-service**        | Micronaut + Micronaut Data JPA                   | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/)                                                                |
 | **payment-service**       | Micronaut + Micronaut Data JPA + File Storage    | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + [MinIO Go SDK](https://github.com/minio/minio-go)            |
-| **pricing-service**       | Micronaut + File Scripts                         | gRPC service + [Tarantool Go Connector](https://github.com/tarantool/go-tarantool)                                                                                      |
+| **pricing-service**       | Micronaut + PostgreSQL (MVEL-based tariff rules) | gRPC service + [GORM](https://gorm.io/) + a Go expression engine to evaluate MVEL-style tariff rules loaded from DB                                                     |
 | **product-service**       | Micronaut + MongoDB                              | gRPC service + [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway) + [GORM](https://gorm.io/) + PostgreSQL JSONB                                             |
 | **policy-search-service** | Micronaut + Elasticsearch                        | gRPC service + [olivere/elastic](https://github.com/olivere/elastic)                                                                                                    |
 
@@ -411,7 +407,7 @@ compatibility of REST APIs.
 
 7. **payment-service**
 
-    - **Current**: Standard Micronaut service with Micronaut Data JPA repositories for PostgreSQL
+    - **Current**: Micronaut service with Micronaut Data JPA repositories for PostgreSQL
       persistence, RESTful HTTP APIs, and local file storage.
     - **Migration**: Migrate to **Go with gRPC** using GORM for PostgreSQL persistence, **MinIO Go
       SDK** replacing local file storage, and gRPC-gateway for external API compatibility.
@@ -427,17 +423,25 @@ compatibility of REST APIs.
 
 8. **pricing-service**
 
-   - **Current**: Micronaut service executing pricing logic from file-based scripts with performance
-     overhead from file I/O operations.
-   - **Migration**: Migrate to **lightweight Go gRPC service** acting as client to Tarantool in-memory
-     database with Lua stored procedures for pricing logic.
-   - **Key Changes**:
-     - **Performance Optimization**: Eliminate file I/O bottlenecks by migrating pricing rules into
-       Tarantool in-memory database for ultra-fast calculations.
-     - **Architectural Simplification**: Transform Go service into thin wrapper forwarding pricing
-       requests to Tarantool via go-tarantool connector.
-     - **Internal-Only Access**: Deploy as internal-only gRPC service without external HTTP exposure,
-       optimized for high-frequency pricing calculations.
+    - **Current**: Micronaut service with Micronaut Data JPA repositories for PostgreSQL
+      persistence that executes pricing logic by evaluating MVEL tariff rule expressions stored in a
+      PostgreSQL database.
+    - **Migration**: Migrate to a **Go gRPC service** that continues to source tariff rules from
+      PostgreSQL but evaluates them using a Go-based expression engine that preserves the MVEL-style
+      rule model.
+    - **Key Changes**:
+        - **Database-centric rules**: Keep tariff rules in the PostgreSQL database; model
+          them explicitly (e.g., rule sets, versions, effective dates) and load them into memory in
+          the Go service for evaluation.
+        - **Go expression engine**: Integrate a Go expression library capable of evaluating
+          MVEL-like expressions (or a close equivalent) so existing rule semantics are preserved as
+          much as possible.
+        - **Rule adaptation**: Where necessary, update stored tariff rule expressions in PostgreSQL
+          to match the chosen Go expression language syntax while keeping business behavior
+          identical.
+        - **Internal-only access**: Expose pricing calculations as internal gRPC endpoints (with
+          optional gRPC-gateway if external HTTP access is required), optimized for high-frequency,
+          low-latency evaluations.
 
 9. **product-service**
 
@@ -699,11 +703,13 @@ integrating full observability and modernizing core components along the way.
         * **Full Observability:** Instrument the new service from day one to export structured logs
           to Loki, metrics to Prometheus, and traces to Tempo.
         * **Component Modernization:** As part of the rewrite, modernize underlying dependencies.
-            * When rewriting the `document-service`, replace the jsreport dependency with a
-              new Go service using the `chromedp` library.
-            * When rewriting the `pricing-service`, migrate the file-based tariff rules to
-              **Tarantool** for scalable, in-memory execution.
-    * **Deploy and Test alongside Java Service:**
+           * When rewriting the `document-service`, replace the jsreport dependency with a
+             new Go service using the `chromedp` library.
+           * When rewriting the `pricing-service`, keep tariff rules in the PostgreSQL database
+             and evaluate them in Go using a suitable expression engine that preserves the existing
+             MVEL-based rule approach; update stored rule expressions as needed to match the Go
+             engine’s syntax while maintaining business behavior.
+     * **Deploy and Test alongside Java Service:**
         * Deploy the new Go service to Kubernetes, where it will run in parallel with its Java
           counterpart.
         * Initially, route no production traffic to the new service. Conduct thorough integration
@@ -739,9 +745,10 @@ integrating full observability and modernizing core components along the way.
      persistence of chat history. While not as critical as policy or payment, its real-time nature
      makes it a good candidate to tackle after simpler data-focused services.
    * `pricing-service` - **medium-to-high risk**: Pricing is a critical business function. This
-     migration involves not only a language change but also a shift in how tariff rules are
-     managed (moving to Tarantool). It should be undertaken after the team is comfortable with the
-     migration process.
+     migration involves not only a language change but also introducing a Go-based expression engine
+     to evaluate MVEL-style tariff rules that live in the PostgreSQL database, and should
+     be undertaken only after the migration process and the tooling for translating and testing
+     tariff rule expressions in Go have been thoroughly validated.
    * `policy-service` - **high risk**: As the service managing core insurance policies, this is
      a high-impact, critical component. It likely has complex business logic and dependencies on
      the services migrated earlier.
