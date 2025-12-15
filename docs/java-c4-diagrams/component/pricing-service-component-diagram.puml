@@ -7,7 +7,7 @@ title Component diagram for Pricing Service
 
 ' External Systems and Services
 System_Ext(policy_service, "Policy Service", "Microservice", "Requests price calculations for insurance offers.")
-System_Ext(config_fs, "Configuration / File System", "YAML/MVEL Files", "Provides persistent storage for tariff rules.")
+System_Ext(pricing_db, "Pricing Database", "PostgreSQL Database", "Stores tariff rules and related pricing data.")
 
 Container_Boundary(pricing_service, "Pricing Service") {
     ' API Layer
@@ -16,13 +16,13 @@ Container_Boundary(pricing_service, "Pricing Service") {
     ' Application/Domain Logic
     Component(calc_service, "Calculation Service", "Java/Micronaut Service", "Orchestrates the calculation by applying the correct tariff rules.")
     Component(rules_engine, "MVEL Rules Engine", "MVEL Evaluator", "Parses and executes business rules written in MVEL.")
-    Component(tariff_repo, "Tariff Repository", "Java Component", "Loads and provides access to tariff rule files from the file system.")
+    Component(tariff_repo, "Tariff Repository", "Micronaut Data JPA / PostgreSQL", "Loads and provides access to tariff rules from PostgreSQL.")
 
     ' Relationships within the service
     Rel(api, calc_service, "Forwards calculation request to")
     Rel(calc_service, tariff_repo, "Uses to fetch tariff rules")
     Rel(calc_service, rules_engine, "Uses to execute rules against data")
-    Rel(tariff_repo, config_fs, "Loads MVEL rule scripts from", "File I/O")
+    Rel(tariff_repo, pricing_db, "Loads tariff rules from", "JDBC/SQL")
 }
 
 ' External Relationships
