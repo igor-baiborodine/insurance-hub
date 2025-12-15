@@ -164,7 +164,7 @@ else
     endif
 endif
 
-VALUES_FILE_PREFIX = env/$(ENV_NAME)
+OVERLAYS_FILE_PATH = overlays/$(ENV_NAME)
 
 .PHONY: _env-check
 _env-check: ## Ensure env name is valid and set based on the current context
@@ -215,7 +215,7 @@ prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack 
 	@helm upgrade --install "$(ENV_NAME)"-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
 		--namespace $(MONITORING_NS) \
-		--values "$(VALUES_FILE_PREFIX)"/infra/prometheus/values.yaml
+		--values "$(OVERLAYS_FILE_PATH)"/infra/prometheus/values.yaml
 	@echo "✅ Kube Prometheus Stack deployment initiated. Check status with: make prometheus-stack-status"
 
 .PHONY: prometheus-stack-uninstall
@@ -287,7 +287,7 @@ postgres-svc-secret-create: _env-check _data-ns-check _svc-name-check ## Create/
 .PHONY: postgres-svc-deploy
 postgres-svc-deploy: _env-check _data-ns-check _svc-name-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
 	@echo "Deploying PostgreSQL cluster for '$(SVC_NAME)' into '$(DATA_NS)' namespace...";
-	@kubectl kustomize "$(VALUES_FILE_PREFIX)/infra/postgres/$(SVC_NAME)" | kubectl apply --server-side -f -;
+	@kubectl kustomize "$(OVERLAYS_FILE_PATH)/infra/postgres/$(SVC_NAME)" | kubectl apply --server-side -f -;
 	@echo "✅ Postgres cluster deployment for '$(SVC_NAME)' initiated. Check status with: make postgres-svc-status SVC_NAME=$(SVC_NAME)"
 
 .PHONY: postgres-svc-status
@@ -334,7 +334,7 @@ es-operator-delete: _env-check ## Delete Elastic Cloud on Kubernetes (ECK) Opera
 .PHONY: es-deploy
 es-deploy: _env-check ## Deploy Elasticsearch cluster
 	@echo "Deploying Elasticsearch cluster into '$(DATA_NS)' namespace...";
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/infra/elastic/elasticsearch.yaml;
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(OVERLAYS_FILE_PATH)"/infra/elastic/elasticsearch.yaml;
 	@echo "✅ Elasticsearch cluster deployment initiated. Check status with: make es-status"
 
 .PHONY: es-status
@@ -367,13 +367,13 @@ es-purge: es-delete ## Delete Elasticsearch cluster and its related secrets and 
 .PHONY: es-exporter-deploy
 es-exporter-deploy: _env-check ## Deploy Prometheus Elasticsearch exporter for monitoring
 	@echo "Deploying Elasticsearch exporter into '$(DATA_NS)' namespace..."
-	@kubectl apply -f "$(VALUES_FILE_PREFIX)"/infra/elastic/elasticsearch-exporter.yaml
+	@kubectl apply -f "$(OVERLAYS_FILE_PATH)"/infra/elastic/elasticsearch-exporter.yaml
 	@echo "✅ Elasticsearch exporter deployment initiated."
 
 .PHONY: es-exporter-delete
 es-exporter-delete: _env-check ## Delete Prometheus Elasticsearch exporter
 	@echo "Deleting Elasticsearch exporter from namespace $(DATA_NS)..."
-	@kubectl delete -f "$(VALUES_FILE_PREFIX)"/infra/elastic/elasticsearch-exporter.yaml --ignore-not-found || true
+	@kubectl delete -f "$(OVERLAYS_FILE_PATH)"/infra/elastic/elasticsearch-exporter.yaml --ignore-not-found || true
 	@echo "🗑 Elasticsearch exporter deleted."
 
 ################################################################################
@@ -404,7 +404,7 @@ kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka operator
 .PHONY: kafka-deploy
 kafka-deploy: _env-check ## Deploy Kafka cluster
 	@echo "Deploying Kafka cluster into '$(DATA_NS)' namespace..."
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/infra/kafka/resources.yaml
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(OVERLAYS_FILE_PATH)"/infra/kafka/resources.yaml
 	@echo "✅ Kafka cluster deployment initiated. Check status with: make kafka-status"
 
 .PHONY: kafka-status
@@ -493,13 +493,13 @@ MINIO_ROOT_USER_PWD ?= minioRootUserPwd
 .PHONY: minio-operator-deploy
 minio-operator-deploy: _env-check ## Deploy MinIO operator
 	@echo "Deploying MinIO operator v$(MINIO_OPERATOR_VERSION) into 'minio-operator' namespace..."
-	@kubectl kustomize "$(VALUES_FILE_PREFIX)"/infra/minio/operator | kubectl apply --server-side -f -
+	@kubectl kustomize "$(OVERLAYS_FILE_PATH)"/infra/minio/operator | kubectl apply --server-side -f -
 	@echo "✅ MinIO operator deployment initiated."
 
 .PHONY: minio-operator-delete
 minio-operator-delete: _env-check ## Delete MinIO operator
 	@echo "Deleting MinIO operator v$(MINIO_OPERATOR_VERSION) from 'minio-operator' namespace..."
-	@kubectl delete -k "$(VALUES_FILE_PREFIX)"/infra/minio/operator
+	@kubectl delete -k "$(OVERLAYS_FILE_PATH)"/infra/minio/operator
 	@echo "🗑 MinIO operator deleted."
 
 .PHONY: minio-storage-user-secret-create
@@ -535,7 +535,7 @@ minio-tenant-deploy: _env-check _svc-name-check ## Deploy MinIO tenant for servi
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
 	echo "Deploying MinIO tenant for '$$SVC_NAME' into '$$NAMESPACE' namespace..."; \
-	kubectl kustomize "$(VALUES_FILE_PREFIX)/infra/minio/$$SVC_NAME" | kubectl apply --server-side -f -; \
+	kubectl kustomize "$(OVERLAYS_FILE_PATH)/infra/minio/$$SVC_NAME" | kubectl apply --server-side -f -; \
 	echo "✅ MinIO cluster for '$$SVC_NAME' deployment initiated. Check status with: make minio-tenant-status SVC_NAME=$$SVC_NAME"
 
 .PHONY: minio-tenant-status
@@ -593,7 +593,7 @@ minio-svc-bucket-create: _env-check _svc-name-check ## Create a MinIO bucket for
 		echo "ERROR: Argument 'BUCKET_NAME' is required! Usage: make minio-svc-bucket-create SVC_NAME=<svc-name> BUCKET_NAME=<bucket-name>"; \
 		exit 1; \
 	fi
-	@bash env/scripts/minio-svc-bucket-create.sh "$(ENV_NAME)" "$(SVC_NAME)" "$(BUCKET_NAME)"
+	@bash apps/scripts/minio-svc-bucket-create.sh "$(ENV_NAME)" "$(SVC_NAME)" "$(BUCKET_NAME)"
 
 .PHONY: minio-svc-user-secret-create
 minio-svc-user-secret-create: _env-check _svc-name-check ## Create/update MinIO credentials secret for service account. Usage: make minio-svc-user-secret-create SVC_NAME=<svc-name> MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>
@@ -615,8 +615,7 @@ minio-svc-user-with-policy-create: _env-check _svc-name-check ## Create a MinIO 
 		echo "ERROR: Argument 'POLICY_FILE' is required! Usage: make minio-svc-user-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>"; \
 		exit 1; \
 	fi
-	@bash env/scripts/minio-svc-user-with-policy-create.sh "$(SVC_NAME)" "$(ENV_NAME)" "$(POLICY_FILE)"
-
+	@bash aps/scripts/minio-svc-user-with-policy-create.sh "$(SVC_NAME)" "$(ENV_NAME)" "$(POLICY_FILE)"
 
 ################################################################################
 # MongoDB Deployment Targets
@@ -657,7 +656,7 @@ mongodb-root-user-secret-create: _env-check _data-ns-check ## Create/update secr
 .PHONY: mongodb-deploy
 mongodb-deploy: _env-check _data-ns-check ## Deploy MongoDB cluster
 	@echo "Deploying MongoDB cluster to '$(DATA_NS)' namespace...";
-	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(VALUES_FILE_PREFIX)"/infra/mongodb/mongodbcommunity.yaml;
+	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(OVERLAYS_FILE_PATH)"/infra/mongodb/mongodbcommunity.yaml;
 	@echo "✅ MongoDB cluster deployment initiated. Check status with: make mongodb-status"
 
 .PHONY: mongodb-status
@@ -695,7 +694,7 @@ mongodb-purge: mongodb-delete ## Delete MongoDB cluster and permanently remove r
 jsreport-deploy: _env-check ## Deploy JSReport instance
 	@kubectl get namespace "$(SVC_NS)" >/dev/null 2>&1 || kubectl create namespace "$(SVC_NS)"
 	@echo "Deploying JSReport cluster into '$(SVC_NS)' namespace..."
-	@kubectl kustomize "$(VALUES_FILE_PREFIX)/svc/jsreport" | kubectl apply --server-side -f -
+	@kubectl kustomize "$(OVERLAYS_FILE_PATH)/svc/jsreport" | kubectl apply --server-side -f -
 	@echo "✅ JSReport deployment initiated. Check status with: make jsreport-status"
 
 .PHONY: jsreport-status
@@ -711,7 +710,7 @@ jsreport-status: _env-check ## Show JSReport status (pod, service, PVC only)
 .PHONY: jsreport-delete
 jsreport-delete: _env-check ## Delete JSReport deployment
 	@echo "Deleting JSReport resources from namespace $(SVC_NS)..."
-	@kubectl delete -k "$(VALUES_FILE_PREFIX)/svc/jsreport" -n "$(SVC_NS)" --ignore-not-found || true
+	@kubectl delete -k "$(OVERLAYS_FILE_PATH)/svc/jsreport" -n "$(SVC_NS)" --ignore-not-found || true
 	@echo "⏳ Waiting 5s for JSReport resources to be cleaned up..."
 	@sleep 5
 
@@ -782,7 +781,7 @@ zipkin-install: _env-check _monitoring-ns-check ## Install Zipkin in QA cluster
 	@helm repo update
 	@helm upgrade --install $(ENV_NAME)-zipkin zipkin/zipkin \
 	   --version $(ZIPKIN_VERSION) \
-	   --values "$(VALUES_FILE_PREFIX)"/infra/zipkin/values.yaml \
+	   --values "$(OVERLAYS_FILE_PATH)"/infra/zipkin/values.yaml \
 	   --namespace $(MONITORING_NS)
 	@echo "Disabling Zipkin deployment readiness probe..."
 	@kubectl patch deployment $(ENV_NAME)-zipkin -n $(MONITORING_NS) --type=json -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/readinessProbe"}]'
