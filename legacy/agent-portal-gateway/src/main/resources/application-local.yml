@@ -1,0 +1,13 @@
+micronaut:
+  server:
+    host: localhost
+    port: 8080
+---
+endpoints:
+  env:
+    enabled: true
+    sensitive: false
+---
+tracing:
+  zipkin:
+    enabled: false

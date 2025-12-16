@@ -3,7 +3,7 @@ micronaut:
     name: gateway
   server:
     host: localhost
-    port: ${SERVICE_PORT:8081}
+    port: 8080
     cors:
       enabled: true
   security:
@@ -25,12 +25,6 @@ micronaut:
         paths: classpath:META-INF/swagger
         mapping: /swagger/**
 ---
-consul:
-  client:
-    registration:
-      enabled: false
-    defaultZone: "${CONSUL_HOST:localhost}:${CONSUL_PORT:8500}"
----
 tracing:
   zipkin:
     enabled: true
@@ -41,3 +35,11 @@ tracing:
 ---
 jackson:
   dateFormat: dd.MM.yyyy
+---
+endpoints:
+  health:
+    enabled: true
+    sensitive: false
+  env:
+    enabled: false
+    sensitive: false

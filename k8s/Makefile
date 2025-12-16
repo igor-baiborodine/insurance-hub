@@ -812,3 +812,10 @@ zipkin-ui: ## Access Zipkin UI via port-forward
 	@echo "Forwarding Zipkin UI to http://localhost:9411"
 	@echo "Press Ctrl+C to stop."
 	@kubectl port-forward svc/$(ENV_NAME)-zipkin 9411:9411 -n $(MONITORING_NS)
+
+################################################################################
+# Services Deployment Targets
+# Targets for deploying and managing Insurance Hub services and front-end apps
+# in local dev and QA cluster
+# Namespace is auto-detected from the current kubectl context
+################################################################################
