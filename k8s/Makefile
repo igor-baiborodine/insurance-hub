@@ -819,3 +819,9 @@ zipkin-ui: ## Access Zipkin UI via port-forward
 # in local dev and QA cluster
 # Namespace is auto-detected from the current kubectl context
 ################################################################################
+
+.PHONY: java-svc-deploye
+java-svc-deploye: _env-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploye SVC_NAME=<service-name>
+	@echo "Deploying Java service '$(SVC_NAME)' for environment '$(ENV_NAME)'..."
+	@kubectl apply -k k8s/overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)"
+	@echo "✅ Java service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app=$(SVC_NAME)"

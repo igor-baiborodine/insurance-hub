@@ -48,7 +48,7 @@ insurance-hub/
 ```
 
 - Operator manifests reside in `k8s/apps/infra/<component>/`.
-- Service-level Kustomize bases live in `k8s/apps/svc/<service>/`.
+- Service-level Kustomize bases live in `k8s/apps/svc/<service>/base`.
 - Environment-level Kustomize compositions live in `k8s/overlays/<env>/` (they reference infra and
   service overlays).
 
