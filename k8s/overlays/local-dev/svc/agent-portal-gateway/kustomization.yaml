@@ -5,7 +5,8 @@ namespace: local-dev-all
 namePrefix: local-dev-
 nameSuffix: -legacy
 labels:
-  - pairs:
+  - includeSelectors: true
+    pairs:
       environment: local-dev
 resources:
   - ../../../../apps/svc/agent-portal-gateway/base
