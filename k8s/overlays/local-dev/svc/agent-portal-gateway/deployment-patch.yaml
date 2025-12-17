@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-portal-gateway
+  labels:
+    environment: local-dev
+spec:
+  template:
+    metadata:
+      labels:
+        environment: local-dev
+    spec:
+      containers:
+        - name: agent-portal-gateway
+          env:
+            - name: TRACING_ZIPKIN_ENABLED
+              value: "false"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-portal-gateway
+  labels:
+    app.kubernetes.io/name: agent-portal-gateway
+    app.kubernetes.io/instance: insurance-hub-agent-portal-gateway
+    app.kubernetes.io/version: "latest"
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-portal-gateway
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-portal-gateway
+        app.kubernetes.io/instance: insurance-hub-agent-portal-gateway
+        app.kubernetes.io/version: "latest"
+        app.kubernetes.io/component: gateway
+    spec:
+      containers:
+        - name: agent-portal-gateway
+          image: insurance-hub-agent-portal-gateway-legacy:latest # Image built by 'docker-svc-java-build' target
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: KUBERNETES_CLIENT_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MICRONAUT_SERVER_HOST
+              value: "0.0.0.0"
+          livenessProbe:
+            httpGet:
+              path: /health/liveness
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Resource requests and limits will be defined in overlays as they are environment-specific

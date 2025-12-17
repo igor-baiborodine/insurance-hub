@@ -6,8 +6,8 @@
 ################################################################################
 # Includes - child domain-specific Makefiles
 ################################################################################
--include k8s/Makefile
--include k8s/bootstrap/Makefile
+include k8s/Makefile
+include k8s/bootstrap/Makefile
 
 ################################################################################
 # Variables
@@ -40,3 +40,24 @@ help:
 go-build: ## Compile the Go application
 	@echo ">> Building $(APP_NAME) (Go $(GO_VERSION))"
 	@go build -o $(BIN_DIR)/$(APP_NAME) ./...
+
+################################################################################
+# Java Targets
+################################################################################
+
+.PHONY: java-all-build
+java-all-build: ## Build all Java microservices
+	@echo "Building all Java microservices without tests..."
+	@bash legacy/build-microservices-without-tests.sh
+	@echo "✅ All Java microservices built successfully."
+
+################################################################################
+# Docker Targets
+################################################################################
+
+.PHONY: docker-java-svc-build
+docker-java-svc-build: _svc-name-check ## Build a Docker image for a Java service in the legacy folder. Usage: make docker-java-svc-build SVC_NAME=<service-name>
+	@echo "Building Docker image for Java service '$(SVC_NAME)' from 'legacy/$(SVC_NAME)'..."
+	@docker build -f "legacy/$(SVC_NAME)/Dockerfile" "legacy/$(SVC_NAME)" -t "insurance-hub-$(SVC_NAME)-legacy:latest"
+	@echo "✅ Docker image '$(SVC_NAME):latest' built successfully."
+
