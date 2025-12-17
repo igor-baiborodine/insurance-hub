@@ -24,6 +24,7 @@ spec:
       containers:
         - name: agent-portal-gateway
           image: insurance-hub-agent-portal-gateway-legacy:latest # Image built by 'docker-svc-java-build' target
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           env:

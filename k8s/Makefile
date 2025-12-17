@@ -820,8 +820,24 @@ zipkin-ui: ## Access Zipkin UI via port-forward
 # Namespace is auto-detected from the current kubectl context
 ################################################################################
 
-.PHONY: java-svc-deploye
-java-svc-deploye: _env-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploye SVC_NAME=<service-name>
+.PHONY: java-svc-image-local-dev-load
+java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the local-dev cluster. Usage: make java-svc-image-local-dev-load SVC_NAME=<service-name>
+	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
+		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
+		exit 1; \
+	fi
+	@echo "Loading Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' into local-dev cluster..."
+	@kind load docker-image --name local-dev-insurance-hub "insurance-hub-$(SVC_NAME)-legacy:latest"
+	@echo "✅ Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' loaded into local-dev cluster."
+
+.PHONY: java-svc-deploy
+java-svc-deploy: _env-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploy SVC_NAME=<service-name>
 	@echo "Deploying Java service '$(SVC_NAME)' for environment '$(ENV_NAME)'..."
-	@kubectl apply -k k8s/overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)"
-	@echo "✅ Java service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app=$(SVC_NAME)"
+	@kubectl apply -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)"
+	@echo "✅ Java service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app.kubernetes.io/name=$(SVC_NAME)"
+
+.PHONY: java-svc-delete
+java-svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service using Kustomize. Usage: make java-svc-delete SVC_NAME=<service-name>
+	@echo "Deleting Java service '$(SVC_NAME)' from environment '$(ENV_NAME)'..."
+	@kubectl delete -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)" --ignore-not-found
+	@echo "🗑 Java service '$(SVC_NAME)' deleted."

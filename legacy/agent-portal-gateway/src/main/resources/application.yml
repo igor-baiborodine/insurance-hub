@@ -2,7 +2,6 @@ micronaut:
   application:
     name: gateway
   server:
-    host: localhost
     port: 8080
     cors:
       enabled: true
