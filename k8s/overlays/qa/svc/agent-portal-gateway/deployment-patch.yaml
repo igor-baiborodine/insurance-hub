@@ -12,6 +12,9 @@ spec:
     spec:
       containers:
         - name: agent-portal-gateway
+          env:
+            - name: TRACING_ZIPKIN_HTTP_URL
+              value: "http://qa-zipkin.qa-monitoring.svc.cluster.local:9411"
           resources:
             requests:
               memory: "256Mi"
