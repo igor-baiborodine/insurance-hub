@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/instance: insurance-hub-agent-portal-gateway
     app.kubernetes.io/component: gateway
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app.kubernetes.io/name: agent-portal-gateway
     app.kubernetes.io/component: gateway
