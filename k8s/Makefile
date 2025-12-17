@@ -836,6 +836,32 @@ java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker i
 	@kind load docker-image --name local-dev-insurance-hub "insurance-hub-$(SVC_NAME)-legacy:latest"
 	@echo "✅ Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' loaded into local-dev cluster."
 
+.PHONY: java-svc-image-qa-load
+java-svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the QA LXD cluster nodes. Usage: make java-svc-image-qa-load SVC_NAME=<service-name>
+	@if [ "$(ENV_NAME)" != "qa" ]; then \
+		echo "ERROR: This target is only applicable for the 'qa' environment (LXD/K3s)."; \
+		exit 1; \
+	fi
+	@echo "Saving Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' to a temporary file..."
+	@docker save "insurance-hub-$(SVC_NAME)-legacy:latest" -o /tmp/$(SVC_NAME)-image.tar
+	@echo "Loading Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' into QA LXD cluster nodes..."
+	@# Find all LXD nodes for the QA cluster (master and workers)
+	@LXD_NODES=$$(lxc list -c n --format csv | grep -E "^qa-(master|worker[0-9]+)" ); \
+	if [ -z "$$LXD_NODES" ]; then \
+		echo "ERROR: No QA LXD nodes found. Is the LXD cluster running and named 'qa-master', 'qa-workerX'?"; \
+		rm /tmp/$(SVC_NAME)-image.tar; \
+		exit 1; \
+	fi; \
+	for NODE in $$LXD_NODES; do \
+		echo "  -> Processing node $$NODE..."; \
+		lxc file push /tmp/$(SVC_NAME)-image.tar $$NODE/tmp/$(SVC_NAME)-image.tar; \
+		lxc exec $$NODE -- /usr/local/bin/k3s ctr images import /tmp/$(SVC_NAME)-image.tar; \
+		lxc exec $$NODE -- rm /tmp/$(SVC_NAME)-image.tar; \
+		echo "  -> Image loaded on $$NODE."; \
+	done
+	@rm /tmp/$(SVC_NAME)-image.tar
+	@echo "✅ Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' loaded into all QA LXD cluster nodes."
+
 .PHONY: java-svc-deploy
 java-svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploy SVC_NAME=<service-name>
 	@echo "Deploying Java service '$(SVC_NAME)' to '$(SVC_NS)' namespace..."
