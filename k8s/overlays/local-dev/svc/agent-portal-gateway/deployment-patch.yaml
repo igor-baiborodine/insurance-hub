@@ -12,6 +12,9 @@ spec:
     spec:
       containers:
         - name: agent-portal-gateway
+          env:
+            - name: TRACING_ZIPKIN_ENABLED
+              value: "false"
           resources:
             requests:
               memory: "256Mi"
