@@ -192,6 +192,12 @@ _monitoring-ns-check: ## Ensure monitoring namespace exists and set it as the cu
 	@kubectl get namespace "$(MONITORING_NS)" >/dev/null 2>&1 || kubectl create namespace "$(MONITORING_NS)"
 	@kubectl config set-context --current --namespace="$(MONITORING_NS)"
 
+.PHONY: _svc-ns-check
+_svc-ns-check: ## Ensure svc(service) namespace exists and set it as the current context
+	@echo "Ensuring namespace $(SVC_NS) exists and is set as current..."
+	@kubectl create namespace "$(SVC_NS)" --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl config set-context --current --namespace="$(SVC_NS)"
+
 .PHONY: _svc-name-check
 _svc-name-check: ## Ensure that the SVC_NAME argument is provided
 	@if [ -z "$$SVC_NAME" ]; then \
@@ -297,15 +303,15 @@ postgres-svc-status: _env-check _svc-name-check ## Show PostgreSQL cluster/resou
 
 .PHONY: postgres-svc-delete
 postgres-svc-delete: _env-check ## Delete PostgreSQL cluster for service. Usage: make postgres-svc-delete SVC_NAME=<svc-name>
-	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' in namespace '$(DATA_NS)'..."
+	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' from namespace '$(DATA_NS)'..."
 	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true
 	@echo "🗑 Postgres cluster for '$(SVC_NAME)' deleted."
 
 .PHONY: postgres-svc-purge
 postgres-svc-purge: _env-check ## Delete PostgreSQL cluster for service and its related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
-	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' in namespace '$(DATA_NS)'..."
+	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' from namespace '$(DATA_NS)'..."
 	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true
-	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)' in namespace '$(DATA_NS)'..."
+	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)' from namespace '$(DATA_NS)'..."
 	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)-user-creds || true
 	@echo "🗑 Postgres cluster for '$(SVC_NAME)' and its user creds deleted."
 
@@ -359,7 +365,7 @@ es-delete: _env-check ## Delete Elasticsearch cluster only
 
 .PHONY: es-purge
 es-purge: es-delete ## Delete Elasticsearch cluster and its related secrets and PVCs
-	@echo "Deleting Elasticsearch-related secrets and PVCs in namespace $(DATA_NS)..."
+	@echo "Deleting Elasticsearch-related secrets and PVCs from namespace $(DATA_NS)..."
 	@kubectl delete secret -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
 	@kubectl delete pvc -n "$(DATA_NS)" -l elasticsearch.k8s.elastic.co/cluster-name=$(ENV_NAME)-elasticsearch || true
 	@echo "🗑 Elasticsearch-related secrets and PVCs deleted."
@@ -431,13 +437,13 @@ kafka-delete: _env-check ## Delete Kafka cluster only (preserves PVCs and Strimz
 
 .PHONY: kafka-purge
 kafka-purge: kafka-delete ## Delete Kafka cluster and permanently remove PVCs, NodePools, and StrimziPodSets
-	@echo "Deleting Kafka-related KafkaNodePools in namespace $(DATA_NS)..."
+	@echo "Deleting Kafka-related KafkaNodePools from namespace $(DATA_NS)..."
 	@kubectl delete kafkanodepool -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
 
-	@echo "Deleting Kafka-related StrimziPodSets in namespace $(DATA_NS)..."
+	@echo "Deleting Kafka-related StrimziPodSets from namespace $(DATA_NS)..."
 	@kubectl delete strimzipodset -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
 
-	@echo "Deleting Kafka-related PVCs in namespace $(DATA_NS)..."
+	@echo "Deleting Kafka-related PVCs from namespace $(DATA_NS)..."
 	@kubectl delete pvc -n "$(DATA_NS)" -l strimzi.io/cluster=$(ENV_NAME)-kafka || true
 
 	@echo "🗑️ Kafka-related NodePools, StrimziPodSets, and PVCs deleted."
@@ -572,7 +578,7 @@ minio-tenant-delete: _env-check _svc-name-check ## Delete MinIO tenant for servi
 .PHONY: minio-tenant-purge
 minio-tenant-purge: minio-tenant-delete _svc-name-check ## Delete MinIO tenant and related secrets/PVCs. Usage: make minio-tenant-purge SVC_NAME=<svc-name>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
-	echo "Deleting MinIO-related secrets and PVCs in namespace $$NAMESPACE..."; \
+	echo "Deleting MinIO-related secrets and PVCs from namespace $$NAMESPACE..."; \
 	kubectl delete secret -n "$$NAMESPACE" --all || true; \
 	kubectl delete pvc -n "$$NAMESPACE" --all || true; \
 	echo "Deleting namespace $$NAMESPACE..."; \
@@ -679,7 +685,7 @@ mongodb-delete: _env-check ## Delete MongoDB cluster only
 
 .PHONY: mongodb-purge
 mongodb-purge: mongodb-delete ## Delete MongoDB cluster and permanently remove related secrets and PVCs
-	@echo "Deleting MongoDB-related secrets and PVCs in namespace $(DATA_NS)..."
+	@echo "Deleting MongoDB-related secrets and PVCs from namespace $(DATA_NS)..."
 	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-mongodb-root-user-creds || true
 	@kubectl delete pvc -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
 	@echo "🗑 MongoDB-related secrets and PVCs deleted."
@@ -716,7 +722,7 @@ jsreport-delete: _env-check ## Delete JSReport deployment
 
 .PHONY: jsreport-purge
 jsreport-purge: jsreport-delete _env-check ## Purge JSReport PVC
-	@echo "Deleting JSReport-related PVC in namespace $(SVC_NS)..."
+	@echo "Deleting JSReport-related PVC from namespace $(SVC_NS)..."
 	@kubectl delete pvc "$(ENV_NAME)"-jsreport-cache-pvc -n "$(SVC_NS)" --ignore-not-found || true
 	@echo "🗑 JSReport cluster and its persistent data deleted."
 
@@ -831,13 +837,13 @@ java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker i
 	@echo "✅ Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' loaded into local-dev cluster."
 
 .PHONY: java-svc-deploy
-java-svc-deploy: _env-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploy SVC_NAME=<service-name>
-	@echo "Deploying Java service '$(SVC_NAME)' for environment '$(ENV_NAME)'..."
-	@kubectl apply -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)"
+java-svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploy SVC_NAME=<service-name>
+	@echo "Deploying Java service '$(SVC_NAME)' to '$(SVC_NS)' namespace..."
+	@kubectl apply -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)" -n "$(SVC_NS)"
 	@echo "✅ Java service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app.kubernetes.io/name=$(SVC_NAME)"
 
 .PHONY: java-svc-delete
 java-svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service using Kustomize. Usage: make java-svc-delete SVC_NAME=<service-name>
-	@echo "Deleting Java service '$(SVC_NAME)' from environment '$(ENV_NAME)'..."
-	@kubectl delete -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)" --ignore-not-found
+	@echo "Deleting Java service '$(SVC_NAME)' from '$(SVC_NS)' namespace..."
+	@kubectl delete -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)" -n "$(SVC_NS)" --ignore-not-found
 	@echo "🗑 Java service '$(SVC_NAME)' deleted."
