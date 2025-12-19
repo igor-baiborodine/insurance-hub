@@ -759,7 +759,7 @@ integrating full observability and modernizing core components along the way.
 **Outcome:** The core business logic is progressively migrated to a modern, performant, and fully
 observable Go-based microservices architecture, with key legacy components updated in the process.
 
-### Phase 5: Modernize Edge and Authentication
+### Phase 5: Modernize Edge and Authentication, Add Service Mesh
 
 **Goal:** Replace the custom Java gateway and authentication service with powerful,
 industry-standard, cloud-native solutions. This phase can run in parallel with Phase 4.
@@ -778,8 +778,17 @@ industry-standard, cloud-native solutions. This phase can run in parallel with P
     * Integrate Envoy with Keycloak for JWT validation at the edge.
     * Once Envoy manages all traffic, decommission the old Java `agent-portal-gateway`.
 
+3. **Introduce Linkerd service mesh for internal traffic:**
+    * Deploy Linkerd to the Kubernetes cluster and enable automatic sidecar injection for backend
+      services.
+    * Use Linkerd to provide mTLS, retries, timeouts, and circuit breaking for all
+      service‑to‑service communication without changing application code.
+    * Integrate Linkerd’s metrics with the existing observability stack (Prometheus/Grafana) to gain
+      fine‑grained insight into internal traffic and latency.
+
 **Outcome:** The system is fronted by a secure, highly performant, and feature-rich edge and
-identity management stack, aligned with cloud-native best practices.
+identity management stack, with zero‑trust mTLS and traffic policies inside the cluster, aligned
+with cloud-native best practices.
 
 ### Phase 6: Finalization, Automation, and Optimization
 
