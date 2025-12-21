@@ -162,6 +162,13 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 
 Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` namespaces.
 
+**Until Docker images publishing to a registry is implemented, for all services, except `jsreport`**:
+- `cd ..`
+- `make docker-java-svc-build SVC_NAME=<svc-name>`
+- `cd k8s`
+- `make java-svc-image-local-dev-load SVC_NAME=<svc-name>` 
+- `make java-svc-image-qa-load SVC_NAME=<svc-name>`
+
 ### jsreport
 
 - `make jsreport-deploy`
@@ -172,6 +179,15 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 - `make jsreport-status`
 - `make jsreport-ui` and go to `http://localhost:5488`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=jsreport-deploy-<iso-date>``
+
+
+### agent-portal-getaway
+
+- `make java-svc-deploy SVC_NAME=agent-portal-gateway`
+
+### auth
+
+- `make java-svc-deploy SVC_NAME=auth`
 
 ### document
 
