@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: qa-svc
+namePrefix: qa-
+nameSuffix: -legacy
+
+labels:
+  - includeSelectors: true
+    pairs:
+      environment: qa
+
+resources:
+  - ../../../../apps/svc/auth/base
+
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: auth-service
