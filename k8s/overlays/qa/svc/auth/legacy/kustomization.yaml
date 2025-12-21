@@ -3,7 +3,6 @@ kind: Kustomization
 
 namespace: qa-svc
 namePrefix: qa-
-nameSuffix: -legacy
 
 labels:
   - includeSelectors: true
@@ -11,10 +10,10 @@ labels:
       environment: qa
 
 resources:
-  - ../../../../apps/svc/auth/base
+  - ../../../../../apps/svc/auth/base/legacy
 
 patches:
   - path: deployment-patch.yaml
     target:
       kind: Deployment
-      name: auth-service
+      name: auth-api-legacy
