@@ -832,9 +832,13 @@ java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker i
 		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
 		exit 1; \
 	fi
-	@echo "Loading Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' into local-dev cluster..."
-	@kind load docker-image --name local-dev-insurance-hub "insurance-hub-$(SVC_NAME)-legacy:latest"
-	@echo "✅ Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' loaded into local-dev cluster."
+	@IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
+	if [ "$(SVC_NAME)" = "agent-portal-gateway" ]; then \
+		IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
+	fi; \
+	echo "Loading Docker image '$$IMAGE_NAME' into 'local-dev' cluster..."; \
+	kind load docker-image --name local-dev-insurance-hub "$$IMAGE_NAME"; \
+	echo "✅ Docker image loaded into 'local-dev' cluster."
 
 .PHONY: java-svc-image-qa-load
 java-svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the QA LXD cluster nodes. Usage: make java-svc-image-qa-load SVC_NAME=<svc-name>
