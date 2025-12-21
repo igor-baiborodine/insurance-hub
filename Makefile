@@ -57,13 +57,12 @@ java-all-build: ## Build all Java microservices
 
 .PHONY: docker-java-svc-build
 docker-java-svc-build: _svc-name-check ## Build a Docker image for a Java service in the 'legacy' folder. Usage: make docker-java-svc-build SVC_NAME=<svc-name>
-    @SVC_FOLDER="legacy/$(SVC_NAME)-service"; \
-    @IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
-	if [ "$(SVC_NAME)" == "agent-portal-gateway" ]; then \
-		SVC_FOLDER="legacy/$(SVC_NAME)" \
-		IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest" \
+	@SVC_FOLDER="legacy/$(SVC_NAME)-service"; \
+	IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
+	if [ "$(SVC_NAME)" = "agent-portal-gateway" ]; then \
+		SVC_FOLDER="legacy/$(SVC_NAME)"; \
+		IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
 	fi; \
 	echo "Building Docker image for Java service '$(SVC_NAME)' from '$$SVC_FOLDER'..."; \
 	docker build -f "$$SVC_FOLDER/Dockerfile" "$$SVC_FOLDER" -t "$$IMAGE_NAME"; \
 	echo "✅ Docker image '$$IMAGE_NAME' built successfully."
-
