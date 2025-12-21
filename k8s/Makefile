@@ -827,7 +827,7 @@ zipkin-ui: ## Access Zipkin UI via port-forward
 ################################################################################
 
 .PHONY: java-svc-image-local-dev-load
-java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the local-dev cluster. Usage: make java-svc-image-local-dev-load SVC_NAME=<service-name>
+java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the local-dev cluster. Usage: make java-svc-image-local-dev-load SVC_NAME=<svc-name>
 	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
 		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
 		exit 1; \
@@ -837,7 +837,7 @@ java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker i
 	@echo "✅ Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' loaded into local-dev cluster."
 
 .PHONY: java-svc-image-qa-load
-java-svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the QA LXD cluster nodes. Usage: make java-svc-image-qa-load SVC_NAME=<service-name>
+java-svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the QA LXD cluster nodes. Usage: make java-svc-image-qa-load SVC_NAME=<svc-name>
 	@if [ "$(ENV_NAME)" != "qa" ]; then \
 		echo "ERROR: This target is only applicable for the 'qa' environment (LXD/K3s)."; \
 		exit 1; \
@@ -863,13 +863,13 @@ java-svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of
 	@echo "✅ Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' loaded into all QA LXD cluster nodes."
 
 .PHONY: java-svc-deploy
-java-svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploy SVC_NAME=<service-name>
+java-svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploy SVC_NAME=<svc-name>
 	@echo "Deploying Java service '$(SVC_NAME)' to '$(SVC_NS)' namespace..."
 	@kubectl apply -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)" -n "$(SVC_NS)"
 	@echo "✅ Java service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app.kubernetes.io/name=$(SVC_NAME)"
 
 .PHONY: java-svc-delete
-java-svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service using Kustomize. Usage: make java-svc-delete SVC_NAME=<service-name>
+java-svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service using Kustomize. Usage: make java-svc-delete SVC_NAME=<svc-name>
 	@echo "Deleting Java service '$(SVC_NAME)' from '$(SVC_NS)' namespace..."
 	@kubectl delete -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)" -n "$(SVC_NS)" --ignore-not-found
 	@echo "🗑 Java service '$(SVC_NAME)' deleted."
