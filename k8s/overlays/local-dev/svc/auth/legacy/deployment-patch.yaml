@@ -10,6 +10,8 @@ spec:
           env:
             - name: TRACING_ZIPKIN_ENABLED
               value: "false"
+            - name: POSTGRES_HOST
+              value: "local-dev-postgres-auth-rw.local-dev-all.svc.cluster.local"
           resources:
             requests:
               memory: "256Mi"
