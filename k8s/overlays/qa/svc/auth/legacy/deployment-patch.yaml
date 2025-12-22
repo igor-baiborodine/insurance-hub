@@ -9,15 +9,18 @@ spec:
         - name: auth-api-legacy
           env:
             - name: TRACING_ZIPKIN_HTTP_URL
-              value: "http://qa-zipkin.qa-monitoring.svc.cluster.local:9411"
+              value: http://qa-zipkin.qa-monitoring.svc.cluster.local:9411
             - name: POSTGRES_HOST
-              value: "qa-postgres-auth-rw.qa-data.svc.cluster.local"
+              value: qa-postgres-auth-rw.qa-data.svc.cluster.local
             - name: POSTGRES_PASSWORD
-              value: "pgSvcUserPwd"
+              valueFrom:
+                secretKeyRef:
+                  name: qa-postgres-auth-user-creds
+                  key: password
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "250m"
+              memory: 512Mi
+              cpu: 250m
             limits:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: 1Gi
+              cpu: 500m
