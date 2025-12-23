@@ -29,6 +29,9 @@
     "sass-loader": "^7.0.3",
     "vue-template-compiler": "^2.5.16"
   },
+  "resolutions": {
+    "minimatch": "^3.0.4"
+  },
   "eslintConfig": {
     "root": true,
     "env": {
