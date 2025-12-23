@@ -15,6 +15,8 @@
   - [Kafka](#kafka)
 - [Services](#services)
   - [jsreport](#jsreport)
+  - [agent-portal-getaway](#agent-portal-getaway)
+  - [auth](#auth)
   - [document](#document)
   - [payment](#payment)
 - [QA—Cluster Load Monitoring](#qacluster-load-monitoring)
