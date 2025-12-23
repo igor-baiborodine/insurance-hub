@@ -29,6 +29,8 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
 * **Git** `>=2.43.0`,
   see [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
 * **Go** `>=1.24`, see [Install Go](https://go.dev/doc/install).
+* **Node.js** `12.12.12`, see [Install Node.js](https://nodejs.org/en/download/).
+* **Yarn** `1.22.22`, see [Install Yarn](https://classic.yarnpkg.com/en/docs/install).
 * **jq** `>=1.6`, see [Install jq](https://stedolan.github.io/jq/download/).
 * **Make** `>=4.3`, see [Install Make](https://www.gnu.org/software/make/).
 * **Docker Engine** `>=24.0.0`,
@@ -56,7 +58,77 @@ cd insurance-hub
 
 ### Install Dependencies
 
-1. Kubernetes Cluster Dependencies
+#### Web Development
+
+<details>
+  <summary>Node.js and Yarn Setup</summary>
+
+⚠️ This legacy Vue 2 project requires **specific versions** due to `node-sass@4.9.2` compatibility:
+
+```
+✅ Node.js v12.22.12 (required)
+✅ Yarn v1.22.22 (required)
+❌ Modern Node 16+ or Yarn 4+ will fail
+```
+
+1. Install NVM (Node Version Manager)
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+source ~/.bashrc  # Reload shell
+```
+
+2. Install Exact Node Version
+
+```bash
+nvm install 12.22.12
+nvm use 12.22.12
+nvm alias default 12.22.12
+```
+
+3. Install Yarn 1.22.22
+
+```bash
+npm install -g yarn@1.22.22
+hash -r  # Refresh PATH
+```
+
+4. Verify Versions
+
+```bash
+node -v  # v12.22.12
+yarn -v  # 1.22.22
+```
+
+5. Install Dependencies
+
+From `insurance-hub/legacy` root:
+```bash
+yarn --cwd web-vue install --ignore-engines
+```
+
+6. Build and Serve
+
+```bash
+# Production build
+yarn --cwd web-vue build
+
+# Development server
+yarn --cwd web-vue serve
+```
+
+7. Switching Node Versions
+
+```bash
+nvm use 25          # Modern Node for other projects
+nvm use 12.22.12    # Back to web-vue project
+```
+
+</details>
+
+#### Kubernetes
+
+1. Install Kubernetes Dependencies
 - `make -C k8s k8s-prereq-all`
 
 ### Create Kubernetes Cluster
