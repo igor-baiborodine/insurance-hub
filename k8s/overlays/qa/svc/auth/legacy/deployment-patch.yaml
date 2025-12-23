@@ -8,10 +8,6 @@ spec:
       containers:
         - name: auth-api-legacy
           env:
-            - name: TRACING_ZIPKIN_HTTP_URL
-              value: http://qa-zipkin.qa-monitoring.svc.cluster.local:9411
-            - name: POSTGRES_HOST
-              value: qa-postgres-auth-rw.qa-data.svc.cluster.local
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:

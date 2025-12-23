@@ -23,6 +23,9 @@ spec:
     spec:
       containers:
         - name: auth-api-legacy
+          envFrom:
+            - configMapRef:
+                name: auth-config-legacy
           image: insurance-hub-auth-api-legacy:latest
           imagePullPolicy: IfNotPresent
           ports:
