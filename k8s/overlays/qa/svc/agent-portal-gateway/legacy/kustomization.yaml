@@ -1,17 +1,15 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
-namespace: local-dev-all
-namePrefix: local-dev-
-nameSuffix: -legacy
+namespace: qa-svc
+namePrefix: qa-
 labels:
   - includeSelectors: true
     pairs:
-      environment: local-dev
+      environment: qa
 resources:
-  - ../../../../apps/svc/agent-portal-gateway/base
+  - ../../../../../apps/svc/agent-portal-gateway/base/legacy
 patches:
   - path: deployment-patch.yaml
     target:
       kind: Deployment
-      name: agent-portal-gateway
+      name: agent-portal-gateway-legacy

@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: agent-portal-gateway
+  name: agent-portal-gateway-legacy
   labels:
     environment: qa
 spec:
@@ -11,14 +11,14 @@ spec:
         environment: qa
     spec:
       containers:
-        - name: agent-portal-gateway
+        - name: agent-portal-gateway-legacy
           env:
             - name: TRACING_ZIPKIN_HTTP_URL
               value: "http://qa-zipkin.qa-monitoring.svc.cluster.local:9411"
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "250m"
+              memory: 512Mi
+              cpu: 250m
             limits:
-              memory: "512Mi"
-              cpu: "500m"
+              memory: 1Gi
+              cpu: 500m
