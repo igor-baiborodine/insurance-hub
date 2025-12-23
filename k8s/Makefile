@@ -280,15 +280,26 @@ postgres-operator-delete: _env-check ## Delete CloudNativePG operator with its n
 	@echo "🗑 CloudNativePG operator deleted."
 
 .PHONY: postgres-svc-secret-create
-postgres-svc-secret-create: _env-check _data-ns-check _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
-	@echo "Creating secret with user creds for '$(SVC_NAME)' database in PostgreSQL..."
-	@kubectl create secret generic "$(ENV_NAME)"-postgres-"$(SVC_NAME)"-user-creds \
-	    --namespace "$(DATA_NS)" \
-	    --type kubernetes.io/basic-auth \
-	    --from-literal=username="$(SVC_NAME)" \
-	    --from-literal=password="$(PG_SVC_USER_PWD)" \
-		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "Secret '"$(ENV_NAME)"-postgres-"$(SVC_NAME)"-user-creds' successfully created/updated in namespace $(DATA_NS)"
+postgres-svc-secret-create: _env-check _data-ns-check _svc-ns-check _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD=<user-pwd>
+	@SECRET_NAME=$(ENV_NAME)-postgres-$(SVC_NAME)-user-creds ; \
+	echo "Creating secret with user creds for '$(SVC_NAME)' database in PostgreSQL..." ; \
+	kubectl create secret generic "$$SECRET_NAME" \
+		--namespace "$(DATA_NS)" \
+		--type kubernetes.io/basic-auth \
+		--from-literal=username="$(SVC_NAME)" \
+		--from-literal=password="$(PG_SVC_USER_PWD)" \
+		--dry-run=client -o yaml | kubectl apply -f - ; \
+	if [ "$(ENV_NAME)" = "qa" ]; then \
+		echo "Copying user creds secret from $(DATA_NS) to $(SVC_NS)..." ; \
+		kubectl get secret "$$SECRET_NAME" \
+			-n "$(DATA_NS)" -o yaml | \
+			sed "s/namespace: $(DATA_NS)/namespace: $(SVC_NS)/" | \
+			kubectl apply -f - ; \
+	fi ; \
+	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $(DATA_NS)" ; \
+	if [ "$(ENV_NAME)" = "qa" ]; then \
+		echo "and copied to $(SVC_NS)" ; \
+	fi
 
 .PHONY: postgres-svc-deploy
 postgres-svc-deploy: _env-check _data-ns-check _svc-name-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
@@ -308,12 +319,20 @@ postgres-svc-delete: _env-check ## Delete PostgreSQL cluster for service. Usage:
 	@echo "🗑 Postgres cluster for '$(SVC_NAME)' deleted."
 
 .PHONY: postgres-svc-purge
-postgres-svc-purge: _env-check ## Delete PostgreSQL cluster for service and its related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
-	@echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' from namespace '$(DATA_NS)'..."
-	@kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true
-	@echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)' from namespace '$(DATA_NS)'..."
-	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-postgres-$(SVC_NAME)-user-creds || true
-	@echo "🗑 Postgres cluster for '$(SVC_NAME)' and its user creds deleted."
+postgres-svc-purge: _env-check _data-ns-check _svc-ns-check _svc-name-check ## Delete PostgreSQL cluster for service and its related secrets. Usage: make postgres-svc-purge SVC_NAME=<svc-name>
+	@SECRET_NAME=$(ENV_NAME)-postgres-$(SVC_NAME)-user-creds ; \
+	echo "Deleting PostgreSQL cluster '$(ENV_NAME)-postgres-$(SVC_NAME)' from namespace '$(DATA_NS)'..." ; \
+	kubectl delete cluster.postgresql.cnpg.io -n "$(DATA_NS)" $(ENV_NAME)-postgres-"$(SVC_NAME)" || true ; \
+	echo "\nDeleting PostgreSQL-related user creds secret for '$(SVC_NAME)' from namespace '$(DATA_NS)'..." ; \
+	kubectl delete secret -n "$(DATA_NS)" "$$SECRET_NAME" || true ; \
+	if [ "$(ENV_NAME)" = "qa" ]; then \
+		echo "Deleting copied user creds secret from namespace '$(SVC_NS)'..." ; \
+		kubectl delete secret -n "$(SVC_NS)" "$$SECRET_NAME" || true ; \
+	fi ; \
+	echo "🗑️ Postgres cluster for '$(SVC_NAME)' and its user creds deleted from $(DATA_NS)" ; \
+	if [ "$(ENV_NAME)" = "qa" ]; then \
+		echo "and $(SVC_NS)" ; \
+	fi
 
 ################################################################################
 # Elastic Cloud Deployment Targets
@@ -827,49 +846,56 @@ zipkin-ui: ## Access Zipkin UI via port-forward
 ################################################################################
 
 .PHONY: java-svc-image-local-dev-load
-java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the local-dev cluster. Usage: make java-svc-image-local-dev-load SVC_NAME=<service-name>
+java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the local-dev cluster. Usage: make java-svc-image-local-dev-load SVC_NAME=<svc-name>
 	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
 		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
 		exit 1; \
 	fi
-	@echo "Loading Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' into local-dev cluster..."
-	@kind load docker-image --name local-dev-insurance-hub "insurance-hub-$(SVC_NAME)-legacy:latest"
-	@echo "✅ Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' loaded into local-dev cluster."
+	@IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
+	if [ "$(SVC_NAME)" = "agent-portal-gateway" ]; then \
+		IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
+	fi; \
+	echo "Loading Docker image '$$IMAGE_NAME' into 'local-dev' cluster..."; \
+	kind load docker-image --name local-dev-insurance-hub "$$IMAGE_NAME"; \
+	echo "✅ Docker image loaded into 'local-dev' cluster."
 
 .PHONY: java-svc-image-qa-load
-java-svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the QA LXD cluster nodes. Usage: make java-svc-image-qa-load SVC_NAME=<service-name>
+java-svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the QA LXD cluster nodes. Usage: make java-svc-image-qa-load SVC_NAME=<svc-name>
 	@if [ "$(ENV_NAME)" != "qa" ]; then \
-		echo "ERROR: This target is only applicable for the 'qa' environment (LXD/K3s)."; \
-		exit 1; \
+	   echo "ERROR: This target is only applicable for the 'qa' environment (LXD/K3s)."; \
+	   exit 1; \
 	fi
-	@echo "Saving Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' to a temporary file..."
-	@docker save "insurance-hub-$(SVC_NAME)-legacy:latest" -o /tmp/$(SVC_NAME)-image.tar
-	@echo "Loading Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' into QA LXD cluster nodes..."
-	@# Find all LXD nodes for the QA cluster (master and workers)
-	@LXD_NODES=$$(lxc list -c n --format csv | grep -E "^qa-(master|worker[0-9]+)" ); \
+	@IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
+	if [ "$(SVC_NAME)" = "agent-portal-gateway" ]; then \
+	   IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
+	fi; \
+	echo "Saving Docker image '$$IMAGE_NAME' to a temporary file..."; \
+	docker save "$$IMAGE_NAME" -o /tmp/$(SVC_NAME)-image.tar; \
+	echo "Loading Docker image '$$IMAGE_NAME' into QA LXD cluster nodes..."; \
+	LXD_NODES=$$(lxc list -c n --format csv | grep -E "^qa-(master|worker[0-9]+)" ); \
 	if [ -z "$$LXD_NODES" ]; then \
-		echo "ERROR: No QA LXD nodes found. Is the LXD cluster running and named 'qa-master', 'qa-workerX'?"; \
-		rm /tmp/$(SVC_NAME)-image.tar; \
-		exit 1; \
+	   echo "ERROR: No QA LXD nodes found. Is the LXD cluster running and named 'qa-master', 'qa-workerX'?"; \
+	   rm /tmp/$(SVC_NAME)-image.tar; \
+	   exit 1; \
 	fi; \
 	for NODE in $$LXD_NODES; do \
-		echo "  -> Processing node $$NODE..."; \
-		lxc file push /tmp/$(SVC_NAME)-image.tar $$NODE/tmp/$(SVC_NAME)-image.tar; \
-		lxc exec $$NODE -- /usr/local/bin/k3s ctr images import /tmp/$(SVC_NAME)-image.tar; \
-		lxc exec $$NODE -- rm /tmp/$(SVC_NAME)-image.tar; \
-		echo "  -> Image loaded on $$NODE."; \
-	done
-	@rm /tmp/$(SVC_NAME)-image.tar
-	@echo "✅ Docker image 'insurance-hub-$(SVC_NAME)-legacy:latest' loaded into all QA LXD cluster nodes."
+	   echo "  -> Processing node $$NODE..."; \
+	   lxc file push /tmp/$(SVC_NAME)-image.tar $$NODE/tmp/$(SVC_NAME)-image.tar; \
+	   lxc exec $$NODE -- /usr/local/bin/k3s ctr images import /tmp/$(SVC_NAME)-image.tar; \
+	   lxc exec $$NODE -- rm /tmp/$(SVC_NAME)-image.tar; \
+	   echo "  -> Image loaded on $$NODE."; \
+	done; \
+	rm /tmp/$(SVC_NAME)-image.tar; \
+	echo "✅ Docker image '$$IMAGE_NAME' loaded into all QA LXD cluster nodes."
 
 .PHONY: java-svc-deploy
-java-svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploy SVC_NAME=<service-name>
-	@echo "Deploying Java service '$(SVC_NAME)' to '$(SVC_NS)' namespace..."
-	@kubectl apply -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)" -n "$(SVC_NS)"
-	@echo "✅ Java service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app.kubernetes.io/name=$(SVC_NAME)"
+java-svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploy SVC_NAME=<svc-name>
+	@echo "Deploying legacy Java service '$(SVC_NAME)' to '$(SVC_NS)' namespace..."
+	@kubectl apply -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)/legacy" -n "$(SVC_NS)"
+	@echo "✅ Java service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app.kubernetes.io/name=$(SVC_NAME)-api-legacy"
 
 .PHONY: java-svc-delete
-java-svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service using Kustomize. Usage: make java-svc-delete SVC_NAME=<service-name>
-	@echo "Deleting Java service '$(SVC_NAME)' from '$(SVC_NS)' namespace..."
-	@kubectl delete -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)" -n "$(SVC_NS)" --ignore-not-found
+java-svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service using Kustomize. Usage: make java-svc-delete SVC_NAME=<svc-name>
+	@echo "Deleting legacy Java service '$(SVC_NAME)' from '$(SVC_NS)' namespace..."
+	@kubectl delete -k overlays/"$(ENV_NAME)"/svc/"$(SVC_NAME)/legacy" -n "$(SVC_NS)" --ignore-not-found
 	@echo "🗑 Java service '$(SVC_NAME)' deleted."
