@@ -52,6 +52,16 @@ java-all-build: ## Build all Java microservices
 	@echo "✅ All Java microservices built successfully."
 
 ################################################################################
+# Frontend Targets
+################################################################################
+
+.PHONY: frontend-build
+frontend-build: ## Build frontend (Vue app)
+	@echo "Building frontend (Vue app)..."
+	@bash legacy/build-frontend.sh
+	@echo "✅ Frontend (Vue app) built successfully."
+
+################################################################################
 # Docker Targets
 ################################################################################
 
