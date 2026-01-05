@@ -852,7 +852,7 @@ svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image 
 		exit 1; \
 	fi
 	@IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
-	if [ "$(SVC_NAME)" = "agent-portal-gateway" ]; then \
+	if [ "$(SVC_NAME)" = "agent-portal-gateway" ] || [ "$(SVC_NAME)" = "web-vue" ]; then \
 		IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
 	fi; \
 	echo "Loading Docker image '$$IMAGE_NAME' into 'local-dev' cluster..."; \
@@ -890,12 +890,16 @@ svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of a Ja
 
 .PHONY: svc-deploy
 svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make svc-deploy SVC_NAME=<svc-name>
-	@echo "Deploying legacy Java service '$(SVC_NAME)' to '$(SVC_NS)' namespace..."
-	@kubectl apply -k "overlays/$(ENV_NAME)/svc/$(SVC_NAME)/legacy" -n "$(SVC_NS)"
-	@echo "✅ Java service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app.kubernetes.io/name=$(SVC_NAME)-api-legacy"
+	@SVC_NAME_LABEL="$(SVC_NAME)-api-legacy"; \
+	if [ "$(SVC_NAME)" = "agent-portal-gateway" ] || [ "$(SVC_NAME)" = "web-vue" ]; then \
+		SVC_NAME_LABEL="$(SVC_NAME)-legacy"; \
+	fi; \
+	echo "Deploying legacy service '$(SVC_NAME)' to '$(SVC_NS)' namespace..."; \
+	kubectl apply -k "overlays/$(ENV_NAME)/svc/$(SVC_NAME)/legacy" -n "$(SVC_NS)"; \
+	echo "✅ Service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app.kubernetes.io/name=$$SVC_NAME_LABEL"
 
 .PHONY: java-svc-delete
 java-svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service using Kustomize. Usage: make java-svc-delete SVC_NAME=<svc-name>
-	@echo "Deleting legacy Java service '$(SVC_NAME)' from '$(SVC_NS)' namespace..."
+	@echo "Deleting legacy service '$(SVC_NAME)' from '$(SVC_NS)' namespace..."
 	@kubectl delete -k "overlays/$(ENV_NAME)/svc/$(SVC_NAME)/legacy" -n "$(SVC_NS)" --ignore-not-found
-	@echo "🗑 Java service '$(SVC_NAME)' deleted."
+	@echo "🗑 Service '$(SVC_NAME)' deleted."
