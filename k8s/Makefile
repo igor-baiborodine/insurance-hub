@@ -898,8 +898,8 @@ svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service or
 	kubectl apply -k "overlays/$(ENV_NAME)/svc/$(SVC_NAME)/legacy" -n "$(SVC_NS)"; \
 	echo "✅ Service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app.kubernetes.io/name=$$SVC_NAME_LABEL"
 
-.PHONY: java-svc-delete
-java-svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service using Kustomize. Usage: make java-svc-delete SVC_NAME=<svc-name>
+.PHONY: svc-delete
+svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service or web app using Kustomize. Usage: make svc-delete SVC_NAME=<svc-name>
 	@echo "Deleting legacy service '$(SVC_NAME)' from '$(SVC_NS)' namespace..."
 	@kubectl delete -k "overlays/$(ENV_NAME)/svc/$(SVC_NAME)/legacy" -n "$(SVC_NS)" --ignore-not-found
 	@echo "🗑 Service '$(SVC_NAME)' deleted."
