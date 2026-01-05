@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: local-dev-all
+namePrefix: local-dev-
+labels:
+  - includeSelectors: true
+    pairs:
+      environment: local-dev
+resources:
+  - ../../../../../apps/svc/web-vue/base/legacy
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: web-vue-legacy
+configMapGenerator:
+  - name: web-vue-config-legacy
+    behavior: merge
+    literals:
+      - GATEWAY_URL=http://local-dev-agent-portal-gateway-legacy
+      - AUTH_URL=http://local-dev-auth-api-legacy
