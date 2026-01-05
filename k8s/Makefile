@@ -845,8 +845,8 @@ zipkin-ui: ## Access Zipkin UI via port-forward
 # Namespace is auto-detected from the current kubectl context
 ################################################################################
 
-.PHONY: java-svc-image-local-dev-load
-java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the local-dev cluster. Usage: make java-svc-image-local-dev-load SVC_NAME=<svc-name>
+.PHONY: svc-image-local-dev-load
+svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image of a Java service or web app into the local-dev cluster. Usage: make svc-image-local-dev-load SVC_NAME=<svc-name>
 	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
 		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
 		exit 1; \
@@ -859,8 +859,8 @@ java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker i
 	kind load docker-image --name local-dev-insurance-hub "$$IMAGE_NAME"; \
 	echo "✅ Docker image loaded into 'local-dev' cluster."
 
-.PHONY: java-svc-image-qa-load
-java-svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the QA LXD cluster nodes. Usage: make java-svc-image-qa-load SVC_NAME=<svc-name>
+.PHONY: svc-image-qa-load
+svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of a Java service or web app into the QA LXD cluster nodes. Usage: make svc-image-qa-load SVC_NAME=<svc-name>
 	@if [ "$(ENV_NAME)" != "qa" ]; then \
 	   echo "ERROR: This target is only applicable for the 'qa' environment (LXD/K3s)."; \
 	   exit 1; \
@@ -888,8 +888,8 @@ java-svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of
 	rm /tmp/$(SVC_NAME)-image.tar; \
 	echo "✅ Docker image '$$IMAGE_NAME' loaded into all QA LXD cluster nodes."
 
-.PHONY: java-svc-deploy
-java-svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploy SVC_NAME=<svc-name>
+.PHONY: svc-deploy
+svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make svc-deploy SVC_NAME=<svc-name>
 	@echo "Deploying legacy Java service '$(SVC_NAME)' to '$(SVC_NS)' namespace..."
 	@kubectl apply -k "overlays/$(ENV_NAME)/svc/$(SVC_NAME)/legacy" -n "$(SVC_NS)"
 	@echo "✅ Java service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app.kubernetes.io/name=$(SVC_NAME)-api-legacy"

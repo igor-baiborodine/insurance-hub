@@ -15,6 +15,7 @@
   - [Kafka](#kafka)
 - [Services](#services)
   - [jsreport](#jsreport)
+  - [web-vue](#web-vue)
   - [agent-portal-getaway](#agent-portal-getaway)
   - [auth](#auth)
   - [document](#document)
@@ -167,9 +168,10 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 **Until Docker images publishing to a registry is implemented, for all services, except `jsreport`**:
 - `cd ..`
 - `make docker-java-svc-build SVC_NAME=<svc-name>`
+- `make docker-frontend-build`
 - `cd k8s`
-- `make java-svc-image-local-dev-load SVC_NAME=<svc-name>` 
-- `make java-svc-image-qa-load SVC_NAME=<svc-name>`
+- `make svc-image-local-dev-load SVC_NAME=<svc-name>` 
+- `make svc-image-qa-load SVC_NAME=<svc-name>`
 
 ### jsreport
 
@@ -183,13 +185,17 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=jsreport-deploy-<iso-date>``
 
 
+### web-vue
+
+- `make svc-deploy SVC_NAME=web-vue`
+
 ### agent-portal-getaway
 
-- `make java-svc-deploy SVC_NAME=agent-portal-gateway`
+- `make svc-deploy SVC_NAME=agent-portal-gateway`
 
 ### auth
 
-- `make java-svc-deploy SVC_NAME=auth`
+- `make svc-deploy SVC_NAME=auth`
 
 ### document
 
