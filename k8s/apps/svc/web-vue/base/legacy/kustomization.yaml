@@ -11,5 +11,5 @@ resources:
 configMapGenerator:
   - name: web-vue-config-legacy
     literals:
-      - GATEWAY_URL=http://local-dev-agent-portal-gateway-legacy.local-dev-all.svc.cluster.local
-      - AUTH_URL=http://local-dev-auth-api-legacy.local-dev-all.svc.cluster.local
+      - GATEWAY_URL=http://localhost:8090
+      - AUTH_URL=http://localhost:8081

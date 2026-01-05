@@ -17,5 +17,5 @@ configMapGenerator:
   - name: web-vue-config-legacy
     behavior: merge
     literals:
-      - GATEWAY_URL=http://local-dev-agent-portal-gateway-legacy
-      - AUTH_URL=http://local-dev-auth-api-legacy
+      - GATEWAY_URL=http://local-dev-agent-portal-gateway-legacy.local-dev-all.svc.cluster.local
+      - AUTH_URL=http://local-dev-auth-api-legacy.local-dev-all.svc.cluster.local
