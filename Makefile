@@ -82,6 +82,7 @@ docker-frontend-build: ## Build the Docker image for the Vue frontend in the 'le
 	@SVC_FOLDER="legacy/web-vue"; \
 	IMAGE_NAME="insurance-hub-web-vue-legacy:latest"; \
 	echo "Building Docker image for Frontend from '$$SVC_FOLDER'..."; \
-	docker build -f "$$SVC_FOLDER/Dockerfile" "$$SVC_FOLDER" -t "$$IMAGE_NAME"; \
+	docker build --no-cache -f "$$SVC_FOLDER/Dockerfile" "$$SVC_FOLDER" -t "$$IMAGE_NAME"; \
+	docker image prune -f; \
 	echo "✅ Docker image '$$IMAGE_NAME' built successfully."
 
