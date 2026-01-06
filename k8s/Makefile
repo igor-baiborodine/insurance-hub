@@ -885,7 +885,7 @@ svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image into th
 	   exit 1; \
 	fi
 	@IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
-	if [ "$(SVC_NAME)" = "agent-portal-gateway" ]; then \
+	if [ "$(SVC_NAME)" = "agent-portal-gateway" ] || [ "$(SVC_NAME)" = "web-vue" ]; then \
 	   IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
 	fi; \
 	echo "Saving Docker image '$$IMAGE_NAME' to a temporary file..."; \
@@ -916,7 +916,7 @@ svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service or
 	echo "Deploying legacy service '$(SVC_NAME)' to '$(SVC_NS)' namespace..."; \
 	kubectl apply -k "overlays/$(ENV_NAME)/svc/$(SVC_NAME)/legacy" -n "$(SVC_NS)"; \
 	echo "✅ Service '$(SVC_NAME)' deployment initiated."; \
-	echo "Check status with: kubectl get deploy,rs,po,svc,endpointslices -n $(SVC_NS) -l app.kubernetes.io/name=$$SVC_NAME_LABEL -o wide"
+	echo "Check status with: kubectl get deploy,rs,po,svc,endpointslices -n $(SVC_NS) -l app.kubernetes.io/name=$$SVC_NAME_LABEL"
 
 .PHONY: svc-delete
 svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service or web app using Kustomize. Usage: make svc-delete SVC_NAME=<svc-name>
