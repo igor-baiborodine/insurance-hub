@@ -52,6 +52,16 @@ java-all-build: ## Build all Java microservices
 	@echo "✅ All Java microservices built successfully."
 
 ################################################################################
+# Frontend Targets
+################################################################################
+
+.PHONY: frontend-build
+frontend-build: ## Build frontend (Vue app)
+	@echo "Building frontend (Vue app)..."
+	@bash legacy/build-frontend.sh
+	@echo "✅ Frontend (Vue app) built successfully."
+
+################################################################################
 # Docker Targets
 ################################################################################
 
@@ -66,3 +76,13 @@ docker-java-svc-build: _svc-name-check ## Build a Docker image for a Java servic
 	echo "Building Docker image for Java service '$(SVC_NAME)' from '$$SVC_FOLDER'..."; \
 	docker build -f "$$SVC_FOLDER/Dockerfile" "$$SVC_FOLDER" -t "$$IMAGE_NAME"; \
 	echo "✅ Docker image '$$IMAGE_NAME' built successfully."
+
+.PHONY: docker-frontend-build
+docker-frontend-build: ## Build the Docker image for the Vue frontend in the 'legacy' folder. Usage: docker-frontend-build
+	@SVC_FOLDER="legacy/web-vue"; \
+	IMAGE_NAME="insurance-hub-web-vue-legacy:latest"; \
+	echo "Building Docker image for Frontend from '$$SVC_FOLDER'..."; \
+	docker build --no-cache -f "$$SVC_FOLDER/Dockerfile" "$$SVC_FOLDER" -t "$$IMAGE_NAME"; \
+	docker image prune -f; \
+	echo "✅ Docker image '$$IMAGE_NAME' built successfully."
+

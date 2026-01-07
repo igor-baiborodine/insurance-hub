@@ -7,15 +7,15 @@ labels:
     pairs:
       environment: qa
 resources:
-  - ../../../../../apps/svc/auth/base/legacy
+  - ../../../../../apps/svc/web-vue/base/legacy
 patches:
   - path: deployment-patch.yaml
     target:
       kind: Deployment
-      name: auth-api-legacy
+      name: web-vue-legacy
 configMapGenerator:
-  - name: auth-config-legacy
+  - name: web-vue-config-legacy
     behavior: merge
     literals:
-      - TRACING_ZIPKIN_HTTP_URL=http://qa-zipkin.qa-monitoring.svc.cluster.local:9411
-      - POSTGRES_HOST=qa-postgres-auth-rw.qa-data.svc.cluster.local
+      - GATEWAY_URL=http://qa-agent-portal-gateway-legacy.qa-svc.svc.cluster.local
+      - AUTH_URL=http://qa-auth-api-legacy.qa-svc.svc.cluster.local

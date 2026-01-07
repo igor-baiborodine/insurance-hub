@@ -845,28 +845,47 @@ zipkin-ui: ## Access Zipkin UI via port-forward
 # Namespace is auto-detected from the current kubectl context
 ################################################################################
 
-.PHONY: java-svc-image-local-dev-load
-java-svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the local-dev cluster. Usage: make java-svc-image-local-dev-load SVC_NAME=<svc-name>
+.PHONY: svc-image-local-dev-load
+svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image into the local-dev cluster. Usage: make svc-image-local-dev-load SVC_NAME=<svc-name>
 	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
 		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
 		exit 1; \
 	fi
 	@IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
-	if [ "$(SVC_NAME)" = "agent-portal-gateway" ]; then \
+	if [ "$(SVC_NAME)" = "agent-portal-gateway" ] || [ "$(SVC_NAME)" = "web-vue" ]; then \
 		IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
 	fi; \
 	echo "Loading Docker image '$$IMAGE_NAME' into 'local-dev' cluster..."; \
 	kind load docker-image --name local-dev-insurance-hub "$$IMAGE_NAME"; \
 	echo "✅ Docker image loaded into 'local-dev' cluster."
 
-.PHONY: java-svc-image-qa-load
-java-svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of a Java service into the QA LXD cluster nodes. Usage: make java-svc-image-qa-load SVC_NAME=<svc-name>
+.PHONY: svc-image-local-dev-unload
+svc-image-local-dev-unload: _svc-name-check ## Unloads (removes) a Docker image from the local-dev Kind cluster nodes. Usage: make svc-image-local-dev-unload SVC_NAME=<svc-name>
+	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
+		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
+		exit 1; \
+	fi
+	@IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
+	if [ "$(SVC_NAME)" = "agent-portal-gateway" ] || [ "$(SVC_NAME)" = "web-vue" ]; then \
+		IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
+	fi; \
+	echo "Unloading Docker image '$$IMAGE_NAME' from 'local-dev' cluster nodes..."; \
+	KIND_NODES=$$(docker ps --filter "label=io.x-k8s.kind.cluster=local-dev-insurance-hub" --format "{{.Names}}"); \
+	for NODE in $$KIND_NODES; do \
+		echo "  -> Removing from node $$NODE..."; \
+		docker exec $$NODE ctr -n k8s.io images rm "docker.io/library/$$IMAGE_NAME" || true; \
+	done; \
+	echo "🗑 Docker image '$$IMAGE_NAME' unloaded from all Kind nodes."
+
+
+.PHONY: svc-image-qa-load
+svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image into the QA LXD cluster nodes. Usage: make svc-image-qa-load SVC_NAME=<svc-name>
 	@if [ "$(ENV_NAME)" != "qa" ]; then \
 	   echo "ERROR: This target is only applicable for the 'qa' environment (LXD/K3s)."; \
 	   exit 1; \
 	fi
 	@IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
-	if [ "$(SVC_NAME)" = "agent-portal-gateway" ]; then \
+	if [ "$(SVC_NAME)" = "agent-portal-gateway" ] || [ "$(SVC_NAME)" = "web-vue" ]; then \
 	   IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
 	fi; \
 	echo "Saving Docker image '$$IMAGE_NAME' to a temporary file..."; \
@@ -888,14 +907,19 @@ java-svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image of
 	rm /tmp/$(SVC_NAME)-image.tar; \
 	echo "✅ Docker image '$$IMAGE_NAME' loaded into all QA LXD cluster nodes."
 
-.PHONY: java-svc-deploy
-java-svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service using Kustomize. Usage: make java-svc-deploy SVC_NAME=<svc-name>
-	@echo "Deploying legacy Java service '$(SVC_NAME)' to '$(SVC_NS)' namespace..."
-	@kubectl apply -k "overlays/$(ENV_NAME)/svc/$(SVC_NAME)/legacy" -n "$(SVC_NS)"
-	@echo "✅ Java service '$(SVC_NAME)' deployment initiated. Check status with: kubectl get deploy,svc -n $(SVC_NS) -l app.kubernetes.io/name=$(SVC_NAME)-api-legacy"
+.PHONY: svc-deploy
+svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service or web app using Kustomize. Usage: make svc-deploy SVC_NAME=<svc-name>
+	@SVC_NAME_LABEL="$(SVC_NAME)-api-legacy"; \
+	if [ "$(SVC_NAME)" = "agent-portal-gateway" ] || [ "$(SVC_NAME)" = "web-vue" ]; then \
+		SVC_NAME_LABEL="$(SVC_NAME)-legacy"; \
+	fi; \
+	echo "Deploying legacy service '$(SVC_NAME)' to '$(SVC_NS)' namespace..."; \
+	kubectl apply -k "overlays/$(ENV_NAME)/svc/$(SVC_NAME)/legacy" -n "$(SVC_NS)"; \
+	echo "✅ Service '$(SVC_NAME)' deployment initiated."; \
+	echo "Check status with: kubectl get deploy,rs,po,svc,endpointslices -n $(SVC_NS) -l app.kubernetes.io/name=$$SVC_NAME_LABEL"
 
-.PHONY: java-svc-delete
-java-svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service using Kustomize. Usage: make java-svc-delete SVC_NAME=<svc-name>
-	@echo "Deleting legacy Java service '$(SVC_NAME)' from '$(SVC_NS)' namespace..."
+.PHONY: svc-delete
+svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service or web app using Kustomize. Usage: make svc-delete SVC_NAME=<svc-name>
+	@echo "Deleting legacy service '$(SVC_NAME)' from '$(SVC_NS)' namespace..."
 	@kubectl delete -k "overlays/$(ENV_NAME)/svc/$(SVC_NAME)/legacy" -n "$(SVC_NS)" --ignore-not-found
-	@echo "🗑 Java service '$(SVC_NAME)' deleted."
+	@echo "🗑 Service '$(SVC_NAME)' deleted."
