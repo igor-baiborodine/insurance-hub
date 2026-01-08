@@ -73,6 +73,9 @@ docker-java-svc-build: _svc-name-check ## Build a Docker image for a Java servic
 		SVC_FOLDER="legacy/$(SVC_NAME)"; \
 		IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
 	fi; \
+	if [ "$(SVC_NAME)" = "document" ]; then \
+		SVC_FOLDER="legacy/$(SVC_NAME)s-service"; \
+	fi; \
 	echo "Building Docker image for Java service '$(SVC_NAME)' from '$$SVC_FOLDER'..."; \
 	docker build -f "$$SVC_FOLDER/Dockerfile" "$$SVC_FOLDER" -t "$$IMAGE_NAME"; \
 	echo "✅ Docker image '$$IMAGE_NAME' built successfully."

@@ -621,7 +621,7 @@ minio-svc-bucket-create: _env-check _svc-name-check ## Create a MinIO bucket for
 	@bash apps/scripts/minio-svc-bucket-create.sh "$(ENV_NAME)" "$(SVC_NAME)" "$(BUCKET_NAME)"
 
 .PHONY: minio-svc-user-secret-create
-minio-svc-user-secret-create: _env-check _svc-name-check ## Create/update MinIO credentials secret for service account. Usage: make minio-svc-user-secret-create SVC_NAME=<svc-name> MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>
+minio-svc-user-secret-create: _env-check _svc-name-check _svc-ns-check ## Create/update MinIO credentials secret for service account. Usage: make minio-svc-user-secret-create SVC_NAME=<svc-name> MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
 	SECRET_NAME="$$NAMESPACE-svc-user-creds"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
@@ -632,7 +632,12 @@ minio-svc-user-secret-create: _env-check _svc-name-check ## Create/update MinIO 
 	   --from-literal=MINIO_SVC_ACCESS_KEY="$(MINIO_SVC_ACCESS_KEY)" \
 	   --from-literal=MINIO_SVC_SECRET_KEY="$(MINIO_SVC_SECRET_KEY)" \
 	   --dry-run=client -o yaml | kubectl apply -f -; \
-	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE"
+	echo "Copying MinIO service credentials secret from $$NAMESPACE to $(SVC_NS)..."; \
+	kubectl get secret "$$SECRET_NAME" \
+	   -n "$$NAMESPACE" -o yaml | \
+	   sed "s/namespace: $$NAMESPACE/namespace: $(SVC_NS)/" | \
+	   kubectl apply -f -; \
+	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE and copied to $(SVC_NS)"
 
 .PHONY: minio-svc-user-with-policy-create
 minio-svc-user-with-policy-create: _env-check _svc-name-check ## Create a MinIO service account and apply an S3 policy. Usage: make minio-svc-user-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>
