@@ -69,14 +69,6 @@
         </dependency>
         <!-- MICRONAUT CORE -->
 
-        <!-- DISCOVERY CLIENT -->
-        <dependency>
-            <groupId>io.micronaut</groupId>
-            <artifactId>micronaut-discovery-client</artifactId>
-            <scope>compile</scope>
-        </dependency>
-        <!-- DISCOVERY CLIENT -->
-
         <!-- MONGO -->
         <dependency>
             <groupId>io.micronaut.mongodb</groupId>
