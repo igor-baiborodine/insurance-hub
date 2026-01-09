@@ -655,6 +655,7 @@ minio-svc-user-with-policy-create: _env-check _svc-name-check ## Create a MinIO 
 
 MONGODB_OPERATOR_VERSION := 0.13.0
 MONGO_ROOT_USER_PWD ?= mongoRootUserPwd
+MONGO_PRODUCT_USER_PWD ?= mongoProductUserPwd
 
 .PHONY: mongodb-operator-install
 mongodb-operator-install: _env-check ## Install MongoDB Community Operator
@@ -682,6 +683,29 @@ mongodb-root-user-secret-create: _env-check _data-ns-check ## Create/update secr
 	    --from-literal=password="$(MONGO_ROOT_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@echo "Secret '"$(ENV_NAME)"-mongodb-root-user-creds' successfully created/updated in namespace $(DATA_NS)"
+
+.PHONY: mongodb-product-user-secret-create
+mongodb-product-user-secret-create: _env-check _data-ns-check _svc-ns-check ## Create/update secret for MongoDB product-service user. Usage: make mongodb-product-user-secret-create MONGO_PRODUCT_USER_PWD=<user-pwd>
+	@SECRET_NAME=$(ENV_NAME)-mongodb-product-user-creds ; \
+	echo "Creating secret with 'product' user creds for 'products-demo' database in MongoDB..." ; \
+	kubectl create secret generic "$$SECRET_NAME" \
+		--namespace "$(DATA_NS)" \
+		--type Opaque \
+		--from-literal=username="product" \
+		--from-literal=password="$(MONGO_PRODUCT_USER_PWD)" \
+		--from-literal=database="products-demo" \
+		--dry-run=client -o yaml | kubectl apply -f - ; \
+	if [ "$(ENV_NAME)" = "qa" ]; then \
+		echo "Copying product user creds secret from $(DATA_NS) to $(SVC_NS)..." ; \
+		kubectl get secret "$$SECRET_NAME" \
+			-n "$(DATA_NS)" -o yaml | \
+			sed "s/namespace: $(DATA_NS)/namespace: $(SVC_NS)/" | \
+			kubectl apply -f - ; \
+	fi ; \
+	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $(DATA_NS)" ; \
+	if [ "$(ENV_NAME)" = "qa" ]; then \
+		echo "and copied to $(SVC_NS)" ; \
+	fi
 
 .PHONY: mongodb-deploy
 mongodb-deploy: _env-check _data-ns-check ## Deploy MongoDB cluster
@@ -711,6 +735,7 @@ mongodb-delete: _env-check ## Delete MongoDB cluster only
 mongodb-purge: mongodb-delete ## Delete MongoDB cluster and permanently remove related secrets and PVCs
 	@echo "Deleting MongoDB-related secrets and PVCs from namespace $(DATA_NS)..."
 	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-mongodb-root-user-creds || true
+	@kubectl delete secret -n "$(DATA_NS)" $(ENV_NAME)-mongodb-product-user-creds || true
 	@kubectl delete pvc -n "$(DATA_NS)" -l app="$(ENV_NAME)"-mongodb-svc || true
 	@echo "🗑 MongoDB-related secrets and PVCs deleted."
 

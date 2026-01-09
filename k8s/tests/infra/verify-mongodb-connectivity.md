@@ -23,8 +23,8 @@ command-line tool.
    and export it as an environment variable with the following command:
 
     ```shell
-    export MONGO_ROOT_USER_PWD="$(kubectl get secret local-dev-mongodb-root-user-creds -n local-dev-all -o jsonpath='{.data.password}' | base64 --decode)"
-    echo "$MONGO_ROOT_USER_PWD"   
+    export MONGO_PRODUCT_USER_PWD="$(kubectl get secret local-dev-mongodb-product-user-creds -n local-dev-all -o jsonpath='{.data.password}' | base64 --decode)"
+    echo "$MONGO_PRODUCT_USER_PWD"   
     ```
 
 2. **Connect Using mongosh**
@@ -33,7 +33,7 @@ command-line tool.
    connect to the database.
 
     ```shell
-    mongosh "mongodb://root:$MONGO_ROOT_USER_PWD@localhost:27017/admin"
+    mongosh "mongodb://product:$MONGO_PRODUCT_USER_PWD@localhost:27017/products-demo"
     ```
 
 3. **Verify the Connection**
@@ -42,17 +42,14 @@ command-line tool.
    `show dbs` to list the available databases and confirm that you are connected.
 
     ```shell
-    Current Mongosh Log ID: 68ddc45011ea3fdbbcce5f46
-    Connecting to:          mongodb://<credentials>@localhost:27017/admin?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+2.5.8
-    Using MongoDB:          8.0.12
-    Using Mongosh:          2.5.8    
+    Current Mongosh Log ID: 69617adb8bb6ed3fb78de665
+   Connecting to:          mongodb://<credentials>@localhost:27017/products-demo?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+2.5.10
+   Using MongoDB:          8.0.12
+   Using Mongosh:          2.5.10    
 
-    local-dev-mongodb [direct: primary] admin> show dbs
-    admin   360.00 KiB
-    config  176.00 KiB
-    local   468.00 KiB
-    local-dev-mongodb [direct: primary] admin> exit 
-    ```
+   local-dev-mongodb [direct: primary] products-demo> db.getCollectionNames()
+   []
+   ```
 
    To exit the `mongosh` shell, you can type `exit` and press Enter.
 
@@ -64,8 +61,8 @@ command-line tool.
    and export it as an environment variable with the following command:
 
     ```shell
-    export MONGO_ROOT_USER_PWD="$(kubectl get secret qa-mongodb-root-user-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)"
-    echo "$MONGO_ROOT_USER_PWD"   
+    export MONGO_PRODUCT_USER_PWD="$(kubectl get secret qa-mongodb-product-user-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)"
+    echo "$MONGO_PRODUCT_USER_PWD"   
     ```
 
 
@@ -77,20 +74,17 @@ command-line tool.
 
     ```shell
     kubectl run mongosh-test --rm -it --image=bitnami/mongodb --namespace=default -- bash \
-        -c "mongosh mongodb://root:$MONGO_ROOT_USER_PWD@qa-mongodb-svc.qa-data.svc.cluster.local:27017/admin"
+        -c "mongosh mongodb://product:$MONGO_PRODUCT_USER_PWD@qa-mongodb-svc.qa-data.svc.cluster.local:27017/admin"
     ```
 
 3. **Verify the Connection**
 
-   When connected successfully, you will see the `mongosh` prompt. Run a command like `show dbs` to
+   When connected successfully, you will see the `mongosh` prompt. Run a command like `db.getCollectionNames()` to
    list the available databases and confirm connectivity:
 
     ```shell
-    qa-mongodb [direct: secondary] admin> show dbs
-    admin   360.00 KiB
-    config  176.00 KiB
-    local   468.00 KiB
-    qa-mongodb [direct: secondary] admin>
+    qa-mongodb [direct: secondary] products-demo> db.getCollectionNames()
+    []
     ```
 
    To exit the `mongosh` shell, type `exit` and press Enter.
