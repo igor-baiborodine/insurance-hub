@@ -27,6 +27,9 @@
 Use the following sequence of [Make](https://www.gnu.org/software/make/) targets and shell commands
 to deploy cluster apps including infrastructure and "Insurance Hub" services.
 
+> ⚠️ Arguments in square brackets are optional. When omitted, the default value is used. The
+> default value can be found by searching argument name in the corresponding `Makefile`.
+
 ## QA—Observability
 
 - `cd k8s`
@@ -68,27 +71,27 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 - `make postgres-operator-deploy`
 
   1. **auth** service: 
-  - `make postgres-svc-secret-create SVC_NAME=auth PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-secret-create SVC_NAME=auth [PG_SVC_USER_PWD=<user-pwd>]`
   - `make postgres-svc-deploy SVC_NAME=auth`, wait at least one minute for the cluster to be ready.
   
   2. **document** service: 
-  - `make postgres-svc-secret-create SVC_NAME=document PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-secret-create SVC_NAME=document [PG_SVC_USER_PWD=<user-pwd>]`
   - `make postgres-svc-deploy SVC_NAME=document`, wait at least one minute for the cluster to be ready.
   
   3. **payment** service: 
-  - `make postgres-svc-secret-create SVC_NAME=payment PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-secret-create SVC_NAME=payment [PG_SVC_USER_PWD=<user-pwd>]`
   - `make postgres-svc-deploy SVC_NAME=payment`, wait at least one minute for the cluster to be ready.
   
   4. **policy** service: 
-  - `make postgres-svc-secret-create SVC_NAME=policy PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-secret-create SVC_NAME=policy [PG_SVC_USER_PWD=<user-pwd>]`
   - `make postgres-svc-deploy SVC_NAME=policy`
 
   5. **pricing** service:
-  - `make postgres-svc-secret-create SVC_NAME=pricing PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-secret-create SVC_NAME=pricing [PG_SVC_USER_PWD=<user-pwd>]`
   - `make postgres-svc-deploy SVC_NAME=pricing`, wait at least one minute for the cluster to be ready.
 
   6. **product** service: 
-  - `make postgres-svc-secret-create SVC_NAME=product PG_SVC_USER_PWD=<user-pwd>`
+  - `make postgres-svc-secret-create SVC_NAME=product [PG_SVC_USER_PWD=<user-pwd>]`
   - `make postgres-svc-deploy SVC_NAME=product`, wait at least one minute for the cluster to be ready.
 
 - `kubectl get pods -n qa-data | grep postgres`
@@ -115,8 +118,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 ### MongoDB
 
 - `make mongodb-operator-install`
-- `make mongodb-root-user-secret-create MONGO_ROOT_USER_PWD=<user-pwd>`
-- `make mongodb-product-user-secret-create MONGO_PRODUCT_USER_PWD=<product-pwd>`
+- `make mongodb-root-user-secret-create [MONGO_ROOT_USER_PWD=<user-pwd>]`
 - `make mongodb-deploy`
 - `make mongodb-status`  
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=mongodb-deploy-<iso-date>`
@@ -137,14 +139,14 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 - `make minio-operator-deploy`
   
   1. **document** service:
-  - `make minio-storage-user-secret-create SVC_NAME=document MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>`
-  - `make minio-storage-config-secret-create SVC_NAME=document MINIO_ROOT_USER=<user-name> MINIO_ROOT_USER_PWD=<user-pwd>`
+  - `make minio-storage-user-secret-create SVC_NAME=document [MINIO_CONSOLE_ACCESS_KEY=<access-key>] [MINIO_CONSOLE_SECRET_KEY=<secret-key>]`
+  - `make minio-storage-config-secret-create SVC_NAME=document [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
   - `make minio-tenant-deploy SVC_NAME=document`
   - `make minio-tenant-status SVC_NAME=document`
 
   2. **payment** service:
-  - `make minio-storage-user-secret-create SVC_NAME=payment MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>`
-  - `make minio-storage-config-secret-create SVC_NAME=payment MINIO_ROOT_USER=<user-name> MINIO_ROOT_USER_PWD=<user-pwd>`
+  - `make minio-storage-user-secret-create SVC_NAME=payment [MINIO_CONSOLE_ACCESS_KEY=<access-key>] [MINIO_CONSOLE_SECRET_KEY=<secret-key>]`
+  - `make minio-storage-config-secret-create SVC_NAME=payment [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
   - `make minio-tenant-deploy SVC_NAME=payment`
   - `make minio-tenant-status SVC_NAME=payment`
 
@@ -201,24 +203,29 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 ### document
 
 - `make minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies`
-- `make minio-svc-user-secret-create SVC_NAME=document MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>`
+- `make minio-svc-user-secret-create SVC_NAME=document [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
 - `make minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json`
 - `make minio-console-ui SVC_NAME=document`
   - Go to `http://localhost:9090`
   - Log in with the credentials provided in the `minio-svc-user-secret-create` target.
-- TODO: add targets to deploy `document` service. 
+- `make svc-deploy SVC_NAME=document` 
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=document-deploy-<iso-date>``
 
 ### payment
 
 - `make minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import`
-- `make minio-svc-user-secret-create SVC_NAME=payment MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>`
+- `make minio-svc-user-secret-create SVC_NAME=payment [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
 - `make minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json`
 - `make minio-console-ui SVC_NAME=payment`
     - Go to `http://localhost:9090`
     - Log in with the credentials provided in the `minio-svc-user-secret-create` target.
-- TODO: add targets to deploy `payment` service.
+- `make svc-deploy SVC_NAME=payment`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=payment-deploy-<iso-date>``
+
+### product
+
+- `make mongodb-product-user-secret-create [MONGO_PRODUCT_USER_PWD=<product-pwd>]`
+- `make svc-deploy SVC_NAME=product`
 
 ## QA—Cluster Load Monitoring
 
