@@ -11,10 +11,6 @@ jackson:
   bean-introspection-module: true
 ---
 mongodb:
-    # WARNING: Hardcoding credentials in the URI is NOT acceptable for production environments
-    # and poses a significant security risk. This approach is used here solely to simplify
-    # deployment during the legacy phase, as MongoDB will be decommissioned in subsequent
-    # migration phases (consolidating to PostgreSQL with JSONB).
     uri: "mongodb://${MG_USER:product}:${MG_PASSWORD:product}@${MG_HOST:localhost}:${MG_PORT:27017}/products-demo?authSource=admin"
     cluster:
       maxWaitQueueSize: 5
