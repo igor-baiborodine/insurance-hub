@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/part-of: insurance-hub
+      app.kubernetes.io/managed-by: kustomize
+resources:
+  - deployment.yaml
+  - service.yaml
+configMapGenerator:
+  - name: product-config-legacy
+    literals:
+      - MG_HOST=localhost
+      - MG_PORT=27017
+      - TRACING_ZIPKIN_ENABLED=true
+      - ZIPKIN_HOST=localhost
+      - ZIPKIN_PORT=9411
