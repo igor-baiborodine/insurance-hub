@@ -168,8 +168,12 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 
 Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` namespaces.
 
+- `cd ..` - from the project root
+- `make java-all-build`
+- `make frontend-build`
+- `cd k8s
+
 **Until Docker images publishing to a registry is implemented, for all services, except `jsreport`**:
-- `cd ..`
 - `make docker-java-svc-build SVC_NAME=<svc-name>`
 - `make docker-frontend-build`
 - `cd k8s`

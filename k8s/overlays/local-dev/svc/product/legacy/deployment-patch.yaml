@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-api-legacy
+spec:
+  template:
+    spec:
+      containers:
+        - name: product-api-legacy
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 500m
+          env:
+            # MongoDB sensitive data
+            - name: MG_USER
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-mongodb-product-user-creds
+                  key: username
+            - name: MG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-mongodb-product-user-creds
+                  key: password

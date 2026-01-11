@@ -11,7 +11,7 @@ jackson:
   bean-introspection-module: true
 ---
 mongodb:
-    uri: "mongodb://${MG_USER:product}:${MG_PASSWORD:product}@${MG_HOST:localhost}:${MG_PORT:27017}/products-demo?authSource=admin"
+    uri: "mongodb://${MG_USER:product}:${MG_PASSWORD:product}@${MG_HOST:localhost}:${MG_PORT:27017}/products-demo"
     cluster:
       maxWaitQueueSize: 5
     connectionPool:
