@@ -5,3 +5,6 @@ micronaut:
 ---
 mongodb:
   uri: "mongodb://product:mongoProductUserPwd@localhost:27017/products-demo"
+tracing:
+  zipkin:
+    enabled: false
