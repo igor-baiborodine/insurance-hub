@@ -30,3 +30,25 @@ spec:
           envFrom:
             - configMapRef:
                 name: web-vue-config-legacy
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    sleep 5  # Wait for entrypoint
+                    nginx -t && nginx -s reload || true
+        - name: nginx-reloader  # Sidecar watches templated conf
+          image: alpine:3.19
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              apk add --no-cache inotify-tools
+              while inotifywait -q -r -e create,modify,delete,move /etc/nginx/conf.d/; do
+                sleep 2  # Debounce entrypoint/env changes
+                nginx -t 2>/dev/null && nginx -s reload && echo "$(date) Reloaded Nginx" || echo "Reload failed";
+              done
+          securityContext:
+            runAsUser: 101  # Match nginx UID
+          volumeMounts: []  # Shared /etc/nginx via hostPath not needed
