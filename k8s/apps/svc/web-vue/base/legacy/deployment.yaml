@@ -39,16 +39,16 @@ spec:
                   - |
                     sleep 5  # Wait for entrypoint
                     nginx -t && nginx -s reload || true
-        - name: nginx-reloader  # Sidecar watches templated conf
+        - name: nginx-reloader
           image: alpine:3.19
-          command: ["/bin/sh", "-c"]
+          command: [ "/bin/sh", "-c" ]
           args:
             - |
-              apk add --no-cache inotify-tools
-              while inotifywait -q -r -e create,modify,delete,move /etc/nginx/conf.d/; do
-                sleep 2  # Debounce entrypoint/env changes
-                nginx -t 2>/dev/null && nginx -s reload && echo "$(date) Reloaded Nginx" || echo "Reload failed";
+              apk add --no-cache inotify-tools nginx
+              while true; do
+                inotifywait -q -r -e create,modify,delete,move /etc/nginx/conf.d/ || continue
+                sleep 2  # Debounce
+                nginx -t 2>/dev/null && nginx -s reload && echo "$(date) Reloaded Nginx" >> /proc/1/fd/1 || echo "$(date) Reload failed" >> /proc/1/fd/1
               done
           securityContext:
-            runAsUser: 101  # Match nginx UID
-          volumeMounts: []  # Shared /etc/nginx via hostPath not needed
+            runAsUser: 0  # root for apk/nginx
