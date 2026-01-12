@@ -22,6 +22,9 @@ endpoints:
     enabled: true
     sensitive: false
     details-visible: ANONYMOUS
+  env:
+    enabled: false
+    sensitive: false
 #  metrics:
 #    enabled: true
 #    sensitive: false

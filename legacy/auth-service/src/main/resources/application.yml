@@ -18,23 +18,6 @@ micronaut:
             generator:
               secret: pleaseChangeThisSecretForANewOne
 ---
-management:
-  endpoints:
-    health:
-      enabled: true
-      liveness:
-        enabled: true
-      readiness:
-        enabled: true
-      probes:
-        enabled: true  # K8s probes
-  endpoint:
-    health:
-      liveness:
-        show-details: always
-      readiness:
-        show-details: always
----
 postgres:
   host: ${PG_HOST:localhost}
   port: ${PG_PORT:5432}
