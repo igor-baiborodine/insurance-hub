@@ -10,11 +10,14 @@ import org.reactivestreams.Publisher;
 import io.reactivex.Flowable;
 
 @Slf4j
-@Filter("/**") // Intercepts all paths
+@Filter("/**")
 public class LoggingFilter implements HttpServerFilter {
 
     @Override
     public Publisher<MutableHttpResponse<?>> doFilter(HttpRequest<?> request, ServerFilterChain chain) {
+        if (request.getPath().equals("/health")) {
+            return chain.proceed(request);
+        }
         log.info("Incoming Request: {} {}", request.getMethod(), request.getUri());
 
         return Flowable.fromPublisher(chain.proceed(request))
