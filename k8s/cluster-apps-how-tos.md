@@ -171,11 +171,14 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 - `cd ..` - from the project root
 - `make java-all-build`
 - `make frontend-build`
-- `cd k8s
+- `make docker-frontend-build`
+- `cd k8s`
+- `make svc-image-local-dev-load SVC_NAME=web-vue`
+- `make svc-image-qa-load SVC_NAME=web-vue`
 
 **Until Docker images publishing to a registry is implemented, for all services, except `jsreport`**:
+- `cd ..` - from the project root
 - `make docker-java-svc-build SVC_NAME=<svc-name>`
-- `make docker-frontend-build`
 - `cd k8s`
 - `make svc-image-local-dev-load SVC_NAME=<svc-name>` 
 - `make svc-image-qa-load SVC_NAME=<svc-name>`
