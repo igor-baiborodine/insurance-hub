@@ -41,7 +41,7 @@ spec:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 15
+            initialDelaySeconds: 25
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 3
@@ -49,7 +49,8 @@ spec:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          # Resource requests and limits will be defined in overlays as they are environment-specific
