@@ -37,27 +37,19 @@ spec:
                   fieldPath: metadata.namespace
             - name: MICRONAUT_SERVER_HOST
               value: "0.0.0.0"
-          startupProbe:
-            httpGet:
-              path: /health/readiness
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 20  # ~100s total grace
           livenessProbe:
             httpGet:
-              path: /health/liveness
+              path: /health
               port: 8080
-            initialDelaySeconds: 30  # After startupProbe
+            initialDelaySeconds: 30
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health/readiness
+              path: /health
               port: 8080
-            initialDelaySeconds: 25  # Matches ~15s startup + buffer
+            initialDelaySeconds: 25
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
