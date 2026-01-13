@@ -13,6 +13,8 @@ spec:
       containers:
         - name: agent-portal-gateway-legacy
           env:
+            - name: MICRONAUT_ENVIRONMENTS
+              value: "local-dev"
             - name: TRACING_ZIPKIN_ENABLED
               value: "false"
           resources:

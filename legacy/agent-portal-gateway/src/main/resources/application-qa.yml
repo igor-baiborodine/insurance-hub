@@ -1,0 +1,6 @@
+micronaut:
+  http:
+    services:
+      product-service:
+        urls:
+          - http://qa-product-api-legacy:80
