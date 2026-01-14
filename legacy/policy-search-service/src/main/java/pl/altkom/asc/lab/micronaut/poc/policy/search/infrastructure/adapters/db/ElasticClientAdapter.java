@@ -3,6 +3,10 @@ package pl.altkom.asc.lab.micronaut.poc.policy.search.infrastructure.adapters.db
 import io.reactivex.Maybe;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.http.HttpHost;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
@@ -56,14 +60,41 @@ public class ElasticClientAdapter {
                 }));
     }
 
-    private RestHighLevelClient buildClient() {
-        return new RestHighLevelClient(
-                RestClient.builder(new HttpHost(elasticSearchSettings.getHost(), elasticSearchSettings.getPort()))
-                        .setRequestConfigCallback(config -> config
-                                .setConnectTimeout(elasticSearchSettings.getConnectionTimeout())
-                                .setConnectionRequestTimeout(elasticSearchSettings.getConnectionRequestTimeout())
-                                .setSocketTimeout(elasticSearchSettings.getSocketTimeout())
-                        )
-                        .setMaxRetryTimeoutMillis(elasticSearchSettings.getMaxRetryTimeout()));
-    }
+        private RestHighLevelClient buildClient() {
+            CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+            credentialsProvider.setCredentials(AuthScope.ANY,
+                    new UsernamePasswordCredentials(
+                            elasticSearchSettings.getUsername(), elasticSearchSettings.getPassword()));
+
+            RestHighLevelClient client = new RestHighLevelClient(
+                    RestClient.builder(new HttpHost(elasticSearchSettings.getHost(), elasticSearchSettings.getPort()))
+                            .setHttpClientConfigCallback(httpClientBuilder -> httpClientBuilder
+                                    .setDefaultCredentialsProvider(credentialsProvider))
+                            .setRequestConfigCallback(config -> config
+                                    .setConnectTimeout(elasticSearchSettings.getConnectionTimeout())
+                                    .setConnectionRequestTimeout(elasticSearchSettings.getConnectionRequestTimeout())
+                                    .setSocketTimeout(elasticSearchSettings.getSocketTimeout())
+                            )
+                            .setMaxRetryTimeoutMillis(elasticSearchSettings.getMaxRetryTimeout()));
+
+            testConnection(client);
+
+            return client;
+        }
+
+        private void testConnection(RestHighLevelClient client) {
+            try {
+                boolean success = client.ping();
+                if (success) {
+                    log.info("Successfully connected to Elasticsearch at {}:{}", 
+                            elasticSearchSettings.getHost(), elasticSearchSettings.getPort());
+                } else {
+                    log.error("Elasticsearch ping failed for {}:{}", 
+                            elasticSearchSettings.getHost(), elasticSearchSettings.getPort());
+                }
+            } catch (Exception e) {
+                log.error("Failed to connect to Elasticsearch at {}:{}. Error: {}", 
+                        elasticSearchSettings.getHost(), elasticSearchSettings.getPort(), e.getMessage());
+            }
+        }
 }

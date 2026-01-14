@@ -54,7 +54,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
 
 ### Zipkin
 
-- **Prerequisites**: Elasticsearch 
+- **Prerequisites**: [Elasticsearch](#elasticsearch) 
 - `make zipkin-es-user-secret-create`
 - `make zipkin-es-user-create`
 - `make zipkin-install`
@@ -233,6 +233,10 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 
 - `make mongodb-product-user-secret-create [MONGO_PRODUCT_USER_PWD=<product-pwd>]`
 - `make svc-deploy SVC_NAME=product`
+
+### policy-search
+
+- `make svc-deploy SVC_NAME=policy-search`
 
 ## QA—Cluster Load Monitoring
 

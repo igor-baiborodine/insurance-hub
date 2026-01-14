@@ -3,7 +3,7 @@ micronaut:
     name: policy-search-service
   server:
     host: localhost
-    port: ${SERVICE_PORT:-1}
+    port: 8080
 ---
 jpa:
  default:
@@ -24,19 +24,6 @@ kafka:
   bootstrap:
     servers: "${KAFKA_HOST:localhost}:${KAFKA_PORT:9092}"
 ---
-consul:
-  client:
-    registration:
-      enabled: true
-      check:
-        http: true
-    defaultZone: "${CONSUL_HOST:localhost}:${CONSUL_PORT:8500}"
----
-endpoints:
-  health:
-    enabled: true
-    sensitive: false
----
 tracing:
   zipkin:
     enabled: true
@@ -48,6 +35,8 @@ tracing:
 elastic:
     host: ${ELASTIC_HOST:localhost}
     port: ${ELASTIC_PORT:9200}
+    username: ${ELASTIC_USERNAME:elastic}
+    password: ${ELASTIC_PASSWORD:elastic}
     connectionTimeout: 5000
     connectionRequestTimeout: 5000
     socketTimeout: 5000
