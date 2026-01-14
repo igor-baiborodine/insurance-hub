@@ -236,6 +236,8 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 
 ### policy-search
 
+- Built-in Elasticsearch's user `elastic` is used for the service. Therefore, no additional user
+  secrets are required.
 - `make svc-deploy SVC_NAME=policy-search`
 
 ## QA—Cluster Load Monitoring
