@@ -12,5 +12,6 @@ tracing:
     enabled: false
 ---
 elastic:
+  scheme: http
   host: localhost
   port: 9200
