@@ -3,7 +3,7 @@ micronaut:
     name: product-service
   server:
     host: localhost
-    port: ${SERVICE_PORT:-1}
+    port: 8080
 #  metrics:
 #    enabled: true
 ---
@@ -11,23 +11,19 @@ jackson:
   bean-introspection-module: true
 ---
 mongodb:
-    uri: "mongodb://${MG_HOST:localhost}:${MG_PORT:27017}/demo"
+    uri: "mongodb://${MG_USER:product}:${MG_PASSWORD:product}@${MG_HOST:localhost}:${MG_PORT:27017}/products-demo"
     cluster:
       maxWaitQueueSize: 5
     connectionPool:
       maxSize: 20
 ---
-consul:
-  client:
-    registration:
-      enabled: true
-      check:
-        http: true
-    defaultZone: "${CONSUL_HOST:localhost}:${CONSUL_PORT:8500}"
----
 endpoints:
   health:
     enabled: true
+    sensitive: false
+    details-visible: ANONYMOUS
+  env:
+    enabled: false
     sensitive: false
 #  metrics:
 #    enabled: true

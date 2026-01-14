@@ -1,0 +1,9 @@
+micronaut:
+  http:
+    services:
+      product-service:
+        urls:
+          - http://local-dev-product-api-legacy:80
+      document-service:
+        urls:
+          - http://local-dev-document-api-legacy:80

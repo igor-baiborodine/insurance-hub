@@ -1,0 +1,10 @@
+micronaut:
+  server:
+    host: localhost
+    port: 8088
+---
+mongodb:
+  uri: "mongodb://product:mongoProductUserPwd@localhost:27017/products-demo"
+tracing:
+  zipkin:
+    enabled: false

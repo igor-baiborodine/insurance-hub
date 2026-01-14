@@ -1,29 +1,32 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: agent-portal-gateway-legacy
+  name: product-api-legacy
   labels:
-    app.kubernetes.io/name: agent-portal-gateway-legacy
-    app.kubernetes.io/instance: insurance-hub-agent-portal-gateway-legacy
+    app.kubernetes.io/name: product-api-legacy
+    app.kubernetes.io/instance: insurance-hub-product-api-legacy
     app.kubernetes.io/version: "latest"
-    app.kubernetes.io/component: gateway
+    app.kubernetes.io/component: api
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: agent-portal-gateway-legacy
-      app.kubernetes.io/component: gateway
+      app.kubernetes.io/name: product-api-legacy
+      app.kubernetes.io/component: api
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: agent-portal-gateway-legacy
-        app.kubernetes.io/instance: insurance-hub-agent-portal-gateway-legacy
+        app.kubernetes.io/name: product-api-legacy
+        app.kubernetes.io/instance: insurance-hub-product-api-legacy
         app.kubernetes.io/version: "latest"
-        app.kubernetes.io/component: gateway
+        app.kubernetes.io/component: api
     spec:
       containers:
-        - name: agent-portal-gateway-legacy
-          image: insurance-hub-agent-portal-gateway-legacy:latest # Image built by 'docker-svc-java-build' target
+        - name: product-api-legacy
+          envFrom:
+            - configMapRef:
+                name: product-config-legacy
+          image: insurance-hub-product-api-legacy:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -38,7 +41,7 @@ spec:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 30
+            initialDelaySeconds: 25
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 3
@@ -46,7 +49,7 @@ spec:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 25
+            initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3

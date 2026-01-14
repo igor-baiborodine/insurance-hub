@@ -34,11 +34,3 @@ tracing:
 ---
 jackson:
   dateFormat: dd.MM.yyyy
----
-endpoints:
-  health:
-    enabled: true
-    sensitive: false
-  env:
-    enabled: false
-    sensitive: false
