@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: policy-search-api-legacy
+  labels:
+    app.kubernetes.io/name: policy-search-api-legacy
+    app.kubernetes.io/instance: insurance-hub-policy-search-api-legacy
+    app.kubernetes.io/version: "latest"
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: policy-search-api-legacy
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: policy-search-api-legacy
+        app.kubernetes.io/instance: insurance-hub-policy-search-api-legacy
+        app.kubernetes.io/version: "latest"
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: policy-search-api-legacy
+          image: insurance-hub-policy-search-api-legacy:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: policy-search-config-legacy
+          env:
+            - name: KUBERNETES_CLIENT_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MICRONAUT_SERVER_HOST
+              value: "0.0.0.0"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 50
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
