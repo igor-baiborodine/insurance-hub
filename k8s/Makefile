@@ -13,7 +13,7 @@ local-dev-port-forward: ## Set up local port-forwarding for Kafka and PostgreSQL
 	@echo "Starting local-dev port-forwards. Use 'killall kubectl' or stop manually when done."
 	@echo "  Kafka (local:9094 -> cluster:9094)..."
 	@# For Kafka, we typically port-forward to the external bootstrap service that Strimzi creates.
-	@kubectl port-forward svc/local-dev-kafka-kafka-external-bootstrap 9094:9094 -n local-dev-all > /dev/null 2>&1 &
+	@kubectl port-forward svc/local-dev-kafka-broker-controller-0 9094:9094 -n local-dev-all > /dev/null 2>&1 &
 	@echo "  PostgreSQL auth (local:5442 -> cluster:5432)..."
 	@kubectl port-forward svc/local-dev-postgres-auth-rw 5442:5432 -n local-dev-all > /dev/null 2>&1 &
 	@echo "  PostgreSQL document (local:5452 -> cluster:5432)..."
