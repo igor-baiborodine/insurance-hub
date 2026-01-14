@@ -8,8 +8,11 @@ import lombok.Setter;
 @Getter
 @Setter
 class ElasticSearchSettings {
+    private String scheme;
     private String host;
     private int port;
+    private String username;
+    private String password;
     private int connectionTimeout;
     private int connectionRequestTimeout;
     private int socketTimeout;

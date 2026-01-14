@@ -5,6 +5,10 @@ metadata:
   namespace: local-dev-all
 spec:
   version: 8.19.6
+  http:
+    tls:
+      selfSignedCertificate:
+        disabled: true
   nodeSets:
     - name: default
       count: 1

@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: local-dev-all
+namePrefix: local-dev-
+labels:
+  - includeSelectors: true
+    pairs:
+      environment: local-dev
+resources:
+  - ../../../../../apps/svc/policy-search/base/legacy
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: policy-search-api-legacy
+configMapGenerator:
+  - name: policy-search-config-legacy
+    behavior: merge
+    literals:
+      - ELASTIC_SCHEME=http
+      - ELASTIC_HOST=local-dev-elasticsearch-es-http.local-dev-all.svc.cluster.local
+      - ELASTIC_PORT=9200
+      - KAFKA_HOST=local-dev-kafka-kafka-bootstrap.local-dev-all.svc.cluster.local
+      - TRACING_ZIPKIN_ENABLED=false

@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: policy-search-api-legacy
+spec:
+  template:
+    spec:
+      containers:
+        - name: policy-search-api-legacy
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 500m
+            limits:
+              memory: 2Gi
+              cpu: 1000m
+          env:
+            # Elasticsearch sensitive data
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-elasticsearch-es-elastic-user
+                  key: elastic

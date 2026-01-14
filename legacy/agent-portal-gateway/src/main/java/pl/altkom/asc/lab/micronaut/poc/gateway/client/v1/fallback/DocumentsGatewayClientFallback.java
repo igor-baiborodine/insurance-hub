@@ -17,7 +17,7 @@ public class DocumentsGatewayClientFallback implements DocumentsGatewayClient {
     @NotNull
     @Override
     public FindDocumentsResult find(String policyNumber) {
-        log.warn("Fallback called for find documents with policyNumber: {}, empty result returned", policyNumber);
+        log.warn("Fallback called for find() with policyNumber: {}, empty result returned", policyNumber);
         return new FindDocumentsResult(Collections.emptyList());
     }
 }
