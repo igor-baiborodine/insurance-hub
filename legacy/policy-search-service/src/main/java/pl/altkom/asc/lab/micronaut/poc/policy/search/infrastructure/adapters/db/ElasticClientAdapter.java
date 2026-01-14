@@ -124,6 +124,7 @@ public class ElasticClientAdapter {
         } catch (Exception e) {
             log.error("Failed to connect to Elasticsearch at {}:{}. Error: {}",
                     elasticSearchSettings.getHost(), elasticSearchSettings.getPort(), e.getMessage());
+            throw new RuntimeException(e);
         }
     }
 }
