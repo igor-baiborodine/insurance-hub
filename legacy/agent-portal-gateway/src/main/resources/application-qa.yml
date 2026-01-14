@@ -7,3 +7,6 @@ micronaut:
       document-service:
         urls:
           - http://qa-document-api-legacy:80
+      policy-search-service:
+        urls:
+          - http://qa-policy-search-api-legacy:80

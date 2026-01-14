@@ -7,3 +7,6 @@ micronaut:
       document-service:
         urls:
           - http://local-dev-document-api-legacy:80
+      policy-search-service:
+        urls:
+          - http://local-dev-policy-search-api-legacy:80
