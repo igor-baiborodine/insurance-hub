@@ -26,8 +26,7 @@ public class EmbeddedElasticTest {
                 restClient, new JacksonJsonpMapper(mapper));
 
         return new PolicyElasticRepository(
-                new ElasticsearchClient(transport),
-                new JsonConverter(mapper)
+                new ElasticsearchClient(transport)
         );
     }
 

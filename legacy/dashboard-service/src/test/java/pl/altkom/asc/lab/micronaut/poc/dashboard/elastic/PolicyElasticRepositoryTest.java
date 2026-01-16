@@ -39,8 +39,7 @@ public class PolicyElasticRepositoryTest extends EmbeddedElasticTest {
                 restClient, new JacksonJsonpMapper(mapper));
 
         PolicyElasticRepository repository = new PolicyElasticRepository(
-                new ElasticsearchClient(transport),
-                new JsonConverter(mapper)
+                new ElasticsearchClient(transport)
         );
 
         repository.save(policyDocument);
