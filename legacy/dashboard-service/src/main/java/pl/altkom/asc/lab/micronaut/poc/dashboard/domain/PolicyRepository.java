@@ -2,6 +2,8 @@ package pl.altkom.asc.lab.micronaut.poc.dashboard.domain;
 
 public interface PolicyRepository {
 
+    boolean indexExists();
+
     void save(PolicyDocument policyDocument);
 
     PolicyDocument findByNumber(String number);

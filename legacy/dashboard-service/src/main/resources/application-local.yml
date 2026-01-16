@@ -1,0 +1,12 @@
+micronaut:
+  server:
+    host: localhost
+    port: 8083
+---
+kafka:
+  bootstrap:
+    servers: "localhost:9094"
+---
+tracing:
+  zipkin:
+    enabled: false

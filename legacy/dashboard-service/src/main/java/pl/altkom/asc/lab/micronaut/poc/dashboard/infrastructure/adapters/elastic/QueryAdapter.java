@@ -1,7 +1,7 @@
 package pl.altkom.asc.lab.micronaut.poc.dashboard.infrastructure.adapters.elastic;
 
-import org.elasticsearch.action.search.SearchRequest;
-import org.elasticsearch.action.search.SearchResponse;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
 import pl.altkom.asc.lab.micronaut.poc.dashboard.domain.AgentSalesQuery;
 import pl.altkom.asc.lab.micronaut.poc.dashboard.domain.SalesTrendsQuery;
 import pl.altkom.asc.lab.micronaut.poc.dashboard.domain.TotalSalesQuery;
@@ -14,7 +14,7 @@ abstract class QueryAdapter<TQuery, TQueryResult> {
     }
 
     abstract SearchRequest buildQuery();
-    abstract TQueryResult extractResult(SearchResponse searchResponse);
+    abstract TQueryResult extractResult(SearchResponse<?> searchResponse);
 
     static TotalSalesQueryAdapter of(TotalSalesQuery query) {
         return new TotalSalesQueryAdapter(query);
