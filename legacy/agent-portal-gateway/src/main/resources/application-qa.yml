@@ -10,3 +10,6 @@ micronaut:
       policy-search-service:
         urls:
           - http://qa-policy-search-api-legacy:80
+      dashboard-service:
+        urls:
+          - http://qa-dashboard-api-legacy:80
