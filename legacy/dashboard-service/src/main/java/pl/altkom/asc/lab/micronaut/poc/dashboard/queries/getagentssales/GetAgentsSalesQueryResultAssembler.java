@@ -9,9 +9,14 @@ import java.util.HashMap;
 public class GetAgentsSalesQueryResultAssembler {
 
     public static GetAgentsSalesQueryResult assemble(AgentSalesQuery.Result agentsSales) {
-        GetAgentsSalesQueryResult result = new GetAgentsSalesQueryResult(new HashMap<>());
-        agentsSales.getPerAgentTotal().forEach((agent,sales) ->
-            result.getPerAgentTotal().put(agent, new SalesDto(sales.getPoliciesCount(), sales.getPremiumAmount()))
+        GetAgentsSalesQueryResult result = new GetAgentsSalesQueryResult();
+        result.setPerAgentTotal(new HashMap<>());
+        agentsSales.getPerAgentTotal().forEach((agent, sales) -> {
+                    SalesDto salesDto = new SalesDto();
+                    salesDto.setPoliciesCount(sales.getPoliciesCount());
+                    salesDto.setPremiumAmount(sales.getPremiumAmount());
+                    result.getPerAgentTotal().put(agent, salesDto);
+                }
         );
         return result;
     }
