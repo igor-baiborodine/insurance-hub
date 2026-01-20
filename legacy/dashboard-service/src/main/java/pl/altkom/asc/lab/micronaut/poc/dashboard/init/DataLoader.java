@@ -28,26 +28,31 @@ public class DataLoader implements ApplicationEventListener<ServerStartupEvent> 
     @Override
     public void onApplicationEvent(ServerStartupEvent event) {
         waitForElasticSearch();
-        savePolicies(generatePolicies());
+
+        if (!policyRepository.indexExists()) {
+            savePolicies(generatePolicies());
+        } else {
+            log.info("Index 'policy_stats' already exists. Skipping data generation.");
+        }
     }
 
     private void waitForElasticSearch() {
         var retries = 0;
-        while (retries<3) {
+        while (retries < 3) {
             try {
                 var health = elasticHealthCheck.health();
 
-                if (health.isOk())
+                if (health.isOk()) {
+                    log.info("Elastic search is ready");
                     return;
-            } catch (Exception e) {
-
+                }
+            } catch (Exception ignored) {
             }
 
             retries++;
             try {
                 TimeUnit.SECONDS.sleep(3);
-            } catch (InterruptedException e) {
-
+            } catch (InterruptedException ignored) {
             }
         }
 

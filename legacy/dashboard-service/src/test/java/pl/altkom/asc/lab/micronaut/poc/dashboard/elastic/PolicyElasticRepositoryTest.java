@@ -1,8 +1,12 @@
 package pl.altkom.asc.lab.micronaut.poc.dashboard.elastic;
 
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.json.jackson.JacksonJsonpMapper;
+import co.elastic.clients.transport.ElasticsearchTransport;
+import co.elastic.clients.transport.rest_client.RestClientTransport;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.HttpHost;
 import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.RestHighLevelClient;
 import org.junit.jupiter.api.Test;
 
 import pl.altkom.asc.lab.micronaut.poc.dashboard.domain.PolicyDocument;
@@ -13,7 +17,6 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-
 
 public class PolicyElasticRepositoryTest extends EmbeddedElasticTest {
 
@@ -29,9 +32,14 @@ public class PolicyElasticRepositoryTest extends EmbeddedElasticTest {
                 "m.smith"
         );
 
+        ObjectMapper mapper = objectMapper();
+        RestClient restClient = RestClient.builder(new HttpHost("localhost", el.getHttpPort(), "http")).build();
+
+        ElasticsearchTransport transport = new RestClientTransport(
+                restClient, new JacksonJsonpMapper(mapper));
+
         PolicyElasticRepository repository = new PolicyElasticRepository(
-                new RestHighLevelClient(RestClient.builder(new HttpHost("localhost", el.getHttpPort(), "http"))),
-                new JsonConverter(objectMapper())
+                new ElasticsearchClient(transport)
         );
 
         repository.save(policyDocument);

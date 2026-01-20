@@ -20,6 +20,9 @@
   - [auth](#auth)
   - [document](#document)
   - [payment](#payment)
+  - [product](#product)
+  - [policy-search](#policy-search)
+  - [dashboard](#dashboard)
 - [QA—Cluster Load Monitoring](#qacluster-load-monitoring)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -239,6 +242,11 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 - Built-in Elasticsearch's user `elastic` is used for the service. Therefore, no additional user
   secrets are required.
 - `make svc-deploy SVC_NAME=policy-search`
+
+### dashboard
+- Built-in Elasticsearch's user `elastic` is used for the service. Therefore, no additional user
+  secrets are required.
+- `make svc-deploy SVC_NAME=dashboard`
 
 ## QA—Cluster Load Monitoring
 

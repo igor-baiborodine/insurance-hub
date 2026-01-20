@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: qa-all
+namePrefix: qa-
+labels:
+  - includeSelectors: true
+    pairs:
+      environment: qa
+resources:
+  - ../../../../../apps/svc/dashboard/base/legacy
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: dashboard-api-legacy
+configMapGenerator:
+  - name: dashboard-config-legacy
+    behavior: merge
+    literals:
+      - ELASTIC_SCHEME=http
+      - ELASTIC_HOST=qa-elasticsearch-es-http.qa-data.svc.cluster.local
+      - ELASTIC_PORT=9200
+      - KAFKA_HOST=qa-kafka-kafka-bootstrap.qa-data.svc.cluster.local
+      - TRACING_ZIPKIN_ENABLED=false
+      - ZIPKIN_HOST=qa-zipkin.qa-monitoring.svc.cluster.local
+      - ZIPKIN_PORT=9411
+      - LOGGER_LEVELS_PL_ALTKOM_ASC_LAB_MICRONAUT_POC_DASHBOARD_INFRASTRUCTURE_ADAPTERS_WEB=DEBUG

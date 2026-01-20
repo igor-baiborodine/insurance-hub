@@ -938,7 +938,7 @@ svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image into th
 	echo "✅ Docker image '$$IMAGE_NAME' loaded into all QA LXD cluster nodes."
 
 .PHONY: svc-deploy
-svc-deploy: _env-check _svc-ns-check _svc-name-check ## Deploy a Java service or web app using Kustomize. Usage: make svc-deploy SVC_NAME=<svc-name>
+svc-deploy: _env-check _svc-ns-check _svc-name-check svc-delete ## Deploy a Java service or web app using Kustomize. Usage: make svc-deploy SVC_NAME=<svc-name>
 	@SVC_NAME_LABEL="$(SVC_NAME)-api-legacy"; \
 	if [ "$(SVC_NAME)" = "agent-portal-gateway" ] || [ "$(SVC_NAME)" = "web-vue" ]; then \
 		SVC_NAME_LABEL="$(SVC_NAME)-legacy"; \

@@ -1,23 +1,18 @@
 package pl.altkom.asc.lab.micronaut.poc.dashboard.infrastructure.adapters.elastic;
 
-import org.elasticsearch.action.search.SearchRequest;
-import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.index.query.BoolQueryBuilder;
-import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.index.query.RangeQueryBuilder;
-import org.elasticsearch.search.aggregations.AggregationBuilder;
-import org.elasticsearch.search.aggregations.AggregationBuilders;
-import org.elasticsearch.search.aggregations.bucket.filter.Filter;
-import org.elasticsearch.search.aggregations.bucket.terms.Terms;
-import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
-import org.elasticsearch.search.aggregations.metrics.sum.Sum;
-import org.elasticsearch.search.builder.SearchSourceBuilder;
+import co.elastic.clients.elasticsearch._types.aggregations.Aggregation;
+import co.elastic.clients.elasticsearch._types.aggregations.StringTermsBucket;
+import co.elastic.clients.elasticsearch._types.aggregations.SumAggregate;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
 
+import co.elastic.clients.json.JsonData;
 import pl.altkom.asc.lab.micronaut.poc.dashboard.domain.SalesResult;
 import pl.altkom.asc.lab.micronaut.poc.dashboard.domain.TotalSalesQuery;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Map;
 
 class TotalSalesQueryAdapter extends QueryAdapter<TotalSalesQuery, TotalSalesQuery.Result> {
 
@@ -27,52 +22,56 @@ class TotalSalesQueryAdapter extends QueryAdapter<TotalSalesQuery, TotalSalesQue
 
     @Override
     SearchRequest buildQuery() {
-        SearchRequest searchRequest = new SearchRequest("policy_stats")
-                .types("policy_type");
-
-        BoolQueryBuilder filterBuilder = QueryBuilders.boolQuery();
-        if (query.getFilterByProductCode()!=null) {
-            filterBuilder.must(QueryBuilders.termQuery("productCode.keyword", query.getFilterByProductCode()));
-        }
-        if (query.getFilterBySalesDate()!=null){
-            RangeQueryBuilder datesRange = QueryBuilders
-                    .rangeQuery("from")
-                    .gte(query.getFilterBySalesDate().getFrom().toString())
-                    .lt(query.getFilterBySalesDate().getTo().toString());
-            filterBuilder.must(datesRange);
-        }
-        AggregationBuilder aggBuilder = AggregationBuilders.filter("agg_filter",filterBuilder);
-
-        TermsAggregationBuilder sumAggBuilder = AggregationBuilders
-                .terms("count_by_product")
-                .field("productCode.keyword")
-                .subAggregation(AggregationBuilders.sum("total_premium").field("totalPremium"));
-        aggBuilder.subAggregation(sumAggBuilder);
-
-        SearchSourceBuilder srcBuilder = new SearchSourceBuilder()
-                .aggregation(aggBuilder)
-                .size(0);
-        searchRequest.source(srcBuilder);
-
-        return searchRequest;
+        return SearchRequest.of(s -> s
+                .index("policy_stats")
+                .size(0)
+                .aggregations("agg_filter", a -> a
+                        .filter(f -> f
+                                .bool(b -> {
+                                    if (query.getFilterByProductCode() != null) {
+                                        b.must(m -> m.term(t -> t.field("productCode.keyword").value(query.getFilterByProductCode())));
+                                    }
+                                    if (query.getFilterBySalesDate() != null) {
+                                        b.must(m -> m.range(r -> r
+                                                .field("from")
+                                                .gte(JsonData.of(query.getFilterBySalesDate().getFrom().toString()))
+                                                .lt(JsonData.of(query.getFilterBySalesDate().getTo().toString()))
+                                        ));
+                                    }
+                                    return b;
+                                })
+                        )
+                        .aggregations("count_by_product", sa -> sa
+                                .terms(t -> t.field("productCode.keyword"))
+                                .aggregations("total_premium", ssa -> ssa
+                                        .sum(sum -> sum.field("totalPremium"))
+                                )
+                        )
+                )
+        );
     }
 
     @Override
-    TotalSalesQuery.Result extractResult(SearchResponse searchResponse) {
+    TotalSalesQuery.Result extractResult(SearchResponse<?> searchResponse) {
         TotalSalesQuery.Result.ResultBuilder result = TotalSalesQuery.Result.builder();
-        long count = 0;
-        BigDecimal amount = BigDecimal.ZERO;
-        Filter filterAgg = searchResponse.getAggregations().get("agg_filter");
-        Terms products = filterAgg.getAggregations().get("count_by_product");
-        for (Terms.Bucket b : products.getBuckets()){
-            count += b.getDocCount();
-            Sum sum = b.getAggregations().get("total_premium");
-            amount = amount.add(BigDecimal.valueOf(sum.getValue()).setScale(2, RoundingMode.HALF_UP));
-            result.productTotal(b.getKeyAsString(), SalesResult.of(b.getDocCount(),BigDecimal.valueOf(sum.getValue())));
-        }
-        result.total(SalesResult.of(count,amount));
+        long totalCount = 0;
+        BigDecimal totalAmount = BigDecimal.ZERO;
 
+        var filterAgg = searchResponse.aggregations().get("agg_filter").filter();
+        var products = filterAgg.aggregations().get("count_by_product").sterms();
+
+        for (StringTermsBucket b : products.buckets().array()) {
+            long bucketCount = b.docCount();
+            totalCount += bucketCount;
+
+            SumAggregate sumAgg = b.aggregations().get("total_premium").sum();
+            BigDecimal bucketAmount = BigDecimal.valueOf(sumAgg.value()).setScale(2, RoundingMode.HALF_UP);
+            totalAmount = totalAmount.add(bucketAmount);
+
+            result.productTotal(b.key().stringValue(), SalesResult.of(bucketCount, bucketAmount));
+        }
+
+        result.total(SalesResult.of(totalCount, totalAmount));
         return result.build();
     }
-
 }

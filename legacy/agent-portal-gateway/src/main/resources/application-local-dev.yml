@@ -10,3 +10,6 @@ micronaut:
       policy-search-service:
         urls:
           - http://local-dev-policy-search-api-legacy:80
+      dashboard-service:
+        urls:
+          - http://local-dev-dashboard-api-legacy:80

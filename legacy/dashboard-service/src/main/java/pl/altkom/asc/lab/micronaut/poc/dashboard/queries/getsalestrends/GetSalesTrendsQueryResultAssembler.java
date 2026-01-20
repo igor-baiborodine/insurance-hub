@@ -9,7 +9,8 @@ import java.util.ArrayList;
 public class GetSalesTrendsQueryResultAssembler {
 
     public static GetSalesTrendsQueryResult assemble(SalesTrendsQuery.Result salesTrands) {
-        GetSalesTrendsQueryResult result = new GetSalesTrendsQueryResult(new ArrayList<>());
+        GetSalesTrendsQueryResult result = new GetSalesTrendsQueryResult();
+        result.setPeriodSales(new ArrayList<>());
         salesTrands.getPeriodSales().forEach(periodSales ->
                 result.getPeriodSales().add(new PeriodSalesDto(
                         periodSales.getPeriodDate(),
