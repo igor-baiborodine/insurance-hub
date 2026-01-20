@@ -240,6 +240,11 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
   secrets are required.
 - `make svc-deploy SVC_NAME=policy-search`
 
+### dashboard
+- Built-in Elasticsearch's user `elastic` is used for the service. Therefore, no additional user
+  secrets are required.
+- `make svc-deploy SVC_NAME=dashboard`
+
 ## QA—Cluster Load Monitoring
 
 1. **Prometheus**
