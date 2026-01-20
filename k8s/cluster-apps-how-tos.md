@@ -20,6 +20,9 @@
   - [auth](#auth)
   - [document](#document)
   - [payment](#payment)
+  - [product](#product)
+  - [policy-search](#policy-search)
+  - [dashboard](#dashboard)
 - [QA—Cluster Load Monitoring](#qacluster-load-monitoring)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
