@@ -19,3 +19,4 @@ configMapGenerator:
     literals:
       - GATEWAY_URL=http://local-dev-agent-portal-gateway-legacy.local-dev-all.svc.cluster.local
       - AUTH_URL=http://local-dev-auth-api-legacy.local-dev-all.svc.cluster.local
+      - CHAT_URL=http://local-dev-chat-api-legacy.local-dev-all.svc.cluster.local
