@@ -23,7 +23,9 @@
   - [product](#product)
   - [policy-search](#policy-search)
   - [dashboard](#dashboard)
-- [QA—Cluster Load Monitoring](#qacluster-load-monitoring)
+- [Cluster Load Monitoring](#cluster-load-monitoring)
+  - [Local Dev (Kind)](#local-dev-kind)
+  - [QA (K3s)](#qa-k3s)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
