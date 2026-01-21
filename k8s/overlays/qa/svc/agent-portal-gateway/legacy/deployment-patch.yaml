@@ -19,8 +19,8 @@ spec:
               value: "http://qa-zipkin.qa-monitoring.svc.cluster.local:9411"
           resources:
             requests:
-              memory: 512Mi
-              cpu: 250m
+              cpu: 100m
+              memory: 256Mi
             limits:
-              memory: 1Gi
-              cpu: 500m
+              cpu: 300m
+              memory: 512Mi
