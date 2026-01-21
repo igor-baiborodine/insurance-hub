@@ -248,7 +248,15 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
   secrets are required.
 - `make svc-deploy SVC_NAME=dashboard`
 
-## QA—Cluster Load Monitoring
+## Cluster Load Monitoring
+
+### Local Dev (Kind)
+
+- `kubectl get apiservice v1beta1.metrics.k8s.io` to verify that the Metrics API service is available.
+- `kubectl get nodes`
+- `kubectl top pods -A` to verify workload metrics.
+
+### QA (K3s)
 
 1. **Prometheus**
 

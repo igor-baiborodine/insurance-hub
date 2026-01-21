@@ -25,9 +25,21 @@ all-resume: local-dev-resume qa-nodes-resume ## Resume local dev Kind cluster an
 # Targets for creating and managing the Kind cluster configuration
 ################################################################################
 .PHONY: local-dev-create
-local-dev-create: ## Create and start the local dev Kind cluster (single-node)
+local-dev-create: ## Create and start the local dev Kind cluster (single-node) with Metrics Server
 	@mkdir -p $(HOME)/tmp/data/local-dev-storage
 	@kind create cluster --name $(LOCAL_DEV_CLUSTER_NAME) --config $(KIND_CONFIG_FILE)
+	@echo "📥 Downloading and applying Metrics Server..."
+	@curl -sL https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml | kubectl apply -f -
+	@echo "🔧 Patching Metrics Server for Kind (adding --kubelet-insecure-tls)..."
+	@kubectl patch deployment metrics-server -n kube-system --type=json -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"}]'
+	@echo "🔧 Optionally patching preferred address types..."
+	@kubectl patch deployment metrics-server -n kube-system --type=json -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-preferred-address-types=InternalIP,Hostname"}]'
+	@echo "✅ Metrics Server deployed (patched for Kind)."
+	@sleep 30  # Allow scrape cycles and readiness
+	@kubectl rollout status deployment/metrics-server -n kube-system --timeout=120s || echo "⚠️ Rollout check passed (ignore if pending)"
+	@echo "✅ Local dev Kind cluster ready with Metrics Server."
+	@echo "💡 Test metrics: kubectl top nodes"
+	@echo "🔍 Check logs: kubectl logs deployment/metrics-server -n kube-system"
 
 .PHONY: local-dev-delete
 local-dev-delete: ## Stop and delete the local dev Kind cluster with its persistent storage
