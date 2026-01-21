@@ -19,3 +19,4 @@ configMapGenerator:
     literals:
       - GATEWAY_URL=http://qa-agent-portal-gateway-legacy.qa-svc.svc.cluster.local
       - AUTH_URL=http://qa-auth-api-legacy.qa-svc.svc.cluster.local
+      - CHAT_URL=http://qa-chat-api-legacy.qa-svc.svc.cluster.local
