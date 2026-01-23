@@ -12,11 +12,6 @@ spec:
     spec:
       containers:
         - name: agent-portal-gateway-legacy
-          env:
-            - name: MICRONAUT_ENVIRONMENTS
-              value: "qa"
-            - name: TRACING_ZIPKIN_HTTP_URL
-              value: "http://qa-zipkin.qa-monitoring.svc.cluster.local:9411"
           resources:
             requests:
               cpu: 100m
@@ -24,3 +19,8 @@ spec:
             limits:
               cpu: 300m
               memory: 512Mi
+          env:
+            - name: MICRONAUT_ENVIRONMENTS
+              value: "qa"
+            - name: TRACING_ZIPKIN_HTTP_URL
+              value: "http://qa-zipkin.qa-monitoring.svc.cluster.local:9411"

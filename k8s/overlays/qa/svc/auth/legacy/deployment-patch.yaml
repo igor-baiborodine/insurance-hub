@@ -7,16 +7,22 @@ spec:
     spec:
       containers:
         - name: auth-api-legacy
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 300m
+              memory: 512Mi
           env:
-            - name: POSTGRES_PASSWORD
+            # Postgres sensitive data
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef:
+                  name: qa-postgres-auth-user-creds
+                  key: username
+            - name: PG_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: qa-postgres-auth-user-creds
                   key: password
-          resources:
-            requests:
-              memory: 512Mi
-              cpu: 250m
-            limits:
-              memory: 1Gi
-              cpu: 500m
