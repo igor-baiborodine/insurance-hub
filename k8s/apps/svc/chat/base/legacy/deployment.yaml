@@ -27,9 +27,6 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
-          envFrom:
-            - configMapRef:
-                name: chat-config-legacy
           env:
             - name: KUBERNETES_CLIENT_NAMESPACE
               valueFrom:

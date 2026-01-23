@@ -9,11 +9,11 @@ spec:
         - name: policy-search-api-legacy
           resources:
             requests:
-              memory: 1Gi
-              cpu: 500m
+              cpu: 100m
+              memory: 256Mi
             limits:
-              memory: 2Gi
-              cpu: 1000m
+              cpu: 300m
+              memory: 512Mi
           env:
             # Elasticsearch sensitive data from QA secret
             - name: ELASTIC_PASSWORD

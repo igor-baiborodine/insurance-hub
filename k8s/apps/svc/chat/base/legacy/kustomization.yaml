@@ -8,7 +8,3 @@ labels:
 resources:
   - deployment.yaml
   - service.yaml
-configMapGenerator:
-  - name: chat-config-legacy
-    literals:
-      - CONFIG_STATUS=placeholder
