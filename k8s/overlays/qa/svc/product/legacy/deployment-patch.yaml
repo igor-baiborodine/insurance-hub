@@ -19,10 +19,10 @@ spec:
             - name: MG_USER
               valueFrom:
                 secretKeyRef:
-                  name: local-dev-mongodb-product-user-creds
+                  name: qa-mongodb-product-user-creds
                   key: username
             - name: MG_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: local-dev-mongodb-product-user-creds
+                  name: qa-mongodb-product-user-creds
                   key: password

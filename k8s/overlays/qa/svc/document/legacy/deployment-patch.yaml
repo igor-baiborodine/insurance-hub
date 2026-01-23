@@ -9,11 +9,11 @@ spec:
         - name: document-api-legacy
           resources:
             requests:
-              memory: 1Gi
-              cpu: 500m
+              cpu: 100m
+              memory: 256Mi
             limits:
-              memory: 2Gi
-              cpu: 1000m
+              cpu: 300m
+              memory: 512Mi
           env:
             # Postgres sensitive data
             - name: PG_USER

@@ -645,7 +645,7 @@ minio-svc-user-with-policy-create: _env-check _svc-name-check ## Create a MinIO 
 		echo "ERROR: Argument 'POLICY_FILE' is required! Usage: make minio-svc-user-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>"; \
 		exit 1; \
 	fi
-	@bash aps/scripts/minio-svc-user-with-policy-create.sh "$(SVC_NAME)" "$(ENV_NAME)" "$(POLICY_FILE)"
+	@bash apps/scripts/minio-svc-user-with-policy-create.sh "$(SVC_NAME)" "$(ENV_NAME)" "$(POLICY_FILE)"
 
 ################################################################################
 # MongoDB Deployment Targets
@@ -938,7 +938,7 @@ svc-image-qa-load: _svc-name-check ## Loads a locally built Docker image into th
 	echo "✅ Docker image '$$IMAGE_NAME' loaded into all QA LXD cluster nodes."
 
 .PHONY: svc-deploy
-svc-deploy: _env-check _svc-ns-check _svc-name-check svc-delete ## Deploy a Java service or web app using Kustomize. Usage: make svc-deploy SVC_NAME=<svc-name>
+svc-deploy: _env-check _svc-ns-check _svc-name-check svc-delete svc-image-local-dev-load ## Deploy a Java service or web app using Kustomize. Usage: make svc-deploy SVC_NAME=<svc-name>
 	@SVC_NAME_LABEL="$(SVC_NAME)-api-legacy"; \
 	if [ "$(SVC_NAME)" = "agent-portal-gateway" ] || [ "$(SVC_NAME)" = "web-vue" ]; then \
 		SVC_NAME_LABEL="$(SVC_NAME)-legacy"; \
