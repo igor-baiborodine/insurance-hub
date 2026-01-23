@@ -12,15 +12,15 @@ spec:
     spec:
       containers:
         - name: agent-portal-gateway-legacy
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 300m
+              memory: 512Mi
           env:
             - name: MICRONAUT_ENVIRONMENTS
               value: "local-dev"
             - name: TRACING_ZIPKIN_ENABLED
               value: "false"
-          resources:
-            requests:
-              memory: 1Gi
-              cpu: 500m
-            limits:
-              memory: 2Gi
-              cpu: 1000m

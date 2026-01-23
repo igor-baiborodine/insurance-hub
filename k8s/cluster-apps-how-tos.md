@@ -23,7 +23,9 @@
   - [product](#product)
   - [policy-search](#policy-search)
   - [dashboard](#dashboard)
-- [QA—Cluster Load Monitoring](#qacluster-load-monitoring)
+- [Cluster Load Monitoring](#cluster-load-monitoring)
+  - [Local Dev (Kind)](#local-dev-kind)
+  - [QA (K3s)](#qa-k3s)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -122,6 +124,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 
 - `make mongodb-operator-install`
 - `make mongodb-root-user-secret-create [MONGO_ROOT_USER_PWD=<user-pwd>]`
+- `make mongodb-product-user-secret-create [MONGO_PRODUCT_USER_PWD=<product-pwd>]`
 - `make mongodb-deploy`
 - `make mongodb-status`  
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=mongodb-deploy-<iso-date>`
@@ -162,7 +165,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 - `make kafka-strimzi-operator-install`
 - `make kafka-deploy`
 - `make kafka-status`
-- `make grafana-ui`
+- **QA/Grafana**: `make grafana-ui`
 - **QA/Grafana**: In _Dashboards > New > Import_, add the "Strimzi Kafka" dashboard using the
   following [JSON](https://github.com/strimzi/strimzi-kafka-operator/blob/0.48.0/examples/metrics/grafana-dashboards/strimzi-kafka.json) file
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
@@ -234,7 +237,6 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 
 ### product
 
-- `make mongodb-product-user-secret-create [MONGO_PRODUCT_USER_PWD=<product-pwd>]`
 - `make svc-deploy SVC_NAME=product`
 
 ### policy-search
@@ -248,7 +250,15 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
   secrets are required.
 - `make svc-deploy SVC_NAME=dashboard`
 
-## QA—Cluster Load Monitoring
+## Cluster Load Monitoring
+
+### Local Dev (Kind)
+
+- `kubectl get apiservice v1beta1.metrics.k8s.io` to verify that the Metrics API service is available.
+- `kubectl get nodes`
+- `kubectl top pods -A` to verify workload metrics.
+
+### QA (K3s)
 
 1. **Prometheus**
 

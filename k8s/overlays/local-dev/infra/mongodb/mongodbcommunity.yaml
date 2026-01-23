@@ -22,7 +22,6 @@ spec:
           db: admin
         - name: readWriteAnyDatabase
           db: admin
-      scramCredentialsSecretName: local-dev-mongodb
     - name: product
       db: products-demo
       passwordSecretRef:
@@ -30,7 +29,6 @@ spec:
       roles:
         - name: readWrite
           db: products-demo
-      scramCredentialsSecretName: local-dev-mongodb-product
   statefulSet:
     spec:
       volumeClaimTemplates:

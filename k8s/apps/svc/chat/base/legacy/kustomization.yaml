@@ -8,9 +8,3 @@ labels:
 resources:
   - deployment.yaml
   - service.yaml
-configMapGenerator:
-  - name: web-vue-config-legacy
-    literals:
-      - GATEWAY_URL=http://localhost:8090
-      - AUTH_URL=http://localhost:8081
-      - CHAT_URL=http://localhost:8082

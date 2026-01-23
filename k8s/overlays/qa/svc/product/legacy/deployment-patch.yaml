@@ -1,12 +1,12 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: auth-api-legacy
+  name: product-api-legacy
 spec:
   template:
     spec:
       containers:
-        - name: auth-api-legacy
+        - name: product-api-legacy
           resources:
             requests:
               cpu: 100m
@@ -15,14 +15,14 @@ spec:
               cpu: 300m
               memory: 512Mi
           env:
-            # Postgres sensitive data
-            - name: PG_USER
+            # MongoDB sensitive data
+            - name: MG_USER
               valueFrom:
                 secretKeyRef:
-                  name: qa-postgres-auth-user-creds
+                  name: qa-mongodb-product-user-creds
                   key: username
-            - name: PG_PASSWORD
+            - name: MG_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: qa-postgres-auth-user-creds
+                  name: qa-mongodb-product-user-creds
                   key: password

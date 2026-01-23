@@ -9,11 +9,11 @@ spec:
         - name: product-api-legacy
           resources:
             requests:
-              memory: 512Mi
-              cpu: 250m
+              cpu: 100m
+              memory: 256Mi
             limits:
-              memory: 1Gi
-              cpu: 500m
+              cpu: 300m
+              memory: 512Mi
           env:
             # MongoDB sensitive data
             - name: MG_USER

@@ -1,12 +1,12 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: web-vue-legacy
+  name: chat-api-legacy
 spec:
   template:
     spec:
       containers:
-        - name: web-vue-legacy
+        - name: chat-api-legacy
           resources:
             requests:
               cpu: 100m
