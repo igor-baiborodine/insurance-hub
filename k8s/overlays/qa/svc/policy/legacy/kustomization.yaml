@@ -12,7 +12,7 @@ patches:
   - path: deployment-patch.yaml
     target:
       kind: Deployment
-      name: policy-service-legacy
+      name: policy-api-legacy
 configMapGenerator:
   - name: policy-config-legacy
     behavior: merge

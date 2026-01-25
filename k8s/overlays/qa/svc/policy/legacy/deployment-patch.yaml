@@ -1,12 +1,12 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: policy-service-legacy
+  name: policy-api-legacy
 spec:
   template:
     spec:
       containers:
-        - name: policy-service-legacy
+        - name: policy-api-legacy
           resources:
             requests:
               cpu: 100m

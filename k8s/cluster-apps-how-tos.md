@@ -250,6 +250,10 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
   secrets are required.
 - `make svc-deploy SVC_NAME=dashboard`
 
+### policy
+
+- `make svc-deploy SVC_NAME=policy`
+
 ## Cluster Load Monitoring
 
 ### Local Dev (Kind)
