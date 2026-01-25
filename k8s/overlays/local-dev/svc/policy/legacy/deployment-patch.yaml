@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: policy-api-legacy
+spec:
+  template:
+    spec:
+      containers:
+        - name: policy-api-legacy
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 300m
+              memory: 512Mi
+          env:
+            # Postgres sensitive data
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-postgres-policy-user-creds
+                  key: username
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-postgres-policy-user-creds
+                  key: password
