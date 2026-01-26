@@ -43,14 +43,6 @@ kafka:
   bootstrap:
     servers: "${KAFKA_HOST:localhost}:${KAFKA_PORT:9092}"
 ---
-endpoints:
-  health:
-    enabled: true
-    sensitive: false
-  env:
-    enabled: false
-    sensitive: false
----
 tracing:
   zipkin:
     enabled: true
