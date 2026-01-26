@@ -9,22 +9,6 @@ kafka:
   bootstrap:
     servers: "${KAFKA_HOST:localhost}:${KAFKA_PORT:9092}"
 ---
-consul:
-  client:
-    registration:
-      enabled: true
-      check:
-        http: true
-    defaultZone: "${CONSUL_HOST:localhost}:${CONSUL_PORT:8500}"
----
-endpoints:
-  health:
-    enabled: true
-    sensitive: false
-  env:
-    enabled: false
-    sensitive: false
----
 hystrix:
   stream:
     enabled: true
@@ -45,7 +29,6 @@ minio:
   tenant-endpoint: "${MINIO_TENANT_ENDPOINT:http://localhost:9000}"
   svc-access-key: "${MINIO_SVC_ACCESS_KEY:minioSvcAccessKey}"
   svc-secret-key: "${MINIO_SVC_SECRET_KEY:minioSvcSecretKey}"
----
 ---
 postgres:
   host: ${PG_HOST:localhost}
