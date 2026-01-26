@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: qa-svc
+namePrefix: qa-
+labels:
+  - includeSelectors: true
+    pairs:
+      environment: qa
+resources:
+  - ../../../../../apps/svc/policy/base/legacy
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: policy-api-legacy
+configMapGenerator:
+  - name: policy-config-legacy
+    behavior: merge
+    literals:
+      - PG_HOST=qa-postgres-policy-rw.qa-data.svc.cluster.local
+      - KAFKA_HOST=qa-kafka-kafka-bootstrap.qa-data.svc.cluster.local
+      - TRACING_ZIPKIN_ENABLED=true
+      - ZIPKIN_HOST=qa-zipkin.qa-monitoring.svc.cluster.local

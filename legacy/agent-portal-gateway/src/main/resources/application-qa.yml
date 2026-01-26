@@ -13,3 +13,6 @@ micronaut:
       dashboard-service:
         urls:
           - http://qa-dashboard-api-legacy:80
+      policy-service:
+        urls:
+          - http://qa-policy-api-legacy:80

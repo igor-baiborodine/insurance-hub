@@ -8,22 +8,6 @@ micronaut:
 jackson:
   bean-introspection-module: true
 ---
-consul:
-  client:
-    registration:
-      enabled: true
-      check:
-        http: true
-    defaultZone: "${CONSUL_HOST:localhost}:${CONSUL_PORT:8500}"
----
-endpoints:
-  health:
-    enabled: true
-    sensitive: false
-  env:
-    enabled: false
-    sensitive: false
----
 tracing:
   zipkin:
     enabled: true

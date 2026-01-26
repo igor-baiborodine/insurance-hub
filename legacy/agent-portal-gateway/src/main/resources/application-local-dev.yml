@@ -13,3 +13,6 @@ micronaut:
       dashboard-service:
         urls:
           - http://local-dev-dashboard-api-legacy:80
+      policy-service:
+        urls:
+          - http://local-dev-policy-api-legacy:80

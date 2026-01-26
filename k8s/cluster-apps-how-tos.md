@@ -23,6 +23,8 @@
   - [product](#product)
   - [policy-search](#policy-search)
   - [dashboard](#dashboard)
+  - [policy](#policy)
+  - [pricing](#pricing)
 - [Cluster Load Monitoring](#cluster-load-monitoring)
   - [Local Dev (Kind)](#local-dev-kind)
   - [QA (K3s)](#qa-k3s)
@@ -198,8 +200,9 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
     ```
 - `make jsreport-status`
 - `make jsreport-ui` and go to `http://localhost:5488`
+- Go to jsreport UI at http://localhost:5488 and add a new template(legacy/documents-service/src/main/resources/policy.template) for generating policy PDF.
+![jsreport/policy template](jsreport-add-policy-template.png)
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=jsreport-deploy-<iso-date>``
-
 
 ### web-vue
 
@@ -249,6 +252,14 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 - Built-in Elasticsearch's user `elastic` is used for the service. Therefore, no additional user
   secrets are required.
 - `make svc-deploy SVC_NAME=dashboard`
+
+### policy
+
+- `make svc-deploy SVC_NAME=policy`
+
+### pricing
+
+- `make svc-deploy SVC_NAME=pricing`
 
 ## Cluster Load Monitoring
 

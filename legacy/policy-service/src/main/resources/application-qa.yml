@@ -1,0 +1,6 @@
+micronaut:
+  http:
+    services:
+      pricing-service:
+        urls:
+          - http://qa-pricing-api-legacy:80

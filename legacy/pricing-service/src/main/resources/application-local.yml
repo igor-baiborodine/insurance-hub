@@ -3,11 +3,6 @@ micronaut:
     host: localhost
     port: 8087
 ---
-endpoints:
-  env:
-    enabled: true
-    sensitive: false
----
 tracing:
   zipkin:
     enabled: false
