@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api-legacy
+spec:
+  template:
+    spec:
+      containers:
+        - name: payment-api-legacy
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 300m
+              memory: 512Mi
+          env:
+            - name: PAYMENTS_IMPORT_FIXED_RATE
+              value: "3m"
+            # Postgres sensitive data
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-postgres-payment-user-creds
+                  key: username
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-postgres-payment-user-creds
+                  key: password
+            # MinIO sensitive data
+            - name: MINIO_SVC_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-minio-payment-svc-user-creds
+                  key: MINIO_SVC_ACCESS_KEY
+            - name: MINIO_SVC_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-minio-payment-svc-user-creds
+                  key: MINIO_SVC_SECRET_KEY
