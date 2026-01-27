@@ -151,12 +151,18 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   - `make minio-storage-config-secret-create SVC_NAME=document [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
   - `make minio-tenant-deploy SVC_NAME=document`
   - `make minio-tenant-status SVC_NAME=document`
+  - `make minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies`
+  - `make minio-svc-user-secret-create SVC_NAME=document [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
+  - `make minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json`
 
   2. **payment** service:
   - `make minio-storage-user-secret-create SVC_NAME=payment [MINIO_CONSOLE_ACCESS_KEY=<access-key>] [MINIO_CONSOLE_SECRET_KEY=<secret-key>]`
   - `make minio-storage-config-secret-create SVC_NAME=payment [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
   - `make minio-tenant-deploy SVC_NAME=payment`
   - `make minio-tenant-status SVC_NAME=payment`
+  - `make minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import`
+  - `make minio-svc-user-secret-create SVC_NAME=payment [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
+  - `make minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json`
 
 - **QA/Grafana**: In _Dashboards > New > Import_, add dashboards using the following URLs: 
     - https://grafana.com/grafana/dashboards/13502-minio-dashboard/
@@ -218,9 +224,6 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 
 ### document
 
-- `make minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies`
-- `make minio-svc-user-secret-create SVC_NAME=document [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
-- `make minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json`
 - `make minio-console-ui SVC_NAME=document`
   - Go to `http://localhost:9090`
   - Log in with the credentials provided in the `minio-svc-user-secret-create` target.
@@ -229,9 +232,6 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 
 ### payment
 
-- `make minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import`
-- `make minio-svc-user-secret-create SVC_NAME=payment [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
-- `make minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json`
 - `make minio-console-ui SVC_NAME=payment`
     - Go to `http://localhost:9090`
     - Log in with the credentials provided in the `minio-svc-user-secret-create` target.
