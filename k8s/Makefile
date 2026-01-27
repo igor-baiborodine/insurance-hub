@@ -680,6 +680,7 @@ mongodb-root-user-secret-create: _env-check _data-ns-check ## Create/update secr
 	@kubectl create secret generic "$(ENV_NAME)"-mongodb-root-user-creds \
 	    --namespace "$(DATA_NS)" \
 	    --type Opaque \
+	    --from-literal=username="root" \
 	    --from-literal=password="$(MONGO_ROOT_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@echo "Secret '"$(ENV_NAME)"-mongodb-root-user-creds' successfully created/updated in namespace $(DATA_NS)"
@@ -964,7 +965,7 @@ svc-load-delete-deploy: _env-check _svc-ns-check _svc-name-check svc-image-local
 
 .PHONY: local-dev-infra-deploy
 local-dev-infra-deploy: _env-check 
-	@echo "Deploying local-dev infra apps (all optional args omitted)..."
+	@echo "🚀 Deploying local-dev infra apps (all optional args omitted)..."
 	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
 		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
 		exit 1; \
@@ -1024,3 +1025,31 @@ local-dev-infra-deploy: _env-check
 
 	@echo "✅ Infra apps deployed to local-dev cluster!"
 	@kubectl get pods -A | grep -E "local-dev-all|minio|elastic|kafka|cnpg"
+
+.PHONY: local-dev-svc-deploy
+local-dev-svc-deploy:  _env-check
+	@echo "🚀 Deploying local-dev services..."
+	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
+		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
+		exit 1; \
+	fi
+	
+	$(MAKE) jsreport-deploy
+
+	$(MAKE) svc-load-delete-deploy SVC_NAME=product
+	$(MAKE) svc-load-delete-deploy SVC_NAME=policy-search
+	$(MAKE) svc-load-delete-deploy SVC_NAME=dashboard
+	$(MAKE) svc-load-delete-deploy SVC_NAME=policy
+	$(MAKE) svc-load-delete-deploy SVC_NAME=pricing
+	
+	$(MAKE) svc-load-delete-deploy SVC_NAME=document
+	$(MAKE) svc-load-delete-deploy SVC_NAME=payment
+
+	$(MAKE) svc-load-delete-deploy SVC_NAME=web-vue &
+	$(MAKE) svc-load-delete-deploy SVC_NAME=agent-portal-gateway &
+	$(MAKE) svc-load-delete-deploy SVC_NAME=auth & wait
+	@echo "⏳ Waiting 60s for services.." && sleep 60
+	
+	@echo "✅ Service apps deployed to local-dev cluster!"
+	@kubectl get pods | grep -E "web|agent|api"
+	@kubectl top pods | grep -E "web|agent|api"
