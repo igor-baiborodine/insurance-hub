@@ -1,5 +1,6 @@
 package pl.altkom.asc.lab.micronaut.poc.policy.search.infrastructure.adapters.db;
 
+import io.reactivex.Completable;
 import io.reactivex.Maybe;
 import java.util.Arrays;
 import java.util.List;
@@ -37,6 +38,21 @@ public class ElasticPolicyViewRepository implements PolicyViewRepository {
     
     @Override
     public Maybe<List<PolicyView>> findAll(FindPolicyQuery query) {
+        return ensureIndexExists()
+                .andThen(executeSearch(query));
+    }
+
+    private Completable ensureIndexExists() {
+        return elasticClientAdapter.indexExists(INDEX_NAME)
+                .flatMapCompletable(exists -> {
+                    if (!exists) {
+                        return elasticClientAdapter.createIndex(INDEX_NAME);
+                    }
+                    return Completable.complete();
+                });
+    }
+
+    private Maybe<List<PolicyView>> executeSearch(FindPolicyQuery query) {
         SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
 
         QueryStringQueryBuilder queryStringQueryBuilder = QueryBuilders.queryStringQuery(query.getQueryText())

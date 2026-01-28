@@ -12,12 +12,17 @@ import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.http.ssl.TrustStrategy;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.index.IndexRequest;
+import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
+import org.elasticsearch.action.admin.indices.create.CreateIndexResponse;
+import org.elasticsearch.action.admin.indices.get.GetIndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
 import org.elasticsearch.client.RestHighLevelClient;
+import io.reactivex.Single;
+import io.reactivex.Completable;
 
 import javax.inject.Singleton;
 import javax.net.ssl.SSLContext;
@@ -64,6 +69,40 @@ public class ElasticClientAdapter {
                         sink.onError(e);
                     }
                 }));
+    }
+
+    public Single<Boolean> indexExists(String indexName) {
+        return Single.create(sink -> {
+            GetIndexRequest request = new GetIndexRequest().indices(indexName);
+            restHighLevelClient.indices().existsAsync(request, new ActionListener<Boolean>() {
+                @Override
+                public void onResponse(Boolean exists) {
+                    sink.onSuccess(exists);
+                }
+
+                @Override
+                public void onFailure(Exception e) {
+                    sink.onError(e);
+                }
+            });
+        });
+    }
+
+    public Completable createIndex(String indexName) {
+        return Completable.create(sink -> {
+            CreateIndexRequest request = new CreateIndexRequest(indexName);
+            restHighLevelClient.indices().createAsync(request, new ActionListener<CreateIndexResponse>() {
+                @Override
+                public void onResponse(CreateIndexResponse createIndexResponse) {
+                    sink.onComplete();
+                }
+
+                @Override
+                public void onFailure(Exception e) {
+                    sink.onError(e);
+                }
+            });
+        });
     }
 
     private RestHighLevelClient buildClient() {
