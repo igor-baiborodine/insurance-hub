@@ -189,16 +189,6 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 **1. jsreport**
 
 - `make jsreport-deploy`
-- `kubectl get pods -n local-dev-all | grep jsreport`
-    ```shell
-    local-dev-jsreport-5548585d57-q5sdc   1/1     Running   0          47s
-    ```
-- `make jsreport-status`
-- `make jsreport-ui` and go to `http://localhost:5488`
-- Go to jsreport UI at http://localhost:5488 and add a new template(legacy/documents-service/src/main/resources/policy.template) for generating policy PDF.
-
-  ![jsreport/policy template](jsreport-add-policy-template.png)
-- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=jsreport-deploy-<iso-date>``
 
 **2. web-vue**
 
