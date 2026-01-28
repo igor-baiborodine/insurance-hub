@@ -30,7 +30,7 @@ public class ElasticPolicyViewRepository implements PolicyViewRepository {
     
     @Override
     public void save(PolicyView policy) {
-        IndexRequest indexRequest = new IndexRequest(INDEX_NAME,"policyview", policy.getNumber());
+        IndexRequest indexRequest = new IndexRequest(INDEX_NAME, "_doc", policy.getNumber());
         indexRequest.source(jsonConverter.stringifyObject(policy), XContentType.JSON);
         elasticClientAdapter.index(indexRequest).blockingGet();
     }
