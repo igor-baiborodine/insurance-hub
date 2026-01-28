@@ -48,8 +48,7 @@ class JsReportTemplateProvisioner : ApplicationEventListener<ServerStartupEvent>
                 LOG.info("Creating jsreport template '{}'", TEMPLATE_NAME)
                 sendCreateRequest(client, templateContent)
             } else {
-                LOG.info("Updating jsreport template '{}'", TEMPLATE_NAME)
-                sendUpdateRequest(client, templateId, templateContent)
+                LOG.info("jsreport template '{}' already exists (shortid={}), skipping provisioning", TEMPLATE_NAME, templateId)
             }
         }
     }
@@ -92,15 +91,6 @@ class JsReportTemplateProvisioner : ApplicationEventListener<ServerStartupEvent>
     private fun sendCreateRequest(client: HttpClient, content: String) {
         val payload = JsReportTemplatePayload(TEMPLATE_NAME, content)
         val request = HttpRequest.POST(JSREPORT_TEMPLATES_ENDPOINT, payload)
-                .header(HttpHeaders.CONTENT_TYPE, JSON_MEDIA_TYPE)
-                .header(HttpHeaders.ACCEPT, JSON_MEDIA_TYPE)
-        client.toBlocking().exchange(request, ByteArray::class.java)
-    }
-
-    private fun sendUpdateRequest(client: HttpClient, templateId: String, content: String) {
-        val payload = JsReportTemplatePayload(TEMPLATE_NAME, content)
-        val endpoint = "$JSREPORT_TEMPLATES_ENDPOINT('$templateId')"
-        val request = HttpRequest.PUT(endpoint, payload)
                 .header(HttpHeaders.CONTENT_TYPE, JSON_MEDIA_TYPE)
                 .header(HttpHeaders.ACCEPT, JSON_MEDIA_TYPE)
         client.toBlocking().exchange(request, ByteArray::class.java)
