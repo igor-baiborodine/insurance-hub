@@ -6,7 +6,6 @@ import io.micronaut.context.event.ApplicationEventListener
 import io.micronaut.http.HttpHeaders
 import io.micronaut.http.HttpRequest
 import io.micronaut.http.HttpStatus
-import io.micronaut.http.MediaType
 import io.micronaut.http.client.HttpClient
 import io.micronaut.http.client.exceptions.HttpClientResponseException
 import io.micronaut.runtime.server.event.ServerStartupEvent
@@ -18,9 +17,10 @@ import javax.inject.Singleton
 
 private const val TEMPLATE_NAME = "POLICY"
 private const val TEMPLATE_RESOURCE = "/policy.template"
-private const val JSREPORT_TEMPLATES_ENDPOINT = "/api/templates"
-private const val TEMPLATE_RECIPE = "html"
+private const val JSREPORT_TEMPLATES_ENDPOINT = "/odata/templates"
+private const val TEMPLATE_RECIPE = "chrome-pdf"
 private const val TEMPLATE_ENGINE = "handlebars"
+private const val JSON_MEDIA_TYPE = "application/json;odata.metadata=minimal;odata.streaming=true;IEEE754Compatible=false;charset=utf-8"
 
 @Singleton
 class JsReportTemplateProvisioner : ApplicationEventListener<ServerStartupEvent> {
@@ -61,8 +61,10 @@ class JsReportTemplateProvisioner : ApplicationEventListener<ServerStartupEvent>
     }
 
     private fun findExistingTemplateId(client: HttpClient): String? {
-        val encodedName = URLEncoder.encode(TEMPLATE_NAME, StandardCharsets.UTF_8)
-        val request = HttpRequest.GET<Any>("$JSREPORT_TEMPLATES_ENDPOINT?name=$encodedName")
+        val filter = URLEncoder.encode("name eq '$TEMPLATE_NAME'", StandardCharsets.UTF_8)
+        val request = HttpRequest.GET<Any>("$JSREPORT_TEMPLATES_ENDPOINT?\$filter=$filter")
+                .header(HttpHeaders.ACCEPT, JSON_MEDIA_TYPE)
+                .header(HttpHeaders.CONTENT_TYPE, JSON_MEDIA_TYPE)
         val response = try {
             client.toBlocking().retrieve(request, JsonNode::class.java)
         } catch (ex: HttpClientResponseException) {
@@ -79,6 +81,7 @@ class JsReportTemplateProvisioner : ApplicationEventListener<ServerStartupEvent>
     private fun extractTemplateId(node: JsonNode?): String? {
         if (node == null) return null
         val candidate = when {
+            node.has("value") && node["value"].isArray -> firstElement(node["value"])
             node.isArray -> firstElement(node)
             node.has("data") && node["data"].isArray -> firstElement(node["data"])
             else -> node
@@ -89,14 +92,17 @@ class JsReportTemplateProvisioner : ApplicationEventListener<ServerStartupEvent>
     private fun sendCreateRequest(client: HttpClient, content: String) {
         val payload = JsReportTemplatePayload(TEMPLATE_NAME, content)
         val request = HttpRequest.POST(JSREPORT_TEMPLATES_ENDPOINT, payload)
-                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.CONTENT_TYPE, JSON_MEDIA_TYPE)
+                .header(HttpHeaders.ACCEPT, JSON_MEDIA_TYPE)
         client.toBlocking().exchange(request, ByteArray::class.java)
     }
 
     private fun sendUpdateRequest(client: HttpClient, templateId: String, content: String) {
         val payload = JsReportTemplatePayload(TEMPLATE_NAME, content)
-        val request = HttpRequest.PUT("$JSREPORT_TEMPLATES_ENDPOINT/$templateId", payload)
-                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON)
+        val endpoint = "$JSREPORT_TEMPLATES_ENDPOINT('$templateId')"
+        val request = HttpRequest.PUT(endpoint, payload)
+                .header(HttpHeaders.CONTENT_TYPE, JSON_MEDIA_TYPE)
+                .header(HttpHeaders.ACCEPT, JSON_MEDIA_TYPE)
         client.toBlocking().exchange(request, ByteArray::class.java)
     }
 
