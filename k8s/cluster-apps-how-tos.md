@@ -14,17 +14,6 @@
   - [MinIO](#minio)
   - [Kafka](#kafka)
 - [Services](#services)
-  - [jsreport](#jsreport)
-  - [web-vue](#web-vue)
-  - [agent-portal-getaway](#agent-portal-getaway)
-  - [auth](#auth)
-  - [document](#document)
-  - [payment](#payment)
-  - [product](#product)
-  - [policy-search](#policy-search)
-  - [dashboard](#dashboard)
-  - [policy](#policy)
-  - [pricing](#pricing)
 - [Cluster Load Monitoring](#cluster-load-monitoring)
   - [Local Dev (Kind)](#local-dev-kind)
   - [QA (K3s)](#qa-k3s)
@@ -197,7 +186,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 - `make svc-image-local-dev-load SVC_NAME=<svc-name>` 
 - `make svc-image-qa-load SVC_NAME=<svc-name>`
 
-### jsreport
+**1. jsreport**
 
 - `make jsreport-deploy`
 - `kubectl get pods -n local-dev-all | grep jsreport`
@@ -207,22 +196,23 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 - `make jsreport-status`
 - `make jsreport-ui` and go to `http://localhost:5488`
 - Go to jsreport UI at http://localhost:5488 and add a new template(legacy/documents-service/src/main/resources/policy.template) for generating policy PDF.
-![jsreport/policy template](jsreport-add-policy-template.png)
+
+  ![jsreport/policy template](jsreport-add-policy-template.png)
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=jsreport-deploy-<iso-date>``
 
-### web-vue
+**2. web-vue**
 
 - `make svc-deploy SVC_NAME=web-vue`
 
-### agent-portal-getaway
+**3. agent-portal-getaway**
 
 - `make svc-deploy SVC_NAME=agent-portal-gateway`
 
-### auth
+**4. auth**
 
 - `make svc-deploy SVC_NAME=auth`
 
-### document
+**5. document**
 
 - `make minio-console-ui SVC_NAME=document`
   - Go to `http://localhost:9090`
@@ -230,7 +220,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 - `make svc-deploy SVC_NAME=document` 
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=document-deploy-<iso-date>``
 
-### payment
+**6. payment**
 
 - `make minio-console-ui SVC_NAME=payment`
     - Go to `http://localhost:9090`
@@ -238,28 +228,32 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 - `make svc-deploy SVC_NAME=payment`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=payment-deploy-<iso-date>``
 
-### product
+**7. product**
 
 - `make svc-deploy SVC_NAME=product`
 
-### policy-search
+**8. policy-search**
 
 - Built-in Elasticsearch's user `elastic` is used for the service. Therefore, no additional user
   secrets are required.
 - `make svc-deploy SVC_NAME=policy-search`
 
-### dashboard
+**9. dashboard**
 - Built-in Elasticsearch's user `elastic` is used for the service. Therefore, no additional user
   secrets are required.
 - `make svc-deploy SVC_NAME=dashboard`
 
-### policy
+**10. policy**
 
 - `make svc-deploy SVC_NAME=policy`
 
-### pricing
+**11. pricing**
 
 - `make svc-deploy SVC_NAME=pricing`
+
+**12. chat**
+
+- `make svc-deploy SVC_NAME=chat`
 
 ## Cluster Load Monitoring
 
