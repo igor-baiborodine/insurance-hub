@@ -1,0 +1,119 @@
+package pl.altkom.asc.lab.micronaut.poc.documents.infrastructure.adapters.jsreport
+
+import com.fasterxml.jackson.databind.JsonNode
+import io.micronaut.context.annotation.Value
+import io.micronaut.context.event.ApplicationEventListener
+import io.micronaut.http.HttpHeaders
+import io.micronaut.http.HttpRequest
+import io.micronaut.http.HttpStatus
+import io.micronaut.http.MediaType
+import io.micronaut.http.client.HttpClient
+import io.micronaut.http.client.exceptions.HttpClientResponseException
+import io.micronaut.runtime.server.event.ServerStartupEvent
+import org.slf4j.LoggerFactory
+import java.net.URL
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import javax.inject.Singleton
+
+private const val TEMPLATE_NAME = "POLICY"
+private const val TEMPLATE_RESOURCE = "/policy.template"
+private const val JSREPORT_TEMPLATES_ENDPOINT = "/api/templates"
+private const val TEMPLATE_RECIPE = "html"
+private const val TEMPLATE_ENGINE = "handlebars"
+
+@Singleton
+class JsReportTemplateProvisioner : ApplicationEventListener<ServerStartupEvent> {
+
+    companion object {
+        private val LOG = LoggerFactory.getLogger(JsReportTemplateProvisioner::class.java)
+    }
+
+    @field:Value("\${jsreport.host}")
+    private lateinit var host: String
+
+    @field:Value("\${jsreport.port}")
+    private lateinit var port: String
+
+    override fun onApplicationEvent(event: ServerStartupEvent) {
+        LOG.info("Validating jsreport template '{}'", TEMPLATE_NAME)
+        ensurePolicyTemplate()
+    }
+
+    private fun ensurePolicyTemplate() {
+        val templateContent = loadTemplate()
+        HttpClient.create(URL("http", host, port.toInt(), "")).use { client ->
+            val templateId = findExistingTemplateId(client)
+            if (templateId == null) {
+                LOG.info("Creating jsreport template '{}'", TEMPLATE_NAME)
+                sendCreateRequest(client, templateContent)
+            } else {
+                LOG.info("Updating jsreport template '{}'", TEMPLATE_NAME)
+                sendUpdateRequest(client, templateId, templateContent)
+            }
+        }
+    }
+
+    private fun loadTemplate(): String {
+        val resource = this::class.java.getResourceAsStream(TEMPLATE_RESOURCE)
+                ?: throw IllegalStateException("Missing template resource $TEMPLATE_RESOURCE")
+        return resource.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+    }
+
+    private fun findExistingTemplateId(client: HttpClient): String? {
+        val encodedName = URLEncoder.encode(TEMPLATE_NAME, StandardCharsets.UTF_8)
+        val request = HttpRequest.GET<Any>("$JSREPORT_TEMPLATES_ENDPOINT?name=$encodedName")
+        val response = try {
+            client.toBlocking().retrieve(request, JsonNode::class.java)
+        } catch (ex: HttpClientResponseException) {
+            if (ex.status == HttpStatus.NOT_FOUND) {
+                LOG.debug("jsreport template '{}' not found", TEMPLATE_NAME)
+                return null
+            }
+            throw ex
+        }
+
+        return extractTemplateId(response)
+    }
+
+    private fun extractTemplateId(node: JsonNode?): String? {
+        if (node == null) return null
+        val candidate = when {
+            node.isArray -> firstElement(node)
+            node.has("data") && node["data"].isArray -> firstElement(node["data"])
+            else -> node
+        }
+        return candidate?.let { getTemplateId(it) }
+    }
+
+    private fun sendCreateRequest(client: HttpClient, content: String) {
+        val payload = JsReportTemplatePayload(TEMPLATE_NAME, content)
+        val request = HttpRequest.POST(JSREPORT_TEMPLATES_ENDPOINT, payload)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON)
+        client.toBlocking().exchange(request, ByteArray::class.java)
+    }
+
+    private fun sendUpdateRequest(client: HttpClient, templateId: String, content: String) {
+        val payload = JsReportTemplatePayload(TEMPLATE_NAME, content)
+        val request = HttpRequest.PUT("$JSREPORT_TEMPLATES_ENDPOINT/$templateId", payload)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON)
+        client.toBlocking().exchange(request, ByteArray::class.java)
+    }
+
+    private fun firstElement(arrayNode: JsonNode): JsonNode? {
+        val iterator = arrayNode.elements()
+        return if (iterator.hasNext()) iterator.next() else null
+    }
+
+    private fun getTemplateId(node: JsonNode): String? {
+        return node["_id"]?.takeUnless { it.isNull }?.asText()
+                ?: node["shortid"]?.takeUnless { it.isNull }?.asText()
+    }
+}
+
+private data class JsReportTemplatePayload(
+        val name: String,
+        val content: String,
+        val engine: String = TEMPLATE_ENGINE,
+        val recipe: String = TEMPLATE_RECIPE
+)
