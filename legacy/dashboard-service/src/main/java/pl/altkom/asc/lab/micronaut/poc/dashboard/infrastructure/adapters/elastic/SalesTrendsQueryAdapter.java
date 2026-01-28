@@ -15,8 +15,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 
-import static pl.altkom.asc.lab.micronaut.poc.dashboard.domain.TimeAggregationUnit.*;
-
 public class SalesTrendsQueryAdapter extends QueryAdapter<SalesTrendsQuery,SalesTrendsQuery.Result> {
     public SalesTrendsQueryAdapter(SalesTrendsQuery query) {
         super(query);

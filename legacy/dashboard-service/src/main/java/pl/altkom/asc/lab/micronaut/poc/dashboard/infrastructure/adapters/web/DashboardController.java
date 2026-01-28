@@ -27,22 +27,34 @@ public class DashboardController implements DashboardOperations {
 
     @Override
     public GetTotalSalesQueryResult queryTotalSales(GetTotalSalesQuery query) {
+        log.info("Starting queryTotalSales {} ...", query);
+        long startNanos = System.nanoTime();
         GetTotalSalesQueryResult getTotalSalesQueryResult = bus.executeQuery(query);
-        logResult(getTotalSalesQueryResult);
+
+        logExecutionTime(query, startNanos);
+        //logResult(getTotalSalesQueryResult);
         return getTotalSalesQueryResult;
     }
 
     @Override
     public GetSalesTrendsQueryResult querySalesTrends(GetSalesTrendsQuery query) {
+        log.info("Starting querySalesTrends {} ...", query);
+        long startNanos = System.nanoTime();
         GetSalesTrendsQueryResult getSalesTrendsQueryResult = bus.executeQuery(query);
-        logResult(getSalesTrendsQueryResult);
+
+        logExecutionTime(query, startNanos);
+        //logResult(getSalesTrendsQueryResult);
         return getSalesTrendsQueryResult;
     }
 
     @Override
     public GetAgentsSalesQueryResult queryAgentsSales(GetAgentsSalesQuery query) {
+        log.info("Starting queryAgentsSales {} ...", query);
+        long startNanos = System.nanoTime();
         GetAgentsSalesQueryResult getAgentsSalesQueryResult = bus.executeQuery(query);
-        logResult(getAgentsSalesQueryResult);
+
+        logExecutionTime(query, startNanos);
+        //logResult(getAgentsSalesQueryResult);
         return getAgentsSalesQueryResult;
     }
 
@@ -52,5 +64,10 @@ public class DashboardController implements DashboardOperations {
         } catch (JsonProcessingException e) {
             log.error("Failed to serialize result", e);
         }
+    }
+
+    private void logExecutionTime(Object query, long startNanos) {
+        long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
+        log.info("executeQuery {} took {} ms", query.getClass().getSimpleName(), durationMs);
     }
 }
