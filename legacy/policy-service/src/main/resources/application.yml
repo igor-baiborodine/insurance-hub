@@ -29,8 +29,8 @@ jpa:
     properties:
         hibernate:
             hbm2ddl:
-                auto: create-drop
-            show_sql: true
+                auto: update
+            show_sql: false
 ---
 jackson:
   serialization:
