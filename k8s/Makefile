@@ -1011,6 +1011,9 @@ local-dev-infra-deploy: _env-check ## Deploy all infra apps into local dev Kind 
 	# Kafka
 	$(MAKE) kafka-deploy
 
+	# jsreport
+	$(MAKE) jsreport-deploy
+
 	# MinIO Tenants
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=document
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=document
@@ -1018,16 +1021,6 @@ local-dev-infra-deploy: _env-check ## Deploy all infra apps into local dev Kind 
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=payment
 	$(MAKE) minio-tenant-deploy SVC_NAME=document & $(MAKE) minio-tenant-deploy SVC_NAME=payment & wait
 	@echo "⏳ Waiting 3m for MinIO tenants.." && sleep 180
-
-	# MinIO Tenant Configuration
-	# Document
-	$(MAKE) minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies
-	$(MAKE) minio-svc-user-secret-create SVC_NAME=document
-	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json
-	# Payment
-	$(MAKE) minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import
-	$(MAKE) minio-svc-user-secret-create SVC_NAME=payment
-	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json
 
 	@echo "✅ Infra apps deployed to local-dev cluster!"
 	@kubectl get pods -A | grep -E "local-dev-all|minio|elastic|kafka|cnpg"
@@ -1040,7 +1033,15 @@ local-dev-svc-deploy:  _env-check ## Deploy all services into local dev Kind clu
 		exit 1; \
 	fi
 
-	$(MAKE) jsreport-deploy
+	# MinIO Tenant Configuration
+	# Document
+	$(MAKE) minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies
+	$(MAKE) minio-svc-user-secret-create SVC_NAME=document
+	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json
+	# Payment
+	$(MAKE) minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import
+	$(MAKE) minio-svc-user-secret-create SVC_NAME=payment
+	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json
 
 	@SVC_NAMES="web-vue,agent-portal-gateway,auth,product,policy-search,dashboard,policy,pricing,document,payment,chat" ; \
 	SVC_NAMES=$$(echo "$$SVC_NAMES" | tr ',' ' ') ; \
