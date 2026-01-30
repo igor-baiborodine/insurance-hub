@@ -976,13 +976,28 @@ legacy-all-build: ## Build all legacy artifacts sequentially (Java → Frontend 
 	@echo "✅ Legacy all legacy artifacts build completed!"
 	@echo "📦 Ready for k8s deployment!"
 
-.PHONY: local-dev-infra-deploy
-local-dev-infra-deploy: _env-check ## Deploy all infra apps into local dev Kind cluster. Usage: make local-dev-infra-deploy
-	@echo "🚀 Deploying local-dev infra apps (all optional args omitted)..."
-	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
-		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
+
+.PHONY: cluster-qa-monitoring-deploy
+cluster-qa-monitoring-deploy: _env-check ## Deploy monitoring stack (Prometheus, Grafana, Zipkin) into qa cluster. Usage: make cluster-qa-monitoring-deploy
+	@echo "🚀 Deploying monitoring stack into '$(ENV_NAME)' cluster..."
+	@if [ "$(ENV_NAME)" != "qa" ]; then \
+		echo "ERROR: This target is only applicable for the 'qa' environment."; \
 		exit 1; \
 	fi
+	
+	# Prometheus & Grafana stack
+	$(MAKE) prometheus-stack-install
+
+	# Zipkin (requires Elasticsearch)
+	$(MAKE) zipkin-es-user-secret-create
+	$(MAKE) zipkin-es-user-create
+	$(MAKE) zipkin-install
+
+	@echo "✅ QA cluster monitoring stack deployed!"
+
+.PHONY: cluster-infra-deploy
+cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring stack) into either local-dev or qa cluster. Usage: make cluster-infra-deploy
+	@echo "🚀 Deploying Insurance Hub infra apps (all optional args omitted) into '$(ENV_NAME)' cluster..."
 
 	# Infra operators
 	$(MAKE) es-operator-deploy & \
@@ -1025,13 +1040,9 @@ local-dev-infra-deploy: _env-check ## Deploy all infra apps into local dev Kind 
 	@echo "✅ Infra apps deployed to local-dev cluster!"
 	@kubectl get pods -A | grep -E "local-dev-all|minio|elastic|kafka|cnpg"
 
-.PHONY: local-dev-svc-deploy
-local-dev-svc-deploy:  _env-check ## Deploy all services into local dev Kind cluster. Usage: make local-dev-svc-deploy
-	@echo "🚀 Deploying local-dev services..."
-	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
-		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
-		exit 1; \
-	fi
+.PHONY: cluster-svc-deploy
+cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or qa cluster. Usage: make cluster-svc-deploy
+	@echo "🚀 Deploying Insurance Hub services into '$(ENV_NAME)' cluster..."
 
 	# MinIO Tenant Configuration
 	# Document
