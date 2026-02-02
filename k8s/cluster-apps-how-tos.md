@@ -4,12 +4,12 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**
 
-- [QA—Observability](#qaobservability)
+- [Observability (QA)](#observability-qa)
   - [Prometheus & Grafana](#prometheus--grafana)
-  - [Zipkin](#zipkin)
-- [Data](#data)
+  - [Zipkin (legacy)](#zipkin-legacy)
+- [Infra](#infra)
   - [Postgres](#postgres)
-  - [MongoDB](#mongodb)
+  - [MongoDB (legacy)](#mongodb-legacy)
   - [Elasticsearch](#elasticsearch)
   - [MinIO](#minio)
   - [Kafka](#kafka)
@@ -26,7 +26,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
 > ⚠️ Arguments in square brackets are optional. When omitted, the default value is used. The
 > default value can be found by searching argument name in the corresponding `Makefile`.
 
-## QA—Observability
+## Observability (QA)
 
 - `cd k8s`
 
@@ -48,7 +48,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
     ```
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=observability-install-<iso-date>`
 
-### Zipkin
+### Zipkin (legacy)
 
 - **Prerequisites**: [Elasticsearch](#elasticsearch) 
 - `make zipkin-es-user-secret-create`
@@ -58,9 +58,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
 - `make zipkin-ui` and go to `http://localhost:9411`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=zipkin-install-<iso-date>`
 
-## Data
-
-Deploy the necessary data resources into the either `local-dev-all` or `qa-data` namespaces.
+## Infra
 
 ### Postgres
 
@@ -89,29 +87,13 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   6. **product** service: 
   - `make postgres-svc-secret-create SVC_NAME=product [PG_SVC_USER_PWD=<user-pwd>]`
   - `make postgres-svc-deploy SVC_NAME=product`, wait at least one minute for the cluster to be ready.
-
-- `kubectl get pods -n qa-data | grep postgres`
-    ```shell
-    NAME                     READY   STATUS    RESTARTS   AGE
-    qa-postgres-auth-1       1/1     Running   0          47m
-    qa-postgres-auth-2       1/1     Running   0          45m
-    qa-postgres-document-1   1/1     Running   0          36m
-    qa-postgres-document-2   1/1     Running   0          35m
-    qa-postgres-payment-1    1/1     Running   0          28m
-    qa-postgres-payment-2    1/1     Running   0          27m
-    qa-postgres-policy-1     1/1     Running   0          11m
-    qa-postgres-policy-2     1/1     Running   0          11m
-    qa-postgres-product-1    1/1     Running   0          9m
-    qa-postgres-product-2    1/1     Running   0          9m
-    qa-postgres-pricing-1    1/1     Running   0          4m
-    qa-postgres-pricing-2    1/1     Running   0          4m
-    ```
+ 
 - **QA**: `make grafana-ui`
 - **QA/Grafana**: In _Dashboards > New > Import_, add the "CloudNativePG" dashboard using the following
   URL: https://grafana.com/grafana/dashboards/20417-cloudnativepg/.
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
 
-### MongoDB
+### MongoDB (legacy)
 
 - `make mongodb-operator-install`
 - `make mongodb-root-user-secret-create [MONGO_ROOT_USER_PWD=<user-pwd>]`

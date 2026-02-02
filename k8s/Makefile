@@ -984,7 +984,12 @@ cluster-qa-monitoring-deploy: _env-check ## Deploy monitoring stack (Prometheus,
 		echo "ERROR: This target is only applicable for the 'qa' environment."; \
 		exit 1; \
 	fi
-	
+
+	# Elasticsearch
+	$(MAKE) es-operator-deploy
+	@echo "⏳ Waiting 15s for elastic operator..." && sleep 15
+	$(MAKE) es-deploy
+
 	# Prometheus & Grafana stack
 	$(MAKE) prometheus-stack-install
 
@@ -1000,7 +1005,6 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	@echo "🚀 Deploying Insurance Hub infra apps (all optional args omitted) into '$(ENV_NAME)' cluster..."
 
 	# Infra operators
-	$(MAKE) es-operator-deploy & \
 	$(MAKE) postgres-operator-deploy & \
 	$(MAKE) minio-operator-deploy & \
 	$(MAKE) mongodb-operator-install & \
@@ -1008,7 +1012,11 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	@echo "⏳ Waiting 15s for infra operators..." && sleep 15
 
 	# Elasticsearch
-	$(MAKE) es-deploy
+	@if [ "$(ENV_NAME)" = "local-dev" ]; then \
+  		$(MAKE) es-operator-deploy ; \
+		@echo "⏳ Waiting 15s for elastic operator..." && sleep 15 ; \
+		$(MAKE) es-deploy ; \
+	fi
 
 	# Postgres
 	@POSTGRES_SVC_NAMES="auth,document,payment,policy,pricing,product" ; \
