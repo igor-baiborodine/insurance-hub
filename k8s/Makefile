@@ -362,6 +362,20 @@ es-deploy: _env-check ## Deploy Elasticsearch cluster
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(OVERLAYS_FILE_PATH)"/infra/elastic/elasticsearch.yaml;
 	@echo "✅ Elasticsearch cluster deployment initiated. Check status with: make es-status"
 
+.PHONY: es-elastic-user-secret-copy
+es-elastic-user-secret-copy: _env-check _data-ns-check _svc-ns-check ## Copy Elasticsearch elastic user creds secret from data namespace to service namespace (QA only). Usage: make es-elastic-user-secret-copy
+	@SECRET_NAME=$(ENV_NAME)-elasticsearch-es-elastic-user ; \
+	if [ "$(ENV_NAME)" != "qa" ]; then \
+	   echo "ERROR: This target is only applicable for the 'qa' environment."; \
+	   exit 1; \
+	fi ; \
+	echo "Copying Elasticsearch default user creds secret from $(DATA_NS) to $(SVC_NS)..." ; \
+	kubectl get secret "$$SECRET_NAME" \
+		-n "$(DATA_NS)" -o yaml | \
+		sed "s/namespace: $(DATA_NS)/namespace: $(SVC_NS)/" | \
+		kubectl apply -f - ; \
+	echo "✅ Secret '$$SECRET_NAME' successfully copied to $(SVC_NS)."
+
 .PHONY: es-status
 es-status: _env-check ## Show Elasticsearch cluster status
 	@echo "Status for namespace: $(DATA_NS)"
@@ -876,12 +890,21 @@ zipkin-ui: ## Access Zipkin UI via port-forward
 # Namespace is auto-detected from the current kubectl context
 ################################################################################
 
+.PHONY: svc-image-load
+svc-image-load: _svc-name-check ## Load a locally built Docker image into the target cluster based on ENV_NAME. Usage: make svc-image-load ENV_NAME=<env> SVC_NAME=<svc-name>
+	@if [ "$(ENV_NAME)" = "qa" ]; then \
+	   echo "ENV_NAME='qa' detected. Delegating to 'svc-image-qa-load'..."; \
+	   $(MAKE) svc-image-qa-load SVC_NAME=$(SVC_NAME) ENV_NAME=$(ENV_NAME); \
+	elif [ "$(ENV_NAME)" = "local-dev" ]; then \
+	   echo "ENV_NAME='local-dev' detected. Delegating to 'svc-image-local-dev-load'..."; \
+	   $(MAKE) svc-image-local-dev-load SVC_NAME=$(SVC_NAME) ENV_NAME=$(ENV_NAME); \
+	else \
+	   echo "ERROR: Unsupported ENV_NAME='$(ENV_NAME)'. Supported values: local-dev, qa."; \
+	   exit 1; \
+	fi
+
 .PHONY: svc-image-local-dev-load
 svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image into the local-dev cluster. Usage: make svc-image-local-dev-load SVC_NAME=<svc-name>
-	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
-		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
-		exit 1; \
-	fi
 	@IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
 	if [ "$(SVC_NAME)" = "agent-portal-gateway" ] || [ "$(SVC_NAME)" = "web-vue" ]; then \
 		IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
@@ -956,7 +979,7 @@ svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service
 	@echo "🗑 Service '$(SVC_NAME)' deleted."
 
 .PHONY: svc-load-delete-deploy
-svc-load-delete-deploy: _env-check _svc-ns-check _svc-name-check svc-image-local-dev-load svc-delete svc-deploy ## Load Docker image, delete and deploy a Java service or web app using Kustomize. Usage: make svc-load-delete-deploy SVC_NAME=<svc-name>
+svc-load-delete-deploy: _env-check _svc-ns-check _svc-name-check svc-image-load svc-delete svc-deploy ## Load Docker image, delete and deploy a Java service or web app using Kustomize. Usage: make svc-load-delete-deploy SVC_NAME=<svc-name>
 
 ##############################################################################################
 # Local Dev Cluster Infra and Services Deployment Targets
@@ -978,7 +1001,7 @@ legacy-all-build: ## Build all legacy artifacts sequentially (Java → Frontend 
 
 
 .PHONY: cluster-qa-monitoring-deploy
-cluster-qa-monitoring-deploy: _env-check ## Deploy monitoring stack (Prometheus, Grafana, Zipkin) into qa cluster. Usage: make cluster-qa-monitoring-deploy
+cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring stack (Prometheus, Grafana, Zipkin) into qa cluster. Usage: make cluster-qa-monitoring-deploy
 	@echo "🚀 Deploying monitoring stack into '$(ENV_NAME)' cluster..."
 	@if [ "$(ENV_NAME)" != "qa" ]; then \
 		echo "ERROR: This target is only applicable for the 'qa' environment."; \
@@ -989,6 +1012,7 @@ cluster-qa-monitoring-deploy: _env-check ## Deploy monitoring stack (Prometheus,
 	$(MAKE) es-operator-deploy
 	@echo "⏳ Waiting 15s for elastic operator..." && sleep 15
 	$(MAKE) es-deploy
+	$(MAKE) es-elastic-user-secret-copy
 
 	# Prometheus & Grafana stack
 	$(MAKE) prometheus-stack-install
@@ -1054,13 +1078,13 @@ cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or 
 
 	# MinIO Tenant Configuration
 	# Document
-	$(MAKE) minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies
-	$(MAKE) minio-svc-user-secret-create SVC_NAME=document
-	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json
-	# Payment
-	$(MAKE) minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import
-	$(MAKE) minio-svc-user-secret-create SVC_NAME=payment
-	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json
+#	$(MAKE) minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies
+#	$(MAKE) minio-svc-user-secret-create SVC_NAME=document
+#	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json
+#	# Payment
+#	$(MAKE) minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import
+#	$(MAKE) minio-svc-user-secret-create SVC_NAME=payment
+#	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json
 
 	@SVC_NAMES="web-vue,agent-portal-gateway,auth,product,policy-search,dashboard,policy,pricing,document,payment,chat" ; \
 	SVC_NAMES=$$(echo "$$SVC_NAMES" | tr ',' ' ') ; \

@@ -11,6 +11,12 @@ echo "Using NAMESPACE=${NAMESPACE}"
 MINIO_TENANT_ALIAS="${NAMESPACE}"
 MINIO_STORAGE_CONFIG_SECRET_NAME="${NAMESPACE}-storage-config"
 
+if [ "${ENV_NAME}" = "qa" ]; then
+    MINIO_SCHEMA="https"
+else
+    MINIO_SCHEMA="http"
+fi
+
 echo "Retrieving MinIO root user credentials from secret '${MINIO_STORAGE_CONFIG_SECRET_NAME}'..."
 MINIO_ROOT_USER=$(kubectl get secret "${MINIO_STORAGE_CONFIG_SECRET_NAME}" -n "${NAMESPACE}" -o jsonpath='{.data.config\.env}' | base64 --decode | grep MINIO_ROOT_USER | cut -d'"' -f2)
 MINIO_ROOT_PASSWORD=$(kubectl get secret "${MINIO_STORAGE_CONFIG_SECRET_NAME}" -n "${NAMESPACE}" -o jsonpath='{.data.config\.env}' | base64 --decode | grep MINIO_ROOT_PASSWORD | cut -d'"' -f2)
@@ -29,11 +35,11 @@ MINIO_CONSOLE_POD_NAME="${MINIO_CONSOLE_POD_NAME_WITH_PREFIX#pod/}"
 MINIO_S3_API_HOSTNAME="${NAMESPACE}-hl"
 echo "Adding MinIO alias for tenant '${SVC_NAME}' S3 API (if not existing)..."
 kubectl exec -it "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- \
-  mc alias set "${MINIO_TENANT_ALIAS}" "http://${MINIO_S3_API_HOSTNAME}:9000" "${MINIO_ROOT_USER}" "${MINIO_ROOT_PASSWORD}" || true
+  mc alias set "${MINIO_TENANT_ALIAS}" "${MINIO_SCHEMA}://${MINIO_S3_API_HOSTNAME}:9000" "${MINIO_ROOT_USER}" "${MINIO_ROOT_PASSWORD}" --insecure || true
 
 echo "Creating bucket '${BUCKET_NAME}'..."
 kubectl exec -it "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- \
-  mc mb "${NAMESPACE}/${BUCKET_NAME}" || true # '|| true' allows it to not fail if bucket already exists
-kubectl exec -it "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- mc ls "${NAMESPACE}"
+  mc mb "${MINIO_TENANT_ALIAS}/${BUCKET_NAME}" --insecure || true # '|| true' allows it to not fail if bucket already exists
+kubectl exec -it "${MINIO_CONSOLE_POD_NAME}" -n "${NAMESPACE}" -- mc ls "${MINIO_TENANT_ALIAS}" --insecure
 
 echo "✅ Bucket '${BUCKET_NAME}' created for tenant '${SVC_NAME}'."
