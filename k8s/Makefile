@@ -369,12 +369,15 @@ es-elastic-user-secret-copy: _env-check _data-ns-check _svc-ns-check ## Copy Ela
 	   echo "ERROR: This target is only applicable for the 'qa' environment."; \
 	   exit 1; \
 	fi ; \
-	echo "Copying Elasticsearch default user creds secret from $(DATA_NS) to $(SVC_NS)..." ; \
+	echo "Copying Elasticsearch default user creds secret '$$SECRET_NAME' from $(DATA_NS) to $(SVC_NS)..." ; \
 	kubectl get secret "$$SECRET_NAME" \
-		-n "$(DATA_NS)" -o yaml | \
-		sed "s/namespace: $(DATA_NS)/namespace: $(SVC_NS)/" | \
-		kubectl apply -f - ; \
-	echo "✅ Secret '$$SECRET_NAME' successfully copied to $(SVC_NS)."
+	   -n "$(DATA_NS)" -o yaml | \
+	sed -e "s/namespace: $(DATA_NS)/namespace: $(SVC_NS)/" \
+	    -e '/eck\.k8s\.elastic\.co/d' \
+	    -e '/elasticsearch\.k8s\.elastic\.co/d' \
+	    -e '/common\.k8s\.elastic\.co/d' | \
+	kubectl apply -f - ; \
+	echo "✅ Secret '$$SECRET_NAME' copied from $(DATA_NS) to $(SVC_NS)"
 
 .PHONY: es-status
 es-status: _env-check ## Show Elasticsearch cluster status
