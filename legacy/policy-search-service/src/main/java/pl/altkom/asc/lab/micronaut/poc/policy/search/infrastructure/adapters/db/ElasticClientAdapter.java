@@ -18,6 +18,8 @@ import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
 import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.client.RestHighLevelClientBuilder;
+import org.elasticsearch.client.RequestOptions;
 
 import javax.inject.Singleton;
 import javax.net.ssl.SSLContext;
@@ -37,33 +39,35 @@ public class ElasticClientAdapter {
 
     Maybe<IndexResponse> index(IndexRequest indexRequest) {
         return Maybe.create(sink -> {
-            restHighLevelClient.indexAsync(indexRequest, new ActionListener<IndexResponse>() {
-                @Override
-                public void onResponse(IndexResponse indexResponse) {
-                    sink.onSuccess(indexResponse);
-                }
+            restHighLevelClient.indexAsync(indexRequest, RequestOptions.DEFAULT,
+                    new ActionListener<IndexResponse>() {
+                        @Override
+                        public void onResponse(IndexResponse indexResponse) {
+                            sink.onSuccess(indexResponse);
+                        }
 
-                @Override
-                public void onFailure(Exception e) {
-                    sink.onError(e);
-                }
-            });
+                        @Override
+                        public void onFailure(Exception e) {
+                            sink.onError(e);
+                        }
+                    });
         });
     }
 
     public Maybe<SearchResponse> search(SearchRequest searchRequest) {
         return Maybe.create(sink ->
-                restHighLevelClient.searchAsync(searchRequest, new ActionListener<SearchResponse>() {
-                    @Override
-                    public void onResponse(SearchResponse searchResponse) {
-                        sink.onSuccess(searchResponse);
-                    }
+                restHighLevelClient.searchAsync(searchRequest, RequestOptions.DEFAULT,
+                        new ActionListener<SearchResponse>() {
+                            @Override
+                            public void onResponse(SearchResponse searchResponse) {
+                                sink.onSuccess(searchResponse);
+                            }
 
-                    @Override
-                    public void onFailure(Exception e) {
-                        sink.onError(e);
-                    }
-                }));
+                            @Override
+                            public void onFailure(Exception e) {
+                                sink.onError(e);
+                            }
+                        }));
     }
 
     private RestHighLevelClient buildClient() {
@@ -98,9 +102,12 @@ public class ElasticClientAdapter {
                     .setConnectionRequestTimeout(elasticSearchSettings.getConnectionRequestTimeout())
                     .setSocketTimeout(elasticSearchSettings.getSocketTimeout())
             );
-            builder.setMaxRetryTimeoutMillis(elasticSearchSettings.getMaxRetryTimeout());
 
-            RestHighLevelClient client = new RestHighLevelClient(builder);
+            RestClient lowLevelClient = builder.build();
+            RestHighLevelClient client = new RestHighLevelClientBuilder(lowLevelClient)
+                    .setApiCompatibilityMode(true)
+                    .build();
+
             log.info("Elasticsearch client initialized");
             testConnection(client);
 
@@ -113,7 +120,7 @@ public class ElasticClientAdapter {
 
     private void testConnection(RestHighLevelClient client) {
         try {
-            boolean success = client.ping();
+            boolean success = client.ping(RequestOptions.DEFAULT);
             if (success) {
                 log.info("Successfully connected to Elasticsearch at {}:{}",
                         elasticSearchSettings.getHost(), elasticSearchSettings.getPort());
