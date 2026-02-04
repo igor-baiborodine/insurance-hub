@@ -1081,13 +1081,13 @@ cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or 
 
 	# MinIO Tenant Configuration
 	# Document
-#	$(MAKE) minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies
-#	$(MAKE) minio-svc-user-secret-create SVC_NAME=document
-#	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json
-#	# Payment
-#	$(MAKE) minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import
-#	$(MAKE) minio-svc-user-secret-create SVC_NAME=payment
-#	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json
+	$(MAKE) minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies
+	$(MAKE) minio-svc-user-secret-create SVC_NAME=document
+	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json
+	# Payment
+	$(MAKE) minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import
+	$(MAKE) minio-svc-user-secret-create SVC_NAME=payment
+	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json
 
 	@SVC_NAMES="web-vue,agent-portal-gateway,auth,product,policy-search,dashboard,policy,pricing,document,payment,chat" ; \
 	SVC_NAMES=$$(echo "$$SVC_NAMES" | tr ',' ' ') ; \
