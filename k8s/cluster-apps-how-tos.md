@@ -4,33 +4,48 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**
 
-- [Observability (QA)](#observability-qa)
-  - [Prometheus & Grafana](#prometheus--grafana)
-  - [Zipkin (legacy)](#zipkin-legacy)
-- [Infra](#infra)
-  - [Postgres](#postgres)
-  - [MongoDB (legacy)](#mongodb-legacy)
-  - [Elasticsearch](#elasticsearch)
-  - [MinIO](#minio)
-  - [Kafka](#kafka)
-- [Services](#services)
+- [Automatic Deployment](#automatic-deployment)
+- [Step-by-Step Deployment](#step-by-step-deployment)
+  - [Observability (QA)](#observability-qa)
+    - [Prometheus & Grafana](#prometheus--grafana)
+    - [Zipkin (legacy)](#zipkin-legacy)
+  - [Infra](#infra)
+    - [Postgres](#postgres)
+    - [MongoDB (legacy)](#mongodb-legacy)
+    - [Elasticsearch](#elasticsearch)
+    - [MinIO](#minio)
+    - [Kafka](#kafka)
+  - [Services](#services)
 - [Cluster Load Monitoring](#cluster-load-monitoring)
   - [Local Dev (Kind)](#local-dev-kind)
   - [QA (K3s)](#qa-k3s)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-Use the following sequence of [Make](https://www.gnu.org/software/make/) targets and shell commands
-to deploy cluster apps including infrastructure and "Insurance Hub" services.
+> Use either automatic or step-by-step sequence of [Make](https://www.gnu.org/software/make/) 
+targets and shell commands to deploy cluster apps including cluster monitoring (QA only) 
+and "Insurance Hub" infrastructure and services.
+
+## Automatic Deployment
+
+- `make legacy-all-build`
+- `cd k8s`
+- **QA**: `make cluster-qa-monitoring-deploy`
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-monitoring-deploy-<iso-date>`
+- `make cluster-infra-deploy`
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-infra-deploy-<iso-date>` 
+- `make cluster-svc-deploy`
+
+## Step-by-Step Deployment
 
 > ⚠️ Arguments in square brackets are optional. When omitted, the default value is used. The
 > default value can be found by searching argument name in the corresponding `Makefile`.
 
-## Observability (QA)
-
 - `cd k8s`
+ 
+### Observability (QA)
 
-### Prometheus & Grafana
+#### Prometheus & Grafana
 
 - `make prometheus-stack-install`
 - `make prometheus-stack-status`
@@ -48,7 +63,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
     ```
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=observability-install-<iso-date>`
 
-### Zipkin (legacy)
+#### Zipkin (legacy)
 
 - **Prerequisites**: [Elasticsearch](#elasticsearch) 
 - `make zipkin-es-user-secret-create`
@@ -58,9 +73,9 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
 - `make zipkin-ui` and go to `http://localhost:9411`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=zipkin-install-<iso-date>`
 
-## Infra
+### Infra
 
-### Postgres
+#### Postgres
 
 - `make postgres-operator-deploy`
 
@@ -93,7 +108,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
   URL: https://grafana.com/grafana/dashboards/20417-cloudnativepg/.
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
 
-### MongoDB (legacy)
+#### MongoDB (legacy)
 
 - `make mongodb-operator-install`
 - `make mongodb-root-user-secret-create [MONGO_ROOT_USER_PWD=<user-pwd>]`
@@ -102,7 +117,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
 - `make mongodb-status`  
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=mongodb-deploy-<iso-date>`
 
-### Elasticsearch
+#### Elasticsearch
 
 - `make es-operator-deploy`
 - `make es-deploy`
@@ -113,7 +128,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
   URL: https://grafana.com/grafana/dashboards/2322-elasticsearch/.
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
 
-### MinIO
+#### MinIO
 
 - `make minio-operator-deploy`
   
@@ -140,7 +155,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
     - https://grafana.com/grafana/dashboards/19237-minio-bucket-dashboard/
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=minio-deploy-<iso-date>`
 
-### Kafka
+#### Kafka
 - `make kafka-strimzi-operator-install`
 - `make kafka-deploy`
 - `make kafka-status`
@@ -149,9 +164,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
   following [JSON](https://github.com/strimzi/strimzi-kafka-operator/blob/0.48.0/examples/metrics/grafana-dashboards/strimzi-kafka.json) file
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
 
-## Services
-
-Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` namespaces.
+### Services
 
 - `cd ..` - from the project root
 - `make java-all-build`
