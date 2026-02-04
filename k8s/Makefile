@@ -1015,7 +1015,6 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 	$(MAKE) es-operator-deploy
 	@echo "⏳ Waiting 15s for elastic operator..." && sleep 15
 	$(MAKE) es-deploy
-	$(MAKE) es-elastic-user-secret-copy
 
 	# Prometheus & Grafana stack
 	$(MAKE) prometheus-stack-install
@@ -1078,6 +1077,9 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 .PHONY: cluster-svc-deploy
 cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or qa cluster. Usage: make cluster-svc-deploy
 	@echo "🚀 Deploying Insurance Hub services into '$(ENV_NAME)' cluster..."
+
+	# Elasticsearch
+	$(MAKE) es-elastic-user-secret-copy
 
 	# MinIO Tenant Configuration
 	# Document
