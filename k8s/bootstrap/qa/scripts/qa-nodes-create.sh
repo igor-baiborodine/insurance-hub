@@ -11,11 +11,11 @@ for NODE in $NODES_ALL; do
         if [[ $NODES_MASTER =~ $NODE ]]; then
             LIMITS_CPU=7
             LIMITS_MEMORY=16
-            ROOT_SIZE=50
+            ROOT_SIZE=100
         else
             LIMITS_CPU=5
             LIMITS_MEMORY=12
-            ROOT_SIZE=30
+            ROOT_SIZE=80
         fi
         if ! lxc profile show "$NODE-profile" &>/dev/null; then
             lxc profile copy default "$NODE-profile"
