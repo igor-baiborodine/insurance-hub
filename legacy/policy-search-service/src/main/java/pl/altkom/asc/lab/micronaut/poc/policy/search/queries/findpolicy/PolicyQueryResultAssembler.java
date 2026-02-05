@@ -19,7 +19,10 @@ class PolicyQueryResultAssembler {
                 .sorted(Comparator.comparing(PolicyListItemDto::getDateFrom, Comparator.nullsLast(Comparator.reverseOrder())))
                 .collect(Collectors.toList());
 
+        FindPolicyQueryResult result = new FindPolicyQueryResult();
+        result.setPolicies(items);
         log.info("Assembled FindPolicyQueryResult with {} items", items.size());
-        return new FindPolicyQueryResult(items);
+
+        return result;
     }
 }

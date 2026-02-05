@@ -8,6 +8,7 @@ import io.micronaut.http.annotation.QueryValue;
 import io.micronaut.security.annotation.Secured;
 import io.micronaut.security.rules.SecurityRule;
 import io.reactivex.Maybe;
+import lombok.extern.slf4j.Slf4j;
 import pl.altkom.asc.lab.micronaut.poc.gateway.client.v1.PolicyGatewayClient;
 import pl.altkom.asc.lab.micronaut.poc.gateway.client.v1.PolicySearchGatewayClient;
 import pl.altkom.asc.lab.micronaut.poc.policy.search.service.api.v1.queries.findpolicy.FindPolicyQueryResult;
@@ -20,6 +21,7 @@ import pl.altkom.asc.lab.micronaut.poc.policy.service.api.v1.queries.getpolicyde
 import javax.inject.Inject;
 import java.security.Principal;
 
+@Slf4j
 @Secured(SecurityRule.IS_AUTHENTICATED)
 @Controller("/api/policies")
 public class PolicyGatewayController {
@@ -30,8 +32,10 @@ public class PolicyGatewayController {
     private PolicySearchGatewayClient policySearchClient;
 
     @Get
-    Maybe<FindPolicyQueryResult> policies(@QueryValue(value = "q", defaultValue = "*") String q) {
-        return policySearchClient.policies(q);
+    public Maybe<FindPolicyQueryResult> policies(@QueryValue(value = "q", defaultValue = "*") String q) {
+        return policySearchClient.policies(q)
+                .doOnSuccess(result -> log.info("Policies found for query '{}': {}", q, result.getPolicies().size()))
+                .doOnError(error -> log.error("Error searching policies: {}", error.getMessage()));
     }
 
     @Get("/{policyNumber}")
