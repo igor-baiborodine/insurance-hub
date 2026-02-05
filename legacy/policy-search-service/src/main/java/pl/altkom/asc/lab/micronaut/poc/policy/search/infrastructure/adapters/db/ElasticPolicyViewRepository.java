@@ -39,22 +39,25 @@ public class ElasticPolicyViewRepository implements PolicyViewRepository {
     @Override
     public Maybe<List<PolicyView>> findAll(FindPolicyQuery query) {
         log.info("Searching policies for query: {}", query.getQueryText());
-        SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
 
         QueryStringQueryBuilder queryStringQueryBuilder = QueryBuilders.queryStringQuery(query.getQueryText())
                 .field("number")
                 .field("policyHolder");
-
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.query(queryStringQueryBuilder).size(100);
 
+        SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
         searchRequest.source(searchSourceBuilder);
 
         return elasticClientAdapter
                 .search(searchRequest)
-                .map(this::mapSearchResponse);
+                .map(response -> {
+                    List<PolicyView> results = mapSearchResponse(response);
+                    log.info("Found {} policies for query: {}", results.size(), query.getQueryText());
+                    return results;
+                });
     }
-    
+
     private List<PolicyView> mapSearchResponse(SearchResponse searchResponse) {
         return Arrays
                 .stream(searchResponse.getHits().getHits())
