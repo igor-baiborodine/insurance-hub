@@ -362,6 +362,23 @@ es-deploy: _env-check ## Deploy Elasticsearch cluster
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(OVERLAYS_FILE_PATH)"/infra/elastic/elasticsearch.yaml;
 	@echo "✅ Elasticsearch cluster deployment initiated. Check status with: make es-status"
 
+.PHONY: es-elastic-user-secret-copy
+es-elastic-user-secret-copy: _env-check _data-ns-check _svc-ns-check ## Copy Elasticsearch elastic user creds secret from data namespace to service namespace (QA only). Usage: make es-elastic-user-secret-copy
+	@SECRET_NAME=$(ENV_NAME)-elasticsearch-es-elastic-user ; \
+	if [ "$(ENV_NAME)" != "qa" ]; then \
+	   echo "ERROR: This target is only applicable for the 'qa' environment."; \
+	   exit 1; \
+	fi ; \
+	echo "Copying Elasticsearch default user creds secret '$$SECRET_NAME' from $(DATA_NS) to $(SVC_NS)..." ; \
+	kubectl get secret "$$SECRET_NAME" \
+	   -n "$(DATA_NS)" -o yaml | \
+	sed -e "s/namespace: $(DATA_NS)/namespace: $(SVC_NS)/" \
+	    -e '/eck\.k8s\.elastic\.co/d' \
+	    -e '/elasticsearch\.k8s\.elastic\.co/d' \
+	    -e '/common\.k8s\.elastic\.co/d' | \
+	kubectl apply -f - ; \
+	echo "✅ Secret '$$SECRET_NAME' copied from $(DATA_NS) to $(SVC_NS)"
+
 .PHONY: es-status
 es-status: _env-check ## Show Elasticsearch cluster status
 	@echo "Status for namespace: $(DATA_NS)"
@@ -680,6 +697,7 @@ mongodb-root-user-secret-create: _env-check _data-ns-check ## Create/update secr
 	@kubectl create secret generic "$(ENV_NAME)"-mongodb-root-user-creds \
 	    --namespace "$(DATA_NS)" \
 	    --type Opaque \
+	    --from-literal=username="root" \
 	    --from-literal=password="$(MONGO_ROOT_USER_PWD)" \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@echo "Secret '"$(ENV_NAME)"-mongodb-root-user-creds' successfully created/updated in namespace $(DATA_NS)"
@@ -875,12 +893,21 @@ zipkin-ui: ## Access Zipkin UI via port-forward
 # Namespace is auto-detected from the current kubectl context
 ################################################################################
 
+.PHONY: svc-image-load
+svc-image-load: _svc-name-check ## Load a locally built Docker image into the target cluster based on ENV_NAME. Usage: make svc-image-load ENV_NAME=<env> SVC_NAME=<svc-name>
+	@if [ "$(ENV_NAME)" = "qa" ]; then \
+	   echo "ENV_NAME='qa' detected. Delegating to 'svc-image-qa-load'..."; \
+	   $(MAKE) svc-image-qa-load SVC_NAME=$(SVC_NAME) ENV_NAME=$(ENV_NAME); \
+	elif [ "$(ENV_NAME)" = "local-dev" ]; then \
+	   echo "ENV_NAME='local-dev' detected. Delegating to 'svc-image-local-dev-load'..."; \
+	   $(MAKE) svc-image-local-dev-load SVC_NAME=$(SVC_NAME) ENV_NAME=$(ENV_NAME); \
+	else \
+	   echo "ERROR: Unsupported ENV_NAME='$(ENV_NAME)'. Supported values: local-dev, qa."; \
+	   exit 1; \
+	fi
+
 .PHONY: svc-image-local-dev-load
 svc-image-local-dev-load: _svc-name-check ## Loads a locally built Docker image into the local-dev cluster. Usage: make svc-image-local-dev-load SVC_NAME=<svc-name>
-	@if [ "$(ENV_NAME)" != "local-dev" ]; then \
-		echo "ERROR: This target is only applicable for the 'local-dev' environment."; \
-		exit 1; \
-	fi
 	@IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
 	if [ "$(SVC_NAME)" = "agent-portal-gateway" ] || [ "$(SVC_NAME)" = "web-vue" ]; then \
 		IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
@@ -955,4 +982,122 @@ svc-delete: _env-check _svc-name-check ## Delete (purge) a deployed Java service
 	@echo "🗑 Service '$(SVC_NAME)' deleted."
 
 .PHONY: svc-load-delete-deploy
-svc-load-delete-deploy: _env-check _svc-ns-check _svc-name-check svc-image-local-dev-load svc-delete svc-deploy ## Load Docker image, delete and deploy a Java service or web app using Kustomize. Usage: make svc-load-delete-deploy SVC_NAME=<svc-name>
+svc-load-delete-deploy: _env-check _svc-ns-check _svc-name-check svc-image-load svc-delete svc-deploy ## Load Docker image, delete and deploy a Java service or web app using Kustomize. Usage: make svc-load-delete-deploy SVC_NAME=<svc-name>
+
+##############################################################################################
+# Local Dev Cluster Infra and Services Deployment Targets
+# Targets for deploying and managing Insurance Hub infra and service apps in local dev cluster
+##############################################################################################
+
+.PHONY: legacy-all-build
+legacy-all-build: ## Build all legacy artifacts sequentially (Java → Frontend → Docker). Usage: legacy-all-build
+	@echo "🚀 Building all legacy artifacts (Java → Frontend → Docker)..."
+
+	$(MAKE) java-all-build
+	$(MAKE) frontend-build
+	$(MAKE) docker-frontend-build
+	$(MAKE) docker-java-svc-all-build
+	@docker images | grep insurance-hub
+
+	@echo "✅ Legacy all legacy artifacts build completed!"
+	@echo "📦 Ready for k8s deployment!"
+
+
+.PHONY: cluster-qa-monitoring-deploy
+cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring stack (Prometheus, Grafana, Zipkin) into qa cluster. Usage: make cluster-qa-monitoring-deploy
+	@echo "🚀 Deploying monitoring stack into '$(ENV_NAME)' cluster..."
+	@if [ "$(ENV_NAME)" != "qa" ]; then \
+		echo "ERROR: This target is only applicable for the 'qa' environment."; \
+		exit 1; \
+	fi
+
+	# Elasticsearch
+	$(MAKE) es-operator-deploy
+	@echo "⏳ Waiting 15s for elastic operator..." && sleep 15
+	$(MAKE) es-deploy
+
+	# Prometheus & Grafana stack
+	$(MAKE) prometheus-stack-install
+
+	# Zipkin (requires Elasticsearch)
+	$(MAKE) zipkin-es-user-secret-create
+	$(MAKE) zipkin-es-user-create
+	$(MAKE) zipkin-install
+
+	@echo "✅ QA cluster monitoring stack deployed!"
+
+.PHONY: cluster-infra-deploy
+cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring stack) into either local-dev or qa cluster. Usage: make cluster-infra-deploy
+	@echo "🚀 Deploying Insurance Hub infra apps (all optional args omitted) into '$(ENV_NAME)' cluster..."
+
+	# Infra operators
+	$(MAKE) postgres-operator-deploy & \
+	$(MAKE) minio-operator-deploy & \
+	$(MAKE) mongodb-operator-install & \
+	$(MAKE) kafka-strimzi-operator-install & wait
+	@echo "⏳ Waiting 15s for infra operators..." && sleep 15
+
+	# Elasticsearch
+	@if [ "$(ENV_NAME)" = "local-dev" ]; then \
+  		$(MAKE) es-operator-deploy ; \
+		@echo "⏳ Waiting 15s for elastic operator..." && sleep 15 ; \
+		$(MAKE) es-deploy ; \
+	fi
+
+	# Postgres
+	@POSTGRES_SVC_NAMES="auth,document,payment,policy,pricing,product" ; \
+	POSTGRES_SVC_NAMES=$$(echo "$$POSTGRES_SVC_NAMES" | tr ',' ' ') ; \
+	for svc in $$POSTGRES_SVC_NAMES ; do \
+		$(MAKE) postgres-svc-secret-create SVC_NAME=$$svc ; \
+		$(MAKE) postgres-svc-deploy SVC_NAME=$$svc ; \
+	done ;
+
+	# MongoDB
+	$(MAKE) mongodb-root-user-secret-create
+	$(MAKE) mongodb-product-user-secret-create
+	$(MAKE) mongodb-deploy
+
+	# Kafka
+	$(MAKE) kafka-deploy
+
+	# jsreport
+	$(MAKE) jsreport-deploy
+
+	# MinIO Tenants
+	$(MAKE) minio-storage-user-secret-create SVC_NAME=document
+	$(MAKE) minio-storage-config-secret-create SVC_NAME=document
+	$(MAKE) minio-storage-user-secret-create SVC_NAME=payment
+	$(MAKE) minio-storage-config-secret-create SVC_NAME=payment
+	$(MAKE) minio-tenant-deploy SVC_NAME=document & $(MAKE) minio-tenant-deploy SVC_NAME=payment & wait
+	@echo "⏳ Waiting 3m for MinIO tenants.." && sleep 180
+
+	@echo "✅ Infra apps deployed to local-dev cluster!"
+	@kubectl get pods -A | grep -E "local-dev-all|minio|elastic|kafka|cnpg"
+
+.PHONY: cluster-svc-deploy
+cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or qa cluster. Usage: make cluster-svc-deploy
+	@echo "🚀 Deploying Insurance Hub services into '$(ENV_NAME)' cluster..."
+
+	# Elasticsearch
+	$(MAKE) es-elastic-user-secret-copy
+
+	# MinIO Tenant Configuration
+	# Document
+	$(MAKE) minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies
+	$(MAKE) minio-svc-user-secret-create SVC_NAME=document
+	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json
+	# Payment
+	$(MAKE) minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import
+	$(MAKE) minio-svc-user-secret-create SVC_NAME=payment
+	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json
+
+	@SVC_NAMES="web-vue,agent-portal-gateway,auth,product,policy-search,dashboard,policy,pricing,document,payment,chat" ; \
+	SVC_NAMES=$$(echo "$$SVC_NAMES" | tr ',' ' ') ; \
+	for svc in $$SVC_NAMES ; do \
+		$(MAKE) svc-load-delete-deploy SVC_NAME=$$svc ; \
+	done
+	@echo "⏳ Waiting 60s for services..." && sleep 60
+
+	@echo "✅ Service apps deployed to local-dev cluster!"
+	@kubectl get pods | grep -E "web|agent|api"
+	@kubectl top pods | grep -E "web|agent|api"

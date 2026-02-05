@@ -17,7 +17,7 @@ configMapGenerator:
   - name: document-config-legacy
     behavior: merge
     literals:
-      - MINIO_TENANT_ENDPOINT=http://qa-minio-document-hl.qa-minio-document.svc.cluster.local:9000
+      - MINIO_TENANT_ENDPOINT=https://qa-minio-document-hl.qa-minio-document.svc.cluster.local:9000
       - PG_HOST=qa-postgres-document-rw.qa-data.svc.cluster.local
       - KAFKA_HOST=qa-kafka-kafka-bootstrap.qa-data.svc.cluster.local
       - TRACING_ZIPKIN_ENABLED=true

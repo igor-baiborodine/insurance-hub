@@ -1,5 +1,6 @@
 package pl.altkom.asc.lab.micronaut.poc.policy.commands;
 
+import lombok.extern.slf4j.Slf4j;
 import pl.altkom.asc.lab.micronaut.poc.command.bus.CommandHandler;
 import pl.altkom.asc.lab.micronaut.poc.policy.domain.Offer;
 import pl.altkom.asc.lab.micronaut.poc.policy.domain.OfferFactory;
@@ -23,6 +24,7 @@ import javax.transaction.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
+@Slf4j
 @Singleton
 @RequiredArgsConstructor
 public class CreateOfferHandler implements CommandHandler<CreateOfferResult, CreateOfferCommand> {
@@ -33,15 +35,14 @@ public class CreateOfferHandler implements CommandHandler<CreateOfferResult, Cre
     @Transactional
     @Override
     public CreateOfferResult handle(CreateOfferCommand cmd) {
-        //calculate price
+        log.info("Creating new offer {}", cmd);
         CalculatePriceCommand calcPriceCmd = constructPriceCmd(cmd);
         CalculatePriceResult price = pricingOperations.calculatePrice(calcPriceCmd);
 
-        //create & save offer
         Offer offer = OfferFactory.offerFromPrice(calcPriceCmd, price);
         offerRepository.save(offer);
+        log.info("Offer {} created", offer.getNumber());
 
-        //return result
         return constructResult(offer);
     }
 

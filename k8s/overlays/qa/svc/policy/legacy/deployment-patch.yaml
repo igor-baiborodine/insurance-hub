@@ -10,11 +10,13 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 384Mi
             limits:
               cpu: 300m
-              memory: 512Mi
+              memory: 768Mi
           env:
+            - name: MICRONAUT_ENVIRONMENTS
+              value: "qa"
             # Postgres sensitive data
             - name: PG_USER
               valueFrom:

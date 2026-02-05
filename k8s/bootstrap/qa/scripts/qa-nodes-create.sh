@@ -5,20 +5,17 @@ set -euo pipefail
 NODES_MASTER="qa-master"
 NODES_WORKER="qa-worker1 qa-worker2"
 NODES_ALL="$NODES_MASTER $NODES_WORKER"
-BASE_LIMITS_CPU=3
-BASE_LIMITS_MEMORY=8
-BASE_ROOT_SIZE=20
 
 for NODE in $NODES_ALL; do
     if ! lxc info "$NODE" &>/dev/null; then
         if [[ $NODES_MASTER =~ $NODE ]]; then
-            LIMITS_CPU=$((BASE_LIMITS_CPU * 2))
-            LIMITS_MEMORY=$((BASE_LIMITS_MEMORY * 2))
-            ROOT_SIZE=$((BASE_ROOT_SIZE * 2))
+            LIMITS_CPU=7
+            LIMITS_MEMORY=16
+            ROOT_SIZE=100
         else
-            LIMITS_CPU=$BASE_LIMITS_CPU
-            LIMITS_MEMORY=${BASE_LIMITS_MEMORY}
-            ROOT_SIZE=${BASE_ROOT_SIZE}
+            LIMITS_CPU=5
+            LIMITS_MEMORY=12
+            ROOT_SIZE=80
         fi
         if ! lxc profile show "$NODE-profile" &>/dev/null; then
             lxc profile copy default "$NODE-profile"

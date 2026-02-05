@@ -1,5 +1,6 @@
 package pl.altkom.asc.lab.micronaut.poc.policy.commands;
 
+import lombok.extern.slf4j.Slf4j;
 import pl.altkom.asc.lab.micronaut.poc.command.bus.CommandHandler;
 import pl.altkom.asc.lab.micronaut.poc.policy.domain.AgentRef;
 import pl.altkom.asc.lab.micronaut.poc.policy.domain.Offer;
@@ -21,6 +22,7 @@ import javax.transaction.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
+@Slf4j
 @Singleton
 @RequiredArgsConstructor
 public class CreatePolicyHandler implements CommandHandler<CreatePolicyResult, CreatePolicyCommand> {
@@ -33,24 +35,22 @@ public class CreatePolicyHandler implements CommandHandler<CreatePolicyResult, C
     @Transactional
     @Override
     public CreatePolicyResult handle(CreatePolicyCommand cmd) {
-        //get offer
+        log.info("Creating new policy {}", cmd);
         Offer offer = offerRepository.getByNumber(cmd.getOfferNumber());
 
-        //if offer not expired and not already converted
         if (offer.isExpired(LocalDate.now())) {
             throw new RuntimeException("Offer has expired");
         }
-
-        //create policy from offer
-        Person policyHolder = new Person(cmd.getPolicyHolder().getFirstName(), cmd.getPolicyHolder().getLastName(), cmd.getPolicyHolder().getTaxId());
+        Person policyHolder = new Person(
+                cmd.getPolicyHolder().getFirstName(),
+                cmd.getPolicyHolder().getLastName(),
+                cmd.getPolicyHolder().getTaxId());
         AgentRef agent = AgentRef.of(cmd.getAgentLogin());
         Policy policy = policyFactory.fromOffer(offer, policyHolder, agent);
 
-        //save policy and update offer
         policyRepository.save(policy);
-
-        //publish events
         eventPublisher.policyRegisteredEvent(policy.getNumber(), createEvent(policy));
+        log.info("Policy {} created for offer {}", policy.getNumber(), cmd.getOfferNumber());
 
         return new CreatePolicyResult(policy.getNumber());
     }

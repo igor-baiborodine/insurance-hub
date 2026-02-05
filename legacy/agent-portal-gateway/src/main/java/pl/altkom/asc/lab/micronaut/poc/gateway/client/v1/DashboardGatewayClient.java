@@ -28,5 +28,4 @@ public interface DashboardGatewayClient extends DashboardOperations {
     @Override
     @Post("/agentssales")
     GetAgentsSalesQueryResult queryAgentsSales(@Body GetAgentsSalesQuery query);
-
 }

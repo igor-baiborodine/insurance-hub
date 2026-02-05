@@ -19,10 +19,13 @@ class PolicyDocumentService(
     private val minioClient: MinioClient
 ) {
 
+    private val log = LoggerFactory.getLogger(PolicyDocumentService::class.java)
+
     @Value("\${documents.policies-s3-bucket}")
     private lateinit var policiesS3Bucket: String
 
     fun add(event: PolicyRegisteredEvent): PolicyDocument? {
+        log.info("Generating PDF for policy {}", event.policy.number)
         val pdfBytesResponse: HttpResponse<ByteArray>? = reportGenerator.generate(event)
 
         if (pdfBytesResponse?.body() != null) {
@@ -56,12 +59,14 @@ class PolicyDocumentService(
     }
 
     fun retrieveDocumentContent(storedBytes: ByteArray?): ByteArray? {
+        log.info("Retrieving document content from storage...")
         if (storedBytes == null || storedBytes.isEmpty()) {
             return null
         }
 
         try {
             val potentialS3ObjectKey = String(storedBytes, StandardCharsets.UTF_8)
+            log.info("Potential S3 object key: {}", potentialS3ObjectKey)
 
             // A typical S3 key will be relatively short and follow the YYYY/MM/ format.
             // Actual PDF data will be much larger and binary.
@@ -89,9 +94,5 @@ class PolicyDocumentService(
         } catch (e: Exception) {
             log.error("Error decoding bytes as UTF-8 or pattern mismatch, assuming legacy PDF data: {}", e.message, e)
             return storedBytes        }
-    }
-
-    companion object {
-        private val log = LoggerFactory.getLogger(PolicyDocumentService::class.java)
     }
 }

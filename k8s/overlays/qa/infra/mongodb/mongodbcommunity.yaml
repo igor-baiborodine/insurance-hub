@@ -20,7 +20,17 @@ spec:
           db: admin
         - name: userAdminAnyDatabase
           db: admin
+        - name: readWriteAnyDatabase
+          db: admin
       scramCredentialsSecretName: qa-mongodb
+    - name: product
+      db: products-demo
+      passwordSecretRef:
+        name: qa-mongodb-product-user-creds
+      roles:
+        - name: readWrite
+          db: products-demo
+      scramCredentialsSecretName: qa-mongodb-product
   statefulSet:
     spec:
       volumeClaimTemplates:

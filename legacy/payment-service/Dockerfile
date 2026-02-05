@@ -2,5 +2,5 @@ FROM eclipse-temurin:17-jre-alpine
 
 RUN apk --no-cache add curl
 COPY target/payment-service*.jar payment-service.jar
-ENV JAVA_OPTS="-Xmx512m -Xms256m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof"
+ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
 CMD ["sh", "-c", "java ${JAVA_OPTS} -jar payment-service.jar"]

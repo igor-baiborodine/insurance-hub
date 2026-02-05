@@ -4,44 +4,48 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**
 
-- [QA—Observability](#qaobservability)
-  - [Prometheus & Grafana](#prometheus--grafana)
-  - [Zipkin](#zipkin)
-- [Data](#data)
-  - [Postgres](#postgres)
-  - [MongoDB](#mongodb)
-  - [Elasticsearch](#elasticsearch)
-  - [MinIO](#minio)
-  - [Kafka](#kafka)
-- [Services](#services)
-  - [jsreport](#jsreport)
-  - [web-vue](#web-vue)
-  - [agent-portal-getaway](#agent-portal-getaway)
-  - [auth](#auth)
-  - [document](#document)
-  - [payment](#payment)
-  - [product](#product)
-  - [policy-search](#policy-search)
-  - [dashboard](#dashboard)
-  - [policy](#policy)
-  - [pricing](#pricing)
+- [Automatic Deployment](#automatic-deployment)
+- [Step-by-Step Deployment](#step-by-step-deployment)
+  - [Observability (QA)](#observability-qa)
+    - [Prometheus & Grafana](#prometheus--grafana)
+    - [Zipkin (legacy)](#zipkin-legacy)
+  - [Infra](#infra)
+    - [Postgres](#postgres)
+    - [MongoDB (legacy)](#mongodb-legacy)
+    - [Elasticsearch](#elasticsearch)
+    - [MinIO](#minio)
+    - [Kafka](#kafka)
+  - [Services](#services)
 - [Cluster Load Monitoring](#cluster-load-monitoring)
   - [Local Dev (Kind)](#local-dev-kind)
   - [QA (K3s)](#qa-k3s)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-Use the following sequence of [Make](https://www.gnu.org/software/make/) targets and shell commands
-to deploy cluster apps including infrastructure and "Insurance Hub" services.
+> Use either automatic or step-by-step sequence of [Make](https://www.gnu.org/software/make/) 
+targets and shell commands to deploy cluster apps including cluster monitoring (QA only) 
+and "Insurance Hub" infrastructure and services.
+
+## Automatic Deployment
+
+- `make legacy-all-build`
+- `cd k8s`
+- **QA**: `make cluster-qa-monitoring-deploy`
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-monitoring-deploy-<iso-date>`
+- `make cluster-infra-deploy`
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-infra-deploy-<iso-date>` 
+- `make cluster-svc-deploy`
+
+## Step-by-Step Deployment
 
 > ⚠️ Arguments in square brackets are optional. When omitted, the default value is used. The
 > default value can be found by searching argument name in the corresponding `Makefile`.
 
-## QA—Observability
-
 - `cd k8s`
+ 
+### Observability (QA)
 
-### Prometheus & Grafana
+#### Prometheus & Grafana
 
 - `make prometheus-stack-install`
 - `make prometheus-stack-status`
@@ -59,7 +63,7 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
     ```
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=observability-install-<iso-date>`
 
-### Zipkin
+#### Zipkin (legacy)
 
 - **Prerequisites**: [Elasticsearch](#elasticsearch) 
 - `make zipkin-es-user-secret-create`
@@ -69,11 +73,9 @@ to deploy cluster apps including infrastructure and "Insurance Hub" services.
 - `make zipkin-ui` and go to `http://localhost:9411`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=zipkin-install-<iso-date>`
 
-## Data
+### Infra
 
-Deploy the necessary data resources into the either `local-dev-all` or `qa-data` namespaces.
-
-### Postgres
+#### Postgres
 
 - `make postgres-operator-deploy`
 
@@ -100,29 +102,13 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   6. **product** service: 
   - `make postgres-svc-secret-create SVC_NAME=product [PG_SVC_USER_PWD=<user-pwd>]`
   - `make postgres-svc-deploy SVC_NAME=product`, wait at least one minute for the cluster to be ready.
-
-- `kubectl get pods -n qa-data | grep postgres`
-    ```shell
-    NAME                     READY   STATUS    RESTARTS   AGE
-    qa-postgres-auth-1       1/1     Running   0          47m
-    qa-postgres-auth-2       1/1     Running   0          45m
-    qa-postgres-document-1   1/1     Running   0          36m
-    qa-postgres-document-2   1/1     Running   0          35m
-    qa-postgres-payment-1    1/1     Running   0          28m
-    qa-postgres-payment-2    1/1     Running   0          27m
-    qa-postgres-policy-1     1/1     Running   0          11m
-    qa-postgres-policy-2     1/1     Running   0          11m
-    qa-postgres-product-1    1/1     Running   0          9m
-    qa-postgres-product-2    1/1     Running   0          9m
-    qa-postgres-pricing-1    1/1     Running   0          4m
-    qa-postgres-pricing-2    1/1     Running   0          4m
-    ```
+ 
 - **QA**: `make grafana-ui`
 - **QA/Grafana**: In _Dashboards > New > Import_, add the "CloudNativePG" dashboard using the following
   URL: https://grafana.com/grafana/dashboards/20417-cloudnativepg/.
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=postgres-deploy-<iso-date>`
 
-### MongoDB
+#### MongoDB (legacy)
 
 - `make mongodb-operator-install`
 - `make mongodb-root-user-secret-create [MONGO_ROOT_USER_PWD=<user-pwd>]`
@@ -131,7 +117,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
 - `make mongodb-status`  
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=mongodb-deploy-<iso-date>`
 
-### Elasticsearch
+#### Elasticsearch
 
 - `make es-operator-deploy`
 - `make es-deploy`
@@ -142,7 +128,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   URL: https://grafana.com/grafana/dashboards/2322-elasticsearch/.
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
 
-### MinIO
+#### MinIO
 
 - `make minio-operator-deploy`
   
@@ -151,19 +137,25 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   - `make minio-storage-config-secret-create SVC_NAME=document [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
   - `make minio-tenant-deploy SVC_NAME=document`
   - `make minio-tenant-status SVC_NAME=document`
+  - `make minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies`
+  - `make minio-svc-user-secret-create SVC_NAME=document [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
+  - `make minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json`
 
   2. **payment** service:
   - `make minio-storage-user-secret-create SVC_NAME=payment [MINIO_CONSOLE_ACCESS_KEY=<access-key>] [MINIO_CONSOLE_SECRET_KEY=<secret-key>]`
   - `make minio-storage-config-secret-create SVC_NAME=payment [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
   - `make minio-tenant-deploy SVC_NAME=payment`
   - `make minio-tenant-status SVC_NAME=payment`
+  - `make minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import`
+  - `make minio-svc-user-secret-create SVC_NAME=payment [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
+  - `make minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json`
 
 - **QA/Grafana**: In _Dashboards > New > Import_, add dashboards using the following URLs: 
     - https://grafana.com/grafana/dashboards/13502-minio-dashboard/
     - https://grafana.com/grafana/dashboards/19237-minio-bucket-dashboard/
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=minio-deploy-<iso-date>`
 
-### Kafka
+#### Kafka
 - `make kafka-strimzi-operator-install`
 - `make kafka-deploy`
 - `make kafka-status`
@@ -172,9 +164,7 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-data`
   following [JSON](https://github.com/strimzi/strimzi-kafka-operator/blob/0.48.0/examples/metrics/grafana-dashboards/strimzi-kafka.json) file
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
 
-## Services
-
-Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` namespaces.
+### Services
 
 - `cd ..` - from the project root
 - `make java-all-build`
@@ -191,75 +181,64 @@ Deploy the necessary data resources into the either `local-dev-all` or `qa-svc` 
 - `make svc-image-local-dev-load SVC_NAME=<svc-name>` 
 - `make svc-image-qa-load SVC_NAME=<svc-name>`
 
-### jsreport
+**1. jsreport**
 
 - `make jsreport-deploy`
-- `kubectl get pods -n local-dev-all | grep jsreport`
-    ```shell
-    local-dev-jsreport-5548585d57-q5sdc   1/1     Running   0          47s
-    ```
-- `make jsreport-status`
-- `make jsreport-ui` and go to `http://localhost:5488`
-- Go to jsreport UI at http://localhost:5488 and add a new template(legacy/documents-service/src/main/resources/policy.template) for generating policy PDF.
-![jsreport/policy template](jsreport-add-policy-template.png)
-- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=jsreport-deploy-<iso-date>``
 
-### web-vue
+**2. web-vue**
 
 - `make svc-deploy SVC_NAME=web-vue`
 
-### agent-portal-getaway
+**3. agent-portal-getaway**
 
 - `make svc-deploy SVC_NAME=agent-portal-gateway`
 
-### auth
+**4. auth**
 
 - `make svc-deploy SVC_NAME=auth`
 
-### document
+**5. document**
 
-- `make minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies`
-- `make minio-svc-user-secret-create SVC_NAME=document [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
-- `make minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json`
 - `make minio-console-ui SVC_NAME=document`
   - Go to `http://localhost:9090`
   - Log in with the credentials provided in the `minio-svc-user-secret-create` target.
 - `make svc-deploy SVC_NAME=document` 
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=document-deploy-<iso-date>``
 
-### payment
+**6. payment**
 
-- `make minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import`
-- `make minio-svc-user-secret-create SVC_NAME=payment [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
-- `make minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json`
 - `make minio-console-ui SVC_NAME=payment`
     - Go to `http://localhost:9090`
     - Log in with the credentials provided in the `minio-svc-user-secret-create` target.
 - `make svc-deploy SVC_NAME=payment`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=payment-deploy-<iso-date>``
 
-### product
+**7. product**
 
 - `make svc-deploy SVC_NAME=product`
 
-### policy-search
+**8. policy-search**
 
 - Built-in Elasticsearch's user `elastic` is used for the service. Therefore, no additional user
   secrets are required.
 - `make svc-deploy SVC_NAME=policy-search`
 
-### dashboard
+**9. dashboard**
 - Built-in Elasticsearch's user `elastic` is used for the service. Therefore, no additional user
   secrets are required.
 - `make svc-deploy SVC_NAME=dashboard`
 
-### policy
+**10. policy**
 
 - `make svc-deploy SVC_NAME=policy`
 
-### pricing
+**11. pricing**
 
 - `make svc-deploy SVC_NAME=pricing`
+
+**12. chat**
+
+- `make svc-deploy SVC_NAME=chat`
 
 ## Cluster Load Monitoring
 

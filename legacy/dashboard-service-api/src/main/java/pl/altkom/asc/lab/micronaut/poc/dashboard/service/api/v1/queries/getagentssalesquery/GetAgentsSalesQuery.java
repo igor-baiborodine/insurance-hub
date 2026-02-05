@@ -1,18 +1,16 @@
 package pl.altkom.asc.lab.micronaut.poc.dashboard.service.api.v1.queries.getagentssalesquery;
 
+import lombok.*;
 import pl.altkom.asc.lab.micronaut.poc.command.bus.api.Query;
 
 import java.time.LocalDate;
 
 import io.micronaut.core.annotation.Introspected;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 @Introspected
 @Getter
 @Setter
+@ToString
 @AllArgsConstructor
 @NoArgsConstructor
 public class GetAgentsSalesQuery implements Query<GetAgentsSalesQueryResult> {

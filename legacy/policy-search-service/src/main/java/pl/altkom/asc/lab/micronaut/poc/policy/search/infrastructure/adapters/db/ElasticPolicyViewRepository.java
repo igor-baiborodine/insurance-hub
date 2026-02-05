@@ -10,7 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.common.xcontent.XContentType;
+import org.elasticsearch.xcontent.XContentType;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.index.query.QueryStringQueryBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
@@ -18,8 +18,8 @@ import pl.altkom.asc.lab.micronaut.poc.policy.search.readmodel.PolicyView;
 import pl.altkom.asc.lab.micronaut.poc.policy.search.readmodel.PolicyViewRepository;
 import pl.altkom.asc.lab.micronaut.poc.policy.search.service.api.v1.queries.findpolicy.FindPolicyQuery;
 
-@Singleton
 @Slf4j
+@Singleton
 @RequiredArgsConstructor
 public class ElasticPolicyViewRepository implements PolicyViewRepository {
 
@@ -30,29 +30,34 @@ public class ElasticPolicyViewRepository implements PolicyViewRepository {
     
     @Override
     public void save(PolicyView policy) {
-        IndexRequest indexRequest = new IndexRequest(INDEX_NAME,"policyview", policy.getNumber());
+        log.info("Saving policy {}", policy);
+        IndexRequest indexRequest = new IndexRequest(INDEX_NAME).id(policy.getNumber());
         indexRequest.source(jsonConverter.stringifyObject(policy), XContentType.JSON);
         elasticClientAdapter.index(indexRequest).blockingGet();
     }
     
     @Override
     public Maybe<List<PolicyView>> findAll(FindPolicyQuery query) {
-        SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
+        log.info("Searching policies for query: {}", query.getQueryText());
 
         QueryStringQueryBuilder queryStringQueryBuilder = QueryBuilders.queryStringQuery(query.getQueryText())
                 .field("number")
                 .field("policyHolder");
-
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.query(queryStringQueryBuilder).size(100);
 
+        SearchRequest searchRequest = new SearchRequest(INDEX_NAME);
         searchRequest.source(searchSourceBuilder);
 
         return elasticClientAdapter
                 .search(searchRequest)
-                .map(this::mapSearchResponse);
+                .map(response -> {
+                    List<PolicyView> results = mapSearchResponse(response);
+                    log.info("Found {} policies for query: {}", results.size(), query.getQueryText());
+                    return results;
+                });
     }
-    
+
     private List<PolicyView> mapSearchResponse(SearchResponse searchResponse) {
         return Arrays
                 .stream(searchResponse.getHits().getHits())

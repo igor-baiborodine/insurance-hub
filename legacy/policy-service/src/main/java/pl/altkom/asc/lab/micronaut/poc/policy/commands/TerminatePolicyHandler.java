@@ -1,6 +1,7 @@
 package pl.altkom.asc.lab.micronaut.poc.policy.commands;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import pl.altkom.asc.lab.micronaut.poc.command.bus.CommandHandler;
 import pl.altkom.asc.lab.micronaut.poc.policy.domain.Policy;
 import pl.altkom.asc.lab.micronaut.poc.policy.domain.PolicyRepository;
@@ -15,15 +16,18 @@ import javax.inject.Singleton;
 import java.time.LocalDate;
 import java.util.Optional;
 
+@Slf4j
 @Singleton
 @RequiredArgsConstructor
-public class TerminatePolicyHandler implements CommandHandler<TerminatePolicyResult, TerminatePolicyCommand> {
+public class TerminatePolicyHandler
+        implements CommandHandler<TerminatePolicyResult, TerminatePolicyCommand> {
 
     private final PolicyRepository policyRepository;
     private final EventPublisher eventPublisher;
 
     @Override
     public TerminatePolicyResult handle(TerminatePolicyCommand cmd) {
+        log.info("Terminating policy {}", cmd);
         Optional<Policy> policyOpt = policyRepository.findByNumber(cmd.getPolicyNumber());
         if (!policyOpt.isPresent())
             throw new BusinessException("POLICY NOT FOUND");
@@ -32,8 +36,8 @@ public class TerminatePolicyHandler implements CommandHandler<TerminatePolicyRes
         policy.terminate(LocalDate.now());
 
         policyRepository.save(policy);
-
         eventPublisher.policyTerminatedEvent(policy.getNumber(), createEvent(policy));
+        log.info("Policy {} terminated", policy.getNumber());
 
         return TerminatePolicyResult.success(policy.getNumber());
     }

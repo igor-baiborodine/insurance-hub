@@ -74,30 +74,30 @@ spec:
       compression.type: producer
     resources:
       requests:
-        memory: 1Gi
         cpu: 250m
+        memory: 512Mi
       limits:
-        memory: 2Gi
         cpu: 500m
+        memory: 1Gi
     metricsConfig:
       type: strimziMetricsReporter
   entityOperator:
     topicOperator:
       resources:
         requests:
-          memory: 512Mi
           cpu: 250m
+          memory: 512Mi
         limits:
-          memory: 1Gi
           cpu: 500m
+          memory: 1Gi
     userOperator:
       resources:
         requests:
-          memory: 512Mi
           cpu: 250m
+          memory: 512Mi
         limits:
-          memory: 1Gi
           cpu: 500m
+          memory: 1Gi
   kafkaExporter:
     topicRegex: ".*"
     groupRegex: ".*"

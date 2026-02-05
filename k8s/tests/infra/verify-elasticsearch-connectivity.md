@@ -67,19 +67,41 @@ To verify connectivity to the Elasticsearch instance running in your local Kind 
 
 3. **Verify the Connection**
 
-   In the pod shell, run the following command to verify the connection:
-    ```bash
-    curl -u elastic:$ELASTIC_USER_PWD -k https://qa-elasticsearch-es-http.qa-data.svc.cluster.local:9200/_cluster/health
-    ```
+   - **Verify cluster health**
    
-   The output will be JSON with the cluster health status like this:
-    ```json
-    {
+     In the pod shell, run the following command to verify the connection:
+     ```bash
+     curl -u elastic:$ELASTIC_USER_PWD -k https://qa-elasticsearch-es-http.qa-data.svc.cluster.local:9200/_cluster/health
+     # response
+     {
       "cluster_name": "qa-elasticsearch",
       "status": "green",
       ...
-    }
-    ```
+     }
+     ```
 
-   Successful response confirms connectivity. To exit the pod shell, the pod will automatically
+   - **List all indexes**
+   
+     In the pod shell, run the following command:
+     ```bash
+     curl -u elastic:$ELASTIC_USER_PWD -k https://qa-elasticsearch-es-http.qa-data.svc.cluster.local:9200/_cat/indices?v
+     # response
+     health status index        uuid                   pri rep docs.count docs.deleted store.size pri.store.size dataset.size
+     green  open   policy-views eOCw92oiQYWC12vG8baVeQ   1   1          6            0     74.4kb         37.2kb       37.2kb
+     green  open   policy_stats U2GsS62aRqK50r-lH-10mg   1   1       1066            0    615.3kb        307.6kb      307.6kb
+     ```
+
+   - **List content for an index**
+    
+     In the pod shell, run the following command:
+     ```bash
+     curl -u elastic:$ELASTIC_USER_PWD -k "https://qa-elasticsearch-es-http.qa-data.svc.cluster.local:9200/policy-views/_search?pretty" \
+     -H 'Content-Type: application/json' \
+       -d '{
+         "query": { "match_all": {} },
+         "size": 10
+       }'
+     ```
+
+   Successful responses confirms connectivity. To exit the pod shell, the pod will automatically
    terminate as it runs the command and exits.

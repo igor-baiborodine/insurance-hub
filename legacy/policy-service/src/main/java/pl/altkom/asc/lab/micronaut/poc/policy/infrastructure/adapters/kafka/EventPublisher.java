@@ -7,6 +7,7 @@ import pl.altkom.asc.lab.micronaut.poc.policy.service.api.v1.events.PolicyRegist
 import pl.altkom.asc.lab.micronaut.poc.policy.service.api.v1.events.PolicyTerminatedEvent;
 
 @KafkaClient
+@LogEventPublisher
 public interface EventPublisher {
 
     @Topic("policy-registered")
