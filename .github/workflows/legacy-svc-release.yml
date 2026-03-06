@@ -1,0 +1,78 @@
+name: Legacy services release (changed services only)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'legacy/**'
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.services }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: changes
+        uses: tj-actions/changed-files@v45
+        with:
+          files: |
+            legacy/**/*-service/**
+            legacy/**/*-service-api/**
+          files_ignore: |
+            **/*.md
+
+      - id: matrix
+        if: steps.changes.outputs.only_changed == 'true'
+        run: |
+          # Extract unique service names from changed paths
+          changed_services=$(echo '${{ steps.changes.outputs.all_changed_files }}' | tr ',' '\n' | grep -o 'legacy/[^/]*-service[^/]*' | sed 's|legacy/||' | sed 's|/.*||' | sort -u | jq -R . | jq -s .)
+          echo "services=$changed_services" >> $GITHUB_OUTPUT
+
+  release-services:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    if: needs.detect-changes.outputs.matrix != '[]'
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'maven'
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      # Semantic versioning from Conventional Commits
+      - name: Semantic versioning for ${{ matrix.service }}
+        id: semver
+        uses: RichardInnocent/semantic-versioning-maven@v0.1.0
+        with:
+          pom-path: legacy/${{ matrix.service }}/pom.xml
+          access-token: ${{ secrets.GITHUB_TOKEN }}
+          git-username: 'github-actions[bot]'
+          git-email: 'github-actions[bot]@users.noreply.github.com'
+
+      # Build service + deps
+      - name: Build ${{ matrix.service }}
+        run: mvn -B -pl legacy/${{ matrix.service }} -am clean verify
+
+      # Publish API JAR
+      - name: Publish ${{ matrix.service }}-api to GitHub Packages
+        run: mvn -B -pl legacy/${{ matrix.service }}-api -Pgithub-packages deploy
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

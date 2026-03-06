@@ -25,6 +25,23 @@
         </repository>
     </repositories>
 
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/igor-baiborodine/insurance-hub</url>
+        </repository>
+    </distributionManagement>
+
+    <profiles>
+        <profile>
+            <id>github-packages</id>
+            <properties>
+                <altDeploymentRepository>github::default::https://maven.pkg.github.com/igor-baiborodine/insurance-hub</altDeploymentRepository>
+            </properties>
+        </profile>
+    </profiles>
+
     <dependencies>
         <dependency>
             <groupId>org.projectlombok</groupId>
