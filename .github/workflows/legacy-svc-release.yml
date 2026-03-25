@@ -10,7 +10,7 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.matrix.outputs.services }}
+      services: ${{ steps.matrix.outputs.services }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,13 +22,11 @@ jobs:
           files: |
             legacy/**/*-service/**
             legacy/**/*-service-api/**
-          files_ignore: |
-            **/*.md
 
       - id: matrix
         if: steps.changes.outputs.only_changed == 'true'
         run: |
-          # Extract unique service names from changed paths
+          # Extract unique service names (e.g. 'dashboard-service')
           changed_services=$(echo '${{ steps.changes.outputs.all_changed_files }}' | tr ',' '\n' | grep -o 'legacy/[^/]*-service[^/]*' | sed 's|legacy/||' | sed 's|/.*||' | sort -u | jq -R . | jq -s .)
           echo "services=$changed_services" >> $GITHUB_OUTPUT
 
@@ -38,10 +36,10 @@ jobs:
     permissions:
       contents: write
       packages: write
-    if: needs.detect-changes.outputs.matrix != '[]'
+    if: needs.detect-changes.outputs.services != '[]'
     strategy:
       matrix:
-        service: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +55,7 @@ jobs:
           server-username: GITHUB_ACTOR
           server-password: GITHUB_TOKEN
 
-      # Semantic versioning from Conventional Commits
+      # Semantic versioning
       - name: Semantic versioning for ${{ matrix.service }}
         id: semver
         uses: RichardInnocent/semantic-versioning-maven@v0.1.0
@@ -67,11 +65,11 @@ jobs:
           git-username: 'github-actions[bot]'
           git-email: 'github-actions[bot]@users.noreply.github.com'
 
-      # Build service + deps
+      # Build
       - name: Build ${{ matrix.service }}
         run: mvn -B -pl legacy/${{ matrix.service }} -am clean verify
 
-      # Publish API JAR
+      # Publish
       - name: Publish ${{ matrix.service }}-api to GitHub Packages
         run: mvn -B -pl legacy/${{ matrix.service }}-api -Pgithub-packages deploy
         env:
