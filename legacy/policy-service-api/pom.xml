@@ -6,7 +6,7 @@
 
     <groupId>pl.altkom.asc.lab.micronaut.poc</groupId>
     <artifactId>policy-service-api</artifactId>
-    <version>1.0</version>
+    <version>0.1.0</version>
     <packaging>jar</packaging>
 
     <parent>
@@ -54,7 +54,7 @@
         <dependency>
             <groupId>pl.altkom.asc.lab.micronaut.poc</groupId>
             <artifactId>command-bus-api</artifactId>
-            <version>1.0</version>
+            <version>0.1.0</version>
             <scope>compile</scope>
         </dependency>
 
