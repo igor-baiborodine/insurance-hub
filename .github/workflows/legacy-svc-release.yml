@@ -22,6 +22,9 @@ jobs:
           files: |
             legacy/**/*-service/**
             legacy/**/*-service-api/**
+            legacy/**/command-bus/**
+            legacy/**/command-bus-api/**
+            legacy/**/agent-portal-gateway/**
 
       - id: matrix
         if: steps.changes.outputs.only_changed == 'true'
