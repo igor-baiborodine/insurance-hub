@@ -30,8 +30,11 @@
 
     <repositories>
         <repository>
-            <id>jcenter.bintray.com</id>
-            <url>https://jcenter.bintray.com</url>
+            <id>github</id>
+            <url>https://maven.pkg.github.com/igor-baiborodine/insurance-hub</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
         </repository>
     </repositories>
 
