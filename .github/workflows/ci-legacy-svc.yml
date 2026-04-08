@@ -1,0 +1,231 @@
+name: Legacy Service CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'legacy/command-bus/**'
+      - 'legacy/agent-portal-gateway/**'
+      - 'legacy/*-service/**'
+      - '!legacy/*-api/**'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      module: ${{ steps.detect.outputs.module }}
+      module-path: ${{ steps.detect.outputs.module_path }}
+      release-tag: ${{ steps.monotag.outputs.release_tag }}
+      release-version: ${{ steps.monotag.outputs.release_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed service module
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CHANGED_FILES="$(git diff --name-only HEAD^ HEAD)"
+          MODULE_LIST="$(echo "$CHANGED_FILES" | grep -oP '^legacy/(command-bus|agent-portal-gateway|[^/]+-service)/' | sed 's|legacy/||;s|/||' | sort -u)"
+          MODULE_COUNT="$(echo "$MODULE_LIST" | grep -v '^$' | wc -l | tr -d ' ')"
+
+          if [ "$MODULE_COUNT" -gt 1 ]; then
+            echo "Error: Multiple service modules detected in a single push."
+            echo "$MODULE_LIST"
+            exit 1
+          fi
+
+          MODULE_NAME="$(echo "$MODULE_LIST" | sed '/^$/d')"
+
+          if [ -z "$MODULE_NAME" ]; then
+            echo "No changed service module detected."
+            exit 1
+          fi
+
+          echo "module=$MODULE_NAME" >> "$GITHUB_OUTPUT"
+          echo "module_path=legacy/$MODULE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next module version with monotag
+        id: monotag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MODULE_NAME="${{ steps.detect.outputs.module }}"
+          MODULE_PATH="${{ steps.detect.outputs.module_path }}"
+          RELEASE_DIR="release-metadata"
+          mkdir -p "$RELEASE_DIR"
+
+          npx -y monotag tag \
+            --repo-dir . \
+            --path "$MODULE_PATH" \
+            --prefix "legacy/$MODULE_NAME/v" \
+            --tag-file "$RELEASE_DIR/tag.txt" \
+            --version-file "$RELEASE_DIR/version.txt" \
+            --notes-file "$RELEASE_DIR/notes.md" \
+            --min-version 1.0.0 \
+            --max-version 1.999.999
+
+          if [[ ! -f "$RELEASE_DIR/tag.txt" || ! -f "$RELEASE_DIR/version.txt" ]]; then
+            echo "Error: monotag did not produce release metadata."
+            exit 1
+          fi
+
+          RELEASE_TAG="$(cat "$RELEASE_DIR/tag.txt")"
+          RELEASE_VERSION="$(cat "$RELEASE_DIR/version.txt")"
+
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate legacy version range
+        shell: bash
+        run: |
+          VERSION="${{ steps.monotag.outputs.release_version }}"
+          if [[ "${VERSION%%.*}" != "1" ]]; then
+            echo "Error: Legacy service version $VERSION is outside the 1.x.x range."
+            exit 1
+          fi
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: release-metadata/
+          if-no-files-found: error
+
+  release-service:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: release-metadata
+          path: release-metadata/
+
+      - name: Set up Java 14
+        uses: actions/setup-java@v4
+        with:
+          java-version: '14'
+          distribution: 'zulu'
+          cache: 'maven'
+          server-id: github
+          settings-path: ${{ github.workspace }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.INSURANCE_HUB_CI }}
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build module
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.INSURANCE_HUB_CI }}
+        run: |
+          MODULE_PATH="${{ needs.detect-changes.outputs.module-path }}"
+          mvn -f "$MODULE_PATH/pom.xml" clean package -DskipTests \
+            -s "${{ github.workspace }}/settings.xml"
+
+      - name: Publish service artifact to GitHub Packages (command-bus only)
+        if: needs.detect-changes.outputs.module == 'command-bus'
+        shell: bash
+        env:
+          VERSION: ${{ needs.detect-changes.outputs.release-version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          MODULE_NAME="${{ needs.detect-changes.outputs.module }}"
+          MODULE_PATH="${{ needs.detect-changes.outputs.module-path }}"
+
+          cd "$MODULE_PATH/target"
+          ORIGINAL_JAR=$(ls "$MODULE_NAME"*.jar | grep -v "sources" | head -n 1)
+          NEW_JAR="$MODULE_NAME-$VERSION.jar"
+          mv "$ORIGINAL_JAR" "$NEW_JAR"
+
+          mvn deploy:deploy-file \
+                -Dfile="$NEW_JAR" \
+                -DgroupId="pl.altkom.asc.lab.micronaut.poc" \
+                -DartifactId="$MODULE_NAME" \
+                -Dversion="$VERSION" \
+                -Dpackaging=jar \
+                -DrepositoryId=github \
+                -Durl="https://maven.pkg.github.com/${{ github.repository }}" \
+                -DgeneratePom=true \
+                -s "${{ github.workspace }}/settings.xml"
+
+      - name: Build and push Docker image
+        if: needs.detect-changes.outputs.module != 'command-bus'
+        shell: bash
+        env:
+          MODULE_NAME: ${{ needs.detect-changes.outputs.module }}
+          RELEASE_VERSION: ${{ needs.detect-changes.outputs.release-version }}
+        run: |
+          set -euo pipefail
+
+          MODULE_PATH="legacy/$MODULE_NAME"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          SVC_NAME="$(echo "$MODULE_NAME" | sed 's/-service$//')"
+
+          if [ "$MODULE_NAME" = "agent-portal-gateway" ]; then
+            BASE_IMAGE_NAME="$MODULE_NAME-legacy"
+          else
+            BASE_IMAGE_NAME="$SVC_NAME-api-legacy"
+          fi
+
+          IMAGE_PATH="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/$BASE_IMAGE_NAME"
+          SHA_TAG="sha-$SHORT_SHA"
+
+          docker build \
+            -t "$IMAGE_PATH:$RELEASE_VERSION" \
+            -t "$IMAGE_PATH:$SHA_TAG" \
+            -f "$MODULE_PATH/Dockerfile" \
+            "$MODULE_PATH"
+
+          docker push "$IMAGE_PATH:$RELEASE_VERSION"
+          docker push "$IMAGE_PATH:$SHA_TAG"
+
+      - name: Create scoped Git tag
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          TAG="${{ needs.detect-changes.outputs.release-tag }}"
+          VERSION="${{ needs.detect-changes.outputs.release-version }}"
+          MODULE="${{ needs.detect-changes.outputs.module }}"
+
+          git tag -a "$TAG" -m "Release $MODULE $VERSION"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release from scoped tag
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          draft: false
+          makeLatest: true
+          name: "${{ needs.detect-changes.outputs.release-tag }}"
+          tag: "${{ needs.detect-changes.outputs.release-tag }}"
+          bodyFile: release-metadata/notes.md
+          token: ${{ secrets.INSURANCE_HUB_CI }}
