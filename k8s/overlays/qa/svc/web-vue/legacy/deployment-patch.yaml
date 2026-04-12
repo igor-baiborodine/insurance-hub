@@ -7,6 +7,8 @@ spec:
     spec:
       containers:
         - name: web-vue-legacy
+          image: ghcr.io/igor-baiborodine/insurance-hub/web-vue-legacy:0.1.0
+          imagePullPolicy: Always
           resources:
             requests:
               cpu: 100m
