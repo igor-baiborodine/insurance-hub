@@ -1,0 +1,165 @@
+name: Legacy Web CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'legacy/web-vue/**'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      module: ${{ steps.detect.outputs.module }}
+      module-path: ${{ steps.detect.outputs.module_path }}
+      release-tag: ${{ steps.monotag.outputs.release_tag }}
+      release-version: ${{ steps.monotag.outputs.release_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect module
+        id: detect
+        shell: bash
+        run: |
+          echo "module=web-vue" >> "$GITHUB_OUTPUT"
+          echo "module_path=legacy/web-vue" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next module version with monotag
+        id: monotag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MODULE_NAME="${{ steps.detect.outputs.module }}"
+          MODULE_PATH="${{ steps.detect.outputs.module_path }}"
+          RELEASE_DIR="release-metadata"
+          mkdir -p "$RELEASE_DIR"
+
+          npx -y monotag tag \
+            --repo-dir . \
+            --path "$MODULE_PATH" \
+            --prefix "legacy/$MODULE_NAME/v" \
+            --tag-file "$RELEASE_DIR/tag.txt" \
+            --version-file "$RELEASE_DIR/version.txt" \
+            --notes-file "$RELEASE_DIR/notes.md" \
+            --min-version 1.0.0 \
+            --max-version 1.999.999
+
+          if [[ ! -f "$RELEASE_DIR/tag.txt" || ! -f "$RELEASE_DIR/version.txt" ]]; then
+            echo "Error: monotag did not produce release metadata."
+            exit 1
+          fi
+
+          RELEASE_TAG="$(cat "$RELEASE_DIR/tag.txt")"
+          RELEASE_VERSION="$(cat "$RELEASE_DIR/version.txt")"
+
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate legacy version range
+        shell: bash
+        run: |
+          VERSION="${{ steps.monotag.outputs.release_version }}"
+          if [[ "${VERSION%%.*}" != "1" ]]; then
+            echo "Error: Legacy version $VERSION is outside the 1.x.x range."
+            exit 1
+          fi
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: release-metadata/
+          if-no-files-found: error
+
+  release-web-vue:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download release metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: release-metadata
+          path: release-metadata/
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '12.22.12'
+
+      - name: Set up Yarn
+        shell: bash
+        run: |
+          npm install -g yarn@1.22.22
+          yarn --version
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build frontend
+        shell: bash
+        run: |
+          cd legacy/web-vue
+          yarn install
+          yarn build
+
+      - name: Build and push Docker image
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.detect-changes.outputs.release-version }}
+        run: |
+          set -euo pipefail
+          MODULE_PATH="legacy/web-vue"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          IMAGE_PATH="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/web-vue-legacy"
+          SHA_TAG="sha-$SHORT_SHA"
+
+          docker build \
+            -t "$IMAGE_PATH:$RELEASE_VERSION" \
+            -t "$IMAGE_PATH:$SHA_TAG" \
+            -f "$MODULE_PATH/Dockerfile" \
+            "$MODULE_PATH"
+
+          docker push "$IMAGE_PATH:$RELEASE_VERSION"
+          docker push "$IMAGE_PATH:$SHA_TAG"
+
+      - name: Create scoped Git tag
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          TAG="${{ needs.detect-changes.outputs.release-tag }}"
+          VERSION="${{ needs.detect-changes.outputs.release-version }}"
+          
+          git tag -a "$TAG" -m "Release web-vue $VERSION"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          draft: false
+          makeLatest: true
+          name: "${{ needs.detect-changes.outputs.release-tag }}"
+          tag: "${{ needs.detect-changes.outputs.release-tag }}"
+          bodyFile: release-metadata/notes.md
+          token: ${{ secrets.GITHUB_TOKEN }}
