@@ -222,7 +222,7 @@ jobs:
             K8S_FOLDER=$(echo "$MODULE_NAME" | sed 's/-service$//')
           fi
 
-          DEPLOYMENT_FILE="k8s/apps/svc/$K8S_FOLDER/base/legacy/deployment.yaml"
+          DEPLOYMENT_FILE="k8s/overlays/qa/svc/$K8S_FOLDER/legacy/deployment-patch.yaml"
           
           if [ -f "$DEPLOYMENT_FILE" ]; then
             echo "Updating image version to $RELEASE_VERSION in $DEPLOYMENT_FILE"
