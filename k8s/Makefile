@@ -254,6 +254,16 @@ flux-bootstrap: _flux-system-ns-check ## Bootstrap Flux into cluster and connect
 	@echo "Listing Flux resources..."
 	@flux get all -A
 
+.PHONY: flux-uninstall
+flux-uninstall: _flux-system-ns-check ## Uninstall Flux from the QA cluster and remove its bootstrap manifests from Git
+	@echo "Uninstalling Flux from '$(ENV_NAME)' cluster and removing bootstrap manifests from Git..."
+	@flux uninstall --silent
+	@rm -rf $(FLUX_QA_PATH)
+	@echo "🗑 Flux uninstalled."
+	@echo "🗑 Local bootstrap path $(FLUX_QA_PATH) has been deleted."
+	@rm -rf ../$(FLUX_QA_PATH)
+	@echo "If the path was tracked by Git, commit and push the deletion."
+
 .PHONY: flux-status
 flux-status: _env-check ## Show Flux status in the QA cluster
 	@echo "Checking Flux status in '$(ENV_NAME)' cluster..."
