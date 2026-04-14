@@ -1,11 +1,14 @@
-name: Legacy Service API CI
+name: Legacy Service Release CI
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'legacy/**-api/**'
+      - 'legacy/command-bus/**'
+      - 'legacy/agent-portal-gateway/**'
+      - 'legacy/*-service/**'
+      - '!legacy/*-api/**'
 
 permissions:
   contents: write
@@ -25,18 +28,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect changed API module
+      - name: Detect changed service module
         id: detect
         shell: bash
         run: |
           set -euo pipefail
 
           CHANGED_FILES="$(git diff --name-only HEAD^ HEAD)"
-          MODULE_LIST="$(echo "$CHANGED_FILES" | grep -oP '^legacy/[^/]+-api/' | sed 's|legacy/||;s|/||' | sort -u)"
+          MODULE_LIST="$(echo "$CHANGED_FILES" | grep -oP '^legacy/(command-bus|agent-portal-gateway|[^/]+-service)/' | sed 's|legacy/||;s|/||' | sort -u)"
           MODULE_COUNT="$(echo "$MODULE_LIST" | grep -v '^$' | wc -l | tr -d ' ')"
 
           if [ "$MODULE_COUNT" -gt 1 ]; then
-            echo "Error: Multiple service API modules detected in a single push."
+            echo "Error: Multiple service modules detected in a single push."
             echo "$MODULE_LIST"
             exit 1
           fi
@@ -44,7 +47,7 @@ jobs:
           MODULE_NAME="$(echo "$MODULE_LIST" | sed '/^$/d')"
 
           if [ -z "$MODULE_NAME" ]; then
-            echo "No changed API module detected."
+            echo "No changed service module detected."
             exit 1
           fi
 
@@ -72,9 +75,8 @@ jobs:
             --min-version 1.0.0 \
             --max-version 1.999.999
 
-          # Verify files exist before proceeding
-          if [[ ! -f "$RELEASE_DIR/version.txt" ]]; then
-            echo "Error: monotag did not produce a version.txt. No changes detected?"
+          if [[ ! -f "$RELEASE_DIR/tag.txt" || ! -f "$RELEASE_DIR/version.txt" ]]; then
+            echo "Error: monotag did not produce release metadata."
             exit 1
           fi
 
@@ -89,7 +91,7 @@ jobs:
         run: |
           VERSION="${{ steps.monotag.outputs.release_version }}"
           if [[ "${VERSION%%.*}" != "1" ]]; then
-            echo "Error: Legacy version $VERSION is outside the 1.x.x range."
+            echo "Error: Legacy service version $VERSION is outside the 1.x.x range."
             exit 1
           fi
 
@@ -100,9 +102,12 @@ jobs:
           path: release-metadata/
           if-no-files-found: error
 
-  release-service-api:
+  release-service:
     needs: detect-changes
     runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -124,6 +129,13 @@ jobs:
           server-id: github
           settings-path: ${{ github.workspace }}
 
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build module
         shell: bash
         env:
@@ -133,7 +145,8 @@ jobs:
           mvn -f "$MODULE_PATH/pom.xml" clean package -DskipTests \
             -s "${{ github.workspace }}/settings.xml"
 
-      - name: Publish API artifact to GitHub Packages
+      - name: Publish service artifact to GitHub Packages (command-bus only)
+        if: needs.detect-changes.outputs.module == 'command-bus'
         shell: bash
         env:
           VERSION: ${{ needs.detect-changes.outputs.release-version }}
@@ -150,15 +163,79 @@ jobs:
           mv "$ORIGINAL_JAR" "$NEW_JAR"
 
           mvn deploy:deploy-file \
-            -Dfile="$NEW_JAR" \
-            -DgroupId="pl.altkom.asc.lab.micronaut.poc" \
-            -DartifactId="$MODULE_NAME" \
-            -Dversion="$VERSION" \
-            -Dpackaging=jar \
-            -DrepositoryId=github \
-            -Durl="https://maven.pkg.github.com/${{ github.repository }}" \
-            -DgeneratePom=true \
-            -s "${{ github.workspace }}/settings.xml"
+                -Dfile="$NEW_JAR" \
+                -DgroupId="pl.altkom.asc.lab.micronaut.poc" \
+                -DartifactId="$MODULE_NAME" \
+                -Dversion="$VERSION" \
+                -Dpackaging=jar \
+                -DrepositoryId=github \
+                -Durl="https://maven.pkg.github.com/${{ github.repository }}" \
+                -DgeneratePom=true \
+                -s "${{ github.workspace }}/settings.xml"
+
+      - name: Build and push Docker image
+        if: needs.detect-changes.outputs.module != 'command-bus'
+        shell: bash
+        env:
+          MODULE_NAME: ${{ needs.detect-changes.outputs.module }}
+          RELEASE_VERSION: ${{ needs.detect-changes.outputs.release-version }}
+        run: |
+          set -euo pipefail
+
+          MODULE_PATH="legacy/$MODULE_NAME"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          SVC_NAME="$(echo "$MODULE_NAME" | sed 's/-service$//')"
+
+          if [ "$MODULE_NAME" = "agent-portal-gateway" ]; then
+            BASE_IMAGE_NAME="$MODULE_NAME-legacy"
+          else
+            BASE_IMAGE_NAME="$SVC_NAME-api-legacy"
+          fi
+
+          IMAGE_PATH="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/$BASE_IMAGE_NAME"
+          SHA_TAG="sha-$SHORT_SHA"
+
+          docker build \
+            -t "$IMAGE_PATH:$RELEASE_VERSION" \
+            -t "$IMAGE_PATH:$SHA_TAG" \
+            -f "$MODULE_PATH/Dockerfile" \
+            "$MODULE_PATH"
+
+          docker push "$IMAGE_PATH:$RELEASE_VERSION"
+          docker push "$IMAGE_PATH:$SHA_TAG"
+
+      - name: Update deployment manifest image version
+        if: needs.detect-changes.outputs.module != 'command-bus'
+        shell: bash
+        env:
+          MODULE_NAME: ${{ needs.detect-changes.outputs.module }}
+          RELEASE_VERSION: ${{ needs.detect-changes.outputs.release-version }}
+        run: |
+          set -euo pipefail
+
+          # Map service module name to k8s folder name
+          if [ "$MODULE_NAME" = "documents-service" ]; then
+            K8S_FOLDER="document"
+          elif [ "$MODULE_NAME" = "agent-portal-gateway" ]; then
+            K8S_FOLDER="agent-portal-gateway"
+          else
+            K8S_FOLDER=$(echo "$MODULE_NAME" | sed 's/-service$//')
+          fi
+
+          DEPLOYMENT_FILE="k8s/overlays/qa/svc/$K8S_FOLDER/legacy/deployment-patch.yaml"
+          
+          if [ -f "$DEPLOYMENT_FILE" ]; then
+            echo "Updating image version to $RELEASE_VERSION in $DEPLOYMENT_FILE"
+            sed -i "s|image: \(ghcr.io/${{ env.IMAGE_NAME }}/.*-legacy\):.*|image: \1:$RELEASE_VERSION|" "$DEPLOYMENT_FILE"
+            
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$DEPLOYMENT_FILE"
+            git commit -m "chore(k8s): update $K8S_FOLDER legacy image to $RELEASE_VERSION"
+            git push origin main
+          else
+            echo "Warning: Deployment file $DEPLOYMENT_FILE not found."
+          fi
 
       - name: Create scoped Git tag
         shell: bash
@@ -183,53 +260,3 @@ jobs:
           tag: "${{ needs.detect-changes.outputs.release-tag }}"
           bodyFile: release-metadata/notes.md
           token: ${{ secrets.GITHUB_TOKEN }}
-
-  update-dependents:
-    needs: [ detect-changes, release-service-api ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Update and commit per dependent service
-        shell: bash
-        env:
-          MODULE_NAME: ${{ needs.detect-changes.outputs.module }}
-          NEW_VERSION: ${{ needs.detect-changes.outputs.release-version }}
-          CI_PAT: ${{ secrets.INSURANCE_HUB_CI }}
-        run: |
-          set -euo pipefail
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${CI_PAT}@github.com/${GITHUB_REPOSITORY}.git"
-
-          # Find all pom.xml files in legacy/ excluding current module and other APIs
-          find legacy -name "pom.xml" \
-                -not -path "*/$MODULE_NAME/*" \
-                -not -path "*-api/*" | while read -r POM_FILE; do
-          
-          # Check if the POM actually contains the dependency
-          if grep -q "<artifactId>$MODULE_NAME</artifactId>" "$POM_FILE"; then
-            DEPENDENT_MODULE=$(echo "$POM_FILE" | sed 's|legacy/||;s|/pom.xml||')
-    
-          echo "Updating $DEPENDENT_MODULE..."
-          sed -i "/<artifactId>$MODULE_NAME<\\/artifactId>/{n;s|<version>.*</version>|<version>$NEW_VERSION</version>|}" "$POM_FILE"
-          
-          git add "$POM_FILE"
-          
-          if git diff --cached --quiet; then
-            echo "No changes to commit for $DEPENDENT_MODULE"
-            continue
-          fi
-          
-          git commit -m "chore($DEPENDENT_MODULE): bump $MODULE_NAME to $NEW_VERSION"
-          
-          # Rebase and push individually to trigger service release workflows
-          git pull --rebase origin main
-          git push origin main
-          fi
-          done
