@@ -17,6 +17,7 @@
 
 1. **Kubernetes cluster dependencies**
 - `cd k8s`
+- **QA**: `make prereq-k8s-flux`
 - `make prereq-k8s-all`
 
 2. **QA cluster configuration**
