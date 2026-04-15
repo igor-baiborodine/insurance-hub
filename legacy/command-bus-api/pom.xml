@@ -6,7 +6,7 @@
     <groupId>pl.altkom.asc.lab.micronaut.poc</groupId>
     <artifactId>command-bus-api</artifactId>
     <version>1.0</version>
-
+<!--comment test pr ci-->
     <properties>
         <jdk.version>14</jdk.version>
     </properties>
