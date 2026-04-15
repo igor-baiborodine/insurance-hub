@@ -94,8 +94,20 @@ prereq-k8s-kubens: ## Install latest kubens on Ubuntu 24.04.2 LTS
 	@sudo mv kubens /usr/local/bin/kubens
 	@echo "kubens installed at /usr/local/bin/kubens"
 
+.PHONY: prereq-k8s-cnpg-plugin
+prereq-k8s-cnpg-plugin: ## Install CloudNativePG kubectl plugin on Ubuntu 24.04.2 LTS
+	@echo "Installing CloudNativePG kubectl plugin..."
+	@curl -sSfL https://github.com/cloudnative-pg/cloudnative-pg/raw/main/hack/install-cnpg-plugin.sh | sudo sh -s -- -b /usr/local/bin
+	@echo "kubectl-cnpg plugin installed at /usr/local/bin"
+
+.PHONY: prereq-k8s-flux
+prereq-k8s-flux: ## Install Flux CLI on Ubuntu 24.04.2 LTS
+	@echo "Installing Flux CLI..."
+	@curl -s https://fluxcd.io/install.sh | sudo bash
+	@flux --version
+
 .PHONY: prereq-k8s-all
-prereq-k8s-all: prereq-k8s-kubectl prereq-k8s-kubectx prereq-k8s-kubens prereq-k8s-helm prereq-k8s-lxd prereq-k8s-kind ## Install all Kubernetes prerequisites
+prereq-k8s-all: prereq-k8s-kubectl prereq-k8s-kubectx prereq-k8s-kubens prereq-k8s-helm prereq-k8s-lxd prereq-k8s-kind prereq-k8s-cnpg-plugin ## Install all Kubernetes prerequisites
 
 .PHONY: prereq-db-psql
 prereq-db-psql: ## Install latest psql (PostgreSQL CLI) on Ubuntu 24.04.2 LTS
@@ -103,12 +115,6 @@ prereq-db-psql: ## Install latest psql (PostgreSQL CLI) on Ubuntu 24.04.2 LTS
 	@sudo apt-get update
 	@sudo apt-get install -y postgresql-client
 	@psql --version
-
-.PHONY: prereq-k8s-cnpg-plugin
-prereq-k8s-cnpg-plugin: ## Install CloudNativePG kubectl plugin on Ubuntu 24.04.2 LTS
-	@echo "Installing CloudNativePG kubectl plugin..."
-	@curl -sSfL https://github.com/cloudnative-pg/cloudnative-pg/raw/main/hack/install-cnpg-plugin.sh | sudo sh -s -- -b /usr/local/bin
-	@echo "kubectl-cnpg plugin installed at /usr/local/bin"
 
 .PHONY: prereq-db-mongosh
 prereq-db-mongosh: ## Install latest mongosh (MongoDB Shell) on Ubuntu 24.04.2 LTS
@@ -150,6 +156,7 @@ ifeq ($(CUR_CTX), qa-insurance-hub)
 	AUTH_NS := $(ENV_NAME)-auth
 	NETWORKING_NS := $(ENV_NAME)-networking
 	MONITORING_NS := $(ENV_NAME)-monitoring
+	FLUX_SYSTEM_NS := flux-system
 else
     ifeq ($(CUR_CTX), kind-local-dev-insurance-hub)
         ENV_NAME := local-dev
@@ -159,6 +166,7 @@ else
 		AUTH_NS := $(LOCAL_DEV_NS)
 		NETWORKING_NS := $(LOCAL_DEV_NS)
 		MONITORING_NS := INVALID
+		FLUX_SYSTEM_NS := INVALID
     else
         ENV_NAME := INVALID
     endif
@@ -192,6 +200,17 @@ _monitoring-ns-check: ## Ensure monitoring namespace exists and set it as the cu
 	@kubectl get namespace "$(MONITORING_NS)" >/dev/null 2>&1 || kubectl create namespace "$(MONITORING_NS)"
 	@kubectl config set-context --current --namespace="$(MONITORING_NS)"
 
+.PHONY: _flux-system-ns-check
+_flux-system-ns-check: ## Ensure flux-system namespace exists and set it as the current context
+	@CUR_CTX=$$(kubectl config current-context); \
+	if [ "$$CUR_CTX" != "qa-insurance-hub" ]; then \
+		echo "ERROR: Current context is '$$CUR_CTX' (expected: qa-insurance-hub for k3s). Aborting."; \
+		exit 1; \
+	fi
+	@echo "Ensuring namespace $(FLUX_SYSTEM_NS) exists and is set as current..."
+	@kubectl get namespace "$(FLUX_SYSTEM_NS)" >/dev/null 2>&1 || kubectl create namespace "$(FLUX_SYSTEM_NS)"
+	@kubectl config set-context --current --namespace="$(FLUX_SYSTEM_NS)"
+
 .PHONY: _svc-ns-check
 _svc-ns-check: ## Ensure svc(service) namespace exists and set it as the current context
 	@echo "Ensuring namespace $(SVC_NS) exists and is set as current..."
@@ -204,6 +223,64 @@ _svc-name-check: ## Ensure that the SVC_NAME argument is provided
 		echo "ERROR: Argument 'SVC_NAME' is required!"; \
 		exit 1; \
 	fi
+
+################################################################################
+# Flux Deployment Targets
+# Targes for deploying and managing Flux
+# Current context must be "qa-insurance-hub"
+################################################################################
+
+FLUX_GITHUB_OWNER ?= igor-baiborodine
+FLUX_GITHUB_REPOSITORY ?= insurance-hub
+FLUX_GITHUB_BRANCH ?= main
+FLUX_QA_PATH ?= k8s/flux/qa
+
+.PHONY: flux-bootstrap
+flux-bootstrap: _flux-system-ns-check ## Bootstrap Flux into cluster and connect it to this GitHub repo
+	@echo "Running Flux pre-flight checks..."
+	@flux check --pre
+	@echo "Bootstrapping Flux from repository $(FLUX_GITHUB_OWNER)/$(FLUX_GITHUB_REPOSITORY)..."
+	@flux bootstrap github \
+		--owner=$(FLUX_GITHUB_OWNER) \
+		--repository=$(FLUX_GITHUB_REPOSITORY) \
+		--branch=$(FLUX_GITHUB_BRANCH) \
+		--path=$(FLUX_QA_PATH) \
+		--token-auth \
+		--personal
+		
+	@echo "✅ Flux bootstrap completed in '$(ENV_NAME)' cluster."
+	@echo "Verifying Flux installation..."
+	@flux check
+	@echo "Listing Flux resources..."
+	@flux get all -A
+
+.PHONY: flux-uninstall
+flux-uninstall: _flux-system-ns-check ## Uninstall Flux from the QA cluster and remove its bootstrap manifests from Git
+	@echo "Uninstalling Flux from '$(ENV_NAME)' cluster and removing bootstrap manifests from Git..."
+	@flux uninstall --silent
+	@rm -rf $(FLUX_QA_PATH)
+	@echo "🗑 Flux uninstalled."
+	@echo "🗑 Local bootstrap path $(FLUX_QA_PATH) has been deleted."
+	@rm -rf ../$(FLUX_QA_PATH)
+	@echo "If the path was tracked by Git, commit and push the deletion."
+
+.PHONY: flux-status
+flux-status: _env-check ## Show Flux status in the QA cluster
+	@echo "Checking Flux status in '$(ENV_NAME)' cluster..."
+	@flux check
+	@flux get all -A
+
+.PHONY: flux-reconcile
+flux-reconcile-qa: _env-check ## Force reconcile the QA Flux Kustomization
+	@echo "Reconciling Flux Kustomization in '$(ENV_NAME)' cluster..."
+	@flux reconcile kustomization qa-services -n flux-system --with-source
+	@echo "✅ Flux reconciliation requested."
+
+.PHONY: flux-suspend
+flux-suspend: _env-check ## Suspend QA Flux reconciliation
+	@echo "Suspending Flux Kustomization in '$(ENV_NAME)' cluster..."
+	@flux suspend kustomization qa-services -n flux-system
+	@echo "✅ Flux reconciliation suspended."
 
 ################################################################################
 # Monitoring Deployment Targets
