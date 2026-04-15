@@ -12,6 +12,8 @@ spec:
     spec:
       containers:
         - name: agent-portal-gateway-legacy
+          image: ghcr.io/igor-baiborodine/insurance-hub/agent-portal-gateway-legacy:1.0.0-SNAPSHOT
+          imagePullPolicy: Always
           resources:
             requests:
               cpu: 100m
