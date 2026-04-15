@@ -6,7 +6,7 @@
 
     <groupId>pl.altkom.asc.lab.micronaut.poc</groupId>
     <artifactId>pricing-service-api</artifactId>
-    <version>1.0</version>
+    <version>1.0.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <parent>
@@ -22,8 +22,11 @@
 
     <repositories>
         <repository>
-            <id>jcenter.bintray.com</id>
-            <url>https://jcenter.bintray.com</url>
+            <id>github</id>
+            <url>https://maven.pkg.github.com/igor-baiborodine/insurance-hub</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
         </repository>
     </repositories>
 

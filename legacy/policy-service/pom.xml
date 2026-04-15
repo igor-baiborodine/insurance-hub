@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>pl.altkom.asc.lab.micronaut.poc</groupId>
     <artifactId>policy-service</artifactId>
-    <version>1.0</version>
+    <version>1.0.0-SNAPSHOT</version>
 
     <parent>
         <groupId>io.micronaut</groupId>
@@ -28,8 +28,11 @@
 
     <repositories>
         <repository>
-            <id>jcenter.bintray.com</id>
-            <url>https://jcenter.bintray.com</url>
+            <id>github</id>
+            <url>https://maven.pkg.github.com/igor-baiborodine/insurance-hub</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
         </repository>
     </repositories>
 
@@ -182,19 +185,19 @@
         <dependency>
             <groupId>pl.altkom.asc.lab.micronaut.poc</groupId>
             <artifactId>policy-service-api</artifactId>
-            <version>1.0</version>
+            <version>1.0.0-SNAPSHOT</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>pl.altkom.asc.lab.micronaut.poc</groupId>
             <artifactId>pricing-service-api</artifactId>
-            <version>1.0</version>
+            <version>1.0.0-SNAPSHOT</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>pl.altkom.asc.lab.micronaut.poc</groupId>
             <artifactId>command-bus</artifactId>
-            <version>1.0</version>
+            <version>1.0.0-SNAPSHOT</version>
         </dependency>
         <!-- INTERNAL -->
     </dependencies>

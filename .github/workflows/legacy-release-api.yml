@@ -1,0 +1,235 @@
+name: Legacy API Release CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'legacy/**-api/**'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      module: ${{ steps.detect.outputs.module }}
+      module-path: ${{ steps.detect.outputs.module_path }}
+      release-tag: ${{ steps.monotag.outputs.release_tag }}
+      release-version: ${{ steps.monotag.outputs.release_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed API module
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CHANGED_FILES="$(git diff --name-only HEAD^ HEAD)"
+          MODULE_LIST="$(echo "$CHANGED_FILES" | grep -oP '^legacy/[^/]+-api/' | sed 's|legacy/||;s|/||' | sort -u)"
+          MODULE_COUNT="$(echo "$MODULE_LIST" | grep -v '^$' | wc -l | tr -d ' ')"
+
+          if [ "$MODULE_COUNT" -gt 1 ]; then
+            echo "Error: Multiple service API modules detected in a single push."
+            echo "$MODULE_LIST"
+            exit 1
+          fi
+
+          MODULE_NAME="$(echo "$MODULE_LIST" | sed '/^$/d')"
+
+          if [ -z "$MODULE_NAME" ]; then
+            echo "No changed API module detected."
+            exit 1
+          fi
+
+          echo "module=$MODULE_NAME" >> "$GITHUB_OUTPUT"
+          echo "module_path=legacy/$MODULE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next module version with monotag
+        id: monotag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MODULE_NAME="${{ steps.detect.outputs.module }}"
+          MODULE_PATH="${{ steps.detect.outputs.module_path }}"
+          RELEASE_DIR="release-metadata"
+          mkdir -p "$RELEASE_DIR"
+
+          npx -y monotag tag \
+            --repo-dir . \
+            --path "$MODULE_PATH" \
+            --prefix "legacy/$MODULE_NAME/v" \
+            --tag-file "$RELEASE_DIR/tag.txt" \
+            --version-file "$RELEASE_DIR/version.txt" \
+            --notes-file "$RELEASE_DIR/notes.md" \
+            --min-version 1.0.0 \
+            --max-version 1.999.999
+
+          # Verify files exist before proceeding
+          if [[ ! -f "$RELEASE_DIR/version.txt" ]]; then
+            echo "Error: monotag did not produce a version.txt. No changes detected?"
+            exit 1
+          fi
+
+          RELEASE_TAG="$(cat "$RELEASE_DIR/tag.txt")"
+          RELEASE_VERSION="$(cat "$RELEASE_DIR/version.txt")"
+
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate legacy version range
+        shell: bash
+        run: |
+          VERSION="${{ steps.monotag.outputs.release_version }}"
+          if [[ "${VERSION%%.*}" != "1" ]]; then
+            echo "Error: Legacy version $VERSION is outside the 1.x.x range."
+            exit 1
+          fi
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: release-metadata/
+          if-no-files-found: error
+
+  release-service-api:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: release-metadata
+          path: release-metadata/
+
+      - name: Set up Java 14
+        uses: actions/setup-java@v4
+        with:
+          java-version: '14'
+          distribution: 'zulu'
+          cache: 'maven'
+          server-id: github
+          settings-path: ${{ github.workspace }}
+
+      - name: Build module
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MODULE_PATH="${{ needs.detect-changes.outputs.module-path }}"
+          mvn -f "$MODULE_PATH/pom.xml" clean package -DskipTests \
+            -s "${{ github.workspace }}/settings.xml"
+
+      - name: Publish API artifact to GitHub Packages
+        shell: bash
+        env:
+          VERSION: ${{ needs.detect-changes.outputs.release-version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          MODULE_NAME="${{ needs.detect-changes.outputs.module }}"
+          MODULE_PATH="${{ needs.detect-changes.outputs.module-path }}"
+
+          cd "$MODULE_PATH/target"
+          ORIGINAL_JAR=$(ls "$MODULE_NAME"*.jar | grep -v "sources" | head -n 1)
+          NEW_JAR="$MODULE_NAME-$VERSION.jar"
+          mv "$ORIGINAL_JAR" "$NEW_JAR"
+
+          mvn deploy:deploy-file \
+            -Dfile="$NEW_JAR" \
+            -DgroupId="pl.altkom.asc.lab.micronaut.poc" \
+            -DartifactId="$MODULE_NAME" \
+            -Dversion="$VERSION" \
+            -Dpackaging=jar \
+            -DrepositoryId=github \
+            -Durl="https://maven.pkg.github.com/${{ github.repository }}" \
+            -DgeneratePom=true \
+            -s "${{ github.workspace }}/settings.xml"
+
+      - name: Create scoped Git tag
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          TAG="${{ needs.detect-changes.outputs.release-tag }}"
+          VERSION="${{ needs.detect-changes.outputs.release-version }}"
+          MODULE="${{ needs.detect-changes.outputs.module }}"
+
+          git tag -a "$TAG" -m "Release $MODULE $VERSION"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release from scoped tag
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          draft: false
+          makeLatest: true
+          name: "${{ needs.detect-changes.outputs.release-tag }}"
+          tag: "${{ needs.detect-changes.outputs.release-tag }}"
+          bodyFile: release-metadata/notes.md
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  update-dependents:
+    needs: [ detect-changes, release-service-api ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Update and commit per dependent service
+        shell: bash
+        env:
+          MODULE_NAME: ${{ needs.detect-changes.outputs.module }}
+          NEW_VERSION: ${{ needs.detect-changes.outputs.release-version }}
+          CI_PAT: ${{ secrets.INSURANCE_HUB_CI }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${CI_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+
+          # Find all pom.xml files in legacy/ excluding current module and other APIs
+          find legacy -name "pom.xml" \
+                -not -path "*/$MODULE_NAME/*" \
+                -not -path "*-api/*" | while read -r POM_FILE; do
+          
+          # Check if the POM actually contains the dependency
+          if grep -q "<artifactId>$MODULE_NAME</artifactId>" "$POM_FILE"; then
+            DEPENDENT_MODULE=$(echo "$POM_FILE" | sed 's|legacy/||;s|/pom.xml||')
+    
+          echo "Updating $DEPENDENT_MODULE..."
+          sed -i "/<artifactId>$MODULE_NAME<\\/artifactId>/{n;s|<version>.*</version>|<version>$NEW_VERSION</version>|}" "$POM_FILE"
+          
+          git add "$POM_FILE"
+          
+          if git diff --cached --quiet; then
+            echo "No changes to commit for $DEPENDENT_MODULE"
+            continue
+          fi
+          
+          git commit -m "chore($DEPENDENT_MODULE): bump $MODULE_NAME to $NEW_VERSION"
+          
+          # Rebase and push individually to trigger service release workflows
+          git pull --rebase origin main
+          git push origin main
+          fi
+          done
