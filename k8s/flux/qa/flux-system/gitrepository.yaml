@@ -1,0 +1,13 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: insurance-hub
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: https://github.com/igor-baiborodine/insurance-hub
+  ref:
+    branch: main
+  ignore: |
+    # include everything by default
+    !/*

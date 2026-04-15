@@ -7,6 +7,8 @@ spec:
     spec:
       containers:
         - name: auth-api-legacy
+          image: ghcr.io/igor-baiborodine/insurance-hub/auth-api-legacy:1.0.0-SNAPSHOT
+          imagePullPolicy: Always
           resources:
             requests:
               cpu: 100m

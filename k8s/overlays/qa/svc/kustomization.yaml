@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ./jsreport
+#  - ./agent-portal-gateway/legacy
+#  - ./auth/legacy
+#  - ./chat/legacy
+#  - ./dashboard/legacy
+#  - ./document/legacy
+#  - ./payment/legacy
+#  - ./policy/legacy
+#  - ./policy-search/legacy
+#  - ./pricing/legacy
+#  - ./product/legacy
+#  - ./web-vue/legacy
