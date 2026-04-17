@@ -3,7 +3,7 @@ kind: Kustomization
 resources:
   - ./jsreport
 #  - ./agent-portal-gateway/legacy
-#  - ./auth/legacy
+  - ./auth/legacy
 #  - ./chat/legacy
 #  - ./dashboard/legacy
 #  - ./document/legacy
