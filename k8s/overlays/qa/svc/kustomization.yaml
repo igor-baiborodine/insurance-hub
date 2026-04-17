@@ -7,7 +7,7 @@ resources:
   - ./chat/legacy
 #  - ./dashboard/legacy
 #  - ./document/legacy
-#  - ./payment/legacy
+  - ./payment/legacy
 #  - ./policy/legacy
 #  - ./policy-search/legacy
 #  - ./pricing/legacy
