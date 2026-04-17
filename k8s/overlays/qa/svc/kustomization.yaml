@@ -4,7 +4,7 @@ resources:
   - ./jsreport
 #  - ./agent-portal-gateway/legacy
   - ./auth/legacy
-#  - ./chat/legacy
+  - ./chat/legacy
 #  - ./dashboard/legacy
 #  - ./document/legacy
 #  - ./payment/legacy
