@@ -1,0 +1,64 @@
+name: Legacy API and Service PR Check
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'legacy/**'
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed legacy module
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Get changed files between PR branch and base branch
+          CHANGED_FILES="$(git diff --name-only origin/${{ github.base_ref }}...HEAD)"
+          
+          # Regex matches: 
+          # 1. Any directory ending in -api (APIs)
+          # 2. command-bus or agent-portal-gateway
+          # 3. Any directory ending in -service (Services)
+          MODULE_LIST="$(echo "$CHANGED_FILES" | grep -oP '^legacy/(command-bus|agent-portal-gateway|[^/]+-api|[^/]+-service)/' | sed 's|legacy/||;s|/||' | sort -u)"
+          MODULE_COUNT="$(echo "$MODULE_LIST" | grep -v '^$' | wc -l | tr -d ' ')"
+
+          if [ "$MODULE_COUNT" -eq 0 ]; then
+            echo "No legacy service or API modules changed. Skipping build."
+            exit 0
+          fi
+
+          if [ "$MODULE_COUNT" -gt 1 ]; then
+            echo "Error: Multiple legacy modules detected ($MODULE_COUNT). PRs must be limited to 1 module."
+            echo "$MODULE_LIST"
+            exit 1
+          fi
+
+          MODULE_NAME="$(echo "$MODULE_LIST" | sed '/^$/d')"
+          echo "module=$MODULE_NAME" >> "$GITHUB_OUTPUT"
+          echo "module_path=legacy/$MODULE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java 14
+        if: steps.detect.outputs.module != ''
+        uses: actions/setup-java@v5
+        with:
+          java-version: '14'
+          distribution: 'zulu'
+          cache: 'maven'
+
+      - name: Build module
+        if: steps.detect.outputs.module != ''
+        shell: bash
+        run: |
+          MODULE_PATH="${{ steps.detect.outputs.module_path }}"
+          # Only package without publishing or testing
+          mvn -f "$MODULE_PATH/pom.xml" clean package -DskipTests

@@ -1,0 +1,83 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+skinparam linetype ortho
+
+title Maven Module Dependency Diagram for Insurance Hub (Legacy)
+
+System_Boundary(legacy_maven, "Legacy Maven Modules") {
+
+    Boundary(gateways, "Gateway Layer") {
+        Container(gateway, "agent-portal-gateway", "Maven Module", "Entry point routing requests to service APIs.")
+    }
+
+    Boundary(services, "Service Implementations") {
+        Container(policy_svc, "policy-service", "Maven Module", "Policy lifecycle logic.")
+        Container(product_svc, "product-service", "Maven Module", "Product catalog management.")
+        Container(pricing_svc, "pricing-service", "Maven Module", "Premium calculation logic.")
+        Container(payment_svc, "payment-service", "Maven Module", "Accounting and payments.")
+        Container(search_svc, "policy-search-service", "Maven Module", "Elasticsearch indexing and search.")
+        Container(dashboard_svc, "dashboard-service", "Maven Module", "Sales analytics.")
+        Container(document_svc, "documents-service", "Maven Module", "PDF generation and storage.")
+        Container(auth_svc, "auth-service", "Maven Module", "Authentication and JWT logic.")
+        Container(chat_svc, "chat-service", "Maven Module", "Real-time chat functionality.")
+    }
+
+    Boundary(apis, "API & Shared Modules") {
+        Container(policy_api, "policy-service-api", "Maven Module", "Policy DTOs and interfaces.")
+        Container(product_api, "product-service-api", "Maven Module", "Product DTOs and interfaces.")
+        Container(pricing_api, "pricing-service-api", "Maven Module", "Pricing DTOs and interfaces.")
+        Container(payment_api, "payment-service-api", "Maven Module", "Payment DTOs and interfaces.")
+        Container(search_api, "policy-search-service-api", "Maven Module", "Search DTOs and interfaces.")
+        Container(dashboard_api, "dashboard-service-api", "Maven Module", "Dashboard DTOs and interfaces.")
+        Container(document_api, "documents-service-api", "Maven Module", "Document DTOs and interfaces.")
+
+        Container(cmd_bus, "command-bus", "Maven Module", "Infrastructure for command handling.")
+        Container(cmd_bus_api, "command-bus-api", "Maven Module", "Command handling abstractions.")
+    }
+}
+
+' Gateway dependencies (Routes to all APIs)
+Rel(gateway, policy_api, "Depends on")
+Rel(gateway, product_api, "Depends on")
+Rel(gateway, pricing_api, "Depends on")
+Rel(gateway, payment_api, "Depends on")
+Rel(gateway, search_api, "Depends on")
+Rel(gateway, document_api, "Depends on")
+Rel(gateway, dashboard_api, "Depends on")
+
+' Service to API dependencies
+Rel(policy_svc, policy_api, "Implements")
+Rel(policy_svc, pricing_api, "Calls")
+Rel(policy_svc, cmd_bus, "Uses")
+
+Rel(product_svc, product_api, "Implements")
+
+Rel(pricing_svc, pricing_api, "Implements")
+
+Rel(payment_svc, payment_api, "Implements")
+Rel(payment_svc, policy_api, "References")
+
+Rel(search_svc, search_api, "Implements")
+Rel(search_svc, policy_api, "References")
+Rel(search_svc, cmd_bus, "Uses")
+
+Rel(dashboard_svc, dashboard_api, "Implements")
+Rel(dashboard_svc, policy_api, "References")
+Rel(dashboard_svc, cmd_bus, "Uses")
+
+Rel(document_svc, document_api, "Implements")
+Rel(document_svc, policy_api, "References")
+Rel(document_svc, cmd_bus, "Uses")
+Rel(document_svc, policy_svc, "Depends on (test scope)", "test")
+
+' Command Bus dependencies
+Rel(cmd_bus, cmd_bus_api, "Implements")
+Rel(policy_api, cmd_bus_api, "Uses")
+Rel(search_api, cmd_bus_api, "Uses")
+Rel(dashboard_api, cmd_bus_api, "Uses")
+
+' Document API specifically depends on Policy API for shared domain objects
+Rel(document_api, policy_api, "Depends on")
+
+@enduml

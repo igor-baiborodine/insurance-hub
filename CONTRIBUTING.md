@@ -29,7 +29,7 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
 * **Git** `>=2.43.0`,
   see [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
 * **Go** `>=1.24`, see [Install Go](https://go.dev/doc/install).
-* **Node.js** `12.12.12`, see [Install Node.js](https://nodejs.org/en/download/).
+* **Node.js** `12.22.12`, see [Install Node.js](https://nodejs.org/en/download/).
 * **Yarn** `1.22.22`, see [Install Yarn](https://classic.yarnpkg.com/en/docs/install).
 * **jq** `>=1.6`, see [Install jq](https://stedolan.github.io/jq/download/).
 * **Make** `>=4.3`, see [Install Make](https://www.gnu.org/software/make/).
