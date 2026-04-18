@@ -145,8 +145,8 @@ jobs:
           mvn -f "$MODULE_PATH/pom.xml" clean package -DskipTests \
             -s "${{ github.workspace }}/settings.xml"
 
-      - name: Publish service artifact to GitHub Packages (command-bus only)
-        if: needs.detect-changes.outputs.module == 'command-bus'
+      - name: Publish service artifact to GitHub Packages (command-bus, policy-service only)
+        if: contains(fromJSON('["command-bus", "policy-service"]'), needs.detect-changes.outputs.module)
         shell: bash
         env:
           VERSION: ${{ needs.detect-changes.outputs.release-version }}
