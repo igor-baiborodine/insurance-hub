@@ -5,7 +5,7 @@ resources:
 #  - ./agent-portal-gateway/legacy
   - ./auth/legacy
   - ./chat/legacy
-#  - ./dashboard/legacy
+  - ./dashboard/legacy
 #  - ./document/legacy
   - ./payment/legacy
   - ./policy/legacy
