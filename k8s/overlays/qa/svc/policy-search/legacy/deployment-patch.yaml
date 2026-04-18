@@ -7,7 +7,7 @@ spec:
     spec:
       containers:
         - name: policy-search-api-legacy
-          image: ghcr.io/igor-baiborodine/insurance-hub/policy-search-api-legacy:1.0.0-SNAPSHOT
+          image: ghcr.io/igor-baiborodine/insurance-hub/policy-search-api-legacy:1.0.0
           imagePullPolicy: Always
           resources:
             requests:
