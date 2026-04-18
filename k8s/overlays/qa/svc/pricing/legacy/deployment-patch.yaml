@@ -7,7 +7,7 @@ spec:
     spec:
       containers:
         - name: pricing-api-legacy
-          image: ghcr.io/igor-baiborodine/insurance-hub/pricing-api-legacy:1.0.0-SNAPSHOT
+          image: ghcr.io/igor-baiborodine/insurance-hub/pricing-api-legacy:1.0.0
           imagePullPolicy: Always
           resources:
             requests:
