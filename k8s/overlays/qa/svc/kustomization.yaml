@@ -6,7 +6,7 @@ resources:
   - ./auth/legacy
   - ./chat/legacy
   - ./dashboard/legacy
-#  - ./document/legacy
+  - ./document/legacy
   - ./payment/legacy
   - ./policy/legacy
   - ./policy-search/legacy
