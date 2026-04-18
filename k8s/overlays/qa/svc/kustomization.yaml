@@ -8,7 +8,7 @@ resources:
 #  - ./dashboard/legacy
 #  - ./document/legacy
   - ./payment/legacy
-#  - ./policy/legacy
+  - ./policy/legacy
 #  - ./policy-search/legacy
   - ./pricing/legacy
   - ./product/legacy
