@@ -10,6 +10,6 @@ resources:
   - ./payment/legacy
 #  - ./policy/legacy
 #  - ./policy-search/legacy
-#  - ./pricing/legacy
+  - ./pricing/legacy
 #  - ./product/legacy
 #  - ./web-vue/legacy
