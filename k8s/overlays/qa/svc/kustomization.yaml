@@ -12,4 +12,4 @@ resources:
   - ./policy-search/legacy
   - ./pricing/legacy
   - ./product/legacy
-#  - ./web-vue/legacy
+  - ./web-vue/legacy
