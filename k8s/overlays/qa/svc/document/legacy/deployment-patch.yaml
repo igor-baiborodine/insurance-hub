@@ -7,7 +7,7 @@ spec:
     spec:
       containers:
         - name: document-api-legacy
-          image: ghcr.io/igor-baiborodine/insurance-hub/document-api-legacy:1.0.1
+          image: ghcr.io/igor-baiborodine/insurance-hub/document-api-legacy:1.0.2
           imagePullPolicy: Always
           resources:
             requests:
