@@ -265,21 +265,21 @@ flux-uninstall: _flux-system-ns-check ## Uninstall Flux from the QA cluster and 
 	@echo "If the path was tracked by Git, commit and push the deletion."
 
 .PHONY: flux-status
-flux-status: _env-check ## Show Flux status in the QA cluster
+flux-status: _flux-system-ns-check ## Show Flux status in the QA cluster
 	@echo "Checking Flux status in '$(ENV_NAME)' cluster..."
 	@flux check
 	@flux get all -A
 
 .PHONY: flux-reconcile
-flux-reconcile-qa: _env-check ## Force reconcile the QA Flux Kustomization
+flux-reconcile: _flux-system-ns-check ## Force reconcile the QA Flux Kustomization
 	@echo "Reconciling Flux Kustomization in '$(ENV_NAME)' cluster..."
-	@flux reconcile kustomization qa-services -n flux-system --with-source
+	@flux reconcile kustomization qa-svc -n flux-system --with-source
 	@echo "✅ Flux reconciliation requested."
 
 .PHONY: flux-suspend
-flux-suspend: _env-check ## Suspend QA Flux reconciliation
+flux-suspend: _flux-system-ns-check ## Suspend QA Flux reconciliation
 	@echo "Suspending Flux Kustomization in '$(ENV_NAME)' cluster..."
-	@flux suspend kustomization qa-services -n flux-system
+	@flux suspend kustomization qa-svc -n flux-system
 	@echo "✅ Flux reconciliation suspended."
 
 ################################################################################
