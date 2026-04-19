@@ -188,7 +188,7 @@ jobs:
 
           if [ "$MODULE_NAME" = "agent-portal-gateway" ]; then
             BASE_IMAGE_NAME="$MODULE_NAME-legacy"
-          elif [ "$MODULE_NAME" = "documents" ]; then
+          elif [ "$MODULE_NAME" = "documents-service" ]; then
             BASE_IMAGE_NAME="document-api-legacy"
           else
             BASE_IMAGE_NAME="$SVC_NAME-api-legacy"
