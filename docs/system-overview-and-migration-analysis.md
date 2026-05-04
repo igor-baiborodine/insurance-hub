@@ -659,13 +659,14 @@ services**.
     * Deploy an OpenTelemetry Collector that receives Zipkin-format traces from the existing Java
       services.
     * Configure the Collector to export traces simultaneously to both Zipkin (for legacy visibility)
-      and Tempo (for unified, modern stack integration).
+      and Tempo (for unified, modern stack integration); Loki is currently deployed as a placeholder.
     * Over time, phase out Zipkin once Tempo ingestion and visualization are validated.
 
-**Outcome:** Existing tracing infrastructure is preserved with **zero changes to Java application
-code** in the short term. The OpenTelemetry Collector provides a bridge for legacy Zipkin traces
-into Tempo, ensuring Grafana dashboards visualize both new and existing services. This setup enables
-a seamless, zero-code migration to Tempo and sets the foundation for Go services to emit native OTLP
+**Outcome:** The existing tracing infrastructure is maintained with **no changes to the Java
+application code** in the short term. The OpenTelemetry Collector serves as a bridge, allowing
+legacy Zipkin traces to integrate into Tempo. This ensures that future Grafana dashboards can
+visualize both current Java-based services and new Go-based services. This setup facilitates a
+smooth, zero-code migration to Tempo and lays the groundwork for Go services to emit native OTLP
 traces.
 
 ### Phase 3: Data Store Consolidation
