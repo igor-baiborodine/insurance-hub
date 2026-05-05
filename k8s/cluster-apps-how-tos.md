@@ -156,7 +156,7 @@ and "Insurance Hub" infrastructure and services.
   - `make minio-tenant-deploy SVC_NAME=loki`
   - `make minio-tenant-status SVC_NAME=loki`
   - `make minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs`
-  - `make minio-svc-user-secret-create SVC_NAME=loki COPY_NS=qa-monitoring [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
+  - `make minio-svc-user-secret-create SVC_NAME=loki COPY_SECRET_NS=qa-monitoring [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
   - `make minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/infra/loki/minio/s3-policy-loki-logs.json`
 
 - **QA/Grafana**: In _Dashboards > New > Import_, add dashboards using the following URLs: 
