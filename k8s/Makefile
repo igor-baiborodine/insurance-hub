@@ -1145,7 +1145,12 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=document
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=payment
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=payment
-	$(MAKE) minio-tenant-deploy SVC_NAME=document & $(MAKE) minio-tenant-deploy SVC_NAME=payment & wait
+	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
+	$(MAKE) minio-storage-config-secret-create SVC_NAME=loki
+	$(MAKE) minio-tenant-deploy SVC_NAME=document & \
+		$(MAKE) minio-tenant-deploy SVC_NAME=payment & \
+		$(MAKE) minio-tenant-deploy SVC_NAME=loki & \
+		wait
 	@echo "⏳ Waiting 3m for MinIO tenants.." && sleep 180
 
 	@echo "✅ Infra apps deployed to local-dev cluster!"
