@@ -26,7 +26,7 @@
 targets and shell commands to deploy cluster apps including cluster monitoring (QA only) 
 and "Insurance Hub" infrastructure and services.
 
-## Automatic Deployment
+## Automated Deployment
 
 - `make legacy-all-build`
 - `cd k8s`
@@ -150,15 +150,14 @@ and "Insurance Hub" infrastructure and services.
   - `make minio-svc-user-secret-create SVC_NAME=payment [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
   - `make minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json`
 
-  3. **loki** service:
+  3. **QA/loki** service:
   - `make minio-storage-user-secret-create SVC_NAME=loki [MINIO_CONSOLE_ACCESS_KEY=<access-key>] [MINIO_CONSOLE_SECRET_KEY=<secret-key>]`
   - `make minio-storage-config-secret-create SVC_NAME=loki [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
   - `make minio-tenant-deploy SVC_NAME=loki`
   - `make minio-tenant-status SVC_NAME=loki`
-  - `make minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs-qa`
-  - `make minio-svc-user-secret-create SVC_NAME=loki [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
-  - `make minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/svc/loki/minio/s3-policy-loki-logs-qa.json`
-  - `make minio-svc-user-secret-create SVC_NAME=loki [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>] SVC_NS='$(MONITORING_NS)'`
+  - `make minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs`
+  - `make minio-svc-user-secret-create SVC_NAME=loki COPY_NS=qa-monitoring [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
+  - `make minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/infra/loki/minio/s3-policy-loki-logs.json`
 
 - **QA/Grafana**: In _Dashboards > New > Import_, add dashboards using the following URLs: 
     - https://grafana.com/grafana/dashboards/13502-minio-dashboard/

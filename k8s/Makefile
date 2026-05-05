@@ -173,6 +173,8 @@ else
 endif
 
 OVERLAYS_FILE_PATH = overlays/$(ENV_NAME)
+NS_SVC ?= $(SVC_NS)
+COPY_NS ?= $(NS_SVC)
 
 .PHONY: _env-check
 _env-check: ## Ensure env name is valid and set based on the current context
@@ -715,10 +717,12 @@ minio-svc-bucket-create: _env-check _svc-name-check ## Create a MinIO bucket for
 	@bash apps/scripts/minio-svc-bucket-create.sh "$(ENV_NAME)" "$(SVC_NAME)" "$(BUCKET_NAME)"
 
 .PHONY: minio-svc-user-secret-create
-minio-svc-user-secret-create: _env-check _svc-name-check _svc-ns-check ## Create/update MinIO credentials secret for service account. Usage: make minio-svc-user-secret-create SVC_NAME=<svc-name> MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>
+minio-svc-user-secret-create: _env-check _svc-name-check ## Create/update MinIO credentials secret for service account. Usage: make minio-svc-user-secret-create SVC_NAME=<svc-name> [COPY_NS=<target-namespace>] [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
 	SECRET_NAME="$$NAMESPACE-svc-user-creds"; \
+	COPY_TARGET_NS="$(if $(strip $(COPY_NS)),$(COPY_NS),$(NS_SVC))"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
+	kubectl get namespace "$$COPY_TARGET_NS" >/dev/null 2>&1 || kubectl create namespace "$$COPY_TARGET_NS"; \
 	echo "Creating MinIO service credentials secret in namespace $$NAMESPACE..."; \
 	kubectl create secret generic "$$SECRET_NAME" \
 	   --namespace "$$NAMESPACE" \
@@ -726,12 +730,12 @@ minio-svc-user-secret-create: _env-check _svc-name-check _svc-ns-check ## Create
 	   --from-literal=MINIO_SVC_ACCESS_KEY="$(MINIO_SVC_ACCESS_KEY)" \
 	   --from-literal=MINIO_SVC_SECRET_KEY="$(MINIO_SVC_SECRET_KEY)" \
 	   --dry-run=client -o yaml | kubectl apply -f -; \
-	echo "Copying MinIO service credentials secret from $$NAMESPACE to $(SVC_NS)..."; \
+	echo "Copying MinIO service credentials secret from $$NAMESPACE to $$COPY_TARGET_NS..."; \
 	kubectl get secret "$$SECRET_NAME" \
 	   -n "$$NAMESPACE" -o yaml | \
-	   sed "s/namespace: $$NAMESPACE/namespace: $(SVC_NS)/" | \
+	   sed "s/namespace: $$NAMESPACE/namespace: $$COPY_TARGET_NS/" | \
 	   kubectl apply -f -; \
-	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE and copied to $(SVC_NS)"
+	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE and copied to $$COPY_TARGET_NS"
 
 .PHONY: minio-svc-user-with-policy-create
 minio-svc-user-with-policy-create: _env-check _svc-name-check ## Create a MinIO service account and apply an S3 policy. Usage: make minio-svc-user-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>
@@ -1096,6 +1100,18 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 	# Prometheus & Grafana stack
 	$(MAKE) prometheus-stack-install
 
+	# MinIO Infra Tenants
+	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
+	$(MAKE) minio-storage-config-secret-create SVC_NAME=loki
+	$(MAKE) minio-tenant-deploy SVC_NAME=loki & wait
+	@echo "⏳ Waiting 3m for MinIO infra tenants.." && sleep 180
+
+    # MinIO Infra Tenant Configuration
+	# Loki
+	$(MAKE) minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs
+	$(MAKE) minio-svc-user-secret-create SVC_NAME=loki COPY_NS=qa-monitoring
+	$(MAKE) make minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/infra/loki/minio/s3-policy-loki-logs.json
+
 	# Zipkin (requires Elasticsearch)
 	$(MAKE) zipkin-es-user-secret-create
 	$(MAKE) zipkin-es-user-create
@@ -1147,11 +1163,8 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=payment
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=loki
-	$(MAKE) minio-tenant-deploy SVC_NAME=document & \
-		$(MAKE) minio-tenant-deploy SVC_NAME=payment & \
-		$(MAKE) minio-tenant-deploy SVC_NAME=loki & \
-		wait
-	@echo "⏳ Waiting 3m for MinIO tenants.." && sleep 180
+	$(MAKE) minio-tenant-deploy SVC_NAME=document & $(MAKE) minio-tenant-deploy SVC_NAME=payment & wait
+	@echo "⏳ Waiting 3m for MinIO service tenants.." && sleep 180
 
 	@echo "✅ Infra apps deployed to local-dev cluster!"
 	@kubectl get pods -A | grep -E "local-dev-all|minio|elastic|kafka|cnpg"
@@ -1163,7 +1176,7 @@ cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or 
 	# Elasticsearch
 	$(MAKE) es-elastic-user-secret-copy
 
-	# MinIO Tenant Configuration
+	# MinIO Service Tenant Configuration
 	# Document
 	$(MAKE) minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies
 	$(MAKE) minio-svc-user-secret-create SVC_NAME=document

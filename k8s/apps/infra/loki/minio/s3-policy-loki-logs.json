@@ -9,7 +9,7 @@
         "s3:DeleteObject"
       ],
       "Resource": [
-        "arn:aws:s3:::loki-logs-qa/*"
+        "arn:aws:s3:::loki-logs/*"
       ]
     },
     {
@@ -19,7 +19,7 @@
         "s3:GetBucketLocation"
       ],
       "Resource": [
-        "arn:aws:s3:::loki-logs-qa"
+        "arn:aws:s3:::loki-logs"
       ]
     }
   ]
