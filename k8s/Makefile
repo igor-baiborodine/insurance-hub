@@ -1142,9 +1142,9 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 
     # MinIO Infra Tenant Configuration
 	# Loki
-	$(MAKE) minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs-qa
+	$(MAKE) minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs
 	$(MAKE) minio-svc-user-secret-create SVC_NAME=loki COPY_SECRET_NS=$(MONITORING_NS)
-	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/svc/loki/minio/s3-policy-loki-logs-qa.json
+	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/svc/loki/minio/s3-policy-loki-logs.json
 
 	# Loki
 	$(MAKE) loki-install

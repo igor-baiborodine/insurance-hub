@@ -1,0 +1,77 @@
+deploymentMode: SingleBinary
+
+gateway:
+  enabled: false
+
+singleBinary:
+  replicas: 1
+  extraArgs:
+    - "-config.expand-env=true"
+  extraEnvFrom:
+    - secretRef:
+        name: qa-minio-loki-svc-user-creds
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  persistence:
+    enabled: true
+    size: 10Gi
+
+write:
+  replicas: 0
+
+read:
+  replicas: 0
+
+backend:
+  replicas: 0
+
+chunksCache:
+  enabled: false
+
+resultsCache:
+  enabled: false
+
+minio:
+  enabled: false
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: s3
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  limits_config:
+    retention_period: 168h
+  compactor:
+    retention_enabled: true
+    delete_request_store: s3
+  storage:
+    type: s3
+    bucketNames:
+      chunks: loki-logs
+      ruler: loki-logs
+      admin: loki-logs
+    s3:
+      endpoint: qa-minio-loki-hl.qa-minio-loki.svc.cluster.local:9000
+      accessKeyId: ${MINIO_SVC_ACCESS_KEY}
+      secretAccessKey: ${MINIO_SVC_SECRET_KEY}
+      s3ForcePathStyle: true
+      insecure: false
+      http_config:
+        insecure_skip_verify: true
+
+monitoring:
+  serviceMonitor:
+    enabled: true
