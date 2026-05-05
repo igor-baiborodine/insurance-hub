@@ -713,9 +713,9 @@ minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for 
 .PHONY: minio-console-ui
 minio-console-ui: _env-check _svc-name-check ## Access MinIO Console UI via port-forward. Usage: make minio-console-ui SVC_NAME=<svc-name>
 	@NAMESPACE="$(ENV_NAME)-minio-$(SVC_NAME)"; \
-	echo "Forwarding MinIO Console for '$(SVC_NAME)' to http://localhost:9090"; \
+	echo "Forwarding MinIO Console for '$(SVC_NAME)' to https://localhost:9443"; \
 	echo "Press Ctrl+C to stop."; \
-	kubectl port-forward svc/$$NAMESPACE-console 9090:9090 -n $$NAMESPACE
+	kubectl port-forward -n $$NAMESPACE svc/$$NAMESPACE-console 9443:9443
 
 .PHONY: minio-tenant-delete
 minio-tenant-delete: _env-check _svc-name-check ## Delete MinIO tenant for service. Usage: make minio-tenant-delete SVC_NAME=<svc-name>
