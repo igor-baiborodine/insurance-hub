@@ -82,7 +82,7 @@ Promtail, Grafana Alloy, or OpenTelemetry Collector). Loki does not scrape pod l
 7. **Fallback: verify Loki with canary logs**
 
    ```shell
-   START_NS=$(date -u -d '15 minutes ago' +%s%N)
+   START_NS=$(date -u -d '30 minutes ago' +%s%N)
    END_NS=$(date -u +%s%N)
    curl -G "http://localhost:3100/loki/api/v1/query_range" \
      --data-urlencode 'query={name="loki-canary"}' \
@@ -105,8 +105,8 @@ Promtail, Grafana Alloy, or OpenTelemetry Collector). Loki does not scrape pod l
    make minio-console-ui SVC_NAME=loki
    ```
 
-   Then open `http://localhost:9090`, log in with Loki MinIO credentials, and confirm bucket
-   `loki-logs` contains objects.
+   Then open `https://localhost:9443`, log in with Loki MinIO credentials (default:
+   minioConsoleAccessKey/minioConsoleSecretKey), and confirm bucket `loki-logs` contains objects.
 
 9. **Verify Grafana Loki datasource**
 
