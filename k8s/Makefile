@@ -290,6 +290,7 @@ flux-suspend: _env-check ## Suspend QA Flux reconciliation
 ################################################################################
 
 KUBE_PROMETHEUS_STACK_VERSION := 79.3.0
+LOKI_HELM_CHART_VERSION := 7.0.0
 
 .PHONY: prometheus-stack-install
 prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
@@ -335,6 +336,41 @@ grafana-ui: ## Access Grafana UI via port-forward
 	@echo "Forwarding Grafana UI to http://localhost:3000"
 	@echo "Login with admin/adminpwd. Press Ctrl+C to stop."
 	@kubectl port-forward svc/qa-prometheus-grafana 3000:80 -n qa-monitoring
+
+.PHONY: loki-install
+loki-install: _monitoring-ns-check ## Install Grafana Loki in QA cluster
+	@if [ ! -f "$(OVERLAYS_FILE_PATH)/infra/loki/values.yaml" ]; then \
+		echo "ERROR: Missing Loki values file at '$(OVERLAYS_FILE_PATH)/infra/loki/values.yaml'."; \
+		exit 1; \
+	fi
+	@helm repo add grafana https://grafana.github.io/helm-charts || true
+	@helm repo update
+	@echo "Installing Grafana Loki using Helm chart v$(LOKI_HELM_CHART_VERSION) into $(MONITORING_NS) namespace..."
+	@helm upgrade --install "$(ENV_NAME)"-loki grafana/loki \
+		--version "$(LOKI_HELM_CHART_VERSION)" \
+		--namespace $(MONITORING_NS) \
+		--values "$(OVERLAYS_FILE_PATH)"/infra/loki/values.yaml
+	@echo "✅ Loki deployment initiated. Check status with: make loki-status"
+
+.PHONY: loki-uninstall
+loki-uninstall: _monitoring-ns-check ## Uninstall Loki from QA cluster
+	@echo "Uninstalling Loki from '$(MONITORING_NS)' namespace..."
+	@helm uninstall "$(ENV_NAME)"-loki --namespace $(MONITORING_NS) || true
+	@echo "🗑 Loki uninstalled."
+
+.PHONY: loki-status
+loki-status: _monitoring-ns-check ## Show Loki deployment status in QA cluster
+	@echo "Status for Loki in namespace: $(MONITORING_NS)"
+	@echo "\nLoki Pods:"
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=loki || true
+	@echo "\nLoki Services:"
+	@kubectl get svc -n $(MONITORING_NS) -l app.kubernetes.io/name=loki || true
+
+.PHONY: loki-ui
+loki-ui: _monitoring-ns-check ## Access Loki HTTP API via port-forward
+	@echo "Forwarding Loki HTTP API to http://localhost:3100"
+	@echo "Press Ctrl+C to stop."
+	@kubectl port-forward svc/$(ENV_NAME)-loki 3100:3100 -n $(MONITORING_NS)
 
 ################################################################################
 # PostgreSQL Deployment Targets
@@ -1083,7 +1119,7 @@ legacy-all-build: ## Build all legacy artifacts sequentially (Java → Frontend 
 
 
 .PHONY: cluster-qa-monitoring-deploy
-cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring stack (Prometheus, Grafana, Zipkin) into qa cluster. Usage: make cluster-qa-monitoring-deploy
+cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring stack (Prometheus, Grafana, Loki, Zipkin) into qa cluster. Usage: make cluster-qa-monitoring-deploy
 	@echo "🚀 Deploying monitoring stack into '$(ENV_NAME)' cluster..."
 	@if [ "$(ENV_NAME)" != "qa" ]; then \
 		echo "ERROR: This target is only applicable for the 'qa' environment."; \
@@ -1106,9 +1142,12 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 
     # MinIO Infra Tenant Configuration
 	# Loki
-	$(MAKE) minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs
-	$(MAKE) minio-svc-user-secret-create SVC_NAME=loki COPY_SECRET_NS=qa-monitoring
-	$(MAKE) make minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/infra/loki/minio/s3-policy-loki-logs.json
+	$(MAKE) minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs-qa
+	$(MAKE) minio-svc-user-secret-create SVC_NAME=loki COPY_SECRET_NS=$(MONITORING_NS)
+	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/svc/loki/minio/s3-policy-loki-logs-qa.json
+
+	# Loki
+	$(MAKE) loki-install
 
 	# Zipkin (requires Elasticsearch)
 	$(MAKE) zipkin-es-user-secret-create

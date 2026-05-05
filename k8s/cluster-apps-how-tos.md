@@ -63,6 +63,15 @@ and "Insurance Hub" infrastructure and services.
     ```
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=observability-install-<iso-date>`
 
+#### Loki
+
+Prerequisites: Deploy MinIO Loki tenant, see [Minio](#minio)
+
+- `make loki-install`
+- `make loki-status`
+- `make loki-ui` and go to `http://localhost:3100`
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=loki-install-<iso-date>`
+
 #### Zipkin (legacy)
 
 - **Prerequisites**: [Elasticsearch](#elasticsearch) 
