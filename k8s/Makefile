@@ -173,6 +173,7 @@ else
 endif
 
 OVERLAYS_FILE_PATH = overlays/$(ENV_NAME)
+COPY_SECRET_NS ?= $(SVC_NS)
 
 .PHONY: _env-check
 _env-check: ## Ensure env name is valid and set based on the current context
@@ -289,6 +290,7 @@ flux-suspend: _env-check ## Suspend QA Flux reconciliation
 ################################################################################
 
 KUBE_PROMETHEUS_STACK_VERSION := 79.3.0
+LOKI_HELM_CHART_VERSION := 7.0.0
 
 .PHONY: prometheus-stack-install
 prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
@@ -334,6 +336,41 @@ grafana-ui: ## Access Grafana UI via port-forward
 	@echo "Forwarding Grafana UI to http://localhost:3000"
 	@echo "Login with admin/adminpwd. Press Ctrl+C to stop."
 	@kubectl port-forward svc/qa-prometheus-grafana 3000:80 -n qa-monitoring
+
+.PHONY: loki-install
+loki-install: _monitoring-ns-check ## Install Grafana Loki in QA cluster
+	@if [ ! -f "$(OVERLAYS_FILE_PATH)/infra/loki/values.yaml" ]; then \
+		echo "ERROR: Missing Loki values file at '$(OVERLAYS_FILE_PATH)/infra/loki/values.yaml'."; \
+		exit 1; \
+	fi
+	@helm repo add grafana https://grafana.github.io/helm-charts || true
+	@helm repo update
+	@echo "Installing Grafana Loki using Helm chart v$(LOKI_HELM_CHART_VERSION) into $(MONITORING_NS) namespace..."
+	@helm upgrade --install "$(ENV_NAME)"-loki grafana/loki \
+		--version "$(LOKI_HELM_CHART_VERSION)" \
+		--namespace $(MONITORING_NS) \
+		--values "$(OVERLAYS_FILE_PATH)"/infra/loki/values.yaml
+	@echo "✅ Loki deployment initiated. Check status with: make loki-status"
+
+.PHONY: loki-uninstall
+loki-uninstall: _monitoring-ns-check ## Uninstall Loki from QA cluster
+	@echo "Uninstalling Loki from '$(MONITORING_NS)' namespace..."
+	@helm uninstall "$(ENV_NAME)"-loki --namespace $(MONITORING_NS) || true
+	@echo "🗑 Loki uninstalled."
+
+.PHONY: loki-status
+loki-status: _monitoring-ns-check ## Show Loki deployment status in QA cluster
+	@echo "Status for Loki in namespace: $(MONITORING_NS)"
+	@echo "\nLoki Pods:"
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=loki || true
+	@echo "\nLoki Services:"
+	@kubectl get svc -n $(MONITORING_NS) -l app.kubernetes.io/name=loki || true
+
+.PHONY: loki-ui
+loki-ui: _monitoring-ns-check ## Access Loki HTTP API via port-forward
+	@echo "Forwarding Loki HTTP API to http://localhost:3100"
+	@echo "Press Ctrl+C to stop."
+	@kubectl port-forward svc/$(ENV_NAME)-loki 3100:3100 -n $(MONITORING_NS)
 
 ################################################################################
 # PostgreSQL Deployment Targets
@@ -676,9 +713,9 @@ minio-tenant-status: _env-check _svc-name-check ## Show MinIO tenant status for 
 .PHONY: minio-console-ui
 minio-console-ui: _env-check _svc-name-check ## Access MinIO Console UI via port-forward. Usage: make minio-console-ui SVC_NAME=<svc-name>
 	@NAMESPACE="$(ENV_NAME)-minio-$(SVC_NAME)"; \
-	echo "Forwarding MinIO Console for '$(SVC_NAME)' to http://localhost:9090"; \
+	echo "Forwarding MinIO Console for '$(SVC_NAME)' to https://localhost:9443"; \
 	echo "Press Ctrl+C to stop."; \
-	kubectl port-forward svc/$$NAMESPACE-console 9090:9090 -n $$NAMESPACE
+	kubectl port-forward -n $$NAMESPACE svc/$$NAMESPACE-console 9443:9443
 
 .PHONY: minio-tenant-delete
 minio-tenant-delete: _env-check _svc-name-check ## Delete MinIO tenant for service. Usage: make minio-tenant-delete SVC_NAME=<svc-name>
@@ -715,10 +752,11 @@ minio-svc-bucket-create: _env-check _svc-name-check ## Create a MinIO bucket for
 	@bash apps/scripts/minio-svc-bucket-create.sh "$(ENV_NAME)" "$(SVC_NAME)" "$(BUCKET_NAME)"
 
 .PHONY: minio-svc-user-secret-create
-minio-svc-user-secret-create: _env-check _svc-name-check _svc-ns-check ## Create/update MinIO credentials secret for service account. Usage: make minio-svc-user-secret-create SVC_NAME=<svc-name> MINIO_SVC_ACCESS_KEY=<access-key> MINIO_SVC_SECRET_KEY=<secret-key>
+minio-svc-user-secret-create: _env-check _svc-name-check ## Create/update MinIO credentials secret for service account. Usage: make minio-svc-user-secret-create SVC_NAME=<svc-name> [COPY_SECRET_NS=<target-namespace>] [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]
 	@NAMESPACE="$(ENV_NAME)-minio-$$SVC_NAME"; \
 	SECRET_NAME="$$NAMESPACE-svc-user-creds"; \
 	kubectl get namespace "$$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$$NAMESPACE"; \
+	kubectl get namespace "$$COPY_SECRET_NS" >/dev/null 2>&1 || kubectl create namespace "$$COPY_SECRET_NS"; \
 	echo "Creating MinIO service credentials secret in namespace $$NAMESPACE..."; \
 	kubectl create secret generic "$$SECRET_NAME" \
 	   --namespace "$$NAMESPACE" \
@@ -726,12 +764,12 @@ minio-svc-user-secret-create: _env-check _svc-name-check _svc-ns-check ## Create
 	   --from-literal=MINIO_SVC_ACCESS_KEY="$(MINIO_SVC_ACCESS_KEY)" \
 	   --from-literal=MINIO_SVC_SECRET_KEY="$(MINIO_SVC_SECRET_KEY)" \
 	   --dry-run=client -o yaml | kubectl apply -f -; \
-	echo "Copying MinIO service credentials secret from $$NAMESPACE to $(SVC_NS)..."; \
+	echo "Copying MinIO service credentials secret from $$NAMESPACE to $$COPY_SECRET_NS..."; \
 	kubectl get secret "$$SECRET_NAME" \
 	   -n "$$NAMESPACE" -o yaml | \
-	   sed "s/namespace: $$NAMESPACE/namespace: $(SVC_NS)/" | \
+	   sed "s/namespace: $$NAMESPACE/namespace: $$COPY_SECRET_NS/" | \
 	   kubectl apply -f -; \
-	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE and copied to $(SVC_NS)"
+	echo "Secret '$$SECRET_NAME' successfully created/updated in namespace $$NAMESPACE and copied to $$COPY_SECRET_NS"
 
 .PHONY: minio-svc-user-with-policy-create
 minio-svc-user-with-policy-create: _env-check _svc-name-check ## Create a MinIO service account and apply an S3 policy. Usage: make minio-svc-user-with-policy-create SVC_NAME=<svc-name> POLICY_FILE=<path/to/policy.json>
@@ -1081,7 +1119,7 @@ legacy-all-build: ## Build all legacy artifacts sequentially (Java → Frontend 
 
 
 .PHONY: cluster-qa-monitoring-deploy
-cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring stack (Prometheus, Grafana, Zipkin) into qa cluster. Usage: make cluster-qa-monitoring-deploy
+cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring stack (Prometheus, Grafana, Loki, Zipkin) into qa cluster. Usage: make cluster-qa-monitoring-deploy
 	@echo "🚀 Deploying monitoring stack into '$(ENV_NAME)' cluster..."
 	@if [ "$(ENV_NAME)" != "qa" ]; then \
 		echo "ERROR: This target is only applicable for the 'qa' environment."; \
@@ -1095,6 +1133,21 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 
 	# Prometheus & Grafana stack
 	$(MAKE) prometheus-stack-install
+
+	# MinIO Infra Tenants
+	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
+	$(MAKE) minio-storage-config-secret-create SVC_NAME=loki
+	$(MAKE) minio-tenant-deploy SVC_NAME=loki & wait
+	@echo "⏳ Waiting 3m for MinIO infra tenants.." && sleep 180
+
+    # MinIO Infra Tenant Configuration
+	# Loki
+	$(MAKE) minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs
+	$(MAKE) minio-svc-user-secret-create SVC_NAME=loki COPY_SECRET_NS=$(MONITORING_NS)
+	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/infra/loki/minio/s3-policy-loki-logs.json
+
+	# Loki
+	$(MAKE) loki-install
 
 	# Zipkin (requires Elasticsearch)
 	$(MAKE) zipkin-es-user-secret-create
@@ -1145,8 +1198,10 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=document
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=payment
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=payment
+	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
+	$(MAKE) minio-storage-config-secret-create SVC_NAME=loki
 	$(MAKE) minio-tenant-deploy SVC_NAME=document & $(MAKE) minio-tenant-deploy SVC_NAME=payment & wait
-	@echo "⏳ Waiting 3m for MinIO tenants.." && sleep 180
+	@echo "⏳ Waiting 3m for MinIO service tenants.." && sleep 180
 
 	@echo "✅ Infra apps deployed to local-dev cluster!"
 	@kubectl get pods -A | grep -E "local-dev-all|minio|elastic|kafka|cnpg"
@@ -1158,7 +1213,7 @@ cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or 
 	# Elasticsearch
 	$(MAKE) es-elastic-user-secret-copy
 
-	# MinIO Tenant Configuration
+	# MinIO Service Tenant Configuration
 	# Document
 	$(MAKE) minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies
 	$(MAKE) minio-svc-user-secret-create SVC_NAME=document
