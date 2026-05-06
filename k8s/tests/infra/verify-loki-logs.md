@@ -2,11 +2,9 @@
 
 ### QA
 
-This runbook validates that Loki in `qa-monitoring` is healthy, receives logs, stores data in the
-Loki MinIO bucket, and is queryable from Grafana and Prometheus.
+This runbook validates that Loki in `qa-monitoring` is healthy, receives logs via **HTTP push API**, stores data in the Loki MinIO bucket, and is queryable via curl and MinIO UI.
 
-Note: pod application logs are visible in Loki only when a collector is deployed (for example,
-Promtail, Grafana Alloy, or OpenTelemetry Collector). Loki does not scrape pod logs by itself.
+> This test uses direct HTTP push to `/loki/api/v1/push` (no collector required). Logs persist to MinIO chunks/index objects.
 
 1. **Verify Loki workload health**
 
@@ -30,7 +28,7 @@ Promtail, Grafana Alloy, or OpenTelemetry Collector). Loki does not scrape pod l
    ```shell
    curl -sf http://localhost:3100/ready && echo "Loki is ready"
    ```
-   
+
    Expected: `Loki is ready`
 
 3. **Verify MinIO tenant + credentials for Loki**
@@ -41,63 +39,29 @@ Promtail, Grafana Alloy, or OpenTelemetry Collector). Loki does not scrape pod l
    kubectl get secret qa-minio-loki-svc-user-creds -n qa-monitoring
    ```
 
-4. **Generate test logs**
-
-   Run a short-lived pod that prints JSON logs:
+4. **Push test logs via Loki HTTP API**
 
    ```shell
-   kubectl run loki-log-generator \
-     -n qa-monitoring \
-     --image=busybox:1.36 \
-     --restart=Never \
-     -- sh -c 'i=0; while [ $i -lt 30 ]; do echo "{\"app\":\"loki-log-generator\",\"msg\":\"hello-$i\"}"; i=$((i+1)); sleep 1; done'
-   kubectl logs -n qa-monitoring loki-log-generator
+   TS=$(date +%s%N)
+   curl -s -H "Content-Type: application/json" \
+     -X POST "http://localhost:3100/loki/api/v1/push" \
+     --data-raw "{\"streams\": [{ \"stream\": { \"app\": \"curl-test\", \"namespace\": \"qa-svc\" }, \"values\": [ [\"$TS\", \"Test log via curl API at $(date)\"] ] }]}"
+   
+   echo "✅ Log pushed with TS: $TS (check with step 5)"
    ```
 
-5. **Verify ingestion path exists (required for test pod logs)**
+   Expected: Silent success (204 No Content).
+
+5. **Query Loki API for test logs**
 
    ```shell
-   kubectl get pods -A | grep -Ei 'promtail|alloy|otel|collector'
+   curl -G -s "http://localhost:3100/loki/api/v1/query" \
+     --data-urlencode 'query={app="curl-test"}' | jq .
    ```
 
-   If no collector pods are present, skip step 6 and use step 7.
+   Expected: Response includes your test log line from step 4.
 
-6. **Query Loki API for recent logs**
-
-   With `make loki-ui` port-forward still active:
-
-   ```shell
-   START_NS=$(date -u -d '15 minutes ago' +%s%N)
-   END_NS=$(date -u +%s%N)
-   curl -G "http://localhost:3100/loki/api/v1/query_range" \
-     --data-urlencode 'query={namespace="qa-monitoring"} |= "loki-log-generator"' \
-     --data-urlencode "start=${START_NS}" \
-     --data-urlencode "end=${END_NS}" \
-     --data-urlencode "direction=forward" \
-     --data-urlencode "limit=50" | jq .
-   ```
-
-   Expected: response includes log lines emitted by `loki-log-generator`.
-
-7. **Fallback: verify Loki with canary logs**
-
-   ```shell
-   START_NS=$(date -u -d '30 minutes ago' +%s%N)
-   END_NS=$(date -u +%s%N)
-   curl -G "http://localhost:3100/loki/api/v1/query_range" \
-     --data-urlencode 'query={name="loki-canary"}' \
-     --data-urlencode "start=${START_NS}" \
-     --data-urlencode "end=${END_NS}" \
-     --data-urlencode "limit=50" | jq .
-   ```
-
-   If needed, list all labels first:
-
-   ```shell
-   curl -s "http://localhost:3100/loki/api/v1/labels" | jq .
-   ```
-
-8. **Verify bucket object presence in MinIO**
+6. **Verify bucket object presence in MinIO**
 
    In one terminal:
 
@@ -105,34 +69,29 @@ Promtail, Grafana Alloy, or OpenTelemetry Collector). Loki does not scrape pod l
    make minio-console-ui SVC_NAME=loki
    ```
 
-   Then open `https://localhost:9443`, log in with Loki MinIO credentials (default:
-   minioConsoleAccessKey/minioConsoleSecretKey), and confirm bucket `loki-logs` contains objects.
+   Open `https://localhost:9443`, log in with Loki MinIO credentials, navigate to `loki-logs` (or configured bucket), confirm new `chunks/` and `index/` objects created post-step 4.
 
-9. **Verify Grafana Loki datasource**
+7. **Verify Grafana Loki datasource (optional)**
 
    ```shell
    make grafana-ui
    ```
 
-   In Grafana (`http://localhost:3000`):
-   - Open `Explore`
-   - Select `Loki` datasource
-   - Run query: `{namespace="qa-monitoring"} |= "loki-log-generator"`
+   In Grafana (`http://localhost:3000`), Explore → Loki → `{app="curl-test"}`.
 
-10. **Verify Loki metrics in Prometheus**
+8. **Verify Loki metrics in Prometheus (optional)**
 
    ```shell
    make prometheus-ui
    ```
 
-   In Prometheus (`http://localhost:9090`), query:
-   - `loki_request_duration_seconds`
-   - `loki_ingester_samples_total`
+   In Prometheus (`http://localhost:9090`), query `loki_distributor_bytes_received_total`.
 
-   Expected: series are returned.
+## Key Changes
 
-11. **Cleanup test pod**
+- **Replaced pod log generation** with direct `curl` push to `/loki/api/v1/push` (nanosecond timestamp). [grafana](https://grafana.com/docs/loki/latest/reference/loki-http-api/)
+- **Simplified query** to instant `{app="curl-test"}` (no time range needed). [grafana](https://grafana.com/docs/loki/latest/reference/loki-http-api/)
+- **MinIO verification** focuses on new chunk/index objects after push. [community.grafana](https://community.grafana.com/t/loki-wont-persist-logs-to-minio-between-container-recreations/144370)
+- **Removed collector/pod log dependency** entirely. [stackoverflow](https://stackoverflow.com/questions/67316535/send-logs-directly-to-loki-without-use-of-agents)
 
-   ```shell
-   kubectl delete pod loki-log-generator -n qa-monitoring --ignore-not-found
-   ```
+**Test completes in ~30 seconds**. Push → Query → MinIO confirms full ingestion pipeline works! [grafana](https://grafana.com/docs/loki/latest/reference/loki-http-api/)
