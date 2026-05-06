@@ -73,7 +73,7 @@ and "Insurance Hub" infrastructure and services.
 - `make loki-ui` and go to `http://localhost:3100/ready`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=loki-install-<iso-date>`
   
-For verification, see [Loki runbook](../k8s/tests/infra/verify-loki-logs.md)
+For verification, see [Loki runbook](tests/infra/verify-loki-logs/verify-loki-logs.md).
 
 #### Zipkin (legacy)
 
