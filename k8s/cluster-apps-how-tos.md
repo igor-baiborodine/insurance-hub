@@ -174,6 +174,17 @@ For verification, see [Loki runbook](tests/infra/verify-loki-logs/verify-loki-lo
   - `kubectl get secret qa-minio-loki-svc-user-creds -n qa-minio-loki`
   - `kubectl get secret qa-minio-loki-svc-user-creds -n qa-monitoring`
 
+  4. **QA/tempo** service:
+  - `make minio-storage-user-secret-create SVC_NAME=tempo [MINIO_CONSOLE_ACCESS_KEY=<access-key>] [MINIO_CONSOLE_SECRET_KEY=<secret-key>]`
+  - `make minio-storage-config-secret-create SVC_NAME=tempo [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
+  - `make minio-tenant-deploy SVC_NAME=tempo`
+  - `make minio-tenant-status SVC_NAME=tempo`
+  - `make minio-svc-bucket-create SVC_NAME=tempo BUCKET_NAME=tempo-traces`
+  - `make minio-svc-user-secret-create SVC_NAME=tempo COPY_SECRET_NS=qa-monitoring [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
+  - `make minio-svc-user-with-policy-create SVC_NAME=tempo POLICY_FILE=apps/infra/tempo/minio/s3-policy-tempo-traces.json`
+  - `kubectl get secret qa-minio-tempo-svc-user-creds -n qa-minio-tempo`
+  - `kubectl get secret qa-minio-tempo-svc-user-creds -n qa-monitoring`
+
 - **QA/Grafana**: In _Dashboards > New > Import_, add dashboards using the following URLs: 
     - https://grafana.com/grafana/dashboards/13502-minio-dashboard/
     - https://grafana.com/grafana/dashboards/19237-minio-bucket-dashboard/
