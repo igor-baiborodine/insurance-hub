@@ -59,6 +59,12 @@ grafana:
       isDefault: false
       jsonData:
         maxLines: 1000
+    - name: Tempo
+      uid: tempo
+      type: tempo
+      access: proxy
+      url: http://qa-tempo:3200
+      isDefault: false
   sidecar:
     dashboards:
       enabled: true
