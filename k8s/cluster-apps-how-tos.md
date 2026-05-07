@@ -9,6 +9,7 @@
   - [Observability (QA)](#observability-qa)
     - [Prometheus & Grafana](#prometheus--grafana)
     - [Loki](#loki)
+    - [Tempo](#tempo)
     - [Zipkin (legacy)](#zipkin-legacy)
   - [Infra](#infra)
     - [Postgres](#postgres)
@@ -74,6 +75,17 @@ and "Insurance Hub" infrastructure and services.
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=loki-install-<iso-date>`
   
 For verification, see [Loki runbook](tests/infra/verify-loki-logs/verify-loki-logs.md).
+
+#### Tempo
+
+**Prerequisites**: MinIO Tempo tenant and its credentials, see [MinIO](#minio).
+
+- `make tempo-install`
+- `make tempo-status`
+- `make tempo-ui` and go to `http://localhost:3200/ready`
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=tempo-install-<iso-date>`
+
+For verification, see [Tempo runbook](tests/infra/verify-tempo-traces/verify-tempo-traces.md).
 
 #### Zipkin (legacy)
 
