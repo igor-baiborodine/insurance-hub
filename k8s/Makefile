@@ -1210,7 +1210,7 @@ legacy-all-build: ## Build all legacy artifacts sequentially (Java → Frontend 
 
 
 .PHONY: cluster-qa-monitoring-deploy
-cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring stack (Prometheus, Grafana, Loki, Zipkin, Alloy) into qa cluster. Usage: make cluster-qa-monitoring-deploy
+cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring stack (Prometheus, Grafana, Loki, Tempo, Zipkin, Alloy) into qa cluster. Usage: make cluster-qa-monitoring-deploy
 	@echo "🚀 Deploying monitoring stack into '$(ENV_NAME)' cluster..."
 	@if [ "$(ENV_NAME)" != "qa" ]; then \
 		echo "ERROR: This target is only applicable for the 'qa' environment."; \
@@ -1228,7 +1228,9 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 	# MinIO Infra Tenants
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=loki
-	$(MAKE) minio-tenant-deploy SVC_NAME=loki & wait
+	$(MAKE) minio-storage-user-secret-create SVC_NAME=tempo
+	$(MAKE) minio-storage-config-secret-create SVC_NAME=tempo
+	$(MAKE) minio-tenant-deploy SVC_NAME=loki & $(MAKE) minio-tenant-deploy SVC_NAME=tempo & wait
 	@echo "⏳ Waiting 3m for MinIO infra tenants.." && sleep 180
 
     # MinIO Infra Tenant Configuration
@@ -1237,8 +1239,16 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 	$(MAKE) minio-svc-user-secret-create SVC_NAME=loki COPY_SECRET_NS=$(MONITORING_NS)
 	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/infra/loki/minio/s3-policy-loki-logs.json
 
+	# Tempo
+	$(MAKE) minio-svc-bucket-create SVC_NAME=tempo BUCKET_NAME=tempo-traces
+	$(MAKE) minio-svc-user-secret-create SVC_NAME=tempo COPY_SECRET_NS=$(MONITORING_NS)
+	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=tempo POLICY_FILE=apps/infra/tempo/minio/s3-policy-tempo-traces.json
+
 	# Loki
 	$(MAKE) loki-install
+
+	# Tempo
+	$(MAKE) tempo-install
 
 	# Zipkin (requires Elasticsearch)
 	$(MAKE) zipkin-es-user-secret-create

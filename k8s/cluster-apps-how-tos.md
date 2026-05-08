@@ -108,6 +108,8 @@ For verification, see [Tempo runbook](tests/infra/verify-tempo-traces/verify-tem
 - `make alloy-ui` and go to `http://localhost:12345/-/ready`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=alloy-install-<iso-date>`
 
+For verification, see [Alloy runbook](tests/infra/verify-alloy-traces/verify-alloy-traces.md).
+
 ### Infra
 
 #### Postgres
