@@ -669,6 +669,25 @@ visualize both current Java-based services and new Go-based services. This setup
 smooth, zero-code migration to Tempo and lays the groundwork for Go services to emit native OTLP
 traces.
 
+**Update 8-May-2026**: The OpenTelemetry Collector specified above should be replaced with **Grafana
+Alloy** deployed as a permanent, central observability collector. Alloy will serve as the long-term 
+cluster-wide gateway for all telemetry signals (traces, logs, metrics) from both legacy Java 
+services (via Zipkin receiver) and future Go services (via OTLP receivers).
+
+Alloy will implement complete pipelines:
+
+* **Traces**: Zipkin + OTLP → Tempo (+ Zipkin during transition)
+
+* **Logs**: OTLP → Loki
+
+* **Metrics**: OTLP/Prometheus scrape → Prometheus
+
+Go services will target Alloy's stable OTLP endpoints as their sole observability backend. Alloy
+will centralize processing (batching, sampling, enrichment, Kubernetes metadata injection) and
+eliminate direct backend coupling, following OpenTelemetry best practices for production Kubernetes
+deployments. The original Phase 2 tracing bridge behavior is preserved while establishing the
+target-state observability architecture.
+
 ### Phase 3: Data Store Consolidation
 
 **Goal:** Simplify the data layer by migrating product data from MongoDB to PostgreSQL, thereby
