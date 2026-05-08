@@ -1,0 +1,186 @@
+controller:
+  type: deployment
+  replicas: 1
+
+alloy:
+  enableHttpServerPort: true
+  listenAddr: 0.0.0.0
+  listenPort: 12345
+  extraPorts:
+    - name: zipkin
+      port: 9411
+      targetPort: 9411
+      protocol: TCP
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  configMap:
+    create: true
+    content: |-
+      otelcol.receiver.zipkin "legacy_java" {
+        endpoint = "0.0.0.0:9411"
+
+        output {
+          traces = [otelcol.processor.attributes.traces.input]
+        }
+      }
+
+      otelcol.receiver.otlp "otlp_ingress" {
+        grpc {
+          endpoint = "0.0.0.0:4317"
+        }
+
+        http {
+          endpoint = "0.0.0.0:4318"
+        }
+
+        output {
+          traces  = [otelcol.processor.attributes.traces.input]
+          logs    = [otelcol.processor.attributes.logs.input]
+          metrics = [otelcol.processor.attributes.metrics.input]
+        }
+      }
+
+      // Add common QA/cluster attributes across all telemetry signals.
+      otelcol.processor.attributes "traces" {
+        action {
+          key    = "deployment.environment"
+          action = "upsert"
+          value  = "qa"
+        }
+
+        action {
+          key    = "cluster.name"
+          action = "upsert"
+          value  = "qa-insurance-hub"
+        }
+
+        output {
+          traces = [otelcol.processor.batch.traces.input]
+        }
+      }
+
+      otelcol.processor.attributes "logs" {
+        action {
+          key    = "deployment.environment"
+          action = "upsert"
+          value  = "qa"
+        }
+
+        action {
+          key    = "cluster.name"
+          action = "upsert"
+          value  = "qa-insurance-hub"
+        }
+
+        output {
+          logs = [otelcol.processor.batch.logs.input]
+        }
+      }
+
+      otelcol.processor.attributes "metrics" {
+        action {
+          key    = "deployment.environment"
+          action = "upsert"
+          value  = "qa"
+        }
+
+        action {
+          key    = "cluster.name"
+          action = "upsert"
+          value  = "qa-insurance-hub"
+        }
+
+        output {
+          metrics = [otelcol.processor.batch.metrics.input]
+        }
+      }
+
+      otelcol.processor.batch "traces" {
+        timeout         = "5s"
+        send_batch_size = 1024
+
+        output {
+          traces = [
+            otelcol.exporter.otlp.tempo.input,
+            otelcol.exporter.otlphttp.zipkin_legacy.input,
+          ]
+        }
+      }
+
+      otelcol.processor.batch "logs" {
+        timeout         = "5s"
+        send_batch_size = 1024
+
+        output {
+          logs = [otelcol.exporter.loki.to_loki.input]
+        }
+      }
+
+      otelcol.processor.batch "metrics" {
+        timeout         = "5s"
+        send_batch_size = 1024
+
+        output {
+          metrics = [otelcol.exporter.prometheus.to_prom.input]
+        }
+      }
+
+      // Tempo traces export (primary target-state backend).
+      otelcol.exporter.otlp "tempo" {
+        client {
+          endpoint = "qa-tempo.qa-monitoring.svc.cluster.local:4317"
+          insecure = true
+        }
+      }
+
+      // Transitional legacy Zipkin export path.
+      // Note: this uses OTLP/HTTP transport and explicit traces endpoint override.
+      otelcol.exporter.otlphttp "zipkin_legacy" {
+        client {
+          endpoint = "http://qa-zipkin.qa-monitoring.svc.cluster.local:9411"
+        }
+
+        traces_endpoint = "http://qa-zipkin.qa-monitoring.svc.cluster.local:9411/api/v2/spans"
+      }
+
+      // OTLP logs -> Loki conversion and write.
+      loki.write "qa_loki" {
+        endpoint {
+          url = "http://qa-loki.qa-monitoring.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }
+
+      otelcol.exporter.loki "to_loki" {
+        forward_to = [loki.write.qa_loki.receiver]
+      }
+
+      // OTLP metrics -> Prometheus remote_write.
+      prometheus.remote_write "qa_prometheus" {
+        endpoint {
+          url = "http://qa-prometheus-kube-prometh-prometheus.qa-monitoring.svc.cluster.local:9090/api/v1/write"
+        }
+      }
+
+      otelcol.exporter.prometheus "to_prom" {
+        forward_to = [prometheus.remote_write.qa_prometheus.receiver]
+      }
+
+service:
+  enabled: true
+  type: ClusterIP
+
+serviceMonitor:
+  enabled: true

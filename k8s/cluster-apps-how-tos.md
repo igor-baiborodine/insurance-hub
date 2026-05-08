@@ -33,7 +33,7 @@ and "Insurance Hub" infrastructure and services.
 
 - `make legacy-all-build`
 - `cd k8s`
-- **QA**: `make cluster-qa-monitoring-deploy` (deploys Prometheus/Grafana, Loki, Zipkin, and Alloy)
+- **QA**: `make cluster-qa-monitoring-deploy` (deploys Prometheus/Grafana, Loki, Tempo, Alloy, and Zipkin)
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-monitoring-deploy-<iso-date>`
 - `make cluster-infra-deploy`
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-infra-deploy-<iso-date>` 
