@@ -19,4 +19,4 @@ configMapGenerator:
     literals:
       - PG_HOST=qa-postgres-pricing-rw.qa-data.svc.cluster.local
       - TRACING_ZIPKIN_ENABLED=true
-      - ZIPKIN_HOST=qa-zipkin.qa-monitoring.svc.cluster.local
+      - ZIPKIN_HOST=qa-alloy.qa-monitoring.svc.cluster.local

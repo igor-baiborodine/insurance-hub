@@ -25,4 +25,4 @@ spec:
             - name: MICRONAUT_ENVIRONMENTS
               value: "qa"
             - name: TRACING_ZIPKIN_HTTP_URL
-              value: "http://qa-zipkin.qa-monitoring.svc.cluster.local:9411"
+              value: "http://qa-alloy.qa-monitoring.svc.cluster.local:9411"
