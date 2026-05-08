@@ -4,14 +4,14 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**
 
-- [Automatic Deployment](#automatic-deployment)
+- [Automated Deployment](#automated-deployment)
 - [Step-by-Step Deployment](#step-by-step-deployment)
   - [Observability (QA)](#observability-qa)
     - [Prometheus & Grafana](#prometheus--grafana)
     - [Loki](#loki)
     - [Tempo](#tempo)
-    - [Alloy](#alloy)
     - [Zipkin (legacy)](#zipkin-legacy)
+    - [Alloy](#alloy)
   - [Infra](#infra)
     - [Postgres](#postgres)
     - [MongoDB (legacy)](#mongodb-legacy)
