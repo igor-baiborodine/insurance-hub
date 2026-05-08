@@ -1,0 +1,56 @@
+replicas: 1
+
+tempo:
+  extraArgs:
+    config.expand-env: "true"
+  extraEnvFrom:
+    - secretRef:
+        name: qa-minio-tempo-svc-user-creds
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  retention: 168h
+  storage:
+    trace:
+      backend: s3
+      s3:
+        bucket: tempo-traces
+        endpoint: qa-minio-tempo-hl.qa-minio-tempo.svc.cluster.local:9000
+        access_key: ${MINIO_SVC_ACCESS_KEY}
+        secret_key: ${MINIO_SVC_SECRET_KEY}
+        forcepathstyle: true
+        insecure: false
+        tls_insecure_skip_verify: true
+      wal:
+        path: /var/tempo/wal
+  receivers:
+    jaeger:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:14250
+        thrift_binary:
+          endpoint: 0.0.0.0:6832
+        thrift_compact:
+          endpoint: 0.0.0.0:6831
+        thrift_http:
+          endpoint: 0.0.0.0:14268
+    opencensus: null
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+    zipkin:
+      endpoint: 0.0.0.0:9411
+
+persistence:
+  enabled: true
+  size: 10Gi
+
+serviceMonitor:
+  enabled: true

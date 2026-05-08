@@ -289,8 +289,11 @@ flux-suspend: _env-check ## Suspend QA Flux reconciliation
 # Current context must be "qa-insurance-hub"
 ################################################################################
 
+#########################################
+# Prometheus & Grafana
+#########################################
+
 KUBE_PROMETHEUS_STACK_VERSION := 79.3.0
-LOKI_HELM_CHART_VERSION := 7.0.0
 
 .PHONY: prometheus-stack-install
 prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
@@ -337,6 +340,12 @@ grafana-ui: ## Access Grafana UI via port-forward
 	@echo "Login with admin/adminpwd. Press Ctrl+C to stop."
 	@kubectl port-forward svc/qa-prometheus-grafana 3000:80 -n qa-monitoring
 
+#########################################
+# Loki
+#########################################
+
+LOKI_HELM_CHART_VERSION := 7.0.0
+
 .PHONY: loki-install
 loki-install: _monitoring-ns-check ## Install Grafana Loki in QA cluster
 	@if [ ! -f "$(OVERLAYS_FILE_PATH)/infra/loki/values.yaml" ]; then \
@@ -371,6 +380,47 @@ loki-ui: _monitoring-ns-check ## Access Loki HTTP API via port-forward
 	@echo "Forwarding Loki HTTP API to http://localhost:3100"
 	@echo "Press Ctrl+C to stop."
 	@kubectl port-forward svc/$(ENV_NAME)-loki 3100:3100 -n $(MONITORING_NS)
+
+#########################################
+# Tempo
+#########################################
+
+TEMPO_HELM_CHART_VERSION := 1.24.4
+
+.PHONY: tempo-install
+tempo-install: _monitoring-ns-check ## Install Grafana Tempo in QA cluster
+	@if [ ! -f "$(OVERLAYS_FILE_PATH)/infra/tempo/values.yaml" ]; then \
+		echo "ERROR: Missing Tempo values file at '$(OVERLAYS_FILE_PATH)/infra/tempo/values.yaml'."; \
+		exit 1; \
+	fi
+	@helm repo add grafana https://grafana.github.io/helm-charts || true
+	@helm repo update
+	@echo "Installing Grafana Tempo using Helm chart v$(TEMPO_HELM_CHART_VERSION) into $(MONITORING_NS) namespace..."
+	@helm upgrade --install "$(ENV_NAME)"-tempo grafana/tempo \
+		--version "$(TEMPO_HELM_CHART_VERSION)" \
+		--namespace $(MONITORING_NS) \
+		--values "$(OVERLAYS_FILE_PATH)"/infra/tempo/values.yaml
+	@echo "✅ Tempo deployment initiated. Check status with: make tempo-status"
+
+.PHONY: tempo-uninstall
+tempo-uninstall: _monitoring-ns-check ## Uninstall Tempo from QA cluster
+	@echo "Uninstalling Tempo from '$(MONITORING_NS)' namespace..."
+	@helm uninstall "$(ENV_NAME)"-tempo --namespace $(MONITORING_NS) || true
+	@echo "🗑 Tempo uninstalled."
+
+.PHONY: tempo-status
+tempo-status: _monitoring-ns-check ## Show Tempo deployment status in QA cluster
+	@echo "Status for Tempo in namespace: $(MONITORING_NS)"
+	@echo "\nTempo Pods:"
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=tempo || true
+	@echo "\nTempo Services:"
+	@kubectl get svc -n $(MONITORING_NS) -l app.kubernetes.io/name=tempo || true
+
+.PHONY: tempo-ui
+tempo-ui: _monitoring-ns-check ## Access Tempo HTTP API via port-forward
+	@echo "Forwarding Tempo HTTP API to http://localhost:3200"
+	@echo "Press Ctrl+C to stop."
+	@kubectl port-forward svc/$(ENV_NAME)-tempo 3200:3200 -n $(MONITORING_NS)
 
 ################################################################################
 # PostgreSQL Deployment Targets
