@@ -142,7 +142,9 @@ alloy:
       otelcol.exporter.otlp "tempo" {
         client {
           endpoint = "qa-tempo.qa-monitoring.svc.cluster.local:4317"
-          insecure = true
+          tls {
+            insecure = true
+          }
         }
       }
 
