@@ -79,30 +79,35 @@ services (Zipkin protocol), and dual-exports them to both Tempo and Zipkin.
 
 6. **Verify trace in Tempo**
 
-   In Grafana:
-   - `make grafana-ui`
-   - Explore -> Tempo
-   - Search by `service.name="alloy-dual-smoke"` or direct trace ID from step 4.
+   In another terminal:
+ 
+   ```shell
+   make grafana-ui
+   ```
+
+   In Grafana (`http://localhost:3000`), Explore → Tempo → Query type → Search →
+   `{resource.service.name="alloy-dual-smoke"}`.
+
+   **Expected**:
+
+   ![Grafana - Test Traces](grafana-test-traces-verification.png)
 
 7. **Verify trace in Zipkin**
 
-   In one terminal:
+   In another terminal:
 
    ```shell
    make zipkin-ui
    ```
 
-   In Zipkin (`http://localhost:9411`):
-   - Query recent traces for service `alloy-dual-smoke`.
-   - Confirm the trace from step 4 is present.
+   In Zipkin (`http://localhost:9411`), Search → `serviceName=alloy-dual-smoke`.
+   
+   **Expected**:
+
+   ![Zipkin - Test Traces](zipkin-test-traces-verification.png)
 
 8. **Verify Java service path (real producer)**
 
-   After redeploying Java services with Alloy Zipkin endpoint:
+   **Expected**: 
 
-   ```shell
-   kubectl logs -n qa-monitoring deploy/qa-alloy --since=10m | \
-     grep -E "receiver_accepted_spans|exporter_sent_spans|Exporting failed"
-   ```
-
-   **Expected**: accepted spans from Zipkin receiver and successful export toward Tempo (and bridge path for Zipkin continuity).
+   ![Zipkin - Java Service Traces](zipkin-java-service-traces-verification.png)
