@@ -25,15 +25,19 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-> Use either automatic or step-by-step sequence of [Make](https://www.gnu.org/software/make/) 
+> Use either automated or step-by-step sequence of [Make](https://www.gnu.org/software/make/) 
 targets and shell commands to deploy cluster apps including cluster monitoring (QA only) 
 and "Insurance Hub" infrastructure and services.
 
 ## Automated Deployment
 
-- `make legacy-all-build`
+> ⚠️ Local dev and/or QA environments are created.
+> - Local dev: `cd bootstrap && make local-dev-create`
+> - QA: `cd bootstrap && make qa-create`
+
+- **Optional** `make legacy-all-build`
 - `cd k8s`
-- **QA**: `make cluster-qa-monitoring-deploy` (deploys Prometheus/Grafana, Loki, Tempo, Alloy, and Zipkin)
+- **QA**: `make cluster-qa-monitoring-deploy`
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-monitoring-deploy-<iso-date>`
 - `make cluster-infra-deploy`
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-infra-deploy-<iso-date>` 
