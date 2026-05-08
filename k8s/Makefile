@@ -422,6 +422,47 @@ tempo-ui: _monitoring-ns-check ## Access Tempo HTTP API via port-forward
 	@echo "Press Ctrl+C to stop."
 	@kubectl port-forward svc/$(ENV_NAME)-tempo 3200:3200 -n $(MONITORING_NS)
 
+#########################################
+# Alloy
+#########################################
+
+ALLOY_HELM_CHART_VERSION := 1.8.1
+
+.PHONY: alloy-install
+alloy-install: _monitoring-ns-check ## Install Grafana Alloy in QA cluster
+	@if [ ! -f "$(OVERLAYS_FILE_PATH)/infra/alloy/values.yaml" ]; then \
+		echo "ERROR: Missing Alloy values file at '$(OVERLAYS_FILE_PATH)/infra/alloy/values.yaml'."; \
+		exit 1; \
+	fi
+	@helm repo add grafana https://grafana.github.io/helm-charts || true
+	@helm repo update
+	@echo "Installing Grafana Alloy using Helm chart v$(ALLOY_HELM_CHART_VERSION) into $(MONITORING_NS) namespace..."
+	@helm upgrade --install "$(ENV_NAME)"-alloy grafana/alloy \
+		--version "$(ALLOY_HELM_CHART_VERSION)" \
+		--namespace $(MONITORING_NS) \
+		--values "$(OVERLAYS_FILE_PATH)"/infra/alloy/values.yaml
+	@echo "✅ Alloy deployment initiated. Check status with: make alloy-status"
+
+.PHONY: alloy-uninstall
+alloy-uninstall: _monitoring-ns-check ## Uninstall Alloy from QA cluster
+	@echo "Uninstalling Alloy from '$(MONITORING_NS)' namespace..."
+	@helm uninstall "$(ENV_NAME)"-alloy --namespace $(MONITORING_NS) || true
+	@echo "🗑 Alloy uninstalled."
+
+.PHONY: alloy-status
+alloy-status: _monitoring-ns-check ## Show Alloy deployment status in QA cluster
+	@echo "Status for Alloy in namespace: $(MONITORING_NS)"
+	@echo "\nAlloy Pods:"
+	@kubectl get pods -n $(MONITORING_NS) -l app.kubernetes.io/name=alloy || true
+	@echo "\nAlloy Services:"
+	@kubectl get svc -n $(MONITORING_NS) -l app.kubernetes.io/name=alloy || true
+
+.PHONY: alloy-ui
+alloy-ui: _monitoring-ns-check ## Access Alloy HTTP endpoint via port-forward
+	@echo "Forwarding Alloy HTTP endpoint to http://localhost:12345"
+	@echo "Press Ctrl+C to stop."
+	@kubectl port-forward svc/$(ENV_NAME)-alloy 12345:12345 -n $(MONITORING_NS)
+
 ################################################################################
 # PostgreSQL Deployment Targets
 # Targets for deploying and managing PostgreSQL cluster per app service in local dev and QA cluster
@@ -1169,7 +1210,7 @@ legacy-all-build: ## Build all legacy artifacts sequentially (Java → Frontend 
 
 
 .PHONY: cluster-qa-monitoring-deploy
-cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring stack (Prometheus, Grafana, Loki, Zipkin) into qa cluster. Usage: make cluster-qa-monitoring-deploy
+cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring stack (Prometheus, Grafana, Loki, Zipkin, Alloy) into qa cluster. Usage: make cluster-qa-monitoring-deploy
 	@echo "🚀 Deploying monitoring stack into '$(ENV_NAME)' cluster..."
 	@if [ "$(ENV_NAME)" != "qa" ]; then \
 		echo "ERROR: This target is only applicable for the 'qa' environment."; \
@@ -1203,6 +1244,9 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 	$(MAKE) zipkin-es-user-secret-create
 	$(MAKE) zipkin-es-user-create
 	$(MAKE) zipkin-install
+
+	# Alloy
+	$(MAKE) alloy-install
 
 	@echo "✅ QA cluster monitoring stack deployed!"
 

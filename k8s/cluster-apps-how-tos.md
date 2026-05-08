@@ -10,6 +10,7 @@
     - [Prometheus & Grafana](#prometheus--grafana)
     - [Loki](#loki)
     - [Tempo](#tempo)
+    - [Alloy](#alloy)
     - [Zipkin (legacy)](#zipkin-legacy)
   - [Infra](#infra)
     - [Postgres](#postgres)
@@ -32,7 +33,7 @@ and "Insurance Hub" infrastructure and services.
 
 - `make legacy-all-build`
 - `cd k8s`
-- **QA**: `make cluster-qa-monitoring-deploy`
+- **QA**: `make cluster-qa-monitoring-deploy` (deploys Prometheus/Grafana, Loki, Zipkin, and Alloy)
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-monitoring-deploy-<iso-date>`
 - `make cluster-infra-deploy`
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-infra-deploy-<iso-date>` 
@@ -97,6 +98,15 @@ For verification, see [Tempo runbook](tests/infra/verify-tempo-traces/verify-tem
 - `make zipkin-status`
 - `make zipkin-ui` and go to `http://localhost:9411`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=zipkin-install-<iso-date>`
+
+#### Alloy
+
+**Prerequisites**: Loki, Tempo, and Zipkin must already be reachable in `qa-monitoring`.
+
+- `make alloy-install`
+- `make alloy-status`
+- `make alloy-ui` and go to `http://localhost:12345/-/ready`
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=alloy-install-<iso-date>`
 
 ### Infra
 
