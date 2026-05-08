@@ -84,7 +84,7 @@ otelcol.processor.batch "traces" {
   output {
     traces = [
       otelcol.exporter.otlp.tempo.input,
-      otelcol.exporter.otlphttp.zipkin_legacy.input,
+      otelcol.exporter.otlp.zipkin_bridge.input,
     ]
   }
 }
@@ -117,14 +117,14 @@ otelcol.exporter.otlp "tempo" {
   }
 }
 
-// Transitional legacy Zipkin export path.
-// Note: this uses OTLP/HTTP transport and explicit traces endpoint override.
-otelcol.exporter.otlphttp "zipkin_legacy" {
+// Transitional Zipkin export path via OTLP->Zipkin bridge collector.
+otelcol.exporter.otlp "zipkin_bridge" {
   client {
-    endpoint = "http://qa-zipkin.qa-monitoring.svc.cluster.local:9411"
+    endpoint = "qa-zipkin-bridge.qa-monitoring.svc.cluster.local:4317"
+    tls {
+      insecure = true
+    }
   }
-
-  traces_endpoint = "http://qa-zipkin.qa-monitoring.svc.cluster.local:9411/api/v2/spans"
 }
 
 // OTLP logs -> Loki conversion and write.
