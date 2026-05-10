@@ -160,7 +160,6 @@ For verification, see [Alloy runbook](tests/infra/verify-alloy-traces/verify-all
 
 #### Elasticsearch
 
-- `make es-operator-deploy`
 - `make es-deploy`
 - `make es-status`
 - **QA**: `make es-exporter-deploy`

@@ -575,7 +575,7 @@ es-operator-delete: _env-check ## Delete Elastic Cloud on Kubernetes (ECK) Opera
 	@echo "🗑 ECK operator and namespace 'elastic-system' deleted."
 
 .PHONY: es-deploy
-es-deploy: _env-check ## Deploy Elasticsearch cluster
+es-deploy: _env-check es-operator-deploy ## Deploy Elasticsearch cluster
 	@echo "Deploying Elasticsearch cluster into '$(DATA_NS)' namespace...";
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(OVERLAYS_FILE_PATH)"/infra/elastic/elasticsearch.yaml;
 	@echo "✅ Elasticsearch cluster deployment initiated. Check status with: make es-status"
@@ -754,7 +754,14 @@ MINIO_ROOT_USER_PWD ?= minioRootUserPwd
 minio-operator-deploy: _env-check ## Deploy MinIO operator
 	@echo "Deploying MinIO operator v$(MINIO_OPERATOR_VERSION) into 'minio-operator' namespace..."
 	@kubectl kustomize "$(OVERLAYS_FILE_PATH)"/infra/minio/operator | kubectl apply --server-side -f -
-	@echo "✅ MinIO operator deployment initiated."
+	@echo "Waiting for MinIO Tenant CRD to be registered..."
+	@kubectl wait --for=condition=Established crd/tenants.minio.min.io --timeout=60s || true
+	@echo "Waiting until Tenant custom resource is accepted by API server..."
+	@until kubectl get tenants.minio.min.io --all-namespaces >/dev/null 2>&1; do \
+		echo "  Tenant CR still not usable, waiting..."; \
+		sleep 2; \
+	done
+	@echo "✅ MinIO operator deployment completed and Tenant CRD is ready."
 
 .PHONY: minio-operator-delete
 minio-operator-delete: _env-check ## Delete MinIO operator
@@ -1234,14 +1241,10 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 	$(MAKE) prometheus-stack-install
 
 	# Elasticsearch
-	$(MAKE) es-operator-deploy
-	@echo "⏳ Waiting 30s for Elastic operator..." && sleep 30
 	$(MAKE) es-deploy
-
 
     # Monitoring operator
 	$(MAKE) minio-operator-deploy
-	@echo "⏳ Waiting 15s for MinIO operator..." && sleep 15
 
 	# MinIO Monitoring Tenants
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
@@ -1285,12 +1288,10 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	$(MAKE) postgres-operator-deploy & \
 	$(MAKE) mongodb-operator-install & \
 	$(MAKE) kafka-strimzi-operator-install & wait
-	@echo "⏳ Waiting 15s for infra operators..." && sleep 15
+	@echo "⏳ Waiting 30s for infra operators..." && sleep 30
 
 	# Elasticsearch
 	@if [ "$(ENV_NAME)" = "local-dev" ]; then \
-  		$(MAKE) es-operator-deploy ; \
-		@echo "⏳ Waiting 15s for Elastic operator..." && sleep 15 ; \
 		$(MAKE) es-deploy ; \
 	fi
 
