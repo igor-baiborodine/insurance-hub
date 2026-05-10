@@ -299,16 +299,19 @@ KUBE_PROMETHEUS_STACK_VERSION := 79.3.0
 prometheus-operator-crds-install: _monitoring-ns-check
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
-	@echo "Installing Prometheus Operator CRDs..."
+	@echo "Installing Prometheus Operator CRDs into $(MONITORING_NS) namespace..."
 	@helm upgrade --install prometheus-operator-crds prometheus-community/prometheus-operator-crds \
 		--namespace $(MONITORING_NS) --create-namespace
 	@echo "Waiting for monitoring.coreos.com CRDs to be registered..."
-	@kubectl wait --for=condition=Established crd/alertmanagers.monitoring.coreos.com --timeout=60s || true
+	@kubectl wait --for=condition=Established crd/alertmanagers.monitoring.coreos.com --timeout=60s
+	@echo "Waiting until Alertmanager custom resource is accepted by API server..."
+	@until kubectl get alertmanagers.monitoring.coreos.com --all-namespaces >/dev/null 2>&1; do \
+		echo "  Alertmanager CR still not usable, waiting..."; \
+		sleep 2; \
+	done
 
 .PHONY: prometheus-stack-install
 prometheus-stack-install: prometheus-operator-crds-install ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
-	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
-	@helm repo update
 	@echo "Installing Kube Prometheus Stack using Helm chart v$(KUBE_PROMETHEUS_STACK_VERSION) into $(MONITORING_NS) namespace..."
 	@helm upgrade --install "$(ENV_NAME)"-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
@@ -1227,13 +1230,14 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 		exit 1; \
 	fi
 
+	# Prometheus & Grafana stack
+	$(MAKE) prometheus-stack-install
+
 	# Elasticsearch
 	$(MAKE) es-operator-deploy
 	@echo "⏳ Waiting 30s for Elastic operator..." && sleep 30
 	$(MAKE) es-deploy
 
-	# Prometheus & Grafana stack
-	$(MAKE) prometheus-stack-install
 
     # Monitoring operator
 	$(MAKE) minio-operator-deploy
