@@ -295,8 +295,18 @@ flux-suspend: _env-check ## Suspend QA Flux reconciliation
 
 KUBE_PROMETHEUS_STACK_VERSION := 79.3.0
 
+.PHONY: prometheus-operator-crds-install
+prometheus-operator-crds-install: _monitoring-ns-check
+	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
+	@helm repo update
+	@echo "Installing Prometheus Operator CRDs..."
+	@helm upgrade --install prometheus-operator-crds prometheus-community/prometheus-operator-crds \
+		--namespace $(MONITORING_NS) --create-namespace
+	@echo "Waiting for monitoring.coreos.com CRDs to be registered..."
+	@kubectl wait --for=condition=Established crd/alertmanagers.monitoring.coreos.com --timeout=60s || true
+
 .PHONY: prometheus-stack-install
-prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
+prometheus-stack-install: prometheus-operator-crds-install ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
 	@echo "Installing Kube Prometheus Stack using Helm chart v$(KUBE_PROMETHEUS_STACK_VERSION) into $(MONITORING_NS) namespace..."
@@ -1219,21 +1229,25 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 
 	# Elasticsearch
 	$(MAKE) es-operator-deploy
-	@echo "⏳ Waiting 15s for elastic operator..." && sleep 15
+	@echo "⏳ Waiting 30s for Elastic operator..." && sleep 30
 	$(MAKE) es-deploy
 
 	# Prometheus & Grafana stack
 	$(MAKE) prometheus-stack-install
 
-	# MinIO Infra Tenants
+    # Monitoring operator
+	$(MAKE) minio-operator-deploy
+	@echo "⏳ Waiting 15s for MinIO operator..." && sleep 15
+
+	# MinIO Monitoring Tenants
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=loki
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=tempo
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=tempo
 	$(MAKE) minio-tenant-deploy SVC_NAME=loki & $(MAKE) minio-tenant-deploy SVC_NAME=tempo & wait
-	@echo "⏳ Waiting 3m for MinIO infra tenants.." && sleep 180
+	@echo "⏳ Waiting 3m for MinIO monitoring tenants.." && sleep 180
 
-    # MinIO Infra Tenant Configuration
+    # MinIO Monitoring Tenant Configuration
 	# Loki
 	$(MAKE) minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs
 	$(MAKE) minio-svc-user-secret-create SVC_NAME=loki COPY_SECRET_NS=$(MONITORING_NS)
@@ -1244,18 +1258,14 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 	$(MAKE) minio-svc-user-secret-create SVC_NAME=tempo COPY_SECRET_NS=$(MONITORING_NS)
 	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=tempo POLICY_FILE=apps/infra/tempo/minio/s3-policy-tempo-traces.json
 
-	# Loki
-	$(MAKE) loki-install
-
-	# Tempo
-	$(MAKE) tempo-install
-
 	# Zipkin (requires Elasticsearch)
 	$(MAKE) zipkin-es-user-secret-create
 	$(MAKE) zipkin-es-user-create
 	$(MAKE) zipkin-install
 
-	# Alloy
+	# Grafana Loki,Tempo and Alloy
+	$(MAKE) loki-install
+	$(MAKE) tempo-install
 	$(MAKE) alloy-install
 
 	@echo "✅ QA cluster monitoring stack deployed!"
@@ -1265,8 +1275,10 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	@echo "🚀 Deploying Insurance Hub infra apps (all optional args omitted) into '$(ENV_NAME)' cluster..."
 
 	# Infra operators
+	@if [ "$(ENV_NAME)" = "local-dev" ]; then \
+		$(MAKE) minio-operator-deploy; \
+	fi
 	$(MAKE) postgres-operator-deploy & \
-	$(MAKE) minio-operator-deploy & \
 	$(MAKE) mongodb-operator-install & \
 	$(MAKE) kafka-strimzi-operator-install & wait
 	@echo "⏳ Waiting 15s for infra operators..." && sleep 15
@@ -1274,7 +1286,7 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	# Elasticsearch
 	@if [ "$(ENV_NAME)" = "local-dev" ]; then \
   		$(MAKE) es-operator-deploy ; \
-		@echo "⏳ Waiting 15s for elastic operator..." && sleep 15 ; \
+		@echo "⏳ Waiting 15s for Elastic operator..." && sleep 15 ; \
 		$(MAKE) es-deploy ; \
 	fi
 
@@ -1302,8 +1314,6 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=document
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=payment
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=payment
-	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
-	$(MAKE) minio-storage-config-secret-create SVC_NAME=loki
 	$(MAKE) minio-tenant-deploy SVC_NAME=document & $(MAKE) minio-tenant-deploy SVC_NAME=payment & wait
 	@echo "⏳ Waiting 3m for MinIO service tenants.." && sleep 180
 
