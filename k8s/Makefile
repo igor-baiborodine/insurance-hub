@@ -906,13 +906,14 @@ MONGODB_OPERATOR_VERSION := 0.13.0
 MONGO_ROOT_USER_PWD ?= mongoRootUserPwd
 MONGO_PRODUCT_USER_PWD ?= mongoProductUserPwd
 
-.PHONY: mongodb-crds-install
-mongodb-crds-install: _env-check ## Install MongoDB Community Operator CRDs
+.PHONY: mongodb-operator-install
+mongodb-operator-install: _env-check ## Install MongoDB Community Operator
 	@kubectl get namespace "$(DATA_NS)" >/dev/null 2>&1 || kubectl create namespace "$(DATA_NS)"
 	@helm repo add mongodb https://mongodb.github.io/helm-charts || true
 	@helm repo update
-	@echo "Installing MongoDB Community Operator CRDs into $(DATA_NS) namespace..."
-	@helm upgrade --install mongodb-operator-crds mongodb/community-operator-crds \
+	@echo "Installing MongoDB operator v$(MONGODB_OPERATOR_VERSION) into $(DATA_NS) namespace..."
+	@helm upgrade --install mongodb-operator mongodb/community-operator \
+	    --version "$(MONGODB_OPERATOR_VERSION)" \
 	    --namespace "$(DATA_NS)"
 	@echo "Waiting for MongoDBCommunity CRD to be registered..."
 	@kubectl wait --for=condition=Established crd/mongodbcommunity.mongodbcommunity.mongodb.com --timeout=60s || true
@@ -921,15 +922,7 @@ mongodb-crds-install: _env-check ## Install MongoDB Community Operator CRDs
 		echo "  MongoDBCommunity CR still not usable, waiting..."; \
 		sleep 2; \
 	done
-	@echo "✅ MongoDB Community Operator CRDs are installed and ready."
-
-.PHONY: mongodb-operator-install
-mongodb-operator-install: mongodb-crds-install ## Install MongoDB Community Operator
-	@echo "Installing MongoDB operator v$(MONGODB_OPERATOR_VERSION) into $(DATA_NS) namespace..."
-	@helm upgrade --install mongodb-operator mongodb/community-operator \
-	   --version "$(MONGODB_OPERATOR_VERSION)" \
-	   --namespace "$(DATA_NS)"
-	@echo "✅ MongoDB operator deployment initiated."
+	@echo "✅ MongoDB operator deployment completed and MongoDBCommunity CRD is ready."
 
 .PHONY: mongodb-operator-uninstall
 mongodb-operator-uninstall: _env-check ## Delete MongoDB Community Operator
