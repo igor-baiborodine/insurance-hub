@@ -488,9 +488,15 @@ PG_SVC_USER_PWD ?= pgSvcUserPwd
 .PHONY: postgres-operator-deploy
 postgres-operator-deploy: _env-check ## Deploy CloudNativePG operator
 	@echo "Deploying CloudNativePG operator v$(CLOUDNATIVE_PG_VERSION) into 'cnpg-system' namespace..."
-	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
-	@echo "✅ CloudNativePG operator deployment initiated."
-
+	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-$(CLOUDNATIVE_PG_VERSION).yaml
+	@echo "Waiting for CloudNativePG CRDs to be registered..."
+	@kubectl wait --for=condition=Established crd/clusters.postgresql.cnpg.io --timeout=60s || true
+	@echo "Waiting until CloudNativePG Cluster custom resource is accepted by API server..."
+	@until kubectl get clusters.postgresql.cnpg.io --all-namespaces >/dev/null 2>&1; do \
+		echo "  Cluster CR still not usable, waiting..."; \
+		sleep 2; \
+	done
+	@echo "✅ CloudNativePG operator deployment completed and CRDs are ready."
 .PHONY: postgres-operator-delete
 postgres-operator-delete: _env-check ## Delete CloudNativePG operator with its namespace
 	@echo "Deleting CloudNativePG operator from 'cnpg-system' namespace..."
@@ -903,13 +909,20 @@ MONGO_PRODUCT_USER_PWD ?= mongoProductUserPwd
 .PHONY: mongodb-operator-install
 mongodb-operator-install: _env-check ## Install MongoDB Community Operator
 	@kubectl get namespace "$(DATA_NS)" >/dev/null 2>&1 || kubectl create namespace "$(DATA_NS)"
-	@helm repo add mongodb https://mongodb.github.io/helm-charts
+	@helm repo add mongodb https://mongodb.github.io/helm-charts || true
 	@helm repo update
 	@echo "Installing MongoDB operator v$(MONGODB_OPERATOR_VERSION) into $(DATA_NS) namespace..."
 	@helm upgrade --install mongodb-operator mongodb/community-operator \
-		--version "$(MONGODB_OPERATOR_VERSION)" \
-		--namespace "$(DATA_NS)"
-	@echo "✅ MongoDB operator installation initiated."
+	    --version "$(MONGODB_OPERATOR_VERSION)" \
+	    --namespace "$(DATA_NS)"
+	@echo "Waiting for MongoDBCommunity CRD to be registered..."
+	@kubectl wait --for=condition=Established crd/mongodbcommunity.mongodb.com --timeout=60s || true
+	@echo "Waiting until MongoDBCommunity custom resource is accepted by API server..."
+	@until kubectl get mongodbcommunity.mongodb.com --all-namespaces >/dev/null 2>&1; do \
+		echo "  MongoDBCommunity CR still not usable, waiting..."; \
+		sleep 2; \
+	done
+	@echo "✅ MongoDB operator deployment completed and CRDs are ready."
 
 .PHONY: mongodb-operator-uninstall
 mongodb-operator-uninstall: _env-check ## Delete MongoDB Community Operator
@@ -1285,10 +1298,9 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	@if [ "$(ENV_NAME)" = "local-dev" ]; then \
 		$(MAKE) minio-operator-deploy; \
 	fi
-	$(MAKE) postgres-operator-deploy & \
-	$(MAKE) mongodb-operator-install & \
-	$(MAKE) kafka-strimzi-operator-install & wait
-	@echo "⏳ Waiting 30s for infra operators..." && sleep 30
+	$(MAKE) postgres-operator-deploy
+	$(MAKE) mongodb-operator-install
+	$(MAKE) kafka-strimzi-operator-install
 
 	# Elasticsearch
 	@if [ "$(ENV_NAME)" = "local-dev" ]; then \
