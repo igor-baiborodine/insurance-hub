@@ -50,18 +50,19 @@ services (Zipkin protocol), and dual-exports them to both Tempo and Zipkin.
    In another terminal:
 
    ```shell
-   TRACE_ID=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
-   SPAN_ID=$(python3 -c 'import secrets; print(secrets.token_hex(8))')
-   TS=$(python3 -c 'import time; print(int(time.time()*1_000_000_000))')
-
-   curl -s http://localhost:4318/v1/traces \
-     -H 'Content-Type: application/json' \
-     -d '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"alloy-dual-smoke"}}]},"scopeSpans":[{"scope":{"name":"smoke"},"spans":[{"traceId":"'"$TRACE_ID"'","spanId":"'"$SPAN_ID"'","name":"alloy-dual-smoke-span","kind":"SPAN_KIND_INTERNAL","startTimeUnixNano":"'"$TS"'","endTimeUnixNano":"'"$((TS+5000000))"'"}]}]}]}'
-
-   echo "TRACE_ID=$TRACE_ID"
+   TRACE_ID=$(python3 -c 'import secrets; print(secrets.token_hex(16))'); \
+     SPAN_ID=$(python3 -c 'import secrets; print(secrets.token_hex(8))'); \
+     TS=$(python3 -c 'import time; print(int(time.time()*1_000_000_000))'); \
+     curl -s http://localhost:4318/v1/traces \
+       -H 'Content-Type: application/json' \
+       -d '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"alloy-dual-smoke"}}]},"scopeSpans":[{"scope":{"name":"smoke"},"spans":[{"traceId":"'"$TRACE_ID"'","spanId":"'"$SPAN_ID"'","name":"alloy-dual-smoke-span","kind":"SPAN_KIND_INTERNAL","startTimeUnixNano":"'"$TS"'","endTimeUnixNano":"'"$((TS+5000000))"'"}]}]}]}'; \
+     echo "TRACE_ID=$TRACE_ID"
    ```
 
-   **Expected**: API responds with `{"partialSuccess":{}}` or empty success response.
+   **Expected**: 
+   ```json
+   {"partialSuccess":{}}
+   ```
 
 5. **Verify Alloy exporter metrics for traces**
 
