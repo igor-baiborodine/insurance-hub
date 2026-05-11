@@ -99,7 +99,7 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     | NAME | STATE | IPV4 | IPV6 | TYPE | SNAPSHOTS |
     +------+-------+------+------+------+-----------+
     ```
-- `make qa-nodes-create`
+- `make qa-nodes-create` or `MASTER_ONLY=true make qa-nodes-create` with only the master node
 - `lxc list`
     ```bash
     +------------+---------+------------------------+-------------------------------------------------+-----------------+-----------+

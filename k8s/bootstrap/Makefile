@@ -66,8 +66,8 @@ local-dev-resume: ## Resume (start) the local dev Kind cluster
 qa-create: qa-nodes-create qa-cluster-create qa-cluster-pull-kubeconfig ## Create and configure QA cluster
 
 .PHONY: qa-cluster-create
-qa-cluster-create: ## Set up multi-node Rancher K3s QA cluster
-	bash qa/scripts/qa-cluster-create.sh
+qa-cluster-create: ## Set up Rancher K3s QA cluster (master + 2 workers by default; master only if MASTER_ONLY=true)
+	MASTER_ONLY=$(MASTER_ONLY) bash qa/scripts/qa-cluster-create.sh
 
 .PHONY: qa-cluster-pull-kubeconfig
 qa-cluster-pull-kubeconfig: ## Pull kubeconfig from QA cluster
@@ -78,8 +78,8 @@ qa-cluster-pull-kubeconfig: ## Pull kubeconfig from QA cluster
 # Targets for creating and managing the LXD virtual machines for QA cluster
 ################################################################################
 .PHONY: qa-nodes-create
-qa-nodes-create: ## Create three LXD VMs (master and two workers) for QA cluster
-	bash qa/scripts/qa-nodes-create.sh
+qa-nodes-create: ## Create LXD VMs for QA cluster (master + 2 workers by default; master only if MASTER_ONLY=true)
+	MASTER_ONLY=$(MASTER_ONLY) bash qa/scripts/qa-nodes-create.sh
 
 .PHONY: qa-nodes-suspend
 qa-nodes-suspend: ## Suspend (pause) all QA LXD VMs

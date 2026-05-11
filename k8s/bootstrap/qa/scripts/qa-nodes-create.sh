@@ -4,7 +4,15 @@ set -euo pipefail
 
 NODES_MASTER="qa-master"
 NODES_WORKER="qa-worker1 qa-worker2"
-NODES_ALL="$NODES_MASTER $NODES_WORKER"
+
+# If MASTER_ONLY=true, create only the master node; otherwise master + 2 workers
+if [[ "${MASTER_ONLY:-}" == "true" ]]; then
+    echo "MASTER_ONLY is true; only creating master node: $NODES_MASTER"
+    NODES_ALL="$NODES_MASTER"
+else
+    echo "MASTER_ONLY not set or not true; creating master and worker nodes: $NODES_MASTER $NODES_WORKER"
+    NODES_ALL="$NODES_MASTER $NODES_WORKER"
+fi
 
 for NODE in $NODES_ALL; do
     if ! lxc info "$NODE" &>/dev/null; then
