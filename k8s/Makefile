@@ -659,16 +659,39 @@ es-exporter-delete: _env-check ## Delete Prometheus Elasticsearch exporter
 
 STRIMZI_OPERATOR_VERSION := 0.48.0
 
+.PHONY: kafka-strimzi-operator-install
 kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka operator
 	@kubectl get namespace kafka-system >/dev/null 2>&1 || kubectl create namespace kafka-system
 	@helm repo add strimzi https://strimzi.io/charts/ || true
 	@helm repo update
 	@echo "Installing Strimzi Kafka operator v$(STRIMZI_OPERATOR_VERSION) into 'kafka-system' namespace..."
 	@helm upgrade --install strimzi-operator strimzi/strimzi-kafka-operator \
-		--version $(STRIMZI_OPERATOR_VERSION) \
-		--namespace kafka-system \
-		--set watchNamespaces={"$(DATA_NS)"}
-	@echo "✅ Strimzi Kafka operator installation initiated."
+	    --version $(STRIMZI_OPERATOR_VERSION) \
+	    --namespace kafka-system \
+	    --set watchNamespaces={"$(DATA_NS)"}
+
+	@echo "Waiting for Kafka CRD to be registered..."
+	@kubectl wait --for=condition=Established crd/kafkas.kafka.strimzi.io --timeout=60s || true
+	@echo "Waiting for KafkaNodePool CRD to be registered (if present in this Strimzi version)..."
+	@kubectl wait --for=condition=Established crd/kafkanodepools.kafka.strimzi.io --timeout=60s || true
+
+	@echo "Waiting until Kafka custom resource is accepted by API server..."
+	@until kubectl get kafkas.kafka.strimzi.io --all-namespaces >/dev/null 2>&1; do \
+		echo "  Kafka CR still not usable, waiting..."; \
+		sleep 2; \
+	done
+
+	@echo "Waiting until KafkaNodePool custom resource is accepted by API server (if CRD exists)..."
+	@if kubectl get crd kafkanodepools.kafka.strimzi.io >/dev/null 2>&1; then \
+		until kubectl get kafkanodepools.kafka.strimzi.io --all-namespaces >/dev/null 2>&1; do \
+			echo "  KafkaNodePool CR still not usable, waiting..."; \
+			sleep 2; \
+		done; \
+	else \
+		echo "  KafkaNodePool CRD not found, skipping readiness wait for KafkaNodePool."; \
+	fi
+
+	@echo "✅ Strimzi Kafka operator deployment completed and Kafka CRDs are ready."
 
 kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka operator
 	@echo "Uninstalling Strimzi Kafka operator..."
