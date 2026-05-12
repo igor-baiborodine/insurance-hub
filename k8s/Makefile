@@ -569,10 +569,19 @@ ECK_OPERATOR_VERSION := 3.2.0
 .PHONY: es-operator-deploy
 es-operator-deploy: _env-check ## Deploy Elastic Cloud on Kubernetes (ECK) Operator
 	@echo "Deploying ECK operator v$(ECK_OPERATOR_VERSION) into 'elastic-system' namespace..."
-	@kubectl create -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml || true
+	@echo "Applying ECK CRDs..."
+	@kubectl apply -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml
+	@echo "Waiting for Elasticsearch CRD to be registered..."
+	@kubectl wait --for=condition=Established crd/elasticsearches.elasticsearch.k8s.elastic.co --timeout=60s || true
+	@echo "Waiting until Elasticsearch custom resource is accepted by API server..."
+	@until kubectl get elasticsearches.elasticsearch.k8s.elastic.co --all-namespaces >/dev/null 2>&1; do \
+		echo "  Elasticsearch CR still not usable, waiting..."; \
+		sleep 2; \
+	done
+	@echo "Applying ECK operator deployment..."
 	@kubectl apply --server-side -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml
-	@echo "✅ ECK operator deployment initiated."
-	
+	@echo "✅ ECK operator deployment completed and Elasticsearch CRD is ready."
+
 .PHONY: es-operator-delete
 es-operator-delete: _env-check ## Delete Elastic Cloud on Kubernetes (ECK) Operator
 	@echo "Deleting ECK operator v$(ECK_OPERATOR_VERSION) from 'elastic-system' namespace..."
@@ -581,7 +590,7 @@ es-operator-delete: _env-check ## Delete Elastic Cloud on Kubernetes (ECK) Opera
 	@echo "🗑 ECK operator and namespace 'elastic-system' deleted."
 
 .PHONY: es-deploy
-es-deploy: _env-check es-operator-deploy ## Deploy Elasticsearch cluster
+es-deploy: _env-check _data-ns-check es-operator-deploy ## Deploy Elasticsearch cluster
 	@echo "Deploying Elasticsearch cluster into '$(DATA_NS)' namespace...";
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(OVERLAYS_FILE_PATH)"/infra/elastic/elasticsearch.yaml;
 	@echo "✅ Elasticsearch cluster deployment initiated. Check status with: make es-status"
