@@ -1259,11 +1259,11 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 		exit 1; \
 	fi
 
-	# Prometheus & Grafana stack
-	$(MAKE) prometheus-stack-install
-
 	# Elasticsearch
 	$(MAKE) es-deploy
+
+	# Prometheus & Grafana stack
+	$(MAKE) prometheus-stack-install
 
     # Monitoring operator
 	$(MAKE) minio-operator-deploy
@@ -1287,15 +1287,15 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 	$(MAKE) minio-svc-user-secret-create SVC_NAME=tempo COPY_SECRET_NS=$(MONITORING_NS)
 	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=tempo POLICY_FILE=apps/infra/tempo/minio/s3-policy-tempo-traces.json
 
-	# Zipkin (requires Elasticsearch)
-	$(MAKE) zipkin-es-user-secret-create
-	$(MAKE) zipkin-es-user-create
-	$(MAKE) zipkin-install
-
 	# Grafana Loki,Tempo and Alloy
 	$(MAKE) loki-install
 	$(MAKE) tempo-install
 	$(MAKE) alloy-install
+
+	# Zipkin (requires Elasticsearch)
+	$(MAKE) zipkin-es-user-secret-create
+	$(MAKE) zipkin-es-user-create
+	$(MAKE) zipkin-install
 
 	@echo "✅ QA cluster monitoring stack deployed!"
 
