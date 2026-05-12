@@ -1393,6 +1393,6 @@ cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or 
 	done
 	@echo "⏳ Waiting 60s for services..." && sleep 60
 
-	@echo "✅ Service apps deployed to local-dev cluster!"
-	@kubectl get pods | grep -E "web|agent|api"
-	@kubectl top pods | grep -E "web|agent|api"
+	@echo "✅ Service apps deployed to '$(ENV_NAME)' cluster!"
+	@kubectl get pods | grep -E "web|agent|auth|api"
+	@kubectl top pods | grep -E "web|agent|auth|api"
