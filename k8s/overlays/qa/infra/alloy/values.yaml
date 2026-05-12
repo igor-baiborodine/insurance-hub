@@ -1,0 +1,284 @@
+controller:
+  type: deployment
+  replicas: 1
+
+alloy:
+  enableHttpServerPort: true
+  listenAddr: 0.0.0.0
+  listenPort: 12345
+  extraPorts:
+    - name: zipkin
+      port: 9411
+      targetPort: 9411
+      protocol: TCP
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  configMap:
+    create: true
+    content: |-
+      otelcol.receiver.zipkin "legacy_java" {
+        endpoint = "0.0.0.0:9411"
+
+        output {
+          traces = [otelcol.processor.attributes.traces.input]
+        }
+      }
+
+      otelcol.receiver.otlp "otlp_ingress" {
+        grpc {
+          endpoint = "0.0.0.0:4317"
+        }
+
+        http {
+          endpoint = "0.0.0.0:4318"
+        }
+
+        output {
+          traces  = [otelcol.processor.attributes.traces.input]
+          logs    = [otelcol.processor.attributes.logs.input]
+          metrics = [otelcol.processor.attributes.metrics.input]
+        }
+      }
+
+      // Add common QA/cluster attributes across all telemetry signals.
+      otelcol.processor.attributes "traces" {
+        action {
+          key    = "deployment.environment"
+          action = "upsert"
+          value  = "qa"
+        }
+
+        action {
+          key    = "cluster.name"
+          action = "upsert"
+          value  = "qa-insurance-hub"
+        }
+
+        output {
+          traces = [otelcol.processor.batch.traces.input]
+        }
+      }
+
+      otelcol.processor.attributes "logs" {
+        action {
+          key    = "deployment.environment"
+          action = "upsert"
+          value  = "qa"
+        }
+
+        action {
+          key    = "cluster.name"
+          action = "upsert"
+          value  = "qa-insurance-hub"
+        }
+
+        output {
+          logs = [otelcol.processor.batch.logs.input]
+        }
+      }
+
+      otelcol.processor.attributes "metrics" {
+        action {
+          key    = "deployment.environment"
+          action = "upsert"
+          value  = "qa"
+        }
+
+        action {
+          key    = "cluster.name"
+          action = "upsert"
+          value  = "qa-insurance-hub"
+        }
+
+        output {
+          metrics = [otelcol.processor.batch.metrics.input]
+        }
+      }
+
+      otelcol.processor.batch "traces" {
+        timeout         = "5s"
+        send_batch_size = 1024
+
+        output {
+          traces = [
+            otelcol.exporter.otlp.tempo.input,
+            otelcol.exporter.otlp.zipkin_bridge.input,
+          ]
+        }
+      }
+
+      otelcol.processor.batch "logs" {
+        timeout         = "5s"
+        send_batch_size = 1024
+
+        output {
+          logs = [otelcol.exporter.loki.to_loki.input]
+        }
+      }
+
+      otelcol.processor.batch "metrics" {
+        timeout         = "5s"
+        send_batch_size = 1024
+
+        output {
+          metrics = [otelcol.exporter.prometheus.to_prom.input]
+        }
+      }
+
+      // Tempo traces export (primary target-state backend).
+      otelcol.exporter.otlp "tempo" {
+        client {
+          endpoint = "qa-tempo.qa-monitoring.svc.cluster.local:4317"
+          tls {
+            insecure = true
+          }
+        }
+      }
+
+      // Transitional Zipkin export path via OTLP->Zipkin bridge collector.
+      otelcol.exporter.otlp "zipkin_bridge" {
+        client {
+          endpoint = "qa-zipkin-bridge.qa-monitoring.svc.cluster.local:4317"
+          tls {
+            insecure = true
+          }
+        }
+      }
+
+      // OTLP logs -> Loki conversion and write.
+      loki.write "qa_loki" {
+        endpoint {
+          url = "http://qa-loki.qa-monitoring.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }
+
+      otelcol.exporter.loki "to_loki" {
+        forward_to = [loki.write.qa_loki.receiver]
+      }
+
+      // OTLP metrics -> Prometheus remote_write.
+      prometheus.remote_write "qa_prometheus" {
+        endpoint {
+          url = "http://qa-prometheus-kube-prometh-prometheus.qa-monitoring.svc.cluster.local:9090/api/v1/write"
+        }
+      }
+
+      otelcol.exporter.prometheus "to_prom" {
+        forward_to = [prometheus.remote_write.qa_prometheus.receiver]
+      }
+
+service:
+  enabled: true
+  type: ClusterIP
+
+serviceMonitor:
+  enabled: true
+
+extraObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: qa-zipkin-bridge-config
+      namespace: qa-monitoring
+    data:
+      config.yaml: |
+        receivers:
+          otlp:
+            protocols:
+              grpc:
+                endpoint: 0.0.0.0:4317
+              http:
+                endpoint: 0.0.0.0:4318
+
+        processors:
+          batch: {}
+
+        exporters:
+          zipkin:
+            endpoint: http://qa-zipkin.qa-monitoring.svc.cluster.local:9411/api/v2/spans
+            format: proto
+
+        service:
+          pipelines:
+            traces:
+              receivers: [otlp]
+              processors: [batch]
+              exporters: [zipkin]
+
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: qa-zipkin-bridge
+      namespace: qa-monitoring
+      labels:
+        app.kubernetes.io/name: zipkin-bridge
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: zipkin-bridge
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: zipkin-bridge
+        spec:
+          containers:
+            - name: otelcol-contrib
+              image: otel/opentelemetry-collector-contrib:0.114.0
+              args:
+                - --config=/etc/otelcol-contrib/config.yaml
+              ports:
+                - containerPort: 4317
+                  name: otlp-grpc
+                  protocol: TCP
+                - containerPort: 4318
+                  name: otlp-http
+                  protocol: TCP
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 300m
+                  memory: 256Mi
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/otelcol-contrib
+          volumes:
+            - name: config
+              configMap:
+                name: qa-zipkin-bridge-config
+
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: qa-zipkin-bridge
+      namespace: qa-monitoring
+      labels:
+        app.kubernetes.io/name: zipkin-bridge
+    spec:
+      type: ClusterIP
+      selector:
+        app.kubernetes.io/name: zipkin-bridge
+      ports:
+        - name: otlp-grpc
+          port: 4317
+          targetPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          port: 4318
+          targetPort: 4318
+          protocol: TCP

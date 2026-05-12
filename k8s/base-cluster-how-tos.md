@@ -6,10 +6,11 @@
 
 - [Prerequisites](#prerequisites)
 - [Local Dev](#local-dev)
+  - [Manage Cluster](#manage-cluster)
 - [QA](#qa)
   - [Create LXD Virtual Machines](#create-lxd-virtual-machines)
   - [Deploy K3s Cluster](#deploy-k3s-cluster)
-  - [Manage Cluster](#manage-cluster)
+  - [Manage Cluster](#manage-cluster-1)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 

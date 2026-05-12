@@ -17,5 +17,5 @@ configMapGenerator:
   - name: auth-config-legacy
     behavior: merge
     literals:
-      - TRACING_ZIPKIN_HTTP_URL=http://qa-zipkin.qa-monitoring.svc.cluster.local:9411
+      - TRACING_ZIPKIN_HTTP_URL=http://qa-alloy.qa-monitoring.svc.cluster.local:9411
       - POSTGRES_HOST=qa-postgres-auth-rw.qa-data.svc.cluster.local

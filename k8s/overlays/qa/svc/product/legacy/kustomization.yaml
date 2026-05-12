@@ -20,3 +20,4 @@ configMapGenerator:
       - MG_HOST=qa-mongodb-svc.qa-data.svc.cluster.local
       - MG_PORT=27017
       - TRACING_ZIPKIN_ENABLED=true
+      - ZIPKIN_HOST=qa-alloy.qa-monitoring.svc.cluster.local

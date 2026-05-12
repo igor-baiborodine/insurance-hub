@@ -4,13 +4,14 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**
 
-- [Automatic Deployment](#automatic-deployment)
+- [Automated Deployment](#automated-deployment)
 - [Step-by-Step Deployment](#step-by-step-deployment)
   - [Observability (QA)](#observability-qa)
     - [Prometheus & Grafana](#prometheus--grafana)
     - [Loki](#loki)
     - [Tempo](#tempo)
     - [Zipkin (legacy)](#zipkin-legacy)
+    - [Alloy](#alloy)
   - [Infra](#infra)
     - [Postgres](#postgres)
     - [MongoDB (legacy)](#mongodb-legacy)
@@ -24,13 +25,17 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-> Use either automatic or step-by-step sequence of [Make](https://www.gnu.org/software/make/) 
+> Use either automated or step-by-step sequence of [Make](https://www.gnu.org/software/make/) 
 targets and shell commands to deploy cluster apps including cluster monitoring (QA only) 
 and "Insurance Hub" infrastructure and services.
 
 ## Automated Deployment
 
-- `make legacy-all-build`
+> ⚠️ Local dev and/or QA environments are created.
+> - Local dev: `cd bootstrap && make local-dev-create`
+> - QA: `cd bootstrap && make qa-create`
+
+- **Optional** `make legacy-all-build`
 - `cd k8s`
 - **QA**: `make cluster-qa-monitoring-deploy`
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-monitoring-deploy-<iso-date>`
@@ -97,6 +102,17 @@ For verification, see [Tempo runbook](tests/infra/verify-tempo-traces/verify-tem
 - `make zipkin-status`
 - `make zipkin-ui` and go to `http://localhost:9411`
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=zipkin-install-<iso-date>`
+
+#### Alloy
+
+**Prerequisites**: Loki, Tempo, and Zipkin must already be reachable in `qa-monitoring`.
+
+- `make alloy-install`
+- `make alloy-status`
+- `make alloy-ui` and go to `http://localhost:12345/-/ready`
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=alloy-install-<iso-date>`
+
+For verification, see [Alloy runbook](tests/infra/verify-alloy-traces/verify-alloy-traces.md).
 
 ### Infra
 

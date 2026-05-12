@@ -20,4 +20,4 @@ configMapGenerator:
       - PG_HOST=qa-postgres-policy-rw.qa-data.svc.cluster.local
       - KAFKA_HOST=qa-kafka-kafka-bootstrap.qa-data.svc.cluster.local
       - TRACING_ZIPKIN_ENABLED=true
-      - ZIPKIN_HOST=qa-zipkin.qa-monitoring.svc.cluster.local
+      - ZIPKIN_HOST=qa-alloy.qa-monitoring.svc.cluster.local
