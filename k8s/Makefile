@@ -1389,7 +1389,11 @@ cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or 
 	@SVC_NAMES="web-vue,agent-portal-gateway,auth,product,policy-search,dashboard,policy,pricing,document,payment,chat" ; \
 	SVC_NAMES=$$(echo "$$SVC_NAMES" | tr ',' ' ') ; \
 	for svc in $$SVC_NAMES ; do \
-		$(MAKE) svc-load-delete-deploy SVC_NAME=$$svc ; \
+		if [ "$(ENV_NAME)" = "local-dev" ]; then \
+			$(MAKE) svc-load-delete-deploy SVC_NAME=$$svc ; \
+		else \
+			$(MAKE) svc-deploy SVC_NAME=$$svc ; \
+		fi ; \
 	done
 	@echo "⏳ Waiting 60s for services..." && sleep 60
 
