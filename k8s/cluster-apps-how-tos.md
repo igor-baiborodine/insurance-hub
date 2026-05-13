@@ -37,11 +37,11 @@ and "Insurance Hub" infrastructure and services.
 
 - **Optional** `make legacy-all-build`
 - `cd k8s`
-- **QA**: `make cluster-qa-monitoring-deploy`
+- **QA**: `make cluster-qa-monitoring-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep "0/"`
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-monitoring-deploy-<iso-date>`
-- `make cluster-infra-deploy`
+- `make cluster-infra-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep "0/"`
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-infra-deploy-<iso-date>` 
-- `make cluster-svc-deploy`
+- `make cluster-svc-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep "0/"`
 
 ## Step-by-Step Deployment
 
