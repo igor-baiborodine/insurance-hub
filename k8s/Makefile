@@ -295,10 +295,23 @@ flux-suspend: _env-check ## Suspend QA Flux reconciliation
 
 KUBE_PROMETHEUS_STACK_VERSION := 79.3.0
 
-.PHONY: prometheus-stack-install
-prometheus-stack-install: _monitoring-ns-check ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
+.PHONY: prometheus-operator-crds-install
+prometheus-operator-crds-install: _monitoring-ns-check
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
 	@helm repo update
+	@echo "Installing Prometheus Operator CRDs into $(MONITORING_NS) namespace..."
+	@helm upgrade --install prometheus-operator-crds prometheus-community/prometheus-operator-crds \
+		--namespace $(MONITORING_NS) --create-namespace
+	@echo "Waiting for monitoring.coreos.com CRDs to be registered..."
+	@kubectl wait --for=condition=Established crd/alertmanagers.monitoring.coreos.com --timeout=60s
+	@echo "Waiting until Alertmanager custom resource is accepted by API server..."
+	@until kubectl get alertmanagers.monitoring.coreos.com --all-namespaces >/dev/null 2>&1; do \
+		echo "  Alertmanager CR still not usable, waiting..."; \
+		sleep 2; \
+	done
+
+.PHONY: prometheus-stack-install
+prometheus-stack-install: prometheus-operator-crds-install ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
 	@echo "Installing Kube Prometheus Stack using Helm chart v$(KUBE_PROMETHEUS_STACK_VERSION) into $(MONITORING_NS) namespace..."
 	@helm upgrade --install "$(ENV_NAME)"-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
@@ -475,9 +488,15 @@ PG_SVC_USER_PWD ?= pgSvcUserPwd
 .PHONY: postgres-operator-deploy
 postgres-operator-deploy: _env-check ## Deploy CloudNativePG operator
 	@echo "Deploying CloudNativePG operator v$(CLOUDNATIVE_PG_VERSION) into 'cnpg-system' namespace..."
-	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-"$(CLOUDNATIVE_PG_VERSION)".yaml
-	@echo "✅ CloudNativePG operator deployment initiated."
-
+	@kubectl apply --server-side -f https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v$(CLOUDNATIVE_PG_VERSION)/cnpg-$(CLOUDNATIVE_PG_VERSION).yaml
+	@echo "Waiting for CloudNativePG CRDs to be registered..."
+	@kubectl wait --for=condition=Established crd/clusters.postgresql.cnpg.io --timeout=60s || true
+	@echo "Waiting until CloudNativePG Cluster custom resource is accepted by API server..."
+	@until kubectl get clusters.postgresql.cnpg.io --all-namespaces >/dev/null 2>&1; do \
+		echo "  Cluster CR still not usable, waiting..."; \
+		sleep 2; \
+	done
+	@echo "✅ CloudNativePG operator deployment completed and CRDs are ready."
 .PHONY: postgres-operator-delete
 postgres-operator-delete: _env-check ## Delete CloudNativePG operator with its namespace
 	@echo "Deleting CloudNativePG operator from 'cnpg-system' namespace..."
@@ -550,10 +569,19 @@ ECK_OPERATOR_VERSION := 3.2.0
 .PHONY: es-operator-deploy
 es-operator-deploy: _env-check ## Deploy Elastic Cloud on Kubernetes (ECK) Operator
 	@echo "Deploying ECK operator v$(ECK_OPERATOR_VERSION) into 'elastic-system' namespace..."
-	@kubectl create -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml || true
+	@echo "Applying ECK CRDs..."
+	@kubectl apply -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/crds.yaml
+	@echo "Waiting for Elasticsearch CRD to be registered..."
+	@kubectl wait --for=condition=Established crd/elasticsearches.elasticsearch.k8s.elastic.co --timeout=60s || true
+	@echo "Waiting until Elasticsearch custom resource is accepted by API server..."
+	@until kubectl get elasticsearches.elasticsearch.k8s.elastic.co --all-namespaces >/dev/null 2>&1; do \
+		echo "  Elasticsearch CR still not usable, waiting..."; \
+		sleep 2; \
+	done
+	@echo "Applying ECK operator deployment..."
 	@kubectl apply --server-side -f https://download.elastic.co/downloads/eck/$(ECK_OPERATOR_VERSION)/operator.yaml
-	@echo "✅ ECK operator deployment initiated."
-	
+	@echo "✅ ECK operator deployment completed and Elasticsearch CRD is ready."
+
 .PHONY: es-operator-delete
 es-operator-delete: _env-check ## Delete Elastic Cloud on Kubernetes (ECK) Operator
 	@echo "Deleting ECK operator v$(ECK_OPERATOR_VERSION) from 'elastic-system' namespace..."
@@ -562,7 +590,7 @@ es-operator-delete: _env-check ## Delete Elastic Cloud on Kubernetes (ECK) Opera
 	@echo "🗑 ECK operator and namespace 'elastic-system' deleted."
 
 .PHONY: es-deploy
-es-deploy: _env-check ## Deploy Elasticsearch cluster
+es-deploy: _env-check _data-ns-check es-operator-deploy ## Deploy Elasticsearch cluster
 	@echo "Deploying Elasticsearch cluster into '$(DATA_NS)' namespace...";
 	@kubectl apply --server-side -n "$(DATA_NS)" -f "$(OVERLAYS_FILE_PATH)"/infra/elastic/elasticsearch.yaml;
 	@echo "✅ Elasticsearch cluster deployment initiated. Check status with: make es-status"
@@ -631,16 +659,39 @@ es-exporter-delete: _env-check ## Delete Prometheus Elasticsearch exporter
 
 STRIMZI_OPERATOR_VERSION := 0.48.0
 
+.PHONY: kafka-strimzi-operator-install
 kafka-strimzi-operator-install: _env-check ## Install Strimzi Kafka operator
 	@kubectl get namespace kafka-system >/dev/null 2>&1 || kubectl create namespace kafka-system
 	@helm repo add strimzi https://strimzi.io/charts/ || true
 	@helm repo update
 	@echo "Installing Strimzi Kafka operator v$(STRIMZI_OPERATOR_VERSION) into 'kafka-system' namespace..."
 	@helm upgrade --install strimzi-operator strimzi/strimzi-kafka-operator \
-		--version $(STRIMZI_OPERATOR_VERSION) \
-		--namespace kafka-system \
-		--set watchNamespaces={"$(DATA_NS)"}
-	@echo "✅ Strimzi Kafka operator installation initiated."
+	    --version $(STRIMZI_OPERATOR_VERSION) \
+	    --namespace kafka-system \
+	    --set watchNamespaces={"$(DATA_NS)"}
+
+	@echo "Waiting for Kafka CRD to be registered..."
+	@kubectl wait --for=condition=Established crd/kafkas.kafka.strimzi.io --timeout=60s || true
+	@echo "Waiting for KafkaNodePool CRD to be registered (if present in this Strimzi version)..."
+	@kubectl wait --for=condition=Established crd/kafkanodepools.kafka.strimzi.io --timeout=60s || true
+
+	@echo "Waiting until Kafka custom resource is accepted by API server..."
+	@until kubectl get kafkas.kafka.strimzi.io --all-namespaces >/dev/null 2>&1; do \
+		echo "  Kafka CR still not usable, waiting..."; \
+		sleep 2; \
+	done
+
+	@echo "Waiting until KafkaNodePool custom resource is accepted by API server (if CRD exists)..."
+	@if kubectl get crd kafkanodepools.kafka.strimzi.io >/dev/null 2>&1; then \
+		until kubectl get kafkanodepools.kafka.strimzi.io --all-namespaces >/dev/null 2>&1; do \
+			echo "  KafkaNodePool CR still not usable, waiting..."; \
+			sleep 2; \
+		done; \
+	else \
+		echo "  KafkaNodePool CRD not found, skipping readiness wait for KafkaNodePool."; \
+	fi
+
+	@echo "✅ Strimzi Kafka operator deployment completed and Kafka CRDs are ready."
 
 kafka-strimzi-operator-uninstall: _env-check ## Uninstall Strimzi Kafka operator
 	@echo "Uninstalling Strimzi Kafka operator..."
@@ -741,7 +792,14 @@ MINIO_ROOT_USER_PWD ?= minioRootUserPwd
 minio-operator-deploy: _env-check ## Deploy MinIO operator
 	@echo "Deploying MinIO operator v$(MINIO_OPERATOR_VERSION) into 'minio-operator' namespace..."
 	@kubectl kustomize "$(OVERLAYS_FILE_PATH)"/infra/minio/operator | kubectl apply --server-side -f -
-	@echo "✅ MinIO operator deployment initiated."
+	@echo "Waiting for MinIO Tenant CRD to be registered..."
+	@kubectl wait --for=condition=Established crd/tenants.minio.min.io --timeout=60s || true
+	@echo "Waiting until Tenant custom resource is accepted by API server..."
+	@until kubectl get tenants.minio.min.io --all-namespaces >/dev/null 2>&1; do \
+		echo "  Tenant CR still not usable, waiting..."; \
+		sleep 2; \
+	done
+	@echo "✅ MinIO operator deployment completed and Tenant CRD is ready."
 
 .PHONY: minio-operator-delete
 minio-operator-delete: _env-check ## Delete MinIO operator
@@ -883,13 +941,20 @@ MONGO_PRODUCT_USER_PWD ?= mongoProductUserPwd
 .PHONY: mongodb-operator-install
 mongodb-operator-install: _env-check ## Install MongoDB Community Operator
 	@kubectl get namespace "$(DATA_NS)" >/dev/null 2>&1 || kubectl create namespace "$(DATA_NS)"
-	@helm repo add mongodb https://mongodb.github.io/helm-charts
+	@helm repo add mongodb https://mongodb.github.io/helm-charts || true
 	@helm repo update
 	@echo "Installing MongoDB operator v$(MONGODB_OPERATOR_VERSION) into $(DATA_NS) namespace..."
 	@helm upgrade --install mongodb-operator mongodb/community-operator \
-		--version "$(MONGODB_OPERATOR_VERSION)" \
-		--namespace "$(DATA_NS)"
-	@echo "✅ MongoDB operator installation initiated."
+	    --version "$(MONGODB_OPERATOR_VERSION)" \
+	    --namespace "$(DATA_NS)"
+	@echo "Waiting for MongoDBCommunity CRD to be registered..."
+	@kubectl wait --for=condition=Established crd/mongodbcommunity.mongodbcommunity.mongodb.com --timeout=60s || true
+	@echo "Waiting until MongoDBCommunity custom resource is accepted by API server..."
+	@until kubectl get mongodbcommunity --all-namespaces >/dev/null 2>&1; do \
+		echo "  MongoDBCommunity CR still not usable, waiting..."; \
+		sleep 2; \
+	done
+	@echo "✅ MongoDB operator deployment completed and MongoDBCommunity CRD is ready."
 
 .PHONY: mongodb-operator-uninstall
 mongodb-operator-uninstall: _env-check ## Delete MongoDB Community Operator
@@ -1218,22 +1283,23 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 	fi
 
 	# Elasticsearch
-	$(MAKE) es-operator-deploy
-	@echo "⏳ Waiting 15s for elastic operator..." && sleep 15
 	$(MAKE) es-deploy
 
 	# Prometheus & Grafana stack
 	$(MAKE) prometheus-stack-install
 
-	# MinIO Infra Tenants
+    # Monitoring operator
+	$(MAKE) minio-operator-deploy
+
+	# MinIO Monitoring Tenants
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=loki
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=tempo
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=tempo
 	$(MAKE) minio-tenant-deploy SVC_NAME=loki & $(MAKE) minio-tenant-deploy SVC_NAME=tempo & wait
-	@echo "⏳ Waiting 3m for MinIO infra tenants.." && sleep 180
+	@echo "⏳ Waiting 3m for MinIO monitoring tenants.." && sleep 180
 
-    # MinIO Infra Tenant Configuration
+    # MinIO Monitoring Tenant Configuration
 	# Loki
 	$(MAKE) minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs
 	$(MAKE) minio-svc-user-secret-create SVC_NAME=loki COPY_SECRET_NS=$(MONITORING_NS)
@@ -1244,18 +1310,14 @@ cluster-qa-monitoring-deploy: _env-check _data-ns-check ## Deploy monitoring sta
 	$(MAKE) minio-svc-user-secret-create SVC_NAME=tempo COPY_SECRET_NS=$(MONITORING_NS)
 	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=tempo POLICY_FILE=apps/infra/tempo/minio/s3-policy-tempo-traces.json
 
-	# Loki
-	$(MAKE) loki-install
-
-	# Tempo
-	$(MAKE) tempo-install
-
 	# Zipkin (requires Elasticsearch)
 	$(MAKE) zipkin-es-user-secret-create
 	$(MAKE) zipkin-es-user-create
 	$(MAKE) zipkin-install
 
-	# Alloy
+	# Grafana Loki,Tempo and Alloy
+	$(MAKE) loki-install
+	$(MAKE) tempo-install
 	$(MAKE) alloy-install
 
 	@echo "✅ QA cluster monitoring stack deployed!"
@@ -1265,16 +1327,15 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	@echo "🚀 Deploying Insurance Hub infra apps (all optional args omitted) into '$(ENV_NAME)' cluster..."
 
 	# Infra operators
-	$(MAKE) postgres-operator-deploy & \
-	$(MAKE) minio-operator-deploy & \
-	$(MAKE) mongodb-operator-install & \
-	$(MAKE) kafka-strimzi-operator-install & wait
-	@echo "⏳ Waiting 15s for infra operators..." && sleep 15
+	@if [ "$(ENV_NAME)" = "local-dev" ]; then \
+		$(MAKE) minio-operator-deploy; \
+	fi
+	$(MAKE) postgres-operator-deploy
+	$(MAKE) mongodb-operator-install
+	$(MAKE) kafka-strimzi-operator-install
 
 	# Elasticsearch
 	@if [ "$(ENV_NAME)" = "local-dev" ]; then \
-  		$(MAKE) es-operator-deploy ; \
-		@echo "⏳ Waiting 15s for elastic operator..." && sleep 15 ; \
 		$(MAKE) es-deploy ; \
 	fi
 
@@ -1302,8 +1363,6 @@ cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring sta
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=document
 	$(MAKE) minio-storage-user-secret-create SVC_NAME=payment
 	$(MAKE) minio-storage-config-secret-create SVC_NAME=payment
-	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
-	$(MAKE) minio-storage-config-secret-create SVC_NAME=loki
 	$(MAKE) minio-tenant-deploy SVC_NAME=document & $(MAKE) minio-tenant-deploy SVC_NAME=payment & wait
 	@echo "⏳ Waiting 3m for MinIO service tenants.." && sleep 180
 
@@ -1330,10 +1389,14 @@ cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or 
 	@SVC_NAMES="web-vue,agent-portal-gateway,auth,product,policy-search,dashboard,policy,pricing,document,payment,chat" ; \
 	SVC_NAMES=$$(echo "$$SVC_NAMES" | tr ',' ' ') ; \
 	for svc in $$SVC_NAMES ; do \
-		$(MAKE) svc-load-delete-deploy SVC_NAME=$$svc ; \
+		if [ "$(ENV_NAME)" = "local-dev" ]; then \
+			$(MAKE) svc-load-delete-deploy SVC_NAME=$$svc ; \
+		else \
+			$(MAKE) svc-deploy SVC_NAME=$$svc ; \
+		fi ; \
 	done
 	@echo "⏳ Waiting 60s for services..." && sleep 60
 
-	@echo "✅ Service apps deployed to local-dev cluster!"
-	@kubectl get pods | grep -E "web|agent|api"
-	@kubectl top pods | grep -E "web|agent|api"
+	@echo "✅ Service apps deployed to '$(ENV_NAME)' cluster!"
+	@kubectl get pods | grep -E "web|agent|auth|api"
+	@kubectl top pods | grep -E "web|agent|auth|api"

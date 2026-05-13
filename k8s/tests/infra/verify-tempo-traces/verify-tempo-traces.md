@@ -49,15 +49,35 @@ Tempo MinIO bucket, and is queryable via API and Grafana.
 4. **Push and verify a synthetic trace**
 
    ```shell
+   # Push
    TRACE_ID=$(python3 -c 'import secrets; print(secrets.token_hex(16))'); \
      SPAN_ID=$(python3 -c 'import secrets; print(secrets.token_hex(8))'); \
      TS=$(python3 -c 'import time; print(int(time.time()*1_000_000))'); \
-     curl -s http://localhost:4318/v1/traces -H 'Content-Type: application/json' -d '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"tempo-smoke"}}]},"scopeSpans":[{"scope":{"name":"smoke"},"spans":[{"traceId":"'"$TRACE_ID"'","spanId":"'"$SPAN_ID"'","name":"tempo-smoke-test","kind":"SPAN_KIND_INTERNAL","startTimeUnixNano":"'"$((TS*1000))"'","endTimeUnixNano":"'"$((TS*1000+5000000))"'"}]}]}]}'   # Verify trace is retrievable by trace ID
-   sleep 10
+     curl -s http://localhost:4318/v1/traces -H 'Content-Type: application/json' -d '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"tempo-smoke"}}]},"scopeSpans":[{"scope":{"name":"smoke"},"spans":[{"traceId":"'"$TRACE_ID"'","spanId":"'"$SPAN_ID"'","name":"tempo-smoke-test","kind":"SPAN_KIND_INTERNAL","startTimeUnixNano":"'"$((TS*1000))"'","endTimeUnixNano":"'"$((TS*1000+5000000))"'"}]}]}]}'; \
+     echo "Sleeping for 10s..." && sleep 10
+   ```
+
+   **Expected**: 
+   ```json
+   {"partialSuccess":{}}
+   ```
+
+   ```shell
+   # Verify
    curl -s "http://localhost:3200/api/traces/$TRACE_ID" | jq '.batches[0].resource.attributes'
    ```
 
-   **Expected**: `{"partialSuccess":{}}`
+   **Expected**:
+   ```json
+   [
+     {
+       "key": "service.name",
+       "value": {
+         "stringValue": "tempo-smoke"
+       }
+     }
+   ]
+   ```
 
 5. **Verify bucket object presence in MinIO**
 
