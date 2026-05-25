@@ -25,7 +25,7 @@
   - [Phase 2: Foundational Observability](#phase-2-foundational-observability)
   - [Phase 3: Data Store Consolidation](#phase-3-data-store-consolidation)
   - [Phase 4: Phased Service Migration to Go (Strangler Fig Pattern)](#phase-4-phased-service-migration-to-go-strangler-fig-pattern)
-  - [Phase 5: Modernize Edge and Authentication](#phase-5-modernize-edge-and-authentication)
+  - [Phase 5: Modernize Edge and Authentication, Add Service Mesh](#phase-5-modernize-edge-and-authentication-add-service-mesh)
   - [Phase 6: Finalization, Automation, and Optimization](#phase-6-finalization-automation-and-optimization)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
