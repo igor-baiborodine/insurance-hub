@@ -662,13 +662,6 @@ services**.
       and Tempo (for unified, modern stack integration); Loki is currently deployed as a placeholder.
     * Over time, phase out Zipkin once Tempo ingestion and visualization are validated.
 
-**Outcome:** The existing tracing infrastructure is maintained with **no changes to the Java
-application code** in the short term. The OpenTelemetry Collector serves as a bridge, allowing
-legacy Zipkin traces to integrate into Tempo. This ensures that future Grafana dashboards can
-visualize both current Java-based services and new Go-based services. This setup facilitates a
-smooth, zero-code migration to Tempo and lays the groundwork for Go services to emit native OTLP
-traces.
-
 **Update 8-May-2026**: The OpenTelemetry Collector specified above should be replaced with **Grafana
 Alloy** deployed as a permanent, central observability collector. Alloy will serve as the long-term 
 cluster-wide gateway for all telemetry signals (traces, logs, metrics) from both legacy Java 
@@ -677,9 +670,7 @@ services (via Zipkin receiver) and future Go services (via OTLP receivers).
 Alloy will implement complete pipelines:
 
 * **Traces**: Zipkin + OTLP → Tempo (+ Zipkin during transition)
-
 * **Logs**: OTLP → Loki
-
 * **Metrics**: OTLP/Prometheus scrape → Prometheus
 
 Go services will target Alloy's stable OTLP endpoints as their sole observability backend. Alloy
@@ -688,14 +679,21 @@ eliminate direct backend coupling, following OpenTelemetry best practices for pr
 deployments. The original Phase 2 tracing bridge behavior is preserved while establishing the
 target-state observability architecture.
 
+**Outcome:** The existing tracing infrastructure is maintained with **no changes to the Java
+application code** in the short term. The OpenTelemetry Collector serves as a bridge, allowing
+legacy Zipkin traces to integrate into Tempo. This ensures that future Grafana dashboards can
+visualize both current Java-based services and new Go-based services. This setup facilitates a
+smooth, zero-code migration to Tempo and lays the groundwork for Go services to emit native OTLP
+traces.
+
 ### Phase 3: Data Store Consolidation
 
 **Goal:** Simplify the data layer by migrating product data from MongoDB to PostgreSQL, thereby
 reducing operational complexity and unifying the persistence strategy.
 
 1. **Adapt Database Schema:** Modify the PostgreSQL schema to accommodate the data currently stored
-   in MongoDB. As per this [analysis](migration/component-replacement-reasoning/replace-mongodb.md), use the `JSONB` data 
-   type to store flexible insurance product definitions.
+   in MongoDB. As per this [analysis](migration/component-replacement-reasoning/replace-mongodb.md), 
+   use the `JSONB` data type to store flexible insurance product definitions.
 2. **Develop and Test Migration Scripts:** Create scripts to perform the ETL (Extract, Transform,
    Load) process from MongoDB to the new PostgreSQL tables. Thoroughly validate the data integrity
    post-migration.
@@ -706,8 +704,33 @@ reducing operational complexity and unifying the persistence strategy.
 5. **Decommission MongoDB:** Once the system is stable and the migration is confirmed successful,
    decommission the MongoDB instance.
 
-**Outcome:** The system's data persistence is consolidated onto PostgreSQL, simplifying operations,
-backups, and data governance.
+**Update 25-May-2026:** In addition to the MongoDB-to-PostgreSQL consolidation work, Phase 3 will
+establish and validate the project’s local, spec-first AI-assisted development workflow. This
+workflow will be introduced first on the required Phase 3 legacy Java changes, especially the
+`product-service` refactor needed to switch from MongoDB to PostgreSQL, so the process can be proven
+on real maintenance and migration work before it is reused for Go service rewrites in Phase 4.
+
+The Phase 3 workflow update includes the following workstreams:
+
+* **Local AI runtime:** Install and configure a fully local model runtime on the development machine
+  to support private, credit-free AI assistance during implementation and refinement.
+* **VS Code integration:** Configure VS Code with Continue so planning, implementation, and
+  refinement can be performed against the local models within the editor.
+* **Repository agent guidance:** Introduce a root-level `AGENTS.md` file to define repository-wide
+  agent instructions such as build commands, validation steps, Make targets, and migration-phase
+  awareness.
+* **Specialized workflow guidance:** Introduce a `SKILLS.md` file or equivalent skill structure for
+  reusable task-specific workflows such as spec-first implementation, Java modernization assistance,
+  and later Go migration scaffolding.
+* **Phase 3 Java pilot:** Validate the workflow on one or more bounded Phase 3 Java tasks, including
+  an explicit spec, planning pass, implementation pass, and refinement pass tied to ticket
+  acceptance criteria.
+* **Phase 4 reuse preparation:** Document the validated workflow so it becomes the default operating
+  model for Go migration tickets in Phase 4.
+
+**Outcome:** The system’s data persistence is consolidated onto PostgreSQL, simplifying operations,
+backups, and data governance. In parallel, Phase 3 establishes the repeatable AI-assisted
+engineering recipe that will carry forward into Phase 4.
 
 ### Phase 4: Phased Service Migration to Go (Strangler Fig Pattern)
 
