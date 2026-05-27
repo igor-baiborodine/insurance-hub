@@ -3,7 +3,7 @@
 ### Hardware information:
 - **Hardware Model:**                              Micro-Star International Co., Ltd. Crosshair 16 HX D14VGKG
 - **Memory:**                                      64.0 GiB
-- **Processor:**                                   Intel® Core™ i7-14650HX × 24 (8 P-cores, 8 E-cores)
+- **Processor:**                                   Intel® Core™ i7-14650HX × 24 CPUs (8 P-cores, 8 E-cores)
 - **Graphics:**                                    Intel® Graphics (RPL-S)
 - **Graphics 1:**                                  NVIDIA GeForce RTX™ 4070 Laptop GPU
 - **Disk Capacity:**                               1.0 TB
