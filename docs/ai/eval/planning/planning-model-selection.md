@@ -1,33 +1,32 @@
+> This document details the selection process for local planning models used in this repository on a laptop running Ollama. The target system, equipped with 64 GB of RAM, an Intel i7-14650HX, and an NVIDIA GeForce RTX 4070 Laptop GPU, provides a robust environment for local inference but requires balancing reasoning depth and multi-step plan quality against VRAM constraints and latency to maintain a productive spec-first development experience.
+
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [Local planning model selection](#local-planning-model-selection)
-  - [Hardware context](#hardware-context)
-  - [Evaluation method](#evaluation-method)
-  - [Planning and reasoning models](#planning-and-reasoning-models)
-    - [DeepSeek‑R1‑8B (reasoning planner)](#deepseek%E2%80%91r1%E2%80%918b-reasoning-planner)
-    - [Llama‑3.1‑8B (balanced planning assistant)](#llama%E2%80%9131%E2%80%918b-balanced-planning-assistant)
-    - [Mistral (7B) (alternative planning/workhorse)](#mistral-7b-alternative-planningworkhorse)
-    - [Phi4‑mini (fast checklist generator)](#phi4%E2%80%91mini-fast-checklist-generator)
-  - [Planning model choices for this repository](#planning-model-choices-for-this-repository)
-  - [Large-model experiment](#large-model-experiment)
-    - [Magistral‑24B sanity check](#magistral%E2%80%9124b-sanity-check)
-    - [Decision](#decision)
+- [Hardware Context](#hardware-context)
+- [Evaluation](#evaluation)
+  - [Models](#models)
+  - [Prompts](#prompts)
+  - [Criteria](#criteria)
+- [Performance Summary](#performance-summary)
+  - [DeepSeek‑R1‑8B (Reasoning Planner)](#deepseek%E2%80%91r1%E2%80%918b-reasoning-planner)
+  - [Llama‑3.1‑8B (Balanced Planning Assistant)](#llama%E2%80%9131%E2%80%918b-balanced-planning-assistant)
+  - [Mistral (7B) (Alternative Planning/Workhorse)](#mistral-7b-alternative-planningworkhorse)
+  - [Phi4‑mini (Fast Checklist generator)](#phi4%E2%80%91mini-fast-checklist-generator)
+- [Final Model Selection](#final-model-selection)
+  - [Large-model Experiment (Magistral‑24B)](#large-model-experiment-magistral%E2%80%9124b)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-## Local planning model selection
-
-### Hardware context
+## Hardware Context
 
 - CPU: Intel i7‑14650HX (16 cores, 24 threads, well-suited for local inference). 
 - GPU: NVIDIA GeForce RTX 4070 Laptop GPU, 8 GB VRAM. 
 - RAM: 64 GB. 
 
-On this setup, 7–8B class models run comfortably when quantized, with evaluation speeds around 40–50 tokens/s and load times under 2 seconds for non‑reasoning models.
+## Evaluation
 
-### Evaluation method
+### Models
 
 To choose planning models, four candidates were evaluated locally:
 
@@ -36,29 +35,40 @@ To choose planning models, four candidates were evaluated locally:
 - `llama3.1:8b`
 - `deepseek-r1:8b`
 
+### Prompts
+
 Each model was tested using the following generic planning prompt suite:
 
 1. **Decomposition**
+
    “List 7 concrete steps to plan and ship a small backend feature, from initial requirements to deployment. Group them into 3 phases and name each phase.”
+
 2. **Prioritization**
+
    “You have tasks A, B, C, D, E and can only do 3 this week. Describe a simple prioritization strategy and pick the 3 tasks with a one-sentence justification each.”
+
 3. **Constraint plan**
+
    “Design a 3–5 step deployment plan for a web service that must have zero downtime and a rollback option after each step. Number the steps and clearly mark the rollback for each.”
+
 4. **Info-first planning**
+
    “Before planning a database migration, list the key information you need to collect. Then, based only on that information, propose a 4-step high-level migration plan.”
+
 5. **Clarification + plan**
+
    “A stakeholder says, ‘Make the system more scalable and reliable.’ First, ask 5 clarifying questions. Then propose a 4-step improvement plan assuming reasonable answers.”
+
+### Criteria
 
 For each prompt and model, the following were recorded:
 
 - Throughput metrics from Ollama (`eval rate` in tokens/s, total tokens generated, prompt eval rate, load duration, total duration). 
 - Qualitative reasoning characteristics: structure, constraint‑handling, depth, and practicality of the plan. 
 
-This file captures the resulting roles and tradeoffs, not the full benchmark logs.
+## Performance Summary
 
-### Planning and reasoning models
-
-#### DeepSeek‑R1‑8B (reasoning planner)
+### DeepSeek‑R1‑8B (Reasoning Planner)
 
 - **Role:** High‑depth planning and “safety‑critical” strategy work.
 - **Reasoning behavior:**
@@ -71,7 +81,7 @@ This file captures the resulting roles and tradeoffs, not the full benchmark log
     - When planning real deployments or database migrations where missing an edge case is costly.
     - When an additional 20–60 seconds of latency is acceptable in exchange for a richer “pre‑flight checklist” style output with explicit reasoning about constraints and failure modes. 
 
-#### Llama‑3.1‑8B (balanced planning assistant)
+### Llama‑3.1‑8B (Balanced Planning Assistant)
 
 - **Role:** Default planning assistant for day‑to‑day work, where a balance between depth and responsiveness is needed.
 - **Reasoning behavior:**
@@ -84,7 +94,7 @@ This file captures the resulting roles and tradeoffs, not the full benchmark log
     - For general planning and technical writing where responses must be fast enough for interactive use but still structured and detailed.
     - As the primary “planning model” referenced by tickets that expect spec‑first discussion and architecture support.
 
-#### Mistral (7B) (alternative planning/workhorse)
+### Mistral (7B) (Alternative Planning/Workhorse)
 
 - **Role:** Alternative balanced planner and general‑purpose technical writing model.
 - **Reasoning behavior:**
@@ -92,12 +102,12 @@ This file captures the resulting roles and tradeoffs, not the full benchmark log
     - Slightly more concise than Llama in some cases, with fewer tokens overall while still respecting formatting and constraints. 
 - **Latency and throughput:**
     - Eval rate around 50 tokens/s, consistently a bit faster than Llama‑3.1 on generation. 
-    - Load times among the best in the group (around 1.3–1.7 seconds), leading to a very responsive experience for cold and warm starts. 
+    - Load times are among the best in the group (around 1.3–1.7 seconds), leading to a very responsive experience for cold and warm starts. 
 - **When to use:**
     - As a backup or alternate planning model when slightly higher generation speed is preferred.
     - For integration into tools where low latency is especially visible (e.g., IDE helpers).
 
-#### Phi4‑mini (fast checklist generator)
+### Phi4‑mini (Fast Checklist generator)
 
 - **Role:** Lightweight planner optimized for speed and quick drafting.
 - **Reasoning behavior:**
@@ -110,9 +120,9 @@ This file captures the resulting roles and tradeoffs, not the full benchmark log
     - For rapid prototyping, quick checklists, and high‑level planning where “instant” responses are more important than exhaustive reasoning.
     - As a utility model when iterating rapidly on ideas or exploring variants on a plan.
 
-### Planning model choices for this repository
+## Final Model Selection
 
-Based on the above evaluation on generic planning prompts:
+Based on local hardware benchmarks and qualitative analysis:
 
 - **Primary comprehensive planning model:**
     - `deepseek-r1:8b` is selected for high‑stakes planning tasks where depth and explicit reasoning about constraints outweigh latency. 
@@ -122,9 +132,7 @@ Based on the above evaluation on generic planning prompts:
     - `mistral:latest` is kept as an alternative workhorse with similar quality and slightly better speed characteristics. 
     - `phi4-mini:latest` is kept as a fast drafting and checklist generator when ultra‑low latency is desired. 
 
-### Large-model experiment
-
-#### Magistral‑24B sanity check
+### Large-model Experiment (Magistral‑24B)
 
 To understand how a larger model behaves on this hardware, Prompt 1 from the generic planning suite was run against `magistral:24b`. The recorded metrics were:
 
@@ -138,9 +146,7 @@ On this RTX 4070 (8 GB VRAM, 64 GB RAM) setup, these numbers mean:
 - **Interactivity:** While load time and prompt prefill are acceptable, the effective generation speed (~6 tokens/s) combined with a long response length pushes total latency into the **11+ minute** range for a single planning answer.
 - **Comparison to 8B models:** The 7–8B models (Phi‑4‑mini, Mistral, Llama‑3.1‑8B, DeepSeek‑R1‑8B) consistently produced comparable planning outputs in **4–15 seconds**, with eval rates in the ~40–80 tokens/s range on similar prompts. 
 
-#### Decision
-
-Given this experiment:
+**Given this experiment:**
 
 - `magistral:24b` is considered **impractical for interactive local planning** on this machine due to multi‑minute response times.
 - The project will **not** rely on 24B‑class models in the local runtime; instead, it standardizes on **7–8B models** that deliver a much better balance of reasoning quality and latency for spec‑first and coding workflows. 
