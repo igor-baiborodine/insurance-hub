@@ -712,10 +712,10 @@ on real maintenance and migration work before it is reused for Go service rewrit
 
 The Phase 3 workflow update includes the following workstreams:
 
-* **Local AI runtime:** Install and configure a fully local model runtime on the development machine
-  to support private, credit-free AI assistance during implementation and refinement.
-* **VS Code integration:** Configure VS Code with Continue so planning, implementation, and
-  refinement can be performed against the local models within the editor.
+* **Local AI runtime:** Install and configure a fully local model runtime (Ollama or LM Studio) on 
+  the development machine to support private, credit-free AI assistance during implementation and refinement.
+* **VS Code integration:** Configure VS Code with a selected extension (Continue or Roo Code) 
+  so planning, implementation, and refinement can be performed against the local models within the editor.
 * **Repository agent guidance:** Introduce a root-level `AGENTS.md` file to define repository-wide
   agent instructions such as build commands, validation steps, Make targets, and migration-phase
   awareness.
