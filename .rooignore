@@ -1,0 +1,24 @@
+# Block Sensitive Files from AI Eye-line
+.env
+.env.*
+*.pem
+*.key
+id_rsa
+
+# Block Large Context-Eaters (Keep them out of the 8k window)
+*.md
+docs/
+architecture/
+*.csv
+*.json
+*.log
+
+# Block Assets and Build Artifacts
+*.svg
+*.png
+*.jpg
+*.jpeg
+dist/
+build/
+out/
+.next/

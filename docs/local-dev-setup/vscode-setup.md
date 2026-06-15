@@ -98,7 +98,9 @@ The script installs all required extensions using the `code --install-extension`
   - `zoocodeorganization.zoo-code`
 - Basic spell checker:
   - `streetsidesoftware.code-spell-checker`
-  
+- Enhanced Git source control:
+  - `eamodio.gitlens`
+
 **Verification**
 
 These checks satisfy “all required extensions are installed and enabled” and “extension versions used during setup are captured”:

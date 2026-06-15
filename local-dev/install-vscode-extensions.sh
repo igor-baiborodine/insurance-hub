@@ -13,4 +13,5 @@ code --install-extension ria.elastic && \
 code --install-extension ms-ossdata.vscode-pgsql && \
 code --install-extension yzhang.markdown-all-in-one && \
 code --install-extension ms-vscode.makefile-tools && \
-code --install-extension streetsidesoftware.code-spell-checker
+code --install-extension streetsidesoftware.code-spell-checker && \
+code --install-extension eamodio.gitlens
