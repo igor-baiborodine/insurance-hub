@@ -30,7 +30,7 @@ Perform these actions in order:
    - include blockers or follow-up for the next step
 
 3. Refresh the git diff artifact:
-   - `git diff development <current-branch> > ai/artifacts/<ticket>/<ticket>-git-diff.txt`
+   - `git diff main <current-branch> > ai/artifacts/<ticket>/<ticket>-git-diff.txt`
 
 ## Constraints
 
