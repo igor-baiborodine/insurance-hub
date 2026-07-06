@@ -2,7 +2,7 @@
 set -euo pipefail
 
 code --install-extension ryanolsonx.solarized && \
-code --install-extension zoocodeorganization.zoo-code && \
+code --install-extension Continue.continue
 code --install-extension vscjava.vscode-java-pack && \
 code --install-extension vscjava.vscode-lombok && \
 code --install-extension oracle-labs-graalvm.micronaut && \

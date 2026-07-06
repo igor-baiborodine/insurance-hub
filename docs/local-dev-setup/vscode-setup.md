@@ -42,6 +42,10 @@ sudo apt update
 
 # Install Visual Studio Code
 sudo apt install code
+
+# Update Visual Studio Code
+sudo apt --only-upgrade install code
+
 ```
 
 Alternative (if needed): VS Code is also available as a Snap package on Ubuntu, installable with `sudo snap install --classic code`, but the APT-based method above should be treated as the primary path for this project. [linuxiac](https://linuxiac.com/how-to-install-vs-code-on-ubuntu-24-04-lts/)
@@ -94,8 +98,8 @@ The script installs all required extensions using the `code --install-extension`
 - Markdown and build tooling:  
   - `yzhang.markdown-all-in-one`  
   - `ms-vscode.makefile-tools`
-- Zoo Code AI agentic development:
-  - `zoocodeorganization.zoo-code`
+- Continue AI assistant development:
+  - `Continue.continue`
 - Basic spell checker:
   - `streetsidesoftware.code-spell-checker`
 - Enhanced Git source control:
