@@ -6,6 +6,22 @@ This repository uses a spec-first, AI-assisted development workflow. These instr
 
 Insurance Hub is a multi-module insurance platform with legacy Java/Micronaut services, frontend modules, Kubernetes deployment assets, and migration documentation. Preserve existing module boundaries and local conventions unless a spec explicitly changes them.
 
+The repository is also a migration workspace that incrementally moves the original Java/Micronaut proof of concept toward Go-based services and updated operational workflows.
+
+Treat API contracts, DTOs, validation, persistence behavior, and security behavior as first-class requirements. When modernizing or migrating behavior, capture the current behavior before proposing a replacement.
+
+## Repository Shape
+
+Use these top-level directories to orient work:
+
+- `legacy/` contains the current Java services, API modules, and legacy frontend applications.
+- `k8s/` contains Kubernetes, bootstrap, Flux, and deployment-related automation.
+- `docs/` contains system analysis, migration notes, business flows, and local setup documentation.
+- `ai/` contains the canonical AI workflow framework for this repository.
+- `local-dev/` contains developer environment helper scripts.
+
+When changing service behavior, identify whether the work belongs in a `*-service` module, a `*-service-api` contract module, the frontend, or deployment/configuration assets.
+
 ## Instruction Precedence
 
 When instructions overlap, apply them in this order:
@@ -34,6 +50,11 @@ Use a spec-first workflow for non-trivial changes:
 
 For small mechanical changes, keep the workflow lightweight, but still read relevant local code before editing and validate the result.
 
+## Repository Conventions
+
+- Use `CONTRIBUTING.md` as the source of truth for branch naming, commit message conventions, prerequisites, and developer workflow expectations.
+- Prefer existing Make targets and module-local build tooling over inventing ad hoc commands.
+
 ## AI Directory
 
 The canonical AI framework lives under `ai/`:
@@ -53,6 +74,8 @@ Use `ai/artifacts/<ticket>/` for temporary ticket artifacts such as delivery pla
 
 Do not commit files under `ai/artifacts/`. The path should be excluded locally in `.git/info/exclude`.
 
+The historical `ai-artifacts/` directory contains older tracked and local AI notes. Treat `ai/` as the current canonical framework for ongoing workflow design.
+
 ## Validation Expectations
 
 Prefer the narrowest validation that proves the change:
@@ -61,6 +84,7 @@ Prefer the narrowest validation that proves the change:
 - run build or compile checks when shared contracts change
 - run formatting or lint checks when the module provides them
 - document any validation that could not be run
+- use `CONTRIBUTING.md`, the root `Makefile`, and module-local build files to choose the correct commands
 
 Do not claim validation was performed unless it was actually run.
 
@@ -71,3 +95,13 @@ Do not claim validation was performed unless it was actually run.
 - Preserve behavior unless the spec requires a change.
 - Ask for clarification when acceptance criteria, contracts, persistence expectations, security expectations, or out-of-scope boundaries are unclear.
 - Prefer existing project patterns over new abstractions.
+
+## References
+
+Use these repository documents when deeper context is needed:
+
+- `README.md` for the migration goal and high-level project framing.
+- `CONTRIBUTING.md` for prerequisites, branch naming, commit message conventions, and developer workflow.
+- `docs/system-overview-and-migration-analysis.md` for architecture and migration context.
+- `docs/business-flows/` for business process understanding.
+- `docs/local-dev-setup/` for local tooling and editor setup.
