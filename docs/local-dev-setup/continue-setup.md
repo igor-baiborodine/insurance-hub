@@ -121,6 +121,69 @@ Use these files during Continue sessions:
 
 For ticket-driven work, follow the spec-first workflow defined in the repository guidance rather than embedding process rules in `~/.continue/config.yaml`.
 
+## Context Providers
+
+Continue supports built-in context providers that appear when typing `@` in chat. For day-to-day repository work, the most useful built-in providers are:
+
+- `@File` for referencing a specific file in the workspace
+- `@Code` for referencing functions or classes across the project
+- `@Current File` for the file currently open in the editor
+- `@Terminal` for the last terminal command and its output
+- `@Open` for currently open files
+- `@Problems` for diagnostics from the current file
+- `@Git Diff` for reviewing current branch changes
+- `@Repository Map` for a codebase outline when broader structural context is needed
+
+For large repositories, `@Repository Map` can be configured with `includeSignatures: false` to reduce context size.
+
+For context beyond the built-in providers, prefer MCP servers. Continue supports MCP-backed context, which is the recommended path for extending prompts, context, and tool use beyond the built-in providers.
+
+If you need a small custom integration without a full MCP server, Continue also supports an HTTP context provider that makes a `POST` request and expects a `ContextItem` object or an array of `ContextItem` objects in the response.
+
+Older non-built-in context providers are deprecated. When extending Continue for repository-specific external context, prefer MCP instead of relying on deprecated providers.
+
+## MCP Servers
+
+Continue supports MCP server integration through the `mcpServers` configuration and uses MCP in agent mode. For this repository, MCP is the preferred extension mechanism when Continue needs external tools, remote data, or repository-adjacent services beyond the built-in context providers. citeturn2view0
+
+You can configure MCP servers in either of these ways:
+
+- add an `mcpServers` block directly to `~/.continue/config.yaml`
+- add standalone MCP config files under `.continue/mcpServers/` in the workspace
+
+When using standalone files in `.continue/mcpServers/`, include the required metadata fields `name`, `version`, and `schema`. Continue also supports JSON MCP config files from tools such as Claude Desktop, Cursor, or Cline when those files are placed in `.continue/mcpServers/`. citeturn2view0
+
+Each MCP server entry can define:
+
+- `name` as the display name
+- `type` as the transport type
+- `command` and `args` for local process startup
+- `env` for environment variables and secrets
+
+Continue documents three MCP transport styles:
+
+- `stdio` for local MCP processes
+- `sse` for remote server-sent events connections
+- `streamable-http` for HTTP-based streaming connections
+
+For local development in this repository, prefer `stdio` unless there is a concrete reason to run a shared remote MCP service. citeturn2view0
+
+If an MCP server requires credentials, use Continue secrets and inject them through `env` rather than hardcoding tokens into the configuration file. citeturn2view0
+
+Example standalone MCP block file:
+
+```yaml
+name: Playwright MCP
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: Browser search
+    type: stdio
+    command: npx
+    args:
+      - "@playwright/mcp@latest"
+```
+
 ## Recommended Usage
 
 Use the models with this default intent:
