@@ -7,6 +7,10 @@ on:
     paths:
       - 'legacy/**'
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   validate-and-build:
     runs-on: ubuntu-latest
@@ -54,11 +58,16 @@ jobs:
           java-version: '14'
           distribution: 'zulu'
           cache: 'maven'
+          server-id: github
+          settings-path: ${{ github.workspace }}
 
       - name: Build module
         if: steps.detect.outputs.module != ''
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           MODULE_PATH="${{ steps.detect.outputs.module_path }}"
           # Only package without publishing or testing
-          mvn -f "$MODULE_PATH/pom.xml" clean package -DskipTests
+          mvn -f "$MODULE_PATH/pom.xml" clean package -DskipTests \
+            -s "${{ github.workspace }}/settings.xml"
