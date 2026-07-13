@@ -94,4 +94,26 @@ public class ProductsControllerIT {
                     });
         }
     }
+
+    @Nested
+    public class GetByCode {
+
+        @Test
+        public void happyPath() {
+            // given
+            String productCode = "TRI";
+
+            // when
+            ProductDto result = classUnderTest.get(productCode);
+
+            // then
+            assertThat(result).isNotNull();
+            assertThat(result.getCode()).isEqualTo("TRI");
+            assertThat(result.getName()).isEqualTo("Safe Traveller");
+            assertThat(result.getCovers()).hasSize(3);
+            assertThat(result.getQuestions()).hasSize(3);
+            assertThat(result.getMaxNumberOfInsured()).isEqualTo(10);
+            assertThat(result.getIcon()).isEqualTo("plane");
+        }
+    }
 }
