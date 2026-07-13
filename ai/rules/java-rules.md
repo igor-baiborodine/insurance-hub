@@ -16,6 +16,8 @@ These rules are intentionally minimal until service-specific Java conventions ar
 When writing or updating JUnit 5 unit or integration tests, prefer an explicit given-when-then
 structure over helper-driven BDD wrappers.
 
+- Name classes with unit tests following `<ClassName>Test` pattern.
+- Name classes with integration tests following `<ClassName>IT` pattern.
 - Group tests for a specific production method inside a JUnit 5 `@Nested` class.
 - Name the instance under test `classUnderTest`.
 - Use `happyPath` for the main successful case.
