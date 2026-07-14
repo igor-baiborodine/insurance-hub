@@ -6,6 +6,9 @@ micronaut:
 mongodb:
   uri: "mongodb://product:mongoProductUserPwd@localhost:27017/products-demo"
 ---
+products:
+  persistence: mongo
+---
 postgres:
   host: localhost
   port: 5432
@@ -22,6 +25,16 @@ datasources:
     url: "jdbc:postgresql://localhost:5432/product"
     username: product
     password: product
+---
+jpa:
+  default:
+    packages-to-scan:
+      - 'pl.altkom.asc.lab.micronaut.poc.product.service.infrastructure.adapters.db.model'
+    properties:
+      hibernate:
+        hbm2ddl:
+          auto: update
+        show_sql: false
 tracing:
   zipkin:
     enabled: false

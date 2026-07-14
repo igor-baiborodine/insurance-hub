@@ -6,6 +6,7 @@ import com.mongodb.reactivestreams.client.MongoCollection;
 import io.reactivex.Flowable;
 import io.reactivex.Maybe;
 import io.reactivex.Single;
+import io.micronaut.context.annotation.Requires;
 import lombok.RequiredArgsConstructor;
 import pl.altkom.asc.lab.micronaut.poc.product.service.domain.Product;
 import pl.altkom.asc.lab.micronaut.poc.product.service.domain.Products;
@@ -13,9 +14,9 @@ import pl.altkom.asc.lab.micronaut.poc.product.service.domain.Products;
 import javax.inject.Singleton;
 import java.util.List;
 
-
 @Singleton
 @RequiredArgsConstructor
+@Requires(property = "products.persistence", value = "mongo")
 public class ProductsRepository implements Products {
 
     private final MongoClient mongoClient;

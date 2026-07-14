@@ -1,14 +1,15 @@
 package pl.altkom.asc.lab.micronaut.poc.product.service.infrastructure.adapters.web;
 
+import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
-import pl.altkom.asc.lab.micronaut.poc.product.service.BaseIT;
 import pl.altkom.asc.lab.micronaut.poc.product.service.api.v1.ProductDto;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -17,14 +18,16 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-public class ProductsControllerIT extends BaseIT {
+public class ProductsControllerIT {
 
     private ProductsTestClient classUnderTest;
     private EmbeddedServer server;
 
     @BeforeAll
     void setup() {
-        server = startServer();
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("micronaut.environments", "test");
+        server = ApplicationContext.run(EmbeddedServer.class, properties);
         classUnderTest = server.getApplicationContext().createBean(ProductsTestClient.class, server.getURL());
     }
 

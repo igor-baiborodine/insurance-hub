@@ -1,6 +1,9 @@
 micronaut:
   server:
     port: -1
+---
+products:
+  persistence: mongo
 tracing:
   zipkin:
     enabled: false

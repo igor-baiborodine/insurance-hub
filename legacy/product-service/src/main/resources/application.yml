@@ -17,6 +17,9 @@ mongodb:
     connectionPool:
       maxSize: 20
 ---
+products:
+  persistence: ${PRODUCTS_PERSISTENCE:mongo}
+---
 postgres:
   host: ${PG_HOST:localhost}
   port: ${PG_PORT:5432}
@@ -33,6 +36,16 @@ datasources:
     url: "jdbc:postgresql://localhost:5432/product"
     username: ${PG_USER:product}
     password: ${PG_PASSWORD:product}
+---
+jpa:
+  default:
+    packages-to-scan:
+      - 'pl.altkom.asc.lab.micronaut.poc.product.service.infrastructure.adapters.db.model'
+    properties:
+      hibernate:
+        hbm2ddl:
+          auto: update
+        show_sql: false
 ---
 endpoints:
   health:
