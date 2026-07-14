@@ -13,9 +13,9 @@ import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-public class ProductPersistenceModelTest {
+public class ProductDefinitionJsonbTypeTest {
 
-    private final ProductDefinitionJsonConverter classUnderTest = new ProductDefinitionJsonConverter();
+    private final ProductDefinitionJsonbType classUnderTest = new ProductDefinitionJsonbType();
 
     @Nested
     public class ProductEntityRoundTrip {
@@ -45,7 +45,7 @@ public class ProductPersistenceModelTest {
     }
 
     @Nested
-    public class JsonConverterRoundTrip {
+    public class JsonbTypeRoundTrip {
 
         @Test
         public void happyPath() {
@@ -53,13 +53,13 @@ public class ProductPersistenceModelTest {
             ProductDefinition definition = ProductDefinition.from(sampleProduct());
 
             // when
-            String result = classUnderTest.convertToDatabaseColumn(definition);
-            ProductDefinition restored = classUnderTest.convertToEntityAttribute(result);
+            String serialized = (String) classUnderTest.disassemble(definition);
+            ProductDefinition restored = (ProductDefinition) classUnderTest.assemble(serialized, null);
 
             // then
-            assertThat(result).contains("\"type\":\"choice\"");
-            assertThat(result).contains("\"type\":\"numeric\"");
-            assertThat(result).contains("\"type\":\"date\"");
+            assertThat(serialized).contains("\"type\":\"choice\"");
+            assertThat(serialized).contains("\"type\":\"numeric\"");
+            assertThat(serialized).contains("\"type\":\"date\"");
             assertThat(restored.getName()).isEqualTo("Safe Traveller");
             assertThat(restored.getCovers()).hasSize(3);
             assertThat(restored.getQuestions()).hasSize(3);

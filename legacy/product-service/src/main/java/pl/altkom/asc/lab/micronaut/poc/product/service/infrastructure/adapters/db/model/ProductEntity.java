@@ -4,15 +4,17 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import pl.altkom.asc.lab.micronaut.poc.product.service.domain.Product;
+import org.hibernate.annotations.Type;
+import org.hibernate.annotations.TypeDef;
 
 import javax.persistence.Column;
-import javax.persistence.Convert;
 import javax.persistence.Entity;
 import javax.persistence.Id;
 import javax.persistence.Table;
 
 @Entity
 @Table(name = "product")
+@TypeDef(name = "jsonb", typeClass = ProductDefinitionJsonbType.class)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Getter
 public class ProductEntity {
@@ -21,7 +23,7 @@ public class ProductEntity {
     @Column(name = "code", nullable = false, updatable = false)
     private String code;
 
-    @Convert(converter = ProductDefinitionJsonConverter.class)
+    @Type(type = "jsonb")
     @Column(name = "definition", nullable = false, columnDefinition = "jsonb")
     private ProductDefinition definition;
 

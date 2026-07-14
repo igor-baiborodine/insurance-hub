@@ -22,12 +22,17 @@ public abstract class BaseIT {
     }
 
     protected EmbeddedServer startServer() {
+        return startServer(new HashMap<>());
+    }
+
+    protected EmbeddedServer startServer(Map<String, Object> extraProperties) {
         Map<String, Object> properties = new HashMap<>();
         properties.put("micronaut.environments", "test");
         properties.put("datasources.default.url", postgresqlContainer.getJdbcUrl());
         properties.put("datasources.default.driverClassName", "org.postgresql.Driver");
         properties.put("datasources.default.username", postgresqlContainer.getUsername());
         properties.put("datasources.default.password", postgresqlContainer.getPassword());
+        properties.putAll(extraProperties);
         return ApplicationContext.run(EmbeddedServer.class, properties);
     }
 
