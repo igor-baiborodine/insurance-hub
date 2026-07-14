@@ -34,6 +34,7 @@ public class PostgresProductsRepositoryIT extends BaseIT {
     void setup() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("products.persistence", "postgres");
+        properties.put("jpa.default.enabled", true);
         server = startServer(properties);
         classUnderTest = server.getApplicationContext().getBean(Products.class);
         postgresRepository = server.getApplicationContext().getBean(PostgresProductsRepository.class);

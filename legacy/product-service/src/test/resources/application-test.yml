@@ -2,8 +2,23 @@ micronaut:
   server:
     port: -1
 ---
+datasources:
+  default:
+    initialization-fail-timeout: -1
+---
+jpa:
+  default:
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQL10Dialect
+        temp:
+          use_jdbc_metadata_defaults: false
+        hbm2ddl:
+          auto: none
+---
 products:
   persistence: mongo
+---
 tracing:
   zipkin:
     enabled: false
