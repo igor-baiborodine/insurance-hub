@@ -91,6 +91,11 @@
             <artifactId>micronaut-jdbc-hikari</artifactId>
             <scope>compile</scope>
         </dependency>
+        <dependency>
+            <groupId>io.micronaut.data</groupId>
+            <artifactId>micronaut-data-hibernate-jpa</artifactId>
+            <scope>compile</scope>
+        </dependency>
         <!-- POSTGRES -->
 
         <!-- MICRONAUT MANAGEMENT -->
