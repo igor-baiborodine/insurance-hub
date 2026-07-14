@@ -5,6 +5,23 @@ micronaut:
 ---
 mongodb:
   uri: "mongodb://product:mongoProductUserPwd@localhost:27017/products-demo"
+---
+postgres:
+  host: localhost
+  port: 5432
+  database: product
+  username: product
+  password: product
+  ssl: false
+---
+# This is only to allow Micronaut to bootstrap DataSource;
+# overridden at runtime by PostgresDatasourceConfigurationListener#onCreated(BeanCreatedEvent<DatasourceConfiguration>)
+datasources:
+  default:
+    driverClassName: org.postgresql.Driver
+    url: "jdbc:postgresql://localhost:5432/product"
+    username: product
+    password: product
 tracing:
   zipkin:
     enabled: false

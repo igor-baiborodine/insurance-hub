@@ -80,6 +80,19 @@
         </dependency>
         <!-- MONGO -->
 
+        <!-- POSTGRES -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.4</version>
+        </dependency>
+        <dependency>
+            <groupId>io.micronaut.sql</groupId>
+            <artifactId>micronaut-jdbc-hikari</artifactId>
+            <scope>compile</scope>
+        </dependency>
+        <!-- POSTGRES -->
+
         <!-- MICRONAUT MANAGEMENT -->
         <dependency>
             <groupId>io.micronaut</groupId>
@@ -150,6 +163,12 @@
             <groupId>org.jeasy</groupId>
             <artifactId>easy-random-core</artifactId>
             <version>5.0.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>1.20.1</version>
             <scope>test</scope>
         </dependency>
         <!-- TESTS -->
