@@ -69,5 +69,5 @@ jobs:
         run: |
           MODULE_PATH="${{ steps.detect.outputs.module_path }}"
           # Only package without publishing or testing
-          mvn -f "$MODULE_PATH/pom.xml" clean package -DskipTests \
+          mvn -f "$MODULE_PATH/pom.xml" clean package \
             -s "${{ github.workspace }}/settings.xml"
