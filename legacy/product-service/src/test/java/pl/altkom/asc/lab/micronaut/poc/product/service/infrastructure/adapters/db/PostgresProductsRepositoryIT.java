@@ -35,6 +35,7 @@ public class PostgresProductsRepositoryIT extends BaseIT {
         Map<String, Object> properties = new HashMap<>();
         properties.put("products.persistence", "postgres");
         properties.put("jpa.default.enabled", true);
+        properties.put("jpa.default.properties.hibernate.hbm2ddl.auto", "create-drop");
         server = startServer(properties);
         classUnderTest = server.getApplicationContext().getBean(Products.class);
         postgresRepository = server.getApplicationContext().getBean(PostgresProductsRepository.class);
