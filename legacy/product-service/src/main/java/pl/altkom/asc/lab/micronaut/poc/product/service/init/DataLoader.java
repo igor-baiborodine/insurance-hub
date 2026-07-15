@@ -7,7 +7,7 @@ import pl.altkom.asc.lab.micronaut.poc.product.service.domain.Product;
 import pl.altkom.asc.lab.micronaut.poc.product.service.domain.Products;
 
 import javax.inject.Singleton;
-import java.util.List;
+import java.util.function.Supplier;
 
 @Singleton
 @RequiredArgsConstructor
@@ -17,22 +17,15 @@ public class DataLoader implements ApplicationEventListener<ServerStartupEvent> 
 
     @Override
     public void onApplicationEvent(ServerStartupEvent serverStartupEvent) {
-        List<Product> allProducts = productsRepository.findAll().blockingGet();
+        seedIfMissing("CAR", DemoProductsFactory::car);
+        seedIfMissing("FAI", DemoProductsFactory::farm);
+        seedIfMissing("HSI", DemoProductsFactory::house);
+        seedIfMissing("TRI", DemoProductsFactory::travel);
+    }
 
-        if (allProducts.stream().noneMatch(p -> p.getCode().equals("CAR"))) {
-            productsRepository.add(DemoProductsFactory.car()).blockingGet();
-        }
-
-        if (allProducts.stream().noneMatch(p -> p.getCode().equals("FAI"))) {
-            productsRepository.add(DemoProductsFactory.farm()).blockingGet();
-        }
-
-        if (allProducts.stream().noneMatch(p -> p.getCode().equals("HSI"))) {
-            productsRepository.add(DemoProductsFactory.house()).blockingGet();
-        }
-
-        if (allProducts.stream().noneMatch(p -> p.getCode().equals("TRI"))) {
-            productsRepository.add(DemoProductsFactory.travel()).blockingGet();
+    private void seedIfMissing(String productCode, Supplier<Product> productSupplier) {
+        if (productsRepository.findOne(productCode).blockingGet() == null) {
+            productsRepository.add(productSupplier.get()).blockingGet();
         }
     }
 }
