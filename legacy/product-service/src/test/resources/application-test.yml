@@ -8,16 +8,17 @@ datasources:
 ---
 jpa:
   default:
+    enabled: true
     properties:
       hibernate:
+        hbm2ddl:
+          auto: create-drop
         dialect: org.hibernate.dialect.PostgreSQL10Dialect
         temp:
           use_jdbc_metadata_defaults: false
-        hbm2ddl:
-          auto: none
 ---
 products:
-  persistence: mongo
+  persistence: postgres
 ---
 tracing:
   zipkin:

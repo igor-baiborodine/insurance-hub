@@ -2,7 +2,6 @@ package pl.altkom.asc.lab.micronaut.poc.product.service;
 
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
-import org.junit.jupiter.api.AfterAll;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.util.HashMap;
@@ -34,12 +33,5 @@ public abstract class BaseIT {
         properties.put("datasources.default.password", postgresqlContainer.getPassword());
         properties.putAll(extraProperties);
         return ApplicationContext.run(EmbeddedServer.class, properties);
-    }
-
-    @AfterAll
-    static void stopPostgres() {
-        if (postgresqlContainer != null) {
-            postgresqlContainer.stop();
-        }
     }
 }
