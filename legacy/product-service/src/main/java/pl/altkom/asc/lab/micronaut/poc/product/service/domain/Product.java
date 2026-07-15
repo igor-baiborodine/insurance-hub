@@ -2,9 +2,6 @@ package pl.altkom.asc.lab.micronaut.poc.product.service.domain;
 
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.bson.codecs.pojo.annotations.BsonCreator;
-import org.bson.codecs.pojo.annotations.BsonDiscriminator;
-import org.bson.codecs.pojo.annotations.BsonProperty;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -12,7 +9,6 @@ import java.util.List;
 
 @Getter
 @NoArgsConstructor
-@BsonDiscriminator
 public class Product {
     private String code;
     private String name;
@@ -23,16 +19,15 @@ public class Product {
     private int maxNumberOfInsured;
     private String icon;
 
-    @BsonCreator
     public Product(
-            @BsonProperty("code") String code,
-            @BsonProperty("name") String name,
-            @BsonProperty("image") String image,
-            @BsonProperty("description") String description,
-            @BsonProperty("covers") List<Cover> covers,
-            @BsonProperty("questions") List<Question> questions,
-            @BsonProperty("maxNumberOfInsured") int maxNumberOfInsured,
-            @BsonProperty("icon") String icon) {
+            String code,
+            String name,
+            String image,
+            String description,
+            List<Cover> covers,
+            List<Question> questions,
+            int maxNumberOfInsured,
+            String icon) {
         this.code = code;
         this.name = name;
         this.image = image;

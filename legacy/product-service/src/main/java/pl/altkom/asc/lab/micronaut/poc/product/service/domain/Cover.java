@@ -2,8 +2,6 @@ package pl.altkom.asc.lab.micronaut.poc.product.service.domain;
 
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.bson.codecs.pojo.annotations.BsonCreator;
-import org.bson.codecs.pojo.annotations.BsonProperty;
 
 import java.math.BigDecimal;
 
@@ -17,13 +15,12 @@ public class Cover {
     private boolean optional;
     private BigDecimal sumInsured;
 
-    @BsonCreator
     public Cover(
-            @BsonProperty("code") String code,
-            @BsonProperty("name") String name,
-            @BsonProperty("description") String description,
-            @BsonProperty("optional") boolean optional,
-            @BsonProperty("sumInsured") BigDecimal sumInsured) {
+            String code,
+            String name,
+            String description,
+            boolean optional,
+            BigDecimal sumInsured) {
         this.code = code;
         this.name = name;
         this.description = description;
