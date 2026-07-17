@@ -1374,7 +1374,9 @@ cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or 
 	@echo "🚀 Deploying Insurance Hub services into '$(ENV_NAME)' cluster..."
 
 	# Elasticsearch
-	$(MAKE) es-elastic-user-secret-copy
+	@if [ "$(ENV_NAME)" = "qa" ]; then \
+    	$(MAKE) es-elastic-user-secret-copy ; \
+    fi
 
 	# MinIO Service Tenant Configuration
 	# Document

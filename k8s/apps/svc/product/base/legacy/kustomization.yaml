@@ -13,6 +13,9 @@ configMapGenerator:
     literals:
       - MG_HOST=localhost
       - MG_PORT=27017
+      - PG_HOST=localhost
+      - PG_PORT=5432
+      - PG_DBNAME=product
       - TRACING_ZIPKIN_ENABLED=true
       - ZIPKIN_HOST=localhost
       - ZIPKIN_PORT=9411

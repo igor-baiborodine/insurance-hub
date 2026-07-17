@@ -57,6 +57,11 @@ java-all-build: ## Build all Java microservices
 
 .PHONY: frontend-build
 frontend-build: ## Build frontend (Vue app)
+	@NODE_VERSION=$$(node -v); \
+	if [ "$$NODE_VERSION" != "v12.22.12" ]; then \
+		echo "ERROR: Incorrect Node.js version ($$NODE_VERSION). Please use v12.22.12 (hint: nvm use 12.22.12)"; \
+		exit 1; \
+	fi
 	@echo "Building frontend (Vue app)..."
 	@bash legacy/build-frontend.sh
 	@echo "✅ Frontend (Vue app) built successfully."
@@ -78,6 +83,7 @@ docker-java-svc-build: _svc-name-check ## Build a Docker image for a Java servic
 	fi; \
 	echo "🔨 Building Docker image for Java service '$(SVC_NAME)' from '$$SVC_FOLDER'..."; \
 	docker build --no-cache -f "$$SVC_FOLDER/Dockerfile" "$$SVC_FOLDER" -t "$$IMAGE_NAME"; \
+	docker image prune -f; \
 	echo "✅ Docker image '$$IMAGE_NAME' built successfully."
 
 .PHONY: docker-java-svc-all-build
@@ -99,3 +105,12 @@ docker-frontend-build: ## Build the Docker image for the Vue frontend in the 'le
 	docker build --no-cache -f "$$SVC_FOLDER/Dockerfile" "$$SVC_FOLDER" -t "$$IMAGE_NAME"; \
 	docker image prune -f; \
 	echo "✅ Docker image '$$IMAGE_NAME' built successfully."
+
+.PHONY: legacy-all-build
+legacy-all-build: ## Build all legacy artifacts sequentially (Java -> Frontend -> Docker). Usage: legacy-all-build
+	@echo "🚀 Building all legacy artifacts (Java -> Frontend -> Docker)..."
+	$(MAKE) java-all-build
+	$(MAKE) frontend-build
+	$(MAKE) docker-frontend-build
+	$(MAKE) docker-java-svc-all-build
+	@echo "✅ All legacy artifacts built successfully!"
