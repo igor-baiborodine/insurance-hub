@@ -26,3 +26,14 @@ spec:
                 secretKeyRef:
                   name: local-dev-mongodb-product-user-creds
                   key: password
+            # Postgres sensitive data
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-postgres-product-user-creds
+                  key: username
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-postgres-product-user-creds
+                  key: password

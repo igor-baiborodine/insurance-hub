@@ -18,7 +18,7 @@ mongodb:
       maxSize: 20
 ---
 products:
-  persistence: ${PRODUCTS_PERSISTENCE:mongo}
+  persistence: ${PRODUCTS_PERSISTENCE:postgres}
 ---
 postgres:
   host: ${PG_HOST:localhost}

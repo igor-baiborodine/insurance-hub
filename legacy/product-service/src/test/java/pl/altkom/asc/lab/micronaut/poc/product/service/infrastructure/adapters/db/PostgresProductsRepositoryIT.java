@@ -17,9 +17,7 @@ import pl.altkom.asc.lab.micronaut.poc.product.service.domain.Products;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -32,11 +30,7 @@ public class PostgresProductsRepositoryIT extends BaseIT {
 
     @BeforeAll
     void setup() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("products.persistence", "postgres");
-        properties.put("jpa.default.enabled", true);
-        properties.put("jpa.default.properties.hibernate.hbm2ddl.auto", "create-drop");
-        server = startServer(properties);
+        server = startServer();
         classUnderTest = server.getApplicationContext().getBean(Products.class);
         postgresRepository = server.getApplicationContext().getBean(PostgresProductsRepository.class);
     }

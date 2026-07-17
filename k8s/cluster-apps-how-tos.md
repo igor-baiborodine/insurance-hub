@@ -31,17 +31,17 @@ and "Insurance Hub" infrastructure and services.
 
 ## Automated Deployment
 
-> ⚠️ Local dev and/or QA environments are created.
-> - Local dev: `cd bootstrap && make local-dev-create`
-> - QA: `cd bootstrap && make qa-create`
+> ⚠️ Local Dev and/or QA environments are created.
+> - Local Dev: `make -C k8s/bootstrap local-dev-create`
+> - QA: `make -C k8s/bootstrap qa-create`
 
-- **Optional** `make legacy-all-build`
+- **Local Dev** `make legacy-all-build`
 - `cd k8s`
-- **QA**: `make cluster-qa-monitoring-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep "0/"`
+- **QA**: `make cluster-qa-monitoring-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep -E -- "-[01]$|-[01] "`
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-monitoring-deploy-<iso-date>`
-- `make cluster-infra-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep "0/"`
+- `make cluster-infra-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep -E -- "-[01]$|-[01] "`
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-infra-deploy-<iso-date>` 
-- `make cluster-svc-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep "0/"`
+- `make cluster-svc-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep -E -- "-[01]$|-[01] "`
 
 ## Step-by-Step Deployment
 

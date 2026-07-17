@@ -3,12 +3,14 @@ package pl.altkom.asc.lab.micronaut.poc.product.service.init;
 import io.micronaut.context.event.ApplicationEventListener;
 import io.micronaut.runtime.server.event.ServerStartupEvent;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import pl.altkom.asc.lab.micronaut.poc.product.service.domain.Product;
 import pl.altkom.asc.lab.micronaut.poc.product.service.domain.Products;
 
 import javax.inject.Singleton;
-import java.util.List;
+import java.util.function.Supplier;
 
+@Slf4j
 @Singleton
 @RequiredArgsConstructor
 public class DataLoader implements ApplicationEventListener<ServerStartupEvent> {
@@ -17,22 +19,20 @@ public class DataLoader implements ApplicationEventListener<ServerStartupEvent> 
 
     @Override
     public void onApplicationEvent(ServerStartupEvent serverStartupEvent) {
-        List<Product> allProducts = productsRepository.findAll().blockingGet();
+        log.info("Starting data seeding...");
+        seedIfMissing("CAR", DemoProductsFactory::car);
+        seedIfMissing("FAI", DemoProductsFactory::farm);
+        seedIfMissing("HSI", DemoProductsFactory::house);
+        seedIfMissing("TRI", DemoProductsFactory::travel);
+        log.info("Data seeding finished.");
+    }
 
-        if (allProducts.stream().noneMatch(p -> p.getCode().equals("CAR"))) {
-            productsRepository.add(DemoProductsFactory.car()).blockingGet();
-        }
-
-        if (allProducts.stream().noneMatch(p -> p.getCode().equals("FAI"))) {
-            productsRepository.add(DemoProductsFactory.farm()).blockingGet();
-        }
-
-        if (allProducts.stream().noneMatch(p -> p.getCode().equals("HSI"))) {
-            productsRepository.add(DemoProductsFactory.house()).blockingGet();
-        }
-
-        if (allProducts.stream().noneMatch(p -> p.getCode().equals("TRI"))) {
-            productsRepository.add(DemoProductsFactory.travel()).blockingGet();
+    private void seedIfMissing(String productCode, Supplier<Product> productSupplier) {
+        if (productsRepository.findOne(productCode).blockingGet() == null) {
+            log.info("Product {} missing. Seeding...", productCode);
+            productsRepository.add(productSupplier.get()).blockingGet();
+        } else {
+            log.info("Product {} already exists.", productCode);
         }
     }
 }
