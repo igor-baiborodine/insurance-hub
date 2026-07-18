@@ -110,7 +110,7 @@ docker-frontend-build: ## Build the Docker image for the Vue frontend in the 'le
 legacy-all-build: ## Build all legacy artifacts sequentially (Java -> Frontend -> Docker). Usage: legacy-all-build
 	@echo "🚀 Building all legacy artifacts (Java -> Frontend -> Docker)..."
 	$(MAKE) java-all-build
+	$(MAKE) docker-java-svc-all-build
 	$(MAKE) frontend-build
 	$(MAKE) docker-frontend-build
-	$(MAKE) docker-java-svc-all-build
 	@echo "✅ All legacy artifacts built successfully!"
