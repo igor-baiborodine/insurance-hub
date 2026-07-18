@@ -15,9 +15,9 @@ import java.util.List;
 @Singleton
 @RequiredArgsConstructor
 @Requires(property = "products.persistence", value = "postgres")
-public class PostgresProductsRepositoryImpl implements Products {
+public class ProductsRepositoryImpl implements Products {
 
-    private final PostgresProductsRepository postgresProductsRepository;
+    private final ProductsRepository postgresProductsRepository;
 
     @Override
     public Single<Product> add(Product product) {

@@ -30,6 +30,8 @@ local-dev-port-forward: ## Set up local port-forwarding for Kafka and PostgreSQL
 	@kubectl port-forward svc/local-dev-minio-payment-hl 9002:9000 -n local-dev-minio-payment > /dev/null 2>&1 &
 	@echo "  jsreport (local:5488 -> cluster:5488)..."
 	@kubectl port-forward svc/local-dev-jsreport 5488:5488 -n local-dev-all > /dev/null 2>&1 &
+	@echo "  web-vue (local:8080 -> cluster:80)..."
+	@kubectl port-forward svc/local-dev-web-vue-legacy 8080:80 -n local-dev-all > /dev/null 2>&1 &
 	@echo "All local-dev port-forwards initiated in the background."
 	@echo "To stop them, you can use 'killall kubectl' or find their process IDs and kill them individually."
 
