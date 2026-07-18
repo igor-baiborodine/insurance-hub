@@ -25,14 +25,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class PostgresProductsRepositoryIT extends BaseIT {
 
     private Products classUnderTest;
-    private PostgresProductsRepository postgresRepository;
+    private ProductsRepository postgresRepository;
     private EmbeddedServer server;
 
     @BeforeAll
     void setup() {
         server = startServer();
         classUnderTest = server.getApplicationContext().getBean(Products.class);
-        postgresRepository = server.getApplicationContext().getBean(PostgresProductsRepository.class);
+        postgresRepository = server.getApplicationContext().getBean(ProductsRepository.class);
     }
 
     @BeforeEach

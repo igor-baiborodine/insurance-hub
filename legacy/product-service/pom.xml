@@ -73,14 +73,6 @@
         </dependency>
         <!-- MICRONAUT CORE -->
 
-        <!-- MONGO -->
-        <dependency>
-            <groupId>io.micronaut.mongodb</groupId>
-            <artifactId>micronaut-mongo-reactive</artifactId>
-            <scope>compile</scope>
-        </dependency>
-        <!-- MONGO -->
-
         <!-- POSTGRES -->
         <dependency>
             <groupId>org.postgresql</groupId>
