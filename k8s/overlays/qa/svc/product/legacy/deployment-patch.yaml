@@ -17,14 +17,14 @@ spec:
               cpu: 300m
               memory: 512Mi
           env:
-            # MongoDB sensitive data
-            - name: MG_USER
+            # Postgres sensitive data
+            - name: PG_USER
               valueFrom:
                 secretKeyRef:
-                  name: qa-mongodb-product-user-creds
+                  name: qa-postgres-product-user-creds
                   key: username
-            - name: MG_PASSWORD
+            - name: PG_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: qa-mongodb-product-user-creds
+                  name: qa-postgres-product-user-creds
                   key: password

@@ -17,7 +17,6 @@ configMapGenerator:
   - name: product-config-legacy
     behavior: merge
     literals:
-      - MG_HOST=qa-mongodb-svc.qa-data.svc.cluster.local
-      - MG_PORT=27017
+      - PG_HOST=qa-postgres-product-rw.qa-data.svc.cluster.local
       - TRACING_ZIPKIN_ENABLED=true
       - ZIPKIN_HOST=qa-alloy.qa-monitoring.svc.cluster.local

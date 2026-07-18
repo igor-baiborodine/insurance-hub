@@ -17,7 +17,5 @@ configMapGenerator:
   - name: product-config-legacy
     behavior: merge
     literals:
-      - MG_HOST=local-dev-mongodb-svc.local-dev-all.svc.cluster.local
-      - MG_PORT=27017
       - PG_HOST=local-dev-postgres-product-rw.local-dev-all.svc.cluster.local
       - TRACING_ZIPKIN_ENABLED=false
