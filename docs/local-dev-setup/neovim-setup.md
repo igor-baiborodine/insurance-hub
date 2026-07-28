@@ -182,6 +182,79 @@ After installation, run these health checks inside Neovim:
 
 Here's a drafted section matching the document's style, following the LazyVim colorscheme pattern with the exact plugin manager config from the solarized.nvim repo. [lazy.folke](https://lazy.folke.io/spec/examples)
 
+### Custom Keymaps
+
+LazyVim is highly structured and expects custom keymaps to be placed in a specific configuration file rather than the root `init.lua`. If you add mappings to the root file, LazyVim may overwrite them during its startup sequence.
+
+**1. Create the Keymap File**
+Ensure you have the correct file for your custom mappings. This file should be located at:
+`~/.config/nvim/lua/config/keymaps.lua`
+
+If you used the LazyVim starter template during the bootstrap step, this file already exists.
+
+**2. Add Custom Mappings**
+Open the file in Neovim:
+```bash
+nvim ~/.config/nvim/lua/config/keymaps.lua
+```
+
+Add your custom Lua-based keymaps here. For example, to set up the popular `jk` shortcut to quickly exit Insert mode and Terminal mode:
+
+```lua
+-- Exit Insert mode quickly with jk
+vim.keymap.set('i', 'jk', '<Esc>', {noremap = true, desc = "Exit Insert mode"})
+
+-- Exit Terminal mode quickly with jk (avoids reaching for Ctrl+\ Ctrl+n)
+vim.keymap.set('t', 'jk', [[<C-\><C-n>]], {noremap = true, desc = "Exit Terminal mode"})
+```
+
+**3. Useful Built-in LazyVim Mappings**
+
+Before adding too many custom mappings, remember that LazyVim already provides an extensive set of IDE-like shortcuts. You can view all available mappings by pressing `Space` and waiting a moment for the Which-key menu to appear.
+
+Some essential built-in mappings include:
+
+| Need                    | Key or Command   |
+|:------------------------|:-----------------|
+| **Find files**          | `<Space><Space>` |
+| **Search project text** | `<Space>sg`      |
+| **Open file explorer**  | `<Space>e`       |
+| **Format current file** | `<Space>cf`      |
+| **Show diagnostics**    | `<Space>xx`      |
+
+Save the `keymaps.lua` file and restart Neovim for your custom mappings to take effect.
+
+Based on the structure of your `neovim-setup.md` document, here is a drafted section you can add to configure `snacks.nvim` so that hidden files always show up in the explorer.
+
+### Configure File Explorer (Snacks.nvim)
+
+LazyVim recently transitioned to using `snacks.nvim` for its default file explorer and picker. By default, hidden files (like `.env` or `.github`) and files ignored by Git are hidden. While you can temporarily toggle their visibility by pressing `H` (for hidden) or `I` (for ignored) while the explorer is open, you can also configure it to show them permanently.
+
+Create a new plugin spec file:
+```text
+~/.config/nvim/lua/plugins/snacks.lua
+```
+
+Add the following configuration, using `lazy.nvim`'s syntax to override the default options for `snacks.nvim`:
+
+```lua
+return {
+  "folke/snacks.nvim",
+  opts = {
+    picker = {
+      sources = {
+        explorer = {
+          hidden = true,  -- Show hidden files like .env
+          ignored = true, -- Optional: Show files ignored by Git
+        },
+      },
+    },
+  },
+}
+```
+
+Save the file and restart Neovim. Because `snacks.nvim` is already a core part of LazyVim, `lazy.nvim` will automatically pick up this override configuration on the next launch and apply it to the default `<Space>e` explorer binding.
+
 ## Install Solarized Theme (Optional)
 
 If you prefer the Solarized color palette over LazyVim's default theme, install `solarized.nvim`, a
@@ -231,6 +304,8 @@ Solarized.nvim requires Neovim v0.9.1 or newer and the `nvim-treesitter` plugin,
 already included in a standard LazyVim setup. Make sure `vim.o.termguicolors = true` is set in your
 Neovim config (LazyVim enables this by default), otherwise the Solarized palette will render with
 incorrect colors in the terminal. 
+
+Based on the document and the LazyVim conventions it outlines, here is a drafted section you can add to your `neovim-setup.md` file.
 
 ## Enable Go Support
 
@@ -358,6 +433,52 @@ make test
 make build
 ```
 
+## Autosave Support
+
+Optional autosave plugin config:
+
+```lua
+return {
+  "okuuva/auto-save.nvim",
+  version = "^1.0.0",
+  event = { "InsertLeave", "TextChanged" },
+  opts = {
+    enabled = true,
+    trigger_events = {
+      immediate_save = { "BufLeave", "FocusLost", "QuitPre", "VimSuspend" },
+      defer_save = { "InsertLeave", "TextChanged" },
+      cancel_deferred_save = { "InsertEnter" },
+    },
+    condition = function(buf)
+      local fn = vim.fn
+      local utils = require("auto-save.utils.data")
+
+      if fn.getbufvar(buf, "&modifiable") == 0 then
+        return false
+      end
+      if utils.not_in(fn.getbufvar(buf, "&filetype"), {
+        "oil",
+        "neo-tree",
+        "TelescopePrompt",
+        "lazy",
+        "mason",
+        "toggleterm",
+        "lazygit",
+        "help",
+      }) then
+        return true
+      end
+      return false
+    end,
+    write_all_buffers = false,
+    debounce_delay = 800,
+  },
+  keys = {
+    { "<leader>ua", "<cmd>ASToggle<cr>", desc = "Toggle auto-save" },
+  },
+}
+```
+
 ## Useful LazyVim Commands and Keybindings
 
 LazyVim uses `<Space>` as the leader key. Press `<Space>` in normal mode and pause to see available
@@ -408,6 +529,7 @@ After installing LazyVim, your config will look roughly like this:
     │   └── options.lua
     └── plugins/
         ├── colorscheme.lua
+        ├── autosave.lua
         └── treesitter-extra.lua
 ```
 
