@@ -105,42 +105,36 @@ Inside the OpenCode TUI:
 
 ### Enabling LSP Support in OpenCode for Go
 
-OpenCode can use language servers to provide richer Go context to the agent. If the OpenCode TUI shows **"LSPs are disabled"**, it means OpenCode is not currently using `gopls` for code intelligence.
+OpenCode can use `gopls` to provide Go diagnostics and richer code context to the agent. If `gopls` is already available from your Neovim setup, OpenCode can reuse it directly.
 
-1. **Install `gopls`**
+1. **Verify `gopls`**
 
-Install the official Go language server globally:
-
-```bash
-go install golang.org/x/tools/gopls@latest
-```
-
-Verify that it is available:
+Confirm that the Go language server is installed and visible from your shell:
 
 ```bash
 which gopls
 gopls version
 ```
 
-2. **Verify Go Binary Path**
+OpenCode runs from the shell environment, so `gopls` must be discoverable through `PATH`.
 
-OpenCode runs from your shell environment, so `gopls` must be discoverable through `PATH`.
+2. **Configure OpenCode for Go**
 
-Add Go’s binary directory if it is not already present:
+Add a project-level `opencode.json` in the repository root:
 
-```bash
-echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
+```json
+{
+  "lsp": {
+    "go": {
+      "disabled": false,
+      "command": ["gopls"],
+      "extensions": [".go"]
+    }
+  }
+}
 ```
 
-Confirm the environment:
-
-```bash
-echo $PATH
-which gopls
-```
-
-If `gopls` is not found here, OpenCode will not be able to use it even if Neovim is configured correctly.
+This enables the Go LSP server for `.go` files and tells OpenCode to start `gopls` when it opens Go sources.
 
 3. **Launch OpenCode from the Project Root**
 
@@ -151,34 +145,7 @@ cd ~/GitRepos/igor-baiborodine/campsite-booking-go
 opencode
 ```
 
-4. **Troubleshooting**
-
-If OpenCode still reports **"LSPs are disabled"**, check the following:
-
-1. `gopls` is installed globally.
-2. `which gopls` returns a valid executable path.
-3. `$HOME/go/bin` is included in `PATH`.
-4. You restarted the terminal after editing `.bashrc`.
-5. You launched OpenCode from the Go project root.
-6. The repository contains a valid `go.mod` file.
-7. Neovim health checks show a healthy Go setup.
-
-It helps to separate the two layers:
-
-- **Neovim / LazyVim LSP setup**: validated with `:checkhealth` and `:Mason`
-- **OpenCode LSP integration**: depends on OpenCode finding `gopls` in its own runtime environment
-
-If Neovim works but OpenCode does not, the problem is usually environment- or OpenCode-side rather than Neovim-side.
-
-**Validation checklist**:
-
-- `gopls` is installed with `go install golang.org/x/tools/gopls@latest`
-- `which gopls` returns a valid path
-- `gopls version` runs successfully
-- `$HOME/go/bin` is on `PATH`
-- OpenCode is launched from the repository root
-- the project has a valid `go.mod`
-- OpenCode no longer displays **"LSPs are disabled"**
+When LSP is working, OpenCode will activate Go code intelligence as files are read and use `gopls` feedback in agent responses.
 
 ### Shell Environment
 
