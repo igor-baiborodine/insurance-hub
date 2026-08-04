@@ -395,7 +395,18 @@ Let's validate your newly configured environment with a real repository maintena
 
     Run `:checkhealth` and `:Mason` inside Neovim. Verify that `gopls` and formatting dependencies display as healthy and installed.
 
-3. **Upgrade Go Module Dependencies**
+3. **Verify Go LSP Navigation**
+
+Open a Go file in the repository and test `gopls` by using `gd` on a few symbols.
+
+If `gopls` is attached, `gd` should jump to the symbol definition:
+
+- On a function call, it jumps to the function declaration.
+- On a type name, it jumps to the type definition.
+- On a variable or constant, it jumps to where it was declared.
+- If the definition is in another file or package, Neovim opens that location.
+
+4. **Upgrade Go Module Dependencies**
 
     Open `go.mod`. Update the `go` version directive to your target version (e.g., `1.26.5`).
 
@@ -415,7 +426,7 @@ Let's validate your newly configured environment with a real repository maintena
     git diff go.mod go.sum
     ```
 
-4. **Upgrade Makefile Tool Versions**
+5. **Upgrade Makefile Tool Versions**
 
     Open the `Makefile` inside Neovim:
     ```vim
@@ -432,7 +443,7 @@ Let's validate your newly configured environment with a real repository maintena
     make install-tools
     ```
 
-5. **Start and Test App Stack**
+6. **Start and Test App Stack**
 
     Verify local infrastructure by running the stack via the terminal:
     ```bash
@@ -447,7 +458,7 @@ Let's validate your newly configured environment with a real repository maintena
     make test-integration
     ```
 
-6. **Verify gRPC Endpoints via grpcurl**
+7. **Verify gRPC Endpoints via grpcurl**
 
     Ensure endpoints respond properly:
     ```bash
@@ -455,7 +466,7 @@ Let's validate your newly configured environment with a real repository maintena
     grpcurl -plaintext localhost:8085 list
     ```
 
-7. **Commit Your Changes**
+8. **Commit Your Changes**
 
     Check everything into your branch inside the Neovim terminal:
     ```bash
