@@ -1,7 +1,7 @@
-# CodeCompanion Setup for Chat with OpenCode ACP
+**CodeCompanion Setup for Chat with OpenCode ACP**
 
-START doctoc generated TOC please keep comment here to allow auto update
-DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
 - [Prerequisites](#prerequisites)
   - [Neovim and Go Setup](#neovim-and-go-setup)
@@ -14,8 +14,11 @@ DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE
   - [Chat Context and Commands](#chat-context-and-commands)
   - [Reviewing Responses](#reviewing-responses)
 - [Chat Walkthrough Test](#chat-walkthrough-test)
+- [Notes for Next Iteration](#notes-for-next-iteration)
+- [References](#references)
 
-END doctoc generated TOC please keep comment here to allow auto update
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 
 This guide documents the first iteration of a hybrid CodeCompanion setup for NeoVim:
 
@@ -200,62 +203,80 @@ CodeCompanion stores chat as a dedicated buffer with turn-based responses, so yo
 
 Use the reference Go repository from `neovim-setup.md`: [`igor-baiborodine/campsite-booking-go`](https://github.com/igor-baiborodine/campsite-booking-go).
 
-### 1. Clone and Open the Repository
+1. **Clone and Open Repository**
 
-```bash
-git clone https://github.com/igor-baiborodine/campsite-booking-go.git
-cd campsite-booking-go
-nvim .
-```
+    ```bash
+    git clone https://github.com/igor-baiborodine/campsite-booking-go.git
+    cd campsite-booking-go
+    nvim .
+    ```
+    
+    Confirm that the project opens correctly and that your Go tooling works as expected.
 
-Confirm that the project opens correctly and that your Go tooling works as expected.
+2. **Open Chat and Ask for Overview**
 
-### 2. Open Chat and Ask for an Overview
+    Inside Neovim:
+    
+    ```vim
+    :CodeCompanionChat
+    ```
+    
+    Then ask something like:
+    
+    ```text
+    Give me a concise overview of this Go service architecture.
+    ```
+    
+    This is a good first check that the OpenCode ACP connection is working end-to-end.
 
-Inside Neovim:
+3. **Ask for Test Ideas**
 
-```vim
-:CodeCompanionChat
-```
+    Use the current buffer as context:
+    
+    ```vim
+    :CodeCompanionChat #buffer suggest test cases for this package
+    ```
+    
+    You can also ask for a broader refactor plan:
+    
+    ```vim
+    :CodeCompanionChat #buffer propose a safer error-handling strategy
+    ```
 
-Then ask something like:
+4. **Validate Markdown Rendering**
 
-```text
-Give me a concise overview of this Go service architecture.
-```
+    Use the following prompt to validate that the Markdown is rendered correctly in the Chat UI.
+    
+    ```text
+    Show me a short demo of rich Markdown formatting.
+    
+    Use:
+    - A top-level heading
+    - A bullet list
+    - A numbered list
+    - A fenced code block with Lua code
+    - A table with 3 columns and 3 rows
+    - Some bold and italic text
+    
+    Keep it concise but include all these elements.
+    ```
 
-This is a good first check that the OpenCode ACP connection is working end-to-end.
+4. **Validate Against Repository Workflow**
 
-### 3. Ask for Test Ideas
+    Use chat to guide the repository tasks you already perform in Neovim:
 
-Use the current buffer as context:
+    - Clarify a function's behavior.
+    - Ask for edge cases to cover.
+    - Draft a refactor plan before editing the code manually.
+    - Generate a checklist for validation steps after a change.
 
-```vim
-:CodeCompanionChat #buffer suggest test cases for this package
-```
+5. **Confirm Setup**
 
-You can also ask for a broader refactor plan:
+    If the chat responds correctly and can see the repository context, your OpenCode ACP + CodeCompanion chat setup is working.
+    
+    At that point, you have a clean baseline for the next iteration: add Inline later with an HTTP provider, and keep Chat on OpenCode ACP.
 
-```vim
-:CodeCompanionChat #buffer propose a safer error-handling strategy
-```
-
-### 4. Validate Against the Repository Workflow
-
-Use chat to guide the repository tasks you already perform in Neovim:
-
-- Clarify a function's behavior.
-- Ask for edge cases to cover.
-- Draft a refactor plan before editing the code manually.
-- Generate a checklist for validation steps after a change.
-
-### 5. Confirm the Setup
-
-If the chat responds correctly and can see repository context, your OpenCode ACP + CodeCompanion chat setup is working.
-
-At that point, you have a clean baseline for the next iteration: add Inline later with an HTTP provider, and keep Chat on OpenCode ACP.
-
-## Notes for the Next Iteration
+## Notes for Next Iteration
 
 This guide intentionally avoids Inline because CodeCompanion's official docs state that Inline supports **HTTP adapters only**, while OpenCode is used here as an **ACP chat agent**.
 
@@ -271,4 +292,3 @@ The next logical step is to add a second provider for Inline, such as Ollama, wh
 - OpenCode ACP: https://opencode.ai/docs/acp/
 - OpenCode Go: https://opencode.ai/go
 - OpenCode Go docs: https://opencode.ai/docs/go/
-- 
