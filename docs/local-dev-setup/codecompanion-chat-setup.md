@@ -8,10 +8,7 @@ DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE
   - [OpenCode Go Subscription](#opencode-go-subscription)
   - [OpenCode CLI](#opencode-cli)
   - [Shell Environment](#shell-environment)
-- [CodeCompanion Installation](#codecompanion-installation)
-- [OpenCode ACP Configuration](#opencode-acp-configuration)
-  - [Chat Interaction Setup](#chat-interaction-setup)
-  - [Optional Model Selection](#optional-model-selection)
+- [Installing and Configuring CodeCompanion](#installing-and-configuring-codecompanion)
 - [Using Chat in Practice](#using-chat-in-practice)
   - [Basic Chat Flow](#basic-chat-flow)
   - [Chat Context and Commands](#chat-context-and-commands)
@@ -103,50 +100,6 @@ Inside the OpenCode TUI:
 2. Select `OpenCode Go`.
 3. Paste your API key.
 
-### Enabling LSP Support in OpenCode for Go
-
-OpenCode can use `gopls` to provide Go diagnostics and richer code context to the agent. If `gopls` is already available from your Neovim setup, OpenCode can reuse it directly.
-
-1. **Verify `gopls`**
-
-Confirm that the Go language server is installed and visible from your shell:
-
-```bash
-which gopls
-gopls version
-```
-
-OpenCode runs from the shell environment, so `gopls` must be discoverable through `PATH`.
-
-2. **Configure OpenCode for Go**
-
-Add a project-level `opencode.json` in the repository root:
-
-```json
-{
-  "lsp": {
-    "go": {
-      "disabled": false,
-      "command": ["gopls"],
-      "extensions": [".go"]
-    }
-  }
-}
-```
-
-This enables the Go LSP server for `.go` files and tells OpenCode to start `gopls` when it opens Go sources.
-
-3. **Launch OpenCode from the Project Root**
-
-For Go projects, start OpenCode from the repository root so `gopls` can load `go.mod`, package imports, and diagnostics correctly:
-
-```bash
-cd ~/GitRepos/igor-baiborodine/campsite-booking-go
-opencode
-```
-
-When LSP is working, OpenCode will activate Go code intelligence as files are read and use `gopls` feedback in agent responses.
-
 ### Shell Environment
 
 Add the OpenCode API key to your shell profile so the agent can pick it up consistently:
@@ -162,105 +115,15 @@ You can confirm it is available in the current shell with:
 echo "$OPENCODE_API_KEY"
 ```
 
-## CodeCompanion Installation
+## Installing and Configuring CodeCompanion
 
-Install CodeCompanion through `lazy.nvim`.
+Install CodeCompanion through `lazy.nvim` and configure Chat to use OpenCode via ACP in a single plugin file.
 
 Create `~/.config/nvim/lua/plugins/codecompanion.lua`:
 
 ```lua
 return {
   "olimorris/codecompanion.nvim",
-  version = "^19.0.0",
-  dependencies = {
-    "nvim-lua/plenary.nvim",
-    "nvim-treesitter/nvim-treesitter",
-  },
-  opts = {},
-}
-```
-
-Restart Neovim and allow Lazy to install the plugin dependencies.
-
-After installation, check the plugin health:
-
-```vim
-:checkhealth codecompanion
-```
-
-## OpenCode ACP Configuration
-
-OpenCode is documented by OpenCode as an **ACP** agent for compatible editors, and CodeCompanion's official docs say ACP adapters are supported for the **chat** interaction only.
-
-### Chat Interaction Setup
-
-Edit `~/.config/nvim/lua/plugins/codecompanion.lua` and configure Chat to use the OpenCode ACP adapter:
-
-```lua
-return {
-  "olimorris/codecompanion.nvim",
-  version = "^19.0.0",
-  dependencies = {
-    "nvim-lua/plenary.nvim",
-    "nvim-treesitter/nvim-treesitter",
-  },
-  opts = {
-    interactions = {
-      chat = {
-        adapter = {
-          name = "opencode",
-        },
-      },
-    },
-  },
-}
-```
-
-This setup makes CodeCompanion use OpenCode as the ACP agent for chat.
-
-If you want to make the OpenCode API key explicit in the adapter configuration, follow the CodeCompanion adapter documentation pattern for environment variables:
-
-```lua
-return {
-  "olimorris/codecompanion.nvim",
-  version = "^19.0.0",
-  dependencies = {
-    "nvim-lua/plenary.nvim",
-    "nvim-treesitter/nvim-treesitter",
-  },
-  opts = {
-    adapters = {
-      acp = {
-        opencode = function()
-          return require("codecompanion.adapters").extend("opencode", {
-            env = {
-              api_key = "OPENCODE_API_KEY",
-            },
-          })
-        end,
-      },
-    },
-    interactions = {
-      chat = {
-        adapter = {
-          name = "opencode",
-        },
-      },
-    },
-  },
-}
-```
-
-### Optional Model Selection
-
-OpenCode Go exposes multiple models, and the OpenCode docs show that the agent can be configured to use different models from the Go plan.
-
-If you want to pin a default model, add one explicitly:
-
-```lua
-return {
-  "olimorris/codecompanion.nvim",
-  version = "^19.0.0",
   dependencies = {
     "nvim-lua/plenary.nvim",
     "nvim-treesitter/nvim-treesitter",
@@ -274,11 +137,20 @@ return {
         },
       },
     },
+    opts = {
+      log_level = "DEBUG",
+    },
   },
 }
 ```
 
-You can later adjust the model if your workflow benefits from a different coding model.
+Restart Neovim and allow Lazy to install the plugin dependencies.
+
+After installation, check the plugin health:
+
+```vim
+:checkhealth codecompanion
+```
 
 ## Using Chat in Practice
 
@@ -323,8 +195,6 @@ For Go work, `#buffer` and `/tests` are especially useful when generating or rev
 ### Reviewing Responses
 
 CodeCompanion stores chat as a dedicated buffer with turn-based responses, so you can keep a visible history of the conversation and revisit earlier instructions easily.
-
-If you need to work with multiple agent styles later, you can extend the configuration without changing the core workflow.
 
 ## Chat Walkthrough Test
 
@@ -401,3 +271,4 @@ The next logical step is to add a second provider for Inline, such as Ollama, wh
 - OpenCode ACP: https://opencode.ai/docs/acp/
 - OpenCode Go: https://opencode.ai/go
 - OpenCode Go docs: https://opencode.ai/docs/go/
+- 
