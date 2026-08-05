@@ -11,6 +11,7 @@
 - [Installing and Configuring CodeCompanion](#installing-and-configuring-codecompanion)
 - [Using Chat in Practice](#using-chat-in-practice)
   - [Basic Chat Flow](#basic-chat-flow)
+  - [Choosing Models for Chat](#choosing-models-for-chat)
   - [Chat Context and Commands](#chat-context-and-commands)
   - [Reviewing Responses](#reviewing-responses)
 - [Chat Walkthrough Test](#chat-walkthrough-test)
@@ -176,6 +177,25 @@ In the chat buffer:
 - Type your prompt.
 - Press `c-s` in insert mode or `cr` in normal mode to send it.
 - Use `:CodeCompanionChat Toggle` to show or hide the buffer.
+
+### Choosing Models for Chat
+
+The `model` in the adapter configuration sets the **default** coding model for all chat interactions. For OpenCode Go, this guide uses `glm-5.2`:
+
+```lua
+adapter = {
+  name = "opencode",
+  model = "glm-5.2",
+}
+```
+
+You can change models directly from the chat buffer without editing your config:
+
+- In the chat buffer, press `ga` in **normal mode** to open the *Select Adapter* window.
+- Choose the `opencode` adapter.
+- If OpenCode exposes multiple models (for example `opencode-go/glm-5.1` and `opencode-go/glm-5.2`), CodeCompanion will prompt you to select a model for the current session.
+
+This per‑session selection overrides the default `model` in your configuration for that chat only. To confirm which models are available from OpenCode Go, you can run `opencode models opencode-go` in your shell and use any of the listed IDs (such as `opencode-go/glm-5.1` or `opencode-go/glm-5.2`) in the adapter configuration or the chat model picker.
 
 ### Chat Context and Commands
 
