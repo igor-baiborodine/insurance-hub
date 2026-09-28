@@ -10,7 +10,7 @@ This framework exists to make AI-assisted work repeatable, auditable, and portab
 
 - `rules/` - stable engineering and process rules
 - `skills/` - repeatable workflows for recurring tasks
-- `prompts/` - reusable prompt fragments
+- `prompts/` - reusable prompt fragments, indexed in `ai/prompts/README.md`
 - `examples/` - examples of acceptable artifacts and implementation patterns
 - `templates/` - reusable ticket description (specification), delivery plan, and PR templates
 - `checks/` - task checklists
