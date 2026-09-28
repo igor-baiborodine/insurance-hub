@@ -3,6 +3,8 @@
 Use before implementing non-trivial changes.
 
 - [ ] Relevant repository instructions were loaded.
+- [ ] Before creating or editing ticket artifacts, the path is ignored by local `.git/info/exclude`
+  and `git ls-files -- ai/artifacts/` reports no indexed artifact paths.
 - [ ] For ticket work, `ai/artifacts/<ticket>/<ticket>-ticket-description.md` exists and was read as the specification.
 - [ ] Ticket readiness was checked.
 - [ ] Business objective is clear.

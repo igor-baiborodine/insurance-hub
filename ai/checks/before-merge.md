@@ -11,6 +11,9 @@ Use before considering a ticket complete.
   scope, result, and evidence detail to reproduce or assess each check.
 - [ ] Every acceptance criterion maps to evidence or is explicitly unresolved; pending CI/manual
   checks and blockers have next actions.
+- [ ] `ai/artifacts/` isolation is verified: the ticket-description path is ignored by
+  `.git/info/exclude`, and `git ls-files -- ai/artifacts/` plus
+  `git diff --cached --name-only -- ai/artifacts/` report no paths.
 - [ ] Git diff artifact is refreshed when using ticket workflow.
 - [ ] Before any commit, the end user reviewed the complete proposed change, including the branch
   diff, staged and unstaged changes, untracked files, and generated files.

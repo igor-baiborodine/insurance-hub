@@ -49,11 +49,25 @@ layers unless a canonical guide explicitly designates them as such.
 
 ## Default Workflow
 
-For ticket-based work, the ticket description is the specification. At startup, ensure
-`ai/artifacts/<ticket>/<ticket>-ticket-description.md` exists and read it before assessing
-readiness or planning. If it is missing or empty, populate it from the supplied ticket description;
-ask the user for missing ticket content rather than inventing requirements. No separate spec
-document is required.
+Before creating or editing any file under `ai/artifacts/`, verify that the local exclusion applies
+to the intended ticket-description path and that no artifact paths are indexed:
+
+```sh
+ticket_id=issue-123
+git check-ignore -q "ai/artifacts/${ticket_id}/${ticket_id}-ticket-description.md"
+git ls-files -- ai/artifacts/
+```
+
+Replace `issue-123` with the current ticket ID. The first command must succeed and the second must
+print no paths. The checkout-local `.git/info/exclude` must contain the exact `/ai/artifacts/`
+entry. If the ignore check fails, stop artifact writes and tell the user to add that entry locally;
+do not edit `.git/info/exclude` automatically. If the index check prints paths, stop and report
+them; do not untrack or alter them automatically. Read-only inspection may continue.
+
+For ticket-based work, after this preflight, ensure `ai/artifacts/<ticket>/<ticket>-ticket-description.md`
+exists and read it before assessing readiness or planning. If it is missing or empty, populate it
+from the supplied ticket description; ask the user for missing ticket content rather than
+inventing requirements. No separate spec document is required.
 
 Use a spec-first workflow for non-trivial changes:
 
@@ -95,7 +109,13 @@ AI agents must not load or use these documents as instructions. Follow this guid
 
 Use `ai/artifacts/<ticket>/` for the ticket description, delivery plans, step summaries, and git diff snapshots.
 
-Do not commit files under `ai/artifacts/`. The path should be excluded locally in `.git/info/exclude`.
+Do not commit files under `ai/artifacts/`. In each checkout, add `/ai/artifacts/` to the local
+`.git/info/exclude`; this local-only file is not committed or changed automatically by the
+workflow. Before considering a ticket complete or preparing a commit, recheck that the ticket
+description path is ignored and verify that `git ls-files -- ai/artifacts/` and
+`git diff --cached --name-only -- ai/artifacts/` print no paths. If an ignore or index check fails,
+stop and show the user the affected paths or required local setup; never unstage, untrack, or delete
+them as an automatic cleanup.
 
 The historical `ai-artifacts/` directory contains older tracked and local AI notes. Treat `ai/` as the current canonical framework for ongoing workflow design.
 
