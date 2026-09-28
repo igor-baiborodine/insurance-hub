@@ -2,6 +2,7 @@
 
 Use before considering a ticket complete.
 
+- [ ] The ticket-description file reflects the agreed requirements used for implementation and validation.
 - [ ] Delivery tracker is updated.
 - [ ] Step summaries exist for completed steps.
 - [ ] Git diff artifact is refreshed when using ticket workflow.

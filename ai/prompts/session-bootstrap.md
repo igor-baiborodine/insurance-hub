@@ -1,6 +1,11 @@
 # Session Bootstrap Prompt
 
 Before starting work on this repository, read and follow the instructions in `AGENTS.md`.
+Then read `ai/manifest.md` for the loading order and framework structure.
+
+For ticket work, ensure `ai/artifacts/<ticket>/<ticket>-ticket-description.md` exists and read it
+as the specification before readiness assessment or planning. Follow `AGENTS.md` when the file
+is missing or empty. For an existing ticket, also read its delivery plan and relevant step summaries.
 
 Also load and follow shared guidance from these folders when relevant to the task:
 

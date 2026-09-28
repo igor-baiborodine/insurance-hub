@@ -1,5 +1,9 @@
 # Delivery Plan: <Ticket>
 
+## Specification
+
+- Ticket description: `ai/artifacts/<ticket>/<ticket>-ticket-description.md`
+
 ## Readiness
 
 - Objective clear:

@@ -38,6 +38,12 @@ If instructions conflict, surface the conflict before proceeding.
 
 ## Default Workflow
 
+For ticket-based work, the ticket description is the specification. At startup, ensure
+`ai/artifacts/<ticket>/<ticket>-ticket-description.md` exists and read it before assessing
+readiness or planning. If it is missing or empty, populate it from the supplied ticket description;
+ask the user for missing ticket content rather than inventing requirements. No separate spec
+document is required.
+
 Use a spec-first workflow for non-trivial changes:
 
 1. Validate that the ticket or request is implementation-ready.
@@ -70,7 +76,7 @@ The canonical AI framework lives under `ai/`:
 
 ## Artifact Rules
 
-Use `ai/artifacts/<ticket>/` for temporary ticket artifacts such as delivery plans, step summaries, and git diff snapshots.
+Use `ai/artifacts/<ticket>/` for the ticket description, delivery plans, step summaries, and git diff snapshots.
 
 Do not commit files under `ai/artifacts/`. The path should be excluded locally in `.git/info/exclude`.
 
