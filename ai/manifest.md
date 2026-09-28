@@ -38,31 +38,28 @@ At session start:
 3. Load only the rules, skills, prompts, templates, or examples relevant to the current task.
 4. For ticket work, read `ai/artifacts/<ticket>/<ticket>-ticket-description.md` as the specification before readiness assessment or planning. Load the delivery plan and step summaries when continuing existing work.
 
+Before planning or editing, follow `AGENTS.md` to discover and load nested instructions that apply
+to the affected paths. Do not load unrelated service guides. Root `AGENTS.md` is the canonical
+definition of instruction precedence, local-guide scope, and conflict handling.
+
 The ticket-description file is required at ticket startup. Follow `AGENTS.md` if it is missing or
 empty. `ai/templates/ticket-content-template.md` provides a structure for its content; a separate
 spec file is not required.
 
 ## Precedence
 
-Instruction precedence is:
-
-1. explicit user request
-2. root `AGENTS.md`
-3. `ai/manifest.md`
-4. relevant `ai/rules/*`
-5. relevant `ai/skills/*`
-6. task-local artifacts
-7. vendor-specific adapters
-
-If instructions conflict, stop and clarify instead of guessing.
+Use the precedence order and conflict procedure defined in root [`AGENTS.md`](../AGENTS.md).
+This manifest describes how to load the shared framework; it does not maintain a second precedence
+list. Nested instruction discovery is scoped to the affected paths as described there.
 
 ## Maintenance Rules
 
 For Go implementation, migration, or tooling work, load [the Go entry point](rules/go-rules.md)
 and all three linked rules: [development](rules/go-development.md),
 [formatting](rules/go-formatting.md), and [validation](rules/go-validation.md).
-They require Makefile targets for Go development operations and supplement the existing precedence;
-service-local instructions must not silently contradict repository policy.
+They require Makefile targets for Go development operations and supplement root policy. Discover
+applicable service-local instructions using the procedure in [`AGENTS.md`](../AGENTS.md); surface
+and resolve conflicts rather than silently treating a local guide as an override.
 
 - Keep rules stable and concise.
 - Keep skills procedural and task-specific.

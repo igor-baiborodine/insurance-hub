@@ -34,7 +34,18 @@ When instructions overlap, apply them in this order:
 6. Task-local artifacts in `ai/artifacts/<ticket>/`
 7. Vendor-specific adapter files, if any
 
-If instructions conflict, surface the conflict before proceeding.
+Before planning or editing, discover any nested `AGENTS.md` files on the path to each affected
+file or directory and read the ones whose scope covers the work. If a change spans directories,
+inspect the applicable local guidance for each area. Do not load unrelated service guides as if
+they applied repository-wide.
+
+Nested guides apply only within their directory subtree. They may add concrete local conventions
+but do not override this root guide or higher-level canonical framework requirements. Treat any
+apparent conflict between applicable instructions—including conflicting ancestor and nested local
+guides—as unresolved: identify the sources and ask the user to resolve it before proceeding; do not
+guess that a more specific file silently wins. Reference documentation and checked-in configuration
+are authoritative evidence for their stated domain, but are not additional instruction-precedence
+layers unless a canonical guide explicitly designates them as such.
 
 ## Default Workflow
 

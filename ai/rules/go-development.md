@@ -2,8 +2,10 @@
 
 Apply to handwritten Go services and their contracts, persistence, and runtime configuration.
 Load [Go formatting](go-formatting.md) and [Go validation](go-validation.md) alongside this rule.
-Follow the existing precedence in [AGENTS.md](../../AGENTS.md); local service instructions add
-constraints without silently overriding repository policy.
+Before planning or editing, discover and read the service-local `AGENTS.md` files applicable to
+each affected path, following the scope, precedence, and conflict procedure in
+[the root guide](../../AGENTS.md). Local Go conventions may add scoped detail; they do not silently
+override canonical repository requirements. Stop and surface conflicts for resolution.
 
 ## Scope and Makefile interface
 
