@@ -26,26 +26,35 @@ review output structure; `ai/checks/before-merge.md` is a separate completion ch
 
 Before writing findings:
 
-1. Read the complete ticket specification, delivery tracker, and completed step summaries. If the
+1. Before reviewing any implementation, update the ticket's branch snapshot automatically. Confirm
+   the repository root, current branch, and that local `main` resolves to a commit. Then run
+   `git diff main <current-branch> > ai/artifacts/<ticket-id>/<ticket-id>-git-diff.txt`, replacing
+   `<current-branch>` with the branch name you verified. This refreshes the prescribed committed-tree
+   comparison and does not stage, commit, or alter source files. If `main` or the branch cannot be
+   resolved, do not overwrite the snapshot; report the blocker and inspect available changes without
+   claiming the snapshot was refreshed.
+2. Inspect `git status --short` immediately after refreshing the snapshot. Explicitly determine
+   whether staged-but-uncommitted changes, unstaged changes, or untracked files exist. Inspect
+   `git diff --cached` for staged changes and `git diff` for unstaged tracked changes, and read each
+   untracked proposed file named by status. Review these alongside the refreshed branch snapshot.
+   The snapshot contains committed branch changes only. In the saved review, signal `clean` or give
+   counts and paths for staged, unstaged, and untracked changes. Do not imply those changes are
+   committed or omit them from the review scope.
+3. Read the complete ticket specification, delivery tracker, and completed step summaries. If the
    ticket description is missing or empty, follow `AGENTS.md`: use supplied ticket content or ask
    for the missing requirements. Do not infer requirements from the ticket number.
-2. Read the diff snapshot completely if present. The prescribed snapshot is
-   `git diff main <current-branch>` and only compares committed trees. Also inspect current Git
-   status and the actual staged, unstaged, and untracked changes proposed for the PR. Read newly
-   added files and relevant surrounding code; the snapshot alone can omit them.
-3. If the snapshot is missing or empty, inspect the current branch against `main` and the actual
-   worktree. Confirm the intended base branch from repository guidance when it differs from `main`.
-   Do not create, stage, commit, reset, or rewrite changes to produce review input. If the diff is
-   still unavailable, explain the limitation and do not claim to have reviewed the implementation.
-4. Load all applicable files under `ai/rules/` and relevant directory/service-local instructions.
+4. Read the refreshed diff snapshot completely. If it is empty, do not assume the proposed change
+   is empty: inspect the working tree and verify whether the branch has any committed differences
+   from `main`. If the snapshot could not be refreshed, explain why and do not claim it is current.
+5. Load all applicable files under `ai/rules/` and relevant directory/service-local instructions.
    Select language guidance from the files changed; apply Java tests and conventions only to Java
    changes, Go rules to Go changes, and operational/API rules when their area is touched.
-5. Inspect changed source, tests, contracts, generated output, migrations, configuration, and
+6. Inspect changed source, tests, contracts, generated output, migrations, configuration, and
    related existing code needed to verify behavior and repository patterns. For generated code,
    find and review its source definition/configuration and corresponding generation evidence.
    Read relevant Makefiles to understand validation coverage; do not assume a target covers every
    module or package.
-6. For contract changes, inspect the authoritative OpenAPI/protobuf/other schema, controllers or
+7. For contract changes, inspect the authoritative OpenAPI/protobuf/other schema, controllers or
    handlers, gateway mappings, callers, and neighboring contracts. Use actual definitions and
    implementation to assess route/RPC names, request/response semantics, status mapping, required
    fields, defaults/nullability, versioning, and compatibility. Never infer a route from generated
@@ -117,6 +126,9 @@ positive observation merely to fill space.
   to meet. Confirm the named line and recommendation make the issue reproducible and actionable.
 - Check that findings are ordered by severity, open questions are not phrased as confirmed bugs,
   and test gaps are distinct from tests known to fail.
+- Confirm the review states whether the working tree was clean and identifies any staged,
+  unstaged, and untracked proposed changes reviewed. The end user must review the complete proposed
+  change before committing; see `AGENTS.md`.
 - Keep repository paths relative in the review. Do not include real tokens, customer data, or other
   secrets in quoted evidence.
 - Save only to `ai/artifacts/<ticket-id>/<ticket-id>-pr-review.md`. Ticket artifacts are local-only.

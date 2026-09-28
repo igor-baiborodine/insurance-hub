@@ -31,6 +31,9 @@ Perform these actions in order:
 
 3. Refresh the git diff artifact:
    - `git diff main <current-branch> > ai/artifacts/<ticket>/<ticket>-git-diff.txt`
+   - This snapshot compares committed trees only; staged, unstaged, and untracked work is not
+     included. Keep it as the branch-level review artifact and do not represent it as a complete
+     working-tree diff.
 
 ## Constraints
 
@@ -38,6 +41,9 @@ Perform these actions in order:
 - Do not create extra documentation files beyond the tracker and per-step summary unless the user asks.
 - Do not run `git diff` in another artifact format unless the user asks.
 - Keep the per-step summary concise and factual.
+- Before any commit, the end user must review the complete proposed change in the working tree,
+  including the branch snapshot, staged and unstaged changes, untracked files, and generated files.
+  Do not commit until the end user has reviewed and explicitly authorized it; see `AGENTS.md`.
 
 ## Output Checklist
 

@@ -104,6 +104,9 @@ Do not claim validation was performed unless it was actually run.
 
 - Do not overwrite or revert user changes unless explicitly asked.
 - Keep diffs scoped to the ticket or request.
+- Before committing ticket changes, present the complete proposed change for end-user review,
+  including the branch diff, staged changes, unstaged changes, untracked files, and generated files.
+  Do not commit until the end user has reviewed them and explicitly authorized the commit.
 - Preserve behavior unless the spec requires a change.
 - Ask for clarification when acceptance criteria, contracts, persistence expectations, security expectations, or out-of-scope boundaries are unclear.
 - Prefer existing project patterns over new abstractions.

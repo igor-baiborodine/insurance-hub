@@ -66,6 +66,14 @@ Implement one delivery step at a time.
 
 For each step:
 
+- Before making any change for the step, refresh the committed-branch snapshot using the post-step
+  workflow's `git diff main <current-branch>` convention and save it to
+  `ai/artifacts/<ticket>/<ticket>-git-diff.txt`. Confirm `main` and the current branch resolve
+  before replacing the artifact; if they do not, preserve the previous snapshot and report the
+  blocker.
+- Immediately check `git status --short` and report any staged, unstaged, or untracked work to the
+  end user before editing. Inspect those changes and preserve them. If they overlap planned files or
+  make ownership/scope unclear, resolve that with the user before proceeding.
 - read the relevant local code before changing anything
 - implement against the ticket description and record agreed requirement changes there before adjusting the plan
 - challenge assumptions and weak designs

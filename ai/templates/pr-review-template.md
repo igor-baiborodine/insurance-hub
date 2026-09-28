@@ -4,6 +4,7 @@
 
 - Outcome: <Findings identified / No findings identified / Review incomplete>
 - Change reviewed: <branch or change identifier and base, when known>
+- Working tree: <clean / staged, unstaged, and untracked changes with counts and paths>
 - Ticket: <ticket-id>
 
 ## Findings
