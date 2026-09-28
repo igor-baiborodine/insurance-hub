@@ -58,6 +58,12 @@ If instructions conflict, stop and clarify instead of guessing.
 
 ## Maintenance Rules
 
+For Go implementation, migration, or tooling work, load [the Go entry point](rules/go-rules.md)
+and all three linked rules: [development](rules/go-development.md),
+[formatting](rules/go-formatting.md), and [validation](rules/go-validation.md).
+They require Makefile targets for Go development operations and supplement the existing precedence;
+service-local instructions must not silently contradict repository policy.
+
 - Keep rules stable and concise.
 - Keep skills procedural and task-specific.
 - Keep prompts lightweight and composable.

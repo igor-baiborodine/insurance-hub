@@ -139,7 +139,13 @@ TODO
 
 ### Go
 
-TODO: add Go style guide before starting Phase 4
+Phase 4 Go services follow the repository's [Go development rules](ai/rules/go-development.md),
+[formatting policy](ai/rules/go-formatting.md), and [validation rules](ai/rules/go-validation.md).
+Use the corresponding Makefile targets for Go tooling, including formatting, linting, tests,
+builds, and generation. Read the owning Makefile for supported targets and module scope.
+
+The first Go service scaffolding must provide these targets and pin compatible tools. The current
+root `go-build` placeholder is not a multi-service build or validation workflow.
 
 ### Branch Names
 
