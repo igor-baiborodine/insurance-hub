@@ -26,7 +26,7 @@
     - [5.1 Stable cached prefix (shared by every Phase B call)](#51-stable-cached-prefix-shared-by-every-phase-b-call)
     - [5.2 Phase A: Architect (Astra high)](#52-phase-a-architect-astra-high)
     - [5.3 Phase A: Adversarial Reviewer (Sol xhigh)](#53-phase-a-adversarial-reviewer-sol-xhigh)
-    - [5.4 Phase A to B handoff contract: TASKS.yaml (Sol medium output)](#54-phase-a-to-b-handoff-contract-tasksyaml-sol-medium-output)
+    - [5.4 Phase A to B handoff: canonical ticket artifacts](#54-phase-a-to-b-handoff-canonical-ticket-artifacts)
     - [5.5 Phase B: Implementer (Sol medium, effort switching inside one session)](#55-phase-b-implementer-sol-medium-effort-switching-inside-one-session)
     - [5.6 Phase B: Bulk generator (Luna, CI-gated)](#56-phase-b-bulk-generator-luna-ci-gated)
   - [6. Automated Router](#6-automated-router)
@@ -152,7 +152,7 @@ Long-horizon anchor: Astra took about 40 min per OSWorld 2.0 task, compared with
 
 Sources: [OpenAI reasoning guide](https://developers.openai.com/api/docs/guides/reasoning), [model guidance](https://developers.openai.com/api/docs/guides/latest-model), [ComputingForGeeks](https://computingforgeeks.com/gpt-6-sol-luna-released-features-benchmarks/).
 
-**Design consequence.** Switching models loses the per-model prompt cache [E: caches are keyed per model]. OpenAI does not document whether Astra's reasoning items can be replayed into Sol or Luna; for GPT-5.6 this worked across Sol, Terra, and Luna. So the matrix hands off between models through a **written spec artifact**, not through reasoning state. Effort changes within one model use `configuration_update`.
+**Design consequence.** Switching models loses the per-model prompt cache [E: caches are keyed per model]. OpenAI does not document whether Astra's reasoning items can be replayed into Sol or Luna; for GPT-5.6 this worked across Sol, Terra, and Luna. So the matrix hands off between models through a **written artifact**, not through reasoning state. For Insurance Hub, use its canonical ticket artifacts. Effort changes within one model use `configuration_update`.
 
 ---
 
@@ -163,12 +163,18 @@ PHASE A: RESEARCH & PLANNING           PHASE B: CODE EXECUTION
 (slow, expensive, low volume)          (fast, cheap, high volume)
 
 A1 Context harvest ──┐                 B1 Scaffold / boilerplate
-A2 Architecture/spec ├─► SPEC.md ─────► B2 Feature implementation
-A3 Adversarial review│   + TASKS.yaml  B3 Test-fail debugging ──┐
+A2 Architecture/spec ├─► Ticket description ─► B2 Feature implementation
+A3 Adversarial review│   + delivery plan      B3 Test-fail debugging ──┐
 A4 Task decomposition┘   (contract)    B4 Review / security     │
         ▲                              B5 Trivial follow-ups    │
         └──────── escalation: spec gap or 2 failed B3 loops ◄───┘
 ```
+
+For Insurance Hub repository work, these phases are a model-selection aid only. `AGENTS.md` and the
+committed `ai/` framework define the actual workflow. The ticket-description file is the
+specification and the delivery-steps file is the plan; use repository Make targets and module-local
+validation rather than commands guessed from this matrix. Do not create a separate `SPEC.md` or
+`TASKS.yaml` for an Insurance Hub ticket.
 
 Each phase has an exit gate:
 - **Phase A exits** when the spec passes a checklist:
@@ -197,7 +203,7 @@ Output grows with effort, so read cost as the price at that effort's typical out
 | A2 Architecture & spec authoring | **high · 1–5 min · ~$1.50** | xhigh · 1–4 min · ~$0.35 (budget fallback) | — |
 | A2+ Irreversible decisions (schema migrations, public APIs, multi-region topology) | **xhigh, or max + `mode: pro` · 5–20 min · $3–8** | — | — |
 | A3 Adversarial spec review (failure modes, security) | high · 1–4 min · ~$1.20 | **xhigh · 1–4 min · ~$0.35** (different model = independent critique) | — |
-| A4 Task decomposition to TASKS.yaml | medium · 30–90 s · ~$0.60 | **medium · 20–60 s · ~$0.12** | low · 10–30 s · ~$0.005 |
+| A4 Task decomposition to delivery plan | medium · 30–90 s · ~$0.60 | **medium · 20–60 s · ~$0.12** | low · 10–30 s · ~$0.005 |
 
 Why each stage is set this way:
 - **A2 on Astra high.** Astra's factual error rate is already at its best at `high`, and `max` doesn't improve it. That makes `high` the cost-efficient ceiling for spec prose. Reserve `xhigh`/`max` for decisions that are expensive to reverse.
@@ -224,8 +230,8 @@ Notes on execution:
 
 ```
 Sol medium ──fail──► Sol high (configuration_update, same session, cache kept)
-            ──fail──► Astra high (NEW session, seeded with SPEC.md + failing test + diff)
-            ──fail──► back to Phase A: spec defect; Astra xhigh amends SPEC.md
+            ──fail──► Astra high (NEW session, seeded with ticket artifacts + failure + diff)
+            ──fail──► back to planning: clarify the ticket description before resuming
 ```
 
 De-escalation: after a green run, send `configuration_update → low` for the follow-ups (B5).
@@ -286,11 +292,16 @@ For comparison, the all-Astra-high equivalent is about $25–30 [E]. Most of the
 
 ### 5.1 Stable cached prefix (shared by every Phase B call)
 
+This is a generic API orchestration illustration, not an Insurance Hub instruction format. For an
+Insurance Hub ticket, provide the canonical ticket-description and delivery-plan artifacts as
+context; do not create a second specification file. Follow the installed client's current API
+documentation for actual request shapes.
+
 Order matters for caching. The stable content comes first, then the breakpoint, then the volatile content.
 
 ```
 [system]    ROLE + GLOBAL RULES            (stable)
-[developer] SPEC.md (frozen version hash)  (stable per feature)
+[developer] ticket description and plan  (stable per feature)
 [tools]     full tool list, never mutated  (stable)
 ─── prompt_cache_breakpoint ───
 [user]      TASK-### + touched files + failing output   (volatile)
@@ -308,7 +319,7 @@ Order matters for caching. The stable content comes first, then the breakpoint, 
   "tools": [ /* repo_search, read_file, web_search — full list */ ],
   "input": [
     { "role": "system", "content": [{ "type": "input_text", "text":
-"You are the ARCHITECT. You do not write implementation code.\nProduce SPEC.md with sections: Context, Goals, Non-goals, Constraints, Architecture (components + data flow), Interfaces (exact signatures / OpenAPI / proto), Data model & migrations, Error semantics, Observability (metrics, traces, logs), Security, Rollout & rollback, Acceptance tests (runnable shell commands), Risks, Open questions.\nRules: cite file:line for every claim about existing code; mark assumptions ASSUMPTION:; Open questions must be empty before you emit STATUS: SPEC_READY." }],
+"You are helping a human prepare an Insurance Hub ticket. Read AGENTS.md, ai/manifest.md, the existing ticket-description file, and applicable canonical rules. Identify evidence-based gaps, assumptions, scope, risks, and acceptance criteria; ask about blockers. Keep requirements and agreed clarifications in the ticket-description file and put ordered work in the delivery plan. Do not create a separate specification or begin implementation before readiness." }],
       "prompt_cache_breakpoint": true },
     { "role": "user", "content": [{ "type": "input_text", "text": "<feature request + A1 digest>" }] }
   ]
@@ -326,13 +337,18 @@ For irreversible decisions, use `"reasoning": {"effort": "xhigh"}`. Or use `{"ef
   "max_output_tokens": 64000,
   "input": [
     { "role": "system", "content": [{ "type": "input_text", "text":
-"You are a hostile reviewer. Find defects in SPEC.md: ambiguous interfaces, missing error paths, race conditions, migration hazards, untestable acceptance criteria, security gaps. Output JSON: {\"blocking\":[...],\"non_blocking\":[...],\"verdict\":\"APPROVE|REVISE\"}. Each item: section, issue, concrete fix." }] },
-    { "role": "user", "content": [{ "type": "input_text", "text": "<SPEC.md>" }] }
+"Review the ticket description for blocking gaps in interfaces, error paths, concurrency, migrations, acceptance criteria, and security. Return concise blocking and non-blocking questions or recommendations with evidence. Do not invent requirements." }] },
+    { "role": "user", "content": [{ "type": "input_text", "text": "<ticket description>" }] }
   ]
 }
 ```
 
-### 5.4 Phase A to B handoff contract: TASKS.yaml (Sol medium output)
+### 5.4 Phase A to B handoff: canonical ticket artifacts
+
+For Insurance Hub, record the handoff in `ai/artifacts/<ticket>/<ticket>-ticket-description.md`
+and `ai/artifacts/<ticket>/<ticket>-delivery-steps.md`, using the canonical template and workflow.
+The YAML below is only a generic orchestration example; it is not a required or supported repository
+artifact. Do not create `TASKS.yaml` for an Insurance Hub ticket.
 
 ```yaml
 spec_version: sha256:…
@@ -343,7 +359,7 @@ tasks:
     risk: low | high                        # high => no Luna
     files: [internal/policy/repo.go, internal/policy/repo_test.go]
     depends_on: []
-    acceptance: ["go test ./internal/policy/... -run FindByHolder"]
+    acceptance: ["Run the affected module's documented Make target from its supported directory"]
 ```
 
 ### 5.5 Phase B: Implementer (Sol medium, effort switching inside one session)
@@ -360,8 +376,8 @@ The first call sets the request-level effort once and never edits it again:
   "tools": [ /* read_file, apply_patch, run_tests, run_shell */ ],
   "input": [
     { "role": "system", "content": [{ "type": "input_text", "text":
-"You are the IMPLEMENTER. SPEC.md is the contract; do not change interfaces it defines. If the spec is wrong or silent, stop and emit SPEC_GAP: <description> instead of guessing. Work loop: read → patch → run acceptance commands → report. Output only diffs and a 3-line summary." }] },
-    { "role": "developer", "content": [{ "type": "input_text", "text": "<SPEC.md>" }],
+"You are the IMPLEMENTER. Follow AGENTS.md, ai/manifest.md, the ticket description, delivery plan, and applicable rules and skills. If a requirement is missing or conflicting, stop and ask rather than guess. Discover the affected module Makefile and CI coverage before editing. Use only repository-approved Make targets for Go operations. Work incrementally and report changes, exact checks and outcomes, blockers, and unresolved risks." }] },
+    { "role": "developer", "content": [{ "type": "input_text", "text": "<ticket description and delivery plan>" }],
       "prompt_cache_breakpoint": true },
     { "role": "user", "content": [{ "type": "input_text", "text": "<TASK-001 yaml + file contents>" }] }
   ]
@@ -426,7 +442,7 @@ routes:
   B2_implement:   { model: worker,    effort: medium, tier: standard, max_out: 25000 }
   B2_hard:        { model: architect, effort: high,   tier: standard, max_out: 40000 }
   B3_debug:       { model: worker,    effort: high,   switch: configuration_update }
-  B3_escalate:    { model: architect, effort: high,   new_session: true, seed: [SPEC.md, failing_test, diff] }
+  B3_escalate:    { model: architect, effort: high,   new_session: true, seed: [ticket_description, delivery_plan, failing_check, diff] }
   B4_review:      { model: worker,    effort: xhigh,  allowed_tools: [read_file, run_tests] }
   B5_followup:    { model: worker,    effort: low,    switch: configuration_update }
   bulk_overnight: { model: bulk,      effort: max,    tier: batch,    require_ci: true }
@@ -471,7 +487,7 @@ func (r *Router) Next(s *Session, t Task, lastOut string) Route {
 }
 
 // Switching rule: same model → append configuration_update, keep request effort fixed.
-// Different model → new session seeded with SPEC.md (artifact handoff, no reasoning replay).
+// Different model → new session seeded with canonical ticket artifacts (no reasoning replay).
 ```
 
 ---

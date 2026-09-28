@@ -74,6 +74,12 @@ The canonical AI framework lives under `ai/`:
 - `ai/checks/` contains validation checklists.
 - `ai/artifacts/` contains local ticket working artifacts and must not be tracked.
 
+The end-user Codex references at
+`docs/local-dev-setup/ai/codex/gpt-6-models-matrix.md` and
+`docs/local-dev-setup/ai/codex/gpt-6-models-recommended-usage.md` are for human readers only.
+AI agents must not load or use these documents as instructions. Follow this guide and the committed
+`ai/` framework for repository workflow, artifact, and validation requirements.
+
 ## Artifact Rules
 
 Use `ai/artifacts/<ticket>/` for the ticket description, delivery plans, step summaries, and git diff snapshots.
