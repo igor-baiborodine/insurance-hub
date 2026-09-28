@@ -121,6 +121,9 @@ Phase 4 and the 8-May-2026 Alloy update.
 
 ## Tests
 
+Use the [Go testing examples](../examples/go-testing/README.md) for concrete patterns; adapt their
+illustrative contracts to the ticket and actual module APIs.
+
 - Test changed observable behavior, failures, and boundaries. Use table-driven cases when helpful,
   clear arrange/act/assert structure, and the module's established assertion conventions.
 - Follow the example's unit-test separation, generated Mockery/Testify mocks, and tagged
