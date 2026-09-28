@@ -22,7 +22,7 @@
 
 - Modules:
 - Changes:
-- Validation:
+- Planned validation:
 - Artifact:
 
 ## Decisions

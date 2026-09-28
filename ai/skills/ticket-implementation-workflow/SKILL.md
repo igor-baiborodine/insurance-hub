@@ -97,5 +97,7 @@ Before considering the ticket workflow complete, ensure:
 - ticket readiness was explicitly validated
 - the delivery-step plan artifact exists
 - each completed step has a matching summary artifact
+- each step summary records applicable validation with the shared evidence format and each
+  acceptance criterion maps to evidence or is identified as unresolved
 - post-step workflow was applied after each completed step
 - formatting and tests were run as required by the repository instructions and ticket scope

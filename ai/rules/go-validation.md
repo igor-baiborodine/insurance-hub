@@ -66,11 +66,15 @@ the target. Use documented equivalents in the owning Makefile and its supported 
 ## Evidence and current availability
 
 - Record exact Make invocations, working directories, relevant variables/module coverage, and
-  results in ticket artifacts. Distinguish passed, failed, blocked, and not applicable checks.
+  results in the per-step `Validation Evidence` record required by the
+  [post-step workflow](../skills/ticket-post-step-workflow/SKILL.md#validation-evidence-record).
+  Use its shared result statuses and record execution source separately. Planned checks belong in
+  the delivery plan; they are not evidence of execution.
 - Report pre-existing failures separately from regressions. Preserve useful failure evidence;
   never hide failures, weaken gates, or state that unexecuted checks passed.
 - After checks, inspect tracked and relevant new files for unintended generated, formatting, or
-  dependency changes. Apply the repository post-step workflow and before-merge checklist.
+  dependency changes. Complete the evidence record, map acceptance criteria to evidence at ticket
+  completion, and apply the repository before-merge checklist.
 - Insurance Hub currently has no Go module/workspace manifests. Its root `go-build` recipe is a
   placeholder, not a multi-service validation suite. Phase 4 scaffolding must establish module
   ownership and the necessary Make targets, pinned tools, exclusions, and CI invocation before

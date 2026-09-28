@@ -41,14 +41,19 @@ Save the finished draft to:
    `Key Changes`, and `Testing Notes`. Put the business/operational issue, evidenced cause, and
    resulting behavior in the concise summary; group implementation details by meaningful change
    area. Mention rationale and out-of-scope behavior where useful without adding unsupported claims.
-6. In `Testing Notes`, distinguish checks that artifacts prove were run from checks that are
-   proposed, not run, blocked, or not applicable. Name automated tests added/updated from the diff.
-   List appropriate validation commands by inspecting the owning Makefile and repository workflow.
+6. In `Testing Notes`, report checks using the shared validation-evidence record from the post-step
+   workflow: give each check a result status (`passed`, `failed`, `blocked`, `not run`, or
+   `not applicable`) and a separate execution source (`local`, `CI`, or `manual`; use `—` when not
+   executed). `Proposed` or `planned` belongs to future work, not a result. Name automated tests
+   added/updated from the diff. List appropriate validation commands by inspecting the owning
+   Makefile and repository workflow.
    Label a suggested command `To run` when there is no evidence it was executed. Give a result only
-   when artifacts or this session show its execution and outcome. For Go changes, use only the
+   when artifacts or this session show its execution and outcome. Include the relevant module or
+   package scope, working directory, and evidence reference; identify blockers and next actions.
+   For Go changes, use only the
    affected module's documented Makefile targets; follow `ai/rules/go-development.md` and
    `ai/rules/go-validation.md`. Do not prescribe direct Go tool invocations. Preserve
-   `<PASS/FAIL — not run>` or equivalent explicit result placeholders for checks a reviewer must
+   `Status: not run; Source: —` (or the equivalent shared-record fields) for checks a reviewer must
    execute; never convert a planned command into a passing result.
 7. Include manual validation where relevant:
    - **UI smoke:** specify a scenario and expected outcome when a documented UI flow, runbook, or

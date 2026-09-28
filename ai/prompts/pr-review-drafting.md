@@ -54,6 +54,9 @@ Before writing findings:
    find and review its source definition/configuration and corresponding generation evidence.
    Read relevant Makefiles to understand validation coverage; do not assume a target covers every
    module or package.
+   When reporting validation, use the shared per-check result statuses and execution-source fields
+   defined by `ai/skills/ticket-post-step-workflow/SKILL.md`. Treat plans as plans, and missing
+   execution records as unverified; do not infer a result or execution source.
 7. For contract changes, inspect the authoritative OpenAPI/protobuf/other schema, controllers or
    handlers, gateway mappings, callers, and neighboring contracts. Use actual definitions and
    implementation to assess route/RPC names, request/response semantics, status mapping, required
