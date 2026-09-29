@@ -50,28 +50,30 @@ Use **Astra max/ultra**, if your Plus picker grants access, only for these “wr
 
 ### A planning prompt pattern
 
-Give the agent constraints and request an artifact—not generic advice:
+For repository ticket work, the ticket content at
+`ai/artifacts/<ticket>/<ticket>-ticket-content.md` is the specification. Follow `AGENTS.md`,
+`ai/manifest.md`, and the applicable canonical rules and skills for readiness, planning, and
+implementation. Do not create a separate committed specification. The following is a human-facing
+conversation starter; it does not replace those repository instructions:
 
 ```text
-You are planning, not implementing.
+Help me assess whether ticket <ticket-id> is ready for implementation in this repository.
 
-Read the relevant packages and tests in this repository. Create an implementation
-specification for <feature> that preserves the existing architecture.
+First read AGENTS.md, ai/manifest.md, the ticket content at
+ai/artifacts/<ticket-id>/<ticket-id>-ticket-content.md, and applicable rules and skills.
+Inspect the relevant packages, tests, and service boundaries.
 
-Include:
-1. Problem statement and non-goals
-2. Domain invariants and edge cases
-3. Affected Go packages, interfaces, and public API changes
-4. Data/schema and migration impact, if any
-5. Error-handling, cancellation, retry, idempotency, and observability behavior
-6. Ordered implementation steps
-7. Table-driven test cases and acceptance criteria
-8. Risks, assumptions, and questions that must be resolved before coding
+Identify missing requirements, scope, assumptions, risks, and acceptance criteria. Do not invent
+business requirements. Ask me to clarify any blocking gaps. Keep requirements and agreed
+clarifications in the ticket-content file; put ordered steps and validation checkpoints in
+ai/artifacts/<ticket-id>/<ticket-id>-delivery-steps.md using the repository workflow.
 
-Do not modify files. Cite the repository files that support each conclusion.
+Do not begin implementation until readiness is established. Cite repository paths for conclusions.
 ```
 
-After it responds, review and edit the specification yourself. Then commit it as a Markdown design note or issue description. That gives the execution agent a stable contract instead of asking it to infer intent mid-edit.
+Review the readiness assessment and clarify requirements in the ticket content. Keep ticket
+artifacts local under `ai/artifacts/<ticket-id>/`; follow the repository's documented artifact and
+Git rules.
 
 ## Implementation
 
@@ -107,15 +109,19 @@ only after the specification and design are clear. Luna is suited to repeatable,
 Keep the implementation agent constrained to the approved plan:
 
 ```text
-Implement the approved specification in <path-to-spec>.
+Implement the ready ticket described by
+ai/artifacts/<ticket-id>/<ticket-id>-ticket-content.md, following its delivery plan and the
+repository's AGENTS.md, ai/manifest.md, and applicable rules and skills.
 
 Rules:
 - First summarize the concrete files and changes you intend to make.
-- Follow the specification; do not introduce unrelated refactors.
+- Follow the ticket acceptance criteria; do not introduce unrelated refactors.
 - Preserve Go package boundaries and existing conventions.
 - Add or update table-driven tests for every acceptance criterion.
-- Run the narrowest relevant commands first, then the repository test command:
-  go test ./...
+- Discover the affected Go module(s), read their Makefiles and CI configuration, then run the
+  narrowest relevant repository-approved Make targets. Do not assume a root target covers every
+  module or invoke Go tools directly. Record commands, working directories, scope, outcomes, and
+  checks that were blocked or not run in the ticket artifacts.
 - Report: modified files, tests run and results, deviations from the spec,
   and any unresolved risks.
 - If a requirement is ambiguous, stop and ask before choosing a design.
@@ -140,7 +146,9 @@ OpenAI’s documentation explicitly recommends starting with Sol at Medium, Luna
 Do not use the same high-effort planning prompt to both design and judge the result. After implementation, open a fresh **Sol + High** agent turn and ask it to act as a reviewer:
 
 ```text
-Review the current diff against <path-to-spec>.
+Review the current change against
+ai/artifacts/<ticket-id>/<ticket-id>-ticket-content.md and the delivery plan. Follow AGENTS.md,
+ai/manifest.md, the applicable repository rules, and the shared PR review workflow/template.
 
 Do not edit files. Identify:
 - Missing acceptance criteria

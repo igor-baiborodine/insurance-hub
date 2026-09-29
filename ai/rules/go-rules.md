@@ -1,8 +1,13 @@
 # Go Rules
 
-These rules are placeholders for future Go migration work.
+For Go work, read and apply all three canonical rules:
 
-- Follow idiomatic Go and the conventions of the target module once Go modules are introduced.
-- Keep package boundaries small and behavior-oriented.
-- Prefer explicit errors and table-driven tests for branching behavior.
-- Do not port Java structure mechanically when a simpler Go design preserves the contract.
+- [Go development](go-development.md): service boundaries, implementation, contracts, and Phase 4 migration.
+- [Go formatting](go-formatting.md): mandatory formatter policy and scope.
+- [Go validation](go-validation.md): module-aware checks and evidence.
+
+All Go development operations must use the corresponding Makefile targets; do not invoke the
+underlying tools directly. See the development rule for target discovery and missing-target handling.
+
+This file remains the Go entry point for existing references. It adds no separate policy or
+instruction precedence.

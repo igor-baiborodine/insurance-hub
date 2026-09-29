@@ -1,5 +1,9 @@
 # Delivery Plan: <Ticket>
 
+## Specification
+
+- Ticket content: `ai/artifacts/<ticket>/<ticket>-ticket-content.md`
+
 ## Readiness
 
 - Objective clear:
@@ -18,7 +22,7 @@
 
 - Modules:
 - Changes:
-- Validation:
+- Planned validation:
 - Artifact:
 
 ## Decisions
