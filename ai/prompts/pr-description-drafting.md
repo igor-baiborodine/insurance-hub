@@ -6,7 +6,7 @@ Draft a pull request description for ticket `<ticket-id>`. Read and follow the r
 `AGENTS.md`, `ai/manifest.md`, and relevant rules before drafting. Use these current Insurance Hub
 artifacts:
 
-- Ticket specification: `ai/artifacts/<ticket-id>/<ticket-id>-ticket-description.md`
+- Ticket specification: `ai/artifacts/<ticket-id>/<ticket-id>-ticket-content.md`
 - Delivery tracker: `ai/artifacts/<ticket-id>/<ticket-id>-delivery-steps.md`
 - Git diff snapshot: `ai/artifacts/<ticket-id>/<ticket-id>-git-diff.txt`
 - Shared template: `ai/templates/pr-description-template.md`
