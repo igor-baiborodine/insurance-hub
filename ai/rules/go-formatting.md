@@ -6,7 +6,7 @@ Apply to changed handwritten Go code. Follow the Makefile interface in
 ## Policy
 
 - Formatting is mechanical and mandatory: `gofumpt` for Go layout, `goimports` for import
-  insertion/removal/grouping, and `golines` with a **120-column target** for long constructs.
+  insertion/removal/grouping, and `golines` with a **100-column target** for long constructs.
   Treat this as an automated readability target, not permission to distort APIs or literal data.
 - Invoke only the corresponding Makefile's formatting and format-check targets. Do not run these
   tools directly, hand-sort imports, manually align fields, or substitute IDE-only formatting.
@@ -44,7 +44,7 @@ for Phase 4 scaffolding, not commands already available at the repository root. 
 implementation must supply these Make targets before formatting can be reported as verified.
 
 In `campsite-booking-go`, `make format` invokes golines then gofumpt, but the recipe does not
-explicitly set 120 columns or invoke goimports; installing goimports alone does not prove import
+explicitly set 100 columns or invoke goimports; installing goimports alone does not prove import
 policy enforcement. Its `check-format-diff` checks the working-tree diff and its golangci-lint
 configuration lists gofmt. Adapt this tooling deliberately rather than copying it as proof that
 the Insurance Hub policy is enforced.
