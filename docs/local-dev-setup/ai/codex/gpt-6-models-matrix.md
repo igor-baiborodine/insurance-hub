@@ -163,7 +163,7 @@ PHASE A: RESEARCH & PLANNING           PHASE B: CODE EXECUTION
 (slow, expensive, low volume)          (fast, cheap, high volume)
 
 A1 Context harvest ──┐                 B1 Scaffold / boilerplate
-A2 Architecture/spec ├─► Ticket description ─► B2 Feature implementation
+A2 Architecture/spec ├─► Ticket content ─► B2 Feature implementation
 A3 Adversarial review│   + delivery plan      B3 Test-fail debugging ──┐
 A4 Task decomposition┘   (contract)    B4 Review / security     │
         ▲                              B5 Trivial follow-ups    │
@@ -171,7 +171,7 @@ A4 Task decomposition┘   (contract)    B4 Review / security     │
 ```
 
 For Insurance Hub repository work, these phases are a model-selection aid only. `AGENTS.md` and the
-committed `ai/` framework define the actual workflow. The ticket-description file is the
+committed `ai/` framework define the actual workflow. The ticket-content file is the
 specification and the delivery-steps file is the plan; use repository Make targets and module-local
 validation rather than commands guessed from this matrix. Do not create a separate `SPEC.md` or
 `TASKS.yaml` for an Insurance Hub ticket.
@@ -231,7 +231,7 @@ Notes on execution:
 ```
 Sol medium ──fail──► Sol high (configuration_update, same session, cache kept)
             ──fail──► Astra high (NEW session, seeded with ticket artifacts + failure + diff)
-            ──fail──► back to planning: clarify the ticket description before resuming
+            ──fail──► back to planning: clarify the ticket content before resuming
 ```
 
 De-escalation: after a green run, send `configuration_update → low` for the follow-ups (B5).
@@ -293,7 +293,7 @@ For comparison, the all-Astra-high equivalent is about $25–30 [E]. Most of the
 ### 5.1 Stable cached prefix (shared by every Phase B call)
 
 This is a generic API orchestration illustration, not an Insurance Hub instruction format. For an
-Insurance Hub ticket, provide the canonical ticket-description and delivery-plan artifacts as
+Insurance Hub ticket, provide the canonical ticket-content and delivery-plan artifacts as
 context; do not create a second specification file. Follow the installed client's current API
 documentation for actual request shapes.
 
@@ -301,7 +301,7 @@ Order matters for caching. The stable content comes first, then the breakpoint, 
 
 ```
 [system]    ROLE + GLOBAL RULES            (stable)
-[developer] ticket description and plan  (stable per feature)
+[developer] ticket content and plan  (stable per feature)
 [tools]     full tool list, never mutated  (stable)
 ─── prompt_cache_breakpoint ───
 [user]      TASK-### + touched files + failing output   (volatile)
@@ -319,7 +319,7 @@ Order matters for caching. The stable content comes first, then the breakpoint, 
   "tools": [ /* repo_search, read_file, web_search — full list */ ],
   "input": [
     { "role": "system", "content": [{ "type": "input_text", "text":
-"You are helping a human prepare an Insurance Hub ticket. Read AGENTS.md, ai/manifest.md, the existing ticket-description file, and applicable canonical rules. Identify evidence-based gaps, assumptions, scope, risks, and acceptance criteria; ask about blockers. Keep requirements and agreed clarifications in the ticket-description file and put ordered work in the delivery plan. Do not create a separate specification or begin implementation before readiness." }],
+"You are helping a human prepare an Insurance Hub ticket. Read AGENTS.md, ai/manifest.md, the existing ticket-content file, and applicable canonical rules. Identify evidence-based gaps, assumptions, scope, risks, and acceptance criteria; ask about blockers. Keep requirements and agreed clarifications in the ticket-content file and put ordered work in the delivery plan. Do not create a separate specification or begin implementation before readiness." }],
       "prompt_cache_breakpoint": true },
     { "role": "user", "content": [{ "type": "input_text", "text": "<feature request + A1 digest>" }] }
   ]
@@ -337,15 +337,15 @@ For irreversible decisions, use `"reasoning": {"effort": "xhigh"}`. Or use `{"ef
   "max_output_tokens": 64000,
   "input": [
     { "role": "system", "content": [{ "type": "input_text", "text":
-"Review the ticket description for blocking gaps in interfaces, error paths, concurrency, migrations, acceptance criteria, and security. Return concise blocking and non-blocking questions or recommendations with evidence. Do not invent requirements." }] },
-    { "role": "user", "content": [{ "type": "input_text", "text": "<ticket description>" }] }
+"Review the ticket content for blocking gaps in interfaces, error paths, concurrency, migrations, acceptance criteria, and security. Return concise blocking and non-blocking questions or recommendations with evidence. Do not invent requirements." }] },
+    { "role": "user", "content": [{ "type": "input_text", "text": "<ticket content>" }] }
   ]
 }
 ```
 
 ### 5.4 Phase A to B handoff: canonical ticket artifacts
 
-For Insurance Hub, record the handoff in `ai/artifacts/<ticket>/<ticket>-ticket-description.md`
+For Insurance Hub, record the handoff in `ai/artifacts/<ticket>/<ticket>-ticket-content.md`
 and `ai/artifacts/<ticket>/<ticket>-delivery-steps.md`, using the canonical template and workflow.
 The YAML below is only a generic orchestration example; it is not a required or supported repository
 artifact. Do not create `TASKS.yaml` for an Insurance Hub ticket.
@@ -376,8 +376,8 @@ The first call sets the request-level effort once and never edits it again:
   "tools": [ /* read_file, apply_patch, run_tests, run_shell */ ],
   "input": [
     { "role": "system", "content": [{ "type": "input_text", "text":
-"You are the IMPLEMENTER. Follow AGENTS.md, ai/manifest.md, the ticket description, delivery plan, and applicable rules and skills. If a requirement is missing or conflicting, stop and ask rather than guess. Discover the affected module Makefile and CI coverage before editing. Use only repository-approved Make targets for Go operations. Work incrementally and report changes, exact checks and outcomes, blockers, and unresolved risks." }] },
-    { "role": "developer", "content": [{ "type": "input_text", "text": "<ticket description and delivery plan>" }],
+"You are the IMPLEMENTER. Follow AGENTS.md, ai/manifest.md, the ticket content, delivery plan, and applicable rules and skills. If a requirement is missing or conflicting, stop and ask rather than guess. Discover the affected module Makefile and CI coverage before editing. Use only repository-approved Make targets for Go operations. Work incrementally and report changes, exact checks and outcomes, blockers, and unresolved risks." }] },
+    { "role": "developer", "content": [{ "type": "input_text", "text": "<ticket content and delivery plan>" }],
       "prompt_cache_breakpoint": true },
     { "role": "user", "content": [{ "type": "input_text", "text": "<TASK-001 yaml + file contents>" }] }
   ]

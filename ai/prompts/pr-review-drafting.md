@@ -8,7 +8,7 @@ Conduct a thorough, read-only review for ticket `<ticket-id>`. Read and follow `
 `ai/manifest.md`, and applicable repository, safety, spec-first, service-local, and language rules.
 Use these current Insurance Hub artifacts:
 
-- Ticket specification: `ai/artifacts/<ticket-id>/<ticket-id>-ticket-description.md`
+- Ticket specification: `ai/artifacts/<ticket-id>/<ticket-id>-ticket-content.md`
 - Delivery tracker: `ai/artifacts/<ticket-id>/<ticket-id>-delivery-steps.md`
 - Git diff snapshot: `ai/artifacts/<ticket-id>/<ticket-id>-git-diff.txt`
 - Completed implementation step summaries: `ai/artifacts/<ticket-id>/<ticket-id>-step-*.md`
@@ -41,7 +41,7 @@ Before writing findings:
    counts and paths for staged, unstaged, and untracked changes. Do not imply those changes are
    committed or omit them from the review scope.
 3. Read the complete ticket specification, delivery tracker, and completed step summaries. If the
-   ticket description is missing or empty, follow `AGENTS.md`: use supplied ticket content or ask
+   ticket-content file is missing or empty, follow `AGENTS.md`: use supplied ticket content or ask
    for the missing requirements. Do not infer requirements from the ticket number.
 4. Read the refreshed diff snapshot completely. If it is empty, do not assume the proposed change
    is empty: inspect the working tree and verify whether the branch has any committed differences

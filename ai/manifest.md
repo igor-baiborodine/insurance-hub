@@ -12,7 +12,7 @@ This framework exists to make AI-assisted work repeatable, auditable, and portab
 - `skills/` - repeatable workflows for recurring tasks
 - `prompts/` - reusable prompt fragments, indexed in `ai/prompts/README.md`
 - `examples/` - examples of acceptable artifacts and implementation patterns
-- `templates/` - reusable ticket description (specification), delivery plan, and PR templates
+- `templates/` - reusable ticket-content specification, delivery plan, and PR templates
 - `checks/` - task checklists
 - `artifacts/` - local per-ticket working files, excluded from Git
 
@@ -36,13 +36,13 @@ At session start:
 1. Read `AGENTS.md`.
 2. Read this manifest.
 3. Load only the rules, skills, prompts, templates, or examples relevant to the current task.
-4. For ticket work, read `ai/artifacts/<ticket>/<ticket>-ticket-description.md` as the specification before readiness assessment or planning. Load the delivery plan and step summaries when continuing existing work.
+4. For ticket work, read `ai/artifacts/<ticket>/<ticket>-ticket-content.md` as the specification before readiness assessment or planning. Load the delivery plan and step summaries when continuing existing work.
 
 Before planning or editing, follow `AGENTS.md` to discover and load nested instructions that apply
 to the affected paths. Do not load unrelated service guides. Root `AGENTS.md` is the canonical
 definition of instruction precedence, local-guide scope, and conflict handling.
 
-The ticket-description file is required at ticket startup. Follow `AGENTS.md` if it is missing or
+The ticket-content file is required at ticket startup. Follow `AGENTS.md` if it is missing or
 empty. `ai/templates/ticket-content-template.md` provides a structure for its content; a separate
 spec file is not required.
 

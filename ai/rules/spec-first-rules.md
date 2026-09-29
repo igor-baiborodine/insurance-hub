@@ -4,7 +4,7 @@ Use these rules for non-trivial feature, bugfix, migration, and integration work
 
 ## Readiness
 
-For ticket work, use `ai/artifacts/<ticket>/<ticket>-ticket-description.md` as the specification.
+For ticket work, use `ai/artifacts/<ticket>/<ticket>-ticket-content.md` as the specification.
 Read it before checking readiness. Keep requirements and agreed clarifications in this file;
 do not create a separate spec document for the same ticket.
 
@@ -21,7 +21,7 @@ Check for:
 - out-of-scope boundaries
 - acceptance criteria that can be tested
 
-If key information is missing, clarify it with the user and update the ticket description before planning implementation.
+If key information is missing, clarify it with the user and update the ticket-content file before planning implementation.
 
 ## Planning
 
@@ -29,7 +29,7 @@ Create a delivery plan before coding when the work has more than one meaningful 
 
 The plan should:
 
-- reference the ticket-description file as its specification
+- reference the ticket-content file as its specification
 - identify module boundaries
 - break work into verifiable steps
 - include test and validation checkpoints

@@ -21,7 +21,7 @@ Save the finished draft to:
 
 1. Read the complete ticket specification and shared PR template before drafting. Read the delivery
    tracker and completed step summaries to understand the delivered scope and recorded validation.
-   If the ticket description is missing or empty, follow `AGENTS.md`: use supplied ticket content,
+   If the ticket-content file is missing or empty, follow `AGENTS.md`: use supplied ticket content,
    or ask for the missing content. Do not infer requirements from the ticket ID.
 2. Review the Git diff snapshot and the current branch's actual changes. The post-step snapshot is
    `git diff main <current-branch>`; it compares committed trees and omits staged/unstaged edits

@@ -102,7 +102,7 @@ Phase 4 and the 8-May-2026 Alloy update.
 
 - Before a rewrite, capture observable Java behavior from service/API modules and business flows:
   DTOs, validation, errors, permissions, events, persistence, date/time and monetary semantics.
-  Define parity cases and explicitly agreed differences in the ticket description.
+  Define parity cases and explicitly agreed differences in the ticket-content specification.
 - Keep each rewrite independently deployable beside Java. Validate internal endpoints before
   production traffic, retain a rollback path, and treat traffic shifts and Java decommissioning as
   separate specified delivery actions. Do not assume Phase 5 authentication/mesh work is complete.

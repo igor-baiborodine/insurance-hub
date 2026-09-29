@@ -50,8 +50,8 @@ Use **Astra max/ultra**, if your Plus picker grants access, only for these “wr
 
 ### A planning prompt pattern
 
-For repository ticket work, the ticket description at
-`ai/artifacts/<ticket>/<ticket>-ticket-description.md` is the specification. Follow `AGENTS.md`,
+For repository ticket work, the ticket content at
+`ai/artifacts/<ticket>/<ticket>-ticket-content.md` is the specification. Follow `AGENTS.md`,
 `ai/manifest.md`, and the applicable canonical rules and skills for readiness, planning, and
 implementation. Do not create a separate committed specification. The following is a human-facing
 conversation starter; it does not replace those repository instructions:
@@ -59,19 +59,19 @@ conversation starter; it does not replace those repository instructions:
 ```text
 Help me assess whether ticket <ticket-id> is ready for implementation in this repository.
 
-First read AGENTS.md, ai/manifest.md, the ticket description at
-ai/artifacts/<ticket-id>/<ticket-id>-ticket-description.md, and applicable rules and skills.
+First read AGENTS.md, ai/manifest.md, the ticket content at
+ai/artifacts/<ticket-id>/<ticket-id>-ticket-content.md, and applicable rules and skills.
 Inspect the relevant packages, tests, and service boundaries.
 
 Identify missing requirements, scope, assumptions, risks, and acceptance criteria. Do not invent
 business requirements. Ask me to clarify any blocking gaps. Keep requirements and agreed
-clarifications in the ticket-description file; put ordered steps and validation checkpoints in
+clarifications in the ticket-content file; put ordered steps and validation checkpoints in
 ai/artifacts/<ticket-id>/<ticket-id>-delivery-steps.md using the repository workflow.
 
 Do not begin implementation until readiness is established. Cite repository paths for conclusions.
 ```
 
-Review the readiness assessment and clarify requirements in the ticket description. Keep ticket
+Review the readiness assessment and clarify requirements in the ticket content. Keep ticket
 artifacts local under `ai/artifacts/<ticket-id>/`; follow the repository's documented artifact and
 Git rules.
 
@@ -110,7 +110,7 @@ Keep the implementation agent constrained to the approved plan:
 
 ```text
 Implement the ready ticket described by
-ai/artifacts/<ticket-id>/<ticket-id>-ticket-description.md, following its delivery plan and the
+ai/artifacts/<ticket-id>/<ticket-id>-ticket-content.md, following its delivery plan and the
 repository's AGENTS.md, ai/manifest.md, and applicable rules and skills.
 
 Rules:
@@ -147,7 +147,7 @@ Do not use the same high-effort planning prompt to both design and judge the res
 
 ```text
 Review the current change against
-ai/artifacts/<ticket-id>/<ticket-id>-ticket-description.md and the delivery plan. Follow AGENTS.md,
+ai/artifacts/<ticket-id>/<ticket-id>-ticket-content.md and the delivery plan. Follow AGENTS.md,
 ai/manifest.md, the applicable repository rules, and the shared PR review workflow/template.
 
 Do not edit files. Identify:

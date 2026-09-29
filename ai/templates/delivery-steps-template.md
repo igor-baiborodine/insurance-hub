@@ -2,7 +2,7 @@
 
 ## Specification
 
-- Ticket description: `ai/artifacts/<ticket>/<ticket>-ticket-description.md`
+- Ticket content: `ai/artifacts/<ticket>/<ticket>-ticket-content.md`
 
 ## Readiness
 

@@ -1,10 +1,11 @@
 <!--
-Save as `ai/artifacts/<ticket>/<ticket>-ticket-description.md` before starting ticket work.
-This description is the specification used for readiness, planning, implementation, and validation.
+Save as `ai/artifacts/<ticket>/<ticket>-ticket-content.md` before starting ticket work.
+This ticket-content file is the specification used for readiness, planning, implementation, and
+validation.
 Replace bracketed prompts with ticket-specific content and remove inapplicable bullets.
 Preserve supplied requirements and record agreed clarifications; do not invent missing details.
 Keep delivery steps and progress in `<ticket>-delivery-steps.md`; no separate spec is required.
-Remove this authoring comment from the completed ticket description.
+Remove this authoring comment from the completed ticket-content file.
 -->
 
 ### Context

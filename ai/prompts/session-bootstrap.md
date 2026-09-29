@@ -7,8 +7,8 @@ For ticket work, before creating or editing any ticket artifact, follow the `AGE
 preflight: verify the intended path is ignored by local `.git/info/exclude` and that no
 `ai/artifacts/` paths are in the Git index. If either check fails, stop artifact writes and report
 the required local setup or indexed paths. After the preflight, ensure
-`ai/artifacts/<ticket>/<ticket>-ticket-description.md` exists and read it as the specification
-before readiness assessment or planning. Follow `AGENTS.md` when the description is missing or
+`ai/artifacts/<ticket>/<ticket>-ticket-content.md` exists and read it as the specification
+before readiness assessment or planning. Follow `AGENTS.md` when the ticket-content file is missing or
 empty. For an existing ticket, also read its delivery plan and relevant step summaries.
 
 Also load and follow shared guidance from these folders when relevant to the task:
