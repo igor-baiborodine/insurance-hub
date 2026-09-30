@@ -1,5 +1,10 @@
 # Dependency Injection Strategy for Insurance Hub Phase 4
 
+> **Status — preliminary research.** This study is preserved as an input to the dated [Phase 4
+> implementation review](phase-4-implementation-review.md), which contains the reviewed disposition,
+> service scope, and adoption gates. Its recommendations are not final platform defaults by
+> themselves.
+
 ## Executive recommendation
 
 Phase 4 should use **dependency injection as a design pattern, but should not adopt a DI framework or container initially**. Standardize on explicit constructor injection, consumer-owned interfaces, and one composition root per Go service. Reassess after the first two migrations—`document-service` and `product-service`—using concrete evidence from their dependency graphs, bootstrap code, tests, and lifecycle handling.
@@ -341,4 +346,3 @@ Phase 4 **does need disciplined dependency injection**, because the new services
 12. [Keeping Your Modules Compatible](https://go.dev/blog/module-compatibility) - If you have an exported struct type, you can almost always add a field or remove an unexported field...
 
 13. [Add an HTTP server - Fx](https://uber-go.github.io/fx/get-started/http-server.html) - Lifecycle Modules Features Features. Add a lifecycle hook to the application with the fx.Lifecycle o...
-

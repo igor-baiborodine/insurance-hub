@@ -1,5 +1,10 @@
 # Configuration Strategy for Insurance Hub Phase 4 Go Services
 
+> **Status — preliminary research.** This study is preserved as an input to the dated [Phase 4
+> implementation review](phase-4-implementation-review.md), which contains the reviewed disposition,
+> service scope, and adoption gates. Its recommendations are not final platform defaults by
+> themselves.
+
 ## Executive recommendation
 
 Phase 4 should **replace Viper as the default with a small, environment-first configuration package built around a typed Go struct, `caarlos0/env/v11`, explicit validation, and one-time startup loading**. Kubernetes and Kustomize should remain responsible for producing environment-specific values: ConfigMaps for non-confidential settings and Secrets for credentials. The Go service should parse those values once, validate them, construct its dependencies, and then pass immutable configuration values only to the components that need them.
@@ -725,4 +730,3 @@ patches:
 39. [go/src/flag/flag.go at master · golang/go](https://github.com/golang/go/blob/master/src/flag/flag.go?name=release) - The Go programming language. Contribute to golang/go development by creating an account on GitHub.
 
 40. [godotenv/README.md at main · joho/godotenv](https://github.com/joho/godotenv/blob/main/README.md) - A Go port of Ruby's dotenv library (Loads environment variables from .env files) - joho/godotenv
-

@@ -1,5 +1,10 @@
 # PostgreSQL Data Access Strategy for Insurance Hub Phase 4
 
+> **Status — preliminary research.** This study is preserved as an input to the dated [Phase 4
+> implementation review](phase-4-implementation-review.md), which contains the reviewed disposition,
+> service scope, and adoption gates. Its recommendations are not final platform defaults by
+> themselves.
+
 ## Executive recommendation
 
 Phase 4 should **replace GORM as the default with `pgx/v5` + `sqlc`**, backed by version-controlled SQL migrations. Use `pgxpool` for PostgreSQL connections, write explicit PostgreSQL SQL, and let `sqlc` generate typed Go methods and models from the schema and queries. Use native `pgx` directly for the small minority of operations that do not fit generated static queries, such as highly dynamic filtering, `COPY`, `LISTEN/NOTIFY`, or specialized PostgreSQL types.
@@ -472,4 +477,3 @@ GORM is a valid, maintained ORM, but it is not the strongest architectural defau
 28. [Home](https://github.com/go-jet/jet/wiki) - Type safe SQL builder with code generation and automatic query result data mapping - go-jet/jet
 
 29. [Modifying the database schema — sqlc 1.31.1 documentation](https://docs.sqlc.dev/en/stable/howto/ddl.html)
-

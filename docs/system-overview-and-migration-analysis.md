@@ -76,6 +76,11 @@ event streaming and interservice decoupling. Key characteristics of the current 
 
 ### Target State
 
+> **Historical proposal — 29 September 2026.** This target-state section preserves the original
+> migration direction for context. Apply the dated [Phase 4 implementation review](migration/phase-4/phase-4-implementation-review.md)
+> for reviewed defaults, qualifications, deferrals, and adoption gates; it supersedes the Phase 4
+> technology recommendations while preserving this text as history.
+
 The target state for the Insurance Hub system represents a strategic redesign and technology
 refresh, with a primary goal of future-proofing the platform by modernizing its technical stack,
 leveraging cloud-native best practices, and fundamentally simplifying operations. Key
@@ -169,6 +174,10 @@ characteristics of the target state include:
 
 ## System Context
 
+The diagrams and descriptions in this section are part of the historical target-state proposal.
+The reviewed Phase 4 baseline clarifies the protocol, storage, security, and adjacent-phase
+assumptions in the [implementation review](migration/phase-4/phase-4-implementation-review.md#reviewed-defaults-and-open-gates).
+
 * [Diagram source PlantUML](java-c4-diagrams/context/insurance-hub-system-context-diagram.puml)
 * [Generated diagram on www.plantuml.com](//www.plantuml.com/plantuml/png/ZPD1Szis48Nl_1LRdzoPsBhqr5CInwdTsbEDfEIgWS2bYGe4sDs57FtxOa6AaLcbqni9BDxxiFlmdiMGfCvNFxbWVQeHMf6UVrqioBpUlZXfqounaer1CCYjZTsYzoRecHkMshlTukwNcwKkVNb-MdI61IalRU_qn3UvxLMzuhqBlI7JWNS1vTWZH98sLfKuyGZh8mjsC1w2sfaNBMuYmMFWH2POX8Uqgweb4iTmRLuopZku-hxxGLUkyj87K6A83KYBuAO2DXuP-knhFBos4IoX4MGmeOREX2ofszvPXtnxzNDL3LJNayGsT-FSKua6nyvPYenqS1RvPcSOQs0zNUumgBlmKeYQv3rurw0zMe_AEHbCzk-WeTZ1tobAEHQXDySEWnJOEjfKVlALaOou6Cvuj_VVvFel9jIhPhhVrwlo2Uk1Jubp2L8m7fQVFiDlamhSXunPAbOOQYI6Xytpqs1gn6HIYNfcGj16dVlkJRCtsfBUs1RX3_qjXWVbNGkXwVH6EJ7IHEfqRqdnu6eT17J8dES0EufxfD8xmyTWMueX9eQSlou5PmVQ7SehOe2nyNEMdGdxRSFPuMF-okP6i33dpqZPHiq_kob-Yxlrrs6SFEo3ZwEJWhXEkwZmAWnyaeCcIx2MJ4FgAMOSphKp937accQ0sfHlM2MFFoHw_dh_z1z8kWrioVN28AqHgB5n0JE0iqfAAZvZoAFZxIYNfJ-Da_mHmaSVnv3tIEnOjFOYpPX6h3KXGvIFRuDILIlqfxSxVrPV6FKIiuSgftTwzamlF1WbVDXibklieXupyRFdCAOT-L-4a7HYaz9YTR_UN9OxfNoPTjvnYrpWR0oSbJWhTiO5m4DHdOVuB1sNrR_dzh54ZcU1UvirmknhdNTb4DFqLcZgo_Bd6TGgVfkMqd7ZRVBQzDWqIAK0-NzepxAbaHgRGoZay80yYydK_KdzSV5d5d-FeKwT_mS0)
 * [Explanation of system context and flows](java-c4-diagrams/context/insurance-hub-system-context-analysis.md)
@@ -202,6 +211,10 @@ characteristics of the target state include:
 
 ### Data Stores
 
+The data-store direction below is historical proposal context. See the reviewed
+[PostgreSQL and migrations assessment](migration/phase-4/phase-4-implementation-review.md#postgresql-and-migrations)
+for schema ownership, service-specific dependencies, and the conditions for product consolidation.
+
 | Data Store                  | Java          | Go                 |
 |-----------------------------|---------------|--------------------|
 | Policy Database             | PostgreSQL    | PostgreSQL         |
@@ -214,6 +227,10 @@ characteristics of the target state include:
 [Reasoning for using PostgreSQL with JSONB for storing insurance products](migration/component-replacement-reasoning/replace-mongodb.md)
 
 ### External systems
+
+The external integration choices remain historical proposals until the reviewed
+[service consequences and adoption gates](migration/phase-4/phase-4-implementation-review.md#service-consequences)
+are satisfied.
 
 | External System          | Java         | Go                                              |
 |--------------------------|--------------|-------------------------------------------------|
@@ -229,6 +246,10 @@ characteristics of the target state include:
 [Reasoning for chromedp for generating PDF documents](migration/component-replacement-reasoning/replace-jsreport.md)
 
 ### External Exposure and Interservice Communication
+
+The communication direction below is historical proposal context. The reviewed
+[transport and validation assessment](migration/phase-4/phase-4-implementation-review.md#transport-and-validation)
+defines the interim Java/Go compatibility and contract requirements.
 
 Use gRPC for internal service communication while exposing select services via gRPC-gateway to
 provide HTTP/OpenAPI functionality, combining the performance benefits of gRPC with the universal
@@ -300,6 +321,11 @@ compatibility of REST APIs.
 
 ### Component Migration Strategy
 
+> **Historical component matrix — 29 September 2026.** The original service recommendations are
+> preserved below. Use the reviewed [service consequences](migration/phase-4/phase-4-implementation-review.md#service-consequences)
+> and [previous-versus-reviewed decision matrix](migration/phase-4/phase-4-implementation-review.md#previous-versus-reviewed-decisions)
+> for current Phase 4 guidance.
+
 | Component                 | Current Stack                                    | Go Migration Approach                                                                                                                                                   |
 |---------------------------|--------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **agent-portal-gateway**  | Micronaut Gateway                                | Replaced by [Envoy Proxy](https://www.envoyproxy.io/) for routing and load balancing                                                                                    |
@@ -314,6 +340,11 @@ compatibility of REST APIs.
 | **policy-search-service** | Micronaut + Elasticsearch                        | gRPC service + [olivere/elastic](https://github.com/olivere/elastic)                                                                                                    |
 
 ### Component-Specific Migration Details
+
+The following service descriptions preserve the historical proposal, including its original
+technology and sequencing assumptions. The reviewed [detailed assessments](migration/phase-4/phase-4-implementation-review.md#detailed-assessments)
+and [service consequences](migration/phase-4/phase-4-implementation-review.md#service-consequences)
+identify which recommendations were retained, qualified, replaced, or deferred.
 
 1. **agent-portal-gateway**
 
@@ -475,6 +506,10 @@ compatibility of REST APIs.
 
 ### Architecture Pattern Migrations
 
+> **Historical architecture proposal — 29 September 2026.** Keep the original rows below for
+> traceability. The dated [Phase 4 implementation review](migration/phase-4/phase-4-implementation-review.md)
+> is the reviewed baseline for architecture defaults and open adoption gates.
+
 | Pattern                         | Current (Java/Micronaut)                    | Proposed (Go)                                                                                                            |
 |---------------------------------|---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
 | **Inter-service Communication** | Micronaut HTTP Client (REST, JSON)          | Direct service-to-service gRPC calls with `grpc-go`                                                                      |
@@ -487,6 +522,10 @@ compatibility of REST APIs.
 | **Command/Query Bus**           | Custom Java implementation                  | Go interfaces to define command/query contracts, with handlers implemented using GORM for persistence                    |
 
 ## System Observability
+
+> **Historical observability proposal — 29 September 2026.** The table and descriptions below
+> preserve the original target direction. Consult the reviewed [observability assessment](migration/phase-4/phase-4-implementation-review.md#observability)
+> for Alloy signal routing, health behavior, structured logging, and runtime evidence gates.
 
 * [Diagram source PlantUML](java-c4-diagrams/observability/insurance-hub-observability-container-diagram.puml)
 * [Generated diagram on www.plantuml.com](https://www.plantuml.com/plantuml/png/bLR1Sjis4BthAxQwH9cfhKjFFSLstDgELNkYfEdqebc1QmfZ4E00e1scqt_lBc0YPEGubG-skDxTj-zXyQWt8QAFNMDcFschJ5SHx69imw_BfSV7urh7NRVj0ddbR2GRZvLhbgr1ApL78LP6RvTdlnpTIkZZwdhPO8ZaERGvumhKblnnA_rduLxR5ZqsO3WQ-vR0-RXpirdKqH2KVAWqrf9tvpnSsj1vj8hWejl2kkVk3Hp1MUSzZmCtMvxj0RVQwDXpyfrdVD-fs7cQpLx1YOhEXzaj-U3ieg87Cgub_pFCtmwVbpVy2pbjpj6Lireg86Ia7Q69Eq1RGVIksneAE-TY01r2Hs7-UZRBCsrENMShzFr23nDlM3fkEM4mVmt_p81_NZ5VJx3IoZkXe1K5M0JTj4RVQQeIUJTcnn7LXTUfkcYrg37I8_QCSrAB8BUiAHhuFOU5qXK-u3BXMEoYHCvjz3sqJdF-esPwMmnQCK5KsjQWhKZO44D4xUpyMqZkijiypIou_0Zh_FWydcHmDwrIFtWg7KCRLzSClGVLEgDLFmAxJO6Nu4fEWnPhQcWW-RTkUGC7bljGtbMTYcEi77aHh2GnDsGM6IhmKoHFbH0Bpq1f6M4CbIC_WXBL51hLcQna0ckqrGqQQFBgFiiDUz5X39WZBmAM99P6KGZSUNHcmzLGErBt-nmhNjPlCD_cq0JqdOj6sobioQk9EusOOdMqSzzVbWh3RklGLsFC8VQ33RLe-gXLWD8aGxReenPnARBwGZFVtlzdGDFvlgG5PBIyYMaYycMWTUj5uLFdiWewCEIsYrILcwcSCQII8E98-Hm-NYQla1m25291ow3_Yl-TVuxaERQSJiPJDQspJ20C_iMP2-Liw0o3Nx0AcWsgvKG9oK1F0W8FfXmFte-3dcgPj__UWe32DekanJN7eFTuTuzo1YroAhoJn-HI3sbNeYTic7noPme1QuAjT_VanrXNgx_6P_GALcWxfhqkDt5oK6DyNgVDdJOKX4v9ltOr_2PHmPKFa4lcoT4h_Q0hxb-yJEuvXEZodLTeJ9R2TH4Ky_1ez9V1JaVWJHfpy_Nk2iiKWuiitrc-Nt8e7pxSmhcjad6do6dYBl51R1h-NT13H7alLGLUr7bFsK7ubDi0Hp0Su-NK-cUSz_KDK_PtpIWXBnp_SSDiowlrpH_SNugcndrWRN7YmukBjnvSpAfSPsE1HLc3t7FwmXllooUl8mK9ISkoAfVBcppEr7aFhfwQwE7bnH0FhsSvzYxyT2Mdor6iutro0l9XMCaGCNPbWUVxaXvSN9RhyFBfVXrUNvm5LkNAmebI5B8UvHlcQF7-rFHO5YzVU9FCynDjsRrbgcbbcISBNKmcJ_D2vUHuyrJvWAUuw_N5CXrrJjbli-TAPPOzdvbgCttBZ3LQ9A_AIDdndqKv_zmwdddYvnpcHm5umx1TO_u3)
@@ -600,6 +639,10 @@ stable foundation for the next, minimizing risk throughout the process.
 
 ### Target State
 
+The migration diagrams and target-state sequence below preserve the historical roadmap. The
+reviewed [sequence and coexistence guidance](migration/phase-4/phase-4-implementation-review.md#sequence-and-coexistence)
+controls Phase 4 adoption and does not certify any diagram or phase as implemented.
+
 1. **System Context**
 * [Diagram source PlantUML](go-c4-diagrams/context/insurance-hub-system-context-diagram.puml)
 * [Generated diagram on www.plantuml.com](//www.plantuml.com/plantuml/png/RLDFRo8x3B_pAVnwebA1Gz_fdOfGzLfjgw92jKVaoMIOB4ayIXme--dNra1XHpt6O_ltnxzvo8o9I_2ZVrmqljGMMkOk_pUR9JnCjuxRKfLiaw78DlBKK9Xr7gFEJ3BNtbMpnR-JfPO-Nbzc0JFR9ANDGYS-UThfzb7UkTXXmW3UHSl7pW8bRcaqOiVUmkeeSm5CFmIrmwqsDvJWEUQIC1eBJwM2CMFQMWOXplPsD5hQb2cESIlixk3cqZpNoesKvg02W1hWreBxQiZeROPEQA27GqjWaaMM4iOQ0aPPgP-zCyxcwOrWzIJ7NoisOiurfXBi4OsdKayYijlRE_YV9XLcArkTIIHazix8xjnh5eqzd8jRfGXDyLviQgmv6c-L-1VYXG_ClPSwstJQ1uP2AD4P0QMe_iGQK-r-2wwyj-_BnPM8pUCdZwdwPGrlCbCIiKByJGiCgxwWKbRtamM5JdPMGcNywkBpssp-SmMh-rlzlaoqTxMACUXHUqxRG6NLP4gmaVCTL1Xt_T5E1NMPH6u2JEmQDAmcNzFRORD3jRD38xRyqATYFkvjL9B9Ob3F97miQE4lFWZ1vgn4gaGxGL4-c8_Hj8aYbJpmI-bK9MM60wMT9woXbPeNW04jneIHYRp0hJ6vfe7tucs-jcrzxj67rZLAoHcbcxGPb4w30kU9TgNh0_Pk_Jd9mv1zP1dYTX1RFgVsAhJVf4LPFAtNozLCOp3Poi01ZuAeW0Eai-lBKdcNszF_O4YwWZng2kWYMBr17fgg8ic8xwBp--t3o9tDKOnaEJbPd7lUnqjyzFCmGNqwORvy_Xxf-amlX7K6xezryLylOi6WDyMZfY3h4Hvih4lmVm00)
@@ -611,6 +654,10 @@ stable foundation for the next, minimizing risk throughout the process.
 * [Explanation of system containers and flows](go-c4-diagrams/container/insurance-hub-container-analysis.md)
 
 ### Phase 1: Foundational Infrastructure & Environment Migration (Lift and Shift)
+
+This phase description is historical prerequisite context. For the reviewed deployment assumptions,
+configuration ownership, and infrastructure compatibility gates, see the addendum's
+[deployment comparison](migration/phase-4/phase-4-implementation-review.md#deployment-comparison).
 
 **Goal:** Move the existing Java application to a Kubernetes environment with minimal code changes.
 This validates the new platform and de-risks subsequent, more complex changes.
@@ -648,6 +695,11 @@ dependencies are containerized, and object storage is handled by MinIO. The syst
 providing a stable baseline for the next phases.
 
 ### Phase 2: Foundational Observability
+
+The original observability rollout remains readable below as historical planning context. Use the
+reviewed [observability assessment](migration/phase-4/phase-4-implementation-review.md#observability)
+and [deployment comparison](migration/phase-4/phase-4-implementation-review.md#deployment-comparison)
+for the current Alloy interpretation and its evidence limits.
 
 **Goal:** Centralize tracing data storage to enable a unified view via Grafana and prepare for a
 seamless transition to a modern observability stack, all **without modifying the existing Java
@@ -687,6 +739,11 @@ smooth, zero-code migration to Tempo and lays the groundwork for Go services to 
 traces.
 
 ### Phase 3: Data Store Consolidation
+
+This phase remains historical prerequisite and workflow context. The reviewed
+[PostgreSQL assessment](migration/phase-4/phase-4-implementation-review.md#postgresql-and-migrations)
+and [sequence guidance](migration/phase-4/phase-4-implementation-review.md#sequence-and-coexistence)
+define the evidence required before Phase 4 relies on its data-store outcomes.
 
 **Goal:** Simplify the data layer by migrating product data from MongoDB to PostgreSQL, thereby
 reducing operational complexity and unifying the persistence strategy.
@@ -733,6 +790,13 @@ backups, and data governance. In parallel, Phase 3 establishes the repeatable AI
 engineering recipe that will carry forward into Phase 4.
 
 ### Phase 4: Phased Service Migration to Go (Strangler Fig Pattern)
+
+> **Historical Phase 4 proposal — 29 September 2026.** The per-service process and sequence below
+> are preserved for traceability. The dated [Phase 4 implementation review](migration/phase-4/phase-4-implementation-review.md)
+> supersedes its technical defaults; use the reviewed [service consequences](migration/phase-4/phase-4-implementation-review.md#service-consequences),
+> [sequence and coexistence guidance](migration/phase-4/phase-4-implementation-review.md#sequence-and-coexistence),
+> and [adoption gates](migration/phase-4/phase-4-implementation-review.md#prerequisites-and-adoption-gates)
+> for implementation planning.
 
 **Goal:** Gradually and safely replace the Java microservices with new, efficient Go microservices,
 integrating full observability and modernizing core components along the way.
@@ -804,6 +868,12 @@ observable Go-based microservices architecture, with key legacy components updat
 
 ### Phase 5: Modernize Edge and Authentication, Add Service Mesh
 
+This adjacent-phase description remains historical proposal context. The reviewed
+[security and Phase 5 assessment](migration/phase-4/phase-4-implementation-review.md#security-and-phase-5)
+and [open gates](migration/phase-4/phase-4-implementation-review.md#reviewed-defaults-and-open-gates)
+clarify that identity, edge, mesh, and traffic-shift capabilities are prerequisites or deferred
+adoption work rather than available Phase 4 infrastructure.
+
 **Goal:** Replace the custom Java gateway and authentication service with powerful,
 industry-standard, cloud-native solutions. This phase can run in parallel with Phase 4.
 
@@ -834,6 +904,11 @@ identity management stack, with zero‑trust mTLS and traffic policies inside th
 with cloud-native best practices.
 
 ### Phase 6: Finalization, Automation, and Optimization
+
+This phase remains historical follow-on planning. The reviewed
+[observability assessment](migration/phase-4/phase-4-implementation-review.md#observability)
+and [sequence guidance](migration/phase-4/phase-4-implementation-review.md#sequence-and-coexistence)
+retain later telemetry retirement as conditional work after service migration evidence exists.
 
 **Goal:** Fully decommission legacy components, finalize the observability stack migration, and
 optimize the architecture for performance, security, and cost efficiency.
