@@ -6,9 +6,9 @@ this document from `templates/go-service/` with workspace mode disabled. The mod
 workspace, filesystem replacements, legacy dependencies, database, broker, or collector.
 
 Issue 119 builds the runnable reference and its copy workflow incrementally. This first delivery
-step establishes the versioned Echo contract and authentic generated Go bindings. Runtime wiring,
-validation, lifecycle behavior, telemetry, tests, and the complete copy procedure follow in later
-steps of the same issue.
+step established the versioned Echo contract and authentic generated Go bindings. The scaffold now
+also provides typed configuration, safe structured logging, and optional trace export. Runtime RPC
+wiring, lifecycle behavior, and the complete copy procedure follow in later steps of the same issue.
 
 ## Prerequisites
 
@@ -19,12 +19,12 @@ steps of the same issue.
 The Makefile owns four setup and generation operations. None is an implicit prerequisite of
 another target:
 
-| Target | Purpose and mutations |
-| --- | --- |
-| `make bootstrap-tools` | Installs Buf 1.73.0, protoc-gen-go 1.36.12, and protoc-gen-go-grpc 1.6.2 into ignored `.tools/bin/`. It uses the Go module cache and network when artifacts are not cached. |
-| `make update-proto-deps` | Resolves the Protovalidate schema commit declared in `buf.yaml` and updates only `buf.lock`. It requires the pinned local Buf binary and BSR access unless cached. |
-| `make gen-proto` | Verifies all local tool versions and regenerates `gen/scaffold/v1/example_service.pb.go` and `gen/scaffold/v1/example_service_grpc.pb.go`. It may fetch declared schemas unless cached; it does not install tools or change dependency manifests. |
-| `make update-deps` | Updates only `go.mod` and `go.sum` for generated-code imports at the pinned versions, then tidies the module. It can use the network and Go module cache. |
+| Target                   | Purpose and mutations                                                                                                                                                                                                                             |
+|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `make bootstrap-tools`   | Installs Buf 1.73.0, protoc-gen-go 1.36.12, and protoc-gen-go-grpc 1.6.2 into ignored `.tools/bin/`. It uses the Go module cache and network when artifacts are not cached.                                                                       |
+| `make update-proto-deps` | Resolves the Protovalidate schema commit declared in `buf.yaml` and updates only `buf.lock`. It requires the pinned local Buf binary and BSR access unless cached.                                                                                |
+| `make gen-proto`         | Verifies all local tool versions and regenerates `gen/scaffold/v1/example_service.pb.go` and `gen/scaffold/v1/example_service_grpc.pb.go`. It may fetch declared schemas unless cached; it does not install tools or change dependency manifests. |
+| `make update-deps`       | Updates only `go.mod` and `go.sum` for generated-code imports at the pinned versions, then tidies the module. It can use the network and Go module cache.                                                                                         |
 
 Bootstrap and generate the contract in this explicit order:
 
@@ -42,3 +42,29 @@ managed mode is disabled.
 
 The broader formatting, lint, security, drift, and CI interface belongs to issue 121. Repository
 module/workspace topology enforcement belongs to issue 123.
+
+## Runtime configuration
+
+Settings are read once from the process environment. An explicitly empty setting is invalid unless
+the optional OTLP endpoint is empty while telemetry is disabled. Diagnostics name the setting and
+do not repeat its supplied value.
+
+| Setting                       | Default          | Validation                                                                                                                                                                                                                       |
+|-------------------------------|------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `SERVICE_NAME`                | `go-service`     | Non-empty; change it when copying the scaffold.                                                                                                                                                                                  |
+| `GRPC_ADDR`                   | `127.0.0.1:9090` | Valid host and numeric port; port `0` is available for tests.                                                                                                                                                                    |
+| `HEALTH_ADDR`                 | `127.0.0.1:8080` | Valid host and numeric port; port `0` is available for tests.                                                                                                                                                                    |
+| `LOG_LEVEL`                   | `info`           | A level accepted by `slog.Level`, such as `debug`, `info`, `warn`, `error`, or a documented level offset.                                                                                                                        |
+| `SHUTDOWN_TIMEOUT`            | `10s`            | Positive Go duration.                                                                                                                                                                                                            |
+| `OTEL_ENABLED`                | `false`          | Boolean. Disabled mode creates no exporter and needs no collector.                                                                                                                                                               |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset            | Required when telemetry is enabled. Use an `http` or `https` OTLP/gRPC URL with a host and numeric port, such as `http://127.0.0.1:4317`; do not append `/v1/traces`. Credentials, query parameters, and fragments are rejected. |
+| `OTEL_EXPORTER_OTLP_TIMEOUT`  | `5s`             | Positive Go duration bounding exporter initialization, flush, and shutdown.                                                                                                                                                      |
+
+Logs are JSON and always include `service`. When the supplied context contains a valid span, logs
+also include `trace_id` and `span_id`. Common credential, token, request/response payload, customer,
+policy, and payment attribute keys are redacted recursively. Callers must still keep sensitive data
+out of log messages and deliberately select only safe fields.
+
+Tracing uses W3C trace-context propagation. Enabled mode exports spans over OTLP/gRPC; disabled mode
+is a local no-op. The service lifecycle owns the returned provider and must call its shutdown method
+with the remaining overall shutdown budget.
