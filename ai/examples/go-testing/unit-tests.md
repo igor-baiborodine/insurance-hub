@@ -25,6 +25,8 @@ import (
 
 func TestValidatePeriod(t *testing.T) {
 	t.Parallel()
+
+	// given
 	now := time.Date(2026, time.January, 15, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name       string
@@ -57,8 +59,10 @@ func TestValidatePeriod(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel() // Independent immutable inputs; no process state or storage.
 
+			// when
 			err := validator.ValidatePeriod(now, tc.start, tc.end)
 
+			// then
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
 				return
@@ -71,6 +75,8 @@ func TestValidatePeriod(t *testing.T) {
 
 The input/expected-output table makes the boundary explicit; Go's
 [table-driven testing guidance](https://go.dev/wiki/TableDrivenTests) describes this structure.
+The fixed clock and immutable case table are shared `given` state; each subtest keeps its action and
+assertions under `when` and `then`. Add a subtest-level `given` when a case needs its own setup.
 If the real API obtains time itself, inject a clock at its consuming boundary and fix that clock in
 tests. Do not replace the production function with a test-only copy of its implementation.
 
@@ -105,10 +111,13 @@ func TestLoad_ShutdownTimeout(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			// given
 			t.Setenv("SHUTDOWN_TIMEOUT", tc.value)
 
+			// when
 			got, err := config.Load()
 
+			// then
 			if tc.wantErr {
 				require.Error(t, err)
 				return

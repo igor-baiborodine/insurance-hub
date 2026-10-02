@@ -27,12 +27,19 @@ Use the module's pinned Go and library versions; verify API compatibility before
 2. Choose the smallest useful boundary. Use an external `_test` package for public behavior; use
    the package itself when adapter internals are the intended boundary. Keep unit tests untagged
    unless the module requires otherwise; reserve `integration` for tests needing that explicit gate.
-3. Use fixed data and independent expected results. Do not build the expected response by calling
+3. Use the exact lowercase comments `// given`, `// when`, and `// then` in each test or subtest
+   where the phases are meaningful. Keep scenario setup and mock expectations under `given`, the
+   behavior-triggering operation under `when`, and observations plus interaction verification under
+   `then`. In a table-driven test, shared immutable fixtures may sit under an outer `given`; keep
+   case-specific setup and the `when`/`then` phases in the subtest. Shared setup helpers and trivial
+   tests may omit the markers when a phase would be empty. Never add an empty or artificial block
+   solely to satisfy the pattern.
+4. Use fixed data and independent expected results. Do not build the expected response by calling
    the production mapper being tested. Use `require` for prerequisites before dereferencing values,
    and `assert` for independent comparisons. Match wrapped errors by cause/type, not whole strings.
-4. Allocate mocks and mutable fixtures per subtest. Parallelize only tests without shared process
+5. Allocate mocks and mutable fixtures per subtest. Parallelize only tests without shared process
    state or shared storage. Use `t.Setenv`, `t.TempDir`, `t.Helper`, and `t.Cleanup` where appropriate.
-5. Register resource cleanup immediately, including partial setup failure paths. Send worker errors
+6. Register resource cleanup immediately, including partial setup failure paths. Send worker errors
    to the test goroutine; do not call `Fatal` or `require` from workers. Use channels for ordering
    and timeouts only as failure bounds, not sleeps as synchronization.
 
@@ -64,8 +71,9 @@ The local `campsite-booking-go` reference was inspected at commit `24594b4`. Rel
 - `internal/grpc/server_test.go` and `server_integration_test.go`: mapping and real gRPC calls.
 - `internal/config/config_test.go`: environment-driven configuration.
 
-The examples preserve those useful boundaries but use fixed dates, per-subtest mocks, strict
-argument/call-count expectations, cleanup-backed environment changes, ephemeral ports, RPC
-deadlines, and cleanup registered during setup. They avoid reference-test patterns such as raw
-environment mutation, error-text substring matching, fixed test ports, or fatal assertions in
-server goroutines. Agents do not need a sibling checkout to read these examples.
+The examples preserve those useful boundaries and the reference's explicit given/when/then phase
+comments. They also use fixed dates, per-subtest mocks, strict argument/call-count expectations,
+cleanup-backed environment changes, ephemeral ports, RPC deadlines, and cleanup registered during
+setup. They avoid reference-test patterns such as raw environment mutation, empty phase blocks,
+error-text substring matching, fixed test ports, or fatal assertions in server goroutines. Agents
+do not need a sibling checkout to read these examples.
