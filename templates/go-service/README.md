@@ -7,8 +7,9 @@ workspace, filesystem replacements, legacy dependencies, database, broker, or co
 
 Issue 119 builds the runnable reference and its copy workflow incrementally. This first delivery
 step established the versioned Echo contract and authentic generated Go bindings. The scaffold now
-also provides typed configuration, safe structured logging, and optional trace export. Runtime RPC
-wiring, lifecycle behavior, and the complete copy procedure follow in later steps of the same issue.
+also provides typed configuration, safe structured logging, optional trace export, Echo transport,
+HTTP lifecycle health, and bounded signal-driven shutdown. The complete copy procedure follows in
+a later step of the same issue.
 
 ## Prerequisites
 
@@ -68,6 +69,25 @@ out of log messages and deliberately select only safe fields.
 Tracing uses W3C trace-context propagation. Enabled mode exports spans over OTLP/gRPC; disabled mode
 is a local no-op. The service lifecycle owns the returned provider and must call its shutdown method
 with the remaining overall shutdown budget.
+
+## Run and stop the service
+
+Start the executable from this module root:
+
+```sh
+GOWORK=off go run ./cmd/server
+```
+
+The default gRPC listener is `127.0.0.1:9090`. The separate management listener on
+`127.0.0.1:8080` exposes only `GET /livez` and `GET /readyz`. Liveness returns 200 while the
+management server accepts requests. Readiness returns 200 after both listeners start and 503 once
+shutdown begins. It represents lifecycle state only and does not simulate dependency checks.
+
+An interrupt or `SIGTERM` first withdraws readiness and asks gRPC to stop accepting new work while
+in-flight RPCs drain. Half of `SHUTDOWN_TIMEOUT` is reserved for graceful gRPC drain. The remaining
+budget covers forced gRPC stop when required, management shutdown, and telemetry cleanup;
+management remains reachable during the drain so `/readyz` can report 503. The executable then
+closes management HTTP and telemetry within the original overall deadline.
 
 ## Example RPC
 
