@@ -14,8 +14,10 @@ PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
 
 PROTOBUF_GO_VERSION := v1.36.12
 GRPC_GO_VERSION := v1.84.0
+PROTOVALIDATE_GO_VERSION := v1.4.0
 PROTOVALIDATE_SCHEMA_GO_VERSION := v1.36.12-20260825204119-511051f7f437.1
 OTEL_VERSION := v1.46.0
+OTEL_GRPC_VERSION := v0.71.0
 
 .PHONY: bootstrap-tools update-deps update-proto-deps gen-proto
 
@@ -35,8 +37,10 @@ bootstrap-tools:
 
 update-deps:
 	GOWORK=off $(GO) get \
+		buf.build/go/protovalidate@$(PROTOVALIDATE_GO_VERSION) \
 		buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go@$(PROTOVALIDATE_SCHEMA_GO_VERSION) \
 		go.opentelemetry.io/otel@$(OTEL_VERSION) \
+		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
 		go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@$(OTEL_VERSION) \
 		go.opentelemetry.io/otel/sdk@$(OTEL_VERSION) \
 		google.golang.org/grpc@$(GRPC_GO_VERSION) \

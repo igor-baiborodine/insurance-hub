@@ -68,3 +68,16 @@ out of log messages and deliberately select only safe fields.
 Tracing uses W3C trace-context propagation. Enabled mode exports spans over OTLP/gRPC; disabled mode
 is a local no-op. The service lifecycle owns the returned provider and must call its shutdown method
 with the remaining overall shutdown budget.
+
+## Example RPC
+
+The generated `scaffold.v1.ExampleService` exposes unary `Echo`. A valid request contains a UTF-8
+message from 1 through 128 bytes, and the response returns the same bytes. Protovalidate enforces
+the schema at the gRPC boundary before the Echo handler runs. Empty or oversized input returns
+`InvalidArgument`; cancellation and deadlines keep their gRPC status; unexpected handler failures
+return `Internal` with the stable message `internal error`.
+
+The transport logs neither request/response bodies nor underlying failure details. Its server
+stats handler uses the explicitly supplied tracer provider and W3C propagator, while metrics remain
+disabled through an explicit no-op meter provider. Reflection, profiling, authentication, and
+production exposure are not enabled by this scaffold.
