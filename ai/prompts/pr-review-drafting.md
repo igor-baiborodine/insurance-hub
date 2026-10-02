@@ -49,7 +49,21 @@ Before writing findings:
 5. Load all applicable files under `ai/rules/` and relevant directory/service-local instructions.
    Select language guidance from the files changed; apply Java tests and conventions only to Java
    changes, Go rules to Go changes, and operational/API rules when their area is touched.
-6. Inspect changed source, tests, contracts, generated output, migrations, configuration, and
+6. Build a repository-rule applicability checklist before assessing the implementation. Include
+   root and nested `AGENTS.md` files, `ai/manifest.md`, applicable `ai/rules/`, relevant workflow
+   skills, and `ai/checks/before-merge.md`. For each applicable source, identify the concrete
+   requirements triggered by the ticket and changed paths. Apply the instruction precedence and
+   conflict procedure from root `AGENTS.md`; recognize documented higher-precedence ticket or user
+   exceptions, and do not report the overridden lower-precedence rule as a violation. Treat the
+   checklist as a coverage aid, not a new source of requirements.
+7. Verify compliance with the proposed change and recorded evidence rather than accepting a ticket,
+   delivery tracker, step summary, or PR description's claim that a rule was followed. Review both
+   implementation rules and observable workflow requirements, including artifact isolation,
+   generated-code ownership, module/service boundaries, required documentation, validation entry
+   points and evidence, and change-scope constraints when applicable. Classify every applicable
+   rule area as satisfied, finding identified, or unverified; use not applicable only with a concrete
+   reason. A missing or contradictory execution record is unverified, not a pass.
+8. Inspect changed source, tests, contracts, generated output, migrations, configuration, and
    related existing code needed to verify behavior and repository patterns. For generated code,
    find and review its source definition/configuration and corresponding generation evidence.
    Read relevant Makefiles to understand validation coverage; do not assume a target covers every
@@ -57,7 +71,7 @@ Before writing findings:
    When reporting validation, use the shared per-check result statuses and execution-source fields
    defined by `ai/skills/ticket-post-step-workflow/SKILL.md`. Treat plans as plans, and missing
    execution records as unverified; do not infer a result or execution source.
-7. For contract changes, inspect the authoritative OpenAPI/protobuf/other schema, controllers or
+9. For contract changes, inspect the authoritative OpenAPI/protobuf/other schema, controllers or
    handlers, gateway mappings, callers, and neighboring contracts. Use actual definitions and
    implementation to assess route/RPC names, request/response semantics, status mapping, required
    fields, defaults/nullability, versioning, and compatibility. Never infer a route from generated
@@ -71,9 +85,13 @@ Assess only areas relevant to this ticket and proposed change:
    Identify missing or partial work; do not treat a proposal or plan as delivered behavior.
 2. **Behavior and boundaries:** look for incorrect success/failure behavior, boundary cases,
    validation gaps, unsafe defaults, nil/empty/config handling, and regressions in existing flows.
-3. **Architecture and repository rules:** check layering, dependency direction, module/service
-   boundaries, established naming, and applicable `ai/rules/`. Flag unrelated refactoring or broad
-   behavior changes only when they create real scope or review risk.
+3. **Repository-rule compliance:** check the implementation and delivery evidence against every
+   applicable repository instruction identified in the rule applicability checklist, including
+   process, architecture, dependency direction, module/service boundaries, established naming,
+   generated-code, testing, validation, documentation, artifact, and scope requirements. Report a
+   concrete deviation even when runtime behavior passes. Cite the exact rule path and section and
+   explain how the changed file or missing evidence violates it. Flag unrelated refactoring or
+   broad behavior changes only when they create real scope or review risk.
 4. **API and generated contracts:** check schema/controller/gateway consistency, backward
    compatibility, versioning, documentation, generated output source, and affected callers.
    Reference concrete HTTP method/path or service/RPC only when files establish it.
@@ -112,6 +130,9 @@ Assess only areas relevant to this ticket and proposed change:
 - State the concrete behavior/risk, expected behavior, specific recommendation, and evidence. Cite
   ticket criteria, rule paths, source contract, tests, or established neighboring behavior. Separate
   confirmed defects from missing coverage and questions.
+- A repository-rule finding must name the applicable instruction and show the conflicting changed
+  implementation or missing required evidence. Do not create findings from generic best practices,
+  inapplicable rules, lower-precedence rules superseded by an explicit exception, or personal style.
 - Prefer a few high-confidence findings. Do not report speculative risks as bugs. If a requirement
   or intended behavior is ambiguous, put a concise question under Open Questions.
 - Do not edit production code, tests, or application configuration during review. Do not run
@@ -121,7 +142,10 @@ Assess only areas relevant to this ticket and proposed change:
 
 Use the shared template headings and numbering. If no issues are found, state **None identified**
 under Findings and still record the reviewed scope and material unverified areas. Do not add a
-positive observation merely to fill space.
+positive observation merely to fill space. Under `Review Coverage and Evidence`, add a
+`Repository-rule compliance` entry that lists the applicable instruction/rule paths and classifies
+each rule area as satisfied, finding identified, or unverified. Do not claim blanket repository
+compliance when any applicable area is unverified.
 
 ## Final checks
 
@@ -129,6 +153,9 @@ positive observation merely to fill space.
   to meet. Confirm the named line and recommendation make the issue reproducible and actionable.
 - Check that findings are ordered by severity, open questions are not phrased as confirmed bugs,
   and test gaps are distinct from tests known to fail.
+- Confirm every applicable repository-rule area appears in the compliance entry and that each
+  claimed pass is supported by the inspected implementation or recorded evidence. Reconcile any
+  conflict between ticket evidence and the actual diff in favor of the authoritative source.
 - Confirm the review states whether the working tree was clean and identifies any staged,
   unstaged, and untracked proposed changes reviewed. The end user must review the complete proposed
   change before committing; see `AGENTS.md`.
