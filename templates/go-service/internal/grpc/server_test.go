@@ -25,7 +25,52 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
 )
+
+func TestExampleServiceGeneratedIdentity(t *testing.T) {
+	// given
+	const (
+		wantFile       = "scaffold/v1/example_service.proto"
+		wantPackage    = "scaffold.v1"
+		wantModule     = "github.com/igor-baiborodine/insurance-hub/templates/go-service"
+		wantService    = "scaffold.v1.ExampleService"
+		wantFullMethod = "/scaffold.v1.ExampleService/Echo"
+	)
+	wantGoPackage := wantModule + "/gen/scaffold/v1;scaffoldv1"
+
+	// when
+	descriptor := (&scaffoldv1.EchoRequest{}).ProtoReflect().Descriptor().ParentFile()
+
+	// then
+	if descriptor.Path() != wantFile || string(descriptor.Package()) != wantPackage {
+		t.Errorf(
+			"descriptor identity = (%q, %q), want (%q, %q)",
+			descriptor.Path(),
+			descriptor.Package(),
+			wantFile,
+			wantPackage,
+		)
+	}
+	options, ok := descriptor.Options().(*descriptorpb.FileOptions)
+	if !ok {
+		t.Fatalf("descriptor options type = %T, want *descriptorpb.FileOptions", descriptor.Options())
+	}
+	if options.GetGoPackage() != wantGoPackage {
+		t.Errorf("go_package = %q, want %q", options.GetGoPackage(), wantGoPackage)
+	}
+	service := descriptor.Services().ByName("ExampleService")
+	if service == nil || string(service.FullName()) != wantService {
+		t.Errorf("service descriptor = %v, want %q", service, wantService)
+	}
+	if scaffoldv1.ExampleService_Echo_FullMethodName != wantFullMethod {
+		t.Errorf(
+			"full method = %q, want %q",
+			scaffoldv1.ExampleService_Echo_FullMethodName,
+			wantFullMethod,
+		)
+	}
+}
 
 func TestExampleServiceEchoBoundaries(t *testing.T) {
 	var calls atomic.Int64

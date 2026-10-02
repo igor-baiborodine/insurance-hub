@@ -5,11 +5,9 @@ identity is `github.com/igor-baiborodine/insurance-hub/templates/go-service`. Ru
 this document from `templates/go-service/` with workspace mode disabled. The module has no root
 workspace, filesystem replacements, legacy dependencies, database, broker, or collector.
 
-Issue 119 builds the runnable reference and its copy workflow incrementally. This first delivery
-step established the versioned Echo contract and authentic generated Go bindings. The scaffold now
-also provides typed configuration, safe structured logging, optional trace export, Echo transport,
-HTTP lifecycle health, and bounded signal-driven shutdown. The complete copy procedure follows in
-a later step of the same issue.
+The scaffold provides a versioned Echo contract, authentic generated Go bindings, typed
+configuration, safe structured logging, optional trace export, HTTP lifecycle health, and bounded
+signal-driven shutdown.
 
 ## Prerequisites
 
@@ -43,6 +41,16 @@ managed mode is disabled.
 
 The broader formatting, lint, security, drift, and CI interface belongs to issue 121. Repository
 module/workspace topology enforcement belongs to issue 123.
+
+## Create an independently owned service
+
+Follow [COPYING.md](COPYING.md) to produce a renamed service without importing this scaffold's
+runtime packages or relying on a workspace or filesystem replacement. The procedure updates module,
+runtime, schema, generated-code, and documentation identities together and regenerates protobuf
+bindings rather than editing them.
+
+Repository maintainers own this reference. A copied service owns its code and dependencies and
+adopts later scaffold fixes through normal review; copies do not update automatically.
 
 ## Runtime configuration
 
