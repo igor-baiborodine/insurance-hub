@@ -83,7 +83,14 @@ with the remaining overall shutdown budget.
 Start the executable from this module root:
 
 ```sh
-GOWORK=off go run ./cmd/server
+make run
+```
+
+The owning target disables workspace mode and uses readonly module resolution. Override runtime
+settings in the environment when needed; for example, this selects ephemeral loopback ports:
+
+```sh
+GRPC_ADDR=127.0.0.1:0 HEALTH_ADDR=127.0.0.1:0 make run
 ```
 
 The default gRPC listener is `127.0.0.1:9090`. The separate management listener on

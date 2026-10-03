@@ -19,7 +19,7 @@ PROTOVALIDATE_SCHEMA_GO_VERSION := v1.36.12-20260825204119-511051f7f437.1
 OTEL_VERSION := v1.46.0
 OTEL_GRPC_VERSION := v0.71.0
 
-.PHONY: bootstrap-tools update-deps update-proto-deps gen-proto
+.PHONY: bootstrap-tools update-deps update-proto-deps gen-proto run
 
 bootstrap-tools:
 	mkdir -p "$(TOOLS_BIN)"
@@ -61,3 +61,6 @@ gen-proto:
 		"gen/scaffold/v1/example_service.pb.go" \
 		"gen/scaffold/v1/example_service_grpc.pb.go"
 	$(BUF) generate
+
+run:
+	GOWORK=off $(GO) run -mod=readonly ./cmd/server
