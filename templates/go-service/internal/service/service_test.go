@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -223,6 +224,92 @@ func TestRunForcesGRPCStopAndReservesTelemetryCleanupTime(t *testing.T) {
 	}
 }
 
+func TestRunBoundsSlowCleanupToOverallShutdownBudget(t *testing.T) {
+	// given
+	const shutdownTimeout = 200 * time.Millisecond
+	order := newOrderRecorder()
+	provider := &fakeTelemetryProvider{order: order}
+	provider.shutdownCalled = make(chan struct{})
+	provider.waitForContext = true
+	server := newFakeGRPCServer(order)
+	management := newFakeManagementServer(order)
+	management.waitForContext = true
+	forced := make(chan time.Time, 1)
+	deps := productionDependencies()
+	deps.newTelemetry = func(
+		context.Context,
+		string,
+		config.Telemetry,
+	) (telemetryProvider, error) {
+		return provider, nil
+	}
+	deps.newGRPCServer = func(
+		*slog.Logger,
+		trace.TracerProvider,
+		propagation.TextMapPropagator,
+		transport.Echo,
+	) (grpcServer, error) {
+		return server, nil
+	}
+	deps.newManagement = func(*health.State) managementServer {
+		return management
+	}
+	deps.listen = func(string, string) (net.Listener, error) {
+		return newTrackingListener(nil), nil
+	}
+	deps.after = func(time.Duration) <-chan time.Time {
+		return forced
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() {
+		runResult <- run(ctx, testConfig(shutdownTimeout), discardLogger(), deps)
+	}()
+	receiveSignal(t, server.serveStarted, "gRPC server did not start")
+	receiveSignal(t, management.serveStarted, "management server did not start")
+
+	// when
+	shutdownStarted := time.Now()
+	cancel()
+	receiveSignal(t, server.gracefulStarted, "graceful stop did not start")
+	forced <- time.Now()
+	receiveSignal(t, management.shutdownCalled, "management shutdown did not start")
+	receiveSignal(t, provider.shutdownCalled, "telemetry shutdown did not start")
+	err := receiveErrorWithin(
+		t,
+		runResult,
+		shutdownTimeout+time.Second,
+		"shutdown exceeded the overall budget",
+	)
+	shutdownCompleted := time.Now()
+
+	// then
+	if elapsed := shutdownCompleted.Sub(shutdownStarted); elapsed < shutdownTimeout {
+		t.Errorf("shutdown completed in %v, before the %v overall deadline", elapsed, shutdownTimeout)
+	}
+	if delay := shutdownCompleted.Sub(provider.shutdownDeadline); delay > 250*time.Millisecond {
+		t.Errorf("shutdown completed %v after the overall deadline", delay)
+	}
+	for _, want := range []string{
+		"shutdown management HTTP: context deadline exceeded",
+		"shutdown telemetry: context deadline exceeded",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("run error %q does not contain %q", err, want)
+		}
+	}
+	wantOrder := []string{"gRPC stop", "management shutdown", "telemetry shutdown"}
+	if got := order.values(); !equalStrings(got, wantOrder) {
+		t.Errorf("shutdown order = %v, want %v", got, wantOrder)
+	}
+	if !errors.Is(management.shutdownResult, context.DeadlineExceeded) {
+		t.Errorf("management shutdown result = %v, want deadline exceeded", management.shutdownResult)
+	}
+	if !errors.Is(provider.shutdownResult, context.DeadlineExceeded) {
+		t.Errorf("telemetry shutdown result = %v, want deadline exceeded", provider.shutdownResult)
+	}
+}
+
 func testConfig(timeout time.Duration) config.Config {
 	return config.Config{
 		ServiceName:     "go-service",
@@ -259,10 +346,20 @@ func receiveSignal(t *testing.T, signal <-chan struct{}, failure string) {
 
 func receiveError(t *testing.T, result <-chan error, failure string) error {
 	t.Helper()
+	return receiveErrorWithin(t, result, time.Second, failure)
+}
+
+func receiveErrorWithin(
+	t *testing.T,
+	result <-chan error,
+	timeout time.Duration,
+	failure string,
+) error {
+	t.Helper()
 	select {
 	case err := <-result:
 		return err
-	case <-time.After(time.Second):
+	case <-time.After(timeout):
 		t.Fatal(failure)
 		return nil
 	}
@@ -315,6 +412,8 @@ type fakeTelemetryProvider struct {
 	shutdownErr          error
 	shutdownContextErr   error
 	shutdownDeadline     time.Time
+	shutdownResult       error
+	waitForContext       bool
 	shutdownNotification sync.Once
 }
 
@@ -336,6 +435,12 @@ func (provider *fakeTelemetryProvider) Shutdown(ctx context.Context) error {
 		provider.shutdownCalled = make(chan struct{})
 	}
 	provider.shutdownNotification.Do(func() { close(provider.shutdownCalled) })
+	if provider.waitForContext {
+		<-ctx.Done()
+		provider.shutdownResult = ctx.Err()
+		return provider.shutdownResult
+	}
+	provider.shutdownResult = provider.shutdownErr
 	return provider.shutdownErr
 }
 
@@ -382,14 +487,19 @@ type fakeManagementServer struct {
 	stopNotification   sync.Once
 	shutdownContextErr error
 	shutdownDeadline   time.Time
+	shutdownCalled     chan struct{}
+	shutdownResult     error
+	waitForContext     bool
 }
 
 func newFakeManagementServer(order *orderRecorder) *fakeManagementServer {
-	return &fakeManagementServer{
+	server := &fakeManagementServer{
 		order:        order,
 		serveStarted: make(chan struct{}),
 		stopped:      make(chan struct{}),
 	}
+	server.shutdownCalled = make(chan struct{})
+	return server
 }
 
 func (server *fakeManagementServer) Serve(net.Listener) error {
@@ -402,6 +512,12 @@ func (server *fakeManagementServer) Shutdown(ctx context.Context) error {
 	server.order.add("management shutdown")
 	server.shutdownContextErr = ctx.Err()
 	server.shutdownDeadline, _ = ctx.Deadline()
+	close(server.shutdownCalled)
+	if server.waitForContext {
+		<-ctx.Done()
+		server.shutdownResult = ctx.Err()
+		return server.shutdownResult
+	}
 	server.stopNotification.Do(func() { close(server.stopped) })
 	return nil
 }
