@@ -44,6 +44,7 @@ func TestPolicyRepository_Insert(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			// given
 			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
 			require.NoError(t, err)
 			t.Cleanup(func() {
@@ -75,8 +76,10 @@ func TestPolicyRepository_Insert(t *testing.T) {
 			t.Cleanup(cancel)
 			repo := postgres.NewPolicyRepository(db)
 
+			// when
 			err = repo.Insert(ctx, &domain.Policy{ID: id, Status: "active"})
 
+			// then
 			if tc.cause != nil {
 				require.ErrorIs(t, err, tc.cause)
 				return

@@ -219,7 +219,8 @@ the [Conventional Commits specification (v1.0.0)](https://www.conventionalcommit
     - The **GitHub issue reference** (for example, `issue-6`) is optional but recommended when the
       commit relates to a specific issue or task.
     - The **description** should be very short, concise, and in lowercase without a period at the
-      end.
+      end. A commit that records completion of a tracked delivery step may use sentence case and
+      end with a period.
     - Use imperative mood (like a command) for the description, e.g., "add logging support" not "
       added
       logging support."
@@ -234,7 +235,10 @@ the [Conventional Commits specification (v1.0.0)](https://www.conventionalcommit
 
 3. Details
 
-    - Always write commit messages in **lowercase**.
+    - Always write the commit type and optional issue reference in **lowercase**. Write the
+      description in lowercase except when recording completion of a tracked delivery step; that
+      description may use sentence case and end with a period. All other format and imperative-mood
+      requirements still apply.
     - Commit types commonly used include:
         - `feat`: a new feature
         - `fix`: a bug fix

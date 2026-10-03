@@ -49,6 +49,7 @@ func TestGetPolicyHandler(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			// given
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			t.Cleanup(cancel)
 			repo := domain.NewMockPolicyReader(t)
@@ -61,8 +62,10 @@ func TestGetPolicyHandler(t *testing.T) {
 			}
 			handler := query.NewGetPolicyHandler(repo)
 
+			// when
 			got, err := handler.Handle(ctx, query.GetPolicy{PolicyID: tc.id})
 
+			// then
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
 				assert.Nil(t, got)
@@ -98,6 +101,7 @@ func (f policyReaderFunc) Find(ctx context.Context, id string) (*domain.Policy, 
 }
 
 func TestGetPolicyHandler_CancelsInFlightRead(t *testing.T) {
+	// given
 	ctx, cancel := context.WithCancel(context.Background())
 	started := make(chan struct{})
 	finished := make(chan struct{})
@@ -137,7 +141,11 @@ func TestGetPolicyHandler_CancelsInFlightRead(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("handler did not reach repository")
 	}
+
+	// when
 	cancel()
+
+	// then
 	select {
 	case got := <-results:
 		require.ErrorIs(t, got.err, context.Canceled)

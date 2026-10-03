@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package scaffold.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package =
+  "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1;scaffoldv1";
+
+service ExampleService {
+  rpc Echo(EchoRequest) returns (EchoResponse);
+}
+
+message EchoRequest {
+  string message = 1 [(buf.validate.field).string = {
+    min_bytes: 1
+    max_bytes: 128
+  }];
+}
+
+message EchoResponse {
+  string message = 1;
+}

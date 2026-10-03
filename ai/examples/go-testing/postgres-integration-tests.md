@@ -83,6 +83,7 @@ func newTestDB(t *testing.T) *sql.DB {
 }
 
 func TestPolicyRepository_RejectsStaleUpdate(t *testing.T) {
+	// given
 	db := newTestDB(t)
 	repo := postgres.NewPolicyRepository(db)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -99,8 +100,10 @@ func TestPolicyRepository_RejectsStaleUpdate(t *testing.T) {
 	firstWriter.Status = "cancelled"
 	require.NoError(t, repo.Update(ctx, &firstWriter))
 
+	// when
 	err = repo.Update(ctx, &staleWriter)
 
+	// then
 	require.ErrorIs(t, err, domain.ErrConflict)
 	stored, err := repo.Find(ctx, id)
 	require.NoError(t, err)
