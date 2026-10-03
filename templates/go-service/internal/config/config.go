@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// DefaultServiceName identifies startup diagnostics until configuration has been validated.
+const DefaultServiceName = "go-service"
+
 const (
 	serviceNameSetting     = "SERVICE_NAME"
 	grpcAddressSetting     = "GRPC_ADDR"
@@ -46,7 +49,7 @@ func (address Address) String() string {
 type Telemetry struct {
 	Enabled          bool
 	ExporterEndpoint *url.URL
-	ExporterTimeout time.Duration
+	ExporterTimeout  time.Duration
 }
 
 // Load reads configuration from the process environment.
@@ -57,7 +60,7 @@ func Load() (Config, error) {
 type lookupEnv func(string) (string, bool)
 
 func load(lookup lookupEnv) (Config, error) {
-	serviceName, err := valueOrDefault(lookup, serviceNameSetting, "go-service")
+	serviceName, err := valueOrDefault(lookup, serviceNameSetting, DefaultServiceName)
 	if err != nil {
 		return Config{}, err
 	}

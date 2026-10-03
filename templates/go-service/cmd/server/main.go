@@ -27,9 +27,11 @@ func shutdownContext(parent context.Context) (context.Context, context.CancelFun
 }
 
 func run(ctx context.Context, output io.Writer) error {
+	bootstrapLogger := logger.New(output, config.DefaultServiceName, slog.LevelInfo)
 	settings, err := config.Load()
 	if err != nil {
-		slog.New(slog.NewJSONHandler(output, nil)).Error(
+		bootstrapLogger.ErrorContext(
+			context.Background(),
 			"configuration failed",
 			slog.Any("error", err),
 		)
