@@ -73,6 +73,7 @@ func TestExampleServiceGeneratedIdentity(t *testing.T) {
 }
 
 func TestExampleServiceEchoBoundaries(t *testing.T) {
+	// given
 	var calls atomic.Int64
 	echo := func(ctx context.Context, message string) (string, error) {
 		calls.Add(1)
@@ -120,12 +121,15 @@ func TestExampleServiceEchoBoundaries(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			callsBefore := calls.Load()
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 
+			// when
 			response, err := client.Echo(ctx, &scaffoldv1.EchoRequest{Message: test.message})
 
+			// then
 			if status.Code(err) != test.wantCode {
 				t.Fatalf("status = %v, want %v: %v", status.Code(err), test.wantCode, err)
 			}
@@ -157,6 +161,7 @@ func TestExampleServiceEchoBoundaries(t *testing.T) {
 }
 
 func TestExampleServiceEchoPreservesCancellation(t *testing.T) {
+	// given
 	started := make(chan struct{})
 	echo := func(ctx context.Context, _ string) (string, error) {
 		close(started)
@@ -172,17 +177,24 @@ func TestExampleServiceEchoPreservesCancellation(t *testing.T) {
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
+
+	// when
 	go func() {
 		_, err := client.Echo(ctx, &scaffoldv1.EchoRequest{Message: "cancel"})
 		result <- err
 	}()
 
+	// then
 	select {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("handler did not start")
 	}
+
+	// when
 	cancel()
+
+	// then
 	select {
 	case err := <-result:
 		if status.Code(err) != codes.Canceled {
@@ -194,6 +206,7 @@ func TestExampleServiceEchoPreservesCancellation(t *testing.T) {
 }
 
 func TestExampleServiceEchoPreservesDeadline(t *testing.T) {
+	// given
 	started := make(chan struct{})
 	echo := func(ctx context.Context, _ string) (string, error) {
 		close(started)
@@ -210,11 +223,14 @@ func TestExampleServiceEchoPreservesDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	result := make(chan error, 1)
+
+	// when
 	go func() {
 		_, err := client.Echo(ctx, &scaffoldv1.EchoRequest{Message: "deadline"})
 		result <- err
 	}()
 
+	// then
 	select {
 	case <-started:
 	case <-time.After(time.Second):
@@ -231,6 +247,7 @@ func TestExampleServiceEchoPreservesDeadline(t *testing.T) {
 }
 
 func TestExampleServiceEchoMapsInternalFailureAndPropagatesTrace(t *testing.T) {
+	// given
 	const (
 		payloadMarker = "payload-marker"
 		privateMarker = "private-adapter-marker"
@@ -255,9 +272,11 @@ func TestExampleServiceEchoMapsInternalFailureAndPropagatesTrace(t *testing.T) {
 	parentCtx, parentSpan := tracerProvider.Tracer("test").Start(context.Background(), "parent")
 	parentSpanContext := parentSpan.SpanContext()
 
+	// when
 	response, err := client.Echo(parentCtx, &scaffoldv1.EchoRequest{Message: payloadMarker})
 	parentSpan.End()
 
+	// then
 	if status.Code(err) != codes.Internal {
 		t.Fatalf("status = %v, want Internal: %v", status.Code(err), err)
 	}
@@ -302,6 +321,7 @@ func TestExampleServiceEchoMapsInternalFailureAndPropagatesTrace(t *testing.T) {
 }
 
 func TestNewServerRejectsMissingDependencies(t *testing.T) {
+	// given
 	log := logger.New(new(bytes.Buffer), "go-service", 0)
 	tracerProvider := noop.NewTracerProvider()
 	propagator := propagation.TraceContext{}
@@ -319,6 +339,7 @@ func TestNewServerRejectsMissingDependencies(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			selectedLogger := log
 			selectedTracer := trace.TracerProvider(tracerProvider)
 			selectedPropagator := propagation.TextMapPropagator(propagator)
@@ -336,12 +357,15 @@ func TestNewServerRejectsMissingDependencies(t *testing.T) {
 				selectedEcho = nil
 			}
 
+			// when
 			server, err := transport.NewServer(
 				selectedLogger,
 				selectedTracer,
 				selectedPropagator,
 				selectedEcho,
 			)
+
+			// then
 			if err == nil || server != nil {
 				t.Fatalf("NewServer() = (%v, %v), want (nil, error)", server, err)
 			}

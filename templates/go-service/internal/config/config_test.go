@@ -8,7 +8,13 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	got, err := load(mapLookup(nil))
+	// given
+	lookup := mapLookup(nil)
+
+	// when
+	got, err := load(lookup)
+
+	// then
 	if err != nil {
 		t.Fatalf("load defaults: %v", err)
 	}
@@ -40,6 +46,7 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadValidOverrides(t *testing.T) {
+	// given
 	values := map[string]string{
 		serviceNameSetting:     "copy-service",
 		grpcAddressSetting:     "[::1]:0",
@@ -51,7 +58,10 @@ func TestLoadValidOverrides(t *testing.T) {
 		otelTimeoutSetting:     "750ms",
 	}
 
+	// when
 	got, err := load(mapLookup(values))
+
+	// then
 	if err != nil {
 		t.Fatalf("load overrides: %v", err)
 	}
@@ -73,6 +83,7 @@ func TestLoadValidOverrides(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
+	// given
 	const privateMarker = "private-marker"
 	tests := []struct {
 		name    string
@@ -80,84 +91,84 @@ func TestLoadRejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
 		setting string
 	}{
 		{
-			name: "empty service",
-			values: map[string]string{serviceNameSetting: ""},
+			name:    "empty service",
+			values:  map[string]string{serviceNameSetting: ""},
 			setting: serviceNameSetting,
 		},
 		{
-			name: "empty grpc address",
-			values: map[string]string{grpcAddressSetting: ""},
+			name:    "empty grpc address",
+			values:  map[string]string{grpcAddressSetting: ""},
 			setting: grpcAddressSetting,
 		},
 		{
-			name: "malformed grpc address",
-			values: map[string]string{grpcAddressSetting: privateMarker},
+			name:    "malformed grpc address",
+			values:  map[string]string{grpcAddressSetting: privateMarker},
 			setting: grpcAddressSetting,
 		},
 		{
-			name: "malformed health address",
-			values: map[string]string{healthAddressSetting: "localhost"},
+			name:    "malformed health address",
+			values:  map[string]string{healthAddressSetting: "localhost"},
 			setting: healthAddressSetting,
 		},
 		{
-			name: "empty log level",
-			values: map[string]string{logLevelSetting: ""},
+			name:    "empty log level",
+			values:  map[string]string{logLevelSetting: ""},
 			setting: logLevelSetting,
 		},
 		{
-			name: "unsupported log level",
-			values: map[string]string{logLevelSetting: privateMarker},
+			name:    "unsupported log level",
+			values:  map[string]string{logLevelSetting: privateMarker},
 			setting: logLevelSetting,
 		},
 		{
-			name: "empty shutdown timeout",
-			values: map[string]string{shutdownTimeoutSetting: ""},
+			name:    "empty shutdown timeout",
+			values:  map[string]string{shutdownTimeoutSetting: ""},
 			setting: shutdownTimeoutSetting,
 		},
 		{
-			name: "invalid shutdown timeout",
-			values: map[string]string{shutdownTimeoutSetting: "later"},
+			name:    "invalid shutdown timeout",
+			values:  map[string]string{shutdownTimeoutSetting: "later"},
 			setting: shutdownTimeoutSetting,
 		},
 		{
-			name: "zero shutdown timeout",
-			values: map[string]string{shutdownTimeoutSetting: "0s"},
+			name:    "zero shutdown timeout",
+			values:  map[string]string{shutdownTimeoutSetting: "0s"},
 			setting: shutdownTimeoutSetting,
 		},
 		{
-			name: "empty telemetry flag",
-			values: map[string]string{otelEnabledSetting: ""},
+			name:    "empty telemetry flag",
+			values:  map[string]string{otelEnabledSetting: ""},
 			setting: otelEnabledSetting,
 		},
 		{
-			name: "invalid telemetry flag",
-			values: map[string]string{otelEnabledSetting: privateMarker},
+			name:    "invalid telemetry flag",
+			values:  map[string]string{otelEnabledSetting: privateMarker},
 			setting: otelEnabledSetting,
 		},
 		{
-			name: "empty exporter timeout",
-			values: map[string]string{otelTimeoutSetting: ""},
+			name:    "empty exporter timeout",
+			values:  map[string]string{otelTimeoutSetting: ""},
 			setting: otelTimeoutSetting,
 		},
 		{
-			name: "negative exporter timeout",
-			values: map[string]string{otelTimeoutSetting: "-1s"},
+			name:    "negative exporter timeout",
+			values:  map[string]string{otelTimeoutSetting: "-1s"},
 			setting: otelTimeoutSetting,
 		},
 		{
-			name: "missing enabled endpoint",
-			values: map[string]string{otelEnabledSetting: "true"},
+			name:    "missing enabled endpoint",
+			values:  map[string]string{otelEnabledSetting: "true"},
 			setting: otelEndpointSetting,
 		},
 		{
-			name: "empty enabled endpoint",
-			values: map[string]string{otelEnabledSetting: "true", otelEndpointSetting: ""},
+			name:    "empty enabled endpoint",
+			values:  map[string]string{otelEnabledSetting: "true", otelEndpointSetting: ""},
 			setting: otelEndpointSetting,
 		},
 		{
 			name: "endpoint credentials",
 			values: map[string]string{
-				otelEnabledSetting: "true",
+				otelEnabledSetting:  "true",
 				otelEndpointSetting: "http://user:" + privateMarker + "@127.0.0.1:4317",
 			},
 			setting: otelEndpointSetting,
@@ -165,7 +176,7 @@ func TestLoadRejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
 		{
 			name: "endpoint HTTP trace path",
 			values: map[string]string{
-				otelEnabledSetting: "true",
+				otelEnabledSetting:  "true",
 				otelEndpointSetting: "http://127.0.0.1:4317/v1/traces?token=" + privateMarker,
 			},
 			setting: otelEndpointSetting,
@@ -173,7 +184,7 @@ func TestLoadRejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
 		{
 			name: "endpoint unsupported scheme",
 			values: map[string]string{
-				otelEnabledSetting: "true",
+				otelEnabledSetting:  "true",
 				otelEndpointSetting: "ftp://" + privateMarker + ":4317",
 			},
 			setting: otelEndpointSetting,
@@ -181,7 +192,7 @@ func TestLoadRejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
 		{
 			name: "endpoint missing port",
 			values: map[string]string{
-				otelEnabledSetting: "true",
+				otelEnabledSetting:  "true",
 				otelEndpointSetting: "http://" + privateMarker,
 			},
 			setting: otelEndpointSetting,
@@ -190,7 +201,13 @@ func TestLoadRejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := load(mapLookup(test.values))
+			// given
+			lookup := mapLookup(test.values)
+
+			// when
+			_, err := load(lookup)
+
+			// then
 			if err == nil {
 				t.Fatal("load returned nil error")
 			}
@@ -205,7 +222,13 @@ func TestLoadRejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
 }
 
 func TestLoadAllowsEmptyEndpointWhenTelemetryIsDisabled(t *testing.T) {
-	got, err := load(mapLookup(map[string]string{otelEndpointSetting: ""}))
+	// given
+	lookup := mapLookup(map[string]string{otelEndpointSetting: ""})
+
+	// when
+	got, err := load(lookup)
+
+	// then
 	if err != nil {
 		t.Fatalf("load disabled telemetry: %v", err)
 	}

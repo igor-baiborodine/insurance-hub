@@ -25,6 +25,7 @@ import (
 )
 
 func TestRunWithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
+	// given
 	settings := testConfig(time.Second)
 	deps := productionDependencies()
 	addresses := make(chan string, 2)
@@ -43,6 +44,7 @@ func TestRunWithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
 		return message, nil
 	}
 
+	// when
 	ctx, cancel := context.WithCancel(context.Background())
 	runResult := make(chan error, 1)
 	go func() {
@@ -52,9 +54,12 @@ func TestRunWithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
 	healthAddress := receiveString(t, addresses)
 	healthURL := "http://" + healthAddress
 	httpClient := &http.Client{Timeout: time.Second}
+
+	// then
 	waitForHTTPStatus(t, httpClient, healthURL+"/readyz", http.StatusOK)
 	assertHTTPStatus(t, httpClient, healthURL+"/livez", http.StatusOK)
 
+	// when
 	connection, err := grpcgo.NewClient(
 		grpcAddress,
 		grpcgo.WithTransportCredentials(insecure.NewCredentials()),
@@ -79,9 +84,14 @@ func TestRunWithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
 		}
 		rpcResult <- err
 	}()
+
+	// then
 	receiveSignal(t, handlerStarted, "Echo handler did not start")
 
+	// when
 	cancel()
+
+	// then
 	waitForHTTPStatus(t, httpClient, healthURL+"/readyz", http.StatusServiceUnavailable)
 	assertHTTPStatus(t, httpClient, healthURL+"/livez", http.StatusOK)
 	select {
@@ -90,7 +100,10 @@ func TestRunWithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
 	default:
 	}
 
+	// when
 	close(releaseHandler)
+
+	// then
 	if err := receiveError(t, rpcResult, "in-flight RPC did not drain"); err != nil {
 		t.Fatalf("drained RPC: %v", err)
 	}
@@ -100,6 +113,7 @@ func TestRunWithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
 }
 
 func TestRunCleansUpAfterLaterStartupFailureAndPreservesErrors(t *testing.T) {
+	// given
 	listenErr := errors.New("health listen failed")
 	closeErr := errors.New("gRPC listener close failed")
 	telemetryErr := errors.New("telemetry cleanup failed")
@@ -131,7 +145,10 @@ func TestRunCleansUpAfterLaterStartupFailureAndPreservesErrors(t *testing.T) {
 		return nil, listenErr
 	}
 
+	// when
 	err := run(context.Background(), testConfig(time.Second), discardLogger(), deps)
+
+	// then
 	for _, want := range []error{listenErr, closeErr, telemetryErr} {
 		if !errors.Is(err, want) {
 			t.Errorf("run error %v does not preserve %v", err, want)
@@ -145,6 +162,7 @@ func TestRunCleansUpAfterLaterStartupFailureAndPreservesErrors(t *testing.T) {
 }
 
 func TestRunForcesGRPCStopAndReservesTelemetryCleanupTime(t *testing.T) {
+	// given
 	const shutdownTimeout = 8 * time.Second
 	order := newOrderRecorder()
 	provider := &fakeTelemetryProvider{order: order}
@@ -181,18 +199,24 @@ func TestRunForcesGRPCStopAndReservesTelemetryCleanupTime(t *testing.T) {
 		return forced
 	}
 
+	// when
 	ctx, cancel := context.WithCancel(context.Background())
 	runResult := make(chan error, 1)
 	go func() {
 		runResult <- run(ctx, testConfig(shutdownTimeout), discardLogger(), deps)
 	}()
+
+	// then
 	receiveSignal(t, server.serveStarted, "gRPC server did not start")
 	receiveSignal(t, management.serveStarted, "management server did not start")
 	waitForReadyState(t, state, true)
 
+	// when
 	cancel()
 	receiveSignal(t, server.gracefulStarted, "graceful stop did not start")
 	forced <- time.Now()
+
+	// then
 	if err := receiveError(t, runResult, "forced shutdown did not complete"); err != nil {
 		t.Fatalf("run service: %v", err)
 	}

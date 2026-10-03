@@ -16,38 +16,61 @@ import (
 )
 
 func TestNewDisabledDoesNotCreateExporter(t *testing.T) {
+	// given
+	settings := config.Telemetry{Enabled: false, ExporterTimeout: time.Second}
+
+	// when
 	provider, err := New(
 		context.Background(),
 		"go-service",
-		config.Telemetry{Enabled: false, ExporterTimeout: time.Second},
+		settings,
 	)
+
+	// then
 	if err != nil {
 		t.Fatalf("new disabled provider: %v", err)
 	}
 
+	// when
 	_, span := provider.TracerProvider().Tracer("test").Start(context.Background(), "disabled")
+
+	// then
 	if span.IsRecording() {
 		t.Error("disabled span is recording")
 	}
+
+	// when
 	span.End()
-	if err := provider.Shutdown(context.Background()); err != nil {
-		t.Errorf("shutdown disabled provider: %v", err)
+	shutdownErr := provider.Shutdown(context.Background())
+
+	// then
+	if shutdownErr != nil {
+		t.Errorf("shutdown disabled provider: %v", shutdownErr)
 	}
 }
 
 func TestProviderExportsSpansWithServiceIdentity(t *testing.T) {
+	// given
 	exporter := newRecordingExporter()
 	provider := enabledProvider(t, exporter, time.Second)
+
+	// when
 	ctx, span := provider.TracerProvider().Tracer("test").Start(context.Background(), "exported")
+
+	// then
 	if !span.IsRecording() {
 		t.Fatal("enabled span is not recording")
 	}
-	span.End()
 
-	if err := provider.ForceFlush(ctx); err != nil {
-		t.Fatalf("force flush: %v", err)
-	}
+	// when
+	span.End()
+	flushErr := provider.ForceFlush(ctx)
 	exported := receiveSpans(t, exporter.exported)
+
+	// then
+	if flushErr != nil {
+		t.Fatalf("force flush: %v", flushErr)
+	}
 	if len(exported) != 1 || exported[0].Name() != "exported" {
 		t.Fatalf("unexpected exported spans: %#v", exported)
 	}
@@ -61,8 +84,12 @@ func TestProviderExportsSpansWithServiceIdentity(t *testing.T) {
 		t.Errorf("service.name = %q, want go-service", serviceName)
 	}
 
-	if err := provider.Shutdown(context.Background()); err != nil {
-		t.Fatalf("shutdown: %v", err)
+	// when
+	shutdownErr := provider.Shutdown(context.Background())
+
+	// then
+	if shutdownErr != nil {
+		t.Fatalf("shutdown: %v", shutdownErr)
 	}
 	select {
 	case <-exporter.shutdown:
@@ -72,6 +99,7 @@ func TestProviderExportsSpansWithServiceIdentity(t *testing.T) {
 }
 
 func TestProviderPropagatesW3CTraceContext(t *testing.T) {
+	// given
 	provider, err := newProvider(
 		context.Background(),
 		"go-service",
@@ -87,33 +115,37 @@ func TestProviderPropagatesW3CTraceContext(t *testing.T) {
 		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
 	spanID := trace.SpanID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18}
 	spanContext := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID: traceID,
-		SpanID: spanID,
+		TraceID:    traceID,
+		SpanID:     spanID,
 		TraceFlags: trace.FlagsSampled,
 	})
 	ctx := trace.ContextWithSpanContext(context.Background(), spanContext)
 	carrier := propagation.MapCarrier{}
 
+	// when
 	provider.Propagator().Inject(ctx, carrier)
+	extracted := trace.SpanContextFromContext(
+		provider.Propagator().Extract(context.Background(), carrier),
+	)
 
+	// then
 	wantHeader := "00-" + traceID.String() + "-" + spanID.String() + "-01"
 	if carrier.Get("traceparent") != wantHeader {
 		t.Fatalf("traceparent = %q, want %q", carrier.Get("traceparent"), wantHeader)
 	}
-	extracted := trace.SpanContextFromContext(
-		provider.Propagator().Extract(context.Background(), carrier),
-	)
 	if extracted.TraceID() != traceID || extracted.SpanID() != spanID || !extracted.IsRemote() {
 		t.Errorf("unexpected extracted span context: %v", extracted)
 	}
 }
 
 func TestProviderBoundsExporterInitializationAndHidesCauseDetails(t *testing.T) {
+	// given
 	const privateMarker = "private-marker"
 	cause := errors.New(privateMarker)
 	settings := testTelemetrySettings(25 * time.Millisecond)
 	started := make(chan struct{})
 
+	// when
 	start := time.Now()
 	_, err := newProvider(
 		context.Background(),
@@ -126,6 +158,8 @@ func TestProviderBoundsExporterInitializationAndHidesCauseDetails(t *testing.T) 
 		},
 	)
 	elapsed := time.Since(start)
+
+	// then
 	if err == nil {
 		t.Fatal("new provider returned nil error")
 	}
@@ -146,8 +180,9 @@ func TestProviderBoundsExporterInitializationAndHidesCauseDetails(t *testing.T) 
 }
 
 func TestProviderShutdownIsBoundedWhenExporterIsUnavailable(t *testing.T) {
+	// given
 	exporter := &blockingExporter{
-		started: make(chan struct{}),
+		started:  make(chan struct{}),
 		shutdown: make(chan struct{}),
 	}
 	provider := enabledProvider(t, exporter, time.Second)
@@ -157,10 +192,13 @@ func TestProviderShutdownIsBoundedWhenExporterIsUnavailable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	result := make(chan error, 1)
+
+	// when
 	go func() {
 		result <- provider.Shutdown(ctx)
 	}()
 
+	// then
 	select {
 	case <-exporter.started:
 	case <-time.After(time.Second):
@@ -182,6 +220,7 @@ func TestProviderShutdownIsBoundedWhenExporterIsUnavailable(t *testing.T) {
 }
 
 func TestProviderDoesNotBlockSpanCompletionDuringExporterOutage(t *testing.T) {
+	// given
 	exporter := &blockingExporter{
 		started:  make(chan struct{}),
 		shutdown: make(chan struct{}),
@@ -193,42 +232,57 @@ func TestProviderDoesNotBlockSpanCompletionDuringExporterOutage(t *testing.T) {
 
 	flushContext, cancelFlush := context.WithCancel(context.Background())
 	flushResult := make(chan error, 1)
+
+	// when
 	go func() {
 		flushResult <- provider.ForceFlush(flushContext)
 	}()
+
+	// then
 	select {
 	case <-exporter.started:
 	case <-time.After(time.Second):
 		t.Fatal("export did not start")
 	}
 
+	// when
 	spanEnded := make(chan struct{})
 	go func() {
 		_, secondSpan := tracer.Start(context.Background(), "second")
 		secondSpan.End()
 		close(spanEnded)
 	}()
+
+	// then
 	select {
 	case <-spanEnded:
 	case <-time.After(time.Second):
 		t.Fatal("span completion blocked on unavailable exporter")
 	}
 
+	// when
 	cancelFlush()
+
+	// then
 	select {
 	case <-flushResult:
 	case <-time.After(time.Second):
 		t.Fatal("force flush exceeded cancellation bound")
 	}
 
+	// when
 	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancelShutdown()
-	if err := provider.Shutdown(shutdownContext); err == nil {
+	shutdownErr := provider.Shutdown(shutdownContext)
+
+	// then
+	if shutdownErr == nil {
 		t.Fatal("shutdown returned nil error")
 	}
 }
 
 func TestNewRejectsInvalidEnabledSettings(t *testing.T) {
+	// given
 	tests := []struct {
 		name        string
 		serviceName string
@@ -247,22 +301,31 @@ func TestNewRejectsInvalidEnabledSettings(t *testing.T) {
 			name:        "non-positive timeout",
 			serviceName: "go-service",
 			settings: config.Telemetry{
-				Enabled: true,
+				Enabled:          true,
 				ExporterEndpoint: mustURL("http://127.0.0.1:4317"),
 			},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// given
+			newExporter := func(
+				context.Context,
+				config.Telemetry,
+			) (sdktrace.SpanExporter, error) {
+				t.Fatal("invalid settings created an exporter")
+				return nil, nil
+			}
+
+			// when
 			_, err := newProvider(
 				context.Background(),
 				test.serviceName,
 				test.settings,
-				func(context.Context, config.Telemetry) (sdktrace.SpanExporter, error) {
-					t.Fatal("invalid settings created an exporter")
-					return nil, nil
-				},
+				newExporter,
 			)
+
+			// then
 			if err == nil {
 				t.Fatal("new provider returned nil error")
 			}

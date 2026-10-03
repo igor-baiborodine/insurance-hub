@@ -13,12 +13,15 @@ import (
 )
 
 func TestNewWritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
+	// given
 	var output bytes.Buffer
 	log := logger.New(&output, "go-service", slog.LevelInfo)
 
+	// when
 	log.DebugContext(context.Background(), "filtered")
 	log.InfoContext(context.Background(), "started", slog.String("component", "test"))
 
+	// then
 	entries := decodeEntries(t, output.String())
 	if len(entries) != 1 {
 		t.Fatalf("entry count = %d, want 1", len(entries))
@@ -31,19 +34,22 @@ func TestNewWritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
 }
 
 func TestNewAddsTraceCorrelationFromContext(t *testing.T) {
+	// given
 	traceID := trace.TraceID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
 	spanID := trace.SpanID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18}
 	spanContext := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID: traceID,
-		SpanID: spanID,
+		TraceID:    traceID,
+		SpanID:     spanID,
 		TraceFlags: trace.FlagsSampled,
 	})
 	ctx := trace.ContextWithSpanContext(context.Background(), spanContext)
 	var output bytes.Buffer
 
+	// when
 	logger.New(&output, "go-service", slog.LevelInfo).InfoContext(ctx, "correlated")
 
+	// then
 	entries := decodeEntries(t, output.String())
 	if len(entries) != 1 {
 		t.Fatalf("entry count = %d, want 1", len(entries))
@@ -54,12 +60,15 @@ func TestNewAddsTraceCorrelationFromContext(t *testing.T) {
 }
 
 func TestNewRedactsSensitiveAttributesAtEveryLevel(t *testing.T) {
+	// given
 	const privateMarker = "private-marker"
 	var output bytes.Buffer
 	log := logger.New(&output, "go-service", slog.LevelDebug).With(
 		slog.String("accessToken", privateMarker),
 	)
 	levels := []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}
+
+	// when
 	for _, level := range levels {
 		log.Log(context.Background(), level, "safe message",
 			slog.String("request_payload", privateMarker),
@@ -68,6 +77,7 @@ func TestNewRedactsSensitiveAttributesAtEveryLevel(t *testing.T) {
 		)
 	}
 
+	// then
 	if strings.Contains(output.String(), privateMarker) {
 		t.Fatalf("captured logs expose private marker: %s", output.String())
 	}

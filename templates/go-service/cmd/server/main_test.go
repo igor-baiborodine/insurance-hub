@@ -52,11 +52,16 @@ func TestRunLogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 }
 
 func TestShutdownContextHandlesSIGTERM(t *testing.T) {
+	// given
 	ctx, stop := shutdownContext(context.Background())
 	defer stop()
+
+	// when
 	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 		t.Fatalf("send SIGTERM: %v", err)
 	}
+
+	// then
 	select {
 	case <-ctx.Done():
 	case <-time.After(time.Second):
