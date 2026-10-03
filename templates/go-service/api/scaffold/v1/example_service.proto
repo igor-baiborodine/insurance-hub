@@ -21,4 +21,3 @@ message EchoRequest {
 message EchoResponse {
   string message = 1;
 }
-
