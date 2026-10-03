@@ -57,4 +57,7 @@ gen-proto:
 		"protoc-gen-go $(PROTOC_GEN_GO_VERSION)"
 	@test "$$($(PROTOC_GEN_GO_GRPC) --version)" = \
 		"protoc-gen-go-grpc $(patsubst v%,%,$(PROTOC_GEN_GO_GRPC_VERSION))"
+	rm -f \
+		"gen/scaffold/v1/example_service.pb.go" \
+		"gen/scaffold/v1/example_service_grpc.pb.go"
 	$(BUF) generate

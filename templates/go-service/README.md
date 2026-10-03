@@ -22,7 +22,7 @@ another target:
 |--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `make bootstrap-tools`   | Installs Buf 1.73.0, protoc-gen-go 1.36.12, and protoc-gen-go-grpc 1.6.2 into ignored `.tools/bin/`. It uses the Go module cache and network when artifacts are not cached.                                                                       |
 | `make update-proto-deps` | Resolves the Protovalidate schema commit declared in `buf.yaml` and updates only `buf.lock`. It requires the pinned local Buf binary and BSR access unless cached.                                                                                |
-| `make gen-proto`         | Verifies all local tool versions and regenerates `gen/scaffold/v1/example_service.pb.go` and `gen/scaffold/v1/example_service_grpc.pb.go`. It may fetch declared schemas unless cached; it does not install tools or change dependency manifests. |
+| `make gen-proto`         | Verifies all local tool versions, removes and regenerates only `gen/scaffold/v1/example_service.pb.go` and `gen/scaffold/v1/example_service_grpc.pb.go`. It may fetch declared schemas unless cached; it does not install tools or change other files under `gen/` or dependency manifests. |
 | `make update-deps`       | Updates only `go.mod` and `go.sum` for generated-code imports at the pinned versions, then tidies the module. It can use the network and Go module cache.                                                                                         |
 
 Bootstrap and generate the contract in this explicit order:
@@ -35,9 +35,9 @@ GOWORK=off make update-deps
 ```
 
 The generators are resolved by explicit paths under `.tools/bin/`; changing the process `PATH` is
-not required. `gen-proto` cleans its configured `gen/` output before generation, so generated files
-must never be edited by hand. The checked-in schema keeps its Go package identity explicit and Buf
-managed mode is disabled.
+not required. `gen-proto` removes only its two declared bindings before generation and leaves every
+other path under `gen/` untouched. Generated files must never be edited by hand. The checked-in
+schema keeps its Go package identity explicit, and Buf managed mode is disabled.
 
 The broader formatting, lint, security, drift, and CI interface belongs to issue 121. Repository
 module/workspace topology enforcement belongs to issue 123.

@@ -89,8 +89,9 @@ sed -i 's/^# Go service scaffold$/# Example copy service/' README.md
 
 Review `README.md` and replace the template introduction with the real service purpose when it is
 known. Update any service-specific ports or configuration defaults required by the service ticket.
-The current `buf.gen.yaml` output root and Makefile recipes are identity-neutral; do not change them
-unless the schema layout or tooling contract changes.
+The replacements above update the two Makefile-owned generated paths. The `buf.gen.yaml` output
+root remains identity-neutral; do not change it unless the schema layout or tooling contract
+changes.
 
 ## 3. Bootstrap dependencies and regenerate bindings
 

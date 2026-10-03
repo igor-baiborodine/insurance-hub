@@ -1,5 +1,4 @@
 version: v2
-clean: true
 managed:
   enabled: false
 plugins:
@@ -11,4 +10,3 @@ plugins:
     out: gen
     opt:
       - paths=source_relative
-
