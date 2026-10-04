@@ -79,6 +79,10 @@ Use a spec-first workflow for non-trivial changes:
 6. Run validation appropriate to the changed modules.
 7. Summarize what changed, what was verified, and what remains.
 
+For pull request or proposed-change reviews, use `ai/skills/code-review/SKILL.md`. The
+`.github/skills/code-review/SKILL.md` file is the GitHub Copilot discovery adapter for the same
+canonical workflow.
+
 For small mechanical changes, keep the workflow lightweight, but still read relevant local code before editing and validate the result.
 
 ## Repository Conventions
