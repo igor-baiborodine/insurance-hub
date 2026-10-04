@@ -28,7 +28,10 @@ Tool-specific files should be thin pointers into the canonical framework.
 - `.continue/rules/CONTINUE.md` is the Continue adapter for repository rules only.
 - `.github/skills/code-review/SKILL.md` is the GitHub Copilot discovery adapter for the canonical
   code-review workflow under `ai/skills/`.
-- `.github/copilot-instructions.md` routes GitHub Copilot reviews to that adapter.
+- `.github/skills/pr-description/SKILL.md` is the GitHub Copilot discovery adapter for the
+  canonical PR-description workflow under `ai/skills/`.
+- `.github/copilot-instructions.md` routes GitHub Copilot reviews and PR-description work to the
+  corresponding adapters.
 
 These files must redirect to `AGENTS.md` and `ai/`; they must not become an independent rule system.
 

@@ -26,6 +26,7 @@ Treat files in `ai/rules/` as task-specific or repository working rules that sup
 
 Treat files in `ai/skills/` as canonical reusable workflow instructions. Apply them when the task
 matches the skill name and description, observe relationships between selected skills, and treat
-`.github/skills/` files only as vendor discovery adapters.
+`.github/skills/` files only as vendor discovery adapters. For GitHub-hosted work, select the
+skill's GitHub mode; for checkout-local artifacts, select its local mode when provided.
 
 When using a shared rule or skill, briefly mention it in working notes so the applied guidance is visible.
