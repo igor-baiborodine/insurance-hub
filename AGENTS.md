@@ -81,6 +81,27 @@ Use a spec-first workflow for non-trivial changes:
 
 For small mechanical changes, keep the workflow lightweight, but still read relevant local code before editing and validate the result.
 
+## Skills
+
+Repository skills are canonical reusable workflows under `ai/skills/`. Use this catalog to select
+the smallest set that matches the current task, then read the selected `SKILL.md` completely before
+acting. Read linked references or scripts only as directed by that skill.
+
+| Skill | Use when | Workflow relationship |
+| --- | --- | --- |
+| [`code-review`](ai/skills/code-review/SKILL.md) | Reviewing a pull request or proposed change against ticket requirements, repository rules, contracts, tests, and evidence. | Read-only workflow with local-checkout and GitHub Copilot modes. Do not implement fixes during the review. |
+| [`ticket-implementation-workflow`](ai/skills/ticket-implementation-workflow/SKILL.md) | Implementing a non-trivial ticket from readiness assessment through validated delivery steps. | Primary ticket delivery workflow; it invokes `ticket-post-step-workflow` after each completed step. |
+| [`ticket-post-step-workflow`](ai/skills/ticket-post-step-workflow/SKILL.md) | A concrete ticket delivery step has been completed and its tracker, summary, validation evidence, and branch snapshot must be updated. | Use after each completed implementation step, normally through `ticket-implementation-workflow`. |
+
+Select skills from their names and descriptions rather than loading every skill at session start.
+When multiple skills apply, follow their stated sequence and keep their boundaries: completing a
+review-only request does not authorize implementation, and completing implementation does not
+replace the required post-step workflow. Briefly identify selected skills in working notes.
+
+Files under `.github/skills/` are vendor discovery adapters, not a second skill system. In
+particular, `.github/skills/code-review/SKILL.md` routes GitHub Copilot to the canonical
+`ai/skills/code-review/SKILL.md` workflow.
+
 ## Repository Conventions
 
 - Use `CONTRIBUTING.md` as the source of truth for branch naming, commit message conventions, prerequisites, and developer workflow expectations.
