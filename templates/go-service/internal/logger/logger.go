@@ -1,9 +1,12 @@
 package logger
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"unicode"
 
@@ -62,6 +65,10 @@ func sanitize(attribute slog.Attr) slog.Attr {
 	if sensitiveKey(attribute.Key) {
 		return slog.String(attribute.Key, redactedValue)
 	}
+	if attribute.Value.Kind() == slog.KindAny {
+		attribute.Value = sanitizeAny(attribute.Value)
+		return attribute
+	}
 	if attribute.Value.Kind() != slog.KindGroup {
 		return attribute
 	}
@@ -72,6 +79,82 @@ func sanitize(attribute slog.Attr) slog.Attr {
 		safeGroup = append(safeGroup, sanitize(child))
 	}
 	return slog.Group(attribute.Key, attrsToAny(safeGroup)...)
+}
+
+func sanitizeAny(value slog.Value) slog.Value {
+	data := value.Any()
+	if _, ok := data.(error); ok {
+		return value
+	}
+
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		if isStructured(data) {
+			return slog.StringValue(redactedValue)
+		}
+		return value
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		if isStructured(data) {
+			return slog.StringValue(redactedValue)
+		}
+		return value
+	}
+
+	switch decoded.(type) {
+	case map[string]any, []any:
+		return slog.AnyValue(sanitizeStructured(decoded))
+	default:
+		return value
+	}
+}
+
+func sanitizeStructured(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		safe := make(map[string]any, len(typed))
+		for key, child := range typed {
+			if sensitiveKey(key) {
+				safe[key] = redactedValue
+				continue
+			}
+			safe[key] = sanitizeStructured(child)
+		}
+		return safe
+	case []any:
+		safe := make([]any, len(typed))
+		for index, child := range typed {
+			safe[index] = sanitizeStructured(child)
+		}
+		return safe
+	default:
+		return value
+	}
+}
+
+func isStructured(value any) bool {
+	reflected := reflect.ValueOf(value)
+	for reflected.IsValid() &&
+		(reflected.Kind() == reflect.Interface || reflected.Kind() == reflect.Pointer) {
+		if reflected.IsNil() {
+			return false
+		}
+		reflected = reflected.Elem()
+	}
+	if !reflected.IsValid() {
+		return false
+	}
+
+	switch reflected.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.Struct:
+		return true
+	default:
+		return false
+	}
 }
 
 func attrsToAny(attributes []slog.Attr) []any {

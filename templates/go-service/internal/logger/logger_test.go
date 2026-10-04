@@ -98,6 +98,91 @@ func TestNewRedactsSensitiveAttributesAtEveryLevel(t *testing.T) {
 	}
 }
 
+func TestNewRedactsSensitiveKeysInsideAnyValues(t *testing.T) {
+	// given
+	const privateMarker = "private-marker"
+	type structuredDetails struct {
+		AccessToken string           `json:"accessToken"`
+		Profiles    []map[string]any `json:"profiles"`
+		Safe        string           `json:"safe"`
+	}
+	var output bytes.Buffer
+	log := logger.New(&output, "go-service", slog.LevelInfo).With(
+		slog.Any("bound_details", map[string]any{
+			"credential": privateMarker,
+			"safe":       "bound-safe",
+		}),
+	)
+
+	// when
+	log.InfoContext(context.Background(), "structured",
+		slog.Any("map_details", map[string]any{
+			"password": privateMarker,
+			"safe":     "map-safe",
+		}),
+		slog.Any("struct_details", structuredDetails{
+			AccessToken: privateMarker,
+			Profiles: []map[string]any{
+				{"response_payload": privateMarker, "safe": "profile-safe"},
+			},
+			Safe: "struct-safe",
+		}),
+		slog.Any("list_details", []any{
+			map[string]any{"customerData": privateMarker, "safe": "list-safe"},
+		}),
+		slog.Any("unsupported_details", map[string]any{
+			"secret": privateMarker,
+			"stream": make(chan int),
+		}),
+	)
+
+	// then
+	if strings.Contains(output.String(), privateMarker) {
+		t.Fatalf("captured logs expose private marker: %s", output.String())
+	}
+	entries := decodeEntries(t, output.String())
+	if len(entries) != 1 {
+		t.Fatalf("entry count = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	assertRedactedMap(t, entry["bound_details"], "credential", "safe", "bound-safe")
+	assertRedactedMap(t, entry["map_details"], "password", "safe", "map-safe")
+
+	structDetails, ok := entry["struct_details"].(map[string]any)
+	if !ok || structDetails["accessToken"] != "[REDACTED]" ||
+		structDetails["safe"] != "struct-safe" {
+		t.Fatalf("unexpected sanitized struct: %#v", entry["struct_details"])
+	}
+	profiles, ok := structDetails["profiles"].([]any)
+	if !ok || len(profiles) != 1 {
+		t.Fatalf("unexpected sanitized profiles: %#v", structDetails["profiles"])
+	}
+	assertRedactedMap(t, profiles[0], "response_payload", "safe", "profile-safe")
+
+	listDetails, ok := entry["list_details"].([]any)
+	if !ok || len(listDetails) != 1 {
+		t.Fatalf("unexpected sanitized list: %#v", entry["list_details"])
+	}
+	assertRedactedMap(t, listDetails[0], "customerData", "safe", "list-safe")
+	if entry["unsupported_details"] != "[REDACTED]" {
+		t.Errorf("unsupported structured value = %#v, want redacted", entry["unsupported_details"])
+	}
+}
+
+func assertRedactedMap(
+	t *testing.T,
+	value any,
+	redactedKey string,
+	safeKey string,
+	wantSafe any,
+) {
+	t.Helper()
+	values, ok := value.(map[string]any)
+	if !ok || values[redactedKey] != "[REDACTED]" || values[safeKey] != wantSafe {
+		t.Errorf("unexpected sanitized map: %#v", value)
+	}
+}
+
 func decodeEntries(t *testing.T, output string) []map[string]any {
 	t.Helper()
 	lines := strings.Split(strings.TrimSpace(output), "\n")

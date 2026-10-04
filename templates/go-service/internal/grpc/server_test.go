@@ -246,6 +246,62 @@ func TestExampleServiceEchoPreservesDeadline(t *testing.T) {
 	}
 }
 
+func TestExampleServiceEchoMapsHandlerContextErrors(t *testing.T) {
+	// given
+	tests := []struct {
+		name       string
+		handlerErr error
+		wantCode   codes.Code
+	}{
+		{name: "canceled", handlerErr: context.Canceled, wantCode: codes.Canceled},
+		{
+			name:       "deadline exceeded",
+			handlerErr: context.DeadlineExceeded,
+			wantCode:   codes.DeadlineExceeded,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			handlerContextErr := make(chan error, 1)
+			echo := func(ctx context.Context, _ string) (string, error) {
+				handlerContextErr <- ctx.Err()
+				return "", test.handlerErr
+			}
+			client := newExampleClient(
+				t,
+				echo,
+				noop.NewTracerProvider(),
+				propagation.TraceContext{},
+				new(bytes.Buffer),
+			)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// when
+			response, err := client.Echo(
+				ctx,
+				&scaffoldv1.EchoRequest{Message: "handler context error"},
+			)
+
+			// then
+			if handlerErr := <-handlerContextErr; handlerErr != nil {
+				t.Errorf("handler context error before return = %v, want nil", handlerErr)
+			}
+			if ctx.Err() != nil {
+				t.Errorf("client context error after response = %v, want nil", ctx.Err())
+			}
+			if response != nil {
+				t.Errorf("response = %v, want nil", response)
+			}
+			if status.Code(err) != test.wantCode {
+				t.Fatalf("status = %v, want %v: %v", status.Code(err), test.wantCode, err)
+			}
+		})
+	}
+}
+
 func TestExampleServiceEchoMapsInternalFailureAndPropagatesTrace(t *testing.T) {
 	// given
 	const (
