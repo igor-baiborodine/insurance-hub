@@ -11,16 +11,21 @@ the required local setup or indexed paths. After the preflight, ensure
 before readiness assessment or planning. Follow `AGENTS.md` when the ticket-content file is missing or
 empty. For an existing ticket, also read its delivery plan and relevant step summaries.
 
-Also load and follow shared guidance from these folders when relevant to the task:
+Use the Skills catalog in `AGENTS.md` to select any applicable workflow. Read each selected
+`SKILL.md` completely, then load only the linked references or scripts required for the current
+mode. Do not load every repository skill by default.
+
+Also, load and follow other shared guidance from these folders when relevant to the task:
 
 - `ai/rules/`
-- `ai/skills/`
 - `ai/examples/`
 - `ai/templates/`
 - `ai/checks/`
 
 Treat files in `ai/rules/` as task-specific or repository working rules that supplement `AGENTS.md`. They do not override explicit repository rules unless the user says so.
 
-Treat files in `ai/skills/` as reusable workflow instructions. Apply them when the task matches their purpose.
+Treat files in `ai/skills/` as canonical reusable workflow instructions. Apply them when the task
+matches the skill name and description, observe relationships between selected skills, and treat
+`.github/skills/` files only as vendor discovery adapters.
 
 When using a shared rule or skill, briefly mention it in working notes so the applied guidance is visible.

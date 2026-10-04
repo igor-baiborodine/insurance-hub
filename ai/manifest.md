@@ -38,8 +38,10 @@ At session start:
 
 1. Read `AGENTS.md`.
 2. Read this manifest.
-3. Load only the rules, skills, prompts, templates, or examples relevant to the current task.
-4. For ticket work, read `ai/artifacts/<ticket>/<ticket>-ticket-content.md` as the specification before readiness assessment or planning. Load the delivery plan and step summaries when continuing existing work.
+3. Use the `AGENTS.md` Skills catalog and each skill's frontmatter to select applicable skills;
+   read selected `SKILL.md` files completely, without loading unrelated skills.
+4. Load only the other rules, prompts, templates, or examples relevant to the current task.
+5. For ticket work, read `ai/artifacts/<ticket>/<ticket>-ticket-content.md` as the specification before readiness assessment or planning. Load the delivery plan and step summaries when continuing existing work.
 
 Before planning or editing, follow `AGENTS.md` to discover and load nested instructions that apply
 to the affected paths. Do not load unrelated service guides. Root `AGENTS.md` is the canonical
@@ -66,6 +68,8 @@ and resolve conflicts rather than silently treating a local guide as an override
 
 - Keep rules stable and concise.
 - Keep skills procedural and task-specific.
+- Keep the `AGENTS.md` Skills catalog synchronized with canonical directories under `ai/skills/`.
+- Keep vendor skill adapters as pointers to canonical skills; do not duplicate workflow bodies.
 - Keep prompts lightweight and composable.
 - Keep examples realistic and clearly labeled.
 - Keep local ticket artifacts out of Git.
