@@ -126,8 +126,14 @@ Phase 4 and the 8-May-2026 Alloy update.
 Use the [Go testing examples](../examples/go-testing/README.md) for concrete patterns; adapt their
 illustrative contracts to the ticket and actual module APIs.
 
-- Test changed observable behavior, failures, and boundaries. Use table-driven cases when helpful,
-  clear arrange/act/assert structure, and the module's established assertion conventions.
+- Test changed observable behavior, failures, and boundaries. Use table-driven cases when helpful
+  and the module's established assertion conventions. Structure each applicable scenario with the
+  exact lowercase comments `// given`, `// when`, and `// then`: put scenario setup, test data, and
+  mock expectations under `given`; the behavior-triggering operation under `when`; and observations
+  plus mock/call verification under `then`. Shared immutable fixtures for table-driven tests may use
+  an outer `given`; keep per-case setup and the `when`/`then` phases in the subtest. Omit the markers
+  from shared setup helpers and trivial tests where a phase would be empty or misleading; do not add
+  placeholder blocks.
 - Follow the example's unit-test separation, generated Mockery/Testify mocks, and tagged
   integration tests where those tools are adopted. Mock dependency boundaries, not implementation
   details; regenerate mocks through Make when interfaces change.

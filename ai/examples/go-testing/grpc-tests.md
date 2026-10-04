@@ -113,6 +113,7 @@ func TestPolicyServer_GetPolicy(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			// given
 			calls := make(chan query.GetPolicy, 4)
 			app := policyAppFunc(func(ctx context.Context, q query.GetPolicy) (*domain.Policy, error) {
 				select {
@@ -129,8 +130,10 @@ func TestPolicyServer_GetPolicy(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			t.Cleanup(cancel)
 
+			// when
 			got, err := client.GetPolicy(ctx, &api.GetPolicyRequest{PolicyId: tc.id})
 
+			// then
 			assert.Equal(t, tc.wantCode, status.Code(err))
 			assert.Len(t, calls, tc.wantCalls)
 			if len(calls) > 0 {

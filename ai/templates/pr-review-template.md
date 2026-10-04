@@ -32,3 +32,17 @@ identified** and do not invent positive findings.
   failed/blocked/not-run checks and “No execution evidence reviewed” when appropriate. Do not
   infer execution from plans.>
 - Unverified areas and residual risk: <specific limits, or “None identified.”>
+
+### Repository-Rule Compliance
+
+List every applicable repository-rule area identified during review. Include the governing root or
+nested instruction, rule, workflow, or checklist path. Use **Satisfied**, **Finding identified**, or
+**Unverified** for applicable areas. Use **Not applicable** only with a concrete reason. Link
+deviations to their finding IDs, and do not claim blanket compliance when any area is unverified.
+
+- Rule area: <process, architecture, generated code, validation, documentation, artifacts, scope,
+  etc.>
+  Applicable source(s): `<path and section>`
+  Status: <Satisfied / Finding identified / Unverified / Not applicable>
+  Evidence, finding, or reason: <inspected evidence, finding ID, missing evidence, or concrete
+  not-applicable reason>
