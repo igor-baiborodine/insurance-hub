@@ -90,6 +90,7 @@ acting. Read linked references or scripts only as directed by that skill.
 | Skill | Use when | Workflow relationship |
 | --- | --- | --- |
 | [`code-review`](ai/skills/code-review/SKILL.md) | Reviewing a pull request or proposed change against ticket requirements, repository rules, contracts, tests, and evidence. | Read-only workflow with local-checkout and GitHub Copilot modes. Do not implement fixes during the review. |
+| [`pr-description`](ai/skills/pr-description/SKILL.md) | Drafting a local PR description artifact or drafting and explicitly updating an existing GitHub pull request body. | Uses shared content and evidence standards with separate local and GitHub modes. A draft-only request does not authorize a GitHub update. |
 | [`ticket-implementation-workflow`](ai/skills/ticket-implementation-workflow/SKILL.md) | Implementing a non-trivial ticket from readiness assessment through validated delivery steps. | Primary ticket delivery workflow; it invokes `ticket-post-step-workflow` after each completed step. |
 | [`ticket-post-step-workflow`](ai/skills/ticket-post-step-workflow/SKILL.md) | A concrete ticket delivery step has been completed and its tracker, summary, validation evidence, and branch snapshot must be updated. | Use after each completed implementation step, normally through `ticket-implementation-workflow`. |
 
@@ -98,9 +99,9 @@ When multiple skills apply, follow their stated sequence and keep their boundari
 review-only request does not authorize implementation, and completing implementation does not
 replace the required post-step workflow. Briefly identify selected skills in working notes.
 
-Files under `.github/skills/` are vendor discovery adapters, not a second skill system. In
-particular, `.github/skills/code-review/SKILL.md` routes GitHub Copilot to the canonical
-`ai/skills/code-review/SKILL.md` workflow.
+Files under `.github/skills/` are vendor discovery adapters, not a second skill system.
+`.github/skills/code-review/SKILL.md` and `.github/skills/pr-description/SKILL.md` route GitHub
+Copilot to their canonical workflows under `ai/skills/`.
 
 ## Repository Conventions
 
