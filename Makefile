@@ -12,10 +12,6 @@ include k8s/bootstrap/Makefile
 ################################################################################
 # Variables
 ################################################################################
-APP_NAME        := insurance-hub
-GO_VERSION      := 1.24
-SRC_DIR         := ./internal
-BIN_DIR         := ./bin
 MAKEFLAGS       += --warn-undefined-variables
 
 ################################################################################
@@ -36,10 +32,18 @@ help:
 ################################################################################
 # Go Targets
 ################################################################################
-.PHONY: go-build
-go-build: ## Compile the Go application
-	@echo ">> Building $(APP_NAME) (Go $(GO_VERSION))"
-	@go build -o $(BIN_DIR)/$(APP_NAME) ./...
+.PHONY: go-scaffold-bootstrap-tools go-scaffold-build go-scaffold-check go-scaffold-run
+go-scaffold-bootstrap-tools: ## Install and verify pinned tools for the Go service scaffold only
+	$(MAKE) -C templates/go-service bootstrap-tools
+
+go-scaffold-build: ## Build the Go service scaffold module only
+	$(MAKE) -C templates/go-service build
+
+go-scaffold-check: ## Run all non-mutating checks for the Go service scaffold module only
+	$(MAKE) -C templates/go-service check
+
+go-scaffold-run: ## Run the Go service scaffold server locally
+	$(MAKE) -C templates/go-service run
 
 ################################################################################
 # Java Targets
