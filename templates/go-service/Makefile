@@ -7,10 +7,16 @@ TOOLS_BIN := $(TOOLS_DIR)/bin
 BUF := $(TOOLS_BIN)/buf
 PROTOC_GEN_GO := $(TOOLS_BIN)/protoc-gen-go
 PROTOC_GEN_GO_GRPC := $(TOOLS_BIN)/protoc-gen-go-grpc
+GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
+GOVULNCHECK := $(TOOLS_BIN)/govulncheck
+GOLANGCI_CONFIG := .golangci.yml
 
+GO_VERSION := 1.27.1
 BUF_VERSION := v1.73.0
 PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
+GOLANGCI_LINT_VERSION := v2.14.0
+GOVULNCHECK_VERSION := v1.8.0
 
 PROTOBUF_GO_VERSION := v1.36.12
 GRPC_GO_VERSION := v1.84.0
@@ -19,7 +25,7 @@ PROTOVALIDATE_SCHEMA_GO_VERSION := v1.36.12-20260825204119-511051f7f437.1
 OTEL_VERSION := v1.46.0
 OTEL_GRPC_VERSION := v0.71.0
 
-.PHONY: bootstrap-tools update-deps update-proto-deps gen-proto run
+.PHONY: bootstrap-tools verify-tools update-deps update-proto-deps gen-proto run
 
 bootstrap-tools:
 	mkdir -p "$(TOOLS_BIN)"
@@ -29,11 +35,27 @@ bootstrap-tools:
 		google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 	GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install \
 		google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
-	@test "$$($(BUF) --version)" = "$(patsubst v%,%,$(BUF_VERSION))"
-	@test "$$($(PROTOC_GEN_GO) --version)" = \
-		"protoc-gen-go $(PROTOC_GEN_GO_VERSION)"
-	@test "$$($(PROTOC_GEN_GO_GRPC) --version)" = \
-		"protoc-gen-go-grpc $(patsubst v%,%,$(PROTOC_GEN_GO_GRPC_VERSION))"
+	GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install \
+		github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install \
+		golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+	@$(MAKE) --no-print-directory verify-tools
+
+verify-tools:
+	@GO="$(GO)" \
+		BUF="$(BUF)" \
+		PROTOC_GEN_GO="$(PROTOC_GEN_GO)" \
+		PROTOC_GEN_GO_GRPC="$(PROTOC_GEN_GO_GRPC)" \
+		GOLANGCI_LINT="$(GOLANGCI_LINT)" \
+		GOVULNCHECK="$(GOVULNCHECK)" \
+		GOLANGCI_CONFIG="$(GOLANGCI_CONFIG)" \
+		GO_VERSION="$(GO_VERSION)" \
+		BUF_VERSION="$(BUF_VERSION)" \
+		PROTOC_GEN_GO_VERSION="$(PROTOC_GEN_GO_VERSION)" \
+		PROTOC_GEN_GO_GRPC_VERSION="$(PROTOC_GEN_GO_GRPC_VERSION)" \
+		GOLANGCI_LINT_VERSION="$(GOLANGCI_LINT_VERSION)" \
+		GOVULNCHECK_VERSION="$(GOVULNCHECK_VERSION)" \
+		./scripts/verify-tools.sh
 
 update-deps:
 	GOWORK=off $(GO) get \
