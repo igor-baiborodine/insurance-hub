@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "modules": [
+    {
+      "directory": "templates/go-service",
+      "modulePath": "github.com/igor-baiborodine/insurance-hub/templates/go-service",
+      "role": "service-scaffold",
+      "owner": "insurance-hub repository maintainers",
+      "supportedModes": [
+        "standalone"
+      ],
+      "validationTarget": "check",
+      "validationVariables": [
+        "FORMAT_SCOPE",
+        "FORMAT_BASE"
+      ],
+      "consumers": [
+        "github.com/igor-baiborodine/insurance-hub/templates/go-service"
+      ],
+      "localReplacements": [],
+      "ciWorkflow": ".github/workflows/go-scaffold.yml"
+    }
+  ],
+  "workspaces": [],
+  "exclusions": [
+    {
+      "pathPattern": ".git/**",
+      "category": "repository-metadata",
+      "reason": "Git implementation data is not repository topology."
+    },
+    {
+      "pathPattern": "ai/artifacts/**",
+      "category": "local-ticket-artifact",
+      "reason": "Ignored ticket evidence is local working data."
+    },
+    {
+      "pathPattern": "**/.tools/**",
+      "category": "tool-cache",
+      "reason": "Module-owned downloaded tools are disposable dependencies."
+    },
+    {
+      "pathPattern": "**/vendor/**",
+      "category": "dependency-tree",
+      "reason": "Vendored dependency manifests do not define repository-owned modules."
+    },
+    {
+      "pathPattern": "**/node_modules/**",
+      "category": "dependency-tree",
+      "reason": "JavaScript dependency manifests do not define repository-owned modules."
+    },
+    {
+      "pathPattern": "**/third_party/**",
+      "category": "dependency-tree",
+      "reason": "Third-party source trees are not repository-owned modules."
+    },
+    {
+      "pathPattern": "**/testdata/**",
+      "category": "fixture",
+      "reason": "Test fixtures are not supported repository topology."
+    },
+    {
+      "pathPattern": "services/example-copy/**",
+      "category": "generated-copy",
+      "reason": "The scaffold reuse proof creates this disposable copy temporarily."
+    }
+  ]
+}

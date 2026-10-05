@@ -32,8 +32,11 @@ help:
 ################################################################################
 # Go Targets
 ################################################################################
-.PHONY: go-scaffold-bootstrap-tools go-scaffold-build go-scaffold-check \
+.PHONY: go-topology-check go-scaffold-bootstrap-tools go-scaffold-build go-scaffold-check \
 	go-scaffold-test-tooling go-scaffold-check-copy go-scaffold-run
+go-topology-check: ## Validate the canonical Go module and workspace inventory
+	@./scripts/go/check-topology.sh
+
 go-scaffold-bootstrap-tools: ## Install and verify pinned tools for the Go service scaffold only
 	$(MAKE) -C templates/go-service bootstrap-tools
 

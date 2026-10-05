@@ -159,6 +159,11 @@ define repository workspace policy. The [Go service scaffold CI](.github/workflo
 uses the same owning targets. See the scaffold README for target coverage, variables, prerequisites,
 network access, mutations, CI reproduction, and the issue-123 topology handoff.
 
+The root [`go-module-topology.json`](go-module-topology.json) records every supported Go module and
+approved workspace. Run `make go-topology-check` with `jq >= 1.6` to compare that inventory with the
+repository manifests. The check is read-only, reports excluded fixture and dependency manifests,
+and fails when a module or workspace is missing, unlisted, or has a different module identity.
+
 ### Branch Names
 
 All branch names **must** follow a consistent structure based on
