@@ -37,6 +37,67 @@ require_trigger() {
 	done
 }
 
+require_run_command() {
+	local workflow_path="$1"
+	local workflow_relative="$2"
+	local target="$3"
+	if ! awk -v target="${target}" '
+	  function leading_spaces(value, copy) {
+	    copy = value
+	    sub(/^ */, "", copy)
+	    return length(value) - length(copy)
+	  }
+	  function is_direct_make_command(value, remainder) {
+	    sub(/^[[:space:]]*/, "", value)
+	    if (value ~ /^#/) {
+	      return 0
+	    }
+	    if (value !~ /^make[[:space:]]+/) {
+	      return 0
+	    }
+	    sub(/^make[[:space:]]+/, "", value)
+	    if (value == target) {
+	      return 1
+	    }
+	    if (index(value, target) != 1) {
+	      return 0
+	    }
+	    remainder = substr(value, length(target) + 1, 1)
+	    return remainder ~ /[[:space:]\\]/
+	  }
+	  {
+	    line = $0
+	    if (inside_run_block) {
+	      trimmed = line
+	      sub(/^[[:space:]]*/, "", trimmed)
+	      if (trimmed == "" || trimmed ~ /^#/) {
+	        next
+	      }
+	      if (leading_spaces(line) > run_indent) {
+	        if (is_direct_make_command(line)) {
+	          found = 1
+	        }
+	        next
+	      }
+	      inside_run_block = 0
+	    }
+	    if (line ~ /^ *(- +)?run: */) {
+	      run_indent = leading_spaces(line)
+	      value = line
+	      sub(/^ *(- +)?run: */, "", value)
+	      if (value ~ /^[|>][+-]?( +#.*)?$/) {
+	        inside_run_block = 1
+	      } else if (is_direct_make_command(value)) {
+	        found = 1
+	      }
+	    }
+	  }
+	  END { exit(found ? 0 : 1) }
+	' "${workflow_path}"; then
+		fail "workflow ${workflow_relative} does not invoke executable Make target: ${target}"
+	fi
+}
+
 mapfile -t workflows < <(
 	jq -r '[.modules[].ciWorkflow, .workspaces[].ciWorkflow] | unique[]' "${inventory_path}"
 )
@@ -84,10 +145,8 @@ for workflow_relative in "${workflows[@]}"; do
 			'.workspaces[] | select(.ciWorkflow == $workflow) | .directory' "${inventory_path}"
 	)
 
-	grep -Fq -- 'make go-modules-check' "${workflow_path}" || \
-		fail "workflow ${workflow_relative} does not invoke make go-modules-check"
-	grep -Fq -- 'make go-topology-test' "${workflow_path}" || \
-		fail "workflow ${workflow_relative} does not invoke make go-topology-test"
+	require_run_command "${workflow_path}" "${workflow_relative}" "go-modules-check"
+	require_run_command "${workflow_path}" "${workflow_relative}" "go-topology-test"
 
 	module_count="$(jq --arg workflow "${workflow_relative}" \
 		'[.modules[] | select(.ciWorkflow == $workflow)] | length' "${inventory_path}")"

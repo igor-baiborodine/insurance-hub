@@ -68,7 +68,8 @@ generated and manifest changes.
 `main` trigger it for the scaffold, every `go.mod`, `go.sum`, `go.work`, and `go.work.sum`, the
 canonical inventory, topology scripts, this guide, root Makefile, and workflow itself. The topology
 checker fails if an inventory module's workflow lacks its module path triggers or does not call
-both `make go-modules-check` and `make go-topology-test`.
+both `make go-modules-check` and `make go-topology-test` as executable `run` commands. Comments and
+values under unrelated workflow keys do not count as execution evidence.
 
 CI uses `ubuntu-24.04`, checkout v6 with full history, setup-go v7 with Go 1.27.1, the scaffold
 `go.sum` cache input, and `contents: read`. It bootstraps pinned tools through Make, resolves changed
