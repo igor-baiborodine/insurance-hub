@@ -54,8 +54,11 @@ jq -e '
     else . end;
 
   if type != "object" then fail("root must be an object") else . end
-  | exact_keys(["schemaVersion", "modules", "workspaces", "exclusions"]; "root")
+  | exact_keys(["schemaVersion", "repositoryModulePrefix", "modules", "workspaces", "exclusions"]; "root")
   | if .schemaVersion != 1 then fail("schemaVersion must equal 1") else . end
+  | .repositoryModulePrefix |= nonempty_string("repositoryModulePrefix")
+  | if (.repositoryModulePrefix | test("^[A-Za-z0-9.-]+(/[A-Za-z0-9._~-]+)*/$") | not)
+    then fail("repositoryModulePrefix must be a slash-terminated module path prefix") else . end
   | if (.modules | type) != "array" or (.modules | length) == 0
     then fail("modules must be a non-empty array") else . end
   | if (.workspaces | type) != "array" then fail("workspaces must be an array") else . end
@@ -71,6 +74,9 @@ jq -e '
       | .directory |= relative_directory("modules[" + ($index | tostring) + "].directory"; true)
       | .modulePath |= nonempty_string("modules[" + ($index | tostring) + "].modulePath")
       | .role |= nonempty_string("modules[" + ($index | tostring) + "].role")
+      | .role as $role
+      | if (["service-scaffold", "business-service", "public-contract", "public-shared", "tool"] | index($role)) == null
+        then fail("modules[" + ($index | tostring) + "].role is unknown: " + $role) else . end
       | .owner |= nonempty_string("modules[" + ($index | tostring) + "].owner")
       | .supportedModes |= string_array("modules[" + ($index | tostring) + "].supportedModes"; false)
       | if any(.supportedModes[]; . != "standalone" and . != "workspace")
@@ -127,10 +133,13 @@ jq -e '
         then fail("exclusions[" + ($index | tostring) + "].category is unknown: " + $category) else . end
       | .reason |= nonempty_string("exclusions[" + ($index | tostring) + "].reason")
     ))
+  | .repositoryModulePrefix as $repository_module_prefix
   | if ([.modules[].directory] | unique | length) != (.modules | length)
     then fail("module directories must be unique") else . end
   | if ([.modules[].modulePath] | unique | length) != (.modules | length)
     then fail("module paths must be unique") else . end
+  | if any(.modules[]; (.modulePath | startswith($repository_module_prefix)) | not)
+    then fail("every module path must start with repositoryModulePrefix") else . end
   | if ([.workspaces[].directory] | unique | length) != (.workspaces | length)
     then fail("workspace directories must be unique") else . end
   | if ([.exclusions[].pathPattern] | unique | length) != (.exclusions | length)
@@ -263,6 +272,10 @@ if ((${#errors[@]} > 0)); then
 	done
 	exit 1
 fi
+
+readonly boundary_checker="${script_dir}/check-boundaries.sh"
+test -x "${boundary_checker}" || fail "missing executable boundary checker: scripts/go/check-boundaries.sh"
+"${boundary_checker}"
 
 printf 'Go module topology: %d module(s), %d approved workspace(s)\n' \
 	"$(jq '.modules | length' "${inventory_path}")" \
