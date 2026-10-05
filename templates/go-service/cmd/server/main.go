@@ -39,7 +39,11 @@ func run(ctx context.Context, output io.Writer) error {
 	}
 	serviceLogger := logger.New(output, settings.ServiceName, settings.LogLevel)
 	if err := service.Run(ctx, settings, serviceLogger); err != nil {
-		serviceLogger.ErrorContext(context.Background(), "service failed", slog.Any("error", err))
+		serviceLogger.ErrorContext(
+			context.Background(),
+			"service failed",
+			slog.Any("error", err),
+		)
 		return err
 	}
 	return nil

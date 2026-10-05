@@ -181,13 +181,19 @@ func parseOptionalEndpoint(lookup lookupEnv, enabled bool) (*url.URL, error) {
 	value, exists := lookup(otelEndpointSetting)
 	if !exists {
 		if enabled {
-			return nil, invalid(otelEndpointSetting, "is required when telemetry is enabled")
+			return nil, invalid(
+				otelEndpointSetting,
+				"is required when telemetry is enabled",
+			)
 		}
 		return nil, nil
 	}
 	if value == "" {
 		if enabled {
-			return nil, invalid(otelEndpointSetting, "is required when telemetry is enabled")
+			return nil, invalid(
+				otelEndpointSetting,
+				"is required when telemetry is enabled",
+			)
 		}
 		return nil, nil
 	}
@@ -207,11 +213,17 @@ func parseOptionalEndpoint(lookup lookupEnv, enabled bool) (*url.URL, error) {
 	host := endpoint.Hostname()
 	port := endpoint.Port()
 	if !validHost(host) || port == "" {
-		return nil, invalid(otelEndpointSetting, "must include a valid host and numeric port")
+		return nil, invalid(
+			otelEndpointSetting,
+			"must include a valid host and numeric port",
+		)
 	}
 	portNumber, err := strconv.ParseUint(port, 10, 16)
 	if err != nil || portNumber == 0 {
-		return nil, invalid(otelEndpointSetting, "must include a valid host and numeric port")
+		return nil, invalid(
+			otelEndpointSetting,
+			"must include a valid host and numeric port",
+		)
 	}
 
 	endpoint.Path = ""
@@ -233,8 +245,10 @@ func validHost(host string) bool {
 			return false
 		}
 		for _, character := range label {
-			if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
-				(character < '0' || character > '9') && character != '-' {
+			if (character < 'a' || character > 'z') &&
+				(character < 'A' || character > 'Z') &&
+				(character < '0' || character > '9') &&
+				character != '-' {
 				return false
 			}
 		}

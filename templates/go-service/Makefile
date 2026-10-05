@@ -25,7 +25,7 @@ PROTOVALIDATE_SCHEMA_GO_VERSION := v1.36.12-20260825204119-511051f7f437.1
 OTEL_VERSION := v1.46.0
 OTEL_GRPC_VERSION := v0.71.0
 
-.PHONY: bootstrap-tools verify-tools update-deps update-proto-deps gen-proto run
+.PHONY: bootstrap-tools verify-tools format format-check update-deps update-proto-deps gen-proto run
 
 bootstrap-tools:
 	mkdir -p "$(TOOLS_BIN)"
@@ -56,6 +56,20 @@ verify-tools:
 		GOLANGCI_LINT_VERSION="$(GOLANGCI_LINT_VERSION)" \
 		GOVULNCHECK_VERSION="$(GOVULNCHECK_VERSION)" \
 		./scripts/verify-tools.sh
+
+format: verify-tools
+	@GOWORK=off \
+		GOLANGCI_LINT="$(GOLANGCI_LINT)" \
+		GOLANGCI_CONFIG="$(GOLANGCI_CONFIG)" \
+		FORMAT_FILES_SET="$(if $(filter undefined,$(origin FORMAT_FILES)),0,1)" \
+		./scripts/format-go.sh format
+
+format-check: verify-tools
+	@GOWORK=off \
+		GOLANGCI_LINT="$(GOLANGCI_LINT)" \
+		GOLANGCI_CONFIG="$(GOLANGCI_CONFIG)" \
+		FORMAT_FILES_SET="$(if $(filter undefined,$(origin FORMAT_FILES)),0,1)" \
+		./scripts/format-go.sh check
 
 update-deps:
 	GOWORK=off $(GO) get \

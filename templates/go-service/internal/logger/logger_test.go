@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
 )
 
 func TestNewWritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
@@ -35,8 +36,10 @@ func TestNewWritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
 
 func TestNewAddsTraceCorrelationFromContext(t *testing.T) {
 	// given
-	traceID := trace.TraceID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
+	traceID := trace.TraceID{
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+	}
 	spanID := trace.SpanID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18}
 	spanContext := trace.NewSpanContext(trace.SpanContextConfig{
 		TraceID:    traceID,
@@ -165,7 +168,10 @@ func TestNewRedactsSensitiveKeysInsideAnyValues(t *testing.T) {
 	}
 	assertRedactedMap(t, listDetails[0], "customerData", "safe", "list-safe")
 	if entry["unsupported_details"] != "[REDACTED]" {
-		t.Errorf("unsupported structured value = %#v, want redacted", entry["unsupported_details"])
+		t.Errorf(
+			"unsupported structured value = %#v, want redacted",
+			entry["unsupported_details"],
+		)
 	}
 }
 

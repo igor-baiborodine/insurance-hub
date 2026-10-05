@@ -10,13 +10,14 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+	grpcgo "google.golang.org/grpc"
+
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/health"
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
-	grpcgo "google.golang.org/grpc"
 )
 
 const (
@@ -216,13 +217,17 @@ func (runtime *runningService) shutdown(timeout time.Duration) error {
 	}
 
 	healthDeadline := shutdownStarted.Add(timeout - timeout/4)
-	if overallDeadline, ok := overallContext.Deadline(); ok && healthDeadline.After(overallDeadline) {
+	if overallDeadline, ok := overallContext.Deadline(); ok &&
+		healthDeadline.After(overallDeadline) {
 		healthDeadline = overallDeadline
 	}
 	healthContext, cancelHealth := context.WithDeadline(overallContext, healthDeadline)
 	if err := runtime.managementServer.Shutdown(healthContext); err != nil &&
 		!errors.Is(err, http.ErrServerClosed) {
-		shutdownErrors = append(shutdownErrors, fmt.Errorf("shutdown management HTTP: %w", err))
+		shutdownErrors = append(
+			shutdownErrors,
+			fmt.Errorf("shutdown management HTTP: %w", err),
+		)
 		if closeErr := runtime.managementServer.Close(); closeErr != nil &&
 			!errors.Is(closeErr, http.ErrServerClosed) {
 			shutdownErrors = append(shutdownErrors,
@@ -230,7 +235,10 @@ func (runtime *runningService) shutdown(timeout time.Duration) error {
 		}
 	}
 	cancelHealth()
-	if err := closeListener("close management listener", runtime.managementListener); err != nil {
+	if err := closeListener(
+		"close management listener",
+		runtime.managementListener,
+	); err != nil {
 		shutdownErrors = append(shutdownErrors, err)
 	}
 
