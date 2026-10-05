@@ -14,6 +14,13 @@
         "FORMAT_SCOPE",
         "FORMAT_BASE"
       ],
+      "packageScope": "all Go packages under ./..., the server executable, owned Protobuf schema and generated output, and module dependency metadata",
+      "prerequisites": [
+        "Go 1.27.1",
+        "pinned scaffold tools installed by make go-scaffold-bootstrap-tools",
+        "GCC for race-enabled tests",
+        "public module, schema, tool, and vulnerability services unless cached"
+      ],
       "consumers": [
         "github.com/igor-baiborodine/insurance-hub/templates/go-service"
       ],

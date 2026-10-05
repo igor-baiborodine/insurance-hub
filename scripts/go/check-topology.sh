@@ -65,8 +65,8 @@ jq -e '
       | if type != "object" then fail("modules[" + ($index | tostring) + "] must be an object") else . end
       | exact_keys([
           "directory", "modulePath", "role", "owner", "supportedModes",
-          "validationTarget", "validationVariables", "consumers", "localReplacements",
-          "ciWorkflow"
+          "validationTarget", "validationVariables", "packageScope", "prerequisites",
+          "consumers", "localReplacements", "ciWorkflow"
         ]; "modules[" + ($index | tostring) + "]")
       | .directory |= relative_directory("modules[" + ($index | tostring) + "].directory"; true)
       | .modulePath |= nonempty_string("modules[" + ($index | tostring) + "].modulePath")
@@ -81,6 +81,8 @@ jq -e '
       | .validationVariables |= string_array("modules[" + ($index | tostring) + "].validationVariables"; true)
       | if any(.validationVariables[]; test("^[A-Z][A-Z0-9_]*$") | not)
         then fail("modules[" + ($index | tostring) + "].validationVariables contains a malformed name") else . end
+      | .packageScope |= nonempty_string("modules[" + ($index | tostring) + "].packageScope")
+      | .prerequisites |= string_array("modules[" + ($index | tostring) + "].prerequisites"; true)
       | .consumers |= string_array("modules[" + ($index | tostring) + "].consumers"; false)
       | if (.localReplacements | type) != "array"
         then fail("modules[" + ($index | tostring) + "].localReplacements must be an array") else . end
@@ -274,6 +276,8 @@ jq -r '
     + " | modes=\(.supportedModes | join(","))"
     + " | validation=\(.validationTarget)"
     + " | variables=\(.validationVariables | if length == 0 then "none" else join(",") end)"
+    + " | scope=\(.packageScope)"
+    + " | prerequisites=\(.prerequisites | if length == 0 then "none" else join(";") end)"
     + " | consumers=\(.consumers | join(","))"
     + " | replacements=\(.localReplacements | if length == 0 then "none" else map(.modulePath + "=>" + .replacementPath) | join(",") end)"
     + " | workspace=none"

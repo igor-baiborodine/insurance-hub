@@ -32,10 +32,20 @@ help:
 ################################################################################
 # Go Targets
 ################################################################################
-.PHONY: go-topology-check go-scaffold-bootstrap-tools go-scaffold-build go-scaffold-check \
-	go-scaffold-test-tooling go-scaffold-check-copy go-scaffold-run
+.PHONY: go-topology-check go-modules-check go-scaffold-bootstrap-tools go-scaffold-build \
+	go-scaffold-check go-scaffold-test-tooling go-scaffold-check-copy go-scaffold-run
+ifneq ($(filter command line,$(origin GO_MODULE_CALLER_VARIABLES)),)
+$(error GO_MODULE_CALLER_VARIABLES is internal and cannot be set)
+endif
+override GO_MODULE_CALLER_VARIABLES = $(sort $(foreach variable,$(.VARIABLES),\
+	$(if $(filter command line,$(origin $(variable))),$(variable))))
+
 go-topology-check: ## Validate the canonical Go module and workspace inventory
 	@./scripts/go/check-topology.sh
+
+go-modules-check: go-topology-check ## Validate every inventory Go module in standalone mode
+	@GO_MODULE_CALLER_VARIABLES="$(GO_MODULE_CALLER_VARIABLES)" \
+		MAKE_COMMAND="$(MAKE)" ./scripts/go/check-modules.sh
 
 go-scaffold-bootstrap-tools: ## Install and verify pinned tools for the Go service scaffold only
 	$(MAKE) -C templates/go-service bootstrap-tools
