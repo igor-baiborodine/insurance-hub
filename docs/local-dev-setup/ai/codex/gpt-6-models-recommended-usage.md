@@ -12,7 +12,7 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-For specification-first Go development, use **Sol as your default model**, switch to **Astra only for the most consequential research and architecture work**, and reserve **Luna for fast, bounded implementation tasks**. Start at the lowest reasoning level that produces a reliable result; reasoning increases depth but also consumes more of your Codex allowance. OpenAI positions Astra for highest capability, Sol for demanding reasoning, and Luna for efficient repeatable work. [developers.openai](https://developers.openai.com/api/docs/guides/latest-model)
+For specification-first Go development, use **GPT-6.1 Sol as your default model**, switch to **Astra only for the most consequential research and architecture work**, and reserve **Luna for fast, bounded implementation tasks**. Start at the lowest reasoning level that produces a reliable result; higher reasoning generally increases response time and token usage. OpenAI positions Astra for highest capability, GPT-6.1 Sol for complex work with a better speed/cost balance, and Luna for efficient repeatable work. [developers.openai](https://developers.openai.com/api/docs/guides/latest-model)
 
 ## Recommended configuration
 
@@ -20,12 +20,15 @@ For specification-first Go development, use **Sol as your default model**, switc
 |------------------------------------|-------------------|-----------:|------------------------------------------------------------------------------------------------------------------------------------------|
 | Research and problem framing       | **6 Astra**       |   **High** | Exploring unfamiliar libraries, comparing architectural options, threat/risk analysis, domain modeling, identifying edge cases           |
 | Specification and technical plan   | **6 Astra**       |   **High** | Producing an implementation-ready spec, package boundaries, API contracts, acceptance criteria, migration steps, test strategy           |
-| Normal implementation              | **6 Sol**         | **Medium** | Adding a handler/service/repository, implementing a bounded user story, writing unit tests, routine refactors                            |
-| Complex execution                  | **6 Sol**         |   **High** | Multi-package Go changes, cross-cutting observability, concurrency changes, DB/schema migrations, fixing a failure after normal attempts |
+| Normal implementation              | **6.1 Sol**       | **Medium** | Adding a handler/service/repository, implementing a bounded user story, writing unit tests, routine refactors                            |
+| Complex execution                  | **6.1 Sol**       |   **High** | Multi-package Go changes, cross-cutting observability, concurrency changes, DB/schema migrations, fixing a failure after normal attempts |
 | Mechanical or repeatable execution | **6 Luna**        | **Medium** | Test table expansion, error wrapping consistency, straightforward DTO/mapper changes, docs, simple cleanup                               |
-| Review and verification            | **6 Sol**         |   **High** | Reviewing the produced diff against your approved specification, finding missing tests, checking error handling and regressions          |
+| PR code review and verification    | **6.1 Sol**       |   **High** | Reviewing the diff against requirements, contracts, tests, repository rules, and validation evidence                                    |
+| PR description drafting            | **6.1 Sol**       | **Medium** | Synthesizing the ticket, diff, implementation decisions, and verified test results into the repository PR template                       |
 
-IntelliJ's AI Assistant picker shows `6 Astra`, `6 Sol`, and `6 Luna`, each in standard, max, and ultra variants. Treat those as **a model/capability class**, then choose the reasoning level below the divider for the actual task. The `Plus` plan entitlement and rollout determine exactly which variants remain usable, so use what the picker lets selecting rather than designing the workflow around a particular unavailable tier. [learn.chatgpt](https://learn.chatgpt.com/docs/models)
+For routine PR code review, open a fresh **GPT-6.1 Sol + High** turn so the reviewer does not inherit the implementation agent's assumptions. Escalate to **xhigh** for a large or ambiguous change, or when security, concurrency, persistence, migrations, or cross-service contracts materially raise the risk. For PR description drafting, use **GPT-6.1 Sol + Medium** because the task requires evidence gathering and technical synthesis but usually not deep defect analysis. **Luna + Medium** is sufficient for a small mechanical PR when the ticket, diff, and validation evidence are already clear.
+
+IntelliJ's AI Assistant picker may shorten the model names to `6 Astra`, `6.1 Sol`, and `6 Luna`. Treat the selected model and its reasoning or intelligence level as separate choices. Available levels can include Light, Medium, High, Extra High, Max, and Ultra, depending on the selected model, account entitlement, and product rollout. Use the levels available in the picker rather than designing the workflow around an unavailable tier. [learn.chatgpt](https://learn.chatgpt.com/docs/models)
 
 ## Research and planning
 
@@ -46,7 +49,7 @@ Avoid `xhigh` as your default. Use it only when the decision is genuinely high i
 - Planning a major Go package reorganization, persistence migration, or API versioning change.
 - Reconciling contradictory requirements or diagnosing a hard concurrency/data-integrity defect.
 
-Use **Astra max/ultra**, if your Plus picker grants access, only for these “write the design once, then execute it many times” decisions. It is overkill for routine feature specifications and will burn quota faster.
+Use **Astra at xhigh or max**, or **Ultra** when the picker offers it, only for these “write the design once, then execute it many times” decisions. It is overkill for routine feature specifications and consumes more time and usage allowance.
 
 ### A planning prompt pattern
 
@@ -80,16 +83,16 @@ Git rules.
 For most approved specifications, choose:
 
 ```text
-Model:     6 Sol
+Model:     6.1 Sol
 Reasoning: medium
 ```
 
-Sol is OpenAI’s recommended strong-reasoning choice for demanding work, while medium is the intended everyday balance. This should be your workhorse setting for Go implementation: it keeps agentic changes deliberate enough to follow a multi-step spec without needlessly using Astra for every loop of compile–test–fix. [developers.openai](https://developers.openai.com/api/docs/guides/latest-model)
+GPT-6.1 Sol is OpenAI’s balanced choice for complex work, while medium is the intended everyday reasoning level. This should be your workhorse setting for Go implementation: it keeps agentic changes deliberate enough to follow a multi-step spec without needlessly using Astra for every loop of compile–test–fix. [developers.openai](https://developers.openai.com/api/docs/guides/latest-model)
 
 Escalate to:
 
 ```text
-Model:     6 Sol
+Model:     6.1 Sol
 Reasoning: high
 ```
 
@@ -133,17 +136,17 @@ For IntelliJ AI Assistant, split a larger feature into small agent runs: domain/
 
 Use this escalation path rather than selecting the most powerful setting every time:
 
-1. **Sol + medium** — Default implementation and small-to-medium Go work.
-2. **Sol + high** — Cross-package change, hard debugging, or a failed first implementation.
+1. **GPT-6.1 Sol + medium** — Default implementation, PR-description drafting, and small-to-medium Go work.
+2. **GPT-6.1 Sol + high** — PR code review, cross-package change, hard debugging, or a failed first implementation.
 3. **Astra + high** — Research, specification, architecture, ambiguous requirements, and major design review.
-4. **Astra + xhigh/max/ultra** — Rare irreversible or security-/data-integrity-critical decisions.
+4. **GPT-6.1 Sol + xhigh or Astra + xhigh/max** — Rare, demanding reviews and irreversible or security-/data-integrity-critical decisions.
 5. **Luna + medium** — Well-scoped repetitive work after a reviewed plan exists.
 
-OpenAI’s documentation explicitly recommends starting with Sol at Medium, Luna at High, or Astra at Light/low and increasing effort only for tasks that require more planning, analysis, or checking. Your spec-first workflow is a sensible exception: use Astra + High for planning because this is where correctness has the highest leverage, then return to Sol + Medium for implementation. [learn.chatgpt](https://learn.chatgpt.com/docs/models)
+OpenAI’s documentation recommends choosing the lightest model and reasoning level that meets the task's quality bar, then increasing effort when the work requires more planning, analysis, or checking. This spec-first workflow uses Astra + High for planning because correctness has the highest leverage there, then returns to GPT-6.1 Sol + Medium for implementation. [learn.chatgpt](https://learn.chatgpt.com/docs/model-selection)
 
 ## Verification pass
 
-Do not use the same high-effort planning prompt to both design and judge the result. After implementation, open a fresh **Sol + High** agent turn and ask it to act as a reviewer:
+Do not use the same high-effort planning prompt to both design and judge the result. After implementation, open a fresh **GPT-6.1 Sol + High** agent turn and ask it to act as a reviewer:
 
 ```text
 Review the current change against
@@ -161,4 +164,4 @@ Do not edit files. Identify:
 Return findings ranked by severity, with exact file and line references.
 ```
 
-Then decide which findings to accept before launching a narrow remediation task. This separation—Astra for specification, Sol for implementation, Sol High for independent verification—fits a disciplined Go workflow and should preserve more Plus quota than keeping Astra at Ultra for every request.
+Then decide which findings to accept before launching a narrow remediation task. This separation—Astra for specification, GPT-6.1 Sol for implementation, and GPT-6.1 Sol + High for independent verification—fits a disciplined Go workflow and should preserve more Plus quota than keeping Astra at the highest available level for every request.
