@@ -11,6 +11,9 @@ GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 GOLANGCI_CONFIG := .golangci.yml
 
+PROTO_SCHEMA := api/scaffold/v1/example_service.proto
+CONTRACT_BASELINE_DIR := testdata/contract-baseline
+
 GO_VERSION := 1.27.1
 BUF_VERSION := v1.73.0
 PROTOC_GEN_GO_VERSION := v1.36.12
@@ -25,7 +28,9 @@ PROTOVALIDATE_SCHEMA_GO_VERSION := v1.36.12-20260825204119-511051f7f437.1
 OTEL_VERSION := v1.46.0
 OTEL_GRPC_VERSION := v0.71.0
 
-.PHONY: bootstrap-tools verify-tools format format-check update-deps update-proto-deps gen-proto run
+.PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
+	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
+	gen-proto run
 
 bootstrap-tools:
 	mkdir -p "$(TOOLS_BIN)"
@@ -83,9 +88,34 @@ update-deps:
 		google.golang.org/protobuf@$(PROTOBUF_GO_VERSION)
 	GOWORK=off $(GO) mod tidy
 
+check-deps: verify-tools
+	@GO="$(GO)" MAKE_COMMAND="$(MAKE)" ./scripts/check-deps.sh
+
 update-proto-deps:
 	@test "$$($(BUF) --version)" = "$(patsubst v%,%,$(BUF_VERSION))"
 	$(BUF) dep update
+
+format-proto: verify-tools
+	$(BUF) format --write "$(PROTO_SCHEMA)"
+
+format-proto-check: verify-tools
+	$(BUF) format --diff --exit-code "$(PROTO_SCHEMA)"
+
+lint-proto: verify-tools
+	$(BUF) lint "$(PROTO_SCHEMA)"
+
+check-proto-breaking: verify-tools
+	@for path in \
+		"$(CONTRACT_BASELINE_DIR)/buf.yaml" \
+		"$(CONTRACT_BASELINE_DIR)/buf.lock" \
+		"$(CONTRACT_BASELINE_DIR)/$(PROTO_SCHEMA)"; do \
+		if test ! -f "$$path" || test ! -r "$$path"; then \
+			echo "check-proto-breaking: missing or unreadable baseline file: $$path" >&2; \
+			exit 1; \
+		fi; \
+	done
+	$(BUF) breaking "$(PROTO_SCHEMA)" --against \
+		"$(CONTRACT_BASELINE_DIR)/$(PROTO_SCHEMA)"
 
 gen-proto:
 	@test "$$($(BUF) --version)" = "$(patsubst v%,%,$(BUF_VERSION))"
