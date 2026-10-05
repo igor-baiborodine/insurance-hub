@@ -1,0 +1,11 @@
+version: v2
+modules:
+  - path: api
+deps:
+  - buf.build/bufbuild/protovalidate:50325440f8f24053b047484a6bf60b76
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

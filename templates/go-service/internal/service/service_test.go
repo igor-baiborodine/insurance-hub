@@ -13,15 +13,16 @@ import (
 	"testing"
 	"time"
 
-	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
-	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/health"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	grpcgo "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
+	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
+	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
+	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/health"
 )
 
 func TestRunWithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
@@ -157,7 +158,10 @@ func TestRunCleansUpAfterLaterStartupFailureAndPreservesErrors(t *testing.T) {
 	receiveSignal(t, listener.closed, "gRPC listener was not closed")
 	receiveSignal(t, provider.shutdownCalled, "telemetry was not shut down")
 	if provider.shutdownContextErr != nil {
-		t.Errorf("telemetry cleanup context started canceled: %v", provider.shutdownContextErr)
+		t.Errorf(
+			"telemetry cleanup context started canceled: %v",
+			provider.shutdownContextErr,
+		)
 	}
 }
 
@@ -309,7 +313,11 @@ func TestRunBoundsSlowCleanupToOverallShutdownBudget(t *testing.T) {
 
 	// then
 	if elapsed := shutdownCompleted.Sub(shutdownStarted); elapsed < shutdownTimeout {
-		t.Errorf("shutdown completed in %v, before the %v overall deadline", elapsed, shutdownTimeout)
+		t.Errorf(
+			"shutdown completed in %v, before the %v overall deadline",
+			elapsed,
+			shutdownTimeout,
+		)
 	}
 	if delay := shutdownCompleted.Sub(provider.shutdownDeadline); delay > 250*time.Millisecond {
 		t.Errorf("shutdown completed %v after the overall deadline", delay)
@@ -327,10 +335,16 @@ func TestRunBoundsSlowCleanupToOverallShutdownBudget(t *testing.T) {
 		t.Errorf("shutdown order = %v, want %v", got, wantOrder)
 	}
 	if !errors.Is(management.shutdownResult, context.DeadlineExceeded) {
-		t.Errorf("management shutdown result = %v, want deadline exceeded", management.shutdownResult)
+		t.Errorf(
+			"management shutdown result = %v, want deadline exceeded",
+			management.shutdownResult,
+		)
 	}
 	if !errors.Is(provider.shutdownResult, context.DeadlineExceeded) {
-		t.Errorf("telemetry shutdown result = %v, want deadline exceeded", provider.shutdownResult)
+		t.Errorf(
+			"telemetry shutdown result = %v, want deadline exceeded",
+			provider.shutdownResult,
+		)
 	}
 }
 

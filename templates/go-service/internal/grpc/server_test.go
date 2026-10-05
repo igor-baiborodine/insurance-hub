@@ -10,9 +10,6 @@ import (
 	"testing"
 	"time"
 
-	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
-	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
@@ -26,6 +23,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
+
+	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
+	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
+	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
 )
 
 func TestExampleServiceGeneratedIdentity(t *testing.T) {
@@ -54,7 +55,10 @@ func TestExampleServiceGeneratedIdentity(t *testing.T) {
 	}
 	options, ok := descriptor.Options().(*descriptorpb.FileOptions)
 	if !ok {
-		t.Fatalf("descriptor options type = %T, want *descriptorpb.FileOptions", descriptor.Options())
+		t.Fatalf(
+			"descriptor options type = %T, want *descriptorpb.FileOptions",
+			descriptor.Options(),
+		)
 	}
 	if options.GetGoPackage() != wantGoPackage {
 		t.Errorf("go_package = %q, want %q", options.GetGoPackage(), wantGoPackage)
@@ -127,11 +131,19 @@ func TestExampleServiceEchoBoundaries(t *testing.T) {
 			defer cancel()
 
 			// when
-			response, err := client.Echo(ctx, &scaffoldv1.EchoRequest{Message: test.message})
+			response, err := client.Echo(
+				ctx,
+				&scaffoldv1.EchoRequest{Message: test.message},
+			)
 
 			// then
 			if status.Code(err) != test.wantCode {
-				t.Fatalf("status = %v, want %v: %v", status.Code(err), test.wantCode, err)
+				t.Fatalf(
+					"status = %v, want %v: %v",
+					status.Code(err),
+					test.wantCode,
+					err,
+				)
 			}
 			wantCalls := callsBefore
 			if test.wantCall {
@@ -145,7 +157,10 @@ func TestExampleServiceEchoBoundaries(t *testing.T) {
 					t.Errorf("response = %v, want nil", response)
 				}
 				if status.Convert(err).Message() != "invalid request" {
-					t.Errorf("message = %q, want invalid request", status.Convert(err).Message())
+					t.Errorf(
+						"message = %q, want invalid request",
+						status.Convert(err).Message(),
+					)
 				}
 				return
 			}
@@ -287,16 +302,27 @@ func TestExampleServiceEchoMapsHandlerContextErrors(t *testing.T) {
 
 			// then
 			if handlerErr := <-handlerContextErr; handlerErr != nil {
-				t.Errorf("handler context error before return = %v, want nil", handlerErr)
+				t.Errorf(
+					"handler context error before return = %v, want nil",
+					handlerErr,
+				)
 			}
 			if ctx.Err() != nil {
-				t.Errorf("client context error after response = %v, want nil", ctx.Err())
+				t.Errorf(
+					"client context error after response = %v, want nil",
+					ctx.Err(),
+				)
 			}
 			if response != nil {
 				t.Errorf("response = %v, want nil", response)
 			}
 			if status.Code(err) != test.wantCode {
-				t.Fatalf("status = %v, want %v: %v", status.Code(err), test.wantCode, err)
+				t.Fatalf(
+					"status = %v, want %v: %v",
+					status.Code(err),
+					test.wantCode,
+					err,
+				)
 			}
 		})
 	}
@@ -348,15 +374,23 @@ func TestExampleServiceEchoMapsInternalFailureAndPropagatesTrace(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("handler context was not captured")
 	}
-	if !serverSpanContext.IsValid() || serverSpanContext.TraceID() != parentSpanContext.TraceID() {
-		t.Errorf("server trace context = %v, parent = %v", serverSpanContext, parentSpanContext)
+	if !serverSpanContext.IsValid() ||
+		serverSpanContext.TraceID() != parentSpanContext.TraceID() {
+		t.Errorf(
+			"server trace context = %v, parent = %v",
+			serverSpanContext,
+			parentSpanContext,
+		)
 	}
 	if strings.Contains(logs.String(), payloadMarker) ||
 		strings.Contains(logs.String(), privateMarker) {
 		t.Fatalf("logs expose request or error marker: %s", logs.String())
 	}
 	if !strings.Contains(logs.String(), `"service":"go-service"`) ||
-		!strings.Contains(logs.String(), `"trace_id":"`+serverSpanContext.TraceID().String()+`"`) {
+		!strings.Contains(
+			logs.String(),
+			`"trace_id":"`+serverSpanContext.TraceID().String()+`"`,
+		) {
 		t.Errorf("logs lack service or trace identity: %s", logs.String())
 	}
 	var clientSpanFound, serverSpanFound bool
@@ -372,7 +406,11 @@ func TestExampleServiceEchoMapsInternalFailureAndPropagatesTrace(t *testing.T) {
 		}
 	}
 	if !clientSpanFound || !serverSpanFound {
-		t.Errorf("request spans found: client=%t server=%t", clientSpanFound, serverSpanFound)
+		t.Errorf(
+			"request spans found: client=%t server=%t",
+			clientSpanFound,
+			serverSpanFound,
+		)
 	}
 }
 

@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 )
 
 func TestNewDisabledDoesNotCreateExporter(t *testing.T) {
@@ -25,7 +26,6 @@ func TestNewDisabledDoesNotCreateExporter(t *testing.T) {
 		"go-service",
 		settings,
 	)
-
 	// then
 	if err != nil {
 		t.Fatalf("new disabled provider: %v", err)
@@ -55,7 +55,9 @@ func TestProviderExportsSpansWithServiceIdentity(t *testing.T) {
 	provider := enabledProvider(t, exporter, time.Second)
 
 	// when
-	ctx, span := provider.TracerProvider().Tracer("test").Start(context.Background(), "exported")
+	ctx, span := provider.TracerProvider().
+		Tracer("test").
+		Start(context.Background(), "exported")
 
 	// then
 	if !span.IsRecording() {
@@ -111,8 +113,10 @@ func TestProviderPropagatesW3CTraceContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new provider: %v", err)
 	}
-	traceID := trace.TraceID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
+	traceID := trace.TraceID{
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+	}
 	spanID := trace.SpanID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18}
 	spanContext := trace.NewSpanContext(trace.SpanContextConfig{
 		TraceID:    traceID,
@@ -175,7 +179,11 @@ func TestProviderBoundsExporterInitializationAndHidesCauseDetails(t *testing.T) 
 		t.Errorf("error exposes private marker: %v", err)
 	}
 	if elapsed < settings.ExporterTimeout || elapsed > time.Second {
-		t.Errorf("initialization elapsed %v, want between %v and 1s", elapsed, settings.ExporterTimeout)
+		t.Errorf(
+			"initialization elapsed %v, want between %v and 1s",
+			elapsed,
+			settings.ExporterTimeout,
+		)
 	}
 }
 
@@ -271,7 +279,10 @@ func TestProviderDoesNotBlockSpanCompletionDuringExporterOutage(t *testing.T) {
 	}
 
 	// when
-	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	shutdownContext, cancelShutdown := context.WithTimeout(
+		context.Background(),
+		50*time.Millisecond,
+	)
 	defer cancelShutdown()
 	shutdownErr := provider.Shutdown(shutdownContext)
 

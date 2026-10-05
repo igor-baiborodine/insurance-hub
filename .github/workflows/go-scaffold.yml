@@ -1,0 +1,87 @@
+name: Go service scaffold CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'templates/go-service/**'
+      - '.github/workflows/go-scaffold.yml'
+      - 'Makefile'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'templates/go-service/**'
+      - '.github/workflows/go-scaffold.yml'
+      - 'Makefile'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Go service scaffold
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go 1.27.1
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.1'
+          cache: true
+          cache-dependency-path: templates/go-service/go.sum
+
+      - name: Bootstrap pinned scaffold tools
+        run: make -C templates/go-service bootstrap-tools
+
+      - name: Resolve formatting scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            candidate="$PR_BASE"
+            source_name="pull-request base"
+          else
+            candidate="$PUSH_BEFORE"
+            source_name="push before"
+          fi
+
+          if [[ -n "$candidate" && ! "$candidate" =~ ^0+$ ]] &&
+            git cat-file -e "${candidate}^{commit}" 2>/dev/null
+          then
+            echo "FORMAT_SCOPE=changed" >> "$GITHUB_ENV"
+            echo "FORMAT_BASE=$candidate" >> "$GITHUB_ENV"
+            echo "Using $source_name commit $candidate for changed-file formatting."
+          else
+            echo "FORMAT_SCOPE=all" >> "$GITHUB_ENV"
+            echo "No resolvable nonzero $source_name commit; using FORMAT_SCOPE=all."
+          fi
+
+      - name: Run non-mutating scaffold checks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$FORMAT_SCOPE" == "changed" ]]; then
+            make -C templates/go-service check \
+              FORMAT_SCOPE=changed \
+              FORMAT_BASE="$FORMAT_BASE"
+          else
+            make -C templates/go-service check FORMAT_SCOPE=all
+          fi
+
+      - name: Prove controlled tooling failures
+        run: make -C templates/go-service test-tooling
+
+      - name: Prove renamed scaffold copy
+        run: make -C templates/go-service check-copy

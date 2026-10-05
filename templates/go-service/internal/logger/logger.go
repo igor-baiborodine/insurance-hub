@@ -193,7 +193,10 @@ func sensitiveKey(key string) bool {
 	}, lowerKey)
 	if strings.HasSuffix(compact, "token") || strings.Contains(compact, "password") ||
 		strings.Contains(compact, "secret") || strings.Contains(compact, "credential") ||
-		strings.Contains(compact, "authorization") || strings.HasPrefix(compact, "customer") ||
+		strings.Contains(
+			compact,
+			"authorization",
+		) || strings.HasPrefix(compact, "customer") ||
 		strings.HasPrefix(compact, "policy") || strings.HasPrefix(compact, "payment") {
 		return true
 	}

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 
 	"buf.build/go/protovalidate"
-	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
@@ -15,6 +14,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+
+	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
 )
 
 const internalMessage = "internal error"
@@ -89,7 +90,10 @@ func (server *exampleServer) Echo(
 			return nil, status.Error(codes.Canceled, context.Canceled.Error())
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
+			return nil, status.Error(
+				codes.DeadlineExceeded,
+				context.DeadlineExceeded.Error(),
+			)
 		}
 		server.logger.ErrorContext(ctx, "echo request failed",
 			slog.String("rpc", scaffoldv1.ExampleService_Echo_FullMethodName),

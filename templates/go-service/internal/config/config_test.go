@@ -13,7 +13,6 @@ func TestLoadDefaults(t *testing.T) {
 
 	// when
 	got, err := load(lookup)
-
 	// then
 	if err != nil {
 		t.Fatalf("load defaults: %v", err)
@@ -38,7 +37,10 @@ func TestLoadDefaults(t *testing.T) {
 		t.Error("Telemetry.Enabled = true, want false")
 	}
 	if got.Telemetry.ExporterEndpoint != nil {
-		t.Errorf("Telemetry.ExporterEndpoint = %v, want nil", got.Telemetry.ExporterEndpoint)
+		t.Errorf(
+			"Telemetry.ExporterEndpoint = %v, want nil",
+			got.Telemetry.ExporterEndpoint,
+		)
 	}
 	if got.Telemetry.ExporterTimeout != 5*time.Second {
 		t.Errorf("Telemetry.ExporterTimeout = %v, want 5s", got.Telemetry.ExporterTimeout)
@@ -60,7 +62,6 @@ func TestLoadValidOverrides(t *testing.T) {
 
 	// when
 	got, err := load(mapLookup(values))
-
 	// then
 	if err != nil {
 		t.Fatalf("load overrides: %v", err)
@@ -73,7 +74,8 @@ func TestLoadValidOverrides(t *testing.T) {
 	if got.LogLevel != slog.LevelDebug+2 {
 		t.Errorf("LogLevel = %v, want DEBUG+2", got.LogLevel)
 	}
-	if got.ShutdownTimeout != 15*time.Second || got.Telemetry.ExporterTimeout != 750*time.Millisecond {
+	if got.ShutdownTimeout != 15*time.Second ||
+		got.Telemetry.ExporterTimeout != 750*time.Millisecond {
 		t.Errorf("unexpected durations: %+v", got)
 	}
 	if !got.Telemetry.Enabled || got.Telemetry.ExporterEndpoint.String() !=
@@ -161,8 +163,11 @@ func TestLoadRejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
 			setting: otelEndpointSetting,
 		},
 		{
-			name:    "empty enabled endpoint",
-			values:  map[string]string{otelEnabledSetting: "true", otelEndpointSetting: ""},
+			name: "empty enabled endpoint",
+			values: map[string]string{
+				otelEnabledSetting:  "true",
+				otelEndpointSetting: "",
+			},
 			setting: otelEndpointSetting,
 		},
 		{
@@ -227,13 +232,15 @@ func TestLoadAllowsEmptyEndpointWhenTelemetryIsDisabled(t *testing.T) {
 
 	// when
 	got, err := load(lookup)
-
 	// then
 	if err != nil {
 		t.Fatalf("load disabled telemetry: %v", err)
 	}
 	if got.Telemetry.ExporterEndpoint != nil {
-		t.Errorf("Telemetry.ExporterEndpoint = %v, want nil", got.Telemetry.ExporterEndpoint)
+		t.Errorf(
+			"Telemetry.ExporterEndpoint = %v, want nil",
+			got.Telemetry.ExporterEndpoint,
+		)
 	}
 }
 

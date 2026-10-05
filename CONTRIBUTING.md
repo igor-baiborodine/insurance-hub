@@ -28,7 +28,7 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
 
 * **Git** `>=2.43.0`,
   see [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
-* **Go** `>=1.24`, see [Install Go](https://go.dev/doc/install).
+* **Go** `1.27.1` for the Go service scaffold, see [Install Go](https://go.dev/doc/install).
 * **Node.js** `12.22.12`, see [Install Node.js](https://nodejs.org/en/download/).
 * **Yarn** `1.22.22`, see [Install Yarn](https://classic.yarnpkg.com/en/docs/install).
 * **jq** `>=1.6`, see [Install jq](https://stedolan.github.io/jq/download/).
@@ -141,11 +141,23 @@ TODO
 
 Phase 4 Go services follow the repository's [Go development rules](ai/rules/go-development.md),
 [formatting policy](ai/rules/go-formatting.md), and [validation rules](ai/rules/go-validation.md).
-Use the corresponding Makefile targets for Go tooling, including formatting, linting, tests,
-builds, and generation. Read the owning Makefile for supported targets and module scope.
+Use the owning Makefile targets for every Go operation, including tool installation, dependency
+maintenance, formatting, linting, tests, builds, execution, and generation. Do not replace them
+with direct Go or tool commands. Read the owning Makefile for supported targets and module scope.
 
-The first Go service scaffolding must provide these targets and pin compatible tools. The current
-root `go-build` placeholder is not a multi-service build or validation workflow.
+The current [Go service scaffold](templates/go-service/README.md) requires exact Go 1.27.1 and pins
+its tools under ignored `templates/go-service/.tools/`. Run `bootstrap-tools`, `update-deps`,
+`update-proto-deps`, `format`, `format-proto`, and `gen-proto` only when their documented mutations
+are intended. `check`, `test-tooling`, and `check-copy` preserve the source module; `check` does not
+install tools, reformat source, tidy manifests, regenerate real output, update compatibility
+baselines, run shared infrastructure, or deploy.
+
+From the repository root, only the `go-scaffold-bootstrap-tools`, `go-scaffold-build`,
+`go-scaffold-check`, `go-scaffold-test-tooling`, `go-scaffold-check-copy`, and `go-scaffold-run`
+delegates apply. Their names and coverage are scaffold-only; they do not validate future modules or
+define repository workspace policy. The [Go service scaffold CI](.github/workflows/go-scaffold.yml)
+uses the same owning targets. See the scaffold README for target coverage, variables, prerequisites,
+network access, mutations, CI reproduction, and the issue-123 topology handoff.
 
 ### Branch Names
 
@@ -293,8 +305,8 @@ recommendations ensures automation is consistent, maintainable, and easy to exte
     - Centralize version numbers, tool binaries, and directory paths as variables at the top.
     - This enhances readability and ease of upgrades.
       ```makefile
-      GO_VERSION = 1.24
-      GOLANGCI_LINT_VERSION = v2.1.6
+      GO_VERSION = 1.27.1
+      GOLANGCI_LINT_VERSION = v2.14.0
       ```
 
 4. Provide a Helpful Default or `help` Target
@@ -326,7 +338,7 @@ recommendations ensures automation is consistent, maintainable, and easy to exte
     - This improves automation usability and testing consistency.
       ```makefile
       .PHONY: check
-      check: format lint test
+      check: format-check lint test-race build
       ```
 
 7. Avoid Hardcoded Paths

@@ -4,7 +4,8 @@ package scaffold.v1;
 
 import "buf/validate/validate.proto";
 
-option go_package = "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1;scaffoldv1";
+option go_package =
+  "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1;scaffoldv1";
 
 service ExampleService {
   rpc Echo(EchoRequest) returns (EchoResponse);
