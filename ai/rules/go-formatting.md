@@ -39,9 +39,11 @@ Apply to changed handwritten Go code. Follow the Makefile interface in
 
 ## Current tooling boundary
 
-Insurance Hub currently has no Go modules or Go formatting/check targets. These are requirements
-for Phase 4 scaffolding, not commands already available at the repository root. The module's first
-implementation must supply these Make targets before formatting can be reported as verified.
+Insurance Hub currently has one Go module: the reusable scaffold at `templates/go-service`. Its
+owning Makefile supplies the pinned `format` and non-mutating `format-check` targets, and the root
+`go-modules-check` aggregate invokes its complete `check` target in standalone mode. No business
+service, shared module, contract module, or Go workspace is currently approved. Future modules are
+not formatting-covered until their owning targets and inventory/CI onboarding are complete.
 
 In `campsite-booking-go`, `make format` invokes golines then gofumpt, but the recipe does not
 explicitly set 100 columns or invoke goimports; installing goimports alone does not prove import

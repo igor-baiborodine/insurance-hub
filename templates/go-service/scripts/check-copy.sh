@@ -81,7 +81,7 @@ remove_scaffold_only_copy_surface() {
 			print "The scaffold-only `go-scaffold-*` root delegates and"
 			print "`.github/workflows/go-scaffold.yml` do not cover this copied module. Run module-owned"
 			print "Make targets from this directory. Add root and CI coverage only through the repository"
-			print "topology and onboarding workflow owned by issue 123."
+			print "documented in ../../docs/migration/phase-4/go-module-topology.md."
 			skipping = 1
 			next
 		}
@@ -161,7 +161,7 @@ if grep -Fq 'make go-scaffold-' "$copy_root/README.md" ||
 	exit 1
 fi
 grep -Fq 'do not cover this copied module' "$copy_root/README.md"
-grep -Fq 'onboarding workflow owned by issue 123' "$copy_root/README.md"
+grep -Fq '../../docs/migration/phase-4/go-module-topology.md' "$copy_root/README.md"
 if grep -n -E '^replace([[:space:]]|$)' "$copy_root/go.mod"; then
 	echo 'check-copy: filesystem replacement found in copied go.mod' >&2
 	exit 1

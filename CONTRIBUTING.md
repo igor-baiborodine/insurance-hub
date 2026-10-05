@@ -152,17 +152,20 @@ are intended. `check`, `test-tooling`, and `check-copy` preserve the source modu
 install tools, reformat source, tidy manifests, regenerate real output, update compatibility
 baselines, run shared infrastructure, or deploy.
 
-From the repository root, only the `go-scaffold-bootstrap-tools`, `go-scaffold-build`,
-`go-scaffold-check`, `go-scaffold-test-tooling`, `go-scaffold-check-copy`, and `go-scaffold-run`
-delegates apply. Their names and coverage are scaffold-only; they do not validate future modules or
-define repository workspace policy. The [Go service scaffold CI](.github/workflows/go-scaffold.yml)
-uses the same owning targets. See the scaffold README for target coverage, variables, prerequisites,
-network access, mutations, CI reproduction, and the issue-123 topology handoff.
-
 The root [`go-module-topology.json`](go-module-topology.json) records every supported Go module and
-approved workspace. Run `make go-topology-check` with `jq >= 1.6` to compare that inventory with the
-repository manifests. The check is read-only, reports excluded fixture and dependency manifests,
-and fails when a module or workspace is missing, unlisted, or has a different module identity.
+approved workspace. Run `make go-topology-check` with `jq >= 1.6` to verify inventory, ownership,
+imports, replacements, and CI coverage. Run `make go-modules-check` after bootstrapping the owning
+module tools to execute every recorded non-mutating validation target in its required resolution
+mode. `make go-topology-test` proves controlled inventory, workspace, replacement, and import
+failures in disposable local fixtures. These targets do not install tools, update dependencies,
+format source, regenerate output, create a workspace, or deploy.
+
+The current inventory contains only `templates/go-service`, which is supported standalone with
+`GOWORK=off`; no workspace or filesystem replacement is approved. The six `go-scaffold-*` root
+delegates remain narrow scaffold conveniences. The
+[Go module topology guide](docs/migration/phase-4/go-module-topology.md) defines exact local and CI
+commands, exclusions, mutation boundaries, consumer validation, and the reviewed onboarding
+process for future modules or workspaces.
 
 ### Branch Names
 

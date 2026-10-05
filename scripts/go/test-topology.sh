@@ -102,7 +102,6 @@ install_checker() {
 	local case_root="$1"
 	mkdir -p "${case_root}/.github/workflows"
 	: >"${case_root}/.go-topology-test-fixture"
-	: >"${case_root}/.github/workflows/test.yml"
 	cat >"${case_root}/Makefile" <<'EOF'
 .PHONY: go-topology-check go-modules-check
 go-topology-check:
@@ -117,6 +116,52 @@ go-modules-check: go-topology-check
 		GO_MODULE_CALLER_VARIABLES="" MAKE_COMMAND="$(MAKE)" \
 		"$(CHECKER_ROOT)/check-modules.sh"
 EOF
+}
+
+write_ci_workflow() {
+	local case_root="$1"
+	local modules_json="$2"
+	local workspaces_json="$3"
+	local workflow_path="${case_root}/.github/workflows/test.yml"
+	local directory
+	{
+		printf '%s\n' \
+			'name: Fixture topology CI' \
+			'on:' \
+			'  push:' \
+			'    paths:'
+		for trigger_path in go.mod go.sum go.work go.work.sum \
+			'**/go.mod' '**/go.sum' '**/go.work' '**/go.work.sum' \
+			'go-module-topology.json' 'scripts/go/**' \
+			'docs/migration/phase-4/go-module-topology.md' '.github/workflows/test.yml' 'Makefile'
+		do
+			printf "      - '%s'\n" "${trigger_path}"
+		done
+		while IFS= read -r directory; do
+			[[ "${directory}" == "." ]] || printf "      - '%s/**'\n" "${directory}"
+		done < <(jq -nr --argjson modules "${modules_json}" --argjson workspaces "${workspaces_json}" \
+			'[$modules[].directory, $workspaces[].directory] | unique[]')
+		printf '%s\n' \
+			'  pull_request:' \
+			'    paths:'
+		for trigger_path in go.mod go.sum go.work go.work.sum \
+			'**/go.mod' '**/go.sum' '**/go.work' '**/go.work.sum' \
+			'go-module-topology.json' 'scripts/go/**' \
+			'docs/migration/phase-4/go-module-topology.md' '.github/workflows/test.yml' 'Makefile'
+		do
+			printf "      - '%s'\n" "${trigger_path}"
+		done
+		while IFS= read -r directory; do
+			[[ "${directory}" == "." ]] || printf "      - '%s/**'\n" "${directory}"
+		done < <(jq -nr --argjson modules "${modules_json}" --argjson workspaces "${workspaces_json}" \
+			'[$modules[].directory, $workspaces[].directory] | unique[]')
+		printf '%s\n' \
+			'jobs:' \
+			'  validate:' \
+			'    steps:' \
+			'      - run: make go-modules-check' \
+			'      - run: make go-topology-test'
+	} >"${workflow_path}"
 }
 
 module_record() {
@@ -162,6 +207,7 @@ write_inventory() {
 		    {pathPattern: "**/testdata/**", category: "fixture", reason: "fixture-only module"}
 		  ]
 		}' >"${case_root}/go-module-topology.json"
+	write_ci_workflow "${case_root}" "${modules_json}" "${workspaces_json}"
 }
 
 write_module() {
@@ -312,6 +358,14 @@ expect_failure "partial workspace" "${case_root}" 'missing inventory workspace m
 case_root="$(new_single_case missing-owning-target)"
 printf '.PHONY: other\nother:\n\t@true\n' >"${case_root}/module/Makefile"
 expect_failure "missing owning target" "${case_root}" 'missing validation target check in module/Makefile' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case missing-ci-module-trigger)"
+grep -Fv -- "- 'module/**'" "${case_root}/.github/workflows/test.yml" \
+	>"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "missing CI module trigger" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing push path trigger for inventory module directory module: module/\*\*' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
 setup_edge_case() {

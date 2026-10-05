@@ -301,6 +301,9 @@ fi
 
 readonly boundary_checker="${script_dir}/check-boundaries.sh"
 test -x "${boundary_checker}" || fail "missing executable boundary checker: scripts/go/check-boundaries.sh"
+readonly ci_checker="${script_dir}/check-ci-coverage.sh"
+test -x "${ci_checker}" || fail "missing executable CI coverage checker: scripts/go/check-ci-coverage.sh"
+"${ci_checker}" "${repo_root}" "${inventory_path}"
 "${boundary_checker}"
 
 printf 'Go module topology: %d module(s), %d approved workspace(s)\n' \
