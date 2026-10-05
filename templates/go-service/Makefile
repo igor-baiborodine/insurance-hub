@@ -13,6 +13,9 @@ GOLANGCI_CONFIG := .golangci.yml
 
 PROTO_SCHEMA := api/scaffold/v1/example_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
+GENERATED_PROTO_FILES := \
+	gen/scaffold/v1/example_service.pb.go \
+	gen/scaffold/v1/example_service_grpc.pb.go
 
 GO_VERSION := 1.27.1
 BUF_VERSION := v1.73.0
@@ -30,7 +33,7 @@ OTEL_GRPC_VERSION := v0.71.0
 
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto run
+	gen-proto check-proto-drift run
 
 bootstrap-tools:
 	mkdir -p "$(TOOLS_BIN)"
@@ -123,10 +126,15 @@ gen-proto:
 		"protoc-gen-go $(PROTOC_GEN_GO_VERSION)"
 	@test "$$($(PROTOC_GEN_GO_GRPC) --version)" = \
 		"protoc-gen-go-grpc $(patsubst v%,%,$(PROTOC_GEN_GO_GRPC_VERSION))"
-	rm -f \
-		"gen/scaffold/v1/example_service.pb.go" \
-		"gen/scaffold/v1/example_service_grpc.pb.go"
+	rm -f $(GENERATED_PROTO_FILES)
 	$(BUF) generate
+
+check-proto-drift: verify-tools
+	@MAKE_COMMAND="$(MAKE)" \
+		TOOLS_BIN="$(TOOLS_BIN)" \
+		PROTO_SCHEMA="$(PROTO_SCHEMA)" \
+		GENERATED_PROTO_FILES="$(GENERATED_PROTO_FILES)" \
+		./scripts/check-proto-drift.sh
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
