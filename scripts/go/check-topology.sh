@@ -40,6 +40,7 @@ fail() {
 }
 
 command -v jq >/dev/null 2>&1 || fail "jq >= 1.6 is required"
+command -v go >/dev/null 2>&1 || fail "Go is required to inspect effective module metadata"
 jq_version="$(jq --version | sed 's/^jq-//')"
 jq_major="${jq_version%%.*}"
 jq_minor="${jq_version#*.}"
@@ -262,6 +263,48 @@ while IFS=$'\t' read -r directory module_path; do
 	elif [[ "${actual_module_path}" != "${module_path}" ]]; then
 		errors+=("module identity mismatch at ${mod_file}: inventory=${module_path}, actual=${actual_module_path}")
 	fi
+
+	set +e
+	metadata="$(env -u GOFLAGS GOWORK=off go mod edit -json "${repo_root}/${mod_file}")"
+	metadata_status=$?
+	set -e
+	if ((metadata_status != 0)) || [[ -z "${metadata}" ]] || \
+		! jq -e 'type == "object"' <<<"${metadata}" >/dev/null
+	then
+		errors+=("could not inspect effective manifest metadata for ${module_path} at ${mod_file}")
+		continue
+	fi
+
+	while IFS=$'\t' read -r required_module replacement_path; do
+		if ! jq -e \
+			--arg directory "${directory}" \
+			--arg required_module "${required_module}" \
+			--arg replacement_path "${replacement_path}" \
+			'.modules[] | select(.directory == $directory) | .localReplacements[]?
+			 | select(.modulePath == $required_module and .replacementPath == $replacement_path)' \
+			"${inventory_path}" >/dev/null; then
+			errors+=("module ${module_path} requires ${required_module} from unapproved filesystem replacement ${replacement_path}; standalone portability is not proven")
+		fi
+	done < <(
+		jq -r '.Replace[]? | select((.New.Version // "") == "") | [.Old.Path, .New.Path] | @tsv' \
+			<<<"${metadata}"
+	)
+
+	while IFS=$'\t' read -r required_module replacement_path; do
+		if ! jq -e \
+			--arg required_module "${required_module}" \
+			--arg replacement_path "${replacement_path}" \
+			'.Replace[]?
+			 | select(.Old.Path == $required_module and .New.Path == $replacement_path
+			   and (.New.Version // "") == "")' \
+			<<<"${metadata}" >/dev/null; then
+			errors+=("module ${module_path} inventory approves missing filesystem replacement ${required_module} => ${replacement_path}")
+		fi
+	done < <(
+		jq -r --arg directory "${directory}" \
+			'.modules[] | select(.directory == $directory) | .localReplacements[]?
+			 | [.modulePath, .replacementPath] | @tsv' "${inventory_path}"
+	)
 done < <(jq -r '.modules[] | [.directory, .modulePath] | @tsv' "${inventory_path}")
 
 while IFS=$'\t' read -r directory; do

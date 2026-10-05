@@ -169,11 +169,13 @@ module_record() {
 	local module_path="$2"
 	local role="$3"
 	local consumers_json="$4"
+	local replacements_json="${5:-[]}"
 	jq -cn \
 		--arg directory "${directory}" \
 		--arg module_path "${module_path}" \
 		--arg role "${role}" \
 		--argjson consumers "${consumers_json}" \
+		--argjson replacements "${replacements_json}" \
 		'{
 		  directory: $directory,
 		  modulePath: $module_path,
@@ -185,7 +187,7 @@ module_record() {
 		  packageScope: "fixture ./...",
 		  prerequisites: [],
 		  consumers: $consumers,
-		  localReplacements: [],
+		  localReplacements: $replacements,
 		  ciWorkflow: ".github/workflows/test.yml"
 		}'
 }
@@ -376,7 +378,7 @@ setup_edge_case() {
 	local case_root="${fixture_root}/${name}"
 	local consumer_path='example.test/insurance-hub/consumer'
 	local owner_path="example.test/insurance-hub/${name}-owner"
-	local consumer_record owner_record modules_json
+	local consumer_record owner_record modules_json replacement_json
 	mkdir -p "${case_root}"
 	install_checker "${case_root}"
 	write_module "${case_root}" "consumer" "${consumer_path}" "consumer"
@@ -387,7 +389,10 @@ setup_edge_case() {
 	fi
 	add_requirement "${case_root}/consumer" "${owner_path}" "../owner"
 	add_import "${case_root}/consumer/consumer.go" "consumer" "${owner_path}/${imported_package}"
-	consumer_record="$(module_record "consumer" "${consumer_path}" "business-service" "[\"${consumer_path}\"]")"
+	replacement_json="$(jq -cn --arg module_path "${owner_path}" \
+		'[{modulePath: $module_path, replacementPath: "../owner", reason: "controlled boundary fixture"}]')"
+	consumer_record="$(module_record "consumer" "${consumer_path}" "business-service" \
+		"[\"${consumer_path}\"]" "${replacement_json}")"
 	owner_record="$(module_record "owner" "${owner_path}" "${owner_role}" "${owner_consumers}")"
 	modules_json="$(printf '%s\n%s\n' "${consumer_record}" "${owner_record}" | jq -s '.')"
 	write_inventory "${case_root}" "${modules_json}"
@@ -427,8 +432,10 @@ write_module "${case_root}" consumer 'example.test/insurance-hub/consumer' consu
 write_module "${case_root}" testdata/unknown 'example.test/insurance-hub/unknown' unknown
 add_requirement "${case_root}/consumer" 'example.test/insurance-hub/unknown' '../testdata/unknown'
 add_import "${case_root}/consumer/consumer.go" consumer 'example.test/insurance-hub/unknown'
+replacement_json="$(jq -cn \
+	'[{modulePath: "example.test/insurance-hub/unknown", replacementPath: "../testdata/unknown", reason: "controlled unknown-owner fixture"}]')"
 record="$(module_record consumer 'example.test/insurance-hub/consumer' business-service \
-	'["example.test/insurance-hub/consumer"]')"
+	'["example.test/insurance-hub/consumer"]' "${replacement_json}")"
 write_inventory "${case_root}" "[$record]"
 expect_failure "unknown repository owner" "${case_root}" \
 	'import=example.test/insurance-hub/unknown.*rule=unknown-repository-owner' \
@@ -455,7 +462,10 @@ ordinary-replacement-resolution:
 EOF
 expect_pass "ordinary local replacement resolution control" "${case_root}" \
 	'ordinary local replacement resolution passed' make --no-print-directory -C "${case_root}" ordinary-replacement-resolution
-expect_failure "unapproved replacement portability" "${case_root}" \
+expect_failure "unapproved replacement topology contract" "${case_root}" \
+	'module example.test/insurance-hub/consumer requires example.test/insurance-hub/dependency from unapproved filesystem replacement ../dependency' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+expect_failure "unapproved replacement aggregate contract" "${case_root}" \
 	'module example.test/insurance-hub/consumer requires example.test/insurance-hub/dependency from unapproved filesystem replacement ../dependency' \
 	make --no-print-directory -C "${case_root}" go-modules-check
 

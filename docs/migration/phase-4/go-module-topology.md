@@ -41,8 +41,9 @@ make go-topology-test
 ```
 
 `go-topology-check` compares discovered manifests with the inventory, checks module identity and
-owner targets, validates CI triggers and root invocations, loads every package graph with
-`GOWORK=off` and readonly module resolution, and enforces repository import boundaries.
+owner targets, compares filesystem replacements with their approved inventory records, validates CI
+triggers and root invocations, loads every package graph with `GOWORK=off` and readonly module
+resolution, and enforces repository import boundaries.
 
 `go-modules-check` runs topology validation first and then visits every inventory module exactly
 once. It forces standalone mode, rejects unapproved filesystem replacements, forwards only the
