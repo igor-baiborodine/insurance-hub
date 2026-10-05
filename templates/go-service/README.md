@@ -74,7 +74,7 @@ require `bootstrap-tools` to have been run explicitly.
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
 | `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts services, or deploys. |
 | `make test-tooling`         | Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation.                                                                       | Verified tools; temporary storage and the network/cache prerequisites of nested checks.                                                                                            |
-| `make check-copy`           | A Git-free `services/example-copy` with renamed module, runtime, schema, generated, configuration, linter, and compatibility-baseline identities. It bootstraps its own tools, regenerates, runs non-race tests and the aggregate, compares inventories, and cleans up.    | Verified source tools, temporary storage, and all public network endpoints listed above.                                                                                           |
+| `make check-copy`           | Source-scaffold maintainer proof that creates a Git-free `services/example-copy`, validates its renamed identities and Make checks, removes scaffold-only copy tooling from the result, compares inventories, and cleans up.                              | Verified source tools, temporary storage, and all public network endpoints listed above. The target is removed from produced service copies.                                       |
 
 Database/broker integration, mock generation, migrations, containers, deployment, workspace
 validation, and live infrastructure are not applicable to this standalone scaffold. It has no such
@@ -165,7 +165,8 @@ module defines no root Go module/workspace and makes no claim about future-modul
 Follow [COPYING.md](COPYING.md) to produce a renamed service without importing this scaffold's
 runtime packages or relying on a workspace or filesystem replacement. The procedure updates module,
 runtime, schema, generated-code, and documentation identities together and regenerates protobuf
-bindings rather than editing them.
+bindings rather than editing them. It also removes the source-scaffold-only `check-copy` target and
+script and replaces root-delegate/CI claims with the copied module's actual onboarding status.
 
 Repository maintainers own this reference. A copied service owns its code and dependencies and
 adopts later scaffold fixes through normal review; copies do not update automatically.

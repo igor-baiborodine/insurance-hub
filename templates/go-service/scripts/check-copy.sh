@@ -2,10 +2,12 @@
 
 set -eu
 
-module_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+module_root=$(
+	unset CDPATH
+	cd -- "$(dirname -- "$0")/.." && pwd
+)
 make_command=${MAKE_COMMAND:-make}
 
-source_module=github.com/igor-baiborodine/insurance-hub/templates/go-service
 source_module_pattern=github\.com/igor-baiborodine/insurance-hub/templates/go-service
 copy_module=github.com/igor-baiborodine/insurance-hub/services/example-copy
 source_directory=templates/go-service
@@ -14,7 +16,6 @@ source_service=go-service
 copy_service=example-copy
 source_proto_path=scaffold/v1
 copy_proto_path=examplecopy/v1
-source_proto_package=scaffold.v1
 copy_proto_package=examplecopy.v1
 source_go_package=scaffoldv1
 copy_go_package=examplecopyv1
@@ -64,6 +65,32 @@ replace_identity() {
 		xargs -0 -r sed -i "s|$old|$new|g"
 }
 
+remove_scaffold_only_copy_surface() {
+	sed -i 's/^\([[:space:]]*\)check-copy run$/\1run/' "$copy_root/Makefile"
+	sed -i '/^check-copy: verify-tools$/,+1d' "$copy_root/Makefile"
+	rm -- "$copy_root/scripts/check-copy.sh"
+
+	sed -i \
+		-e '/^| `make check-copy`/d' \
+		-e '/^make check-copy$/d' \
+		"$copy_root/README.md"
+	awk '
+		/^### Root scaffold delegates$/ {
+			print "### Repository onboarding"
+			print ""
+			print "The scaffold-only `go-scaffold-*` root delegates and"
+			print "`.github/workflows/go-scaffold.yml` do not cover this copied module. Run module-owned"
+			print "Make targets from this directory. Add root and CI coverage only through the repository"
+			print "topology and onboarding workflow owned by issue 123."
+			skipping = 1
+			next
+		}
+		skipping && /^## Create an independently owned service$/ { skipping = 0 }
+		!skipping { print }
+	' "$copy_root/README.md" >"$copy_root/README.md.copy"
+	mv -- "$copy_root/README.md.copy" "$copy_root/README.md"
+}
+
 inventory_tree "$module_root" "$source_inventory"
 
 mkdir -p "$copy_root"
@@ -104,6 +131,7 @@ replace_identity 'scaffold\.v1' "$copy_proto_package"
 replace_identity "$source_go_package" "$copy_go_package"
 replace_identity "$source_service" "$copy_service"
 sed -i 's/^# Go service scaffold$/# Example copy service/' "$copy_root/README.md"
+remove_scaffold_only_copy_surface
 
 if grep -R -n -E \
 	--exclude=COPYING.md \
@@ -116,21 +144,24 @@ then
 	exit 1
 fi
 
-if grep -n -F \
-	-e "$source_module" \
-	-e "$source_directory" \
-	-e "$source_service" \
-	-e "$source_proto_path" \
-	-e "$source_proto_package" \
-	-e "$source_go_package" \
-	"$copy_root/scripts/check-copy.sh"
-then
-	echo 'check-copy: stale source identity found in copied validation script' >&2
-	exit 1
-fi
-
 test ! -e "$copy_root/go.work"
 test ! -e "$copy_root/.git"
+test ! -e "$copy_root/scripts/check-copy.sh"
+if grep -q '^check-copy:' "$copy_root/Makefile" ||
+	grep -q 'check-copy' "$copy_root/Makefile" ||
+	grep -Fq '`make check-copy`' "$copy_root/README.md"; then
+	echo 'check-copy: copied service retained scaffold-only check-copy tooling' >&2
+	exit 1
+fi
+if grep -Fq 'make go-scaffold-' "$copy_root/README.md" ||
+	grep -Fq 'Go service scaffold CI' "$copy_root/README.md" ||
+	grep -Fq 'when this module, the workflow, or the root Makefile changes' \
+		"$copy_root/README.md"; then
+	echo 'check-copy: copied README claims scaffold-only root or CI coverage' >&2
+	exit 1
+fi
+grep -Fq 'do not cover this copied module' "$copy_root/README.md"
+grep -Fq 'onboarding workflow owned by issue 123' "$copy_root/README.md"
 if grep -n -E '^replace([[:space:]]|$)' "$copy_root/go.mod"; then
 	echo 'check-copy: filesystem replacement found in copied go.mod' >&2
 	exit 1

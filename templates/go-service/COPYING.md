@@ -64,8 +64,9 @@ normal temporary-file cleanup. The copy procedure never needs to overwrite gener
 
 Apply the concrete example replacements below. They cover the Go module and imports, runtime and
 test identities, schema and generated paths, the checked-in golangci-lint configuration, tooling
-scripts, Make-owned output paths, and the isolated compatibility baseline. `COPYING.md` is excluded
-because it must retain the source values needed to create another independent copy.
+scripts that remain applicable, Make-owned output paths, and the isolated compatibility baseline.
+`COPYING.md` is excluded because it must retain the source values needed to create another
+independent copy.
 
 ```sh
 rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
@@ -95,6 +96,39 @@ rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
 
 sed -i 's/^# Go service scaffold$/# Example copy service/' README.md
 ```
+
+The source scaffold's `check-copy` target proves this procedure, but it is not a service-owned
+validation capability. Remove that target and script from the copy, and replace the scaffold-only
+root-delegate and CI sections with the copied module's actual onboarding boundary:
+
+```sh
+sed -i 's/^\([[:space:]]*\)check-copy run$/\1run/' Makefile
+sed -i '/^check-copy: verify-tools$/,+1d' Makefile
+rm scripts/check-copy.sh
+
+sed -i \
+  -e '/^| `make check-copy`/d' \
+  -e '/^make check-copy$/d' \
+  README.md
+awk '
+  /^### Root scaffold delegates$/ {
+    print "### Repository onboarding"
+    print ""
+    print "The scaffold-only `go-scaffold-*` root delegates and"
+    print "`.github/workflows/go-scaffold.yml` do not cover this copied module. Run module-owned"
+    print "Make targets from this directory. Add root and CI coverage only through the repository"
+    print "topology and onboarding workflow owned by issue 123."
+    skipping = 1
+    next
+  }
+  skipping && /^## Create an independently owned service$/ { skipping = 0 }
+  !skipping { print }
+' README.md > README.md.copy
+mv README.md.copy README.md
+```
+
+The repository root Makefile and scaffold workflow still point to `templates/go-service`. Do not
+claim that they cover the copied service until the repository onboarding workflow updates them.
 
 Review `README.md` and replace the template introduction with the real service purpose when it is
 known. Update any service-specific ports or configuration defaults required by the service ticket.
@@ -188,7 +222,8 @@ approved repository module topology; this copy procedure does not establish that
 When changing the source scaffold or this procedure, run the owning proof from the original module.
 It creates a temporary `services/example-copy`, applies every identity replacement above,
 bootstraps that copy's own pinned tools, regenerates its bindings, runs `test` and the complete
-non-mutating `check`, compares inventories, and removes the temporary tree.
+non-mutating `check`, verifies that scaffold-only copy tooling and coverage claims were removed,
+compares inventories, and removes the temporary tree.
 
 ```sh
 make check-copy
