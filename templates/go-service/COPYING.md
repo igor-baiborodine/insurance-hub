@@ -7,14 +7,14 @@ contract identities in a completed copy.
 The concrete example below creates `services/example-copy`. Choose service-specific values before
 creating a real service, then use the same replacement categories consistently.
 
-| Identity | Scaffold value | Example copy value |
-| --- | --- | --- |
-| Repository directory | `templates/go-service` | `services/example-copy` |
-| Go module/import prefix | `github.com/igor-baiborodine/insurance-hub/templates/go-service` | `github.com/igor-baiborodine/insurance-hub/services/example-copy` |
-| Runtime `SERVICE_NAME` default | `go-service` | `example-copy` |
-| Protobuf package | `scaffold.v1` | `examplecopy.v1` |
-| Schema/generated path | `scaffold/v1` | `examplecopy/v1` |
-| Generated Go package | `scaffoldv1` | `examplecopyv1` |
+| Identity                       | Scaffold value                                                   | Example copy value                                                |
+|--------------------------------|------------------------------------------------------------------|-------------------------------------------------------------------|
+| Repository directory           | `templates/go-service`                                           | `services/example-copy`                                           |
+| Go module/import prefix        | `github.com/igor-baiborodine/insurance-hub/templates/go-service` | `github.com/igor-baiborodine/insurance-hub/services/example-copy` |
+| Runtime `SERVICE_NAME` default | `go-service`                                                     | `example-copy`                                                    |
+| Protobuf package               | `scaffold.v1`                                                    | `examplecopy.v1`                                                  |
+| Schema/generated path          | `scaffold/v1`                                                    | `examplecopy/v1`                                                  |
+| Generated Go package           | `scaffoldv1`                                                     | `examplecopyv1`                                                   |
 
 Use a valid Protobuf identifier without a hyphen. The generic `ExampleService`, `EchoRequest`,
 `EchoResponse`, `Echo`, and `cmd/server` names may remain until the service defines a real contract.
@@ -199,3 +199,8 @@ From the repository root, the narrowly scoped equivalent is:
 ```sh
 make go-scaffold-check-copy
 ```
+
+The scaffold workflow filters only `templates/go-service/**`, its own workflow file, and the root
+Makefile. A copied service is therefore not covered automatically. Add repository-wide module and
+CI onboarding only through the issue-123 topology workflow; do not broaden the scaffold job or its
+root delegates and imply coverage before that policy exists.

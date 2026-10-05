@@ -11,36 +11,154 @@ signal-driven shutdown.
 
 ## Prerequisites
 
-- Go 1.27.1
+- Go 1.27.1 exactly
 - GNU Make 4.3 or newer
-- Network access for initial Go module and Buf Schema Registry downloads
+- Git for the default changed-file formatting scope; `FORMAT_SCOPE=all` also works outside Git
+- GCC on Linux for `test-race`
+- Network access when the Go module proxy/checksum service, source-based tool installation, Buf
+  Schema Registry dependencies, or `vuln.go.dev` are not already cached
 
-The Makefile owns four setup and generation operations. None is an implicit prerequisite of
-another target:
+All Go and tooling operations use this module's Makefile. Run module targets from
+`templates/go-service/`, or use `make -C templates/go-service <target>` from the repository root.
+Tool installation, dependency maintenance, formatting, linting, tests, builds, vulnerability
+analysis, and execution set `GOWORK=off`; normal validation uses readonly module resolution and
+never depends on a root workspace or filesystem replacement. `GO` may override the Go executable.
 
-| Target                   | Purpose and mutations                                                                                                                                                                                                                             |
-|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `make bootstrap-tools`   | Installs Buf 1.73.0, protoc-gen-go 1.36.12, and protoc-gen-go-grpc 1.6.2 into ignored `.tools/bin/`. It uses the Go module cache and network when artifacts are not cached.                                                                       |
-| `make update-proto-deps` | Resolves the Protovalidate schema commit declared in `buf.yaml` and updates only `buf.lock`. It requires the pinned local Buf binary and BSR access unless cached.                                                                                |
-| `make gen-proto`         | Verifies all local tool versions, removes and regenerates only `gen/scaffold/v1/example_service.pb.go` and `gen/scaffold/v1/example_service_grpc.pb.go`. It may fetch declared schemas unless cached; it does not install tools or change other files under `gen/` or dependency manifests. |
-| `make update-deps`       | Updates only `go.mod` and `go.sum` for generated-code imports at the pinned versions, then tidies the module. It can use the network and Go module cache.                                                                                         |
+`bootstrap-tools` installs these exact binaries under ignored `.tools/bin/`:
 
-Bootstrap and generate the contract in this explicit order:
+- Buf 1.73.0
+- protoc-gen-go 1.36.12
+- protoc-gen-go-grpc 1.6.2
+- golangci-lint 2.14.0
+- govulncheck 1.8.0
 
-```sh
-GOWORK=off make bootstrap-tools
-GOWORK=off make update-proto-deps
-GOWORK=off make gen-proto
-GOWORK=off make update-deps
+### Mutating and runtime targets
+
+These operations are explicit and are never hidden inside `check`:
+
+| Target                   | Mutation or side effect                                                                                                    | Prerequisite and network behavior                                                              |
+|--------------------------|----------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
+| `make bootstrap-tools`   | Installs or replaces only binaries under ignored `.tools/bin/`; it does not change source, generated output, or manifests. | Go 1.27.1 and source/module download access unless cached; finishes by running `verify-tools`. |
+| `make update-deps`       | Updates only `go.mod` and `go.sum` to the Makefile's pinned runtime/generated-code dependencies, then tidies.              | Go proxy and checksum access unless cached.                                                    |
+| `make update-proto-deps` | Updates only `buf.lock` for the schema dependency declared in `buf.yaml`.                                                  | Verified pinned Buf binary and BSR access unless cached.                                       |
+| `make format`            | Rewrites only the selected eligible handwritten Go files through gofumpt, goimports, then golines at 100 columns.          | Verified pinned tools; file selection is described below.                                      |
+| `make format-proto`      | Rewrites only `api/scaffold/v1/example_service.proto` with pinned Buf.                                                     | Verified pinned tools.                                                                         |
+| `make gen-proto`         | Removes and regenerates only the two declared files under `gen/scaffold/v1/`.                                              | Pinned Buf and generators already installed; BSR access unless cached.                         |
+| `make run`               | Starts `./cmd/server`; it changes no repository file.                                                                      | Go 1.27.1; readonly modules; runtime settings below.                                           |
+
+Generated bindings must never be edited by hand. `gen-proto` owns only:
+
+```text
+gen/scaffold/v1/example_service.pb.go
+gen/scaffold/v1/example_service_grpc.pb.go
 ```
 
-The generators are resolved by explicit paths under `.tools/bin/`; changing the process `PATH` is
-not required. `gen-proto` removes only its two declared bindings before generation and leaves every
-other path under `gen/` untouched. Generated files must never be edited by hand. The checked-in
-schema keeps its Go package identity explicit, and Buf managed mode is disabled.
+### Non-mutating validation targets
 
-The broader formatting, lint, security, drift, and CI interface belongs to issue 121. Repository
-module/workspace topology enforcement belongs to issue 123.
+These targets preserve the module outside ignored `.tools/`. Targets that invoke pinned tools
+require `bootstrap-tools` to have been run explicitly.
+
+| Target                      | Coverage                                                                                                                                                                                                                                                                   | Network or other prerequisite                                                                                                                                                      |
+|-----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `make verify-tools`         | Exact Go/tool versions, golangci-lint schema and formatter order, module/import prefix, 100-column settings, readonly loading, all-test lint scope, and vet-equivalent coverage.                                                                                           | All five pinned binaries already installed; no installation.                                                                                                                       |
+| `make format-check`         | The same ordered formatter pipeline and selected handwritten files as `format`, reported without rewriting them.                                                                                                                                                           | Verified tools; file selection below.                                                                                                                                              |
+| `make check-deps`           | Reproduces `update-deps` in a temporary standalone module and compares `go.mod` and `go.sum`.                                                                                                                                                                              | Go proxy/checksum access unless cached.                                                                                                                                            |
+| `make format-proto-check`   | Buf formatting for the one owned schema.                                                                                                                                                                                                                                   | Verified tools.                                                                                                                                                                    |
+| `make lint-proto`           | Buf lint for the one owned schema.                                                                                                                                                                                                                                         | Verified tools and locked BSR dependencies.                                                                                                                                        |
+| `make check-proto-breaking` | Current schema against `testdata/contract-baseline/` with Buf `FILE` rules. The baseline is fixed and never promoted automatically.                                                                                                                                        | Verified tools and readable checked-in baseline/lock data.                                                                                                                         |
+| `make check-proto-drift`    | Exact generated path set and bytes against two isolated regenerations, detecting added, modified, missing, deleted, and non-reproducible output.                                                                                                                           | Verified tools and BSR access unless cached.                                                                                                                                       |
+| `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
+| `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.1; readonly modules.                                                                                                                                                       |
+| `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.1, readonly modules, and a C compiler.                                                                                                                                     |
+| `make build`                | Every package under `./...` and an executable `server`, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.1; readonly modules.                                                                                                                                                       |
+| `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
+| `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts services, or deploys. |
+| `make test-tooling`         | Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation.                                                                       | Verified tools; temporary storage and the network/cache prerequisites of nested checks.                                                                                            |
+| `make check-copy`           | A Git-free `services/example-copy` with renamed module, runtime, schema, generated, configuration, linter, and compatibility-baseline identities. It bootstraps its own tools, regenerates, runs non-race tests and the aggregate, compares inventories, and cleans up.    | Verified source tools, temporary storage, and all public network endpoints listed above.                                                                                           |
+
+Database/broker integration, mock generation, migrations, containers, deployment, workspace
+validation, and live infrastructure are not applicable to this standalone scaffold. It has no such
+dependencies or placeholder targets.
+
+### Go file selection
+
+`format` and `format-check` share one stable ordered selector:
+
+- `FORMAT_FILES="path/a.go path/b.go"` has highest precedence and accepts only module-relative
+  handwritten Go files.
+- `FORMAT_SCOPE=all` selects every eligible handwritten Go file and works without Git.
+- The default `FORMAT_SCOPE=changed` compares tracked added/copied/modified/renamed files against
+  `FORMAT_BASE` when supplied, or against `HEAD`, then includes eligible untracked files.
+- An unresolved supplied base fails. A legitimate zero-file selection is reported as zero and does
+  not broaden scope.
+- Generated headers and paths under `gen/`, `vendor/`, `third_party/`, `testdata/`, and `.tools/`
+  are excluded. Escaping the module or selecting an excluded file explicitly fails.
+
+### Setup and normal validation
+
+Bootstrap and refresh owned generated/dependency content explicitly:
+
+```sh
+make bootstrap-tools
+make update-proto-deps
+make gen-proto
+make update-deps
+make format FORMAT_SCOPE=all
+```
+
+Run normal non-mutating validation after tools are installed:
+
+```sh
+make check FORMAT_SCOPE=all
+make test-tooling
+make check-copy
+```
+
+### Root scaffold delegates
+
+The repository root exposes only these narrowly scoped delegates. They cover
+`templates/go-service` and do not discover or validate future Go modules.
+
+| Root target                        | Owning module target                           |
+|------------------------------------|------------------------------------------------|
+| `make go-scaffold-bootstrap-tools` | `make -C templates/go-service bootstrap-tools` |
+| `make go-scaffold-build`           | `make -C templates/go-service build`           |
+| `make go-scaffold-check`           | `make -C templates/go-service check`           |
+| `make go-scaffold-test-tooling`    | `make -C templates/go-service test-tooling`    |
+| `make go-scaffold-check-copy`      | `make -C templates/go-service check-copy`      |
+| `make go-scaffold-run`             | `make -C templates/go-service run`             |
+
+### Continuous integration
+
+[Go service scaffold CI](../../.github/workflows/go-scaffold.yml) runs on pull requests to `main`
+and pushes to `main` when this module, the workflow, or the root Makefile changes. It uses
+`ubuntu-24.04`, checkout v6 with full history, setup-go v7 with exact Go 1.27.1, the nested
+`go.sum` cache key, and read-only repository permissions. It requires no secret, database, broker,
+container runtime, deployment environment, or telemetry collector.
+
+CI explicitly bootstraps tools, runs `check`, `test-tooling`, and `check-copy`, and invokes no Go,
+formatter, linter, generator, or vulnerability binary directly. Pull requests use the base SHA for
+`FORMAT_BASE`; pushes use the before SHA. A missing, all-zero, or unresolvable event base visibly
+falls back to `FORMAT_SCOPE=all`.
+
+The equivalent full-file local job is:
+
+```sh
+make -C templates/go-service bootstrap-tools
+make -C templates/go-service check FORMAT_SCOPE=all
+make -C templates/go-service test-tooling
+make -C templates/go-service check-copy
+```
+
+A local pass is local equivalent-job evidence. Workflow inspection is configuration evidence. Only
+a successful GitHub Actions run on a pushed branch or pull request is hosted-CI evidence.
+
+### Repository topology handoff
+
+Issue 123 owns repository-wide module/workspace discovery and onboarding. Its input from this
+scaffold is the authoritative target inventory above, standalone `GOWORK=off` resolution, the six
+scaffold-only root delegates, the workflow's three path filters, and the exact CI sequence. This
+module defines no root Go module/workspace and makes no claim about future-module coverage.
 
 ## Create an independently owned service
 
