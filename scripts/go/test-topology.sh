@@ -348,14 +348,19 @@ printf 'go 1.23\n\nuse ./module\n' >"${case_root}/go.work"
 expect_failure "unapproved workspace" "${case_root}" 'unlisted developer-local manifest: go.work' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
-case_root="$(new_single_case partial-workspace)"
+case_root="$(new_single_case unsupported-approved-workspace)"
 workspace_record='[{"directory":".","owner":"fixture owner","use":["module"],"replacements":[],"validationTarget":"check","ciWorkflow":".github/workflows/test.yml"}]'
 jq --argjson workspaces "${workspace_record}" '.workspaces = $workspaces' \
 	"${case_root}/go-module-topology.json" >"${case_root}/inventory.tmp"
 mv "${case_root}/inventory.tmp" "${case_root}/go-module-topology.json"
+printf 'go 1.23\n\nuse ./module\n' >"${case_root}/go.work"
 : >"${case_root}/go.work.sum"
-expect_failure "partial workspace" "${case_root}" 'missing inventory workspace manifest: go.work' \
+expect_failure "approved workspace fails closed in topology" "${case_root}" \
+	'approved workspaces are not supported by current topology validation; implement go.work membership, replacement, and validation-target enforcement before adding one' \
 	make --no-print-directory -C "${case_root}" go-topology-check
+expect_failure "approved workspace fails closed in aggregate" "${case_root}" \
+	'approved workspaces are not supported by current topology validation; implement go.work membership, replacement, and validation-target enforcement before adding one' \
+	make --no-print-directory -C "${case_root}" go-modules-check
 
 case_root="$(new_single_case missing-owning-target)"
 printf '.PHONY: other\nother:\n\t@true\n' >"${case_root}/module/Makefile"

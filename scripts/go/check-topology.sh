@@ -144,6 +144,9 @@ jq -e '
       | .validationTarget |= nonempty_string("workspaces[" + ($index | tostring) + "].validationTarget")
       | .ciWorkflow |= nonempty_string("workspaces[" + ($index | tostring) + "].ciWorkflow")
     ))
+  | if (.workspaces | length) != 0 then
+      fail("approved workspaces are not supported by current topology validation; implement go.work membership, replacement, and validation-target enforcement before adding one")
+    else . end
   | .exclusions |= (to_entries | map(
       .key as $index | .value
       | if type != "object" then fail("exclusions[" + ($index | tostring) + "] must be an object") else . end

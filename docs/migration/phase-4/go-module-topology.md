@@ -20,6 +20,11 @@ cross-module application dependency, private-module prerequisite, `go.work`, `go
 filesystem `replace`. The `services/example-copy` tree created by `check-copy` is a disposable reuse
 fixture and is excluded from topology.
 
+Workspace inventory is currently fail-closed. `go-module-topology.json` must retain an empty
+`workspaces` collection; `go-topology-check` rejects every non-empty workspace record before it can
+be represented as approved. A future workspace approval must first add enforcement for actual
+`go.work` membership and replacements plus its owning validation target and controlled evidence.
+
 Inventory exclusions cover repository metadata, ignored ticket artifacts, module tool caches,
 vendored or third-party dependency trees, test data, and the generated scaffold copy. The topology
 checker reports encountered exclusions; exclusions cannot be used to hide a supported module.
@@ -114,8 +119,10 @@ Onboarding is one reviewed topology change. Complete all applicable items togeth
    introduce a shared business-model package to avoid duplication.
 3. Record each filesystem replacement with its distribution reason, or remove it. Standalone
    modules must resolve without an ambient parent workspace or undeclared local path.
-4. Add the module to `go-module-topology.json`. Add a workspace only after its membership, `use` and
-   replacement entries, owner, validation target, and CI purpose are explicitly approved.
+4. Add the module to `go-module-topology.json`. Do not add a workspace record under the current
+   fail-closed policy. A future workspace change must first implement comparison of its actual
+   membership/replacements and execution of its owning target, with positive and mismatch fixtures;
+   only then may its owner, validation target, and CI purpose be approved in the inventory.
 5. Update CI module path triggers, tool bootstrap, cache dependency paths, and the existing root
    aggregate job. Do not create a competing workflow that bypasses topology validation.
 6. Add positive boundary coverage for any approved public edge and negative fixtures for private,
