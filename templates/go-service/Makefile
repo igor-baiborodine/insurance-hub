@@ -33,7 +33,7 @@ OTEL_GRPC_VERSION := v0.71.0
 
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto check-proto-drift run
+	gen-proto check-proto-drift lint test test-race build vulncheck check run
 
 bootstrap-tools:
 	mkdir -p "$(TOOLS_BIN)"
@@ -135,6 +135,28 @@ check-proto-drift: verify-tools
 		PROTO_SCHEMA="$(PROTO_SCHEMA)" \
 		GENERATED_PROTO_FILES="$(GENERATED_PROTO_FILES)" \
 		./scripts/check-proto-drift.sh
+
+lint: verify-tools
+	GOWORK=off $(GOLANGCI_LINT) run --config "$(GOLANGCI_CONFIG)" ./...
+
+test:
+	GOWORK=off $(GO) test -mod=readonly -count=1 ./...
+
+test-race:
+	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./...
+
+build:
+	@set -eu; \
+	output_dir=$$(mktemp -d); \
+	trap 'rm -rf "$$output_dir"' EXIT HUP INT TERM; \
+	GOWORK=off $(GO) build -mod=readonly -o "$$output_dir/" ./...; \
+	test -x "$$output_dir/server"
+
+vulncheck: verify-tools
+	GOWORK=off GOFLAGS=-mod=readonly $(GOVULNCHECK) ./...
+
+check: verify-tools format-check format-proto-check lint lint-proto test-race build \
+	check-deps check-proto-drift check-proto-breaking vulncheck
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
