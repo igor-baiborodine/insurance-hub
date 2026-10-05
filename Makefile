@@ -32,7 +32,8 @@ help:
 ################################################################################
 # Go Targets
 ################################################################################
-.PHONY: go-scaffold-bootstrap-tools go-scaffold-build go-scaffold-check go-scaffold-run
+.PHONY: go-scaffold-bootstrap-tools go-scaffold-build go-scaffold-check \
+	go-scaffold-test-tooling go-scaffold-run
 go-scaffold-bootstrap-tools: ## Install and verify pinned tools for the Go service scaffold only
 	$(MAKE) -C templates/go-service bootstrap-tools
 
@@ -41,6 +42,9 @@ go-scaffold-build: ## Build the Go service scaffold module only
 
 go-scaffold-check: ## Run all non-mutating checks for the Go service scaffold module only
 	$(MAKE) -C templates/go-service check
+
+go-scaffold-test-tooling: ## Test controlled tooling failures for the Go service scaffold only
+	$(MAKE) -C templates/go-service test-tooling
 
 go-scaffold-run: ## Run the Go service scaffold server locally
 	$(MAKE) -C templates/go-service run

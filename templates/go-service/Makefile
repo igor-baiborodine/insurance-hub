@@ -33,7 +33,7 @@ OTEL_GRPC_VERSION := v0.71.0
 
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto check-proto-drift lint test test-race build vulncheck check run
+	gen-proto check-proto-drift lint test test-race build vulncheck check test-tooling run
 
 bootstrap-tools:
 	mkdir -p "$(TOOLS_BIN)"
@@ -157,6 +157,9 @@ vulncheck: verify-tools
 
 check: verify-tools format-check format-proto-check lint lint-proto test-race build \
 	check-deps check-proto-drift check-proto-breaking vulncheck
+
+test-tooling: verify-tools
+	@MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" ./scripts/test-tooling.sh
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
