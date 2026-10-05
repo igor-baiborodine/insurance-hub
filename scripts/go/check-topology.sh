@@ -4,9 +4,35 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly script_dir
-repo_root="$(cd -- "${script_dir}/../.." && pwd -P)"
+default_repo_root="$(cd -- "${script_dir}/../.." && pwd -P)"
+if [[ -n "${GO_TOPOLOGY_FIXTURE_ROOT:-}" || -n "${GO_TOPOLOGY_FIXTURE_INVENTORY:-}" ]]; then
+	[[ "${GO_TOPOLOGY_TEST_MODE:-0}" == "1" ]] || {
+		printf 'go-topology-check: fixture inputs require GO_TOPOLOGY_TEST_MODE=1\n' >&2
+		exit 1
+	}
+	[[ -n "${GO_TOPOLOGY_FIXTURE_ROOT:-}" && -n "${GO_TOPOLOGY_FIXTURE_INVENTORY:-}" ]] || {
+		printf 'go-topology-check: fixture root and inventory must be provided together\n' >&2
+		exit 1
+	}
+	repo_root="$(cd -- "${GO_TOPOLOGY_FIXTURE_ROOT}" && pwd -P)"
+	[[ -f "${repo_root}/.go-topology-test-fixture" ]] || {
+		printf 'go-topology-check: fixture root is missing its test marker\n' >&2
+		exit 1
+	}
+	inventory_path="$(cd -- "$(dirname -- "${GO_TOPOLOGY_FIXTURE_INVENTORY}")" && pwd -P)/$(basename -- "${GO_TOPOLOGY_FIXTURE_INVENTORY}")"
+	case "${inventory_path}" in
+		"${repo_root}"/*) ;;
+		*)
+			printf 'go-topology-check: fixture inventory must be inside the fixture root\n' >&2
+			exit 1
+			;;
+	esac
+else
+	repo_root="${default_repo_root}"
+	inventory_path="${repo_root}/go-module-topology.json"
+fi
 readonly repo_root
-readonly inventory_path="${repo_root}/go-module-topology.json"
+readonly inventory_path
 
 fail() {
 	printf 'go-topology-check: %s\n' "$*" >&2

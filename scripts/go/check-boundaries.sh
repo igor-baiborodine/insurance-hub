@@ -4,9 +4,35 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly script_dir
-repo_root="$(cd -- "${script_dir}/../.." && pwd -P)"
+default_repo_root="$(cd -- "${script_dir}/../.." && pwd -P)"
+if [[ -n "${GO_TOPOLOGY_FIXTURE_ROOT:-}" || -n "${GO_TOPOLOGY_FIXTURE_INVENTORY:-}" ]]; then
+	[[ "${GO_TOPOLOGY_TEST_MODE:-0}" == "1" ]] || {
+		printf 'go-boundary-check: fixture inputs require GO_TOPOLOGY_TEST_MODE=1\n' >&2
+		exit 1
+	}
+	[[ -n "${GO_TOPOLOGY_FIXTURE_ROOT:-}" && -n "${GO_TOPOLOGY_FIXTURE_INVENTORY:-}" ]] || {
+		printf 'go-boundary-check: fixture root and inventory must be provided together\n' >&2
+		exit 1
+	}
+	repo_root="$(cd -- "${GO_TOPOLOGY_FIXTURE_ROOT}" && pwd -P)"
+	[[ -f "${repo_root}/.go-topology-test-fixture" ]] || {
+		printf 'go-boundary-check: fixture root is missing its test marker\n' >&2
+		exit 1
+	}
+	inventory_path="$(cd -- "$(dirname -- "${GO_TOPOLOGY_FIXTURE_INVENTORY}")" && pwd -P)/$(basename -- "${GO_TOPOLOGY_FIXTURE_INVENTORY}")"
+	case "${inventory_path}" in
+		"${repo_root}"/*) ;;
+		*)
+			printf 'go-boundary-check: fixture inventory must be inside the fixture root\n' >&2
+			exit 1
+			;;
+	esac
+else
+	repo_root="${default_repo_root}"
+	inventory_path="${repo_root}/go-module-topology.json"
+fi
 readonly repo_root
-readonly inventory_path="${repo_root}/go-module-topology.json"
+readonly inventory_path
 
 fail() {
 	printf 'go-boundary-check: %s\n' "$*" >&2
@@ -22,9 +48,11 @@ mapfile -t module_records < <(
 	jq -c '.modules | sort_by(.modulePath | length) | reverse[]' "${inventory_path}"
 )
 
-graph_dir="$(mktemp -d)"
+temp_parent="$(cd -- "${TMPDIR:-/tmp}" && pwd -P)"
+readonly temp_parent
+graph_dir="$(mktemp -d "${temp_parent}/insurance-hub-go-boundary.XXXXXX")"
 case "${graph_dir}" in
-	/tmp/tmp.*) ;;
+	"${temp_parent}"/insurance-hub-go-boundary.*) ;;
 	*) fail "refusing unexpected temporary path: ${graph_dir}" ;;
 esac
 readonly graph_dir
@@ -132,13 +160,23 @@ for module_record in "${module_records[@]}"; do
 		' "${graph_path}" | sort -u
 	)
 
-	while IFS= read -r incomplete_package; do
-		failures+=("module=${module_path} consumer-package=${incomplete_package} import=unknown owner=unknown rule=incomplete-package-graph remediation=resolve all standalone readonly imports before boundary validation")
+	while IFS=$'\t' read -r incomplete_package failed_import; do
+		failures+=("module=${module_path} consumer-package=${incomplete_package} import=${failed_import} owner=unknown rule=incomplete-package-graph remediation=resolve all standalone readonly imports before boundary validation")
 	done < <(
 		jq -r '
 		  .[]
 		  | select((.Incomplete // false) or (.Error != null) or ((.DepsErrors // []) | length > 0))
-		  | .ImportPath
+		  | .ImportPath as $consumer
+		  | ([.Error.ImportStack[-1]?, (.DepsErrors // [])[]?.ImportStack[-1]?]
+		      + ([.Error.Err?, (.DepsErrors // [])[]?.Err?]
+		        | map(select(type == "string")
+		          | try capture("package (?<path>[^ )]+)").path catch empty))
+		      | map(select(. != null and . != $consumer))
+		      | unique) as $failed_imports
+		  | if ($failed_imports | length) == 0 then [$consumer, "unknown"]
+		    else $failed_imports[] as $failed_import | [$consumer, $failed_import]
+		    end
+		  | @tsv
 		' "${graph_path}" | sort -u
 	)
 done

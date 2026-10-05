@@ -32,7 +32,7 @@ help:
 ################################################################################
 # Go Targets
 ################################################################################
-.PHONY: go-topology-check go-modules-check go-scaffold-bootstrap-tools go-scaffold-build \
+.PHONY: go-topology-check go-topology-test go-modules-check go-scaffold-bootstrap-tools go-scaffold-build \
 	go-scaffold-check go-scaffold-test-tooling go-scaffold-check-copy go-scaffold-run
 ifneq ($(filter command line,$(origin GO_MODULE_CALLER_VARIABLES)),)
 $(error GO_MODULE_CALLER_VARIABLES is internal and cannot be set)
@@ -42,6 +42,9 @@ override GO_MODULE_CALLER_VARIABLES = $(sort $(foreach variable,$(.VARIABLES),\
 
 go-topology-check: ## Validate the canonical Go module and workspace inventory
 	@./scripts/go/check-topology.sh
+
+go-topology-test: ## Test controlled Go topology and resolution failures in disposable fixtures
+	@./scripts/go/test-topology.sh
 
 go-modules-check: go-topology-check ## Validate every inventory Go module in standalone mode
 	@GO_MODULE_CALLER_VARIABLES="$(GO_MODULE_CALLER_VARIABLES)" \
