@@ -131,34 +131,39 @@ The repository root exposes only these narrowly scoped delegates. They cover
 ### Continuous integration
 
 [Go service scaffold CI](../../.github/workflows/go-scaffold.yml) runs on pull requests to `main`
-and pushes to `main` when this module, the workflow, or the root Makefile changes. It uses
-`ubuntu-24.04`, checkout v6 with full history, setup-go v7 with exact Go 1.27.1, the nested
-`go.sum` cache key, and read-only repository permissions. It requires no secret, database, broker,
-container runtime, deployment environment, or telemetry collector.
+and pushes to `main` when this module, any Go module/workspace manifest, the canonical topology,
+topology scripts, the workflow, or the root Makefile changes. It uses `ubuntu-24.04`, checkout v6
+with full history, setup-go v7 with exact Go 1.27.1, the nested `go.sum` cache key, and read-only
+repository permissions. It requires no secret, database, broker, container runtime, deployment
+environment, or telemetry collector.
 
-CI explicitly bootstraps tools, runs `check`, `test-tooling`, and `check-copy`, and invokes no Go,
-formatter, linter, generator, or vulnerability binary directly. Pull requests use the base SHA for
-`FORMAT_BASE`; pushes use the before SHA. A missing, all-zero, or unresolvable event base visibly
-falls back to `FORMAT_SCOPE=all`.
+CI bootstraps the scaffold tools, runs the repository-wide `go-modules-check` and
+`go-topology-test`, then retains the scaffold-specific `test-tooling` and `check-copy` proofs. It
+invokes only documented Make targets. Pull requests use the base SHA for `FORMAT_BASE`; pushes use
+the before SHA. A missing, all-zero, or unresolvable event base visibly falls back to
+`FORMAT_SCOPE=all`.
 
 The equivalent full-file local job is:
 
 ```sh
-make -C templates/go-service bootstrap-tools
-make -C templates/go-service check FORMAT_SCOPE=all
-make -C templates/go-service test-tooling
-make -C templates/go-service check-copy
+make go-scaffold-bootstrap-tools
+make go-modules-check FORMAT_SCOPE=all
+make go-topology-test
+make go-scaffold-test-tooling
+make go-scaffold-check-copy
 ```
 
 A local pass is local equivalent-job evidence. Workflow inspection is configuration evidence. Only
 a successful GitHub Actions run on a pushed branch or pull request is hosted-CI evidence.
 
-### Repository topology handoff
+### Repository topology
 
-Issue 123 owns repository-wide module/workspace discovery and onboarding. Its input from this
-scaffold is the authoritative target inventory above, standalone `GOWORK=off` resolution, the six
-scaffold-only root delegates, the workflow's three path filters, and the exact CI sequence. This
-module defines no root Go module/workspace and makes no claim about future-module coverage.
+The root [Go module topology guide](../../docs/migration/phase-4/go-module-topology.md) defines
+repository-wide discovery, resolution, import boundaries, CI coverage, and onboarding. This
+scaffold is the only current inventory module. Its supported mode is standalone `GOWORK=off`, it
+has no filesystem replacement or cross-module runtime dependency, and the repository has no
+approved workspace. Future modules are uncovered until their inventory, owning target, consumers,
+CI triggers, and controlled fixtures are reviewed together.
 
 ## Create an independently owned service
 

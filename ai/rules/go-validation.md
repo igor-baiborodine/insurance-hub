@@ -75,8 +75,11 @@ the target. Use documented equivalents in the owning Makefile and its supported 
 - After checks, inspect tracked and relevant new files for unintended generated, formatting, or
   dependency changes. Complete the evidence record, map acceptance criteria to evidence at ticket
   completion, and apply the repository before-merge checklist.
-- Insurance Hub currently has no Go module/workspace manifests. Its root `go-build` recipe is a
-  placeholder, not a multi-service validation suite. Phase 4 scaffolding must establish module
-  ownership and the necessary Make targets, pinned tools, exclusions, and CI invocation before
-  service validation is executable. Documentation-only changes to these rules need reference,
-  consistency, and whitespace review; they do not establish runtime or toolchain correctness.
+- Insurance Hub currently has one Go module manifest at `templates/go-service` and no approved
+  workspace. The scaffold owns pinned setup and non-mutating validation targets. Root
+  `go-topology-check`, `go-modules-check`, and `go-topology-test` enforce the canonical inventory,
+  standalone resolution, boundaries, controlled failures, and CI agreement. They cover only
+  modules recorded in `go-module-topology.json`; future business, contract, shared, or tool modules
+  require explicit owning targets, consumers, resolution modes, CI triggers, and onboarding before
+  repository validation may claim coverage. Documentation-only rule changes still require
+  reference, consistency, and whitespace review and do not establish runtime correctness.

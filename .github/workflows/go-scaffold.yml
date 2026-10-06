@@ -6,6 +6,17 @@ on:
       - main
     paths:
       - 'templates/go-service/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'go.work'
+      - 'go.work.sum'
+      - '**/go.mod'
+      - '**/go.sum'
+      - '**/go.work'
+      - '**/go.work.sum'
+      - 'go-module-topology.json'
+      - 'scripts/go/**'
+      - 'docs/migration/phase-4/go-module-topology.md'
       - '.github/workflows/go-scaffold.yml'
       - 'Makefile'
   pull_request:
@@ -13,6 +24,17 @@ on:
       - main
     paths:
       - 'templates/go-service/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'go.work'
+      - 'go.work.sum'
+      - '**/go.mod'
+      - '**/go.sum'
+      - '**/go.work'
+      - '**/go.work.sum'
+      - 'go-module-topology.json'
+      - 'scripts/go/**'
+      - 'docs/migration/phase-4/go-module-topology.md'
       - '.github/workflows/go-scaffold.yml'
       - 'Makefile'
 
@@ -21,7 +43,7 @@ permissions:
 
 jobs:
   validate:
-    name: Validate Go service scaffold
+    name: Validate Go module topology and scaffold
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository history
@@ -37,7 +59,7 @@ jobs:
           cache-dependency-path: templates/go-service/go.sum
 
       - name: Bootstrap pinned scaffold tools
-        run: make -C templates/go-service bootstrap-tools
+        run: make go-scaffold-bootstrap-tools
 
       - name: Resolve formatting scope
         shell: bash
@@ -64,24 +86,18 @@ jobs:
             echo "Using $source_name commit $candidate for changed-file formatting."
           else
             echo "FORMAT_SCOPE=all" >> "$GITHUB_ENV"
+            echo "FORMAT_BASE=" >> "$GITHUB_ENV"
             echo "No resolvable nonzero $source_name commit; using FORMAT_SCOPE=all."
           fi
 
-      - name: Run non-mutating scaffold checks
-        shell: bash
-        run: |
-          set -euo pipefail
+      - name: Run non-mutating module checks
+        run: make go-modules-check FORMAT_SCOPE="$FORMAT_SCOPE" FORMAT_BASE="$FORMAT_BASE"
 
-          if [[ "$FORMAT_SCOPE" == "changed" ]]; then
-            make -C templates/go-service check \
-              FORMAT_SCOPE=changed \
-              FORMAT_BASE="$FORMAT_BASE"
-          else
-            make -C templates/go-service check FORMAT_SCOPE=all
-          fi
+      - name: Prove controlled topology failures
+        run: make go-topology-test
 
       - name: Prove controlled tooling failures
-        run: make -C templates/go-service test-tooling
+        run: make go-scaffold-test-tooling
 
       - name: Prove renamed scaffold copy
-        run: make -C templates/go-service check-copy
+        run: make go-scaffold-check-copy

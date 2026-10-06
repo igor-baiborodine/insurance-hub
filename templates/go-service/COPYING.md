@@ -117,7 +117,7 @@ awk '
     print "The scaffold-only `go-scaffold-*` root delegates and"
     print "`.github/workflows/go-scaffold.yml` do not cover this copied module. Run module-owned"
     print "Make targets from this directory. Add root and CI coverage only through the repository"
-    print "topology and onboarding workflow owned by issue 123."
+    print "documented in ../../docs/migration/phase-4/go-module-topology.md."
     skipping = 1
     next
   }
@@ -214,8 +214,9 @@ cmp "$inventory_before" "$inventory_after"
 ```
 
 The copy remains standalone: it must have no `go.work`, filesystem `replace` directive, import of
-the source scaffold, or dependency on its private implementation. Issue 123 will enforce the
-approved repository module topology; this copy procedure does not establish that topology.
+the source scaffold, or dependency on its private implementation. This procedure does not add the
+copy to the canonical inventory or CI; complete the repository onboarding process before claiming
+root aggregate or hosted coverage.
 
 ## 6. Run the automated copy proof for scaffold changes
 
@@ -235,7 +236,8 @@ From the repository root, the narrowly scoped equivalent is:
 make go-scaffold-check-copy
 ```
 
-The scaffold workflow filters only `templates/go-service/**`, its own workflow file, and the root
-Makefile. A copied service is therefore not covered automatically. Add repository-wide module and
-CI onboarding only through the issue-123 topology workflow; do not broaden the scaffold job or its
-root delegates and imply coverage before that policy exists.
+The topology workflow still covers only modules recorded in `go-module-topology.json`. A copied
+service is not covered automatically. Follow the [Go module topology onboarding guide](../../docs/migration/phase-4/go-module-topology.md):
+record ownership and resolution mode, add its owning validation target and consumers, update CI
+triggers/bootstrap/cache, add positive and negative boundary fixtures, and run both root topology
+targets before claiming coverage.
