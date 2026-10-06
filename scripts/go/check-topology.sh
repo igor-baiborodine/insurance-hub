@@ -260,13 +260,6 @@ while IFS=$'\t' read -r directory module_path; do
 	if [[ ! -f "${repo_root}/${ci_workflow}" ]]; then
 		errors+=("missing CI workflow for ${directory}: ${ci_workflow}")
 	fi
-	actual_module_path="$(sed -n 's/^module[[:space:]][[:space:]]*//p' "${repo_root}/${mod_file}")"
-	if [[ -z "${actual_module_path}" ]]; then
-		errors+=("missing module directive: ${mod_file}")
-	elif [[ "${actual_module_path}" != "${module_path}" ]]; then
-		errors+=("module identity mismatch at ${mod_file}: inventory=${module_path}, actual=${actual_module_path}")
-	fi
-
 	set +e
 	metadata="$(env -u GOFLAGS GOWORK=off go mod edit -json "${repo_root}/${mod_file}")"
 	metadata_status=$?
@@ -276,6 +269,13 @@ while IFS=$'\t' read -r directory module_path; do
 	then
 		errors+=("could not inspect effective manifest metadata for ${module_path} at ${mod_file}")
 		continue
+	fi
+
+	actual_module_path="$(jq -r '.Module.Path // empty' <<<"${metadata}")"
+	if [[ -z "${actual_module_path}" ]]; then
+		errors+=("missing module directive: ${mod_file}")
+	elif [[ "${actual_module_path}" != "${module_path}" ]]; then
+		errors+=("module identity mismatch at ${mod_file}: inventory=${module_path}, actual=${actual_module_path}")
 	fi
 
 	while IFS=$'\t' read -r required_module replacement_path; do
