@@ -429,6 +429,41 @@ expect_failure "folded CI target lines are not separate commands" "${case_root}"
 	'workflow .github/workflows/test.yml does not invoke executable Make target: go-modules-check' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
+case_root="$(new_single_case heredoc-ci-targets)"
+grep -Fv \
+	-e "- run: make go-modules-check" \
+	-e "- run: make go-topology-test" \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+printf '%s\n' \
+	'      - name: Retain target names as heredoc data' \
+	'        run: |' \
+	"          cat <<'COMMANDS'" \
+	'          make go-modules-check' \
+	'          make go-topology-test' \
+	'          COMMANDS' \
+	>>"${case_root}/.github/workflows/test.yml"
+expect_failure "heredoc CI target lines are shell data" "${case_root}" \
+	'workflow .github/workflows/test.yml does not invoke executable Make target: go-modules-check' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case continued-argument-ci-targets)"
+grep -Fv \
+	-e "- run: make go-modules-check" \
+	-e "- run: make go-topology-test" \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+printf '%s\n' \
+	'      - name: Retain target names as continued echo arguments' \
+	'        run: |' \
+	'          echo documentation \' \
+	'            make go-modules-check \' \
+	'            make go-topology-test' \
+	>>"${case_root}/.github/workflows/test.yml"
+expect_failure "continued CI target lines are shell arguments" "${case_root}" \
+	'workflow .github/workflows/test.yml does not invoke executable Make target: go-modules-check' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
 setup_edge_case() {
 	local name="$1"
 	local owner_role="$2"

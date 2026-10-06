@@ -49,41 +49,23 @@ require_run_command() {
 	    sub(/^ */, "", copy)
 	    return length(value) - length(copy)
 	  }
-	  function is_direct_make_command(value, remainder) {
+	  function is_direct_make_command(value) {
 	    sub(/^[[:space:]]*/, "", value)
-	    if (value ~ /^#/) {
-	      return 0
-	    }
-	    if (value !~ /^make[[:space:]]+/) {
-	      return 0
-	    }
-	    sub(/^make[[:space:]]+/, "", value)
-	    if (value == target) {
+	    sub(/[[:space:]]*$/, "", value)
+	    if (value == "make " target) {
 	      return 1
 	    }
-	    if (index(value, target) != 1) {
-	      return 0
+	    if (target == "go-modules-check" &&
+	        value == "make go-modules-check FORMAT_SCOPE=\"$FORMAT_SCOPE\" FORMAT_BASE=\"$FORMAT_BASE\"") {
+	      return 1
 	    }
-	    remainder = substr(value, length(target) + 1, 1)
-	    return remainder ~ /[[:space:]\\]/
+	    return 0
 	  }
 	  {
 	    line = $0
 	    indent = leading_spaces(line)
 	    trimmed = line
 	    sub(/^[[:space:]]*/, "", trimmed)
-	    if (inside_run_block) {
-	      if (trimmed == "" || trimmed ~ /^#/) {
-	        next
-	      }
-	      if (indent > run_indent) {
-	        if (is_direct_make_command(line)) {
-	          found = 1
-	        }
-	        next
-	      }
-	      inside_run_block = 0
-	    }
 	    if (trimmed == "" || trimmed ~ /^#/) {
 	      next
 	    }
@@ -150,10 +132,7 @@ require_run_command() {
 	    if (!valid_run) {
 	      next
 	    }
-	    run_indent = indent
-	    if (value ~ /^[|][+-]?( +#.*)?$/) {
-	      inside_run_block = 1
-	    } else if (is_direct_make_command(value)) {
+	    if (is_direct_make_command(value)) {
 	      found = 1
 	    }
 	  }

@@ -86,21 +86,12 @@ jobs:
             echo "Using $source_name commit $candidate for changed-file formatting."
           else
             echo "FORMAT_SCOPE=all" >> "$GITHUB_ENV"
+            echo "FORMAT_BASE=" >> "$GITHUB_ENV"
             echo "No resolvable nonzero $source_name commit; using FORMAT_SCOPE=all."
           fi
 
       - name: Run non-mutating module checks
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "$FORMAT_SCOPE" == "changed" ]]; then
-            make go-modules-check \
-              FORMAT_SCOPE=changed \
-              FORMAT_BASE="$FORMAT_BASE"
-          else
-            make go-modules-check FORMAT_SCOPE=all
-          fi
+        run: make go-modules-check FORMAT_SCOPE="$FORMAT_SCOPE" FORMAT_BASE="$FORMAT_BASE"
 
       - name: Prove controlled topology failures
         run: make go-topology-test
