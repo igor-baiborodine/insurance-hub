@@ -29,7 +29,9 @@ require_trigger() {
 		if ! awk -v header="  ${event}:" -v trigger="      - '${trigger_path}'" '
 		  $0 == header { inside = 1; next }
 		  inside && ($0 ~ /^[^[:space:]]/ || $0 ~ /^  [A-Za-z_]+:$/) { exit }
-		  inside && $0 == trigger { found = 1 }
+		  inside && $0 == "    paths:" { inside_paths = 1; next }
+		  inside && $0 ~ /^    [^[:space:]]/ { inside_paths = 0 }
+		  inside && inside_paths && $0 == trigger { found = 1 }
 		  END { exit(found ? 0 : 1) }
 		' "${workflow_path}"; then
 			fail "workflow ${workflow_relative} is missing ${event} path trigger for ${description}: ${trigger_path}"
