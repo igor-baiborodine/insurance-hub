@@ -14,7 +14,7 @@ This framework exists to make AI-assisted work repeatable, auditable, and portab
 - `examples/` - examples of acceptable artifacts and implementation patterns
 - `templates/` - reusable ticket-content specification, delivery plan, and PR templates
 - `checks/` - task checklists
-- `artifacts/` - local per-ticket working files, excluded from Git
+- `artifacts/` - local ticket working files, standalone or grouped under `epic-<number>/`, excluded from Git
 
 ## Source Of Truth
 
@@ -44,7 +44,10 @@ At session start:
 3. Use the `AGENTS.md` Skills catalog and each skill's frontmatter to select applicable skills;
    read selected `SKILL.md` files completely, without loading unrelated skills.
 4. Load only the other rules, prompts, templates, or examples relevant to the current task.
-5. For ticket work, read `ai/artifacts/<ticket>/<ticket>-ticket-content.md` as the specification before readiness assessment or planning. Load the delivery plan and step summaries when continuing existing work.
+5. For ticket work, resolve `<ticket-dir>` using [AGENTS.md Artifact Rules](../AGENTS.md#artifact-rules)
+   and read `<ticket-dir>/<ticket>-ticket-content.md` as the specification before readiness
+   assessment or planning. Load the delivery plan and step summaries from that same directory
+   when continuing existing work.
 
 Before planning or editing, follow `AGENTS.md` to discover and load nested instructions that apply
 to the affected paths. Do not load unrelated service guides. Root `AGENTS.md` is the canonical

@@ -10,8 +10,8 @@ nested instructions and rules, and the precedence and conflict procedure they de
 
 Choose the execution mode before reviewing:
 
-- For a review from a local checkout that produces `ai/artifacts/<ticket>/<ticket>-pr-review.md`,
-  read and follow [local review](references/local-review.md).
+- For a review from a local checkout that produces `<ticket-dir>/<ticket>-pr-review.md`,
+  resolve `<ticket-dir>` through root `AGENTS.md` and follow [local review](references/local-review.md).
 - For GitHub Copilot code review on a pull request, read and follow
   [GitHub review](references/github-review.md).
 

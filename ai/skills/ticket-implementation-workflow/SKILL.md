@@ -24,8 +24,10 @@ That bootstrap prompt establishes:
 
 ### 1. Validate Ticket Readiness
 
-Start by reading `ai/artifacts/<ticket>/<ticket>-ticket-content.md`. This required file is
-the ticket's specification; no separate spec document is needed.
+Resolve `<ticket-dir>` using [AGENTS.md Artifact Rules](../../../AGENTS.md#artifact-rules), then
+read `<ticket-dir>/<ticket>-ticket-content.md`. This required file is the ticket's specification;
+no separate spec document is needed. Reuse that directory for every artifact below, including
+when it is grouped under an epic. Apply the root artifact preflight before any artifact write.
 
 If the file is missing or empty, create or populate it from ticket content supplied by the user before
 planning. Use `ai/templates/ticket-content-template.md` when helpful to structure the content.
@@ -54,7 +56,7 @@ If information is missing or ambiguous:
 
 Once the ticket is implementation-ready:
 
-- create the delivery steps artifact at `ai/artifacts/<ticket>/<ticket>-delivery-steps.md`
+- create the delivery steps artifact at `<ticket-dir>/<ticket>-delivery-steps.md`
 - use `ai/templates/delivery-steps-template.md` and reference the ticket-content file as the specification
 - make the steps granular enough to track progress and validate behavior incrementally
 - include a progress section
@@ -68,7 +70,7 @@ For each step:
 
 - Before making any change for the step, refresh the committed-branch snapshot using the post-step
   workflow's `git diff main <current-branch>` convention and save it to
-  `ai/artifacts/<ticket>/<ticket>-git-diff.txt`. Confirm `main` and the current branch resolve
+  `<ticket-dir>/<ticket>-git-diff.txt`. Confirm `main` and the current branch resolve
   before replacing the artifact; if they do not, preserve the previous snapshot and report the
   blocker.
 - Immediately check `git status --short` and report any staged, unstaged, or untracked work to the

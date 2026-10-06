@@ -3,13 +3,16 @@
 Before starting work on this repository, read and follow the instructions in `AGENTS.md`.
 Then read `ai/manifest.md` for the loading order and framework structure.
 
-For ticket work, before creating or editing any ticket artifact, follow the `AGENTS.md` artifact
-preflight: verify the intended path is ignored by local `.git/info/exclude` and that no
+For ticket work, first resolve `<ticket-dir>` through
+[AGENTS.md Artifact Rules](../../AGENTS.md#artifact-rules), honoring supplied paths and existing
+standalone or epic-grouped folders. Before creating or editing any ticket artifact, follow the
+`AGENTS.md` artifact preflight: verify the intended path is ignored by local `.git/info/exclude` and that no
 `ai/artifacts/` paths are in the Git index. If either check fails, stop artifact writes and report
 the required local setup or indexed paths. After the preflight, ensure
-`ai/artifacts/<ticket>/<ticket>-ticket-content.md` exists and read it as the specification
+`<ticket-dir>/<ticket>-ticket-content.md` exists and read it as the specification
 before readiness assessment or planning. Follow `AGENTS.md` when the ticket-content file is missing or
-empty. For an existing ticket, also read its delivery plan and relevant step summaries.
+empty. For an existing ticket, also read its delivery plan and relevant step summaries from that
+same directory.
 
 Use the Skills catalog in `AGENTS.md` to select any applicable workflow. Read each selected
 `SKILL.md` completely, then load only the linked references or scripts required for the current

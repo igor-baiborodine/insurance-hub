@@ -16,4 +16,5 @@ For ticket-driven implementation, use:
 - `ai/skills/ticket-implementation-workflow/SKILL.md`
 - `ai/skills/ticket-post-step-workflow/SKILL.md`
 
-Local ticket artifacts belong under `ai/artifacts/<ticket>/` and must not be committed.
+Resolve local ticket paths through [AGENTS.md Artifact Rules](AGENTS.md#artifact-rules), which
+supports standalone and epic-grouped tickets. Artifacts remain local-only and must not be committed.

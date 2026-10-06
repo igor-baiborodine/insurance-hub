@@ -3,6 +3,8 @@
 Use before considering a ticket complete.
 
 - [ ] The ticket-content file reflects the agreed requirements used for implementation and validation.
+- [ ] Ticket artifacts use the same resolved `<ticket-dir>` from
+  [AGENTS.md Artifact Rules](../../AGENTS.md#artifact-rules), with links correct for its nesting depth.
 - [ ] Delivery tracker is updated.
 - [ ] Step summaries exist for completed steps.
 - [ ] Each step summary has a validation-evidence record for applicable checks, including failed,
@@ -11,7 +13,7 @@ Use before considering a ticket complete.
   scope, result, and evidence detail to reproduce or assess each check.
 - [ ] Every acceptance criterion maps to evidence or is explicitly unresolved; pending CI/manual
   checks and blockers have next actions.
-- [ ] `ai/artifacts/` isolation is verified: the ticket-content path is ignored by
+- [ ] `ai/artifacts/` isolation is verified: the resolved ticket-content path is ignored by
   `.git/info/exclude`, and `git ls-files -- ai/artifacts/` plus
   `git diff --cached --name-only -- ai/artifacts/` report no paths.
 - [ ] Git diff artifact is refreshed when using ticket workflow.

@@ -2,7 +2,11 @@
 
 ## Specification
 
-- Ticket content: `ai/artifacts/<ticket>/<ticket>-ticket-content.md`
+- Ticket content: `<ticket-dir>/<ticket>-ticket-content.md`
+
+Resolve `<ticket-dir>` using [AGENTS.md Artifact Rules](../../AGENTS.md#artifact-rules). Replace
+this placeholder with the actual standalone or epic-grouped path and save the plan in that same
+directory. When copying this template, update relative links for the destination directory.
 
 ## Readiness
 

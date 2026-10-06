@@ -13,7 +13,9 @@
 
 - Do not commit files under `ai/artifacts/`.
 - Do not overwrite or revert user changes unless explicitly requested.
-- For ticket work, store the ticket-content specification, delivery plan, step summaries, and diff snapshots under `ai/artifacts/<ticket>/`.
+- For ticket work, resolve `<ticket-dir>` through [AGENTS.md Artifact Rules](../../AGENTS.md#artifact-rules).
+  Store the specification, delivery plan, step summaries, and diff snapshots together there,
+  whether the ticket is standalone or grouped under an epic.
 - Keep committed AI framework files under `ai/` concise and reusable.
 
 ## Validation

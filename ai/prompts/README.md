@@ -13,6 +13,10 @@ applicable `ai/skills/*/SKILL.md` file.
 
 Replace each placeholder with the real issue or pull request number.
 
+For local ticket work, [AGENTS.md Artifact Rules](../../AGENTS.md#artifact-rules) resolves the
+artifact directory, including tickets grouped under an epic. You may supply the exact path, for
+example: `Continue issue-131 using ai/artifacts/epic-4.2/issue-131/issue-131-ticket-content.md`.
+
 | Task and context                                        | Example request                                                                |
 |---------------------------------------------------------|--------------------------------------------------------------------------------|
 | Start ticket implementation                             | `Please implement issue-<number>.`                                             |

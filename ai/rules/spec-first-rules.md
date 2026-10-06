@@ -4,7 +4,8 @@ Use these rules for non-trivial feature, bugfix, migration, and integration work
 
 ## Readiness
 
-For ticket work, use `ai/artifacts/<ticket>/<ticket>-ticket-content.md` as the specification.
+For ticket work, resolve `<ticket-dir>` through [AGENTS.md Artifact Rules](../../AGENTS.md#artifact-rules)
+and use `<ticket-dir>/<ticket>-ticket-content.md` as the specification.
 Read it before checking readiness. Keep requirements and agreed clarifications in this file;
 do not create a separate spec document for the same ticket.
 

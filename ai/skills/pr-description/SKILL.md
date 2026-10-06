@@ -13,8 +13,8 @@ procedure they define.
 Choose the execution mode before gathering evidence:
 
 - For a local checkout that produces
-  `ai/artifacts/<ticket>/<ticket>-pr-description.md`, read and follow
-  [local drafting](references/local-drafting.md).
+  `<ticket-dir>/<ticket>-pr-description.md`, resolve `<ticket-dir>` through root `AGENTS.md`
+  and follow [local drafting](references/local-drafting.md).
 - For a pull request hosted on GitHub, including a request to update its body, read and follow
   [GitHub drafting and update](references/github-drafting.md).
 

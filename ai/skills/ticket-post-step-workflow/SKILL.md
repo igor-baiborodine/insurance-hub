@@ -10,21 +10,23 @@ Use this skill only after a concrete delivery step has been completed.
 ## Required Inputs
 
 - Ticket ID, for example `issue-45`
+- `<ticket-dir>` resolved using [AGENTS.md Artifact Rules](../../../AGENTS.md#artifact-rules)
 - Current step number
 - Current branch name
 - Short step summary or title
 
 ## Required Post-Step Actions
 
-Perform these actions in order:
+Reuse the resolved directory from implementation, including its epic grouping, and apply the root
+artifact preflight before writing. Perform these actions in order:
 
-1. Update `ai/artifacts/<ticket>/<ticket>-delivery-steps.md`
+1. Update `<ticket-dir>/<ticket>-delivery-steps.md`
    - mark the completed step as done
    - add concise findings or decisions for that step
    - record the step artifact filename
 
 2. Create the per-step markdown summary:
-   - `ai/artifacts/<ticket>/<ticket>-step-<nn>-<summary>.md`
+   - `<ticket-dir>/<ticket>-step-<nn>-<summary>.md`
    - include what changed or was inspected
    - include key decisions
    - include blockers or follow-up for the next step
@@ -32,7 +34,9 @@ Perform these actions in order:
      relevant checks that were not run or are blocked; use the record format below
 
 3. Refresh the git diff artifact:
-   - `git diff main <current-branch> > ai/artifacts/<ticket>/<ticket>-git-diff.txt`
+   - `git diff main <current-branch> > <ticket-dir>/<ticket>-git-diff.txt`
+   - Substitute the actual branch, resolved directory, and ticket ID before running the command;
+     quote the output path as needed.
    - This snapshot compares committed trees only; staged, unstaged, and untracked work is not
      included. Keep it as the branch-level review artifact and do not represent it as a complete
      working-tree diff.
@@ -64,7 +68,7 @@ step summary, record validation in a table with these columns:
   unresolved, CI-only, and manual checks. Do not treat an aggregate check as covering packages or
   modules its evidence does not show.
 
-- Write ticket artifacts only under `ai/artifacts/<ticket>/`.
+- Write ticket artifacts only under the resolved `<ticket-dir>`.
 - Do not create extra documentation files beyond the tracker and per-step summary unless the user asks.
 - Do not run `git diff` in another artifact format unless the user asks.
 - Keep the per-step summary concise and factual.
@@ -76,6 +80,6 @@ step summary, record validation in a table with these columns:
 
 Before finishing the turn, confirm that all of the following exist or were updated:
 
-- `ai/artifacts/<ticket>/<ticket>-delivery-steps.md`
-- `ai/artifacts/<ticket>/<ticket>-step-<nn>-<summary>.md`
-- `ai/artifacts/<ticket>/<ticket>-git-diff.txt`
+- `<ticket-dir>/<ticket>-delivery-steps.md`
+- `<ticket-dir>/<ticket>-step-<nn>-<summary>.md`
+- `<ticket-dir>/<ticket>-git-diff.txt`
