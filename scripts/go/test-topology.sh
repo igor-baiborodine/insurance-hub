@@ -398,6 +398,20 @@ expect_failure "inert CI target is not execution" "${case_root}" \
 	'workflow .github/workflows/test.yml does not invoke executable Make target: go-topology-test' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
+case_root="$(new_single_case env-run-ci-target)"
+grep -Fv -- "- run: make go-topology-test" "${case_root}/.github/workflows/test.yml" \
+	>"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+printf '%s\n' \
+	'      - name: Retain the target under a non-executable env key' \
+	'        env:' \
+	'          run: make go-topology-test' \
+	'        run: echo "$run"' \
+	>>"${case_root}/.github/workflows/test.yml"
+expect_failure "env run key is not execution" "${case_root}" \
+	'workflow .github/workflows/test.yml does not invoke executable Make target: go-topology-test' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
 setup_edge_case() {
 	local name="$1"
 	local owner_role="$2"

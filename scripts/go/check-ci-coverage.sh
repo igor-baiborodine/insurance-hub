@@ -69,13 +69,14 @@ require_run_command() {
 	  }
 	  {
 	    line = $0
+	    indent = leading_spaces(line)
+	    trimmed = line
+	    sub(/^[[:space:]]*/, "", trimmed)
 	    if (inside_run_block) {
-	      trimmed = line
-	      sub(/^[[:space:]]*/, "", trimmed)
 	      if (trimmed == "" || trimmed ~ /^#/) {
 	        next
 	      }
-	      if (leading_spaces(line) > run_indent) {
+	      if (indent > run_indent) {
 	        if (is_direct_make_command(line)) {
 	          found = 1
 	        }
@@ -83,15 +84,77 @@ require_run_command() {
 	      }
 	      inside_run_block = 0
 	    }
-	    if (line ~ /^ *(- +)?run: */) {
-	      run_indent = leading_spaces(line)
-	      value = line
-	      sub(/^ *(- +)?run: */, "", value)
-	      if (value ~ /^[|>][+-]?( +#.*)?$/) {
-	        inside_run_block = 1
-	      } else if (is_direct_make_command(value)) {
-	        found = 1
-	      }
+	    if (trimmed == "" || trimmed ~ /^#/) {
+	      next
+	    }
+	    if (indent == 0 && trimmed == "jobs:") {
+	      inside_jobs = 1
+	      jobs_indent = indent
+	      job_indent = -1
+	      inside_steps = 0
+	      step_indent = -1
+	      next
+	    }
+	    if (!inside_jobs) {
+	      next
+	    }
+	    if (indent <= jobs_indent) {
+	      inside_jobs = 0
+	      job_indent = -1
+	      inside_steps = 0
+	      step_indent = -1
+	      next
+	    }
+	    if (indent == jobs_indent + 2 &&
+	        trimmed ~ /^[A-Za-z0-9_.-]+:[[:space:]]*(#.*)?$/) {
+	      job_indent = indent
+	      inside_steps = 0
+	      step_indent = -1
+	      next
+	    }
+	    if (job_indent < 0) {
+	      next
+	    }
+	    if (indent <= job_indent) {
+	      inside_steps = 0
+	      step_indent = -1
+	      next
+	    }
+	    if (indent == job_indent + 2 && trimmed == "steps:") {
+	      inside_steps = 1
+	      steps_indent = indent
+	      step_indent = -1
+	      next
+	    }
+	    if (!inside_steps) {
+	      next
+	    }
+	    if (indent <= steps_indent) {
+	      inside_steps = 0
+	      step_indent = -1
+	      next
+	    }
+	    if (trimmed ~ /^-[[:space:]]+/ &&
+	        (step_indent < 0 || indent == step_indent)) {
+	      step_indent = indent
+	    }
+	    value = trimmed
+	    valid_run = 0
+	    if (indent == step_indent && value ~ /^-[[:space:]]+run:[[:space:]]*/) {
+	      sub(/^-[[:space:]]+run:[[:space:]]*/, "", value)
+	      valid_run = 1
+	    } else if (indent == step_indent + 2 && value ~ /^run:[[:space:]]*/) {
+	      sub(/^run:[[:space:]]*/, "", value)
+	      valid_run = 1
+	    }
+	    if (!valid_run) {
+	      next
+	    }
+	    run_indent = indent
+	    if (value ~ /^[|>][+-]?( +#.*)?$/) {
+	      inside_run_block = 1
+	    } else if (is_direct_make_command(value)) {
+	      found = 1
 	    }
 	  }
 	  END { exit(found ? 0 : 1) }
