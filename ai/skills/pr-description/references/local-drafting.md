@@ -6,12 +6,14 @@ description artifact.
 ## Required inputs
 
 - Ticket ID and repository root.
-- `ai/artifacts/<ticket>/<ticket>-ticket-content.md`.
+- `<ticket-dir>/<ticket>-ticket-content.md`.
 - Existing delivery tracker, completed step summaries, branch diff snapshot, and any explicitly
   supplied investigation or review artifacts.
 - `ai/templates/pr-description-template.md`.
 
-Before writing an artifact, perform the artifact preflight required by root `AGENTS.md`. If the
+Resolve `<ticket-dir>` using [AGENTS.md Artifact Rules](../../../../AGENTS.md#artifact-rules),
+including existing standalone or epic-grouped locations. Use the same directory for all inputs
+and outputs below. Before writing an artifact, perform the root artifact preflight. If the
 ticket-content file is missing or empty, follow that guide rather than inferring requirements from
 the ticket ID.
 
@@ -19,7 +21,7 @@ the ticket ID.
 
 1. Read the complete ticket specification and shared PR template. Read the delivery tracker and
    completed step summaries to understand delivered scope and recorded validation.
-2. Read `ai/artifacts/<ticket>/<ticket>-git-diff.txt`, then inspect the current branch and working
+2. Read `<ticket-dir>/<ticket>-git-diff.txt`, then inspect the current branch and working
    tree. The snapshot uses `git diff main <current-branch>` and covers committed trees only; it
    omits staged, unstaged, and untracked changes. Inspect `git status --short`, `git diff --cached`,
    `git diff`, and every relevant untracked file so the description represents the complete
@@ -53,7 +55,7 @@ Include manual validation only when applicable:
 
 Save the finished description only to:
 
-`ai/artifacts/<ticket>/<ticket>-pr-description.md`
+`<ticket-dir>/<ticket>-pr-description.md`
 
 Read an existing output before changing it and preserve relevant user-authored content. Do not
 stage, commit, publish, create or modify a pull request, send messages, or execute application smoke

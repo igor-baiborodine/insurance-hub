@@ -6,11 +6,13 @@ artifact.
 ## Required inputs
 
 - Ticket ID and repository root.
-- `ai/artifacts/<ticket>/<ticket>-ticket-content.md`.
+- `<ticket-dir>/<ticket>-ticket-content.md`.
 - Existing delivery tracker, completed step summaries, and optional reviewer-supplied artifacts.
 - `ai/templates/pr-review-template.md`.
 
-Before writing any ticket artifact, perform the artifact preflight required by root `AGENTS.md`.
+Resolve `<ticket-dir>` using [AGENTS.md Artifact Rules](../../../../AGENTS.md#artifact-rules),
+including existing standalone or epic-grouped locations. Use the same directory for all inputs
+and outputs below. Before writing any ticket artifact, perform the root artifact preflight.
 If required ticket content is missing or empty, follow that guide instead of inventing requirements.
 
 ## Upstream synchronization gate
@@ -36,7 +38,8 @@ part of the later working-tree review and do not by themselves fail synchronizat
 After the synchronization gate passes:
 
 1. Confirm that local `main` and the current branch resolve. Refresh the committed-tree snapshot
-   with `git diff main <current-branch> > ai/artifacts/<ticket>/<ticket>-git-diff.txt`. If either ref
+   with `git diff main <current-branch> > <ticket-dir>/<ticket>-git-diff.txt`, substituting the
+   actual branch, directory, and ticket ID and quoting the output path as needed. If either ref
    cannot be resolved, preserve the previous snapshot and stop with a blocker.
 2. Immediately inspect `git status --short`, `git diff --cached`, and `git diff`. Read every untracked
    proposed file. Record whether the tree is clean or list staged, unstaged, and untracked paths.
@@ -62,7 +65,7 @@ evidence into a pass; report the available recorded evidence and its limits.
 
 Write the review using `ai/templates/pr-review-template.md` and save it only to:
 
-`ai/artifacts/<ticket>/<ticket>-pr-review.md`
+`<ticket-dir>/<ticket>-pr-review.md`
 
 Assign finding IDs in order (`F-001`, `F-002`, ...). Under repository-rule compliance, list every
 applicable rule area as **Satisfied**, **Finding identified**, **Unverified**, or, with a concrete

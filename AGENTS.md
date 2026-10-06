@@ -31,7 +31,7 @@ When instructions overlap, apply them in this order:
 3. `ai/manifest.md`
 4. Relevant files in `ai/rules/`
 5. Relevant workflows in `ai/skills/`
-6. Task-local artifacts in `ai/artifacts/<ticket>/`
+6. Task-local artifacts in the resolved `<ticket-dir>` under `ai/artifacts/`
 7. Vendor-specific adapter files, if any
 
 Before planning or editing, discover any nested `AGENTS.md` files on the path to each affected
@@ -49,22 +49,25 @@ layers unless a canonical guide explicitly designates them as such.
 
 ## Default Workflow
 
-Before creating or editing any file under `ai/artifacts/`, verify that the local exclusion applies
-to the intended ticket-content path and that no artifact paths are indexed:
+Resolve `<ticket-dir>` using [Artifact Rules](#artifact-rules) before looking up or creating ticket
+content. Before creating or editing any file under `ai/artifacts/`, verify that the local exclusion
+applies to the intended ticket-content path and that no artifact paths are indexed:
 
 ```sh
-ticket_id=issue-123
-git check-ignore -q "ai/artifacts/${ticket_id}/${ticket_id}-ticket-content.md"
+ticket_id=issue-131
+ticket_dir="ai/artifacts/epic-4.2/${ticket_id}"
+git check-ignore -q "${ticket_dir}/${ticket_id}-ticket-content.md"
 git ls-files -- ai/artifacts/
 ```
 
-Replace `issue-123` with the current ticket ID. The first command must succeed and the second must
-print no paths. The checkout-local `.git/info/exclude` must contain the exact `/ai/artifacts/`
+Run from the repository root with the current ticket ID and resolved directory; the example uses
+an epic child ticket. The ignore check must succeed and the index check must print no paths.
+The checkout-local `.git/info/exclude` must contain the exact `/ai/artifacts/`
 entry. If the ignore check fails, stop artifact writes and tell the user to add that entry locally;
 do not edit `.git/info/exclude` automatically. If the index check prints paths, stop and report
 them; do not untrack or alter them automatically. Read-only inspection may continue.
 
-For ticket-based work, after this preflight, ensure `ai/artifacts/<ticket>/<ticket>-ticket-content.md`
+For ticket-based work, after this preflight, ensure `<ticket-dir>/<ticket>-ticket-content.md`
 exists and read it before assessing readiness or planning. If it is missing or empty, populate it
 from ticket content supplied by the user; ask for missing content rather than
 inventing requirements. No separate spec document is required.
@@ -73,7 +76,7 @@ Use a spec-first workflow for non-trivial changes:
 
 1. Validate that the ticket or request is implementation-ready.
 2. Clarify or enrich missing requirements before coding.
-3. Create a concrete delivery plan under `ai/artifacts/<ticket>/`.
+3. Create a concrete delivery plan under the same resolved `<ticket-dir>`.
 4. Implement incrementally, one tracked step at a time.
 5. Apply the post-step workflow after each completed delivery step.
 6. Run validation appropriate to the changed modules.
@@ -129,8 +132,33 @@ AI agents must not load or use these documents as instructions. Follow this guid
 
 ## Artifact Rules
 
-Use `ai/artifacts/<ticket>/` for the ticket-content specification, delivery plans, step summaries,
-and git diff snapshots.
+`<ticket>` is the issue identifier, such as `issue-131`. `<ticket-dir>` is its resolved artifact
+directory, relative to the repository root. Supported layouts are:
+
+| Ticket organization | `<ticket-dir>` | Ticket-content example |
+| --- | --- | --- |
+| Standalone ticket | `ai/artifacts/<ticket>` | `ai/artifacts/issue-123/issue-123-ticket-content.md` |
+| Ticket grouped under an epic | `ai/artifacts/epic-<number>/<ticket>` | `ai/artifacts/epic-4.2/issue-131/issue-131-ticket-content.md` |
+| Epic's own ticket | `ai/artifacts/epic-<number>` | `ai/artifacts/epic-4.2/issue-130-ticket-content.md` |
+
+Resolve the directory once and reuse it for the entire ticket workflow:
+
+1. Honor an explicit user-supplied ticket-content path or artifact directory under `ai/artifacts/`.
+2. Otherwise, search existing ticket-content files and ticket folders in both standalone and
+   epic-grouped locations. Include ignored files/directories in discovery: ordinary `rg --files`
+   omits these local artifacts. Reuse the matching location, including an existing empty placeholder
+   folder; do not create a flat duplicate because a nested ticket-content file is missing.
+3. If multiple locations match and the session does not identify the intended one, ask which to
+   use before writing. Do not merge, relocate, or delete artifacts automatically.
+4. If no location exists, use the epic grouping specified by the user or current task context;
+   otherwise default to `ai/artifacts/<ticket>`. Do not infer epic membership from the issue number.
+
+Keep the ticket-content specification, delivery plan, step summaries, diff snapshots, reviews, and
+PR drafts together in `<ticket-dir>`. Filenames retain the ticket ID, such as
+`<ticket>-ticket-content.md` and `<ticket>-delivery-steps.md`, regardless of directory depth.
+Shared templates use `<ticket-dir>` as a placeholder; replace it with the resolved path. Resolve
+relative links from each artifact's actual directory rather than assuming a fixed nesting depth.
+Existing flat artifacts remain valid; adding epic grouping does not require moving them.
 
 Do not commit files under `ai/artifacts/`. In each checkout, add `/ai/artifacts/` to the local
 `.git/info/exclude`; this local-only file is not committed or changed automatically by the

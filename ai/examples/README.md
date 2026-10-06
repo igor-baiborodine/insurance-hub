@@ -2,7 +2,9 @@
 
 Use this directory for committed examples that demonstrate preferred ticket content (specifications), delivery plans, verification notes, or implementation patterns.
 
-Examples should be realistic, concise, and clearly labeled as examples. Do not store ticket working artifacts here; use `ai/artifacts/<ticket>/` instead.
+Examples should be realistic, concise, and clearly labeled as examples. Store ticket working
+artifacts in the resolved `<ticket-dir>` under `ai/artifacts/`, following
+[AGENTS.md Artifact Rules](../../AGENTS.md#artifact-rules), rather than in this examples directory.
 
 ## Go testing examples
 
