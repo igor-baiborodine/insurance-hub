@@ -121,7 +121,7 @@ while IFS= read -r module_record; do
 	printf '  prerequisites: %s\n' "${prerequisites}"
 
 	mapfile -t module_variables < <(jq -r '.validationVariables[]' <<<"${module_record}")
-	child_environment=(env -u MAKEFLAGS -u MAKEOVERRIDES -u GOWORK)
+	child_environment=(env -u MAKEFLAGS -u MAKEOVERRIDES -u GOWORK -u FORMAT_FILES)
 	for variable in "${declared_variables[@]}"; do
 		child_environment+=(-u "${variable}")
 	done
