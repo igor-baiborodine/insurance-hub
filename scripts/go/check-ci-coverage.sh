@@ -151,7 +151,7 @@ require_run_command() {
 	      next
 	    }
 	    run_indent = indent
-	    if (value ~ /^[|>][+-]?( +#.*)?$/) {
+	    if (value ~ /^[|][+-]?( +#.*)?$/) {
 	      inside_run_block = 1
 	    } else if (is_direct_make_command(value)) {
 	      found = 1
