@@ -9,13 +9,23 @@ PostgreSQL cluster.
 
 1. **Port-Forward to the PostgreSQL Service**
 
+| Postgres Service                     | Cluster Port Mapping  |
+|--------------------------------------|-----------------------|
+| `svc/local-dev-postgres-auth-rw`     | 5432 → localhost:5442 |
+| `svc/local-dev-postgres-document-rw` | 5432 → localhost:5452 |
+| `svc/local-dev-postgres-payment-rw`  | 5432 → localhost:5462 |
+| `svc/local-dev-postgres-policy-rw`   | 5432 → localhost:5472 |
+| `svc/local-dev-postgres-pricing-rw`  | 5432 → localhost:5482 |
+| `svc/local-dev-postgres-product-rw`  | 5432 → localhost:5492 |
+
     In a terminal window, run the following command. This will create a secure tunnel from your local
-    machine's port `5432` to the PostgreSQL service running in the cluster.
+    machine's port `5442` to the PostgreSQL service running in the cluster. For another Postgres
+    service change the service name and port number accordingly. 
     
     ```shell
-    kubectl port-forward local-dev-postgres-auth-1 -n local-dev-all 5432:5432
-    Forwarding from 127.0.0.1:5432 -> 5432
-    Forwarding from [::1]:5432 -> 5432
+    kubectl port-forward svc/local-dev-postgres-auth-rw 5442:5432 -n local-dev-all > /dev/null 2>&1
+    Forwarding from 127.0.0.1:5442 -> 5432
+    Forwarding from [::1]:5442 -> 5432
     ```
 
 2. **Connect Using psql**
