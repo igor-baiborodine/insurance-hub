@@ -6,6 +6,7 @@
 
 - [Automated Deployment](#automated-deployment)
 - [Step-by-Step Deployment](#step-by-step-deployment)
+  - [Continuous Delivery (QA)](#continuous-delivery-qa)
   - [Observability (QA)](#observability-qa)
     - [Prometheus & Grafana](#prometheus--grafana)
     - [Loki](#loki)
@@ -37,6 +38,12 @@ and "Insurance Hub" infrastructure and services.
 
 - **Local Dev** `make legacy-all-build`
 - `cd k8s`
+- **QA**: `make prereq-k8s-flux`
+- **QA**: Set and export `GITHUB_TOKEN` as described in
+  [Continuous Delivery (QA)](#continuous-delivery-qa), then run `make flux-bootstrap` and
+  `unset GITHUB_TOKEN`.
+- **QA**: `make flux-status`
+- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=flux-bootstrap-<iso-date>`
 - **QA**: `make cluster-qa-monitoring-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep -E -- "-[01]$|-[01] "`
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-monitoring-deploy-<iso-date>`
 - `make cluster-infra-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep -E -- "-[01]$|-[01] "`
@@ -49,7 +56,37 @@ and "Insurance Hub" infrastructure and services.
 > default value can be found by searching argument name in the corresponding `Makefile`.
 
 - `cd k8s`
- 
+
+### Continuous Delivery (QA)
+
+**Prerequisites**: Create the QA cluster and pull its kubeconfig as described in
+[`base-cluster-how-tos.md`](base-cluster-how-tos.md). Create a GitHub personal access token that is
+authorized to update `igor-baiborodine/insurance-hub`.
+
+- `make prereq-k8s-flux`
+- `kubectl config use-context qa-insurance-hub`
+- `kubectl get nodes`
+- `flux check --pre`
+- Read and export the GitHub token without echoing it or placing it in shell history:
+    ```bash
+    read -rsp 'GitHub token: ' GITHUB_TOKEN
+    export GITHUB_TOKEN
+    printf '\n'
+    ```
+- `make flux-bootstrap`
+- `unset GITHUB_TOKEN`
+- `make flux-status`
+- `kubectl get deployments -n flux-system`
+- `flux get sources git -n flux-system`
+- `flux get kustomizations -n flux-system`
+- **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=flux-bootstrap-<iso-date>`
+
+The bootstrap target installs Flux in the cluster and configures reconciliation from the `main`
+branch under `k8s/flux/qa`. It may commit and push generated bootstrap manifest changes directly to
+`main`; review the remote commit and synchronize the local checkout afterward. The `qa-svc`
+Kustomization may begin reconciling service resources, whose readiness is checked after the
+dependencies in [Infra](#infra) are installed.
+
 ### Observability (QA)
 
 #### Prometheus & Grafana

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "baseline": "issue-131-product-read",
-  "status": "scenario-register-only",
-  "statusMeaning": "Every scenario is registered for later observation or proof; this manifest contains no runtime outcome.",
+  "status": "inventory-captured",
+  "statusMeaning": "The local-dev and QA environment/schema inventories are captured and validated; later data, HTTP, access, permission, and replay scenarios remain pending.",
   "representativeCatalog": ["CAR", "FAI", "HSI", "TRI"],
   "executionConstraints": {
     "environmentConcurrency": "Local-dev and QA are mutually exclusive local deployments and must be run sequentially.",
@@ -12,6 +12,8 @@
   },
   "tooling": {
     "makeInterface": "scripts/product-baseline/Makefile",
+    "implementedCaptureParts": ["inventory"],
+    "implementedFixtureChecks": ["inventory"],
     "implementedSuites": ["smoke"],
     "registeredPendingSuites": ["happy", "data-edges", "failures", "access", "db-permissions", "comparator", "all"],
     "localDevProductDatabaseDefault": "127.0.0.1:5492",
@@ -182,7 +184,8 @@
       "captureProfile": "inventory",
       "sourceRefs": ["foundation.phase-4.1", "product.entity", "product.config", "product.seed", "deploy.product-base", "deploy.product-local", "deploy.postgres", "deploy.make", "deploy.postgres-connectivity"],
       "acceptanceCriteria": ["AC131-01", "AC131-07", "AC131-09"],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "inventory/local-dev.json"
     },
     {
       "id": "INV-QA-001",
@@ -194,7 +197,8 @@
       "captureProfile": "inventory",
       "sourceRefs": ["foundation.phase-4.1", "product.entity", "product.config", "product.seed", "deploy.product-base", "deploy.product-qa", "deploy.postgres", "deploy.make", "deploy.postgres-connectivity", "deploy.flux"],
       "acceptanceCriteria": ["AC131-01", "AC131-07", "AC131-09"],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "inventory/qa.json"
     },
     {
       "id": "DATA-LOCAL-001",

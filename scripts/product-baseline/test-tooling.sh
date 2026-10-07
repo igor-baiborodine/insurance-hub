@@ -29,8 +29,10 @@ expect_failure "port 5482 belongs to Pricing" \
   env BASELINE_ENV=local-dev BASELINE_PRODUCT_DB_PORT=5482 "${script_dir}/preflight.sh"
 expect_failure "Unsupported BASELINE_SUITE 'unknown'" \
   env BASELINE_SUITE=unknown "${script_dir}/validate-suite.sh"
-expect_failure "not implemented yet" \
-  env BASELINE_ENV=local-dev BASELINE_PART=inventory \
-  "${script_dir}/not-implemented.sh" capture BASELINE_ENV BASELINE_PART
+expect_failure "BASELINE_PART must be 'inventory'" \
+  env BASELINE_ENV=local-dev BASELINE_PART=stored-catalog \
+  "${script_dir}/capture-inventory.sh"
+expect_failure "BASELINE_PART must be 'inventory'" \
+  env BASELINE_PART=stored-catalog "${script_dir}/check-inventory.sh"
 
 echo "Controlled failure checks passed before any live or disposable data mutation."

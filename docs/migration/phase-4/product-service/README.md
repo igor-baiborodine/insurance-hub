@@ -4,10 +4,12 @@ This directory is the versioned entry point for issue #131's Product catalog rea
 baseline will describe the Java behavior that the Go pilot must preserve, the shared PostgreSQL
 topology it will read, and the evidence used to qualify later implementation work.
 
-The source inventory and scenario register are established. Runtime captures, accepted fixtures,
-parity decisions, permission proofs, and replay commands remain pending their delivery steps. A
-source reference in this document records what the checkout says; it is not evidence of an
-effective local-dev or QA result.
+The source inventory and scenario register are established, and both local-dev and QA
+environment/schema inventories are captured. The QA recovery and effective differences are
+documented in [`data-baseline.md`](data-baseline.md). Other runtime captures, parity decisions,
+permission proofs, and replay commands remain pending their delivery steps. A source reference in
+this document records what the checkout says; it is not evidence of an effective local-dev or QA
+result.
 
 ## Scope and foundation
 
@@ -31,14 +33,14 @@ evidence are still owned by issues #131 through #136.
 | Path | Ownership and purpose | Current state |
 | --- | --- | --- |
 | `docs/migration/phase-4/product-service/README.md` | Baseline entry point, source inventory, reproduction guidance, limits, and downstream handoff. | Source inventory established. |
-| `docs/migration/phase-4/product-service/data-baseline.md` | Effective environment/schema/writer inventory, catalog provenance, shared topology, and database-permission proof. | Planned; no runtime inventory has been recorded. |
+| `docs/migration/phase-4/product-service/data-baseline.md` | Effective environment/schema/writer inventory, catalog provenance, shared topology, and database-permission proof. | Local-dev and QA inventories captured; later catalog identity and restricted-role proof remain pending. |
 | `docs/migration/phase-4/product-service/contract-baseline.md` | Consumer and field mappings, HTTP observations, parity rules, and transport semantics. | Planned; wire behavior and decisions are pending. |
 | `docs/migration/phase-4/product-service/security-baseline.md` | Observed Java access and identity behavior and the compatible future Go model. | Planned; source observations do not establish effective enforcement. |
-| `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and, in later steps, the index for the sanitized fixture corpus. | Scenario register established; fixture paths and checksums are pending capture. |
-| `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | No accepted captures or synthetic payloads exist yet. |
+| `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and index for the sanitized fixture corpus. | Both inventory fixtures indexed; later scenarios remain pending. |
+| `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | Accepted local-dev and QA inventories present; stored-row, HTTP, and synthetic fixtures remain pending. |
 | `legacy/product-service/src/test/java/…` | Product/PostgreSQL listener, fixture, edge, failure, and permission tests. | Disposable listener/PostgreSQL smoke and shared-database override guard implemented; later scenario groups remain planned. |
 | `legacy/agent-portal-gateway/src/test/…` | Gateway listener, retry/fallback, and access tests against the shared corpus. | Real-listener authenticated/unauthenticated smoke implemented; retry/fallback and full access cases remain planned. |
-| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Public interface and Step 2 preflight/smoke support implemented; later capabilities fail explicitly until their owning steps. |
+| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Inventory capture/check and Step 2 preflight/smoke implemented; later capabilities fail explicitly until their owning steps. |
 
 Ticket plans, execution records, step summaries, and Git snapshots stay in the ignored
 `ai/artifacts/epic-4.2/issue-131/` directory. They are evidence records rather than reusable
@@ -164,6 +166,8 @@ Run baseline commands from the repository root. The current implemented entry po
 make help
 make product-baseline-test BASELINE_SUITE=smoke
 make product-baseline-preflight BASELINE_ENV=local-dev
+make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=inventory
+make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=inventory
 ```
 
 The smoke suite requires Java 14, system Maven, Docker Engine, and dependency resolution access on
@@ -178,8 +182,8 @@ The Product test base rejects attempts to override its datasource, PostgreSQL, H
 test-environment isolation properties. Invalid suite names, missing configuration, the Pricing
 database port, and later unimplemented capabilities fail before any data operation. The registered
 suite names are `smoke`, `happy`, `data-edges`, `failures`, `access`, `db-permissions`, `comparator`,
-and `all`; only `smoke` is implemented in Step 2. Capture, fixture-check, replay, live-verify, and
-aggregate-check targets report their later-step status instead of returning an empty success.
+and `all`; only `smoke` is implemented. Inventory capture and fixture checking are implemented;
+later capture parts, suites, replay, live verification, and the aggregate check remain pending.
 
 Local-dev preflight is read-only. It verifies the exact Kubernetes context, Product and gateway
 workloads/services/endpoints, access to the Product database Secret, Docker/Java/Maven/psql

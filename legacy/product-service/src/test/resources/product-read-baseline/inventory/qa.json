@@ -1,0 +1,522 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "INV-QA-001",
+  "status": "captured",
+  "captureProfile": "inventory",
+  "provenance": "captured-observation",
+  "credentialCategory": "database-capture",
+  "capturedAt": "2026-10-07T19:54:49Z",
+  "captureClock": "Target PostgreSQL clock at the read-only inventory query",
+  "captureCommand": "make product-baseline-capture BASELINE_ENV=qa BASELINE_PART=inventory",
+  "environment": "qa",
+  "sourceRevision": "cbe608a6cfa98b38ddcf9d329a41b3e71cbc302b",
+  "kubernetes": {
+    "context": "qa-insurance-hub",
+    "namespaces": {
+      "service": "qa-svc",
+      "data": "qa-data"
+    },
+    "workloads": {
+      "product": {
+        "deployment": "qa-product-api-legacy",
+        "generation": 3,
+        "observedGeneration": 3,
+        "desiredReplicas": 1,
+        "readyReplicas": 1,
+        "availableReplicas": 1,
+        "deploymentRevision": "2",
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": "25%",
+            "maxUnavailable": "25%"
+          },
+          "type": "RollingUpdate"
+        },
+        "container": {
+          "name": "product-api-legacy",
+          "image": "ghcr.io/igor-baiborodine/insurance-hub/product-api-legacy:1.4.0",
+          "imagePullPolicy": "Always",
+          "ports": [
+            {
+              "containerPort": 8080,
+              "protocol": "TCP"
+            }
+          ],
+          "readinessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/health",
+              "port": 8080,
+              "scheme": "HTTP"
+            },
+            "initialDelaySeconds": 30,
+            "periodSeconds": 10,
+            "successThreshold": 1,
+            "timeoutSeconds": 5
+          },
+          "livenessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/health",
+              "port": 8080,
+              "scheme": "HTTP"
+            },
+            "initialDelaySeconds": 25,
+            "periodSeconds": 20,
+            "successThreshold": 1,
+            "timeoutSeconds": 5
+          },
+          "envFrom": [
+            {
+              "configMapRef": {
+                "name": "qa-product-config-legacy-f778mm425k"
+              }
+            }
+          ],
+          "environment": [
+            {
+              "name": "PG_USER",
+              "secretKeyRef": {
+                "name": "qa-postgres-product-user-creds",
+                "key": "username",
+                "optional": false
+              }
+            },
+            {
+              "name": "PG_PASSWORD",
+              "secretKeyRef": {
+                "name": "qa-postgres-product-user-creds",
+                "key": "password",
+                "optional": false
+              }
+            },
+            {
+              "name": "KUBERNETES_CLIENT_NAMESPACE",
+              "fieldRef": "metadata.namespace"
+            },
+            {
+              "name": "MICRONAUT_SERVER_HOST",
+              "value": "0.0.0.0"
+            }
+          ]
+        },
+        "pods": [
+          {
+            "name": "qa-product-api-legacy-6867cf4c99-cllq8",
+            "node": "qa-worker1",
+            "phase": "Running",
+            "ready": "True",
+            "image": "ghcr.io/igor-baiborodine/insurance-hub/product-api-legacy:1.4.0",
+            "imageDigest": "ghcr.io/igor-baiborodine/insurance-hub/product-api-legacy@sha256:633d645b45696349ef8e3e2fbe3f25aec0997ce9698c371f31535ca4da5bae8d"
+          }
+        ]
+      },
+      "gateway": {
+        "deployment": "qa-agent-portal-gateway-legacy",
+        "generation": 2,
+        "observedGeneration": 2,
+        "desiredReplicas": 1,
+        "readyReplicas": 1,
+        "availableReplicas": 1,
+        "deploymentRevision": "1",
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": "25%",
+            "maxUnavailable": "25%"
+          },
+          "type": "RollingUpdate"
+        },
+        "container": {
+          "name": "agent-portal-gateway-legacy",
+          "image": "ghcr.io/igor-baiborodine/insurance-hub/agent-portal-gateway-legacy:1.0.0",
+          "imagePullPolicy": "Always",
+          "ports": [
+            {
+              "containerPort": 8080,
+              "protocol": "TCP"
+            }
+          ],
+          "readinessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/health",
+              "port": 8080,
+              "scheme": "HTTP"
+            },
+            "initialDelaySeconds": 25,
+            "periodSeconds": 10,
+            "successThreshold": 1,
+            "timeoutSeconds": 5
+          },
+          "livenessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/health",
+              "port": 8080,
+              "scheme": "HTTP"
+            },
+            "initialDelaySeconds": 30,
+            "periodSeconds": 20,
+            "successThreshold": 1,
+            "timeoutSeconds": 5
+          },
+          "envFrom": null,
+          "environment": [
+            {
+              "name": "MICRONAUT_ENVIRONMENTS",
+              "value": "qa"
+            },
+            {
+              "name": "TRACING_ZIPKIN_HTTP_URL",
+              "value": "http://qa-alloy.qa-monitoring.svc.cluster.local:9411"
+            },
+            {
+              "name": "KUBERNETES_CLIENT_NAMESPACE",
+              "fieldRef": "metadata.namespace"
+            },
+            {
+              "name": "MICRONAUT_SERVER_HOST",
+              "value": "0.0.0.0"
+            }
+          ]
+        },
+        "pods": [
+          {
+            "name": "qa-agent-portal-gateway-legacy-66c64c77db-vlrgn",
+            "node": "qa-worker2",
+            "phase": "Running",
+            "ready": "True",
+            "image": "ghcr.io/igor-baiborodine/insurance-hub/agent-portal-gateway-legacy:1.0.0",
+            "imageDigest": "ghcr.io/igor-baiborodine/insurance-hub/agent-portal-gateway-legacy@sha256:edfd116b33792cc3a7d61534086107fc39b858b4a2a8ec35869b2dcf27651a3c"
+          }
+        ]
+      }
+    },
+    "services": {
+      "product": {
+        "name": "qa-product-api-legacy",
+        "type": "ClusterIP",
+        "clusterIP": "10.43.224.124",
+        "ports": [
+          {
+            "port": 80,
+            "protocol": "TCP",
+            "targetPort": 8080
+          }
+        ],
+        "readyEndpointAddresses": [
+          "10.42.1.56"
+        ]
+      },
+      "gateway": {
+        "name": "qa-agent-portal-gateway-legacy",
+        "type": "ClusterIP",
+        "clusterIP": "10.43.112.33",
+        "ports": [
+          {
+            "port": 80,
+            "protocol": "TCP",
+            "targetPort": 8080
+          }
+        ],
+        "readyEndpointAddresses": [
+          "10.42.2.58"
+        ]
+      }
+    },
+    "productConfiguration": {
+      "configMap": "qa-product-config-legacy-f778mm425k",
+      "data": {
+        "MG_HOST": "localhost",
+        "MG_PORT": "27017",
+        "PG_DBNAME": "product",
+        "PG_HOST": "qa-postgres-product-rw.qa-data.svc.cluster.local",
+        "PG_PORT": "5432",
+        "TRACING_ZIPKIN_ENABLED": "true",
+        "ZIPKIN_HOST": "qa-alloy.qa-monitoring.svc.cluster.local",
+        "ZIPKIN_PORT": "9411"
+      }
+    },
+    "postgresCluster": {
+      "name": "qa-postgres-product",
+      "generation": 1,
+      "observedGeneration": null,
+      "instances": 2,
+      "image": "ghcr.io/cloudnative-pg/postgresql:17",
+      "currentPrimary": "qa-postgres-product-1",
+      "readyInstances": 2,
+      "phase": "Cluster in healthy state",
+      "bootstrap": {
+        "database": "product",
+        "owner": "product",
+        "secretReference": "qa-postgres-product-user-creds"
+      }
+    },
+    "flux": {
+      "apiAvailable": true,
+      "qaServiceKustomization": {
+        "name": "qa-svc",
+        "sourceRef": {
+          "kind": "GitRepository",
+          "name": "insurance-hub"
+        },
+        "path": "./k8s/overlays/qa/svc",
+        "interval": "5m",
+        "retryInterval": "1m",
+        "prune": true,
+        "lastAppliedRevision": "main@sha1:453afd77041d380dea7a6435e4c3e5d4e94d496f",
+        "lastAttemptedRevision": "main@sha1:453afd77041d380dea7a6435e4c3e5d4e94d496f",
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-07T19:52:32Z",
+            "message": "Applied revision: main@sha1:453afd77041d380dea7a6435e4c3e5d4e94d496f",
+            "observedGeneration": 1,
+            "reason": "ReconciliationSucceeded",
+            "status": "True",
+            "type": "Ready"
+          },
+          {
+            "lastTransitionTime": "2026-10-07T19:52:32Z",
+            "message": "Health check passed in 506.688517ms",
+            "observedGeneration": 1,
+            "reason": "Succeeded",
+            "status": "True",
+            "type": "Healthy"
+          }
+        ]
+      },
+      "source": {
+        "name": "insurance-hub",
+        "url": "https://github.com/igor-baiborodine/insurance-hub",
+        "branch": "main",
+        "interval": "1m",
+        "artifactRevision": "main@sha1:453afd77041d380dea7a6435e4c3e5d4e94d496f"
+      }
+    }
+  },
+  "postgres": {
+    "role": {
+      "name": "product",
+      "canLogin": true,
+      "inherits": true,
+      "superuser": false,
+      "createRole": false,
+      "replication": false,
+      "createDatabase": false,
+      "bypassRowLevelSecurity": false
+    },
+    "table": {
+      "owner": "product",
+      "columns": [
+        {
+          "name": "code",
+          "default": null,
+          "ordinal": 1,
+          "dataType": "character varying",
+          "identity": false,
+          "nullable": false,
+          "generated": "NEVER",
+          "underlyingType": "varchar",
+          "characterMaximumLength": 255
+        },
+        {
+          "name": "definition",
+          "default": null,
+          "ordinal": 2,
+          "dataType": "jsonb",
+          "identity": false,
+          "nullable": false,
+          "generated": "NEVER",
+          "underlyingType": "jsonb",
+          "characterMaximumLength": null
+        }
+      ],
+      "indexes": [
+        {
+          "name": "product_pkey",
+          "definition": "CREATE UNIQUE INDEX product_pkey ON public.product USING btree (code)"
+        }
+      ],
+      "triggers": [],
+      "constraints": [
+        {
+          "name": "product_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (code)"
+        }
+      ],
+      "qualifiedName": "public.product"
+    },
+    "schema": "public",
+    "database": "product",
+    "observedAt": "2026-10-07T19:54:49Z",
+    "currentUser": "product",
+    "serverVersion": "17.9 (Debian 17.9-1.pgdg11+1)",
+    "relevantObjects": [
+      {
+        "kind": "index",
+        "name": "product_pkey",
+        "owner": "product"
+      },
+      {
+        "kind": "table",
+        "name": "product",
+        "owner": "product"
+      }
+    ],
+    "roleMemberships": [
+      {
+        "role": "product",
+        "depth": 0
+      }
+    ],
+    "sessionReadOnly": true,
+    "catalogProvenance": {
+      "codes": [
+        "CAR",
+        "FAI",
+        "HSI",
+        "TRI"
+      ],
+      "rowCount": 4
+    },
+    "effectivePrivileges": {
+      "table": {
+        "delete": true,
+        "insert": true,
+        "select": true,
+        "update": true,
+        "trigger": true,
+        "truncate": true,
+        "references": true
+      },
+      "schema": {
+        "usage": true,
+        "create": true
+      },
+      "database": {
+        "create": true,
+        "connect": true,
+        "temporary": true
+      }
+    },
+    "explicitTableGrants": [
+      {
+        "grantee": "product",
+        "grantor": "product",
+        "grantable": true,
+        "privilege": "DELETE"
+      },
+      {
+        "grantee": "product",
+        "grantor": "product",
+        "grantable": true,
+        "privilege": "INSERT"
+      },
+      {
+        "grantee": "product",
+        "grantor": "product",
+        "grantable": true,
+        "privilege": "REFERENCES"
+      },
+      {
+        "grantee": "product",
+        "grantor": "product",
+        "grantable": true,
+        "privilege": "SELECT"
+      },
+      {
+        "grantee": "product",
+        "grantor": "product",
+        "grantable": true,
+        "privilege": "TRIGGER"
+      },
+      {
+        "grantee": "product",
+        "grantor": "product",
+        "grantable": true,
+        "privilege": "TRUNCATE"
+      },
+      {
+        "grantee": "product",
+        "grantor": "product",
+        "grantable": true,
+        "privilege": "UPDATE"
+      }
+    ],
+    "serverVersionNumber": 170009
+  },
+  "connection": {
+    "endpoint": "127.0.0.1:5492",
+    "forwardVerified": true,
+    "transactionReadOnly": true
+  },
+  "ownership": {
+    "runtimeManagers": {
+      "services": "kustomize",
+      "databaseOperator": "cloudnative-pg"
+    },
+    "checkedInResources": [
+      "k8s/apps/svc/product/base/legacy/deployment.yaml",
+      "k8s/overlays/qa/svc/product/legacy/deployment-patch.yaml",
+      "k8s/overlays/qa/svc/agent-portal-gateway/legacy/deployment-patch.yaml",
+      "k8s/apps/infra/postgres/base/cluster.yaml",
+      "k8s/overlays/qa/infra/postgres/product/cluster-patch.yaml",
+      "k8s/Makefile",
+      "k8s/flux/qa/flux-system/kustomization-qa-svc.yaml",
+      "k8s/flux/qa/flux-system/gotk-sync.yaml"
+    ],
+    "secretReferences": [
+      "qa-postgres-product-user-creds"
+    ],
+    "writers": [
+      {
+        "owner": "legacy Product service",
+        "mechanism": "DataLoader inserts missing CAR, FAI, HSI, and TRI on ServerStartupEvent",
+        "source": "legacy/product-service/src/main/java/pl/altkom/asc/lab/micronaut/poc/product/service/init/DataLoader.java"
+      },
+      {
+        "owner": "legacy Product service Hibernate startup",
+        "mechanism": "hibernate.hbm2ddl.auto=update",
+        "source": "legacy/product-service/src/main/resources/application.yml"
+      },
+      {
+        "owner": "CloudNativePG bootstrap/admin identity",
+        "mechanism": "creates the product database and product owner from a Secret reference",
+        "source": "k8s/overlays/qa/infra/postgres/product/cluster-patch.yaml"
+      }
+    ]
+  },
+  "checkedInExpectations": {
+    "productImage": "ghcr.io/igor-baiborodine/insurance-hub/product-api-legacy:1.4.0",
+    "gatewayImage": "ghcr.io/igor-baiborodine/insurance-hub/agent-portal-gateway-legacy:1.0.0",
+    "productDatabaseHost": "qa-postgres-product-rw.qa-data.svc.cluster.local",
+    "postgresImage": "ghcr.io/cloudnative-pg/postgresql:17",
+    "productTable": {
+      "owner": "product",
+      "columns": [
+        {
+          "name": "code",
+          "underlyingType": "varchar",
+          "characterMaximumLength": 255,
+          "nullable": false
+        },
+        {
+          "name": "definition",
+          "underlyingType": "jsonb",
+          "characterMaximumLength": null,
+          "nullable": false
+        }
+      ],
+      "primaryKey": "PRIMARY KEY (code)"
+    }
+  },
+  "differencesFromCheckedInSources": [],
+  "sanitizationRecord": {
+    "secretValuesCaptured": false,
+    "bearerTokensCaptured": false,
+    "catalogDefinitionsCaptured": false,
+    "retainedSensitiveReferences": "Secret names and keys only",
+    "temporaryCredentialHandling": "Database password held only in process memory and unset after the read-only query"
+  }
+}

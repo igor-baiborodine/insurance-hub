@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 fail() {
   echo "ERROR: $*" >&2
   exit 2
@@ -62,8 +64,8 @@ require_command docker
 require_command java
 require_command kubectl
 require_command mvn
+require_command pg_isready
 require_command psql
-require_command timeout
 
 docker_versions="$(docker version --format '{{.Client.Version}} client, {{.Server.Version}} server' 2>&1)" || \
   fail "Docker Engine is unavailable: ${docker_versions}"
@@ -108,8 +110,8 @@ for service in "${product_service}" "${gateway_service}"; do
   [[ -n "${endpoint_ip}" ]] || fail "Service '${service}' has no ready endpoint."
 done
 
-if ! timeout 5 bash -c 'exec 3<>"/dev/tcp/$1/$2"' bash \
-  "${database_host}" "${database_port}" 2>/dev/null; then
+if ! pg_isready --host="${database_host}" --port="${database_port}" \
+  --timeout=5 --quiet; then
   fail "Product PostgreSQL endpoint ${database_host}:${database_port} is unreachable. Start the Product port-forward or provide an explicit Product endpoint."
 fi
 
@@ -123,28 +125,52 @@ database_password="$(kubectl --context="${expected_context}" -n "${data_namespac
   fail "Product database credentials are incomplete."
 
 readonly identity_sql="SET default_transaction_read_only=on; SELECT current_database() || '|' || current_schema() || '|' || COALESCE(to_regclass('public.product')::text, ''); SELECT count(*)::text FROM public.product;"
-if ! database_output="$(PGPASSWORD="${database_password}" PGCONNECT_TIMEOUT=5 \
-  psql -X -q -A -t -v ON_ERROR_STOP=1 \
-    --host="${database_host}" --port="${database_port}" \
-    --username="${database_username}" --dbname=product \
-    --command="${identity_sql}" 2>&1)"; then
+if [[ -n "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT:-}" ]]; then
+  require_command jq
+  if ! PGPASSWORD="${database_password}" PGCONNECT_TIMEOUT=5 \
+    psql -X -q -A -t -v ON_ERROR_STOP=1 \
+      --host="${database_host}" --port="${database_port}" \
+      --username="${database_username}" --dbname=product \
+      --file="${script_dir}/inventory.sql" \
+      >"${BASELINE_PREFLIGHT_INVENTORY_OUTPUT}"; then
+    unset database_password
+    fail "Read-only Product database inventory and identity check failed."
+  fi
   unset database_password
-  fail "Read-only Product database identity check failed: ${database_output}"
-fi
-unset database_password
+  jq -e '
+    .database == "product"
+    and .schema == "public"
+    and .table.qualifiedName == "public.product"
+    and (.catalogProvenance.rowCount | type == "number")
+  ' "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT}" >/dev/null || \
+    fail "Endpoint ${database_host}:${database_port} is not the expected product/public.product database."
+  database_row_count="$(jq -r '.catalogProvenance.rowCount' \
+    "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT}")"
+else
+  if ! database_output="$(PGPASSWORD="${database_password}" PGCONNECT_TIMEOUT=5 \
+    psql -X -q -A -t -v ON_ERROR_STOP=1 \
+      --host="${database_host}" --port="${database_port}" \
+      --username="${database_username}" --dbname=product \
+      --command="${identity_sql}" 2>&1)"; then
+    unset database_password
+    fail "Read-only Product database identity check failed: ${database_output}"
+  fi
+  unset database_password
 
-mapfile -t database_rows <<<"${database_output}"
-[[ "${database_rows[0]:-}" == "product|public|product" ]] || \
-  fail "Endpoint ${database_host}:${database_port} is not the expected product/public.product database."
-[[ "${database_rows[1]:-}" =~ ^[0-9]+$ ]] || \
-  fail "Could not verify read access to public.product."
+  mapfile -t database_rows <<<"${database_output}"
+  [[ "${database_rows[0]:-}" == "product|public|product" ]] || \
+    fail "Endpoint ${database_host}:${database_port} is not the expected product/public.product database."
+  [[ "${database_rows[1]:-}" =~ ^[0-9]+$ ]] || \
+    fail "Could not verify read access to public.product."
+  database_row_count="${database_rows[1]}"
+fi
 
 echo "Product baseline preflight passed for ${environment}."
 echo "  Kubernetes context: ${expected_context}"
 echo "  Service namespace: ${service_namespace}"
 echo "  Data namespace: ${data_namespace}"
 echo "  Product database endpoint: ${database_host}:${database_port}"
-echo "  Product catalog rows visible: ${database_rows[1]}"
+echo "  Product catalog rows visible: ${database_row_count}"
 echo "  Docker: ${docker_versions}"
 echo "  Java: $(first_line "${java_version}")"
 echo "  Maven: $(first_line "${maven_version}")"
