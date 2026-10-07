@@ -10,6 +10,13 @@
     "qaEntryPreflight": "Run after switching to QA and before the first QA-dependent capture; repeat after later environment switches.",
     "comparison": "Compare environment- and revision-keyed captures; never require both environments to be live simultaneously."
   },
+  "tooling": {
+    "makeInterface": "scripts/product-baseline/Makefile",
+    "implementedSuites": ["smoke"],
+    "registeredPendingSuites": ["happy", "data-edges", "failures", "access", "db-permissions", "comparator", "all"],
+    "localDevProductDatabaseDefault": "127.0.0.1:5492",
+    "safetyBoundary": "Live preflight is read-only; mutation-capable cases run only against disposable resources."
+  },
   "environments": {
     "local-dev": "Shared local-dev Java Product, gateway, and PostgreSQL; read-only capture only. The broad Make target assigns Product PostgreSQL to localhost:5492.",
     "qa": "Shared QA Java Product, gateway, and PostgreSQL; read-only capture only.",

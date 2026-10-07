@@ -4,13 +4,22 @@ import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
 import org.testcontainers.containers.PostgreSQLContainer;
 
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public abstract class BaseIT {
 
     private static final String POSTGRES_DOCKER_IMAGE_NAME = "postgres:16.4-alpine";
     private static final String POSTGRES_DATABASE_NAME = "product_test";
+    private static final List<String> DISPOSABLE_DATABASE_PROPERTY_PREFIXES = Arrays.asList(
+            "datasources.default.",
+            "postgres.",
+            "jpa.default.properties.hibernate.hbm2ddl.auto",
+            "micronaut.environments"
+    );
 
     static final PostgreSQLContainer<?> postgresqlContainer;
 
@@ -25,6 +34,15 @@ public abstract class BaseIT {
     }
 
     protected EmbeddedServer startServer(Map<String, Object> extraProperties) {
+        List<String> unsafeProperties = extraProperties.keySet().stream()
+                .filter(BaseIT::isDisposableDatabaseProperty)
+                .sorted()
+                .collect(Collectors.toList());
+        if (!unsafeProperties.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Disposable Product tests cannot override database isolation properties: " + unsafeProperties);
+        }
+
         Map<String, Object> properties = new HashMap<>();
         properties.put("micronaut.environments", "test");
         properties.put("datasources.default.url", postgresqlContainer.getJdbcUrl());
@@ -33,5 +51,9 @@ public abstract class BaseIT {
         properties.put("datasources.default.password", postgresqlContainer.getPassword());
         properties.putAll(extraProperties);
         return ApplicationContext.run(EmbeddedServer.class, properties);
+    }
+
+    private static boolean isDisposableDatabaseProperty(String property) {
+        return DISPOSABLE_DATABASE_PROPERTY_PREFIXES.stream().anyMatch(property::startsWith);
     }
 }

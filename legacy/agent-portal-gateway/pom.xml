@@ -24,7 +24,8 @@
         <exec.mainClass>pl.altkom.asc.lab.micronaut.poc.gateway.AgentPortalGatewayApplication</exec.mainClass>
         <micronaut.data.version>2.3.1</micronaut.data.version>
         <maven-surefire-plugin.version>2.22.2</maven-surefire-plugin.version>
-        <maven-failsafe-plugin.version>2.22.2</maven-failsafe-plugin.version>
+        <maven-failsafe-plugin.version>3.2.5</maven-failsafe-plugin.version>
+        <skip.surefire.tests>false</skip.surefire.tests>
     </properties>
 
     <repositories>
@@ -122,6 +123,12 @@
             <artifactId>micronaut-test-junit5</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>3.24.2</version>
+            <scope>test</scope>
+        </dependency>
         <!-- TEST -->
 
         <dependency>
@@ -191,10 +198,14 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${maven-surefire-plugin.version}</version>
                 <configuration>
+                    <skipTests>${skip.surefire.tests}</skipTests>
                     <detail>true</detail>
                     <includes>
                         <include>%regex[.*]</include>
                     </includes>
+                    <excludes>
+                        <exclude>%regex[.*IT.*]</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>
@@ -207,6 +218,9 @@
                             <goal>integration-test</goal>
                             <goal>verify</goal>
                         </goals>
+                        <configuration>
+                            <failIfNoTests>true</failIfNoTests>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

@@ -8,6 +8,7 @@
 ################################################################################
 include k8s/Makefile
 include k8s/bootstrap/Makefile
+include scripts/product-baseline/Makefile
 
 ################################################################################
 # Variables

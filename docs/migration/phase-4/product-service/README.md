@@ -36,9 +36,9 @@ evidence are still owned by issues #131 through #136.
 | `docs/migration/phase-4/product-service/security-baseline.md` | Observed Java access and identity behavior and the compatible future Go model. | Planned; source observations do not establish effective enforcement. |
 | `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and, in later steps, the index for the sanitized fixture corpus. | Scenario register established; fixture paths and checksums are pending capture. |
 | `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | No accepted captures or synthetic payloads exist yet. |
-| `legacy/product-service/src/test/java/…` | Product/PostgreSQL listener, fixture, edge, failure, and permission tests. | Existing happy-path foundation only; baseline tests are planned. |
-| `legacy/agent-portal-gateway/src/test/…` | Gateway listener, retry/fallback, and access tests against the shared corpus. | Planned; the module currently has no test source tree. |
-| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Planned for step 2 onward. |
+| `legacy/product-service/src/test/java/…` | Product/PostgreSQL listener, fixture, edge, failure, and permission tests. | Disposable listener/PostgreSQL smoke and shared-database override guard implemented; later scenario groups remain planned. |
+| `legacy/agent-portal-gateway/src/test/…` | Gateway listener, retry/fallback, and access tests against the shared corpus. | Real-listener authenticated/unauthenticated smoke implemented; retry/fallback and full access cases remain planned. |
+| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Public interface and Step 2 preflight/smoke support implemented; later capabilities fail explicitly until their owning steps. |
 
 Ticket plans, execution records, step summaries, and Git snapshots stay in the ignored
 `ai/artifacts/epic-4.2/issue-131/` directory. They are evidence records rather than reusable
@@ -158,9 +158,40 @@ array order, status, or errors.
 
 ## Reproduction status
 
-The `product-baseline-*` Make interface described by the ticket does not exist yet. Step 2 will add
-the owning preflight and isolated smoke foundation before any live capture. Until then there is no
-supported command that reproduces this baseline, and no local-dev or QA observation is accepted.
+Run baseline commands from the repository root. The current implemented entry points are:
+
+```shell
+make help
+make product-baseline-test BASELINE_SUITE=smoke
+make product-baseline-preflight BASELINE_ENV=local-dev
+```
+
+The smoke suite requires Java 14, system Maven, Docker Engine, and dependency resolution access on
+the first run. It compiles the Product API and the Product/gateway test classpaths, starts Product
+with a disposable `postgres:16.4-alpine` Testcontainer, exercises its real HTTP listener, and then
+stops both resources. It also starts a real gateway listener against an isolated loopback Product
+endpoint and checks authenticated success plus rejection without a bearer token. The gateway has
+no downstream auth-service client; the test generates JWT trust material at runtime and never
+stores or prints the token or signing secret.
+
+The Product test base rejects attempts to override its datasource, PostgreSQL, Hibernate DDL, or
+test-environment isolation properties. Invalid suite names, missing configuration, the Pricing
+database port, and later unimplemented capabilities fail before any data operation. The registered
+suite names are `smoke`, `happy`, `data-edges`, `failures`, `access`, `db-permissions`, `comparator`,
+and `all`; only `smoke` is implemented in Step 2. Capture, fixture-check, replay, live-verify, and
+aggregate-check targets report their later-step status instead of returning an empty success.
+
+Local-dev preflight is read-only. It verifies the exact Kubernetes context, Product and gateway
+workloads/services/endpoints, access to the Product database Secret, Docker/Java/Maven/psql
+availability, and the `product.public.product` identity plus catalog read access. It defaults to
+`127.0.0.1:5492`, which remains overrideable through `BASELINE_PRODUCT_DB_HOST` and
+`BASELINE_PRODUCT_DB_PORT`. The preflight does not create a port-forward. Start the existing broad
+forward or a targeted Product forward in another terminal before running it, for example:
+
+```shell
+kubectl --context=kind-local-dev-insurance-hub --namespace=local-dev-all \
+  port-forward service/local-dev-postgres-product-rw 5492:5432
+```
 
 Local-dev and QA cannot run concurrently on the maintainer's laptop. Step 2 preflights local-dev
 only. QA preflight runs later, after local-dev is stopped and QA is started for its first capture.
