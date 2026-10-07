@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "DATA-LOCAL-001",
+  "status": "captured",
+  "captureProfile": "stored-catalog",
+  "provenance": "captured-representative",
+  "credentialCategory": "database-capture",
+  "capturedAt": "2026-10-07T20:30:03Z",
+  "captureClock": "Target PostgreSQL statement clock inside a repeatable-read, read-only transaction",
+  "captureCommand": "make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=catalog",
+  "environment": "local-dev",
+  "sourceRevision": "eddc97efd09fecf441f37fa8fda2600afdb5da91",
+  "kubernetesContext": "kind-local-dev-insurance-hub",
+  "connection": {
+    "endpoint": "127.0.0.1:5492",
+    "transactionReadOnly": true
+  },
+  "inventoryIdentity": {
+    "path": "legacy/product-service/src/test/resources/product-read-baseline/inventory/local-dev.json",
+    "algorithm": "SHA-256",
+    "value": "cc4a970509ed1754902ce272b251dc88f54f19ef354f17552326333185b1e1be"
+  },
+  "database": {
+    "name": "product",
+    "schema": "public",
+    "table": "public.product",
+    "tableOwner": "product"
+  },
+  "schemaIdentity": {
+    "value": "76fac669b254931c0709c236fdd7804b",
+    "algorithm": "MD5"
+  },
+  "dataIdentity": {
+    "codes": [
+      "CAR",
+      "FAI",
+      "HSI",
+      "TRI"
+    ],
+    "value": "7ba18949c152e2979df14a28a67cba7f",
+    "rowCount": 4,
+    "algorithm": "MD5"
+  },
+  "transactionSnapshot": "808:808:",
+  "rows": [
+    {
+      "code": "CAR",
+      "checksum": {
+        "value": "915ca1a8e507fdb4bdb7039cde7e2998",
+        "algorithm": "MD5"
+      },
+      "rawLosslessDefinitionJson": "{\"icon\": \"car\", \"name\": \"Happy Driver\", \"image\": \"/static/car.jpg\", \"covers\": [{\"code\": \"C1\", \"name\": \"Assistance\", \"optional\": true, \"sumInsured\": null, \"description\": \"\"}], \"questions\": [{\"code\": \"NUM_OF_CLAIM\", \"text\": \"Number of claims in last 5 years\", \"type\": \"numeric\", \"index\": 3}], \"description\": \"Car insurance\", \"maxNumberOfInsured\": 1}"
+    },
+    {
+      "code": "FAI",
+      "checksum": {
+        "value": "df87da1ca51acaabf8b0717c9d2a666d",
+        "algorithm": "MD5"
+      },
+      "rawLosslessDefinitionJson": "{\"icon\": \"apple\", \"name\": \"Happy farm\", \"image\": \"/static/farm.jpg\", \"covers\": [{\"code\": \"C1\", \"name\": \"Crops\", \"optional\": false, \"sumInsured\": 200000, \"description\": \"\"}, {\"code\": \"C2\", \"name\": \"Flood\", \"optional\": false, \"sumInsured\": 100000, \"description\": \"\"}, {\"code\": \"C3\", \"name\": \"Fire\", \"optional\": false, \"sumInsured\": 50000, \"description\": \"\"}, {\"code\": \"C4\", \"name\": \"Equipment\", \"optional\": true, \"sumInsured\": 300000, \"description\": \"\"}], \"questions\": [{\"code\": \"TYP\", \"text\": \"Cultivation type\", \"type\": \"choice\", \"index\": 1, \"choices\": [{\"code\": \"ZB\", \"label\": \"Crop\"}, {\"code\": \"KW\", \"label\": \"Vegetable\"}]}, {\"code\": \"AREA\", \"text\": \"Area\", \"type\": \"numeric\", \"index\": 2}, {\"code\": \"NUM_OF_CLAIM\", \"text\": \"Number of claims in last 5 years\", \"type\": \"numeric\", \"index\": 3}, {\"code\": \"FLOOD\", \"text\": \"Located in flood risk area\", \"type\": \"choice\", \"index\": 4, \"choices\": [{\"code\": \"YES\", \"label\": \"Yes\"}, {\"code\": \"NO\", \"label\": \"No\"}]}], \"description\": \"Farm insurance\", \"maxNumberOfInsured\": 1}"
+    },
+    {
+      "code": "HSI",
+      "checksum": {
+        "value": "d4c5d818a6a1225de8a189e0309f6b38",
+        "algorithm": "MD5"
+      },
+      "rawLosslessDefinitionJson": "{\"icon\": \"building\", \"name\": \"Happy House\", \"image\": \"/static/house.jpg\", \"covers\": [{\"code\": \"C1\", \"name\": \"Fire\", \"optional\": false, \"sumInsured\": 200000, \"description\": \"\"}, {\"code\": \"C2\", \"name\": \"Flood\", \"optional\": false, \"sumInsured\": 100000, \"description\": \"\"}, {\"code\": \"C3\", \"name\": \"Theft\", \"optional\": false, \"sumInsured\": 50000, \"description\": \"\"}, {\"code\": \"C4\", \"name\": \"Assistance\", \"optional\": true, \"sumInsured\": null, \"description\": \"\"}], \"questions\": [{\"code\": \"TYP\", \"text\": \"Apartment / House\", \"type\": \"choice\", \"index\": 1, \"choices\": [{\"code\": \"APT\", \"label\": \"Apartment\"}, {\"code\": \"HOUSE\", \"label\": \"House\"}]}, {\"code\": \"AREA\", \"text\": \"Area\", \"type\": \"numeric\", \"index\": 2}, {\"code\": \"NUM_OF_CLAIM\", \"text\": \"Number of claims in last 5 years\", \"type\": \"numeric\", \"index\": 3}, {\"code\": \"FLOOD\", \"text\": \"Located in flood risk area\", \"type\": \"choice\", \"index\": 4, \"choices\": [{\"code\": \"YES\", \"label\": \"Yes\"}, {\"code\": \"NO\", \"label\": \"No\"}]}], \"description\": \"House insurance\", \"maxNumberOfInsured\": 5}"
+    },
+    {
+      "code": "TRI",
+      "checksum": {
+        "value": "4097333f55b5abb72892d714e9b2b1a4",
+        "algorithm": "MD5"
+      },
+      "rawLosslessDefinitionJson": "{\"icon\": \"plane\", \"name\": \"Safe Traveller\", \"image\": \"/static/travel.jpg\", \"covers\": [{\"code\": \"C1\", \"name\": \"Luggage\", \"optional\": false, \"sumInsured\": 5000, \"description\": \"\"}, {\"code\": \"C2\", \"name\": \"Illness\", \"optional\": false, \"sumInsured\": 5000, \"description\": \"\"}, {\"code\": \"C3\", \"name\": \"Assistance\", \"optional\": true, \"sumInsured\": null, \"description\": \"\"}], \"questions\": [{\"code\": \"DESTINATION\", \"text\": \"Destination\", \"type\": \"choice\", \"index\": 1, \"choices\": [{\"code\": \"EUR\", \"label\": \"Europe\"}, {\"code\": \"WORLD\", \"label\": \"World\"}, {\"code\": \"PL\", \"label\": \"Poland\"}]}, {\"code\": \"NUM_OF_ADULTS\", \"text\": \"Number of adults\", \"type\": \"numeric\", \"index\": 2}, {\"code\": \"NUM_OF_CHILDREN\", \"text\": \"Number of children\", \"type\": \"numeric\", \"index\": 3}], \"description\": \"Travel insurance\", \"maxNumberOfInsured\": 10}"
+    }
+  ],
+  "coverage": {
+    "products": [
+      {
+        "code": "CAR",
+        "coversType": "array",
+        "coversCount": 1,
+        "topLevelKeys": [
+          "covers",
+          "description",
+          "icon",
+          "image",
+          "maxNumberOfInsured",
+          "name",
+          "questions"
+        ],
+        "questionsType": "array",
+        "questionsCount": 1
+      },
+      {
+        "code": "FAI",
+        "coversType": "array",
+        "coversCount": 4,
+        "topLevelKeys": [
+          "covers",
+          "description",
+          "icon",
+          "image",
+          "maxNumberOfInsured",
+          "name",
+          "questions"
+        ],
+        "questionsType": "array",
+        "questionsCount": 4
+      },
+      {
+        "code": "HSI",
+        "coversType": "array",
+        "coversCount": 4,
+        "topLevelKeys": [
+          "covers",
+          "description",
+          "icon",
+          "image",
+          "maxNumberOfInsured",
+          "name",
+          "questions"
+        ],
+        "questionsType": "array",
+        "questionsCount": 4
+      },
+      {
+        "code": "TRI",
+        "coversType": "array",
+        "coversCount": 3,
+        "topLevelKeys": [
+          "covers",
+          "description",
+          "icon",
+          "image",
+          "maxNumberOfInsured",
+          "name",
+          "questions"
+        ],
+        "questionsType": "array",
+        "questionsCount": 3
+      }
+    ],
+    "questionTypes": [
+      "choice",
+      "numeric"
+    ],
+    "sumInsuredTokens": [
+      null,
+      "200000",
+      "100000",
+      "50000",
+      "300000",
+      "200000",
+      "100000",
+      "50000",
+      null,
+      "5000",
+      "5000",
+      null
+    ],
+    "choiceCollections": [
+      {
+        "productCode": "FAI",
+        "choicesCount": 2,
+        "questionCode": "FLOOD",
+        "choicesPresence": "array"
+      },
+      {
+        "productCode": "FAI",
+        "choicesCount": 2,
+        "questionCode": "TYP",
+        "choicesPresence": "array"
+      },
+      {
+        "productCode": "HSI",
+        "choicesCount": 2,
+        "questionCode": "FLOOD",
+        "choicesPresence": "array"
+      },
+      {
+        "productCode": "HSI",
+        "choicesCount": 2,
+        "questionCode": "TYP",
+        "choicesPresence": "array"
+      },
+      {
+        "productCode": "TRI",
+        "choicesCount": 3,
+        "questionCode": "DESTINATION",
+        "choicesPresence": "array"
+      }
+    ]
+  },
+  "sanitizationRecord": {
+    "sourceContainsOnlyAgreedDemoCatalog": true,
+    "credentialsCaptured": false,
+    "bearerTokensCaptured": false,
+    "transformation": "PostgreSQL definition::text retained as a JSON string; no typed or floating-point conversion"
+  }
+}

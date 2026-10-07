@@ -24,7 +24,7 @@ product-baseline-preflight: ## Check read-only Product baseline prerequisites fo
 	@./scripts/product-baseline/preflight.sh
 
 product-baseline-capture: ## Capture a Product baseline part with BASELINE_ENV=<environment> BASELINE_PART=<part>
-	@./scripts/product-baseline/capture-inventory.sh
+	@./scripts/product-baseline/capture.sh
 
 product-baseline-test: ## Run a named disposable Product baseline suite with BASELINE_SUITE=<suite>
 	@./scripts/product-baseline/validate-suite.sh
@@ -35,7 +35,7 @@ else
 endif
 
 product-baseline-fixtures-check: ## Check Product fixtures, optionally filtered with BASELINE_ENV and BASELINE_PART
-	@./scripts/product-baseline/check-inventory.sh
+	@./scripts/product-baseline/check-fixtures.sh
 
 product-baseline-replay: ## Replay an accepted Product fixture set (implemented in a later delivery step)
 	@./scripts/product-baseline/not-implemented.sh replay BASELINE_FIXTURE_SET

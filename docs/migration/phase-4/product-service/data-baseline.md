@@ -1,9 +1,10 @@
 # Product data and environment baseline
 
-This document records the effective Product environment, PostgreSQL schema, runtime ownership, and
-writer inventory for issue #131. The machine-readable records are under
-`legacy/product-service/src/test/resources/product-read-baseline/inventory/` and contain no Secret
-values, bearer tokens, or catalog definitions.
+This document records the effective Product environment, PostgreSQL schema, runtime ownership,
+writer inventory, and accepted four-product snapshots for issue #131. The machine-readable records
+are under `legacy/product-service/src/test/resources/product-read-baseline/`. Inventory records
+contain no catalog definitions; catalog records contain only the agreed demo products. Neither
+record type contains Secret values, credentials, or bearer tokens.
 
 ## Capture status
 
@@ -11,6 +12,8 @@ values, bearer tokens, or catalog definitions.
 | --- | --- | --- | --- |
 | local-dev | `INV-LOCAL-001` | Captured and fixture-checked on 2026-10-07 at source revision `cbe608a6cfa98b38ddcf9d329a41b3e71cbc302b`. | `inventory/local-dev.json` |
 | QA | `INV-QA-001` | Captured and fixture-checked on 2026-10-07 at source revision `cbe608a6cfa98b38ddcf9d329a41b3e71cbc302b`. | `inventory/qa.json` |
+| local-dev | `DATA-LOCAL-001` | Captured, reviewed, fixture-checked, and round-trip tested on 2026-10-07 at source revision `eddc97efd09fecf441f37fa8fda2600afdb5da91`. | `catalog/local-dev.json` |
+| QA | `DATA-QA-001` | Captured, reviewed, fixture-checked, and round-trip tested on 2026-10-07 at source revision `eddc97efd09fecf441f37fa8fda2600afdb5da91`. | `catalog/qa.json` |
 
 The initial QA capture failed because the restored snapshot exposed Product `1.0.0` with MongoDB
 configuration and had no `public.product` table. Both Product tags `1.0.0` and `1.4.0` resolved at
@@ -34,6 +37,12 @@ kubectl --context=kind-local-dev-insurance-hub --namespace=local-dev-all \
   port-forward service/local-dev-postgres-product-rw 5492:5432
 make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=inventory
 make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=inventory
+make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=catalog
+# Review the new path printed by capture before accepting it.
+scripts/product-baseline/accept-catalog.sh \
+  ai/artifacts/epic-4.2/issue-131/catalog-runs/local-dev-<timestamp>.json
+make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=catalog
+BASELINE_ENV=local-dev scripts/product-baseline/test-catalog-roundtrip.sh
 ```
 
 For QA, replace the context, namespace, service, and environment with `qa-insurance-hub`, `qa-data`,
@@ -46,6 +55,35 @@ records Secret names and keys but never writes Secret values to disk or output. 
 definitions remain owned by Step 4 and are deliberately excluded from inventory records.
 `capturedAt` comes from the target PostgreSQL server in the same metadata query so the record is
 internally ordered with environment events even when the operator host clock is not synchronized.
+
+Catalog capture writes a new ignored run file and never updates the accepted fixture directly.
+Acceptance is a separate explicit command after review. The database query runs in one
+repeatable-read, read-only transaction and records its transaction snapshot, schema checksum,
+catalog checksum, ordered codes, and per-row checksums. Each `definition::text` value is stored as
+a JSON string, avoiding a typed or floating-point conversion while metadata is assembled. The
+round-trip check loads that raw representation into disposable PostgreSQL 16.4 and compares the
+stored JSONB text checksum for every row.
+
+## Accepted catalog snapshots
+
+Both environments contain exactly `CAR`, `FAI`, `HSI`, and `TRI`. Their schema checksum
+(`76fac669b254931c0709c236fdd7804b`), full catalog checksum
+(`7ba18949c152e2979df14a28a67cba7f`), and all four row checksums match. No environment-specific
+catalog difference was observed. This identity applies to stored JSONB only; direct and gateway
+HTTP representations are separate Step 5 evidence.
+
+The representative data covers non-empty product, cover, question, and choice arrays; explicit
+`true` and `false` cover flags; explicit null and integer `sumInsured` values; and `choice` and
+`numeric` question subtypes. It does not cover a `date` question, fractional/high-precision/
+trailing-scale/zero decimals, absent or null product fields, empty/null/absent collections,
+primitive null/default behavior, unknown fields or subtypes, or deterministic ordering. Those are
+synthetic isolated scenarios in later steps and must not be inferred from the demo rows.
+
+The four accepted rows are frozen against additions until Java retirement. Any row addition or
+removal, row checksum change, schema checksum change, or mismatch between an observation and its
+linked inventory identity invalidates that environment's downstream comparison. Recapture into a
+new run, review the differences, explicitly replace the accepted fixture, then rerun fixture and
+round-trip checks. Capture and verification never refresh accepted data automatically.
 
 ## Effective local-dev inventory
 

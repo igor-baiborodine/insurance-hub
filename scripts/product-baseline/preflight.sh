@@ -125,7 +125,32 @@ database_password="$(kubectl --context="${expected_context}" -n "${data_namespac
   fail "Product database credentials are incomplete."
 
 readonly identity_sql="SET default_transaction_read_only=on; SELECT current_database() || '|' || current_schema() || '|' || COALESCE(to_regclass('public.product')::text, ''); SELECT count(*)::text FROM public.product;"
-if [[ -n "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT:-}" ]]; then
+if [[ -n "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT:-}" && -n "${BASELINE_PREFLIGHT_CATALOG_OUTPUT:-}" ]]; then
+  unset database_password
+  fail "Only one preflight database output may be requested."
+elif [[ -n "${BASELINE_PREFLIGHT_CATALOG_OUTPUT:-}" ]]; then
+  require_command jq
+  if ! PGPASSWORD="${database_password}" PGCONNECT_TIMEOUT=5 \
+    psql -X -q -A -t -v ON_ERROR_STOP=1 \
+      --host="${database_host}" --port="${database_port}" \
+      --username="${database_username}" --dbname=product \
+      --file="${script_dir}/catalog.sql" \
+      >"${BASELINE_PREFLIGHT_CATALOG_OUTPUT}"; then
+    unset database_password
+    fail "Read-only Product catalog and identity check failed."
+  fi
+  unset database_password
+  jq -e '
+    .database == "product"
+    and .schema == "public"
+    and .table == "public.product"
+    and .transactionReadOnly == true
+    and (.dataIdentity.rowCount | type == "number")
+  ' "${BASELINE_PREFLIGHT_CATALOG_OUTPUT}" >/dev/null || \
+    fail "Endpoint ${database_host}:${database_port} is not the expected product/public.product database."
+  database_row_count="$(jq -r '.dataIdentity.rowCount' \
+    "${BASELINE_PREFLIGHT_CATALOG_OUTPUT}")"
+elif [[ -n "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT:-}" ]]; then
   require_command jq
   if ! PGPASSWORD="${database_password}" PGCONNECT_TIMEOUT=5 \
     psql -X -q -A -t -v ON_ERROR_STOP=1 \

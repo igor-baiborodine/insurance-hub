@@ -210,7 +210,8 @@
       "captureProfile": "stored-catalog",
       "sourceRefs": ["product.entity", "product.definition", "product.jsonb", "product.seed", "product.demo"],
       "acceptanceCriteria": ["AC131-02", "AC131-07", "AC131-08", "AC131-09"],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "catalog/local-dev.json"
     },
     {
       "id": "DATA-QA-001",
@@ -222,7 +223,8 @@
       "captureProfile": "stored-catalog",
       "sourceRefs": ["product.entity", "product.definition", "product.jsonb", "product.seed", "product.demo"],
       "acceptanceCriteria": ["AC131-02", "AC131-07", "AC131-08", "AC131-09"],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "catalog/qa.json"
     },
     {
       "id": "HTTP-DIRECT-LIST-001",

@@ -37,10 +37,10 @@ evidence are still owned by issues #131 through #136.
 | `docs/migration/phase-4/product-service/contract-baseline.md` | Consumer and field mappings, HTTP observations, parity rules, and transport semantics. | Planned; wire behavior and decisions are pending. |
 | `docs/migration/phase-4/product-service/security-baseline.md` | Observed Java access and identity behavior and the compatible future Go model. | Planned; source observations do not establish effective enforcement. |
 | `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and index for the sanitized fixture corpus. | Both inventory fixtures indexed; later scenarios remain pending. |
-| `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | Accepted local-dev and QA inventories present; stored-row, HTTP, and synthetic fixtures remain pending. |
+| `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | Accepted local-dev and QA inventories and stored-row catalogs present; HTTP and synthetic fixtures remain pending. |
 | `legacy/product-service/src/test/java/…` | Product/PostgreSQL listener, fixture, edge, failure, and permission tests. | Disposable listener/PostgreSQL smoke and shared-database override guard implemented; later scenario groups remain planned. |
 | `legacy/agent-portal-gateway/src/test/…` | Gateway listener, retry/fallback, and access tests against the shared corpus. | Real-listener authenticated/unauthenticated smoke implemented; retry/fallback and full access cases remain planned. |
-| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Inventory capture/check and Step 2 preflight/smoke implemented; later capabilities fail explicitly until their owning steps. |
+| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Inventory/catalog capture and checks plus Step 2 preflight/smoke implemented; later capabilities fail explicitly until their owning steps. |
 
 Ticket plans, execution records, step summaries, and Git snapshots stay in the ignored
 `ai/artifacts/epic-4.2/issue-131/` directory. They are evidence records rather than reusable
@@ -168,6 +168,9 @@ make product-baseline-test BASELINE_SUITE=smoke
 make product-baseline-preflight BASELINE_ENV=local-dev
 make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=inventory
 make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=inventory
+make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=catalog
+make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=catalog
+BASELINE_ENV=local-dev scripts/product-baseline/test-catalog-roundtrip.sh
 ```
 
 The smoke suite requires Java 14, system Maven, Docker Engine, and dependency resolution access on
@@ -182,8 +185,11 @@ The Product test base rejects attempts to override its datasource, PostgreSQL, H
 test-environment isolation properties. Invalid suite names, missing configuration, the Pricing
 database port, and later unimplemented capabilities fail before any data operation. The registered
 suite names are `smoke`, `happy`, `data-edges`, `failures`, `access`, `db-permissions`, `comparator`,
-and `all`; only `smoke` is implemented. Inventory capture and fixture checking are implemented;
-later capture parts, suites, replay, live verification, and the aggregate check remain pending.
+and `all`; only `smoke` is implemented. Inventory and catalog capture and fixture checking are
+implemented. Catalog capture creates a new ignored run that must be reviewed and explicitly
+accepted with `accept-catalog.sh`; its round-trip check restores the accepted raw JSONB strings
+into disposable PostgreSQL and compares row checksums. HTTP/access capture parts, later suites,
+replay, live verification, and the aggregate check remain pending.
 
 Local-dev preflight is read-only. It verifies the exact Kubernetes context, Product and gateway
 workloads/services/endpoints, access to the Product database Secret, Docker/Java/Maven/psql
