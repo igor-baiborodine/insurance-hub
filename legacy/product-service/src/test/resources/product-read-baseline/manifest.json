@@ -4,6 +4,12 @@
   "status": "scenario-register-only",
   "statusMeaning": "Every scenario is registered for later observation or proof; this manifest contains no runtime outcome.",
   "representativeCatalog": ["CAR", "FAI", "HSI", "TRI"],
+  "executionConstraints": {
+    "environmentConcurrency": "Local-dev and QA are mutually exclusive local deployments and must be run sequentially.",
+    "step02Preflight": "Run against local-dev only.",
+    "qaEntryPreflight": "Run after switching to QA and before the first QA-dependent capture; repeat after later environment switches.",
+    "comparison": "Compare environment- and revision-keyed captures; never require both environments to be live simultaneously."
+  },
   "environments": {
     "local-dev": "Shared local-dev Java Product, gateway, and PostgreSQL; read-only capture only. The broad Make target assigns Product PostgreSQL to localhost:5492.",
     "qa": "Shared QA Java Product, gateway, and PostgreSQL; read-only capture only.",

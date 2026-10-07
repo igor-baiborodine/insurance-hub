@@ -162,6 +162,11 @@ The `product-baseline-*` Make interface described by the ticket does not exist y
 the owning preflight and isolated smoke foundation before any live capture. Until then there is no
 supported command that reproduces this baseline, and no local-dev or QA observation is accepted.
 
+Local-dev and QA cannot run concurrently on the maintainer's laptop. Step 2 preflights local-dev
+only. QA preflight runs later, after local-dev is stopped and QA is started for its first capture.
+Every result records its environment and revisions so comparisons can use accepted captures from
+separate runs; no workflow may require both environments to be live at once.
+
 Live capture must be read-only and must record its explicit Kubernetes context, namespace, target,
 and revision. Empty catalogs, malformed rows, dependency failures, access negatives requiring
 controlled credentials, and permission-denial attempts run only in disposable resources. Capture
