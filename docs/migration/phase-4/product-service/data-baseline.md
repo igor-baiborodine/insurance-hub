@@ -147,3 +147,58 @@ services/endpoints, sanitized environment and ConfigMap data, database cluster s
 privileges and memberships, table metadata, relevant public objects, and differences from selected
 checked-in expectations. Capture timestamps and source revisions make environment switches and
 later drift explicit.
+
+## Candidate Go runtime role
+
+Step 9 proves the future Product reader's database boundary in disposable PostgreSQL. The proof
+starts Java normally so Hibernate and `DataLoader` create and seed the representative table, then
+uses the Testcontainer's owning setup identity to remove relevant `PUBLIC` grants and provision a
+separate `go_product_reader` login. The candidate application identity never runs DDL, migrations,
+fixture loading, grants, or seeding.
+
+The reproducible role specification is:
+
+```sql
+REVOKE ALL ON DATABASE product FROM PUBLIC;
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE <java-schema-owner> IN SCHEMA public
+  REVOKE ALL ON TABLES FROM PUBLIC;
+
+CREATE ROLE go_product_reader
+  LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION
+  PASSWORD '<provisioned-secret>';
+GRANT CONNECT ON DATABASE product TO go_product_reader;
+GRANT USAGE ON SCHEMA public TO go_product_reader;
+GRANT SELECT ON TABLE public.product TO go_product_reader;
+```
+
+The isolated database is named `product_test`; the production-form `product` name above expresses
+the provisioning contract for #134. The credential value is generated and owned by provisioning,
+is passed to the future workload through an environment Secret, and must not appear in fixtures,
+logs, manifests, or application configuration. #134 owns idempotent environment provisioning and
+must adapt the database name without changing this privilege boundary.
+
+The effective inspection found no inherited roles, no ownership, no `PUBLIC` current/default table
+grant, no candidate default table grant, no sequence in the current schema, and no
+superuser, database-create, role-create, inheritance, replication, or row-security-bypass
+attribute. The candidate had database `CONNECT`, schema `USAGE`, and table `SELECT`; it lacked
+database/schema `CREATE` and table `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE`.
+
+Real list and get queries returned the four seeded rows and `CAR`. Well-formed attempts to insert,
+update, delete, truncate, create a table in `public`, alter `public.product`, and drop the table all
+failed with SQLSTATE `42501` (`insufficient_privilege`). Row count, ordered data checksum, column
+checksum, absence of the probe table, and absence of the probe column matched before and after all
+attempts.
+
+Run the proof and validate its fixture from the repository root:
+
+```shell
+make product-baseline-test BASELINE_SUITE=db-permissions
+make product-baseline-fixtures-check BASELINE_PART=db-permissions
+```
+
+This proof defines the candidate role and demonstrates PostgreSQL enforcement in isolation. It does
+not install or change local-dev or QA grants. #134 must create a separate environment credential,
+verify effective deployed privileges including ownership, memberships, `PUBLIC` and default grants,
+confirm the Go workload uses that credential, and prove startup performs no schema or data writes.

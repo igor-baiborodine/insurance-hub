@@ -765,7 +765,8 @@
         {"id": "DB-READ-LIST-001", "operation": "list product rows"},
         {"id": "DB-READ-GET-001", "operation": "get one product row"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "db-permissions/cases.json"
     },
     {
       "id": "DB-DML-DENY-001",
@@ -783,7 +784,8 @@
         {"id": "DB-DENY-DELETE-001", "operation": "DELETE"},
         {"id": "DB-DENY-TRUNCATE-001", "operation": "TRUNCATE"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "db-permissions/cases.json"
     },
     {
       "id": "DB-DDL-DENY-001",
@@ -800,7 +802,8 @@
         {"id": "DB-DENY-ALTER-001", "operation": "ALTER"},
         {"id": "DB-DENY-DROP-001", "operation": "DROP"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "db-permissions/cases.json"
     },
     {
       "id": "CHECK-FIXTURE-COVERAGE-001",
