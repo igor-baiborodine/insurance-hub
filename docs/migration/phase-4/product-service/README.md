@@ -6,9 +6,9 @@ topology it will read, and the evidence used to qualify later implementation wor
 
 The source inventory and scenario register are established, both local-dev and QA environment and
 catalog snapshots are captured, successful direct/gateway HTTP reads are recorded, and the
-synthetic data-semantics corpus is established. The QA recovery and effective differences are
-documented in [`data-baseline.md`](data-baseline.md); wire observations, data semantics, and
-consumer needs are documented in [`contract-baseline.md`](contract-baseline.md). Failure captures,
+synthetic data-semantics and failure corpora are established. The QA recovery and effective
+differences are documented in [`data-baseline.md`](data-baseline.md); wire observations, data
+semantics, and consumer needs are documented in [`contract-baseline.md`](contract-baseline.md). Access captures,
 parity decisions, permission proofs, and replay commands remain pending their delivery steps. A
 source reference in this document records what the checkout says; it is not evidence of an
 effective runtime result.
@@ -36,13 +36,13 @@ evidence are still owned by issues #131 through #136.
 | --- | --- | --- |
 | `docs/migration/phase-4/product-service/README.md` | Baseline entry point, source inventory, reproduction guidance, limits, and downstream handoff. | Source inventory established. |
 | `docs/migration/phase-4/product-service/data-baseline.md` | Effective environment/schema/writer inventory, catalog provenance, shared topology, and database-permission proof. | Local-dev and QA inventories and catalog identities captured; restricted-role proof remains pending. |
-| `docs/migration/phase-4/product-service/contract-baseline.md` | Consumer and field mappings, HTTP observations, parity rules, and transport semantics. | Successful reads, consumer expectations, and data-semantics edges captured; broader failure behavior and parity decisions remain pending. |
+| `docs/migration/phase-4/product-service/contract-baseline.md` | Consumer and field mappings, HTTP observations, parity rules, and transport semantics. | Successful reads, consumer expectations, data semantics, and failure behavior captured; parity decisions remain pending. |
 | `docs/migration/phase-4/product-service/security-baseline.md` | Observed Java access and identity behavior and the compatible future Go model. | Planned; source observations do not establish effective enforcement. |
-| `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and index for the sanitized fixture corpus. | Inventory, catalog, successful HTTP, and data-semantics fixtures indexed; later scenarios remain pending. |
-| `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | Accepted local-dev and QA captures plus isolated synthetic data-semantics fixtures present. |
-| `legacy/product-service/src/test/java/…` | Product/PostgreSQL listener, fixture, edge, failure, and permission tests. | Disposable listener/PostgreSQL happy paths, raw-JSONB data edges, SQL-null constraints, and shared-database override guard implemented. |
-| `legacy/agent-portal-gateway/src/test/…` | Gateway listener, retry/fallback, and access tests against the shared corpus. | Real-listener authenticated/unauthenticated smoke implemented; retry/fallback and full access cases remain planned. |
-| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Inventory, catalog, HTTP, and data-edge fixture checks plus smoke, happy, and data-edge suites implemented; later capabilities fail explicitly until their owning steps. |
+| `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and index for the sanitized fixture corpus. | Inventory, catalog, successful HTTP, data-semantics, and failure fixtures indexed; later scenarios remain pending. |
+| `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | Accepted local-dev and QA captures plus isolated data-semantics and failure fixtures present. |
+| `legacy/product-service/src/test/java/…` | Product/PostgreSQL listener, fixture, edge, failure, and permission tests. | Disposable listener/PostgreSQL happy paths, raw-JSONB edges, lookup/decode/dependency failures, SQL-null constraints, and shared-database override guard implemented. |
+| `legacy/agent-portal-gateway/src/test/…` | Gateway listener, retry/fallback, and access tests against the shared corpus. | Real-listener authentication plus lookup, retry, fallback, backend-error, and backend-unavailable observations implemented; full access cases remain planned. |
+| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Fixture checks plus smoke, happy, data-edge, and failure suites implemented; later capabilities fail explicitly until their owning steps. |
 
 Ticket plans, execution records, step summaries, and Git snapshots stay in the ignored
 `ai/artifacts/epic-4.2/issue-131/` directory. They are evidence records rather than reusable
@@ -169,6 +169,7 @@ make help
 make product-baseline-test BASELINE_SUITE=smoke
 make product-baseline-test BASELINE_SUITE=happy
 make product-baseline-test BASELINE_SUITE=data-edges
+make product-baseline-test BASELINE_SUITE=failures
 make product-baseline-preflight BASELINE_ENV=local-dev
 make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=inventory
 make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=inventory
@@ -179,6 +180,7 @@ make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=http \
   BASELINE_GATEWAY_TOKEN_FILE=/path/to/temporary-token
 make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=http
 make product-baseline-fixtures-check BASELINE_PART=data-edges
+make product-baseline-fixtures-check BASELINE_PART=failures
 ```
 
 The smoke suite requires Java 14, system Maven, Docker Engine, and dependency resolution access on
@@ -191,11 +193,11 @@ stores or prints the token or signing secret.
 
 The Product test base rejects attempts to override its datasource, PostgreSQL, Hibernate DDL, or
 test-environment isolation properties. Invalid suite names, missing configuration, the Pricing
-database port, and later unimplemented capabilities fail before any data operation. The `smoke`
-`happy`, and `data-edges` suites are implemented; `failures`, `access`, `db-permissions`,
-`comparator`, and `all` remain pending. Inventory, catalog, successful HTTP, and synthetic
-data-edge fixture checking are implemented. Each live capture creates a new ignored run that must
-be reviewed and explicitly accepted. HTTP capture verifies the catalog identity before and after
+database port, and later unimplemented capabilities fail before any data operation. The `smoke`,
+`happy`, `data-edges`, and `failures` suites are implemented; `access`, `db-permissions`,
+`comparator`, and `all` remain pending. Inventory, catalog, successful HTTP, data-edge, and failure
+fixture checking are implemented. Each live capture creates a new ignored run that must be reviewed
+and explicitly accepted. HTTP capture verifies the catalog identity before and after
 all ten requests, retains raw response bodies, and records only a redacted authorization marker.
 Replay, live verification, access capture, and the aggregate check remain pending.
 

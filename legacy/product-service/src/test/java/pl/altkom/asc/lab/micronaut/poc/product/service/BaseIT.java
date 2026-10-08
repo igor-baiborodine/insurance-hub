@@ -33,7 +33,15 @@ public abstract class BaseIT {
         return startServer(new HashMap<>());
     }
 
+    protected EmbeddedServer startServerWithDisposableConnectionTimeout(long timeoutMillis) {
+        return startServer(new HashMap<>(), timeoutMillis);
+    }
+
     protected EmbeddedServer startServer(Map<String, Object> extraProperties) {
+        return startServer(extraProperties, null);
+    }
+
+    private EmbeddedServer startServer(Map<String, Object> extraProperties, Long connectionTimeoutMillis) {
         List<String> unsafeProperties = extraProperties.keySet().stream()
                 .filter(BaseIT::isDisposableDatabaseProperty)
                 .sorted()
@@ -49,6 +57,9 @@ public abstract class BaseIT {
         properties.put("datasources.default.driverClassName", "org.postgresql.Driver");
         properties.put("datasources.default.username", postgresqlContainer.getUsername());
         properties.put("datasources.default.password", postgresqlContainer.getPassword());
+        if (connectionTimeoutMillis != null) {
+            properties.put("datasources.default.connectionTimeout", connectionTimeoutMillis);
+        }
         properties.putAll(extraProperties);
         return ApplicationContext.run(EmbeddedServer.class, properties);
     }

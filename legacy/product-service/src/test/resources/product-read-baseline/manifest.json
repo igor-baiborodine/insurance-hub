@@ -370,7 +370,8 @@
         {"id": "HTTP-EMPTY-DIRECT-LIST-001", "boundary": "direct", "operation": "list"},
         {"id": "HTTP-EMPTY-GATEWAY-LIST-001", "boundary": "gateway", "operation": "list"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "failures/cases.json"
     },
     {
       "id": "HTTP-SINGLE-CATALOG-001",
@@ -388,7 +389,8 @@
         {"id": "HTTP-SINGLE-GATEWAY-LIST-001", "boundary": "gateway", "operation": "list"},
         {"id": "HTTP-SINGLE-GATEWAY-GET-001", "boundary": "gateway", "operation": "get"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "failures/cases.json"
     },
     {
       "id": "HTTP-MISSING-001",
@@ -404,7 +406,8 @@
         {"id": "HTTP-MISSING-DIRECT-001", "boundary": "direct"},
         {"id": "HTTP-MISSING-GATEWAY-001", "boundary": "gateway"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "failures/cases.json"
     },
     {
       "id": "HTTP-LOOKUP-PATHS-001",
@@ -423,7 +426,8 @@
         {"id": "HTTP-LOOKUP-BAD-ENCODING-001", "inputClass": "invalid percent encoding"},
         {"id": "HTTP-LOOKUP-EMPTY-SEGMENT-001", "inputClass": "empty or trailing path segment"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "failures/cases.json"
     },
     {
       "id": "DATA-DECIMAL-001",
@@ -554,7 +558,8 @@
         {"id": "FAIL-DECODE-TYPE-001", "failureClass": "incompatible scalar or collection type"},
         {"id": "FAIL-DECODE-STRUCTURE-001", "failureClass": "incompatible nested structure"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "failures/cases.json"
     },
     {
       "id": "FAIL-DATABASE-001",
@@ -570,7 +575,8 @@
         {"id": "FAIL-DATABASE-LIST-001", "operation": "list"},
         {"id": "FAIL-DATABASE-GET-001", "operation": "get"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "failures/cases.json"
     },
     {
       "id": "FAIL-GATEWAY-BACKEND-001",
@@ -588,7 +594,8 @@
         {"id": "FAIL-GATEWAY-LIST-ERROR-001", "operation": "list", "failureClass": "backend error response"},
         {"id": "FAIL-GATEWAY-GET-ERROR-001", "operation": "get", "failureClass": "backend error response"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "failures/cases.json"
     },
     {
       "id": "ACCESS-GATEWAY-LIST-001",
