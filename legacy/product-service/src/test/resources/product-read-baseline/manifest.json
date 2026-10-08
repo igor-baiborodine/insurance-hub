@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "baseline": "issue-131-product-read",
-  "status": "replay-validated",
-  "statusMeaning": "Evidence and decisions through deterministic replay and drift detection are validated; final acceptance mapping and downstream handoff remain pending.",
+  "status": "complete",
+  "statusMeaning": "The Product Java baseline, parity decisions, replay and drift checks, acceptance mapping, and downstream handoff are complete.",
   "representativeCatalog": ["CAR", "FAI", "HSI", "TRI"],
   "executionConstraints": {
     "environmentConcurrency": "Local-dev and QA are mutually exclusive local deployments and must be run sequentially.",
@@ -882,7 +882,8 @@
       "captureProfile": "validation",
       "sourceRefs": ["foundation.phase-4.1"],
       "acceptanceCriteria": ["AC131-01", "AC131-02", "AC131-03", "AC131-04", "AC131-05", "AC131-06", "AC131-07", "AC131-08", "AC131-09", "AC131-10"],
-      "status": "registered"
+      "status": "validated",
+      "evidence": "docs/migration/phase-4/product-service/README.md#acceptance-evidence"
     }
   ]
 }
