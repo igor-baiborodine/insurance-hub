@@ -8,6 +8,10 @@ BASELINE_SUITE ?=
 BASELINE_FIXTURE_SET ?=
 BASELINE_PRODUCT_DB_HOST ?=
 BASELINE_PRODUCT_DB_PORT ?=
+BASELINE_PRODUCT_DB_AFTER_PORT ?=
+BASELINE_PRODUCT_URL ?=
+BASELINE_GATEWAY_URL ?=
+BASELINE_GATEWAY_TOKEN_FILE ?=
 
 export BASELINE_ENV
 export BASELINE_PART
@@ -15,10 +19,15 @@ export BASELINE_SUITE
 export BASELINE_FIXTURE_SET
 export BASELINE_PRODUCT_DB_HOST
 export BASELINE_PRODUCT_DB_PORT
+export BASELINE_PRODUCT_DB_AFTER_PORT
+export BASELINE_PRODUCT_URL
+export BASELINE_GATEWAY_URL
+export BASELINE_GATEWAY_TOKEN_FILE
 
 .PHONY: product-baseline-preflight product-baseline-capture product-baseline-test \
 	product-baseline-fixtures-check product-baseline-replay product-baseline-verify \
-	product-baseline-check _product-baseline-resolve-java _product-baseline-test-smoke
+	product-baseline-check _product-baseline-resolve-java _product-baseline-test-smoke \
+	_product-baseline-test-happy
 
 product-baseline-preflight: ## Check read-only Product baseline prerequisites for one explicit environment
 	@./scripts/product-baseline/preflight.sh
@@ -30,6 +39,8 @@ product-baseline-test: ## Run a named disposable Product baseline suite with BAS
 	@./scripts/product-baseline/validate-suite.sh
 ifeq ($(BASELINE_SUITE),smoke)
 	+@$(MAKE) --no-print-directory _product-baseline-test-smoke
+else ifeq ($(BASELINE_SUITE),happy)
+	+@$(MAKE) --no-print-directory _product-baseline-test-happy
 else
 	@./scripts/product-baseline/not-implemented.sh test-suite BASELINE_SUITE
 endif
@@ -52,3 +63,6 @@ _product-baseline-resolve-java:
 _product-baseline-test-smoke: _product-baseline-resolve-java
 	@./scripts/product-baseline/test-tooling.sh
 	@./scripts/product-baseline/test-smoke.sh
+
+_product-baseline-test-happy: _product-baseline-resolve-java
+	@./scripts/product-baseline/test-happy.sh

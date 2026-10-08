@@ -96,7 +96,43 @@ public class ProductsControllerIT extends BaseIT {
     public class GetByCode {
 
         @Test
-        public void happyPath() {
+        public void givenCarCode_thenReturnCar() {
+            // given
+            String productCode = "CAR";
+
+            // when
+            ProductDto result = classUnderTest.get(productCode);
+
+            // then
+            assertProduct(result, "CAR", "Happy Driver", 1, 1, 1, "car");
+        }
+
+        @Test
+        public void givenFaiCode_thenReturnFai() {
+            // given
+            String productCode = "FAI";
+
+            // when
+            ProductDto result = classUnderTest.get(productCode);
+
+            // then
+            assertProduct(result, "FAI", "Happy farm", 4, 4, 1, "apple");
+        }
+
+        @Test
+        public void givenHsiCode_thenReturnHsi() {
+            // given
+            String productCode = "HSI";
+
+            // when
+            ProductDto result = classUnderTest.get(productCode);
+
+            // then
+            assertProduct(result, "HSI", "Happy House", 4, 4, 5, "building");
+        }
+
+        @Test
+        public void givenTriCode_thenReturnTri() {
             // given
             String productCode = "TRI";
 
@@ -104,13 +140,24 @@ public class ProductsControllerIT extends BaseIT {
             ProductDto result = classUnderTest.get(productCode);
 
             // then
-            assertThat(result).isNotNull();
-            assertThat(result.getCode()).isEqualTo("TRI");
-            assertThat(result.getName()).isEqualTo("Safe Traveller");
-            assertThat(result.getCovers()).hasSize(3);
-            assertThat(result.getQuestions()).hasSize(3);
-            assertThat(result.getMaxNumberOfInsured()).isEqualTo(10);
-            assertThat(result.getIcon()).isEqualTo("plane");
+            assertProduct(result, "TRI", "Safe Traveller", 3, 3, 10, "plane");
         }
+    }
+
+    private static void assertProduct(
+            ProductDto result,
+            String code,
+            String name,
+            int coverCount,
+            int questionCount,
+            int maxNumberOfInsured,
+            String icon) {
+        assertThat(result).isNotNull();
+        assertThat(result.getCode()).isEqualTo(code);
+        assertThat(result.getName()).isEqualTo(name);
+        assertThat(result.getCovers()).hasSize(coverCount);
+        assertThat(result.getQuestions()).hasSize(questionCount);
+        assertThat(result.getMaxNumberOfInsured()).isEqualTo(maxNumberOfInsured);
+        assertThat(result.getIcon()).isEqualTo(icon);
     }
 }

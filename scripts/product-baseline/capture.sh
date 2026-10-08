@@ -4,8 +4,9 @@ set -euo pipefail
 case "${BASELINE_PART:-}" in
   inventory) exec "$(dirname "${BASH_SOURCE[0]}")/capture-inventory.sh" ;;
   catalog) exec "$(dirname "${BASH_SOURCE[0]}")/capture-catalog.sh" ;;
+  http) exec "$(dirname "${BASH_SOURCE[0]}")/capture-http.sh" ;;
   *)
-    echo "ERROR: BASELINE_PART must be 'inventory' or 'catalog'." >&2
+    echo "ERROR: BASELINE_PART must be 'inventory', 'catalog', or 'http'." >&2
     exit 2
     ;;
 esac

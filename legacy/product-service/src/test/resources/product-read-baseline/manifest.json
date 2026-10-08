@@ -236,7 +236,8 @@
       "captureProfile": "http",
       "sourceRefs": ["product.contract", "product.controller", "product.repository", "product.assembler", "product.dto"],
       "acceptanceCriteria": ["AC131-02", "AC131-03", "AC131-04", "AC131-08"],
-      "status": "registered"
+      "status": "captured",
+      "fixtures": {"local-dev": "http/local-dev.json", "qa": "http/qa.json"}
     },
     {
       "id": "HTTP-GATEWAY-LIST-001",
@@ -248,7 +249,8 @@
       "captureProfile": "http",
       "sourceRefs": ["gateway.controller", "gateway.client", "gateway.config", "product.contract"],
       "acceptanceCriteria": ["AC131-02", "AC131-03", "AC131-04", "AC131-05", "AC131-08"],
-      "status": "registered"
+      "status": "captured",
+      "fixtures": {"local-dev": "http/local-dev.json", "qa": "http/qa.json"}
     },
     {
       "id": "HTTP-DIRECT-GET-CAR-001",
@@ -260,7 +262,8 @@
       "captureProfile": "http",
       "sourceRefs": ["product.contract", "product.controller", "product.assembler", "product.dto"],
       "acceptanceCriteria": ["AC131-02", "AC131-03", "AC131-04", "AC131-08"],
-      "status": "registered"
+      "status": "captured",
+      "fixtures": {"local-dev": "http/local-dev.json", "qa": "http/qa.json"}
     },
     {
       "id": "HTTP-DIRECT-GET-FAI-001",
@@ -272,7 +275,8 @@
       "captureProfile": "http",
       "sourceRefs": ["product.contract", "product.controller", "product.assembler", "product.dto"],
       "acceptanceCriteria": ["AC131-02", "AC131-03", "AC131-04", "AC131-08"],
-      "status": "registered"
+      "status": "captured",
+      "fixtures": {"local-dev": "http/local-dev.json", "qa": "http/qa.json"}
     },
     {
       "id": "HTTP-DIRECT-GET-HSI-001",
@@ -284,7 +288,8 @@
       "captureProfile": "http",
       "sourceRefs": ["product.contract", "product.controller", "product.assembler", "product.dto"],
       "acceptanceCriteria": ["AC131-02", "AC131-03", "AC131-04", "AC131-08"],
-      "status": "registered"
+      "status": "captured",
+      "fixtures": {"local-dev": "http/local-dev.json", "qa": "http/qa.json"}
     },
     {
       "id": "HTTP-DIRECT-GET-TRI-001",
@@ -296,7 +301,8 @@
       "captureProfile": "http",
       "sourceRefs": ["product.contract", "product.controller", "product.assembler", "product.dto"],
       "acceptanceCriteria": ["AC131-02", "AC131-03", "AC131-04", "AC131-08"],
-      "status": "registered"
+      "status": "captured",
+      "fixtures": {"local-dev": "http/local-dev.json", "qa": "http/qa.json"}
     },
     {
       "id": "HTTP-GATEWAY-GET-CAR-001",
@@ -308,7 +314,8 @@
       "captureProfile": "http",
       "sourceRefs": ["gateway.controller", "gateway.client", "product.contract"],
       "acceptanceCriteria": ["AC131-02", "AC131-03", "AC131-04", "AC131-05", "AC131-08"],
-      "status": "registered"
+      "status": "captured",
+      "fixtures": {"local-dev": "http/local-dev.json", "qa": "http/qa.json"}
     },
     {
       "id": "HTTP-GATEWAY-GET-FAI-001",
@@ -320,7 +327,8 @@
       "captureProfile": "http",
       "sourceRefs": ["gateway.controller", "gateway.client", "product.contract"],
       "acceptanceCriteria": ["AC131-02", "AC131-03", "AC131-04", "AC131-05", "AC131-08"],
-      "status": "registered"
+      "status": "captured",
+      "fixtures": {"local-dev": "http/local-dev.json", "qa": "http/qa.json"}
     },
     {
       "id": "HTTP-GATEWAY-GET-HSI-001",
@@ -332,7 +340,8 @@
       "captureProfile": "http",
       "sourceRefs": ["gateway.controller", "gateway.client", "product.contract"],
       "acceptanceCriteria": ["AC131-02", "AC131-03", "AC131-04", "AC131-05", "AC131-08"],
-      "status": "registered"
+      "status": "captured",
+      "fixtures": {"local-dev": "http/local-dev.json", "qa": "http/qa.json"}
     },
     {
       "id": "HTTP-GATEWAY-GET-TRI-001",
@@ -344,7 +353,8 @@
       "captureProfile": "http",
       "sourceRefs": ["gateway.controller", "gateway.client", "product.contract"],
       "acceptanceCriteria": ["AC131-02", "AC131-03", "AC131-04", "AC131-05", "AC131-08"],
-      "status": "registered"
+      "status": "captured",
+      "fixtures": {"local-dev": "http/local-dev.json", "qa": "http/qa.json"}
     },
     {
       "id": "HTTP-EMPTY-CATALOG-001",
