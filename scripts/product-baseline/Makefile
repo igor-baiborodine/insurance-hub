@@ -1,0 +1,109 @@
+################################################################################
+# Product read baseline targets
+################################################################################
+
+BASELINE_ENV ?=
+BASELINE_PART ?=
+BASELINE_SUITE ?=
+BASELINE_FIXTURE_SET ?=
+BASELINE_PRODUCT_DB_HOST ?=
+BASELINE_PRODUCT_DB_PORT ?=
+BASELINE_PRODUCT_DB_AFTER_PORT ?=
+BASELINE_PRODUCT_DB_TRANSPORT ?=
+BASELINE_PRODUCT_URL ?=
+BASELINE_GATEWAY_URL ?=
+BASELINE_GATEWAY_TOKEN_FILE ?=
+
+export BASELINE_ENV
+export BASELINE_PART
+export BASELINE_SUITE
+export BASELINE_FIXTURE_SET
+export BASELINE_PRODUCT_DB_HOST
+export BASELINE_PRODUCT_DB_PORT
+export BASELINE_PRODUCT_DB_AFTER_PORT
+export BASELINE_PRODUCT_DB_TRANSPORT
+export BASELINE_PRODUCT_URL
+export BASELINE_GATEWAY_URL
+export BASELINE_GATEWAY_TOKEN_FILE
+
+.PHONY: product-baseline-preflight product-baseline-capture product-baseline-test \
+	product-baseline-fixtures-check product-baseline-replay product-baseline-verify \
+	product-baseline-check _product-baseline-resolve-java _product-baseline-test-smoke \
+	_product-baseline-test-happy _product-baseline-test-data-edges _product-baseline-test-failures \
+	_product-baseline-test-access _product-baseline-test-db-permissions \
+	_product-baseline-test-comparator _product-baseline-test-all
+
+product-baseline-preflight: ## Check read-only Product baseline prerequisites for one explicit environment
+	@./scripts/product-baseline/preflight.sh
+
+product-baseline-capture: ## Capture a Product baseline part with BASELINE_ENV=<environment> BASELINE_PART=<part>
+	@./scripts/product-baseline/capture.sh
+
+product-baseline-test: ## Run a named disposable Product baseline suite with BASELINE_SUITE=<suite>
+	@./scripts/product-baseline/validate-suite.sh
+ifeq ($(BASELINE_SUITE),smoke)
+	+@$(MAKE) --no-print-directory _product-baseline-test-smoke
+else ifeq ($(BASELINE_SUITE),happy)
+	+@$(MAKE) --no-print-directory _product-baseline-test-happy
+else ifeq ($(BASELINE_SUITE),data-edges)
+	+@$(MAKE) --no-print-directory _product-baseline-test-data-edges
+else ifeq ($(BASELINE_SUITE),failures)
+	+@$(MAKE) --no-print-directory _product-baseline-test-failures
+else ifeq ($(BASELINE_SUITE),access)
+	+@$(MAKE) --no-print-directory _product-baseline-test-access
+else ifeq ($(BASELINE_SUITE),db-permissions)
+	+@$(MAKE) --no-print-directory _product-baseline-test-db-permissions
+else ifeq ($(BASELINE_SUITE),comparator)
+	+@$(MAKE) --no-print-directory _product-baseline-test-comparator
+else ifeq ($(BASELINE_SUITE),all)
+	+@$(MAKE) --no-print-directory _product-baseline-test-all
+else
+	@./scripts/product-baseline/not-implemented.sh test-suite BASELINE_SUITE
+endif
+
+product-baseline-fixtures-check: ## Check Product fixtures, optionally filtered with BASELINE_ENV and BASELINE_PART
+	@./scripts/product-baseline/check-fixtures.sh
+
+product-baseline-replay: ## Replay an accepted Product fixture set with BASELINE_FIXTURE_SET=<environment>
+	@./scripts/product-baseline/replay.sh
+
+product-baseline-verify: ## Compare one read-only live Product environment with its accepted baseline
+	@./scripts/product-baseline/verify.sh
+
+product-baseline-check: ## Run the complete offline Product baseline gate
+	@./scripts/product-baseline/check.sh
+
+_product-baseline-resolve-java:
+	@./scripts/product-baseline/resolve-java.sh
+
+_product-baseline-test-smoke: _product-baseline-resolve-java
+	@./scripts/product-baseline/test-tooling.sh
+	@./scripts/product-baseline/test-smoke.sh
+
+_product-baseline-test-happy: _product-baseline-resolve-java
+	@./scripts/product-baseline/test-happy.sh
+
+_product-baseline-test-data-edges: _product-baseline-resolve-java
+	@./scripts/product-baseline/test-data-edges.sh
+
+_product-baseline-test-failures: _product-baseline-resolve-java
+	@./scripts/product-baseline/test-failures.sh
+
+_product-baseline-test-access: _product-baseline-resolve-java
+	@./scripts/product-baseline/test-access.sh
+
+_product-baseline-test-db-permissions: _product-baseline-resolve-java
+	@./scripts/product-baseline/test-db-permissions.sh
+
+_product-baseline-test-comparator:
+	@./scripts/product-baseline/test-comparator.sh
+
+_product-baseline-test-all: _product-baseline-resolve-java
+	@./scripts/product-baseline/test-tooling.sh
+	@./scripts/product-baseline/test-smoke.sh
+	@./scripts/product-baseline/test-happy.sh
+	@./scripts/product-baseline/test-data-edges.sh
+	@./scripts/product-baseline/test-failures.sh
+	@./scripts/product-baseline/test-access.sh
+	@./scripts/product-baseline/test-db-permissions.sh
+	@./scripts/product-baseline/test-comparator.sh

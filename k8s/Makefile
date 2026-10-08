@@ -22,8 +22,10 @@ local-dev-port-forward: ## Set up local port-forwarding for Kafka and PostgreSQL
 	@kubectl port-forward svc/local-dev-postgres-payment-rw 5462:5432 -n local-dev-all > /dev/null 2>&1 &
 	@echo "  PostgreSQL policy (local:5472 -> cluster:5432)..."
 	@kubectl port-forward svc/local-dev-postgres-policy-rw 5472:5432 -n local-dev-all > /dev/null 2>&1 &
-	@echo "  PostgreSQL product (local:5482 -> cluster:5432)..."
-	@kubectl port-forward svc/local-dev-postgres-product-rw 5482:5432 -n local-dev-all > /dev/null 2>&1 &
+	@echo "  PostgreSQL pricing (local:5482 -> cluster:5432)..."
+	@kubectl port-forward svc/local-dev-postgres-pricing-rw 5482:5432 -n local-dev-all > /dev/null 2>&1 &
+	@echo "  PostgreSQL product (local:5492 -> cluster:5432)..."
+	@kubectl port-forward svc/local-dev-postgres-product-rw 5492:5432 -n local-dev-all > /dev/null 2>&1 &
 	@echo "  MinIO document (local:9001 -> cluster:9000)..."
 	@kubectl port-forward svc/local-dev-minio-document-hl 9001:9000 -n local-dev-minio-document > /dev/null 2>&1 &
 	@echo "  MinIO payment (local:9002 -> cluster:9000)..."

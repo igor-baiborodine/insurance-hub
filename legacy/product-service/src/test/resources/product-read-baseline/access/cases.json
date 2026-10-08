@@ -1,0 +1,550 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "JAVA-ACCESS-001",
+  "provenance": "synthetic-isolated",
+  "claimsShape": {
+    "authIssued": [
+      "sub",
+      "roles",
+      "iss",
+      "iat",
+      "nbf",
+      "exp",
+      "jti",
+      "avatar"
+    ],
+    "testMatrix": [
+      "sub",
+      "roles",
+      "iss",
+      "aud",
+      "iat",
+      "nbf",
+      "exp"
+    ],
+    "valuesRetained": false
+  },
+  "cases": [
+    {
+      "id": "ACCESS-GATEWAY-LIST-VALID-001",
+      "scenarioId": "ACCESS-GATEWAY-LIST-VALID-001",
+      "target": "gateway",
+      "path": "/api/products",
+      "credential": "valid",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "[{\"code\":\"TRI\",\"name\":\"Travel insurance\",\"maxNumberOfInsured\":0}]",
+        "downstreamRequests": 1,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-LIST-MISSING-001",
+      "scenarioId": "ACCESS-GATEWAY-LIST-MISSING-001",
+      "target": "gateway",
+      "path": "/api/products",
+      "credential": "missing",
+      "expected": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "downstreamRequests": 0,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-LIST-MALFORMED-001",
+      "scenarioId": "ACCESS-GATEWAY-LIST-MALFORMED-001",
+      "target": "gateway",
+      "path": "/api/products",
+      "credential": "malformed",
+      "expected": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "downstreamRequests": 0,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-LIST-SIGNATURE-001",
+      "scenarioId": "ACCESS-GATEWAY-LIST-SIGNATURE-001",
+      "target": "gateway",
+      "path": "/api/products",
+      "credential": "invalid-signature",
+      "expected": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "downstreamRequests": 0,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-LIST-EXPIRED-001",
+      "scenarioId": "ACCESS-GATEWAY-LIST-EXPIRED-001",
+      "target": "gateway",
+      "path": "/api/products",
+      "credential": "expired",
+      "expected": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "downstreamRequests": 0,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-LIST-NBF-001",
+      "scenarioId": "ACCESS-GATEWAY-LIST-NBF-001",
+      "target": "gateway",
+      "path": "/api/products",
+      "credential": "not-before",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "[{\"code\":\"TRI\",\"name\":\"Travel insurance\",\"maxNumberOfInsured\":0}]",
+        "downstreamRequests": 1,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-LIST-ISSUER-001",
+      "scenarioId": "ACCESS-GATEWAY-LIST-ISSUER-001",
+      "target": "gateway",
+      "path": "/api/products",
+      "credential": "issuer-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "[{\"code\":\"TRI\",\"name\":\"Travel insurance\",\"maxNumberOfInsured\":0}]",
+        "downstreamRequests": 1,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-LIST-AUDIENCE-001",
+      "scenarioId": "ACCESS-GATEWAY-LIST-AUDIENCE-001",
+      "target": "gateway",
+      "path": "/api/products",
+      "credential": "audience-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "[{\"code\":\"TRI\",\"name\":\"Travel insurance\",\"maxNumberOfInsured\":0}]",
+        "downstreamRequests": 1,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-LIST-ROLE-001",
+      "scenarioId": "ACCESS-GATEWAY-LIST-ROLE-001",
+      "target": "gateway",
+      "path": "/api/products",
+      "credential": "role-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "[{\"code\":\"TRI\",\"name\":\"Travel insurance\",\"maxNumberOfInsured\":0}]",
+        "downstreamRequests": 1,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-LIST-SUBJECT-001",
+      "scenarioId": "ACCESS-GATEWAY-LIST-SUBJECT-001",
+      "target": "gateway",
+      "path": "/api/products",
+      "credential": "missing-subject",
+      "expected": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "downstreamRequests": 0,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-GET-VALID-001",
+      "scenarioId": "ACCESS-GATEWAY-GET-VALID-001",
+      "target": "gateway",
+      "path": "/api/products/TRI",
+      "credential": "valid",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"TRI\",\"name\":\"Travel insurance\",\"maxNumberOfInsured\":0}",
+        "downstreamRequests": 1,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-GET-MISSING-001",
+      "scenarioId": "ACCESS-GATEWAY-GET-MISSING-001",
+      "target": "gateway",
+      "path": "/api/products/TRI",
+      "credential": "missing",
+      "expected": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "downstreamRequests": 0,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-GET-MALFORMED-001",
+      "scenarioId": "ACCESS-GATEWAY-GET-MALFORMED-001",
+      "target": "gateway",
+      "path": "/api/products/TRI",
+      "credential": "malformed",
+      "expected": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "downstreamRequests": 0,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-GET-SIGNATURE-001",
+      "scenarioId": "ACCESS-GATEWAY-GET-SIGNATURE-001",
+      "target": "gateway",
+      "path": "/api/products/TRI",
+      "credential": "invalid-signature",
+      "expected": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "downstreamRequests": 0,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-GET-EXPIRED-001",
+      "scenarioId": "ACCESS-GATEWAY-GET-EXPIRED-001",
+      "target": "gateway",
+      "path": "/api/products/TRI",
+      "credential": "expired",
+      "expected": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "downstreamRequests": 0,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-GET-NBF-001",
+      "scenarioId": "ACCESS-GATEWAY-GET-NBF-001",
+      "target": "gateway",
+      "path": "/api/products/TRI",
+      "credential": "not-before",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"TRI\",\"name\":\"Travel insurance\",\"maxNumberOfInsured\":0}",
+        "downstreamRequests": 1,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-GET-ISSUER-001",
+      "scenarioId": "ACCESS-GATEWAY-GET-ISSUER-001",
+      "target": "gateway",
+      "path": "/api/products/TRI",
+      "credential": "issuer-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"TRI\",\"name\":\"Travel insurance\",\"maxNumberOfInsured\":0}",
+        "downstreamRequests": 1,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-GET-AUDIENCE-001",
+      "scenarioId": "ACCESS-GATEWAY-GET-AUDIENCE-001",
+      "target": "gateway",
+      "path": "/api/products/TRI",
+      "credential": "audience-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"TRI\",\"name\":\"Travel insurance\",\"maxNumberOfInsured\":0}",
+        "downstreamRequests": 1,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-GET-ROLE-001",
+      "scenarioId": "ACCESS-GATEWAY-GET-ROLE-001",
+      "target": "gateway",
+      "path": "/api/products/TRI",
+      "credential": "role-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"TRI\",\"name\":\"Travel insurance\",\"maxNumberOfInsured\":0}",
+        "downstreamRequests": 1,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-GATEWAY-GET-SUBJECT-001",
+      "scenarioId": "ACCESS-GATEWAY-GET-SUBJECT-001",
+      "target": "gateway",
+      "path": "/api/products/TRI",
+      "credential": "missing-subject",
+      "expected": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "downstreamRequests": 0,
+        "downstreamAuthorizationPresent": false,
+        "downstreamIdentityHeaderNames": []
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-LIST-NONE-001",
+      "scenarioId": "ACCESS-DIRECT-LIST-NONE-001",
+      "target": "product",
+      "path": "/products",
+      "credential": "missing",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "array"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-LIST-VALID-001",
+      "scenarioId": "ACCESS-DIRECT-LIST-VALID-001",
+      "target": "product",
+      "path": "/products",
+      "credential": "valid",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "array"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-LIST-MALFORMED-001",
+      "scenarioId": "ACCESS-DIRECT-LIST-INVALID-001",
+      "target": "product",
+      "path": "/products",
+      "credential": "malformed",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "array"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-LIST-SIGNATURE-001",
+      "scenarioId": "ACCESS-DIRECT-LIST-INVALID-001",
+      "target": "product",
+      "path": "/products",
+      "credential": "invalid-signature",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "array"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-LIST-EXPIRED-001",
+      "scenarioId": "ACCESS-DIRECT-LIST-INVALID-001",
+      "target": "product",
+      "path": "/products",
+      "credential": "expired",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "array"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-LIST-NBF-001",
+      "scenarioId": "ACCESS-DIRECT-LIST-INVALID-001",
+      "target": "product",
+      "path": "/products",
+      "credential": "not-before",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "array"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-LIST-ISSUER-001",
+      "scenarioId": "ACCESS-DIRECT-LIST-INVALID-001",
+      "target": "product",
+      "path": "/products",
+      "credential": "issuer-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "array"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-LIST-AUDIENCE-001",
+      "scenarioId": "ACCESS-DIRECT-LIST-INVALID-001",
+      "target": "product",
+      "path": "/products",
+      "credential": "audience-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "array"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-LIST-ROLE-001",
+      "scenarioId": "ACCESS-DIRECT-LIST-INVALID-001",
+      "target": "product",
+      "path": "/products",
+      "credential": "role-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "array"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-GET-NONE-001",
+      "scenarioId": "ACCESS-DIRECT-GET-NONE-001",
+      "target": "product",
+      "path": "/products/TRI",
+      "credential": "missing",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "object"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-GET-VALID-001",
+      "scenarioId": "ACCESS-DIRECT-GET-VALID-001",
+      "target": "product",
+      "path": "/products/TRI",
+      "credential": "valid",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "object"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-GET-MALFORMED-001",
+      "scenarioId": "ACCESS-DIRECT-GET-INVALID-001",
+      "target": "product",
+      "path": "/products/TRI",
+      "credential": "malformed",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "object"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-GET-SIGNATURE-001",
+      "scenarioId": "ACCESS-DIRECT-GET-INVALID-001",
+      "target": "product",
+      "path": "/products/TRI",
+      "credential": "invalid-signature",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "object"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-GET-EXPIRED-001",
+      "scenarioId": "ACCESS-DIRECT-GET-INVALID-001",
+      "target": "product",
+      "path": "/products/TRI",
+      "credential": "expired",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "object"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-GET-NBF-001",
+      "scenarioId": "ACCESS-DIRECT-GET-INVALID-001",
+      "target": "product",
+      "path": "/products/TRI",
+      "credential": "not-before",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "object"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-GET-ISSUER-001",
+      "scenarioId": "ACCESS-DIRECT-GET-INVALID-001",
+      "target": "product",
+      "path": "/products/TRI",
+      "credential": "issuer-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "object"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-GET-AUDIENCE-001",
+      "scenarioId": "ACCESS-DIRECT-GET-INVALID-001",
+      "target": "product",
+      "path": "/products/TRI",
+      "credential": "audience-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "object"
+      }
+    },
+    {
+      "id": "ACCESS-DIRECT-GET-ROLE-001",
+      "scenarioId": "ACCESS-DIRECT-GET-ROLE-001",
+      "target": "product",
+      "path": "/products/TRI",
+      "credential": "role-variation",
+      "expected": {
+        "status": 200,
+        "contentType": "application/json",
+        "bodyType": "object"
+      }
+    }
+  ],
+  "sanitization": {
+    "tokensRetained": false,
+    "signingMaterialRetained": false,
+    "claimValuesRetained": false
+  }
+}

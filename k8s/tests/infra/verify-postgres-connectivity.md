@@ -9,13 +9,23 @@ PostgreSQL cluster.
 
 1. **Port-Forward to the PostgreSQL Service**
 
+| Postgres Service                     | Cluster Port Mapping  |
+|--------------------------------------|-----------------------|
+| `svc/local-dev-postgres-auth-rw`     | 5432 → localhost:5442 |
+| `svc/local-dev-postgres-document-rw` | 5432 → localhost:5452 |
+| `svc/local-dev-postgres-payment-rw`  | 5432 → localhost:5462 |
+| `svc/local-dev-postgres-policy-rw`   | 5432 → localhost:5472 |
+| `svc/local-dev-postgres-pricing-rw`  | 5432 → localhost:5482 |
+| `svc/local-dev-postgres-product-rw`  | 5432 → localhost:5492 |
+
     In a terminal window, run the following command. This will create a secure tunnel from your local
-    machine's port `5432` to the PostgreSQL service running in the cluster.
+    machine's port `5442` to the PostgreSQL service running in the cluster. For another Postgres
+    service change the service name and port number accordingly.
     
     ```shell
-    kubectl port-forward local-dev-postgres-auth-1 -n local-dev-all 5432:5432
-    Forwarding from 127.0.0.1:5432 -> 5432
-    Forwarding from [::1]:5432 -> 5432
+    kubectl port-forward svc/local-dev-postgres-auth-rw 5442:5432 -n local-dev-all
+    Forwarding from 127.0.0.1:5442 -> 5432
+    Forwarding from [::1]:5442 -> 5432
     ```
 
 2. **Connect Using psql**
@@ -24,8 +34,9 @@ PostgreSQL cluster.
     connect to the database. 
     
     ```shell
-    echo "PG_SVC_USER_PWD=$(kubectl get secret local-dev-postgres-auth-user-creds -n local-dev-all -o jsonpath='{.data.password}' | base64 --decode)"
-    psql --host=localhost -U auth -d auth -p 5432
+    export PGPASSWORD="$(kubectl get secret local-dev-postgres-auth-user-creds -n local-dev-all -o jsonpath='{.data.password}' | base64 --decode)"
+    psql --host=localhost --username=auth --dbname=auth --port=5442
+    unset PGPASSWORD
     ```
 
 3. **Verify the Connection**
@@ -40,7 +51,7 @@ PostgreSQL cluster.
     SSL connection (protocol: TLSv1.3, cipher: TLS_AES_256_GCM_SHA384, compression: off)
     Type "help" for help.
     
-    authsvc=> \dt
+    auth=> \dt
     Did not find any relations.
     authsvc=> \q
     ```
@@ -55,8 +66,7 @@ PostgreSQL cluster.
     and export it as an environment variable with the following command:
     
     ```shell
-    export PG_SVC_USER_PWD=$(kubectl get secret qa-postgres-auth-user-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)
-    echo "$PG_SVC_USER_PWD"   
+    export PG_SVC_USER_PWD="$(kubectl get secret qa-postgres-auth-user-creds -n qa-data -o jsonpath='{.data.password}' | base64 --decode)"
     ```
 
 2. **Run the `psql` Client in a Temporary Pod**
@@ -80,3 +90,9 @@ PostgreSQL cluster.
     ```
     
     To exit the `psql` shell, you can type `\q` and press Enter.
+
+    Unset the password after the temporary client exits:
+
+    ```shell
+    unset PG_SVC_USER_PWD
+    ```
