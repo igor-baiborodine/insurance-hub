@@ -1,0 +1,507 @@
+{
+  "schemaVersion": 1,
+  "status": "captured",
+  "captureProfile": "access",
+  "provenance": "captured-representative",
+  "environment": "local-dev",
+  "capturedAt": "2026-10-08T11:54:55Z",
+  "captureCommand": "make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=access BASELINE_PRODUCT_DB_PORT=5492 BASELINE_PRODUCT_DB_AFTER_PORT=5493 BASELINE_PRODUCT_URL=http://127.0.0.1:19081 BASELINE_GATEWAY_URL=http://127.0.0.1:19082 BASELINE_GATEWAY_TOKEN_FILE=<temporary-token-file>",
+  "sourceRevision": "69858bb26493cd4863f70d02152a507c33928a08",
+  "kubernetesContext": "kind-local-dev-insurance-hub",
+  "identities": {
+    "inventory": {
+      "path": "legacy/product-service/src/test/resources/product-read-baseline/inventory/local-dev.json",
+      "algorithm": "SHA-256",
+      "value": "cc4a970509ed1754902ce272b251dc88f54f19ef354f17552326333185b1e1be"
+    },
+    "catalog": {
+      "path": "legacy/product-service/src/test/resources/product-read-baseline/catalog/local-dev.json",
+      "algorithm": "SHA-256",
+      "value": "c5ec4eb51c1a435527dcdf42cab111a3c609e82d7d996ae10022640dbf471496"
+    },
+    "schema": {
+      "value": "76fac669b254931c0709c236fdd7804b",
+      "algorithm": "MD5"
+    },
+    "data": {
+      "codes": [
+        "CAR",
+        "FAI",
+        "HSI",
+        "TRI"
+      ],
+      "value": "7ba18949c152e2979df14a28a67cba7f",
+      "rowCount": 4,
+      "algorithm": "MD5"
+    }
+  },
+  "serviceRevisions": {
+    "product": {
+      "deployment": "local-dev-product-api-legacy",
+      "generation": 1,
+      "observedGeneration": 1,
+      "desiredReplicas": 1,
+      "readyReplicas": 1,
+      "availableReplicas": 1,
+      "deploymentRevision": "1",
+      "strategy": {
+        "rollingUpdate": {
+          "maxSurge": "25%",
+          "maxUnavailable": "25%"
+        },
+        "type": "RollingUpdate"
+      },
+      "container": {
+        "name": "product-api-legacy",
+        "image": "insurance-hub-product-api-legacy:latest",
+        "imagePullPolicy": "IfNotPresent",
+        "ports": [
+          {
+            "containerPort": 8080,
+            "protocol": "TCP"
+          }
+        ],
+        "readinessProbe": {
+          "failureThreshold": 3,
+          "httpGet": {
+            "path": "/health",
+            "port": 8080,
+            "scheme": "HTTP"
+          },
+          "initialDelaySeconds": 30,
+          "periodSeconds": 10,
+          "successThreshold": 1,
+          "timeoutSeconds": 5
+        },
+        "livenessProbe": {
+          "failureThreshold": 3,
+          "httpGet": {
+            "path": "/health",
+            "port": 8080,
+            "scheme": "HTTP"
+          },
+          "initialDelaySeconds": 25,
+          "periodSeconds": 20,
+          "successThreshold": 1,
+          "timeoutSeconds": 5
+        },
+        "envFrom": [
+          {
+            "configMapRef": {
+              "name": "local-dev-product-config-legacy-2bbfg7hd62"
+            }
+          }
+        ],
+        "environment": [
+          {
+            "name": "PG_USER",
+            "secretKeyRef": {
+              "name": "local-dev-postgres-product-user-creds",
+              "key": "username",
+              "optional": false
+            }
+          },
+          {
+            "name": "PG_PASSWORD",
+            "secretKeyRef": {
+              "name": "local-dev-postgres-product-user-creds",
+              "key": "password",
+              "optional": false
+            }
+          },
+          {
+            "name": "KUBERNETES_CLIENT_NAMESPACE",
+            "fieldRef": "metadata.namespace"
+          },
+          {
+            "name": "MICRONAUT_SERVER_HOST",
+            "value": "0.0.0.0"
+          }
+        ]
+      },
+      "pods": [
+        {
+          "name": "local-dev-product-api-legacy-7f77768c76-6fbdl",
+          "node": "local-dev-insurance-hub-control-plane",
+          "phase": "Running",
+          "ready": "True",
+          "image": "docker.io/library/insurance-hub-product-api-legacy:latest",
+          "imageDigest": "sha256:7b8a1052370ce651c8cc6d54f02caa1dd81881a5caf2ead0a575d87d4bf74a80"
+        }
+      ]
+    },
+    "gateway": {
+      "deployment": "local-dev-agent-portal-gateway-legacy",
+      "generation": 1,
+      "observedGeneration": 1,
+      "desiredReplicas": 1,
+      "readyReplicas": 1,
+      "availableReplicas": 1,
+      "deploymentRevision": "1",
+      "strategy": {
+        "rollingUpdate": {
+          "maxSurge": "25%",
+          "maxUnavailable": "25%"
+        },
+        "type": "RollingUpdate"
+      },
+      "container": {
+        "name": "agent-portal-gateway-legacy",
+        "image": "insurance-hub-agent-portal-gateway-legacy:latest",
+        "imagePullPolicy": "IfNotPresent",
+        "ports": [
+          {
+            "containerPort": 8080,
+            "protocol": "TCP"
+          }
+        ],
+        "readinessProbe": {
+          "failureThreshold": 3,
+          "httpGet": {
+            "path": "/health",
+            "port": 8080,
+            "scheme": "HTTP"
+          },
+          "initialDelaySeconds": 25,
+          "periodSeconds": 10,
+          "successThreshold": 1,
+          "timeoutSeconds": 5
+        },
+        "livenessProbe": {
+          "failureThreshold": 3,
+          "httpGet": {
+            "path": "/health",
+            "port": 8080,
+            "scheme": "HTTP"
+          },
+          "initialDelaySeconds": 30,
+          "periodSeconds": 20,
+          "successThreshold": 1,
+          "timeoutSeconds": 5
+        },
+        "envFrom": null,
+        "environment": [
+          {
+            "name": "MICRONAUT_ENVIRONMENTS",
+            "value": "local-dev"
+          },
+          {
+            "name": "TRACING_ZIPKIN_ENABLED",
+            "value": "false"
+          },
+          {
+            "name": "KUBERNETES_CLIENT_NAMESPACE",
+            "fieldRef": "metadata.namespace"
+          },
+          {
+            "name": "MICRONAUT_SERVER_HOST",
+            "value": "0.0.0.0"
+          }
+        ]
+      },
+      "pods": [
+        {
+          "name": "local-dev-agent-portal-gateway-legacy-54f6bcfd94-bn496",
+          "node": "local-dev-insurance-hub-control-plane",
+          "phase": "Running",
+          "ready": "True",
+          "image": "docker.io/library/insurance-hub-agent-portal-gateway-legacy:latest",
+          "imageDigest": "sha256:436ab6da77e5713476bcf5b4e7a5221b5f6cad8b8e0677ac6b9017b64b6a190b"
+        }
+      ]
+    }
+  },
+  "observations": [
+    {
+      "scenarioId": "ACCESS-DIRECT-GET-SIGNATURE-001",
+      "boundary": "direct",
+      "route": "get",
+      "request": {
+        "method": "GET",
+        "path": "/products/TRI",
+        "credentialCategory": "invalid-signature",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"TRI\",\"name\":\"Safe Traveller\",\"image\":\"/static/travel.jpg\",\"description\":\"Travel insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Luggage\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C2\",\"name\":\"Illness\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C3\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"DESTINATION\",\"index\":1,\"text\":\"Destination\",\"choices\":[{\"code\":\"EUR\",\"label\":\"Europe\"},{\"code\":\"WORLD\",\"label\":\"World\"},{\"code\":\"PL\",\"label\":\"Poland\"}]},{\"type\":\"numeric\",\"code\":\"NUM_OF_ADULTS\",\"index\":2,\"text\":\"Number of adults\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CHILDREN\",\"index\":3,\"text\":\"Number of children\"}],\"maxNumberOfInsured\":10,\"icon\":\"plane\"}",
+        "rawBodySha256": "061abadf7ea9e3a1585a3caec8628d62c7788c846f3afa0d28dcdd9389d86ea9"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-DIRECT-GET-MALFORMED-001",
+      "boundary": "direct",
+      "route": "get",
+      "request": {
+        "method": "GET",
+        "path": "/products/TRI",
+        "credentialCategory": "malformed",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"TRI\",\"name\":\"Safe Traveller\",\"image\":\"/static/travel.jpg\",\"description\":\"Travel insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Luggage\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C2\",\"name\":\"Illness\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C3\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"DESTINATION\",\"index\":1,\"text\":\"Destination\",\"choices\":[{\"code\":\"EUR\",\"label\":\"Europe\"},{\"code\":\"WORLD\",\"label\":\"World\"},{\"code\":\"PL\",\"label\":\"Poland\"}]},{\"type\":\"numeric\",\"code\":\"NUM_OF_ADULTS\",\"index\":2,\"text\":\"Number of adults\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CHILDREN\",\"index\":3,\"text\":\"Number of children\"}],\"maxNumberOfInsured\":10,\"icon\":\"plane\"}",
+        "rawBodySha256": "061abadf7ea9e3a1585a3caec8628d62c7788c846f3afa0d28dcdd9389d86ea9"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-DIRECT-GET-NONE-001",
+      "boundary": "direct",
+      "route": "get",
+      "request": {
+        "method": "GET",
+        "path": "/products/TRI",
+        "credentialCategory": "missing",
+        "authorization": null
+      },
+      "response": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"TRI\",\"name\":\"Safe Traveller\",\"image\":\"/static/travel.jpg\",\"description\":\"Travel insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Luggage\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C2\",\"name\":\"Illness\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C3\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"DESTINATION\",\"index\":1,\"text\":\"Destination\",\"choices\":[{\"code\":\"EUR\",\"label\":\"Europe\"},{\"code\":\"WORLD\",\"label\":\"World\"},{\"code\":\"PL\",\"label\":\"Poland\"}]},{\"type\":\"numeric\",\"code\":\"NUM_OF_ADULTS\",\"index\":2,\"text\":\"Number of adults\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CHILDREN\",\"index\":3,\"text\":\"Number of children\"}],\"maxNumberOfInsured\":10,\"icon\":\"plane\"}",
+        "rawBodySha256": "061abadf7ea9e3a1585a3caec8628d62c7788c846f3afa0d28dcdd9389d86ea9"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-DIRECT-GET-VALID-001",
+      "boundary": "direct",
+      "route": "get",
+      "request": {
+        "method": "GET",
+        "path": "/products/TRI",
+        "credentialCategory": "valid",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"TRI\",\"name\":\"Safe Traveller\",\"image\":\"/static/travel.jpg\",\"description\":\"Travel insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Luggage\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C2\",\"name\":\"Illness\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C3\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"DESTINATION\",\"index\":1,\"text\":\"Destination\",\"choices\":[{\"code\":\"EUR\",\"label\":\"Europe\"},{\"code\":\"WORLD\",\"label\":\"World\"},{\"code\":\"PL\",\"label\":\"Poland\"}]},{\"type\":\"numeric\",\"code\":\"NUM_OF_ADULTS\",\"index\":2,\"text\":\"Number of adults\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CHILDREN\",\"index\":3,\"text\":\"Number of children\"}],\"maxNumberOfInsured\":10,\"icon\":\"plane\"}",
+        "rawBodySha256": "061abadf7ea9e3a1585a3caec8628d62c7788c846f3afa0d28dcdd9389d86ea9"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-DIRECT-LIST-SIGNATURE-001",
+      "boundary": "direct",
+      "route": "list",
+      "request": {
+        "method": "GET",
+        "path": "/products",
+        "credentialCategory": "invalid-signature",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "[{\"code\":\"CAR\",\"name\":\"Happy Driver\",\"image\":\"/static/car.jpg\",\"description\":\"Car insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"}],\"maxNumberOfInsured\":1,\"icon\":\"car\"},{\"code\":\"FAI\",\"name\":\"Happy farm\",\"image\":\"/static/farm.jpg\",\"description\":\"Farm insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Crops\",\"optional\":false,\"sumInsured\":200000},{\"code\":\"C2\",\"name\":\"Flood\",\"optional\":false,\"sumInsured\":100000},{\"code\":\"C3\",\"name\":\"Fire\",\"optional\":false,\"sumInsured\":50000},{\"code\":\"C4\",\"name\":\"Equipment\",\"optional\":true,\"sumInsured\":300000}],\"questions\":[{\"type\":\"choice\",\"code\":\"TYP\",\"index\":1,\"text\":\"Cultivation type\",\"choices\":[{\"code\":\"ZB\",\"label\":\"Crop\"},{\"code\":\"KW\",\"label\":\"Vegetable\"}]},{\"type\":\"numeric\",\"code\":\"AREA\",\"index\":2,\"text\":\"Area\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"},{\"type\":\"choice\",\"code\":\"FLOOD\",\"index\":4,\"text\":\"Located in flood risk area\",\"choices\":[{\"code\":\"YES\",\"label\":\"Yes\"},{\"code\":\"NO\",\"label\":\"No\"}]}],\"maxNumberOfInsured\":1,\"icon\":\"apple\"},{\"code\":\"HSI\",\"name\":\"Happy House\",\"image\":\"/static/house.jpg\",\"description\":\"House insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Fire\",\"optional\":false,\"sumInsured\":200000},{\"code\":\"C2\",\"name\":\"Flood\",\"optional\":false,\"sumInsured\":100000},{\"code\":\"C3\",\"name\":\"Theft\",\"optional\":false,\"sumInsured\":50000},{\"code\":\"C4\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"TYP\",\"index\":1,\"text\":\"Apartment / House\",\"choices\":[{\"code\":\"APT\",\"label\":\"Apartment\"},{\"code\":\"HOUSE\",\"label\":\"House\"}]},{\"type\":\"numeric\",\"code\":\"AREA\",\"index\":2,\"text\":\"Area\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"},{\"type\":\"choice\",\"code\":\"FLOOD\",\"index\":4,\"text\":\"Located in flood risk area\",\"choices\":[{\"code\":\"YES\",\"label\":\"Yes\"},{\"code\":\"NO\",\"label\":\"No\"}]}],\"maxNumberOfInsured\":5,\"icon\":\"building\"},{\"code\":\"TRI\",\"name\":\"Safe Traveller\",\"image\":\"/static/travel.jpg\",\"description\":\"Travel insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Luggage\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C2\",\"name\":\"Illness\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C3\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"DESTINATION\",\"index\":1,\"text\":\"Destination\",\"choices\":[{\"code\":\"EUR\",\"label\":\"Europe\"},{\"code\":\"WORLD\",\"label\":\"World\"},{\"code\":\"PL\",\"label\":\"Poland\"}]},{\"type\":\"numeric\",\"code\":\"NUM_OF_ADULTS\",\"index\":2,\"text\":\"Number of adults\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CHILDREN\",\"index\":3,\"text\":\"Number of children\"}],\"maxNumberOfInsured\":10,\"icon\":\"plane\"}]",
+        "rawBodySha256": "8ec5ef258af9baa22a732f5cd78ec8d7edabffc05e49a280b597ff3a8649bcf3"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-DIRECT-LIST-MALFORMED-001",
+      "boundary": "direct",
+      "route": "list",
+      "request": {
+        "method": "GET",
+        "path": "/products",
+        "credentialCategory": "malformed",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "[{\"code\":\"CAR\",\"name\":\"Happy Driver\",\"image\":\"/static/car.jpg\",\"description\":\"Car insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"}],\"maxNumberOfInsured\":1,\"icon\":\"car\"},{\"code\":\"FAI\",\"name\":\"Happy farm\",\"image\":\"/static/farm.jpg\",\"description\":\"Farm insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Crops\",\"optional\":false,\"sumInsured\":200000},{\"code\":\"C2\",\"name\":\"Flood\",\"optional\":false,\"sumInsured\":100000},{\"code\":\"C3\",\"name\":\"Fire\",\"optional\":false,\"sumInsured\":50000},{\"code\":\"C4\",\"name\":\"Equipment\",\"optional\":true,\"sumInsured\":300000}],\"questions\":[{\"type\":\"choice\",\"code\":\"TYP\",\"index\":1,\"text\":\"Cultivation type\",\"choices\":[{\"code\":\"ZB\",\"label\":\"Crop\"},{\"code\":\"KW\",\"label\":\"Vegetable\"}]},{\"type\":\"numeric\",\"code\":\"AREA\",\"index\":2,\"text\":\"Area\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"},{\"type\":\"choice\",\"code\":\"FLOOD\",\"index\":4,\"text\":\"Located in flood risk area\",\"choices\":[{\"code\":\"YES\",\"label\":\"Yes\"},{\"code\":\"NO\",\"label\":\"No\"}]}],\"maxNumberOfInsured\":1,\"icon\":\"apple\"},{\"code\":\"HSI\",\"name\":\"Happy House\",\"image\":\"/static/house.jpg\",\"description\":\"House insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Fire\",\"optional\":false,\"sumInsured\":200000},{\"code\":\"C2\",\"name\":\"Flood\",\"optional\":false,\"sumInsured\":100000},{\"code\":\"C3\",\"name\":\"Theft\",\"optional\":false,\"sumInsured\":50000},{\"code\":\"C4\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"TYP\",\"index\":1,\"text\":\"Apartment / House\",\"choices\":[{\"code\":\"APT\",\"label\":\"Apartment\"},{\"code\":\"HOUSE\",\"label\":\"House\"}]},{\"type\":\"numeric\",\"code\":\"AREA\",\"index\":2,\"text\":\"Area\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"},{\"type\":\"choice\",\"code\":\"FLOOD\",\"index\":4,\"text\":\"Located in flood risk area\",\"choices\":[{\"code\":\"YES\",\"label\":\"Yes\"},{\"code\":\"NO\",\"label\":\"No\"}]}],\"maxNumberOfInsured\":5,\"icon\":\"building\"},{\"code\":\"TRI\",\"name\":\"Safe Traveller\",\"image\":\"/static/travel.jpg\",\"description\":\"Travel insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Luggage\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C2\",\"name\":\"Illness\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C3\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"DESTINATION\",\"index\":1,\"text\":\"Destination\",\"choices\":[{\"code\":\"EUR\",\"label\":\"Europe\"},{\"code\":\"WORLD\",\"label\":\"World\"},{\"code\":\"PL\",\"label\":\"Poland\"}]},{\"type\":\"numeric\",\"code\":\"NUM_OF_ADULTS\",\"index\":2,\"text\":\"Number of adults\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CHILDREN\",\"index\":3,\"text\":\"Number of children\"}],\"maxNumberOfInsured\":10,\"icon\":\"plane\"}]",
+        "rawBodySha256": "8ec5ef258af9baa22a732f5cd78ec8d7edabffc05e49a280b597ff3a8649bcf3"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-DIRECT-LIST-NONE-001",
+      "boundary": "direct",
+      "route": "list",
+      "request": {
+        "method": "GET",
+        "path": "/products",
+        "credentialCategory": "missing",
+        "authorization": null
+      },
+      "response": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "[{\"code\":\"CAR\",\"name\":\"Happy Driver\",\"image\":\"/static/car.jpg\",\"description\":\"Car insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"}],\"maxNumberOfInsured\":1,\"icon\":\"car\"},{\"code\":\"FAI\",\"name\":\"Happy farm\",\"image\":\"/static/farm.jpg\",\"description\":\"Farm insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Crops\",\"optional\":false,\"sumInsured\":200000},{\"code\":\"C2\",\"name\":\"Flood\",\"optional\":false,\"sumInsured\":100000},{\"code\":\"C3\",\"name\":\"Fire\",\"optional\":false,\"sumInsured\":50000},{\"code\":\"C4\",\"name\":\"Equipment\",\"optional\":true,\"sumInsured\":300000}],\"questions\":[{\"type\":\"choice\",\"code\":\"TYP\",\"index\":1,\"text\":\"Cultivation type\",\"choices\":[{\"code\":\"ZB\",\"label\":\"Crop\"},{\"code\":\"KW\",\"label\":\"Vegetable\"}]},{\"type\":\"numeric\",\"code\":\"AREA\",\"index\":2,\"text\":\"Area\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"},{\"type\":\"choice\",\"code\":\"FLOOD\",\"index\":4,\"text\":\"Located in flood risk area\",\"choices\":[{\"code\":\"YES\",\"label\":\"Yes\"},{\"code\":\"NO\",\"label\":\"No\"}]}],\"maxNumberOfInsured\":1,\"icon\":\"apple\"},{\"code\":\"HSI\",\"name\":\"Happy House\",\"image\":\"/static/house.jpg\",\"description\":\"House insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Fire\",\"optional\":false,\"sumInsured\":200000},{\"code\":\"C2\",\"name\":\"Flood\",\"optional\":false,\"sumInsured\":100000},{\"code\":\"C3\",\"name\":\"Theft\",\"optional\":false,\"sumInsured\":50000},{\"code\":\"C4\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"TYP\",\"index\":1,\"text\":\"Apartment / House\",\"choices\":[{\"code\":\"APT\",\"label\":\"Apartment\"},{\"code\":\"HOUSE\",\"label\":\"House\"}]},{\"type\":\"numeric\",\"code\":\"AREA\",\"index\":2,\"text\":\"Area\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"},{\"type\":\"choice\",\"code\":\"FLOOD\",\"index\":4,\"text\":\"Located in flood risk area\",\"choices\":[{\"code\":\"YES\",\"label\":\"Yes\"},{\"code\":\"NO\",\"label\":\"No\"}]}],\"maxNumberOfInsured\":5,\"icon\":\"building\"},{\"code\":\"TRI\",\"name\":\"Safe Traveller\",\"image\":\"/static/travel.jpg\",\"description\":\"Travel insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Luggage\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C2\",\"name\":\"Illness\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C3\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"DESTINATION\",\"index\":1,\"text\":\"Destination\",\"choices\":[{\"code\":\"EUR\",\"label\":\"Europe\"},{\"code\":\"WORLD\",\"label\":\"World\"},{\"code\":\"PL\",\"label\":\"Poland\"}]},{\"type\":\"numeric\",\"code\":\"NUM_OF_ADULTS\",\"index\":2,\"text\":\"Number of adults\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CHILDREN\",\"index\":3,\"text\":\"Number of children\"}],\"maxNumberOfInsured\":10,\"icon\":\"plane\"}]",
+        "rawBodySha256": "8ec5ef258af9baa22a732f5cd78ec8d7edabffc05e49a280b597ff3a8649bcf3"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-DIRECT-LIST-VALID-001",
+      "boundary": "direct",
+      "route": "list",
+      "request": {
+        "method": "GET",
+        "path": "/products",
+        "credentialCategory": "valid",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "[{\"code\":\"CAR\",\"name\":\"Happy Driver\",\"image\":\"/static/car.jpg\",\"description\":\"Car insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"}],\"maxNumberOfInsured\":1,\"icon\":\"car\"},{\"code\":\"FAI\",\"name\":\"Happy farm\",\"image\":\"/static/farm.jpg\",\"description\":\"Farm insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Crops\",\"optional\":false,\"sumInsured\":200000},{\"code\":\"C2\",\"name\":\"Flood\",\"optional\":false,\"sumInsured\":100000},{\"code\":\"C3\",\"name\":\"Fire\",\"optional\":false,\"sumInsured\":50000},{\"code\":\"C4\",\"name\":\"Equipment\",\"optional\":true,\"sumInsured\":300000}],\"questions\":[{\"type\":\"choice\",\"code\":\"TYP\",\"index\":1,\"text\":\"Cultivation type\",\"choices\":[{\"code\":\"ZB\",\"label\":\"Crop\"},{\"code\":\"KW\",\"label\":\"Vegetable\"}]},{\"type\":\"numeric\",\"code\":\"AREA\",\"index\":2,\"text\":\"Area\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"},{\"type\":\"choice\",\"code\":\"FLOOD\",\"index\":4,\"text\":\"Located in flood risk area\",\"choices\":[{\"code\":\"YES\",\"label\":\"Yes\"},{\"code\":\"NO\",\"label\":\"No\"}]}],\"maxNumberOfInsured\":1,\"icon\":\"apple\"},{\"code\":\"HSI\",\"name\":\"Happy House\",\"image\":\"/static/house.jpg\",\"description\":\"House insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Fire\",\"optional\":false,\"sumInsured\":200000},{\"code\":\"C2\",\"name\":\"Flood\",\"optional\":false,\"sumInsured\":100000},{\"code\":\"C3\",\"name\":\"Theft\",\"optional\":false,\"sumInsured\":50000},{\"code\":\"C4\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"TYP\",\"index\":1,\"text\":\"Apartment / House\",\"choices\":[{\"code\":\"APT\",\"label\":\"Apartment\"},{\"code\":\"HOUSE\",\"label\":\"House\"}]},{\"type\":\"numeric\",\"code\":\"AREA\",\"index\":2,\"text\":\"Area\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"},{\"type\":\"choice\",\"code\":\"FLOOD\",\"index\":4,\"text\":\"Located in flood risk area\",\"choices\":[{\"code\":\"YES\",\"label\":\"Yes\"},{\"code\":\"NO\",\"label\":\"No\"}]}],\"maxNumberOfInsured\":5,\"icon\":\"building\"},{\"code\":\"TRI\",\"name\":\"Safe Traveller\",\"image\":\"/static/travel.jpg\",\"description\":\"Travel insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Luggage\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C2\",\"name\":\"Illness\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C3\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"DESTINATION\",\"index\":1,\"text\":\"Destination\",\"choices\":[{\"code\":\"EUR\",\"label\":\"Europe\"},{\"code\":\"WORLD\",\"label\":\"World\"},{\"code\":\"PL\",\"label\":\"Poland\"}]},{\"type\":\"numeric\",\"code\":\"NUM_OF_ADULTS\",\"index\":2,\"text\":\"Number of adults\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CHILDREN\",\"index\":3,\"text\":\"Number of children\"}],\"maxNumberOfInsured\":10,\"icon\":\"plane\"}]",
+        "rawBodySha256": "8ec5ef258af9baa22a732f5cd78ec8d7edabffc05e49a280b597ff3a8649bcf3"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-GATEWAY-GET-SIGNATURE-001",
+      "boundary": "gateway",
+      "route": "get",
+      "request": {
+        "method": "GET",
+        "path": "/api/products/TRI",
+        "credentialCategory": "invalid-signature",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "rawBodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-GATEWAY-GET-MALFORMED-001",
+      "boundary": "gateway",
+      "route": "get",
+      "request": {
+        "method": "GET",
+        "path": "/api/products/TRI",
+        "credentialCategory": "malformed",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "rawBodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-GATEWAY-GET-MISSING-001",
+      "boundary": "gateway",
+      "route": "get",
+      "request": {
+        "method": "GET",
+        "path": "/api/products/TRI",
+        "credentialCategory": "missing",
+        "authorization": null
+      },
+      "response": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "rawBodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-GATEWAY-GET-VALID-001",
+      "boundary": "gateway",
+      "route": "get",
+      "request": {
+        "method": "GET",
+        "path": "/api/products/TRI",
+        "credentialCategory": "valid",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"TRI\",\"name\":\"Safe Traveller\",\"image\":\"/static/travel.jpg\",\"description\":\"Travel insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Luggage\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C2\",\"name\":\"Illness\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C3\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"DESTINATION\",\"index\":1,\"text\":\"Destination\",\"choices\":[{\"code\":\"EUR\",\"label\":\"Europe\"},{\"code\":\"WORLD\",\"label\":\"World\"},{\"code\":\"PL\",\"label\":\"Poland\"}]},{\"type\":\"numeric\",\"code\":\"NUM_OF_ADULTS\",\"index\":2,\"text\":\"Number of adults\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CHILDREN\",\"index\":3,\"text\":\"Number of children\"}],\"maxNumberOfInsured\":10,\"icon\":\"plane\"}",
+        "rawBodySha256": "061abadf7ea9e3a1585a3caec8628d62c7788c846f3afa0d28dcdd9389d86ea9"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-GATEWAY-LIST-SIGNATURE-001",
+      "boundary": "gateway",
+      "route": "list",
+      "request": {
+        "method": "GET",
+        "path": "/api/products",
+        "credentialCategory": "invalid-signature",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "rawBodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-GATEWAY-LIST-MALFORMED-001",
+      "boundary": "gateway",
+      "route": "list",
+      "request": {
+        "method": "GET",
+        "path": "/api/products",
+        "credentialCategory": "malformed",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "rawBodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-GATEWAY-LIST-MISSING-001",
+      "boundary": "gateway",
+      "route": "list",
+      "request": {
+        "method": "GET",
+        "path": "/api/products",
+        "credentialCategory": "missing",
+        "authorization": null
+      },
+      "response": {
+        "status": 401,
+        "contentType": "",
+        "rawBody": "",
+        "rawBodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "scenarioId": "ACCESS-GATEWAY-LIST-VALID-001",
+      "boundary": "gateway",
+      "route": "list",
+      "request": {
+        "method": "GET",
+        "path": "/api/products",
+        "credentialCategory": "valid",
+        "authorization": "Bearer <redacted>"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "[{\"code\":\"CAR\",\"name\":\"Happy Driver\",\"image\":\"/static/car.jpg\",\"description\":\"Car insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"}],\"maxNumberOfInsured\":1,\"icon\":\"car\"},{\"code\":\"FAI\",\"name\":\"Happy farm\",\"image\":\"/static/farm.jpg\",\"description\":\"Farm insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Crops\",\"optional\":false,\"sumInsured\":200000},{\"code\":\"C2\",\"name\":\"Flood\",\"optional\":false,\"sumInsured\":100000},{\"code\":\"C3\",\"name\":\"Fire\",\"optional\":false,\"sumInsured\":50000},{\"code\":\"C4\",\"name\":\"Equipment\",\"optional\":true,\"sumInsured\":300000}],\"questions\":[{\"type\":\"choice\",\"code\":\"TYP\",\"index\":1,\"text\":\"Cultivation type\",\"choices\":[{\"code\":\"ZB\",\"label\":\"Crop\"},{\"code\":\"KW\",\"label\":\"Vegetable\"}]},{\"type\":\"numeric\",\"code\":\"AREA\",\"index\":2,\"text\":\"Area\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"},{\"type\":\"choice\",\"code\":\"FLOOD\",\"index\":4,\"text\":\"Located in flood risk area\",\"choices\":[{\"code\":\"YES\",\"label\":\"Yes\"},{\"code\":\"NO\",\"label\":\"No\"}]}],\"maxNumberOfInsured\":1,\"icon\":\"apple\"},{\"code\":\"HSI\",\"name\":\"Happy House\",\"image\":\"/static/house.jpg\",\"description\":\"House insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Fire\",\"optional\":false,\"sumInsured\":200000},{\"code\":\"C2\",\"name\":\"Flood\",\"optional\":false,\"sumInsured\":100000},{\"code\":\"C3\",\"name\":\"Theft\",\"optional\":false,\"sumInsured\":50000},{\"code\":\"C4\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"TYP\",\"index\":1,\"text\":\"Apartment / House\",\"choices\":[{\"code\":\"APT\",\"label\":\"Apartment\"},{\"code\":\"HOUSE\",\"label\":\"House\"}]},{\"type\":\"numeric\",\"code\":\"AREA\",\"index\":2,\"text\":\"Area\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CLAIM\",\"index\":3,\"text\":\"Number of claims in last 5 years\"},{\"type\":\"choice\",\"code\":\"FLOOD\",\"index\":4,\"text\":\"Located in flood risk area\",\"choices\":[{\"code\":\"YES\",\"label\":\"Yes\"},{\"code\":\"NO\",\"label\":\"No\"}]}],\"maxNumberOfInsured\":5,\"icon\":\"building\"},{\"code\":\"TRI\",\"name\":\"Safe Traveller\",\"image\":\"/static/travel.jpg\",\"description\":\"Travel insurance\",\"covers\":[{\"code\":\"C1\",\"name\":\"Luggage\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C2\",\"name\":\"Illness\",\"optional\":false,\"sumInsured\":5000},{\"code\":\"C3\",\"name\":\"Assistance\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"DESTINATION\",\"index\":1,\"text\":\"Destination\",\"choices\":[{\"code\":\"EUR\",\"label\":\"Europe\"},{\"code\":\"WORLD\",\"label\":\"World\"},{\"code\":\"PL\",\"label\":\"Poland\"}]},{\"type\":\"numeric\",\"code\":\"NUM_OF_ADULTS\",\"index\":2,\"text\":\"Number of adults\"},{\"type\":\"numeric\",\"code\":\"NUM_OF_CHILDREN\",\"index\":3,\"text\":\"Number of children\"}],\"maxNumberOfInsured\":10,\"icon\":\"plane\"}]",
+        "rawBodySha256": "8ec5ef258af9baa22a732f5cd78ec8d7edabffc05e49a280b597ff3a8649bcf3"
+      }
+    }
+  ],
+  "liveCoverage": [
+    "valid",
+    "missing",
+    "malformed",
+    "invalid-signature"
+  ],
+  "isolatedCoverage": [
+    "expired",
+    "not-before",
+    "issuer",
+    "audience",
+    "role",
+    "identity-propagation"
+  ],
+  "sanitizationRecord": {
+    "bearerTokensCaptured": false,
+    "signingMaterialCaptured": false,
+    "credentialsCaptured": false
+  }
+}

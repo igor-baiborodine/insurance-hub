@@ -27,7 +27,8 @@ export BASELINE_GATEWAY_TOKEN_FILE
 .PHONY: product-baseline-preflight product-baseline-capture product-baseline-test \
 	product-baseline-fixtures-check product-baseline-replay product-baseline-verify \
 	product-baseline-check _product-baseline-resolve-java _product-baseline-test-smoke \
-	_product-baseline-test-happy _product-baseline-test-data-edges _product-baseline-test-failures
+	_product-baseline-test-happy _product-baseline-test-data-edges _product-baseline-test-failures \
+	_product-baseline-test-access
 
 product-baseline-preflight: ## Check read-only Product baseline prerequisites for one explicit environment
 	@./scripts/product-baseline/preflight.sh
@@ -45,6 +46,8 @@ else ifeq ($(BASELINE_SUITE),data-edges)
 	+@$(MAKE) --no-print-directory _product-baseline-test-data-edges
 else ifeq ($(BASELINE_SUITE),failures)
 	+@$(MAKE) --no-print-directory _product-baseline-test-failures
+else ifeq ($(BASELINE_SUITE),access)
+	+@$(MAKE) --no-print-directory _product-baseline-test-access
 else
 	@./scripts/product-baseline/not-implemented.sh test-suite BASELINE_SUITE
 endif
@@ -76,3 +79,6 @@ _product-baseline-test-data-edges: _product-baseline-resolve-java
 
 _product-baseline-test-failures: _product-baseline-resolve-java
 	@./scripts/product-baseline/test-failures.sh
+
+_product-baseline-test-access: _product-baseline-resolve-java
+	@./scripts/product-baseline/test-access.sh

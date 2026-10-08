@@ -170,6 +170,7 @@ make product-baseline-test BASELINE_SUITE=smoke
 make product-baseline-test BASELINE_SUITE=happy
 make product-baseline-test BASELINE_SUITE=data-edges
 make product-baseline-test BASELINE_SUITE=failures
+make product-baseline-test BASELINE_SUITE=access
 make product-baseline-preflight BASELINE_ENV=local-dev
 make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=inventory
 make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=inventory
@@ -181,6 +182,7 @@ make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=http \
 make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=http
 make product-baseline-fixtures-check BASELINE_PART=data-edges
 make product-baseline-fixtures-check BASELINE_PART=failures
+make product-baseline-fixtures-check BASELINE_PART=access
 ```
 
 The smoke suite requires Java 14, system Maven, Docker Engine, and dependency resolution access on
@@ -194,12 +196,15 @@ stores or prints the token or signing secret.
 The Product test base rejects attempts to override its datasource, PostgreSQL, Hibernate DDL, or
 test-environment isolation properties. Invalid suite names, missing configuration, the Pricing
 database port, and later unimplemented capabilities fail before any data operation. The `smoke`,
-`happy`, `data-edges`, and `failures` suites are implemented; `access`, `db-permissions`,
-`comparator`, and `all` remain pending. Inventory, catalog, successful HTTP, data-edge, and failure
-fixture checking are implemented. Each live capture creates a new ignored run that must be reviewed
+`happy`, `data-edges`, `failures`, and `access` suites are implemented; `db-permissions`,
+`comparator`, and `all` remain pending. Inventory, catalog, successful HTTP, data-edge, failure, and
+access fixture checking are implemented. Each live capture creates a new ignored run that must be reviewed
 and explicitly accepted. HTTP capture verifies the catalog identity before and after
 all ten requests, retains raw response bodies, and records only a redacted authorization marker.
-Replay, live verification, access capture, and the aggregate check remain pending.
+Replay, live verification, and the aggregate check remain pending. Access capture is implemented
+for valid, absent, malformed, and invalid-signature credentials; controlled expiry, missing-subject,
+not-before, issuer, audience, role, and propagation cases remain isolated by design. See
+[`security-baseline.md`](security-baseline.md) for the observed permission matrix and #133 mapping.
 
 Local-dev preflight is read-only. It verifies the exact Kubernetes context, Product and gateway
 workloads/services/endpoints, access to the Product database Secret, Docker/Java/Maven/psql

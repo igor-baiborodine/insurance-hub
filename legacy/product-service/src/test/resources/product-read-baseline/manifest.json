@@ -616,9 +616,12 @@
         {"id": "ACCESS-GATEWAY-LIST-NBF-001", "credential": "not yet valid"},
         {"id": "ACCESS-GATEWAY-LIST-ISSUER-001", "credential": "issuer variation"},
         {"id": "ACCESS-GATEWAY-LIST-AUDIENCE-001", "credential": "audience variation"},
-        {"id": "ACCESS-GATEWAY-LIST-ROLE-001", "credential": "role variation"}
+        {"id": "ACCESS-GATEWAY-LIST-ROLE-001", "credential": "role variation"},
+        {"id": "ACCESS-GATEWAY-LIST-SUBJECT-001", "credential": "missing subject"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "access/cases.json",
+      "fixtures": {"local-dev": "access/local-dev.json", "qa": "access/qa.json"}
     },
     {
       "id": "ACCESS-GATEWAY-GET-001",
@@ -639,9 +642,12 @@
         {"id": "ACCESS-GATEWAY-GET-NBF-001", "credential": "not yet valid"},
         {"id": "ACCESS-GATEWAY-GET-ISSUER-001", "credential": "issuer variation"},
         {"id": "ACCESS-GATEWAY-GET-AUDIENCE-001", "credential": "audience variation"},
-        {"id": "ACCESS-GATEWAY-GET-ROLE-001", "credential": "product-role variation"}
+        {"id": "ACCESS-GATEWAY-GET-ROLE-001", "credential": "product-role variation"},
+        {"id": "ACCESS-GATEWAY-GET-SUBJECT-001", "credential": "missing subject"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "access/cases.json",
+      "fixtures": {"local-dev": "access/local-dev.json", "qa": "access/qa.json"}
     },
     {
       "id": "ACCESS-DIRECT-LIST-001",
@@ -658,7 +664,9 @@
         {"id": "ACCESS-DIRECT-LIST-VALID-001", "credential": "valid"},
         {"id": "ACCESS-DIRECT-LIST-INVALID-001", "credential": "invalid matrix"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "access/cases.json",
+      "fixtures": {"local-dev": "access/local-dev.json", "qa": "access/qa.json"}
     },
     {
       "id": "ACCESS-DIRECT-GET-001",
@@ -676,7 +684,9 @@
         {"id": "ACCESS-DIRECT-GET-INVALID-001", "credential": "invalid matrix"},
         {"id": "ACCESS-DIRECT-GET-ROLE-001", "credential": "product-role variation"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "access/cases.json",
+      "fixtures": {"local-dev": "access/local-dev.json", "qa": "access/qa.json"}
     },
     {
       "id": "ACCESS-PROPAGATION-001",
@@ -688,7 +698,9 @@
       "captureProfile": "access",
       "sourceRefs": ["gateway.controller", "gateway.client", "gateway.config", "product.controller"],
       "acceptanceCriteria": ["AC131-05", "AC131-06", "AC131-08", "AC131-09"],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "access/cases.json",
+      "fixtures": {"local-dev": "access/local-dev.json", "qa": "access/qa.json"}
     },
     {
       "id": "DECISION-PARITY-001",

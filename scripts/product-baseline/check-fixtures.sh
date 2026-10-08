@@ -9,15 +9,17 @@ case "${BASELINE_PART:-}" in
   http) exec "${script_dir}/check-http.sh" ;;
   data-edges) exec "${script_dir}/check-data-edges.sh" ;;
   failures) exec "${script_dir}/check-failures.sh" ;;
+  access) exec "${script_dir}/check-access.sh" ;;
   "")
     BASELINE_PART=inventory "${script_dir}/check-inventory.sh"
     BASELINE_PART=catalog "${script_dir}/check-catalog.sh"
     BASELINE_PART=http "${script_dir}/check-http.sh"
     BASELINE_PART=data-edges "${script_dir}/check-data-edges.sh"
     BASELINE_PART=failures "${script_dir}/check-failures.sh"
+    BASELINE_PART=access "${script_dir}/check-access.sh"
     ;;
   *)
-    echo "ERROR: BASELINE_PART must be 'inventory', 'catalog', 'http', 'data-edges', or 'failures' when provided." >&2
+    echo "ERROR: BASELINE_PART must be 'inventory', 'catalog', 'http', 'data-edges', 'failures', or 'access' when provided." >&2
     exit 2
     ;;
 esac
