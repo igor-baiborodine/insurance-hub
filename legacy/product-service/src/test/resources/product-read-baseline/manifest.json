@@ -442,7 +442,8 @@
         {"id": "DATA-DECIMAL-ZERO-001", "valueClass": "zero"},
         {"id": "DATA-DECIMAL-NULL-001", "valueClass": "explicit null"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "data-edges/cases.json"
     },
     {
       "id": "DATA-QUESTION-VARIANTS-001",
@@ -459,7 +460,8 @@
         {"id": "DATA-QUESTION-DATE-001", "type": "date"},
         {"id": "DATA-QUESTION-NUMERIC-001", "type": "numeric"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "data-edges/cases.json"
     },
     {
       "id": "DATA-PRESENCE-DEFAULTS-001",
@@ -479,7 +481,8 @@
         {"id": "DATA-DEFAULT-FALSE-001", "valueClass": "primitive false"},
         {"id": "DATA-DEFAULT-NULL-001", "valueClass": "null for primitive-backed field"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "data-edges/cases.json"
     },
     {
       "id": "DATA-UNKNOWN-FIELDS-001",
@@ -497,7 +500,8 @@
         {"id": "DATA-UNKNOWN-QUESTION-FIELD-001", "level": "question"},
         {"id": "DATA-UNKNOWN-CHOICE-FIELD-001", "level": "choice"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "data-edges/cases.json"
     },
     {
       "id": "DATA-UNKNOWN-SUBTYPE-001",
@@ -514,7 +518,8 @@
         {"id": "DATA-SUBTYPE-ABSENT-001", "valueClass": "absent discriminator"},
         {"id": "DATA-SUBTYPE-NULL-001", "valueClass": "null discriminator"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "data-edges/cases.json"
     },
     {
       "id": "DATA-ORDERING-001",
@@ -532,7 +537,8 @@
         {"id": "DATA-ORDER-QUESTIONS-001", "collection": "questions"},
         {"id": "DATA-ORDER-CHOICES-001", "collection": "choices"}
       ],
-      "status": "registered"
+      "status": "captured",
+      "fixture": "data-edges/cases.json"
     },
     {
       "id": "FAIL-DECODE-001",

@@ -28,8 +28,33 @@ The representative wire objects always contain `code`, `name`, `image`, `descrip
 `questions`, `maxNumberOfInsured`, and `icon`. Covers contain `code`, `name`, and `optional`;
 `sumInsured` is omitted when its DTO value is null and present as an integer JSON number otherwise.
 Questions contain `type`, `code`, `index`, and `text`; choice questions also contain ordered
-`choices` with `code` and `label`. The observed subtype values are `numeric` and `choice`. Decimal,
-presence, unknown subtype, null/empty collection, and ordering edge cases remain Step 6 work.
+`choices` with `code` and `label`. The representative rows contain `numeric` and `choice`; the
+isolated data-semantics corpus below also establishes the `date` variant.
+
+## Data semantics observations
+
+The accepted `data-edges/cases.json` fixture contains 16 named cases covering all 25 registered
+data-semantics variants. The test starts Java normally against disposable PostgreSQL, replaces the
+seeded rows only inside that Testcontainer, inserts raw JSONB through JDBC, and captures the real
+Product HTTP response. This deliberately bypasses Java write serialization while retaining the
+production JSONB decoder, domain mapping, DTO assembly, and HTTP serialization path.
+
+| Input class | Observed Java result |
+| --- | --- |
+| Decimal values | `12.3400`, `12345678901234567890.123456789`, and `0.00` retain their exact JSON number tokens on the wire. A null `sumInsured` is omitted. |
+| Question variants | `choice`, `date`, and `numeric` decode and serialize with the same discriminator. Choice and nested-array order is retained in the observation. |
+| Absent and empty product collections | Absent `covers`/`questions` and explicit empty arrays both result in those fields being omitted. Primitive `maxNumberOfInsured` remains present as `0`. |
+| Primitive JSON null | Null `maxNumberOfInsured` and question `index` become `0`; null cover `optional` becomes `false`. |
+| Choice collection presence | Absent, null, and empty `choices` all map to an empty collection and the field is omitted from the response. |
+| Explicit null product collections | Null `covers` or null `questions` reaches domain conversion and produces HTTP `500` with `Internal Server Error: null`. |
+| Unknown fields | An unknown product-level property is ignored. Unknown properties inside a cover, question, or choice fail JSONB decoding and produce HTTP `500`. |
+| Question discriminator | Unknown, absent, and null `type` values fail JSONB decoding and produce HTTP `500`. The response currently exposes the Hibernate decode exception category. |
+| SQL null | The database rejects null `definition` and null `code` with SQLSTATE `23502`; these are distinct from JSON null and absent JSON keys. |
+| Product ordering | A list inserted as `EDGE_Z`, `EDGE_A`, `EDGE_M` was returned in that order. Covers, questions, and choices also retained input order. These are repeatable observations, not ordering guarantees, because the repository query has no explicit sort. |
+
+The nested-field and discriminator failures expose internal exception detail in the legacy response.
+The fixture preserves that observable behavior without credentials or environment data. Step 7
+extends failure-path evidence, and Step 10 makes the explicit compatibility-versus-safety decision.
 
 ## Consumer expectations
 
@@ -53,6 +78,8 @@ Run the happy-path listener checks with:
 ```shell
 make product-baseline-test BASELINE_SUITE=happy
 make product-baseline-fixtures-check BASELINE_PART=http
+make product-baseline-test BASELINE_SUITE=data-edges
+make product-baseline-fixtures-check BASELINE_PART=data-edges
 ```
 
 Live capture requires temporary Product, gateway, and Product-database forwards plus a file

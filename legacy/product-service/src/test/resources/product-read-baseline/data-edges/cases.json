@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "DATA-EDGES-001",
+  "provenance": "synthetic-isolated",
+  "description": "Raw JSONB cases loaded only after normal Java startup in disposable PostgreSQL.",
+  "cases": [
+    {
+      "id": "DATA-EDGES-RICH-001",
+      "scenarioIds": [
+        "DATA-DECIMAL-FRACTION-001",
+        "DATA-DECIMAL-PRECISION-001",
+        "DATA-DECIMAL-SCALE-001",
+        "DATA-DECIMAL-ZERO-001",
+        "DATA-DECIMAL-NULL-001",
+        "DATA-QUESTION-CHOICE-001",
+        "DATA-QUESTION-DATE-001",
+        "DATA-QUESTION-NUMERIC-001",
+        "DATA-UNKNOWN-PRODUCT-FIELD-001",
+        "DATA-ORDER-COVERS-001",
+        "DATA-ORDER-QUESTIONS-001",
+        "DATA-ORDER-CHOICES-001"
+      ],
+      "kind": "http",
+      "repetitions": 3,
+      "requestPath": "/products/EDGE_RICH",
+      "rows": [
+        {
+          "code": "EDGE_RICH",
+          "rawDefinitionJson": "{\"name\":\"Rich semantics\",\"image\":\"/edge.png\",\"description\":\"Synthetic\",\"covers\":[{\"code\":\"FRACTION\",\"name\":\"Fraction\",\"description\":\"first\",\"optional\":true,\"sumInsured\":12.3400},{\"code\":\"PRECISION\",\"name\":\"Precision\",\"description\":\"second\",\"optional\":false,\"sumInsured\":12345678901234567890.123456789},{\"code\":\"ZERO\",\"name\":\"Zero\",\"description\":\"third\",\"optional\":false,\"sumInsured\":0.00},{\"code\":\"NULL\",\"name\":\"Null\",\"description\":\"fourth\",\"optional\":true,\"sumInsured\":null}],\"questions\":[{\"type\":\"choice\",\"code\":\"CHOICE\",\"index\":3,\"text\":\"Choice\",\"choices\":[{\"code\":\"B\",\"label\":\"Second\"},{\"code\":\"A\",\"label\":\"First\"}]},{\"type\":\"date\",\"code\":\"DATE\",\"index\":1,\"text\":\"Date\"},{\"type\":\"numeric\",\"code\":\"NUMBER\",\"index\":2,\"text\":\"Number\"}],\"maxNumberOfInsured\":7,\"icon\":\"edge\",\"ignoredTopLevel\":\"discard me\"}"
+        }
+      ],
+      "expected": {
+        "outcome": "http-success",
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"EDGE_RICH\",\"name\":\"Rich semantics\",\"image\":\"/edge.png\",\"description\":\"Synthetic\",\"covers\":[{\"code\":\"FRACTION\",\"name\":\"Fraction\",\"description\":\"first\",\"optional\":true,\"sumInsured\":12.3400},{\"code\":\"PRECISION\",\"name\":\"Precision\",\"description\":\"second\",\"optional\":false,\"sumInsured\":12345678901234567890.123456789},{\"code\":\"ZERO\",\"name\":\"Zero\",\"description\":\"third\",\"optional\":false,\"sumInsured\":0.00},{\"code\":\"NULL\",\"name\":\"Null\",\"description\":\"fourth\",\"optional\":true}],\"questions\":[{\"type\":\"choice\",\"code\":\"CHOICE\",\"index\":3,\"text\":\"Choice\",\"choices\":[{\"code\":\"B\",\"label\":\"Second\"},{\"code\":\"A\",\"label\":\"First\"}]},{\"type\":\"date\",\"code\":\"DATE\",\"index\":1,\"text\":\"Date\"},{\"type\":\"numeric\",\"code\":\"NUMBER\",\"index\":2,\"text\":\"Number\"}],\"maxNumberOfInsured\":7,\"icon\":\"edge\"}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-ABSENT-001",
+      "scenarioIds": ["DATA-PRESENCE-ABSENT-001", "DATA-DEFAULT-ZERO-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_ABSENT",
+      "rows": [{"code": "EDGE_ABSENT", "rawDefinitionJson": "{}"}],
+      "expected": {
+        "outcome": "http-success",
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"EDGE_ABSENT\",\"maxNumberOfInsured\":0}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-EMPTY-001",
+      "scenarioIds": ["DATA-PRESENCE-EMPTY-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_EMPTY",
+      "rows": [{"code": "EDGE_EMPTY", "rawDefinitionJson": "{\"name\":\"Empty\",\"covers\":[],\"questions\":[],\"maxNumberOfInsured\":0}"}],
+      "expected": {
+        "outcome": "http-success",
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"EDGE_EMPTY\",\"name\":\"Empty\",\"maxNumberOfInsured\":0}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-PRIMITIVE-NULL-001",
+      "scenarioIds": ["DATA-DEFAULT-FALSE-001", "DATA-DEFAULT-NULL-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_PRIMITIVE_NULL",
+      "rows": [{"code": "EDGE_PRIMITIVE_NULL", "rawDefinitionJson": "{\"name\":\"Primitive nulls\",\"covers\":[{\"code\":\"C\",\"name\":\"Cover\",\"optional\":null,\"sumInsured\":1}],\"questions\":[{\"type\":\"numeric\",\"code\":\"Q\",\"index\":null,\"text\":\"Question\"}],\"maxNumberOfInsured\":null}"}],
+      "expected": {
+        "outcome": "http-success",
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"EDGE_PRIMITIVE_NULL\",\"name\":\"Primitive nulls\",\"covers\":[{\"code\":\"C\",\"name\":\"Cover\",\"optional\":false,\"sumInsured\":1}],\"questions\":[{\"type\":\"numeric\",\"code\":\"Q\",\"index\":0,\"text\":\"Question\"}],\"maxNumberOfInsured\":0}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-CHOICE-PRESENCE-001",
+      "scenarioIds": ["DATA-PRESENCE-NULL-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_CHOICE_PRESENCE",
+      "rows": [{"code": "EDGE_CHOICE_PRESENCE", "rawDefinitionJson": "{\"name\":\"Choice presence\",\"covers\":[],\"questions\":[{\"type\":\"choice\",\"code\":\"ABSENT\",\"index\":1,\"text\":\"Absent\"},{\"type\":\"choice\",\"code\":\"NULL\",\"index\":2,\"text\":\"Null\",\"choices\":null},{\"type\":\"choice\",\"code\":\"EMPTY\",\"index\":3,\"text\":\"Empty\",\"choices\":[]}]}"}],
+      "expected": {
+        "outcome": "http-success",
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "{\"code\":\"EDGE_CHOICE_PRESENCE\",\"name\":\"Choice presence\",\"questions\":[{\"type\":\"choice\",\"code\":\"ABSENT\",\"index\":1,\"text\":\"Absent\"},{\"type\":\"choice\",\"code\":\"NULL\",\"index\":2,\"text\":\"Null\"},{\"type\":\"choice\",\"code\":\"EMPTY\",\"index\":3,\"text\":\"Empty\"}],\"maxNumberOfInsured\":0}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-PRODUCT-ORDER-001",
+      "scenarioIds": ["DATA-ORDER-PRODUCTS-001"],
+      "kind": "http",
+      "repetitions": 3,
+      "requestPath": "/products",
+      "rows": [
+        {"code": "EDGE_Z", "rawDefinitionJson": "{\"name\":\"Inserted first\",\"covers\":[],\"questions\":[]}"},
+        {"code": "EDGE_A", "rawDefinitionJson": "{\"name\":\"Inserted second\",\"covers\":[],\"questions\":[]}"},
+        {"code": "EDGE_M", "rawDefinitionJson": "{\"name\":\"Inserted third\",\"covers\":[],\"questions\":[]}"}
+      ],
+      "expected": {
+        "outcome": "http-success",
+        "status": 200,
+        "contentType": "application/json",
+        "rawBody": "[{\"code\":\"EDGE_Z\",\"name\":\"Inserted first\",\"maxNumberOfInsured\":0},{\"code\":\"EDGE_A\",\"name\":\"Inserted second\",\"maxNumberOfInsured\":0},{\"code\":\"EDGE_M\",\"name\":\"Inserted third\",\"maxNumberOfInsured\":0}]"
+      }
+    },
+    {
+      "id": "DATA-EDGES-NULL-COVERS-001",
+      "scenarioIds": ["DATA-PRESENCE-NULL-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_NULL_COVERS",
+      "rows": [{"code": "EDGE_NULL_COVERS", "rawDefinitionJson": "{\"name\":\"Null covers\",\"covers\":null,\"questions\":[]}"}],
+      "expected": {
+        "outcome": "http-failure",
+        "status": 500,
+        "contentType": "application/json",
+        "rawBody": "{\"message\":\"Internal Server Error: null\",\"_links\":{\"self\":{\"href\":\"/products/EDGE_NULL_COVERS\",\"templated\":false}}}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-NULL-QUESTIONS-001",
+      "scenarioIds": ["DATA-PRESENCE-NULL-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_NULL_QUESTIONS",
+      "rows": [{"code": "EDGE_NULL_QUESTIONS", "rawDefinitionJson": "{\"name\":\"Null questions\",\"covers\":[],\"questions\":null}"}],
+      "expected": {
+        "outcome": "http-failure",
+        "status": 500,
+        "contentType": "application/json",
+        "rawBody": "{\"message\":\"Internal Server Error: null\",\"_links\":{\"self\":{\"href\":\"/products/EDGE_NULL_QUESTIONS\",\"templated\":false}}}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-UNKNOWN-COVER-001",
+      "scenarioIds": ["DATA-UNKNOWN-COVER-FIELD-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_UNKNOWN_COVER",
+      "rows": [{"code": "EDGE_UNKNOWN_COVER", "rawDefinitionJson": "{\"covers\":[{\"code\":\"C\",\"name\":\"Cover\",\"optional\":false,\"unexpected\":true}],\"questions\":[]}"}],
+      "expected": {
+        "outcome": "http-failure",
+        "status": 500,
+        "contentType": "application/json",
+        "rawBody": "{\"message\":\"Internal Server Error: org.hibernate.HibernateException: Cannot deserialize product definition from jsonb\",\"_links\":{\"self\":{\"href\":\"/products/EDGE_UNKNOWN_COVER\",\"templated\":false}}}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-UNKNOWN-QUESTION-001",
+      "scenarioIds": ["DATA-UNKNOWN-QUESTION-FIELD-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_UNKNOWN_QUESTION",
+      "rows": [{"code": "EDGE_UNKNOWN_QUESTION", "rawDefinitionJson": "{\"covers\":[],\"questions\":[{\"type\":\"numeric\",\"code\":\"Q\",\"index\":1,\"text\":\"Question\",\"unexpected\":true}]}"}],
+      "expected": {
+        "outcome": "http-failure",
+        "status": 500,
+        "contentType": "application/json",
+        "rawBody": "{\"message\":\"Internal Server Error: org.hibernate.HibernateException: Cannot deserialize product definition from jsonb\",\"_links\":{\"self\":{\"href\":\"/products/EDGE_UNKNOWN_QUESTION\",\"templated\":false}}}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-UNKNOWN-CHOICE-001",
+      "scenarioIds": ["DATA-UNKNOWN-CHOICE-FIELD-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_UNKNOWN_CHOICE",
+      "rows": [{"code": "EDGE_UNKNOWN_CHOICE", "rawDefinitionJson": "{\"covers\":[],\"questions\":[{\"type\":\"choice\",\"code\":\"Q\",\"index\":1,\"text\":\"Question\",\"choices\":[{\"code\":\"A\",\"label\":\"A\",\"unexpected\":true}]}]}"}],
+      "expected": {
+        "outcome": "http-failure",
+        "status": 500,
+        "contentType": "application/json",
+        "rawBody": "{\"message\":\"Internal Server Error: org.hibernate.HibernateException: Cannot deserialize product definition from jsonb\",\"_links\":{\"self\":{\"href\":\"/products/EDGE_UNKNOWN_CHOICE\",\"templated\":false}}}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-SUBTYPE-UNKNOWN-001",
+      "scenarioIds": ["DATA-SUBTYPE-UNKNOWN-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_SUBTYPE_UNKNOWN",
+      "rows": [{"code": "EDGE_SUBTYPE_UNKNOWN", "rawDefinitionJson": "{\"covers\":[],\"questions\":[{\"type\":\"future\",\"code\":\"Q\",\"index\":1,\"text\":\"Question\"}]}"}],
+      "expected": {
+        "outcome": "http-failure",
+        "status": 500,
+        "contentType": "application/json",
+        "rawBody": "{\"message\":\"Internal Server Error: org.hibernate.HibernateException: Cannot deserialize product definition from jsonb\",\"_links\":{\"self\":{\"href\":\"/products/EDGE_SUBTYPE_UNKNOWN\",\"templated\":false}}}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-SUBTYPE-ABSENT-001",
+      "scenarioIds": ["DATA-SUBTYPE-ABSENT-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_SUBTYPE_ABSENT",
+      "rows": [{"code": "EDGE_SUBTYPE_ABSENT", "rawDefinitionJson": "{\"covers\":[],\"questions\":[{\"code\":\"Q\",\"index\":1,\"text\":\"Question\"}]}"}],
+      "expected": {
+        "outcome": "http-failure",
+        "status": 500,
+        "contentType": "application/json",
+        "rawBody": "{\"message\":\"Internal Server Error: org.hibernate.HibernateException: Cannot deserialize product definition from jsonb\",\"_links\":{\"self\":{\"href\":\"/products/EDGE_SUBTYPE_ABSENT\",\"templated\":false}}}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-SUBTYPE-NULL-001",
+      "scenarioIds": ["DATA-SUBTYPE-NULL-001"],
+      "kind": "http",
+      "requestPath": "/products/EDGE_SUBTYPE_NULL",
+      "rows": [{"code": "EDGE_SUBTYPE_NULL", "rawDefinitionJson": "{\"covers\":[],\"questions\":[{\"type\":null,\"code\":\"Q\",\"index\":1,\"text\":\"Question\"}]}"}],
+      "expected": {
+        "outcome": "http-failure",
+        "status": 500,
+        "contentType": "application/json",
+        "rawBody": "{\"message\":\"Internal Server Error: org.hibernate.HibernateException: Cannot deserialize product definition from jsonb\",\"_links\":{\"self\":{\"href\":\"/products/EDGE_SUBTYPE_NULL\",\"templated\":false}}}"
+      }
+    },
+    {
+      "id": "DATA-EDGES-SQL-NULL-DEFINITION-001",
+      "scenarioIds": ["DATA-PRESENCE-NULL-001"],
+      "kind": "database-constraint",
+      "rows": [{"code": "EDGE_SQL_NULL_DEFINITION", "rawDefinitionJson": null}],
+      "expected": {
+        "outcome": "constraint-rejected",
+        "sqlState": "23502"
+      }
+    },
+    {
+      "id": "DATA-EDGES-SQL-NULL-CODE-001",
+      "scenarioIds": ["DATA-PRESENCE-NULL-001"],
+      "kind": "database-constraint",
+      "rows": [{"code": null, "rawDefinitionJson": "{}"}],
+      "expected": {
+        "outcome": "constraint-rejected",
+        "sqlState": "23502"
+      }
+    }
+  ]
+}
