@@ -1,17 +1,18 @@
 # Product read baseline
 
 This directory is the versioned entry point for issue #131's Product catalog read baseline. The
-baseline will describe the Java behavior that the Go pilot must preserve, the shared PostgreSQL
+baseline describes the Java behavior that the Go pilot must preserve, the shared PostgreSQL
 topology it will read, and the evidence used to qualify later implementation work.
 
 The source inventory and scenario register are established, both local-dev and QA environment and
 catalog snapshots are captured, successful direct/gateway HTTP reads are recorded, and the
-synthetic data-semantics and failure corpora are established. The QA recovery and effective
-differences are documented in [`data-baseline.md`](data-baseline.md); wire observations, data
-semantics, and consumer needs are documented in [`contract-baseline.md`](contract-baseline.md). Access captures,
-parity decisions, permission proofs, and replay commands remain pending their delivery steps. A
-source reference in this document records what the checkout says; it is not evidence of an
-effective runtime result.
+synthetic data-semantics, failure, access, and database-permission corpora are established. The QA
+recovery, shared-data decision, and role proof are documented in
+[`data-baseline.md`](data-baseline.md); field and scenario parity plus unary gRPC/HTTP semantics are
+documented in [`contract-baseline.md`](contract-baseline.md); the final Java-compatible entry/hop
+mapping is in [`security-baseline.md`](security-baseline.md). Replay, live drift verification, and
+the final evidence handoff remain pending. A source reference records what the checkout says; it is
+not evidence of an effective runtime result.
 
 ## Scope and foundation
 
@@ -34,15 +35,15 @@ evidence are still owned by issues #131 through #136.
 
 | Path | Ownership and purpose | Current state |
 | --- | --- | --- |
-| `docs/migration/phase-4/product-service/README.md` | Baseline entry point, source inventory, reproduction guidance, limits, and downstream handoff. | Source inventory established. |
-| `docs/migration/phase-4/product-service/data-baseline.md` | Effective environment/schema/writer inventory, catalog provenance, shared topology, and database-permission proof. | Local-dev and QA inventories and catalog identities captured; restricted-role proof remains pending. |
-| `docs/migration/phase-4/product-service/contract-baseline.md` | Consumer and field mappings, HTTP observations, parity rules, and transport semantics. | Successful reads, consumer expectations, data semantics, and failure behavior captured; parity decisions remain pending. |
-| `docs/migration/phase-4/product-service/security-baseline.md` | Observed Java access and identity behavior and the compatible future Go model. | Planned; source observations do not establish effective enforcement. |
-| `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and index for the sanitized fixture corpus. | Inventory, catalog, successful HTTP, data-semantics, and failure fixtures indexed; later scenarios remain pending. |
-| `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | Accepted local-dev and QA captures plus isolated data-semantics and failure fixtures present. |
+| `docs/migration/phase-4/product-service/README.md` | Baseline entry point, source inventory, reproduction guidance, limits, and downstream handoff. | Inventory and current workflow status documented. |
+| `docs/migration/phase-4/product-service/data-baseline.md` | Effective environment/schema/writer inventory, catalog provenance, shared topology, and database-permission proof. | Local-dev/QA identities, final shared topology, snapshot rules, and restricted-role proof documented. |
+| `docs/migration/phase-4/product-service/contract-baseline.md` | Consumer and field mappings, HTTP observations, parity rules, and transport semantics. | Observations plus binding field/scenario comparison and unary gRPC/HTTP decisions documented. |
+| `docs/migration/phase-4/product-service/security-baseline.md` | Observed Java access and identity behavior and the compatible future Go model. | Live/isolated evidence and final HTTP/gRPC/hop mapping documented. |
+| `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and index for the sanitized fixture corpus. | Evidence scenarios through permissions captured and Step 10 decision checks documented; replay/handoff checks remain registered. |
+| `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | Accepted local-dev/QA captures plus isolated data, failure, access, and database-permission fixtures present. |
 | `legacy/product-service/src/test/java/…` | Product/PostgreSQL listener, fixture, edge, failure, and permission tests. | Disposable listener/PostgreSQL happy paths, raw-JSONB edges, lookup/decode/dependency failures, SQL-null constraints, and shared-database override guard implemented. |
-| `legacy/agent-portal-gateway/src/test/…` | Gateway listener, retry/fallback, and access tests against the shared corpus. | Real-listener authentication plus lookup, retry, fallback, backend-error, and backend-unavailable observations implemented; full access cases remain planned. |
-| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Fixture checks plus smoke, happy, data-edge, and failure suites implemented; later capabilities fail explicitly until their owning steps. |
+| `legacy/agent-portal-gateway/src/test/…` | Gateway listener, retry/fallback, and access tests against the shared corpus. | Real-listener failure and complete controlled access/propagation matrices implemented. |
+| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Captures and fixture checks plus smoke, happy, data-edge, failure, access, and database-permission suites implemented; comparator/replay/aggregate capabilities remain pending. |
 
 Ticket plans, execution records, step summaries, and Git snapshots stay in the ignored
 `ai/artifacts/epic-4.2/issue-131/` directory. They are evidence records rather than reusable
@@ -137,9 +138,9 @@ catalog client in those services.
 
 [`manifest.json`](../../../../legacy/product-service/src/test/resources/product-read-baseline/manifest.json)
 is the canonical register. Every entry has a stable ID, target environment, fixture provenance,
-credential category, capture profile, source references, acceptance-criterion mapping, and a
-`registered` status. A registered entry describes required work and never means the result was
-observed.
+credential category, capture profile, source references, acceptance-criterion mapping, and status.
+`registered` means work remains; `captured` identifies accepted runtime or isolated evidence;
+`documented` identifies a derived decision/check whose reusable evidence is a baseline document.
 
 The register separates:
 
@@ -156,9 +157,10 @@ The manifest's capture profiles define the required fields. HTTP evidence includ
 query, sanitized request headers, credential category, status, content type, selected response
 headers, raw sanitized body, environment, capture command, service revision, fixture/schema/data
 identity, retry/fallback information, timestamp, and sanitization record. Stored data is captured
-separately and losslessly. Volatile headers and JSON object-key order may be considered for later
-normalization, but the register does not preapprove normalization of decimals, field presence,
-array order, status, or errors.
+separately and losslessly. The accepted normalization is limited to volatile transport headers,
+response framing, JSON object-key order, and top-level product-list order. Decimal tokens, field
+presence, status, subtype, scalar values, and nested-array order remain comparison-sensitive; safe
+pilot server-error bodies intentionally omit the internal exception text preserved in Java fixtures.
 
 ## Reproduction status
 

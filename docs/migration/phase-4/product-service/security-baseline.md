@@ -60,7 +60,7 @@ PostgreSQL with its database credential and environment-configured SSL flag; tha
 is separate from the caller and is covered by the data-access baseline. No mTLS or workload identity
 protects the gateway-to-Product hop in the observed Java design.
 
-## Java-compatible mapping for #133
+## Final Java-compatible mapping for #133
 
 The future Product pilot must keep these access results until an explicit hardening decision changes
 them:
@@ -77,10 +77,32 @@ them:
 - No product-specific permission result exists. A role mismatch must not become a fabricated `403`.
   Positive tests include list/get with an unrelated role and direct reads without credentials.
 - A new workload identity, mTLS policy, JWT rotation mechanism, or backend role check is separate
-  hardening work. Step 10 finalizes the transport mapping and records any explicit accepted change.
+  hardening work.
 
 These rules preserve the effective Java security model; they do not claim that anonymous direct
 Product access or shared symmetric trust is a sufficient long-term design.
+
+The binding entry and hop mapping is:
+
+| Entry or hop | Identity and enforcement required during coexistence | Transport/trust requirement | #133 proof |
+| --- | --- | --- | --- |
+| Browser/client → Java gateway `GET /api/products` and `GET /api/products/{code}` | Gateway verifies the existing HMAC signature, expiry, and non-empty `sub`. Missing, malformed, invalid-signature, expired, or missing-subject tokens are `401`. Future `nbf`, issuer, audience, and roles remain non-enforcing. | Existing gateway HTTP exposure and trust-material ownership remain unchanged. | Real-listener positive and negative matrix, including accepted issuer/audience/future-`nbf`/unrelated-role cases. |
+| Java gateway → Go compatible HTTP | Anonymous backend call. Do not forward bearer token, principal, role, or invented identity metadata. Go performs no caller or product-entitlement check. | Cluster-internal plain HTTP, matching the observed hop. Existing Java gateway owns authentication, retry, and fallback. | Record the downstream request and prove all identity headers are absent; prove rejected gateway requests make no backend call. |
+| Direct Go HTTP list/get | Anonymous, matching direct Java Product. No JWT parser, role check, or `403` result is introduced. | Internal `ClusterIP` exposure owned by #134; no claim of public bypass protection. | List/get succeed without credentials and with malformed, expired, or unrelated credentials because the backend does not parse them. |
+| Direct Go unary gRPC list/get | Anonymous internal business entry with the same list/get authorization result as direct HTTP. Transport validation and application errors are not authorization decisions. | Internal gRPC port on the distinct Go Service. No mTLS or workload identity is required for Java parity. | Real gRPC listener tests prove unauthenticated success and absence of role/product checks; #134 proves the port is not externally exposed. |
+| Go HTTP adapter → application handler | No network identity transition and no principal synthesis. The adapter passes only the decoded Product request. | In-process boundary. | Adapter tests prove headers/claims do not alter Product results. |
+| Go service → PostgreSQL | Separate `go_product_reader` database identity; never the end-user JWT subject and never the Java `product` owner. | PostgreSQL credential supplied through the environment Secret; minimum grants are defined in `data-baseline.md`. | #134 verifies the deployed identity and effective read-only grants; permission fixtures remain issue #131 evidence. |
+
+There is no denied product entitlement case in the Java model. An unrelated or product-mismatched
+role is therefore a positive access case after successful gateway authentication, and direct Go
+HTTP/gRPC access without a bearer token is also a positive parity case. #133 must keep authentication
+failures (`401`) distinct from authorization (`403`, which is not expected), backend application
+errors, and database permission failures.
+
+The existing HMAC key lifecycle remains owned by Auth and the Java gateway configuration. The Go
+Product service does not consume that signing key under this mapping. Rotation redesign, issuer or
+audience enforcement, future-`nbf` enforcement, product-role authorization, mTLS, and workload
+identity require separate explicit hardening decisions and cannot be added under a parity claim.
 
 ## Reproduction
 

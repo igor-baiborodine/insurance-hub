@@ -202,3 +202,29 @@ This proof defines the candidate role and demonstrates PostgreSQL enforcement in
 not install or change local-dev or QA grants. #134 must create a separate environment credential,
 verify effective deployed privileges including ownership, memberships, `PUBLIC` and default grants,
 confirm the Go workload uses that credential, and prove startup performs no schema or data writes.
+
+## Final shared-data decision
+
+The pilot topology is one shared environment database, not a copied or synchronized catalog. In
+local-dev and QA, Java and Go read the same `product` database and `public.product` table. Java keeps
+the existing `product` owner identity, Hibernate update behavior, and `DataLoader` seeding ownership
+for this phase. Go uses a separately provisioned restricted login and has no migration, DDL, grant,
+fixture-load, seed, insert, update, delete, or truncate path at startup or runtime.
+
+The authoritative comparison identity is the tuple of environment, source/service revision,
+PostgreSQL database/schema, schema checksum, catalog checksum, four ordered code identities, and
+per-row checksums recorded by the accepted inventory and catalog fixtures. HTTP observations must
+link to that identity. A changed column, constraint, row set, row checksum, or mismatched observation
+invalidates the affected baseline even while the product-addition freeze is in force. The response
+must be a new read-only capture, review, explicit fixture acceptance, and complete replay; tooling
+must never refresh expected files during comparison.
+
+| Owner | Final responsibility |
+| --- | --- |
+| #132 | Implement read-only repository behavior against `public.product`; include no startup schema or data writer. Select and pin the SQL adapter/tooling without changing the topology. |
+| #134 | Provision the separate environment Secret and role idempotently; apply the minimum grants; verify ownership, memberships, `PUBLIC` and default grants, effective read/write/DDL behavior, workload credential wiring, startup behavior, and unchanged shared data/schema in local-dev and QA. |
+| #136 | Measure differential/candidate load against Java/PostgreSQL and define pass/abort criteria before qualification; issue #131 does not invent capacity thresholds. |
+| Java/platform owners | Retain the existing Java schema/seeding owner and routing until the later cutover and retirement gates authorize change. |
+
+The isolated PostgreSQL proof is the reusable role-definition evidence. It is not evidence that the
+role has already been installed in either shared environment.
