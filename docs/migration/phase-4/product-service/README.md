@@ -10,9 +10,9 @@ synthetic data-semantics, failure, access, and database-permission corpora are e
 recovery, shared-data decision, and role proof are documented in
 [`data-baseline.md`](data-baseline.md); field and scenario parity plus unary gRPC/HTTP semantics are
 documented in [`contract-baseline.md`](contract-baseline.md); the final Java-compatible entry/hop
-mapping is in [`security-baseline.md`](security-baseline.md). Replay, live drift verification, and
-the final evidence handoff remain pending. A source reference records what the checkout says; it is
-not evidence of an effective runtime result.
+mapping is in [`security-baseline.md`](security-baseline.md). Deterministic replay and drift
+detection are implemented; the final evidence handoff remains pending. A source reference records
+what the checkout says; it is not evidence of an effective runtime result.
 
 ## Scope and foundation
 
@@ -39,11 +39,11 @@ evidence are still owned by issues #131 through #136.
 | `docs/migration/phase-4/product-service/data-baseline.md` | Effective environment/schema/writer inventory, catalog provenance, shared topology, and database-permission proof. | Local-dev/QA identities, final shared topology, snapshot rules, and restricted-role proof documented. |
 | `docs/migration/phase-4/product-service/contract-baseline.md` | Consumer and field mappings, HTTP observations, parity rules, and transport semantics. | Observations plus binding field/scenario comparison and unary gRPC/HTTP decisions documented. |
 | `docs/migration/phase-4/product-service/security-baseline.md` | Observed Java access and identity behavior and the compatible future Go model. | Live/isolated evidence and final HTTP/gRPC/hop mapping documented. |
-| `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and index for the sanitized fixture corpus. | Evidence scenarios through permissions captured and Step 10 decision checks documented; replay/handoff checks remain registered. |
+| `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and index for the sanitized fixture corpus. | Evidence scenarios through permissions captured, Step 10 decisions documented, and replay/drift checks validated; the handoff check remains registered. |
 | `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | Accepted local-dev/QA captures plus isolated data, failure, access, and database-permission fixtures present. |
 | `legacy/product-service/src/test/java/…` | Product/PostgreSQL listener, fixture, edge, failure, and permission tests. | Disposable listener/PostgreSQL happy paths, raw-JSONB edges, lookup/decode/dependency failures, SQL-null constraints, and shared-database override guard implemented. |
 | `legacy/agent-portal-gateway/src/test/…` | Gateway listener, retry/fallback, and access tests against the shared corpus. | Real-listener failure and complete controlled access/propagation matrices implemented. |
-| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Captures and fixture checks plus smoke, happy, data-edge, failure, access, and database-permission suites implemented; comparator/replay/aggregate capabilities remain pending. |
+| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Capture, fixture, smoke, happy, data-edge, failure, access, permission, comparator, environment replay, live verification, and aggregate entry points are implemented. |
 
 Ticket plans, execution records, step summaries, and Git snapshots stay in the ignored
 `ai/artifacts/epic-4.2/issue-131/` directory. They are evidence records rather than reusable
@@ -140,7 +140,8 @@ catalog client in those services.
 is the canonical register. Every entry has a stable ID, target environment, fixture provenance,
 credential category, capture profile, source references, acceptance-criterion mapping, and status.
 `registered` means work remains; `captured` identifies accepted runtime or isolated evidence;
-`documented` identifies a derived decision/check whose reusable evidence is a baseline document.
+`documented` identifies a derived decision/check whose reusable evidence is a baseline document;
+`validated` identifies an executed replay, comparison, or safety check with passing evidence.
 
 The register separates:
 
@@ -174,6 +175,8 @@ make product-baseline-test BASELINE_SUITE=data-edges
 make product-baseline-test BASELINE_SUITE=failures
 make product-baseline-test BASELINE_SUITE=access
 make product-baseline-test BASELINE_SUITE=db-permissions
+make product-baseline-test BASELINE_SUITE=comparator
+make product-baseline-test BASELINE_SUITE=all
 make product-baseline-preflight BASELINE_ENV=local-dev
 make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=inventory
 make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=inventory
@@ -187,6 +190,12 @@ make product-baseline-fixtures-check BASELINE_PART=data-edges
 make product-baseline-fixtures-check BASELINE_PART=failures
 make product-baseline-fixtures-check BASELINE_PART=access
 make product-baseline-fixtures-check BASELINE_PART=db-permissions
+make product-baseline-replay BASELINE_FIXTURE_SET=local-dev
+make product-baseline-replay BASELINE_FIXTURE_SET=qa
+make product-baseline-check
+make product-baseline-verify BASELINE_ENV=local-dev \
+  BASELINE_PRODUCT_DB_TRANSPORT=kubectl-exec \
+  BASELINE_GATEWAY_TOKEN_FILE=/path/to/temporary-token
 ```
 
 The smoke suite requires Java 14, system Maven, Docker Engine, and dependency resolution access on
@@ -199,14 +208,28 @@ stores or prints the token or signing secret.
 
 The Product test base rejects attempts to override its datasource, PostgreSQL, Hibernate DDL, or
 test-environment isolation properties. Invalid suite names, missing configuration, the Pricing
-database port, and later unimplemented capabilities fail before any data operation. The `smoke`,
-`happy`, `data-edges`, `failures`, `access`, and `db-permissions` suites are implemented;
-`comparator` and `all` remain pending. Inventory, catalog, successful HTTP, data-edge, failure,
-access, and database-permission fixture checking are implemented. Each live capture creates a new
+database port, and invalid fixture-set names fail before any data operation. All registered suites
+are implemented. Inventory, catalog, successful HTTP, data-edge, failure, access, and
+database-permission fixture checking are implemented. Each live capture creates a new
 ignored run that must be reviewed and explicitly accepted. HTTP capture verifies the catalog
 identity before and after all ten requests, retains raw response bodies, and records only a
 redacted authorization marker.
-Replay, live verification, and the aggregate check remain pending. Access capture is implemented
+Replay loads each accepted environment catalog into a fresh disposable PostgreSQL container,
+exercises a real Product listener, and routes the accepted direct responses through a real isolated
+gateway listener. The comparator preserves decimal tokens and field presence, treats nested-array
+order as binding, and permits only object-key order, top-level product order, and omitted volatile
+headers. Its controlled tests prove precision, presence, subtype, nested-order, status, and missing
+scenario drift. `product-baseline-check` runs every fixture check and affected Java suite, both
+environment replays, and the comparator without contacting a live cluster. Live verification is a
+separate read-only operation: it preflights the explicit environment, rejects schema/catalog
+identity drift, compares all ten Product/gateway observations, and confirms identity again without
+rewriting accepted fixtures. The default database transport uses the application identity through
+an explicit local port-forward. `BASELINE_PRODUCT_DB_TRANSPORT=kubectl-exec` is an opt-in fallback
+for a stale Kubernetes forwarding namespace; it runs the same read-only identity SQL through the
+active CloudNativePG primary's local socket and does not read the application password. Python 3 is
+required for the token-preserving comparator.
+
+Access capture is implemented
 for valid, absent, malformed, and invalid-signature credentials; controlled expiry, missing-subject,
 not-before, issuer, audience, role, and propagation cases remain isolated by design. See
 [`security-baseline.md`](security-baseline.md) for the observed permission matrix and #133 mapping.

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "baseline": "issue-131-product-read",
-  "status": "decisions-documented",
-  "statusMeaning": "Evidence through database permissions is captured and validated; parity, transport, security, and shared-data decisions are documented; replay, drift, and final handoff checks remain pending.",
+  "status": "replay-validated",
+  "statusMeaning": "Evidence and decisions through deterministic replay and drift detection are validated; final acceptance mapping and downstream handoff remain pending.",
   "representativeCatalog": ["CAR", "FAI", "HSI", "TRI"],
   "executionConstraints": {
     "environmentConcurrency": "Local-dev and QA are mutually exclusive local deployments and must be run sequentially.",
@@ -14,8 +14,8 @@
     "makeInterface": "scripts/product-baseline/Makefile",
     "implementedCaptureParts": ["inventory", "catalog", "http", "access"],
     "implementedFixtureChecks": ["inventory", "catalog", "http", "data-edges", "failures", "access", "db-permissions"],
-    "implementedSuites": ["smoke", "happy", "data-edges", "failures", "access", "db-permissions"],
-    "registeredPendingSuites": ["comparator", "all"],
+    "implementedSuites": ["smoke", "happy", "data-edges", "failures", "access", "db-permissions", "comparator", "all"],
+    "registeredPendingSuites": [],
     "localDevProductDatabaseDefault": "127.0.0.1:5492",
     "safetyBoundary": "Live preflight is read-only; mutation-capable cases run only against disposable resources."
   },
@@ -819,7 +819,8 @@
       "captureProfile": "validation",
       "sourceRefs": ["product.contract", "product.definition", "gateway.controller", "gateway.client", "gateway.fallback"],
       "acceptanceCriteria": ["AC131-02", "AC131-08", "AC131-09", "AC131-10"],
-      "status": "registered"
+      "status": "validated",
+      "evidence": "scripts/product-baseline/check-fixtures.sh"
     },
     {
       "id": "CHECK-DRIFT-001",
@@ -842,7 +843,8 @@
         {"id": "CHECK-NORMALIZE-HEADER-001", "difference": "approved volatile header"},
         {"id": "CHECK-NORMALIZE-OBJECT-ORDER-001", "difference": "JSON object-key order"}
       ],
-      "status": "registered"
+      "status": "validated",
+      "evidence": "scripts/product-baseline/test-comparator.sh"
     },
     {
       "id": "CHECK-SNAPSHOT-INVALIDATION-001",
@@ -854,7 +856,8 @@
       "captureProfile": "validation",
       "sourceRefs": ["product.entity", "product.seed", "deploy.postgres"],
       "acceptanceCriteria": ["AC131-07", "AC131-08", "AC131-10"],
-      "status": "registered"
+      "status": "validated",
+      "evidence": "scripts/product-baseline/verify.sh"
     },
     {
       "id": "CHECK-SHARED-STATE-001",
@@ -866,7 +869,8 @@
       "captureProfile": "validation",
       "sourceRefs": ["product.seed", "product.config", "deploy.product-local", "deploy.product-qa", "deploy.make", "deploy.postgres-connectivity", "deploy.flux"],
       "acceptanceCriteria": ["AC131-08", "AC131-09", "AC131-10"],
-      "status": "registered"
+      "status": "validated",
+      "evidence": "scripts/product-baseline/verify.sh"
     },
     {
       "id": "CHECK-HANDOFF-001",

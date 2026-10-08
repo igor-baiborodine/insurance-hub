@@ -32,6 +32,7 @@ case "${environment}" in
     readonly gateway_deployment="local-dev-agent-portal-gateway-legacy"
     readonly gateway_service="local-dev-agent-portal-gateway-legacy"
     readonly database_secret="local-dev-postgres-product-user-creds"
+    readonly database_cluster="local-dev-postgres-product"
     readonly default_database_port="5492"
     ;;
   qa)
@@ -43,6 +44,7 @@ case "${environment}" in
     readonly gateway_deployment="qa-agent-portal-gateway-legacy"
     readonly gateway_service="qa-agent-portal-gateway-legacy"
     readonly database_secret="qa-postgres-product-user-creds"
+    readonly database_cluster="qa-postgres-product"
     readonly default_database_port="5492"
     ;;
   *) fail "Unsupported BASELINE_ENV '${environment}'; use local-dev or qa." ;;
@@ -54,7 +56,11 @@ readonly requested_context="${BASELINE_KUBE_CONTEXT:-${expected_context}}"
 
 readonly database_host="${BASELINE_PRODUCT_DB_HOST:-127.0.0.1}"
 readonly database_port="${BASELINE_PRODUCT_DB_PORT:-${default_database_port}}"
+readonly database_transport="${BASELINE_PRODUCT_DB_TRANSPORT:-port-forward}"
 [[ "${database_port}" =~ ^[0-9]+$ ]] || fail "BASELINE_PRODUCT_DB_PORT must be numeric."
+case "${database_transport}" in port-forward | kubectl-exec) ;; *)
+  fail "BASELINE_PRODUCT_DB_TRANSPORT must be 'port-forward' or 'kubectl-exec'." ;;
+esac
 if [[ "${environment}" == "local-dev" && "${database_port}" == "5482" ]]; then
   fail "Local port 5482 belongs to Pricing; Product PostgreSQL uses 5492 by default."
 fi
@@ -110,19 +116,61 @@ for service in "${product_service}" "${gateway_service}"; do
   [[ -n "${endpoint_ip}" ]] || fail "Service '${service}' has no ready endpoint."
 done
 
-if ! pg_isready --host="${database_host}" --port="${database_port}" \
-  --timeout=5 --quiet; then
-  fail "Product PostgreSQL endpoint ${database_host}:${database_port} is unreachable. Start the Product port-forward or provide an explicit Product endpoint."
+database_username=""
+database_password=""
+database_pod=""
+if [[ "${database_transport}" == "port-forward" ]]; then
+  if ! pg_isready --host="${database_host}" --port="${database_port}" \
+    --timeout=5 --quiet; then
+    fail "Product PostgreSQL endpoint ${database_host}:${database_port} is unreachable. Start the Product port-forward or provide an explicit Product endpoint."
+  fi
+  database_username="$(kubectl --context="${expected_context}" -n "${data_namespace}" \
+    get secret "${database_secret}" -o jsonpath='{.data.username}' | base64 --decode)" || \
+    fail "Cannot read the Product database username."
+  database_password="$(kubectl --context="${expected_context}" -n "${data_namespace}" \
+    get secret "${database_secret}" -o jsonpath='{.data.password}' | base64 --decode)" || \
+    fail "Cannot read the Product database password."
+  [[ -n "${database_username}" && -n "${database_password}" ]] || \
+    fail "Product database credentials are incomplete."
+else
+  database_pod="$(kubectl --context="${expected_context}" -n "${data_namespace}" get pods \
+    -l "cnpg.io/cluster=${database_cluster},cnpg.io/instanceRole=primary" \
+    -o jsonpath='{.items[0].metadata.name}')" || fail "Cannot resolve the Product PostgreSQL primary pod."
+  [[ -n "${database_pod}" ]] || fail "The Product PostgreSQL primary pod is unavailable."
+  kubectl --context="${expected_context}" -n "${data_namespace}" exec "${database_pod}" -- \
+    pg_isready --host=127.0.0.1 --port=5432 --quiet || fail "Product PostgreSQL is not ready inside ${database_pod}."
 fi
 
-database_username="$(kubectl --context="${expected_context}" -n "${data_namespace}" \
-  get secret "${database_secret}" -o jsonpath='{.data.username}' | base64 --decode)" || \
-  fail "Cannot read the Product database username."
-database_password="$(kubectl --context="${expected_context}" -n "${data_namespace}" \
-  get secret "${database_secret}" -o jsonpath='{.data.password}' | base64 --decode)" || \
-  fail "Cannot read the Product database password."
-[[ -n "${database_username}" && -n "${database_password}" ]] || \
-  fail "Product database credentials are incomplete."
+run_psql_file() {
+  local sql_file="$1"
+  local output_file="$2"
+  if [[ "${database_transport}" == "kubectl-exec" ]]; then
+    kubectl --context="${expected_context}" -n "${data_namespace}" exec -i "${database_pod}" -- \
+      psql -X -q -A -t -v ON_ERROR_STOP=1 --username=postgres --dbname=product \
+      >"${output_file}" <"${sql_file}"
+  else
+    PGPASSWORD="${database_password}" PGCONNECT_TIMEOUT=5 \
+      psql -X -q -A -t -v ON_ERROR_STOP=1 \
+        --host="${database_host}" --port="${database_port}" \
+        --username="${database_username}" --dbname=product \
+        --file="${sql_file}" >"${output_file}"
+  fi
+}
+
+run_psql_command() {
+  local sql_command="$1"
+  if [[ "${database_transport}" == "kubectl-exec" ]]; then
+    kubectl --context="${expected_context}" -n "${data_namespace}" exec "${database_pod}" -- \
+      psql -X -q -A -t -v ON_ERROR_STOP=1 --username=postgres --dbname=product \
+        --command="${sql_command}"
+  else
+    PGPASSWORD="${database_password}" PGCONNECT_TIMEOUT=5 \
+      psql -X -q -A -t -v ON_ERROR_STOP=1 \
+        --host="${database_host}" --port="${database_port}" \
+        --username="${database_username}" --dbname=product \
+        --command="${sql_command}"
+  fi
+}
 
 readonly identity_sql="SET default_transaction_read_only=on; SELECT current_database() || '|' || current_schema() || '|' || COALESCE(to_regclass('public.product')::text, ''); SELECT count(*)::text FROM public.product;"
 if [[ -n "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT:-}" && -n "${BASELINE_PREFLIGHT_CATALOG_OUTPUT:-}" ]]; then
@@ -130,12 +178,7 @@ if [[ -n "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT:-}" && -n "${BASELINE_PREFLIGHT_
   fail "Only one preflight database output may be requested."
 elif [[ -n "${BASELINE_PREFLIGHT_CATALOG_OUTPUT:-}" ]]; then
   require_command jq
-  if ! PGPASSWORD="${database_password}" PGCONNECT_TIMEOUT=5 \
-    psql -X -q -A -t -v ON_ERROR_STOP=1 \
-      --host="${database_host}" --port="${database_port}" \
-      --username="${database_username}" --dbname=product \
-      --file="${script_dir}/catalog.sql" \
-      >"${BASELINE_PREFLIGHT_CATALOG_OUTPUT}"; then
+  if ! run_psql_file "${script_dir}/catalog.sql" "${BASELINE_PREFLIGHT_CATALOG_OUTPUT}"; then
     unset database_password
     fail "Read-only Product catalog and identity check failed."
   fi
@@ -152,12 +195,7 @@ elif [[ -n "${BASELINE_PREFLIGHT_CATALOG_OUTPUT:-}" ]]; then
     "${BASELINE_PREFLIGHT_CATALOG_OUTPUT}")"
 elif [[ -n "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT:-}" ]]; then
   require_command jq
-  if ! PGPASSWORD="${database_password}" PGCONNECT_TIMEOUT=5 \
-    psql -X -q -A -t -v ON_ERROR_STOP=1 \
-      --host="${database_host}" --port="${database_port}" \
-      --username="${database_username}" --dbname=product \
-      --file="${script_dir}/inventory.sql" \
-      >"${BASELINE_PREFLIGHT_INVENTORY_OUTPUT}"; then
+  if ! run_psql_file "${script_dir}/inventory.sql" "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT}"; then
     unset database_password
     fail "Read-only Product database inventory and identity check failed."
   fi
@@ -172,11 +210,7 @@ elif [[ -n "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT:-}" ]]; then
   database_row_count="$(jq -r '.catalogProvenance.rowCount' \
     "${BASELINE_PREFLIGHT_INVENTORY_OUTPUT}")"
 else
-  if ! database_output="$(PGPASSWORD="${database_password}" PGCONNECT_TIMEOUT=5 \
-    psql -X -q -A -t -v ON_ERROR_STOP=1 \
-      --host="${database_host}" --port="${database_port}" \
-      --username="${database_username}" --dbname=product \
-      --command="${identity_sql}" 2>&1)"; then
+  if ! database_output="$(run_psql_command "${identity_sql}" 2>&1)"; then
     unset database_password
     fail "Read-only Product database identity check failed: ${database_output}"
   fi
@@ -194,7 +228,11 @@ echo "Product baseline preflight passed for ${environment}."
 echo "  Kubernetes context: ${expected_context}"
 echo "  Service namespace: ${service_namespace}"
 echo "  Data namespace: ${data_namespace}"
-echo "  Product database endpoint: ${database_host}:${database_port}"
+if [[ "${database_transport}" == "kubectl-exec" ]]; then
+  echo "  Product database endpoint: kubectl-exec:${database_pod}"
+else
+  echo "  Product database endpoint: ${database_host}:${database_port}"
+fi
 echo "  Product catalog rows visible: ${database_row_count}"
 echo "  Docker: ${docker_versions}"
 echo "  Java: $(first_line "${java_version}")"

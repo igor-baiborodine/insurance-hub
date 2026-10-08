@@ -27,8 +27,12 @@ expect_failure "Unsupported BASELINE_ENV 'production'" \
   env BASELINE_ENV=production "${script_dir}/preflight.sh"
 expect_failure "port 5482 belongs to Pricing" \
   env BASELINE_ENV=local-dev BASELINE_PRODUCT_DB_PORT=5482 "${script_dir}/preflight.sh"
+expect_failure "BASELINE_PRODUCT_DB_TRANSPORT must be 'port-forward' or 'kubectl-exec'" \
+  env BASELINE_ENV=local-dev BASELINE_PRODUCT_DB_TRANSPORT=socket "${script_dir}/preflight.sh"
 expect_failure "Unsupported BASELINE_SUITE 'unknown'" \
   env BASELINE_SUITE=unknown "${script_dir}/validate-suite.sh"
+expect_failure "BASELINE_FIXTURE_SET is required" \
+  env BASELINE_FIXTURE_SET=unknown "${script_dir}/replay.sh"
 expect_failure "BASELINE_PART must be 'inventory'" \
   env BASELINE_ENV=local-dev BASELINE_PART=stored-catalog \
   "${script_dir}/capture-inventory.sh"
