@@ -14,9 +14,10 @@ fail() {
 }
 
 case "$integration_suite" in
-	all) test_pattern='^(TestPostgresHarness|TestPostgresReader)$' ;;
+	all) test_pattern='^(TestPostgresHarness|TestPostgresReader|TestProductGRPC)$' ;;
 	harness) test_pattern='^TestPostgresHarness$' ;;
 	reader) test_pattern='^TestPostgresReader$' ;;
+	grpc) test_pattern='^TestProductGRPC$' ;;
 	'') fail 'INTEGRATION_SUITE must not be empty' ;;
 	*) fail "unknown INTEGRATION_SUITE: $integration_suite" ;;
 esac
@@ -49,7 +50,7 @@ PRODUCT_TEST_POSTGRES_IMAGE="$postgres_image" \
 
 executed_count=$(
 	awk '
-		/"Action":"run"/ && /"Test":"TestPostgres(Harness|Reader)/ { count++ }
+		/"Action":"run"/ && /"Test":"(TestPostgresHarness|TestPostgresReader|TestProductGRPC)/ { count++ }
 		END { print count + 0 }
 	' "$result_file"
 )
