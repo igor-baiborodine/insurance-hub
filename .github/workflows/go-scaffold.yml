@@ -1,4 +1,4 @@
-name: Go service scaffold CI
+name: Go modules CI
 
 on:
   push:
@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'templates/go-service/**'
+      - 'services/product-service/**'
+      - 'legacy/product-service/src/test/resources/product-read-baseline/**'
       - 'go.mod'
       - 'go.sum'
       - 'go.work'
@@ -24,6 +26,8 @@ on:
       - main
     paths:
       - 'templates/go-service/**'
+      - 'services/product-service/**'
+      - 'legacy/product-service/src/test/resources/product-read-baseline/**'
       - 'go.mod'
       - 'go.sum'
       - 'go.work'
@@ -43,7 +47,7 @@ permissions:
 
 jobs:
   validate:
-    name: Validate Go module topology and scaffold
+    name: Validate Go module topology and services
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository history
@@ -51,15 +55,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go 1.27.1
+      - name: Set up Go 1.27.2
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: true
-          cache-dependency-path: templates/go-service/go.sum
+          cache-dependency-path: |
+            templates/go-service/go.sum
+            services/product-service/go.sum
 
       - name: Bootstrap pinned scaffold tools
         run: make go-scaffold-bootstrap-tools
+
+      - name: Bootstrap pinned Product tools
+        run: make -C services/product-service bootstrap-tools
 
       - name: Resolve formatting scope
         shell: bash

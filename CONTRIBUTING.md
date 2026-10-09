@@ -28,7 +28,7 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
 
 * **Git** `>=2.43.0`,
   see [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
-* **Go** `1.27.1` for the Go service scaffold, see [Install Go](https://go.dev/doc/install).
+* **Go** `1.27.2` for the Go modules, see [Install Go](https://go.dev/doc/install).
 * **Node.js** `12.22.12`, see [Install Node.js](https://nodejs.org/en/download/).
 * **Yarn** `1.22.22`, see [Install Yarn](https://classic.yarnpkg.com/en/docs/install).
 * **jq** `>=1.6`, see [Install jq](https://stedolan.github.io/jq/download/).
@@ -145,7 +145,7 @@ Use the owning Makefile targets for every Go operation, including tool installat
 maintenance, formatting, linting, tests, builds, execution, and generation. Do not replace them
 with direct Go or tool commands. Read the owning Makefile for supported targets and module scope.
 
-The current [Go service scaffold](templates/go-service/README.md) requires exact Go 1.27.1 and pins
+The current [Go service scaffold](templates/go-service/README.md) requires exact Go 1.27.2 and pins
 its tools under ignored `templates/go-service/.tools/`. Run `bootstrap-tools`, `update-deps`,
 `update-proto-deps`, `format`, `format-proto`, and `gen-proto` only when their documented mutations
 are intended. `check`, `test-tooling`, and `check-copy` preserve the source module; `check` does not
@@ -160,9 +160,11 @@ mode. `make go-topology-test` proves controlled inventory, workspace, replacemen
 failures in disposable local fixtures. These targets do not install tools, update dependencies,
 format source, regenerate output, create a workspace, or deploy.
 
-The current inventory contains only `templates/go-service`, which is supported standalone with
-`GOWORK=off`; no workspace or filesystem replacement is approved. The six `go-scaffold-*` root
-delegates remain narrow scaffold conveniences. The
+The current inventory contains `templates/go-service` and
+[`services/product-service`](services/product-service/README.md), both supported standalone with
+`GOWORK=off`; no workspace or filesystem replacement is approved. Bootstrap Product's module-owned
+tools with `make -C services/product-service bootstrap-tools` before running the aggregate. The six
+`go-scaffold-*` root delegates remain narrow scaffold conveniences. The
 [Go module topology guide](docs/migration/phase-4/go-module-topology.md) defines exact local and CI
 commands, exclusions, mutation boundaries, consumer validation, and the reviewed onboarding
 process for future modules or workspaces.
@@ -313,7 +315,7 @@ recommendations ensures automation is consistent, maintainable, and easy to exte
     - Centralize version numbers, tool binaries, and directory paths as variables at the top.
     - This enhances readability and ease of upgrades.
       ```makefile
-      GO_VERSION = 1.27.1
+      GO_VERSION = 1.27.2
       GOLANGCI_LINT_VERSION = v2.14.0
       ```
 

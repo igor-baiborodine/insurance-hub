@@ -8,17 +8,20 @@ inventory, owning Make target, consumers, and CI path agree.
 
 ## Current topology
 
-The repository currently owns one Go module and no Go workspace.
+The repository currently owns two Go modules and no Go workspace.
 
 | Directory | Module path | Role and owner | Consumers | Replacements | Supported mode | Owning validation | CI |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `templates/go-service` | `github.com/igor-baiborodine/insurance-hub/templates/go-service` | Reusable service scaffold; Insurance Hub repository maintainers | Itself only | None | Standalone, `GOWORK=off` | `make -C templates/go-service check` | `.github/workflows/go-scaffold.yml` |
+| `services/product-service` | `github.com/igor-baiborodine/insurance-hub/services/product-service` | Product business service; Product service maintainers | Its current executable and support packages | None | Standalone, `GOWORK=off` | `make -C services/product-service check` | `.github/workflows/go-scaffold.yml` |
 
 The scaffold owns its Protobuf source and generated bindings. It is not a deployed business
-service, shared business model, or independently distributed contract module. There is no approved
-cross-module application dependency, private-module prerequisite, `go.work`, `go.work.sum`, or
-filesystem `replace`. The `services/example-copy` tree created by `check-copy` is a disposable reuse
-fixture and is excluded from topology.
+service, shared business model, or independently distributed contract module. Product currently has
+a management-only shell; its Product v1 contract, SQL reader, and business listeners join the same
+module in later issue-132 steps. There is no approved cross-module application dependency,
+private-module prerequisite, `go.work`, `go.work.sum`, or filesystem `replace`. The
+`services/example-copy` tree created by `check-copy` is a disposable reuse fixture and is excluded
+from topology.
 
 Workspace inventory is currently fail-closed. `go-module-topology.json` must retain an empty
 `workspaces` collection; `go-topology-check` rejects every non-empty workspace record before it can
@@ -35,6 +38,7 @@ Install pinned tools explicitly before running the full local job:
 
 ```sh
 make go-scaffold-bootstrap-tools
+make -C services/product-service bootstrap-tools
 ```
 
 The supported non-mutating repository checks are:
@@ -53,8 +57,9 @@ resolution, and enforces repository import boundaries.
 `go-modules-check` runs topology validation first and then visits every inventory module exactly
 once. It forces standalone mode, rejects unapproved filesystem replacements, forwards only the
 module's declared validation variables, and verifies that module/workspace manifest paths and bytes
-remain unchanged. For the current module, `FORMAT_SCOPE=all` covers every eligible handwritten Go
-file and `./...` covers eight packages, including `cmd/server` and generated consumers.
+remain unchanged. `FORMAT_SCOPE=all` covers every eligible handwritten Go file in both modules.
+The scaffold's `./...` covers eight packages; Product's current `./...` covers six shell packages,
+including `cmd/server`. Later Product contract and adapter packages must enter this aggregate.
 
 `go-topology-test` creates local temporary repositories with no network requirement. It proves
 malformed and drifted inventory failures, workspace and replacement masking, allowed contract
@@ -70,16 +75,18 @@ generated and manifest changes.
 ## Continuous integration
 
 `.github/workflows/go-scaffold.yml` is the current topology workflow. Pushes and pull requests to
-`main` trigger it for the scaffold, every `go.mod`, `go.sum`, `go.work`, and `go.work.sum`, the
-canonical inventory, topology scripts, this guide, root Makefile, and workflow itself. The topology
-checker fails if an inventory module's workflow lacks its module path triggers or does not call
+`main` trigger it for both modules, the shared Product baseline corpus, every `go.mod`, `go.sum`,
+`go.work`, and `go.work.sum`, the canonical inventory, topology scripts, this guide, root Makefile,
+and workflow itself. The topology checker fails if an inventory module's workflow lacks its module
+path triggers or does not call
 both `make go-modules-check` and `make go-topology-test` through the restricted inline step-level
 `run` forms used by this repository. Block scalars, comments, and values under unrelated workflow
 keys do not count as execution evidence.
 
-CI uses `ubuntu-24.04`, checkout v6 with full history, setup-go v7 with Go 1.27.1, the scaffold
-`go.sum` cache input, and `contents: read`. It bootstraps pinned tools through Make, resolves changed
-formatting scope from the pull-request base or push predecessor, runs the aggregate module and
+CI uses `ubuntu-24.04`, checkout v6 with full history, setup-go v7 with Go 1.27.2, both module
+`go.sum` cache inputs, and `contents: read`. It bootstraps each module's pinned tools through Make,
+resolves changed formatting scope from the pull-request base or push predecessor, runs the aggregate
+module and
 topology targets, then retains the scaffold tooling-failure and renamed-copy proofs. It requires no
 secret or live service.
 
@@ -87,6 +94,7 @@ The equivalent full-file local sequence is:
 
 ```sh
 make go-scaffold-bootstrap-tools
+make -C services/product-service bootstrap-tools
 make go-modules-check FORMAT_SCOPE=all
 make go-topology-test
 make go-scaffold-test-tooling

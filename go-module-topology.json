@@ -17,13 +17,39 @@
       ],
       "packageScope": "all Go packages under ./..., the server executable, owned Protobuf schema and generated output, and module dependency metadata",
       "prerequisites": [
-        "Go 1.27.1",
+        "Go 1.27.2",
         "pinned scaffold tools installed by make go-scaffold-bootstrap-tools",
         "GCC for race-enabled tests",
         "public module, schema, tool, and vulnerability services unless cached"
       ],
       "consumers": [
         "github.com/igor-baiborodine/insurance-hub/templates/go-service"
+      ],
+      "localReplacements": [],
+      "ciWorkflow": ".github/workflows/go-scaffold.yml"
+    },
+    {
+      "directory": "services/product-service",
+      "modulePath": "github.com/igor-baiborodine/insurance-hub/services/product-service",
+      "role": "business-service",
+      "owner": "Product service maintainers",
+      "supportedModes": [
+        "standalone"
+      ],
+      "validationTarget": "check",
+      "validationVariables": [
+        "FORMAT_SCOPE",
+        "FORMAT_BASE"
+      ],
+      "packageScope": "current Product management shell packages under ./..., the server executable, and module dependency metadata; catalog and contract checks join as implemented",
+      "prerequisites": [
+        "Go 1.27.2",
+        "pinned Product tools installed by make -C services/product-service bootstrap-tools",
+        "GCC for race-enabled tests",
+        "public module and vulnerability services unless cached"
+      ],
+      "consumers": [
+        "github.com/igor-baiborodine/insurance-hub/services/product-service"
       ],
       "localReplacements": [],
       "ciWorkflow": ".github/workflows/go-scaffold.yml"

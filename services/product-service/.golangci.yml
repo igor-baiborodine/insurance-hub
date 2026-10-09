@@ -1,0 +1,39 @@
+version: "2"
+
+run:
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  default: standard
+  exclusions:
+    generated: strict
+    paths:
+      - gen/
+      - vendor/
+      - third_party/
+      - testdata/
+      - .tools/
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+    - golines
+  settings:
+    gofumpt:
+      module-path: github.com/igor-baiborodine/insurance-hub/services/product-service
+    goimports:
+      local-prefixes:
+        - github.com/igor-baiborodine/insurance-hub/services/product-service
+    golines:
+      max-len: 100
+      tab-len: 8
+  exclusions:
+    generated: strict
+    paths:
+      - gen/
+      - vendor/
+      - third_party/
+      - testdata/
+      - .tools/

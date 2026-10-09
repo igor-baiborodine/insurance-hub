@@ -17,7 +17,7 @@ GENERATED_PROTO_FILES := \
 	gen/scaffold/v1/example_service.pb.go \
 	gen/scaffold/v1/example_service_grpc.pb.go
 
-GO_VERSION := 1.27.1
+GO_VERSION := 1.27.2
 BUF_VERSION := v1.73.0
 PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
@@ -30,6 +30,7 @@ PROTOVALIDATE_GO_VERSION := v1.4.0
 PROTOVALIDATE_SCHEMA_GO_VERSION := v1.36.12-20260825204119-511051f7f437.1
 OTEL_VERSION := v1.46.0
 OTEL_GRPC_VERSION := v0.71.0
+X_NET_VERSION := v0.60.0
 
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
@@ -89,7 +90,8 @@ update-deps:
 		go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@$(OTEL_VERSION) \
 		go.opentelemetry.io/otel/sdk@$(OTEL_VERSION) \
 		google.golang.org/grpc@$(GRPC_GO_VERSION) \
-		google.golang.org/protobuf@$(PROTOBUF_GO_VERSION)
+		google.golang.org/protobuf@$(PROTOBUF_GO_VERSION) \
+		golang.org/x/net@$(X_NET_VERSION)
 	GOWORK=off $(GO) mod tidy
 
 check-deps: verify-tools
