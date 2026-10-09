@@ -88,5 +88,8 @@ func getStatus(t *testing.T, client *http.Client, url string) int {
 		t.Fatalf("GET %s: %v", url, err)
 	}
 	defer func() { _ = response.Body.Close() }()
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		t.Fatalf("read response from %s: %v", url, err)
+	}
 	return response.StatusCode
 }
