@@ -13,6 +13,7 @@ GOLANGCI_LINT_VERSION := v2.14.0
 GOVULNCHECK_VERSION := v1.8.0
 OTEL_VERSION := v1.46.0
 X_NET_VERSION := v0.60.0
+TEST_PACKAGES ?= ./...
 
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	lint test test-race build vulncheck check run
@@ -65,7 +66,8 @@ lint: verify-tools
 	GOWORK=off $(GOLANGCI_LINT) run --config "$(GOLANGCI_CONFIG)" ./...
 
 test:
-	GOWORK=off $(GO) test -mod=readonly -count=1 ./...
+	@test -n "$(strip $(TEST_PACKAGES))" || { echo "TEST_PACKAGES must not be empty" >&2; exit 1; }
+	GOWORK=off $(GO) test -mod=readonly -count=1 $(TEST_PACKAGES)
 
 test-race:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./...

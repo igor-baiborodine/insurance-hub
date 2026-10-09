@@ -1,9 +1,10 @@
 # Product catalog read service
 
 This standalone module is the Go Product pilot. The current step establishes its independently
-owned build and management shell. Catalog HTTP, gRPC, and PostgreSQL behavior will be added in the
-remaining issue-132 steps. The executable currently exposes only `GET /livez` and `GET /readyz` on
-the management listener. Readiness returns `503` because no Product reader or business listener is
+owned build, management shell, and tested direct HTTP routing boundary. Catalog application logic,
+gRPC, and PostgreSQL behavior will be added in the remaining issue-132 steps. The executable
+currently exposes only `GET /livez` and `GET /readyz` on the management listener. Readiness
+returns `503` because no Product reader or business listener is
 wired yet. Do not route Product traffic to this shell.
 
 The module path is
@@ -18,6 +19,10 @@ make -C services/product-service check FORMAT_SCOPE=all
 make -C services/product-service build
 make -C services/product-service run
 ```
+
+The direct HTTP boundary is exercised on a real loopback listener with test-owned callbacks:
+`make -C services/product-service test TEST_PACKAGES=./internal/http`. The business listener is
+not wired into the executable yet.
 
 `bootstrap-tools`, `update-deps`, and `format` are explicit mutating targets. `check` is
 non-mutating and currently covers tool/config verification, all handwritten Go formatting,
