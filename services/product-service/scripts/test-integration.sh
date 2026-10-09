@@ -14,7 +14,9 @@ fail() {
 }
 
 case "$integration_suite" in
-	all | harness) test_pattern='^TestPostgresHarness$' ;;
+	all) test_pattern='^(TestPostgresHarness|TestPostgresReader)$' ;;
+	harness) test_pattern='^TestPostgresHarness$' ;;
+	reader) test_pattern='^TestPostgresReader$' ;;
 	'') fail 'INTEGRATION_SUITE must not be empty' ;;
 	*) fail "unknown INTEGRATION_SUITE: $integration_suite" ;;
 esac
@@ -43,11 +45,11 @@ trap cleanup EXIT
 PRODUCT_TEST_POSTGRES_IMAGE="$postgres_image" \
 	PRODUCT_INTEGRATION_FIXTURE_SET="$fixture_set" \
 	GOWORK=off "$go_command" test -mod=readonly -count=1 -race -tags=integration \
-	-json -run "$test_pattern" ./internal/testing | tee "$result_file"
+	-json -run "$test_pattern" ./internal/testing ./internal/postgres | tee "$result_file"
 
 executed_count=$(
 	awk '
-		/"Action":"run"/ && /"Test":"TestPostgresHarness/ { count++ }
+		/"Action":"run"/ && /"Test":"TestPostgres(Harness|Reader)/ { count++ }
 		END { print count + 0 }
 	' "$result_file"
 )

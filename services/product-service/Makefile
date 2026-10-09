@@ -10,6 +10,7 @@ PROTOC_GEN_GO := $(TOOLS_BIN)/protoc-gen-go
 PROTOC_GEN_GO_GRPC := $(TOOLS_BIN)/protoc-gen-go-grpc
 GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
+SQLC := $(TOOLS_BIN)/sqlc
 GOLANGCI_CONFIG := .golangci.yml
 PROTO_SCHEMA := api/product/v1/product_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
@@ -21,6 +22,7 @@ PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
 GOLANGCI_LINT_VERSION := v2.14.0
 GOVULNCHECK_VERSION := v1.8.0
+SQLC_VERSION := v1.31.1
 PROTOBUF_GO_VERSION := v1.36.12
 GRPC_GO_VERSION := v1.83.2
 PROTOVALIDATE_GO_VERSION := v1.4.0
@@ -32,13 +34,18 @@ PGX_VERSION := v5.11.0
 TESTCONTAINERS_VERSION := v0.44.0
 MOBY_GO_ARCHIVE_VERSION := v0.3.0
 POSTGRES_IMAGE := postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+SQL_SCHEMA := internal/postgres/sql/schema.sql
+SQL_QUERIES := internal/postgres/sql/queries.sql
+GENERATED_SQL_FILES := internal/postgres/dbgen/db.go internal/postgres/dbgen/models.go \
+	internal/postgres/dbgen/queries.sql.go internal/postgres/dbgen/querier.go
 TEST_PACKAGES ?= ./...
 INTEGRATION_SUITE ?= all
 FIXTURE_SET ?= qa
 
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto check-proto-drift lint test test-race test-integration build vulncheck check run
+	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race test-integration \
+	build vulncheck check run
 
 bootstrap-tools:
 	mkdir -p "$(TOOLS_BIN)"
@@ -52,6 +59,8 @@ bootstrap-tools:
 		github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install \
 		golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+	GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install \
+		github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
 	@$(MAKE) --no-print-directory verify-tools
 
 verify-tools:
@@ -61,6 +70,7 @@ verify-tools:
 		PROTOC_GEN_GO_GRPC="$(PROTOC_GEN_GO_GRPC)" \
 		GOLANGCI_LINT="$(GOLANGCI_LINT)" \
 		GOVULNCHECK="$(GOVULNCHECK)" \
+		SQLC="$(SQLC)" \
 		GOLANGCI_CONFIG="$(GOLANGCI_CONFIG)" \
 		GO_VERSION="$(GO_VERSION)" \
 		BUF_VERSION="$(BUF_VERSION)" \
@@ -68,6 +78,7 @@ verify-tools:
 		PROTOC_GEN_GO_GRPC_VERSION="$(PROTOC_GEN_GO_GRPC_VERSION)" \
 		GOLANGCI_LINT_VERSION="$(GOLANGCI_LINT_VERSION)" \
 		GOVULNCHECK_VERSION="$(GOVULNCHECK_VERSION)" \
+		SQLC_VERSION="$(SQLC_VERSION)" \
 		./scripts/verify-tools.sh
 
 format: verify-tools
@@ -146,6 +157,19 @@ check-proto-drift: verify-tools
 		GENERATED_PROTO_FILES="$(GENERATED_PROTO_FILES)" \
 		./scripts/check-proto-drift.sh
 
+gen-sql:
+	@test "$$($(SQLC) version)" = "$(SQLC_VERSION)"
+	rm -f $(GENERATED_SQL_FILES)
+	$(SQLC) generate
+
+check-sql-drift: verify-tools
+	@MAKE_COMMAND="$(MAKE)" \
+		TOOLS_BIN="$(TOOLS_BIN)" \
+		SQL_SCHEMA="$(SQL_SCHEMA)" \
+		SQL_QUERIES="$(SQL_QUERIES)" \
+		GENERATED_SQL_FILES="$(GENERATED_SQL_FILES)" \
+		./scripts/check-sql-drift.sh
+
 lint: verify-tools
 	GOWORK=off $(GOLANGCI_LINT) run --config "$(GOLANGCI_CONFIG)" ./...
 
@@ -175,7 +199,7 @@ vulncheck: verify-tools
 	GOWORK=off GOFLAGS=-mod=readonly $(GOVULNCHECK) ./...
 
 check: verify-tools format-check format-proto-check lint lint-proto test-race test-integration build \
-	check-deps check-proto-drift check-proto-breaking vulncheck
+	check-deps check-proto-drift check-sql-drift check-proto-breaking vulncheck
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server

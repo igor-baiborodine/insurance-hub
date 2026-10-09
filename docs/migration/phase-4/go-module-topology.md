@@ -65,9 +65,10 @@ once. It forces standalone mode, rejects unapproved filesystem replacements, for
 module's declared validation variables, and verifies that module/workspace manifest paths and bytes
 remain unchanged. `FORMAT_SCOPE=all` covers every eligible handwritten Go file in both modules.
 The scaffold and Product `./...` scopes cover all their current packages. Product coverage includes
-`cmd/server`, the test-owned HTTP boundary, generated Product v1 bindings, contract tests, the
-authoritative fixture loader, and the tagged PostgreSQL harness invoked by `test-integration`.
-Later Product adapters must enter this aggregate.
+`cmd/server`, the test-owned HTTP boundary, generated Product v1 bindings, sqlc-generated queries,
+the bounded PostgreSQL reader, contract tests, the authoritative QA fixture loader, and the tagged
+PostgreSQL harness/reader suites invoked by `test-integration`. Later Product transport adapters
+must enter this aggregate.
 
 `go-topology-test` creates local temporary repositories with no network requirement. It proves
 malformed and drifted inventory failures, workspace and replacement masking, allowed contract

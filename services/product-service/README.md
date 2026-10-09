@@ -1,8 +1,8 @@
 # Product catalog read service
 
 This standalone module is the Go Product pilot. It owns its build, management shell, tested direct
-HTTP routing boundary, and generated Product v1 gRPC contract. Catalog application logic, the gRPC
-adapter, and PostgreSQL behavior will be added in the remaining issue-132 steps. The executable
+HTTP routing boundary, generated Product v1 gRPC contract, and PostgreSQL catalog reader. The gRPC
+and HTTP adapters will be added in the remaining issue-132 steps. The executable
 currently exposes only `GET /livez` and `GET /readyz` on the management listener. Readiness
 returns `503` because no Product reader or business listener is wired yet. Do not route Product
 traffic to this shell.
@@ -30,14 +30,26 @@ after the run:
 make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXTURE_SET=qa
 ```
 
-`INTEGRATION_SUITE` accepts `harness` or `all`. `FIXTURE_SET` accepts only `qa`, the
+`INTEGRATION_SUITE` accepts `harness`, `reader`, or `all`. `FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
 missing fixtures, zero selected tests, and any configured `PRODUCT_DATABASE_URL` fail the target.
 The harness resolves and reads the accepted QA snapshot directly under
 `legacy/product-service/src/test/resources/product-read-baseline/` without copying or changing
-them. Its setup identity creates the legacy table and `go_product_reader`; future service tests
-receive only the generated reader URL.
+it. Its setup identity creates the legacy table and `go_product_reader`; service tests receive only
+the generated reader URL.
+
+The reader integration suite uses the same disposable database and QA snapshot:
+
+```sh
+make -C services/product-service test-integration INTEGRATION_SUITE=reader FIXTURE_SET=qa
+```
+
+The reader uses sqlc v1.31.1 with pgx v5.11.0. Its source-only schema and parameterized list/get
+queries are under `internal/postgres/sql`; generated code is under `internal/postgres/dbgen`. The
+schema file describes the existing Java-owned table for generation and tests. The service never
+executes it at runtime. Use `gen-sql` only when intentionally changing SQL inputs; `check-sql-drift`
+verifies the exact output set, source preservation, and byte-reproducible generation.
 
 The direct HTTP boundary is exercised on a real loopback listener with test-owned callbacks:
 `make -C services/product-service test TEST_PACKAGES=./internal/http`. The business listener is
@@ -49,14 +61,13 @@ The Product v1 schema is `api/product/v1/product_service.proto`; generated Go bi
 `update-proto-deps`, and `gen-proto` only when intentionally changing the schema or generated
 output; `check` verifies format, lint, reproducible generation, and breaking compatibility.
 
-`bootstrap-tools`, `update-deps`, `format`, and the protobuf maintenance targets are explicit
+`bootstrap-tools`, `update-deps`, `format`, and the protobuf/SQL generation targets are explicit
 mutating targets. `check` is
 non-mutating and currently covers tool/config verification, all handwritten Go formatting,
 lint/vet, all-package race tests, the race-enabled disposable PostgreSQL integration suite,
 executable build, dependency reproduction, and vulnerability analysis, plus Product v1 protobuf
-format, lint, drift, and breaking checks. SQL generation checks join this target when that
-capability is implemented. Tools are pinned in this Makefile and installed under ignored
-`.tools/bin/`.
+format, lint, drift, and breaking checks, plus sqlc output drift. Tools are pinned in this Makefile
+and installed under ignored `.tools/bin/`.
 Normal checks use readonly module resolution. `FORMAT_SCOPE=changed` is the default for local
 formatting; `FORMAT_SCOPE=all` checks every eligible handwritten Go file.
 

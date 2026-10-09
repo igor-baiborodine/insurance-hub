@@ -30,6 +30,7 @@ require_executable protoc-gen-go "$PROTOC_GEN_GO"
 require_executable protoc-gen-go-grpc "$PROTOC_GEN_GO_GRPC"
 require_executable golangci-lint "$GOLANGCI_LINT"
 require_executable govulncheck "$GOVULNCHECK"
+require_executable sqlc "$SQLC"
 
 expect_equal "go.mod Go version" "$GO_VERSION" "$module_go_version"
 expect_equal "Go toolchain version" "go$GO_VERSION" "$($GO env GOVERSION)"
@@ -50,6 +51,7 @@ govulncheck_version=$(
 		sed -n 's/^Scanner: govulncheck@\([^ ]*\).*/\1/p'
 )
 expect_equal "govulncheck version" "$GOVULNCHECK_VERSION" "$govulncheck_version"
+expect_equal "sqlc version" "$SQLC_VERSION" "$($SQLC version)"
 
 "$GOLANGCI_LINT" config verify --config "$config" >/dev/null
 
