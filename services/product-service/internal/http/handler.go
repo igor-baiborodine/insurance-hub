@@ -1,51 +1,177 @@
-// Package producthttp owns the direct Product HTTP routing boundary.
+// Package producthttp owns the direct Product HTTP transport boundary.
 package producthttp
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
+
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/domain"
 )
 
-// Callbacks let the HTTP boundary invoke the application without owning its domain types.
-// Step 03 supplies test callbacks; the Product application adapter is wired in a later step.
-type Callbacks struct {
-	List func(http.ResponseWriter, *http.Request)
-	Get  func(http.ResponseWriter, *http.Request, string)
+type (
+	ListProducts func(context.Context) ([]domain.Product, error)
+	GetProduct   func(context.Context, string) (domain.Product, error)
+)
+
+type Settings struct {
+	RequestTimeout time.Duration
 }
 
-// NewHandler routes direct catalog requests without normalizing encoded product codes.
-func NewHandler(callbacks Callbacks) http.Handler {
-	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodGet {
-			writer.Header().Set("Allow", http.MethodGet)
-			http.Error(writer, "Method Not Allowed", http.StatusMethodNotAllowed)
-			return
-		}
+// NewHandler constructs the direct Product HTTP routes.
+func NewHandler(
+	logger *slog.Logger,
+	settings Settings,
+	listProducts ListProducts,
+	getProduct GetProduct,
+) (http.Handler, error) {
+	if logger == nil {
+		return nil, errors.New("create Product HTTP handler: logger is required")
+	}
+	if settings.RequestTimeout <= 0 {
+		return nil, errors.New(
+			"create Product HTTP handler: request timeout must be positive",
+		)
+	}
+	if listProducts == nil || getProduct == nil {
+		return nil, errors.New("create Product HTTP handler: catalog handlers are required")
+	}
 
-		path := request.URL.EscapedPath()
-		if path == "/products" || path == "/products/" {
-			callbacks.List(writer, request)
-			return
-		}
-		if !strings.HasPrefix(path, "/products/") {
-			WriteNotFound(writer, request)
-			return
-		}
+	handler := &catalogHandler{
+		logger:         logger,
+		requestTimeout: settings.RequestTimeout,
+		listProducts:   listProducts,
+		getProduct:     getProduct,
+	}
+	return http.HandlerFunc(handler.serveHTTP), nil
+}
 
-		rawCode := strings.TrimPrefix(path, "/products/")
-		if rawCode == "" || strings.Contains(rawCode, "/") {
-			WriteNotFound(writer, request)
+type catalogHandler struct {
+	logger         *slog.Logger
+	requestTimeout time.Duration
+	listProducts   ListProducts
+	getProduct     GetProduct
+}
+
+func (handler *catalogHandler) serveHTTP(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writer.Header().Set("Allow", http.MethodGet)
+		http.Error(writer, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	path := request.URL.EscapedPath()
+	if path == "/products" || path == "/products/" {
+		handler.list(writer, request)
+		return
+	}
+	if !strings.HasPrefix(path, "/products/") {
+		WriteNotFound(writer, request)
+		return
+	}
+
+	rawCode := strings.TrimPrefix(path, "/products/")
+	if rawCode == "" || strings.Contains(rawCode, "/") {
+		WriteNotFound(writer, request)
+		return
+	}
+	code, err := url.PathUnescape(rawCode)
+	if err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "Malformed URI", "/")
+		return
+	}
+	handler.get(writer, request, code)
+}
+
+func (handler *catalogHandler) list(writer http.ResponseWriter, request *http.Request) {
+	ctx, cancel := context.WithTimeout(request.Context(), handler.requestTimeout)
+	defer cancel()
+	products, err := handler.listProducts(ctx)
+	if err != nil {
+		handler.writeApplicationError(writer, request, err)
+		return
+	}
+
+	mapped := make([]productDTO, 0, len(products))
+	for _, product := range products {
+		value, mapErr := mapProduct(product)
+		if mapErr != nil {
+			handler.writeApplicationError(writer, request, mapErr)
 			return
 		}
-		code, err := url.PathUnescape(rawCode)
-		if err != nil {
-			writeJSONError(writer, http.StatusBadRequest, "Malformed URI", "/")
-			return
-		}
-		callbacks.Get(writer, request, code)
-	})
+		mapped = append(mapped, value)
+	}
+	handler.writeSuccess(writer, request, mapped)
+}
+
+func (handler *catalogHandler) get(
+	writer http.ResponseWriter,
+	request *http.Request,
+	code string,
+) {
+	ctx, cancel := context.WithTimeout(request.Context(), handler.requestTimeout)
+	defer cancel()
+	product, err := handler.getProduct(ctx, code)
+	if err != nil {
+		handler.writeApplicationError(writer, request, err)
+		return
+	}
+	mapped, err := mapProduct(product)
+	if err != nil {
+		handler.writeApplicationError(writer, request, err)
+		return
+	}
+	handler.writeSuccess(writer, request, mapped)
+}
+
+func (handler *catalogHandler) writeSuccess(
+	writer http.ResponseWriter,
+	request *http.Request,
+	value any,
+) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		handler.writeApplicationError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, body)
+}
+
+func (handler *catalogHandler) writeApplicationError(
+	writer http.ResponseWriter,
+	request *http.Request,
+	err error,
+) {
+	if errors.Is(err, application.ErrProductNotFound) {
+		WriteNotFound(writer, request)
+		return
+	}
+	if errors.Is(err, context.Canceled) && request.Context().Err() != nil {
+		return
+	}
+	handler.logger.ErrorContext(
+		request.Context(),
+		"Product HTTP request failed",
+		slog.String("route", routeName(request.URL.EscapedPath())),
+	)
+	writeJSON(
+		writer,
+		http.StatusInternalServerError,
+		[]byte(`{"message":"Internal Server Error"}`),
+	)
+}
+
+func routeName(path string) string {
+	if path == "/products" || path == "/products/" {
+		return "list-products"
+	}
+	return "get-product"
 }
 
 // WriteNotFound preserves the incoming encoded path in the legacy self link.
@@ -54,9 +180,13 @@ func WriteNotFound(writer http.ResponseWriter, request *http.Request) {
 }
 
 func writeJSONError(writer http.ResponseWriter, status int, message, href string) {
+	writeJSON(writer, status, jsonErrorBody(message, href))
+}
+
+func writeJSON(writer http.ResponseWriter, status int, body []byte) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
-	_, _ = writer.Write(jsonErrorBody(message, href))
+	_, _ = writer.Write(body)
 }
 
 type errorLink struct {
