@@ -17,3 +17,4 @@ flags:
 ignore:
   - "services/product-service/gen/**"
   - "services/product-service/internal/postgres/dbgen/**"
+  - "services/product-service/internal/testing/**"
