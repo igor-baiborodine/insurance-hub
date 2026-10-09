@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
-	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/postgres/dbgen"
 )
@@ -23,56 +22,6 @@ type Reader struct {
 }
 
 var _ application.ProductReader = (*Reader)(nil)
-
-// Open creates and verifies a bounded pool using the restricted runtime database settings.
-func Open(ctx context.Context, settings config.Database) (*Reader, error) {
-	return open(
-		ctx,
-		settings.URL.Value(),
-		settings.MaxConnections,
-		settings.ConnectTimeout,
-		settings.AcquireTimeout,
-		settings.QueryTimeout,
-	)
-}
-
-func open(
-	ctx context.Context,
-	databaseURL string,
-	maxConnections int32,
-	connectTimeout time.Duration,
-	acquireTimeout time.Duration,
-	queryTimeout time.Duration,
-) (*Reader, error) {
-	poolConfig, err := pgxpool.ParseConfig(databaseURL)
-	if err != nil {
-		return nil, unavailable("parse connection settings", err)
-	}
-	poolConfig.MaxConns = maxConnections
-	poolConfig.MinConns = 0
-	poolConfig.ConnConfig.ConnectTimeout = connectTimeout
-
-	connectCtx, cancel := context.WithTimeout(ctx, connectTimeout)
-	defer cancel()
-	pool, err := pgxpool.NewWithConfig(connectCtx, poolConfig)
-	if err != nil {
-		return nil, classifyContext("create pool", connectCtx, err)
-	}
-	if err := pool.Ping(connectCtx); err != nil {
-		pool.Close()
-		return nil, classifyContext("verify connection", connectCtx, err)
-	}
-	return &Reader{
-		pool:           pool,
-		acquireTimeout: acquireTimeout,
-		queryTimeout:   queryTimeout,
-	}, nil
-}
-
-// Close releases every connection owned by the reader pool.
-func (reader *Reader) Close() {
-	reader.pool.Close()
-}
 
 // ListProducts returns a complete decoded catalog or an error without a partial result.
 func (reader *Reader) ListProducts(ctx context.Context) ([]domain.Product, error) {

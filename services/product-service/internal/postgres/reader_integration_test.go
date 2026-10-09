@@ -46,23 +46,25 @@ func TestPostgresReader(t *testing.T) {
 		t.Fatalf("start harness: %v", err)
 	}
 	t.Cleanup(func() { _ = harness.Close() })
-	reader, err := open(
+	pool, err := openPool(
 		ctx,
 		harness.RuntimeDatabaseURL(),
 		1,
 		3*time.Second,
-		2*time.Second,
-		5*time.Second,
 	)
 	if err != nil {
-		t.Fatalf("open reader: %v", err)
+		t.Fatalf("open pool: %v", err)
 	}
-	readerClosed := false
+	poolClosed := false
 	t.Cleanup(func() {
-		if !readerClosed {
-			reader.Close()
+		if !poolClosed {
+			pool.Close()
 		}
 	})
+	reader, err := NewReader(pool, 2*time.Second, 5*time.Second)
+	if err != nil {
+		t.Fatalf("create reader: %v", err)
+	}
 	if reader.pool.Config().MaxConns != 1 || reader.pool.Config().MinConns != 0 {
 		t.Fatalf(
 			"pool bounds = %d/%d, want 1/0",
@@ -258,8 +260,8 @@ func TestPostgresReader(t *testing.T) {
 	})
 
 	// when
-	reader.Close()
-	readerClosed = true
+	pool.Close()
+	poolClosed = true
 	products, listErr := reader.ListProducts(ctx)
 
 	// then

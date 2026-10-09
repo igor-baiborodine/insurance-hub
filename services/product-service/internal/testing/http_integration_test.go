@@ -60,16 +60,24 @@ func TestProductHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load Product configuration: %v", err)
 	}
-	reader, err := postgres.Open(ctx, settings.Database)
+	pool, err := postgres.OpenPool(ctx, settings.Database)
 	if err != nil {
-		t.Fatalf("open reader: %v", err)
+		t.Fatalf("open pool: %v", err)
 	}
-	readerClosed := false
+	poolClosed := false
 	t.Cleanup(func() {
-		if !readerClosed {
-			reader.Close()
+		if !poolClosed {
+			pool.Close()
 		}
 	})
+	reader, err := postgres.NewReader(
+		pool,
+		settings.Database.AcquireTimeout,
+		settings.Database.QueryTimeout,
+	)
+	if err != nil {
+		t.Fatalf("create reader: %v", err)
+	}
 	listProducts, err := application.NewListProducts(reader)
 	if err != nil {
 		t.Fatal(err)
@@ -155,8 +163,8 @@ func TestProductHTTP(t *testing.T) {
 	})
 
 	t.Run("maps unavailable database without retry or detail", func(t *testing.T) {
-		reader.Close()
-		readerClosed = true
+		pool.Close()
+		poolClosed = true
 		want := HTTPExpectation{
 			Status: http.StatusInternalServerError, ContentType: "application/json",
 			Body: []byte(`{"message":"Internal Server Error"}`),

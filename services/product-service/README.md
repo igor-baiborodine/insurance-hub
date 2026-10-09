@@ -1,11 +1,9 @@
 # Product catalog read service
 
-This standalone module is the Go Product pilot. It owns its build, management shell, tested direct
-HTTP routing boundary, generated Product v1 gRPC contract, and PostgreSQL catalog reader. The gRPC
-and HTTP adapters will be added in the remaining issue-132 steps. The executable
-currently exposes only `GET /livez` and `GET /readyz` on the management listener. Readiness
-returns `503` because no Product reader or business listener is wired yet. Do not route Product
-traffic to this shell.
+This standalone module is the Go Product pilot. Its executable serves the direct Product HTTP API,
+the generated Product v1 gRPC API, and management health routes from one explicit composition root.
+It uses one process-owned PostgreSQL pool for catalog reads and dependency-aware readiness. The
+service remains an internal migration candidate; do not route production Product traffic to it.
 
 The module path is
 `github.com/igor-baiborodine/insurance-hub/services/product-service`. It resolves with
@@ -30,7 +28,8 @@ after the run:
 make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXTURE_SET=qa
 ```
 
-`INTEGRATION_SUITE` accepts `harness`, `reader`, or `all`. `FIXTURE_SET` accepts only `qa`, the
+`INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, or `all`.
+`FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
 missing fixtures, zero selected tests, and any configured `PRODUCT_DATABASE_URL` fail the target.
@@ -52,8 +51,9 @@ executes it at runtime. Use `gen-sql` only when intentionally changing SQL input
 verifies the exact output set, source preservation, and byte-reproducible generation.
 
 The direct HTTP boundary is exercised on a real loopback listener with test-owned callbacks:
-`make -C services/product-service test TEST_PACKAGES=./internal/http`. The business listener is
-not wired into the executable yet.
+`make -C services/product-service test TEST_PACKAGES=./internal/http`. The `startup` integration
+suite exercises the production composition path, all three listeners, empty-table health,
+dependency loss/recovery, startup failures, and resource cleanup.
 
 The Product v1 schema is `api/product/v1/product_service.proto`; generated Go bindings are under
 `gen/product/v1`. The frozen initial compatibility baseline lives in
@@ -105,5 +105,8 @@ fallback and is held in a redacting value type; it must identify the restricted 
 
 Callers with a shorter deadline keep that deadline. Acquisition and query work share the request
 budget rather than starting new clocks. Startup, readiness, and shutdown each use their one
-documented budget. The current executable still starts only the management listener; later issue-132
-steps consume the business listener, database, and operation settings.
+documented budget. Startup pings PostgreSQL, verifies `SELECT` access to `public.product`, and binds
+all listeners before readiness becomes true. `/livez` is process-only; `/readyz` performs a bounded
+read-access check, treats an empty table as healthy, returns `503` during dependency loss or drain,
+and recovers without changing schema or permissions. The composition root closes the singleton pool
+after partial startup or process shutdown.

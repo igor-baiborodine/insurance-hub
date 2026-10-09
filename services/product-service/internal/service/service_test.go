@@ -2,94 +2,70 @@ package service
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"testing"
 	"time"
 
+	grpcgo "google.golang.org/grpc"
+
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
-	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/telemetry"
 )
 
-func TestShellServesLivenessButNeverClaimsReadiness(t *testing.T) {
+func TestRunRejectsInvalidProcessDependencies(t *testing.T) {
 	// given
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-	settings := config.Config{
-		ServiceName:     "product-service",
-		ShutdownTimeout: time.Second,
-		Telemetry:       config.Telemetry{ExporterTimeout: time.Second},
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	result := make(chan error, 1)
-	deps := dependencies{
-		listen:       func(string, string) (net.Listener, error) { return listener, nil },
-		newTelemetry: telemetry.New,
-	}
-	go func() { result <- run(ctx, settings, slog.New(slog.NewTextHandler(io.Discard, nil)), deps) }()
-	client := &http.Client{Timeout: time.Second}
-
-	// when
-	live := getStatus(t, client, "http://"+listener.Addr().String()+"/livez")
-	ready := getStatus(t, client, "http://"+listener.Addr().String()+"/readyz")
-
-	// then
-	if live != http.StatusOK || ready != http.StatusServiceUnavailable {
-		t.Errorf("management status live=%d ready=%d", live, ready)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	tests := []struct {
+		name     string
+		settings config.Config
+		logger   *slog.Logger
+	}{
+		{name: "missing logger", settings: config.Config{StartupTimeout: time.Second}},
+		{
+			name:     "missing startup timeout",
+			settings: config.Config{ShutdownTimeout: time.Second},
+			logger:   logger,
+		},
+		{
+			name:     "missing shutdown timeout",
+			settings: config.Config{StartupTimeout: time.Second},
+			logger:   logger,
+		},
 	}
 
-	// when
-	cancel()
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			err := Run(context.Background(), test.settings, test.logger)
 
-	// then
-	select {
-	case err := <-result:
-		if err != nil {
-			t.Errorf("run shell: %v", err)
+			// then
+			if err == nil {
+				t.Fatal("Run() error = nil")
+			}
+		})
+	}
+}
+
+func TestExpectedServeErrorRecognizesOwnedServerShutdown(t *testing.T) {
+	// given
+	tests := []struct {
+		err  error
+		want bool
+	}{
+		{want: true},
+		{err: http.ErrServerClosed, want: true},
+		{err: grpcgo.ErrServerStopped, want: true},
+		{err: context.Canceled},
+	}
+
+	for _, test := range tests {
+		// when
+		got := expectedServeError(test.err)
+
+		// then
+		if got != test.want {
+			t.Errorf("expectedServeError(%v) = %t, want %t", test.err, got, test.want)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("shell did not stop within its test bound")
 	}
-}
-
-func TestShellPreservesListenerFailure(t *testing.T) {
-	// given
-	listenErr := errors.New("occupied listener")
-	deps := dependencies{
-		listen:       func(string, string) (net.Listener, error) { return nil, listenErr },
-		newTelemetry: telemetry.New,
-	}
-	settings := config.Config{
-		ServiceName:     "product-service",
-		ShutdownTimeout: time.Second,
-		Telemetry:       config.Telemetry{ExporterTimeout: time.Second},
-	}
-
-	// when
-	err := run(context.Background(), settings, slog.Default(), deps)
-
-	// then
-	if !errors.Is(err, listenErr) {
-		t.Errorf("listener failure not preserved: %v", err)
-	}
-}
-
-func getStatus(t *testing.T, client *http.Client, url string) int {
-	t.Helper()
-	response, err := client.Get(url)
-	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
-	}
-	defer func() { _ = response.Body.Close() }()
-	if _, err := io.Copy(io.Discard, response.Body); err != nil {
-		t.Fatalf("read response from %s: %v", url, err)
-	}
-	return response.StatusCode
 }
