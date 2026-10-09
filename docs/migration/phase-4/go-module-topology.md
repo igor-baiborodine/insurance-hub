@@ -12,8 +12,8 @@ The repository currently owns two Go modules and no Go workspace.
 
 | Directory | Module path | Role and owner | Consumers | Replacements | Supported mode | Owning validation | CI |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `templates/go-service` | `github.com/igor-baiborodine/insurance-hub/templates/go-service` | Reusable service scaffold; Insurance Hub repository maintainers | Itself only | None | Standalone, `GOWORK=off` | `make -C templates/go-service check` | `.github/workflows/go-scaffold.yml` |
-| `services/product-service` | `github.com/igor-baiborodine/insurance-hub/services/product-service` | Product business service; Product service maintainers | Its current executable and support packages | None | Standalone, `GOWORK=off` | `make -C services/product-service check` | `.github/workflows/go-scaffold.yml` |
+| `templates/go-service` | `github.com/igor-baiborodine/insurance-hub/templates/go-service` | Reusable service scaffold; Insurance Hub repository maintainers | Itself only | None | Standalone, `GOWORK=off` | `make -C templates/go-service check` | `.github/workflows/go-modules.yml` |
+| `services/product-service` | `github.com/igor-baiborodine/insurance-hub/services/product-service` | Product business service; Product service maintainers | Its current executable and support packages | None | Standalone, `GOWORK=off` | `make -C services/product-service check` | `.github/workflows/go-modules.yml` |
 
 The scaffold owns its Protobuf source and generated bindings. It is not a deployed business
 service, shared business model, or independently distributed contract module. Product currently has
@@ -74,7 +74,7 @@ generated and manifest changes.
 
 ## Continuous integration
 
-`.github/workflows/go-scaffold.yml` is the current topology workflow. Pushes and pull requests to
+`.github/workflows/go-modules.yml` is the current topology workflow. Pushes and pull requests to
 `main` trigger it for both modules, the shared Product baseline corpus, every `go.mod`, `go.sum`,
 `go.work`, and `go.work.sum`, the canonical inventory, topology scripts, this guide, root Makefile,
 and workflow itself. The topology checker fails if an inventory module's workflow lacks its module

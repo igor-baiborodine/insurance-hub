@@ -26,7 +26,7 @@
         "github.com/igor-baiborodine/insurance-hub/templates/go-service"
       ],
       "localReplacements": [],
-      "ciWorkflow": ".github/workflows/go-scaffold.yml"
+      "ciWorkflow": ".github/workflows/go-modules.yml"
     },
     {
       "directory": "services/product-service",
@@ -52,7 +52,7 @@
         "github.com/igor-baiborodine/insurance-hub/services/product-service"
       ],
       "localReplacements": [],
-      "ciWorkflow": ".github/workflows/go-scaffold.yml"
+      "ciWorkflow": ".github/workflows/go-modules.yml"
     }
   ],
   "workspaces": [],

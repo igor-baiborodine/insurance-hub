@@ -19,7 +19,7 @@ on:
       - 'go-module-topology.json'
       - 'scripts/go/**'
       - 'docs/migration/phase-4/go-module-topology.md'
-      - '.github/workflows/go-scaffold.yml'
+      - '.github/workflows/go-modules.yml'
       - 'Makefile'
   pull_request:
     branches:
@@ -39,7 +39,7 @@ on:
       - 'go-module-topology.json'
       - 'scripts/go/**'
       - 'docs/migration/phase-4/go-module-topology.md'
-      - '.github/workflows/go-scaffold.yml'
+      - '.github/workflows/go-modules.yml'
       - 'Makefile'
 
 permissions:

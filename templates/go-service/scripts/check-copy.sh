@@ -79,7 +79,7 @@ remove_scaffold_only_copy_surface() {
 			print "### Repository onboarding"
 			print ""
 			print "The scaffold-only `go-scaffold-*` root delegates and"
-			print "`.github/workflows/go-scaffold.yml` do not cover this copied module. Run module-owned"
+			print "`.github/workflows/go-modules.yml` do not cover this copied module. Run module-owned"
 			print "Make targets from this directory. Add root and CI coverage only through the repository"
 			print "documented in ../../docs/migration/phase-4/go-module-topology.md."
 			skipping = 1
@@ -155,6 +155,7 @@ if grep -q '^check-copy:' "$copy_root/Makefile" ||
 fi
 if grep -Fq 'make go-scaffold-' "$copy_root/README.md" ||
 	grep -Fq 'Go service scaffold CI' "$copy_root/README.md" ||
+	grep -Fq 'Go modules CI' "$copy_root/README.md" ||
 	grep -Fq 'when this module, the workflow, or the root Makefile changes' \
 		"$copy_root/README.md"; then
 	echo 'check-copy: copied README claims scaffold-only root or CI coverage' >&2

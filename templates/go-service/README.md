@@ -130,7 +130,7 @@ The repository root exposes only these narrowly scoped delegates. They cover
 
 ### Continuous integration
 
-[Go service scaffold CI](../../.github/workflows/go-scaffold.yml) runs on pull requests to `main`
+[Go modules CI](../../.github/workflows/go-modules.yml) runs on pull requests to `main`
 and pushes to `main` when this module, any Go module/workspace manifest, the canonical topology,
 topology scripts, the workflow, or the root Makefile changes. It uses `ubuntu-24.04`, checkout v6
 with full history, setup-go v7 with exact Go 1.27.2, the nested `go.sum` cache key, and read-only
