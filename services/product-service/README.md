@@ -40,10 +40,39 @@ ignored `.tools/bin/`.
 Normal checks use readonly module resolution. `FORMAT_SCOPE=changed` is the default for local
 formatting; `FORMAT_SCOPE=all` checks every eligible handwritten Go file.
 
-The current shell accepts `SERVICE_NAME` (default `product-service`), `HEALTH_ADDR` (default
-`127.0.0.1:8080`), `LOG_LEVEL` (default `info`), `SHUTDOWN_TIMEOUT` (default `10s`), `OTEL_ENABLED`
-(default `false`), `OTEL_EXPORTER_OTLP_ENDPOINT` (required only when telemetry is enabled), and
-`OTEL_EXPORTER_OTLP_TIMEOUT` (default `2s`). Duration values use Go duration syntax. The
-configuration loader rejects invalid values with setting-name diagnostics. Telemetry is disabled
-by default and needs no collector. The full business configuration and architecture handoff will
-be documented after the corresponding readers, transports, and lifecycle behavior exist.
+Configuration is read once and validated before service resources are acquired. Duration values use
+Go duration syntax. Listener ports may be zero for test-owned ephemeral listeners; listener hosts
+must be explicit, and the three configured addresses must be distinct. Invalid configuration
+returns a setting-name diagnostic without the rejected value. `PRODUCT_DATABASE_URL` has no
+fallback and is held in a redacting value type; it must identify the restricted Product reader.
+
+| Setting                       | Default           | Constraint                                                                                                              |
+|-------------------------------|-------------------|-------------------------------------------------------------------------------------------------------------------------|
+| `SERVICE_NAME`                | `product-service` | Non-empty, non-blank service identity.                                                                                  |
+| `HTTP_ADDR`                   | `127.0.0.1:8081`  | Business HTTP host and numeric port.                                                                                    |
+| `GRPC_ADDR`                   | `127.0.0.1:9090`  | Business gRPC host and numeric port.                                                                                    |
+| `HEALTH_ADDR`                 | `127.0.0.1:8080`  | Management HTTP host and numeric port; all listener addresses must differ.                                              |
+| `PRODUCT_DATABASE_URL`        | required          | `postgres` or `postgresql` URL with a host and database name; never logged or echoed.                                   |
+| `DB_MAX_CONNS`                | `8`               | Integer from 1 through 32; minimum pool size remains zero.                                                              |
+| `DB_CONNECT_TIMEOUT`          | `3s`              | Positive; no greater than `STARTUP_TIMEOUT`.                                                                            |
+| `DB_ACQUIRE_TIMEOUT`          | `2s`              | Positive; no greater than `DB_QUERY_TIMEOUT`.                                                                           |
+| `DB_QUERY_TIMEOUT`            | `5s`              | Positive; no greater than `REQUEST_TIMEOUT`.                                                                            |
+| `STARTUP_TIMEOUT`             | `10s`             | Positive total startup budget.                                                                                          |
+| `REQUEST_TIMEOUT`             | `8s`              | Positive outer business request budget.                                                                                 |
+| `PROBE_TIMEOUT`               | `2s`              | Positive; no greater than `DB_QUERY_TIMEOUT`.                                                                           |
+| `HTTP_READ_HEADER_TIMEOUT`    | `5s`              | Positive.                                                                                                               |
+| `HTTP_READ_TIMEOUT`           | `10s`             | Positive; at least `HTTP_READ_HEADER_TIMEOUT`.                                                                          |
+| `HTTP_WRITE_TIMEOUT`          | `10s`             | Positive; at least `REQUEST_TIMEOUT`.                                                                                   |
+| `HTTP_IDLE_TIMEOUT`           | `30s`             | Positive keep-alive idle limit.                                                                                         |
+| `GRPC_MAX_RECV_BYTES`         | `1048576`         | Integer from 1 through 16777216.                                                                                        |
+| `GRPC_MAX_SEND_BYTES`         | `8388608`         | Integer from 1 through 67108864; overflow fails instead of truncating.                                                  |
+| `SHUTDOWN_TIMEOUT`            | `10s`             | Positive total drain, force-stop, and cleanup budget; the lifecycle reserves its final `2s` for force-stop and cleanup. |
+| `LOG_LEVEL`                   | `info`            | Supported `slog` level.                                                                                                 |
+| `OTEL_ENABLED`                | `false`           | Boolean; disabled mode requires no collector.                                                                           |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset             | HTTP(S) OTLP/gRPC URL, required only when telemetry is enabled.                                                         |
+| `OTEL_EXPORTER_OTLP_TIMEOUT`  | `2s`              | Positive; no greater than `SHUTDOWN_TIMEOUT`.                                                                           |
+
+Callers with a shorter deadline keep that deadline. Acquisition and query work share the request
+budget rather than starting new clocks. Startup, readiness, and shutdown each use their one
+documented budget. The current executable still starts only the management listener; later issue-132
+steps consume the business listener, database, and operation settings.

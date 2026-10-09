@@ -16,6 +16,10 @@ func TestRunLogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 	const privateMarker = "private-credential-marker"
 	t.Setenv("SERVICE_NAME", "configured-service")
 	t.Setenv("HEALTH_ADDR", "127.0.0.1:0")
+	t.Setenv(
+		"PRODUCT_DATABASE_URL",
+		"postgresql://product_reader:reader-password@127.0.0.1:5432/product",
+	)
 	t.Setenv("LOG_LEVEL", "info")
 	t.Setenv("SHUTDOWN_TIMEOUT", "1s")
 	t.Setenv("OTEL_ENABLED", "true")
