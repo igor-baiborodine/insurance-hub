@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package product.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/igor-baiborodine/insurance-hub/services/product-service/gen/product/v1;productv1";
+
+service ProductService {
+  rpc ListProducts(ListProductsRequest) returns (ListProductsResponse);
+  rpc GetProduct(GetProductRequest) returns (GetProductResponse);
+}
+
+message ListProductsRequest {}
+
+message ListProductsResponse {
+  repeated Product products = 1;
+}
+
+message GetProductRequest {
+  string code = 1 [(buf.validate.field).string.min_bytes = 1];
+}
+
+message GetProductResponse {
+  Product product = 1 [(buf.validate.field).required = true];
+}
+
+message Product {
+  string code = 1;
+  string name = 2;
+  string image = 3;
+  string description = 4;
+  repeated Cover covers = 5;
+  repeated Question questions = 6;
+  int32 max_number_of_insured = 7;
+  string icon = 8;
+}
+
+message Cover {
+  string code = 1;
+  string name = 2;
+  string description = 3;
+  bool optional = 4;
+  optional string sum_insured = 5 [(buf.validate.field).string.pattern = "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?$"];
+}
+
+message Question {
+  string code = 1;
+  int32 index = 2;
+  string text = 3;
+  oneof kind {
+    option (buf.validate.oneof).required = true;
+    ChoiceQuestion choice = 10;
+    DateQuestion date = 11;
+    NumericQuestion numeric = 12;
+  }
+}
+
+message ChoiceQuestion {
+  repeated Choice choices = 1;
+}
+
+message DateQuestion {}
+
+message NumericQuestion {}
+
+message Choice {
+  string code = 1;
+  string label = 2;
+}

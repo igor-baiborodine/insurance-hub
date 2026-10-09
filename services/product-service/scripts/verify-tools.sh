@@ -25,11 +25,20 @@ expect_equal() {
 		fail "$label mismatch: expected '$expected', got '$actual'"
 }
 
+require_executable buf "$BUF"
+require_executable protoc-gen-go "$PROTOC_GEN_GO"
+require_executable protoc-gen-go-grpc "$PROTOC_GEN_GO_GRPC"
 require_executable golangci-lint "$GOLANGCI_LINT"
 require_executable govulncheck "$GOVULNCHECK"
 
 expect_equal "go.mod Go version" "$GO_VERSION" "$module_go_version"
 expect_equal "Go toolchain version" "go$GO_VERSION" "$($GO env GOVERSION)"
+expect_equal "Buf version" "${BUF_VERSION#v}" "$($BUF --version)"
+expect_equal "protoc-gen-go version" \
+	"protoc-gen-go $PROTOC_GEN_GO_VERSION" "$($PROTOC_GEN_GO --version)"
+expect_equal "protoc-gen-go-grpc version" \
+	"protoc-gen-go-grpc ${PROTOC_GEN_GO_GRPC_VERSION#v}" "$($PROTOC_GEN_GO_GRPC --version)"
+
 golangci_lint_version=$(
 	"$GOLANGCI_LINT" version |
 		sed -n 's/^golangci-lint has version \([^ ]*\).*/\1/p'

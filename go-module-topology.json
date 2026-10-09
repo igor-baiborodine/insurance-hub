@@ -41,7 +41,7 @@
         "FORMAT_SCOPE",
         "FORMAT_BASE"
       ],
-      "packageScope": "current Product management shell and HTTP boundary packages under ./..., the server executable, and module dependency metadata; catalog and contract checks join as implemented",
+      "packageScope": "current Product management, HTTP boundary, and generated Product v1 contract packages under ./..., the server executable, Protobuf schema/output, and module dependency metadata; catalog adapter checks join as implemented",
       "prerequisites": [
         "Go 1.27.2",
         "pinned Product tools installed by make -C services/product-service bootstrap-tools",

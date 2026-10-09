@@ -58,9 +58,9 @@ resolution, and enforces repository import boundaries.
 once. It forces standalone mode, rejects unapproved filesystem replacements, forwards only the
 module's declared validation variables, and verifies that module/workspace manifest paths and bytes
 remain unchanged. `FORMAT_SCOPE=all` covers every eligible handwritten Go file in both modules.
-The scaffold's `./...` covers eight packages; Product's current `./...` covers seven packages,
-including `cmd/server` and the test-owned HTTP boundary. Later Product contract and adapter
-packages must enter this aggregate.
+The scaffold's `./...` covers eight packages; Product's current `./...` covers nine packages,
+including `cmd/server`, the test-owned HTTP boundary, generated Product v1 bindings, and contract
+tests. Later Product application and adapter packages must enter this aggregate.
 
 `go-topology-test` creates local temporary repositories with no network requirement. It proves
 malformed and drifted inventory failures, workspace and replacement masking, allowed contract
