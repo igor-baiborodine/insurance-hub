@@ -20,6 +20,25 @@ make -C services/product-service build
 make -C services/product-service run
 ```
 
+The Product check requires a working Docker daemon. Integration tests pin Testcontainers Go
+v0.44.0 and `postgres:17.10-alpine` at digest
+`sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193`, create an isolated
+`product_test` database, and remove it
+after the run:
+
+```sh
+make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXTURE_SET=qa
+```
+
+`INTEGRATION_SUITE` accepts `harness` or `all`. `FIXTURE_SET` accepts only `qa`, the
+production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
+The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
+missing fixtures, zero selected tests, and any configured `PRODUCT_DATABASE_URL` fail the target.
+The harness resolves and reads the accepted QA snapshot directly under
+`legacy/product-service/src/test/resources/product-read-baseline/` without copying or changing
+them. Its setup identity creates the legacy table and `go_product_reader`; future service tests
+receive only the generated reader URL.
+
 The direct HTTP boundary is exercised on a real loopback listener with test-owned callbacks:
 `make -C services/product-service test TEST_PACKAGES=./internal/http`. The business listener is
 not wired into the executable yet.
@@ -33,10 +52,11 @@ output; `check` verifies format, lint, reproducible generation, and breaking com
 `bootstrap-tools`, `update-deps`, `format`, and the protobuf maintenance targets are explicit
 mutating targets. `check` is
 non-mutating and currently covers tool/config verification, all handwritten Go formatting,
-lint/vet, all-package race tests, executable build, dependency reproduction, and vulnerability
-analysis, plus Product v1 protobuf format, lint, drift, and breaking checks. SQL checks join this
-target when that capability is implemented. Tools are pinned in this Makefile and installed under
-ignored `.tools/bin/`.
+lint/vet, all-package race tests, the race-enabled disposable PostgreSQL integration suite,
+executable build, dependency reproduction, and vulnerability analysis, plus Product v1 protobuf
+format, lint, drift, and breaking checks. SQL generation checks join this target when that
+capability is implemented. Tools are pinned in this Makefile and installed under ignored
+`.tools/bin/`.
 Normal checks use readonly module resolution. `FORMAT_SCOPE=changed` is the default for local
 formatting; `FORMAT_SCOPE=all` checks every eligible handwritten Go file.
 

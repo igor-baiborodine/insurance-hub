@@ -41,11 +41,13 @@
         "FORMAT_SCOPE",
         "FORMAT_BASE"
       ],
-      "packageScope": "current Product management, HTTP boundary, and generated Product v1 contract packages under ./..., the server executable, Protobuf schema/output, and module dependency metadata; catalog adapter checks join as implemented",
+      "packageScope": "all current Product packages under ./..., the server executable, generated Product v1 contract, fixture loader and disposable PostgreSQL harness, Protobuf schema/output, and module dependency metadata; catalog adapters join as implemented",
       "prerequisites": [
         "Go 1.27.2",
         "pinned Product tools installed by make -C services/product-service bootstrap-tools",
         "GCC for race-enabled tests",
+        "Docker Engine with daemon access for race-enabled integration tests",
+        "pinned postgres:17.10-alpine image digest available locally or from its public registry",
         "public module and vulnerability services unless cached"
       ],
       "consumers": [

@@ -41,6 +41,12 @@ make go-scaffold-bootstrap-tools
 make -C services/product-service bootstrap-tools
 ```
 
+The Product validation also requires Docker daemon access. Its owning `check` target runs the
+race-enabled disposable PostgreSQL harness with Testcontainers Go v0.44.0 and
+`postgres:17.10-alpine` pinned at
+`sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193`; it never uses
+`PRODUCT_DATABASE_URL` or another shared database.
+
 The supported non-mutating repository checks are:
 
 ```sh
@@ -58,9 +64,10 @@ resolution, and enforces repository import boundaries.
 once. It forces standalone mode, rejects unapproved filesystem replacements, forwards only the
 module's declared validation variables, and verifies that module/workspace manifest paths and bytes
 remain unchanged. `FORMAT_SCOPE=all` covers every eligible handwritten Go file in both modules.
-The scaffold's `./...` covers eight packages; Product's current `./...` covers nine packages,
-including `cmd/server`, the test-owned HTTP boundary, generated Product v1 bindings, and contract
-tests. Later Product application and adapter packages must enter this aggregate.
+The scaffold and Product `./...` scopes cover all their current packages. Product coverage includes
+`cmd/server`, the test-owned HTTP boundary, generated Product v1 bindings, contract tests, the
+authoritative fixture loader, and the tagged PostgreSQL harness invoked by `test-integration`.
+Later Product adapters must enter this aggregate.
 
 `go-topology-test` creates local temporary repositories with no network requirement. It proves
 malformed and drifted inventory failures, workspace and replacement masking, allowed contract
@@ -69,9 +76,10 @@ fixtures after success, failure, or interruption and checks that real source and
 not change.
 
 These checks do not install tools, format source, tidy or upgrade dependencies, regenerate output,
-advance compatibility baselines, create a workspace, deploy, or contact live infrastructure.
-Mutating module operations remain explicit owning Make targets and must be reviewed with their
-generated and manifest changes.
+advance compatibility baselines, create a workspace, deploy, or contact shared infrastructure.
+Product validation may pull its pinned public PostgreSQL image and creates only disposable local
+containers. Mutating module operations remain explicit owning Make targets and must be reviewed
+with their generated and manifest changes.
 
 ## Continuous integration
 

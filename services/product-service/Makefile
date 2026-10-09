@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := bootstrap-tools
 
 GO ?= go
+DOCKER ?= docker
 
 TOOLS_DIR := $(CURDIR)/.tools
 TOOLS_BIN := $(TOOLS_DIR)/bin
@@ -27,11 +28,17 @@ PROTOVALIDATE_SCHEMA_GO_VERSION := v1.36.12-20260825204119-511051f7f437.1
 OTEL_VERSION := v1.46.0
 OTEL_GRPC_VERSION := v0.71.0
 X_NET_VERSION := v0.60.0
+PGX_VERSION := v5.11.0
+TESTCONTAINERS_VERSION := v0.44.0
+MOBY_GO_ARCHIVE_VERSION := v0.3.0
+POSTGRES_IMAGE := postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
 TEST_PACKAGES ?= ./...
+INTEGRATION_SUITE ?= all
+FIXTURE_SET ?= qa
 
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto check-proto-drift lint test test-race build vulncheck check run
+	gen-proto check-proto-drift lint test test-race test-integration build vulncheck check run
 
 bootstrap-tools:
 	mkdir -p "$(TOOLS_BIN)"
@@ -88,6 +95,10 @@ update-deps:
 		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
 		google.golang.org/grpc@$(GRPC_GO_VERSION) \
 		google.golang.org/protobuf@$(PROTOBUF_GO_VERSION) \
+		github.com/jackc/pgx/v5@$(PGX_VERSION) \
+		github.com/testcontainers/testcontainers-go@$(TESTCONTAINERS_VERSION) \
+		github.com/testcontainers/testcontainers-go/modules/postgres@$(TESTCONTAINERS_VERSION) \
+		github.com/moby/go-archive@$(MOBY_GO_ARCHIVE_VERSION) \
 		golang.org/x/net@$(X_NET_VERSION)
 	GOWORK=off $(GO) mod tidy
 
@@ -145,6 +156,14 @@ test:
 test-race:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./...
 
+test-integration:
+	@GO="$(GO)" \
+		DOCKER="$(DOCKER)" \
+		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" \
+		INTEGRATION_SUITE="$(INTEGRATION_SUITE)" \
+		FIXTURE_SET="$(FIXTURE_SET)" \
+		./scripts/test-integration.sh
+
 build:
 	@set -eu; \
 	output_dir=$$(mktemp -d); \
@@ -155,7 +174,7 @@ build:
 vulncheck: verify-tools
 	GOWORK=off GOFLAGS=-mod=readonly $(GOVULNCHECK) ./...
 
-check: verify-tools format-check format-proto-check lint lint-proto test-race build \
+check: verify-tools format-check format-proto-check lint lint-proto test-race test-integration build \
 	check-deps check-proto-drift check-proto-breaking vulncheck
 
 run:
