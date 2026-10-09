@@ -51,3 +51,6 @@
 
 # Dev
 *.tgz
+
+# Go coverage reports
+/services/product-service/coverage.txt

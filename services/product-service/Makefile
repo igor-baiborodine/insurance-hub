@@ -39,12 +39,13 @@ SQL_QUERIES := internal/postgres/sql/queries.sql
 GENERATED_SQL_FILES := internal/postgres/dbgen/db.go internal/postgres/dbgen/models.go \
 	internal/postgres/dbgen/queries.sql.go internal/postgres/dbgen/querier.go
 TEST_PACKAGES ?= ./...
+COVERAGE_FILE ?= coverage.txt
 INTEGRATION_SUITE ?= all
 FIXTURE_SET ?= qa
 
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race test-integration \
+	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage test-integration \
 	build vulncheck check run
 
 bootstrap-tools:
@@ -179,6 +180,11 @@ test:
 
 test-race:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./...
+
+coverage:
+	@test -n "$(strip $(COVERAGE_FILE))" || { echo "COVERAGE_FILE must not be empty" >&2; exit 1; }
+	GOWORK=off $(GO) test -mod=readonly -count=1 \
+		-covermode=atomic -coverprofile="$(COVERAGE_FILE)" ./...
 
 test-integration:
 	@GO="$(GO)" \

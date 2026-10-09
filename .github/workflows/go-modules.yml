@@ -20,6 +20,7 @@ on:
       - 'scripts/go/**'
       - 'docs/migration/phase-4/go-module-topology.md'
       - '.github/workflows/go-modules.yml'
+      - 'codecov.yml'
       - 'Makefile'
   pull_request:
     branches:
@@ -40,6 +41,7 @@ on:
       - 'scripts/go/**'
       - 'docs/migration/phase-4/go-module-topology.md'
       - '.github/workflows/go-modules.yml'
+      - 'codecov.yml'
       - 'Makefile'
 
 permissions:
@@ -110,3 +112,16 @@ jobs:
 
       - name: Prove renamed scaffold copy
         run: make go-scaffold-check-copy
+
+      - name: Generate Product Service coverage
+        run: make -C services/product-service coverage
+
+      - name: Upload Product Service coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./services/product-service/coverage.txt
+          flags: product-service
+          name: product-service
+          disable_search: true
+          fail_ci_if_error: true
