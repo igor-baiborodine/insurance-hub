@@ -189,8 +189,7 @@ This ensures clarity, easier traceability to issues, and automation support.
     ```
 
     - `type` — one of the allowed conventional commit types (`feat`, `fix`, `docs`, `chore`,
-      `refactor`,
-      `perf`, `test`, `style`, etc.).
+      `refactor`, `perf`, `test`, `style`, etc.).
     - `[issue-<number>]` — the related GitHub issue number in the form `issue-7`. This part is *
       *optional**
       but strongly recommended when the branch corresponds to a specific ticket.

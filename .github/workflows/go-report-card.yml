@@ -1,0 +1,93 @@
+name: Go Report Card
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'services/product-service/**'
+      - 'templates/go-service/**'
+      - '.github/workflows/go-report-card.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'services/product-service/**'
+      - 'templates/go-service/**'
+      - '.github/workflows/go-report-card.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report-card:
+    name: Check Go module report cards
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Insurance Hub
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Checkout archived Go Report Card CLI
+        uses: actions/checkout@v6
+        with:
+          repository: gojp/goreportcard
+          ref: af15decf135bcd0a1bfa12180d027bdeb19f601c
+          path: .tools/goreportcard
+          persist-credentials: false
+
+      - name: Set up Go 1.27.2
+        id: setup-go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.2'
+          cache: false
+
+      - name: Install archived report checks
+        run: make -C .tools/goreportcard install
+
+      - name: Check Product Service and service scaffold
+        working-directory: .tools/goreportcard
+        shell: bash
+        env:
+          REPORT_CARD_BIN: ${{ steps.setup-go.outputs.go-bin-path }}
+        run: |
+          set -euo pipefail
+          export PATH="$REPORT_CARD_BIN:$PATH"
+
+          printf '| Module | Grade | Score | Issues |\n| --- | --- | ---: | ---: |\n' >> "$GITHUB_STEP_SUMMARY"
+          failed=0
+          for module in services/product-service templates/go-service; do
+            result=$(GOWORK=off go run ./cmd/goreportcard-cli -d "$GITHUB_WORKSPACE/$module" -j)
+            grade=$(jq -r '.GradeFromPercentage' <<< "$result")
+            score=$(jq -r '.average * 100' <<< "$result")
+            issues=$(jq -r '.issues' <<< "$result")
+            printf '| %s | %s | %.1f%% | %s |\n' "$module" "$grade" "$score" "$issues" >> "$GITHUB_STEP_SUMMARY"
+            printf '%s: grade %s, score %.1f%%, issues %s\n' "$module" "$grade" "$score" "$issues"
+            jq -r '.checks[] | "  \(.name): \(.percentage * 100 | floor)% \(if .error == "" then "" else "(error: \(.error))" end)"' <<< "$result"
+            printf '%s issue details:\n' "$module"
+            jq -r --arg root "$GITHUB_WORKSPACE/" --arg module "$module" '
+              .checks[] as $check
+              | $check.file_summaries[]
+              | if .filename == "" then
+                  "  \($check.name): no recognized license file in \($module) directory"
+                else
+                  .filename as $file
+                  | if (.errors | length) == 0 then
+                      "  \($check.name): \($file | ltrimstr($root))"
+                    else
+                      .errors[]
+                      | "  \($check.name): \($file | ltrimstr($root)):\(.line_number): \(.error_string)"
+                    end
+                end
+            ' <<< "$result"
+
+            if ! jq -e '.did_error == false and .average >= 0.75' <<< "$result" > /dev/null; then
+              printf '%s: report checks failed or score is below 75%%\n' "$module" >&2
+              failed=1
+            fi
+          done
+
+          exit "$failed"
