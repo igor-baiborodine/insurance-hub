@@ -34,7 +34,8 @@ help:
 # Go Targets
 ################################################################################
 .PHONY: go-topology-check go-topology-test go-modules-check go-scaffold-bootstrap-tools go-scaffold-build \
-	go-scaffold-check go-scaffold-test-tooling go-scaffold-check-copy go-scaffold-run
+	go-scaffold-check go-scaffold-test-tooling go-scaffold-check-copy go-scaffold-run \
+	go-product-bootstrap-tools go-product-test-tooling
 ifneq ($(filter command line,$(origin GO_MODULE_CALLER_VARIABLES)),)
 $(error GO_MODULE_CALLER_VARIABLES is internal and cannot be set)
 endif
@@ -68,6 +69,12 @@ go-scaffold-check-copy: ## Validate a renamed copy of the Go service scaffold on
 
 go-scaffold-run: ## Run the Go service scaffold server locally
 	$(MAKE) -C templates/go-service run
+
+go-product-bootstrap-tools: ## Install and verify pinned tools for Product Service only
+	$(MAKE) -C services/product-service bootstrap-tools
+
+go-product-test-tooling: ## Test controlled tooling failures for Product Service only
+	$(MAKE) -C services/product-service test-tooling
 
 ################################################################################
 # Java Targets

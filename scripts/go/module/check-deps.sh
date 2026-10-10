@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-module_root=$(dirname -- "$script_dir")
+module_root=${MODULE_ROOT:?MODULE_ROOT is required}
+common_tooling_dir=${COMMON_GO_TOOLING_DIR:?COMMON_GO_TOOLING_DIR is required}
 go_command=${GO:-go}
 make_command=${MAKE_COMMAND:-make}
 
@@ -14,7 +14,7 @@ for manifest in go.mod go.sum; do
 	fi
 done
 
-temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/product-service-deps.XXXXXX")
+temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/go-module-deps.XXXXXX")
 cleanup() {
 	rm -rf -- "$temporary_dir"
 }
@@ -24,16 +24,20 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 isolated_module=$temporary_dir/module
-mkdir -p "$isolated_module"
+isolated_tooling=$isolated_module/.common-go-tooling
+mkdir -p "$isolated_module" "$isolated_tooling"
 tar --exclude='./.tools' -C "$module_root" -cf - . | tar -C "$isolated_module" -xf -
+cp -a "$common_tooling_dir/." "$isolated_tooling/"
 
 non_manifest_inventory() {
-	find "$isolated_module" -path "$isolated_module/.tools" -prune -o -type f \
-		! -name go.mod ! -name go.sum -exec sha256sum {} + | LC_ALL=C sort
+	find "$isolated_module" \
+		\( -path "$isolated_module/.tools" -o -path "$isolated_tooling" \) -prune \
+		-o -type f ! -name go.mod ! -name go.sum -exec sha256sum {} + | LC_ALL=C sort
 }
 
 before_inventory=$(non_manifest_inventory)
-"$make_command" -C "$isolated_module" update-deps GO="$go_command"
+"$make_command" -C "$isolated_module" update-deps \
+	GO="$go_command" COMMON_GO_TOOLING_DIR="$isolated_tooling"
 after_inventory=$(non_manifest_inventory)
 
 if [[ "$before_inventory" != "$after_inventory" ]]; then

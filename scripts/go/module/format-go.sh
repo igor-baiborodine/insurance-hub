@@ -12,8 +12,7 @@ case "$mode" in
 		;;
 esac
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-module_root=$(dirname -- "$script_dir")
+module_root=${MODULE_ROOT:?MODULE_ROOT is required}
 cd "$module_root"
 
 golangci_lint=${GOLANGCI_LINT:?GOLANGCI_LINT is required}
@@ -23,7 +22,7 @@ format_base=${FORMAT_BASE:-}
 format_files_set=${FORMAT_FILES_SET:-0}
 format_files=${FORMAT_FILES:-}
 
-temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/go-service-format.XXXXXX")
+temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/go-module-format.XXXXXX")
 cleanup() {
 	rm -rf -- "$temporary_dir"
 }

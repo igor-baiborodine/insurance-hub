@@ -7,6 +7,7 @@ module_root=$(
 	cd -- "$(dirname -- "$0")/.." && pwd
 )
 make_command=${MAKE_COMMAND:-make}
+common_tooling_dir=${COMMON_GO_TOOLING_DIR:?COMMON_GO_TOOLING_DIR is required}
 
 source_module_pattern=github\.com/igor-baiborodine/insurance-hub/templates/go-service
 copy_module=github.com/igor-baiborodine/insurance-hub/services/example-copy
@@ -44,6 +45,11 @@ copy_inventory=$temporary_root/copy-before-checks.sha256
 copy_inventory_after=$temporary_root/copy-after-checks.sha256
 generated_inventory=$temporary_root/generated-files.txt
 
+run_copy_make() {
+	COMMON_GO_TOOLING_DIR="$copy_root/scripts/go-module" \
+		"$make_command" -C "$copy_root" "$@"
+}
+
 inventory_tree() {
 	root=$1
 	output=$2
@@ -67,7 +73,7 @@ replace_identity() {
 
 remove_scaffold_only_copy_surface() {
 	sed -i 's/^\([[:space:]]*\)check-copy run$/\1run/' "$copy_root/Makefile"
-	sed -i '/^check-copy: verify-tools$/,+1d' "$copy_root/Makefile"
+	sed -i '/^check-copy: verify-tools$/,+2d' "$copy_root/Makefile"
 	rm -- "$copy_root/scripts/check-copy.sh"
 
 	sed -i \
@@ -106,6 +112,12 @@ mkdir -p "$copy_root"
 	cd "$copy_root"
 	tar -xf -
 )
+
+mkdir -p "$copy_root/scripts/go-module"
+cp -a "$common_tooling_dir/." "$copy_root/scripts/go-module/"
+sed -i \
+	's|^COMMON_GO_TOOLING_DIR ?= ../../scripts/go/module$|COMMON_GO_TOOLING_DIR ?= scripts/go-module|' \
+	"$copy_root/Makefile"
 
 rm -rf -- "$copy_root/gen"
 
@@ -147,6 +159,12 @@ fi
 test ! -e "$copy_root/go.work"
 test ! -e "$copy_root/.git"
 test ! -e "$copy_root/scripts/check-copy.sh"
+test -f "$copy_root/scripts/go-module/common.mk"
+grep -Fqx 'COMMON_GO_TOOLING_DIR ?= scripts/go-module' "$copy_root/Makefile"
+if grep -Fq '../../scripts/go/module' "$copy_root/Makefile"; then
+	echo 'check-copy: copied Makefile retained a path to repository tooling' >&2
+	exit 1
+fi
 if grep -q '^check-copy:' "$copy_root/Makefile" ||
 	grep -q 'check-copy' "$copy_root/Makefile" ||
 	grep -Fq '`make check-copy`' "$copy_root/README.md"; then
@@ -183,15 +201,15 @@ grep -Fq "$copy_module/gen/$copy_proto_path;$copy_go_package" \
 	"$copy_root/testdata/contract-baseline/api/$copy_proto_path/example_service.proto"
 
 echo 'check-copy: bootstrapping renamed copy tools'
-"$make_command" -C "$copy_root" bootstrap-tools
+run_copy_make bootstrap-tools
 echo 'check-copy: refreshing renamed copy Protobuf dependencies'
-"$make_command" -C "$copy_root" update-proto-deps
+run_copy_make update-proto-deps
 echo 'check-copy: generating renamed copy bindings'
-"$make_command" -C "$copy_root" gen-proto
+run_copy_make gen-proto
 echo 'check-copy: refreshing renamed copy Go dependencies'
-"$make_command" -C "$copy_root" update-deps
+run_copy_make update-deps
 echo 'check-copy: formatting renamed copy handwritten Go files'
-"$make_command" -C "$copy_root" format FORMAT_SCOPE=all
+run_copy_make format FORMAT_SCOPE=all
 
 (
 	cd "$copy_root"
@@ -210,9 +228,9 @@ fi
 inventory_tree "$copy_root" "$copy_inventory"
 
 echo 'check-copy: running renamed copy non-race tests'
-"$make_command" -C "$copy_root" test
+run_copy_make test
 echo 'check-copy: running renamed copy aggregate checks'
-"$make_command" -C "$copy_root" check FORMAT_SCOPE=all
+run_copy_make check FORMAT_SCOPE=all
 
 inventory_tree "$copy_root" "$copy_inventory_after"
 if ! cmp -s "$copy_inventory" "$copy_inventory_after"; then

@@ -42,59 +42,17 @@ TEST_PACKAGES ?= ./...
 COVERAGE_FILE ?= coverage.txt
 INTEGRATION_SUITE ?= all
 FIXTURE_SET ?= qa
+EXTRA_TOOL_PACKAGES := github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
+VERIFY_EXTRA_TOOL_SPECS := sqlc|$(SQLC)|$(SQLC_VERSION)|version
+
+COMMON_GO_TOOLING_DIR ?= ../../scripts/go/module
+COMMON_GO_TOOLING_DIR := $(abspath $(COMMON_GO_TOOLING_DIR))
+include $(COMMON_GO_TOOLING_DIR)/common.mk
 
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage test-integration \
-	build vulncheck check run
-
-bootstrap-tools:
-	mkdir -p "$(TOOLS_BIN)"
-	GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install \
-		github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
-	GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install \
-		google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
-	GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install \
-		google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
-	GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install \
-		github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
-	GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install \
-		golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
-	GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install \
-		github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
-	@$(MAKE) --no-print-directory verify-tools
-
-verify-tools:
-	@GO="$(GO)" \
-		BUF="$(BUF)" \
-		PROTOC_GEN_GO="$(PROTOC_GEN_GO)" \
-		PROTOC_GEN_GO_GRPC="$(PROTOC_GEN_GO_GRPC)" \
-		GOLANGCI_LINT="$(GOLANGCI_LINT)" \
-		GOVULNCHECK="$(GOVULNCHECK)" \
-		SQLC="$(SQLC)" \
-		GOLANGCI_CONFIG="$(GOLANGCI_CONFIG)" \
-		GO_VERSION="$(GO_VERSION)" \
-		BUF_VERSION="$(BUF_VERSION)" \
-		PROTOC_GEN_GO_VERSION="$(PROTOC_GEN_GO_VERSION)" \
-		PROTOC_GEN_GO_GRPC_VERSION="$(PROTOC_GEN_GO_GRPC_VERSION)" \
-		GOLANGCI_LINT_VERSION="$(GOLANGCI_LINT_VERSION)" \
-		GOVULNCHECK_VERSION="$(GOVULNCHECK_VERSION)" \
-		SQLC_VERSION="$(SQLC_VERSION)" \
-		./scripts/verify-tools.sh
-
-format: verify-tools
-	@GOWORK=off \
-		GOLANGCI_LINT="$(GOLANGCI_LINT)" \
-		GOLANGCI_CONFIG="$(GOLANGCI_CONFIG)" \
-		FORMAT_FILES_SET="$(if $(filter undefined,$(origin FORMAT_FILES)),0,1)" \
-		./scripts/format-go.sh format
-
-format-check: verify-tools
-	@GOWORK=off \
-		GOLANGCI_LINT="$(GOLANGCI_LINT)" \
-		GOLANGCI_CONFIG="$(GOLANGCI_CONFIG)" \
-		FORMAT_FILES_SET="$(if $(filter undefined,$(origin FORMAT_FILES)),0,1)" \
-		./scripts/format-go.sh check
+	build vulncheck check test-tooling run
 
 update-deps:
 	GOWORK=off $(GO) get \
@@ -114,72 +72,24 @@ update-deps:
 		golang.org/x/net@$(X_NET_VERSION)
 	GOWORK=off $(GO) mod tidy
 
-check-deps: verify-tools
-	@GO="$(GO)" MAKE_COMMAND="$(MAKE)" ./scripts/check-deps.sh
-
-update-proto-deps:
-	@test "$$($(BUF) --version)" = "$(patsubst v%,%,$(BUF_VERSION))"
-	$(BUF) dep update
-
-format-proto: verify-tools
-	$(BUF) format --write "$(PROTO_SCHEMA)"
-
-format-proto-check: verify-tools
-	$(BUF) format --diff --exit-code "$(PROTO_SCHEMA)"
-
-lint-proto: verify-tools
-	$(BUF) lint "$(PROTO_SCHEMA)"
-
-check-proto-breaking: verify-tools
-	@for path in \
-		"$(CONTRACT_BASELINE_DIR)/buf.yaml" \
-		"$(CONTRACT_BASELINE_DIR)/buf.lock" \
-		"$(CONTRACT_BASELINE_DIR)/$(PROTO_SCHEMA)"; do \
-		if test ! -f "$$path" || test ! -r "$$path"; then \
-			echo "check-proto-breaking: missing or unreadable baseline file: $$path" >&2; \
-			exit 1; \
-		fi; \
-	done
-	$(BUF) breaking "$(PROTO_SCHEMA)" --against \
-		"$(CONTRACT_BASELINE_DIR)/$(PROTO_SCHEMA)"
-
-gen-proto:
-	@test "$$($(BUF) --version)" = "$(patsubst v%,%,$(BUF_VERSION))"
-	@test "$$($(PROTOC_GEN_GO) --version)" = "protoc-gen-go $(PROTOC_GEN_GO_VERSION)"
-	@test "$$($(PROTOC_GEN_GO_GRPC) --version)" = \
-		"protoc-gen-go-grpc $(patsubst v%,%,$(PROTOC_GEN_GO_GRPC_VERSION))"
-	rm -f $(GENERATED_PROTO_FILES)
-	$(BUF) generate
-
-check-proto-drift: verify-tools
-	@MAKE_COMMAND="$(MAKE)" \
-		TOOLS_BIN="$(TOOLS_BIN)" \
-		PROTO_SCHEMA="$(PROTO_SCHEMA)" \
-		GENERATED_PROTO_FILES="$(GENERATED_PROTO_FILES)" \
-		./scripts/check-proto-drift.sh
-
 gen-sql:
 	@test "$$($(SQLC) version)" = "$(SQLC_VERSION)"
 	rm -f $(GENERATED_SQL_FILES)
 	$(SQLC) generate
 
 check-sql-drift: verify-tools
-	@MAKE_COMMAND="$(MAKE)" \
+	@MODULE_ROOT="$(CURDIR)" \
+		COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
+		MAKE_COMMAND="$(MAKE)" \
 		TOOLS_BIN="$(TOOLS_BIN)" \
-		SQL_SCHEMA="$(SQL_SCHEMA)" \
-		SQL_QUERIES="$(SQL_QUERIES)" \
-		GENERATED_SQL_FILES="$(GENERATED_SQL_FILES)" \
-		./scripts/check-sql-drift.sh
-
-lint: verify-tools
-	GOWORK=off $(GOLANGCI_LINT) run --config "$(GOLANGCI_CONFIG)" ./...
-
-test:
-	@test -n "$(strip $(TEST_PACKAGES))" || { echo "TEST_PACKAGES must not be empty" >&2; exit 1; }
-	GOWORK=off $(GO) test -mod=readonly -count=1 $(TEST_PACKAGES)
-
-test-race:
-	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./...
+		CHECK_NAME="check-sql-drift" \
+		GENERATION_TARGET="gen-sql" \
+		GENERATION_INPUTS="Makefile sqlc.yaml $(SQL_SCHEMA) $(SQL_QUERIES)" \
+		GENERATION_TOOLS="sqlc" \
+		GENERATED_ROOT="internal/postgres/dbgen" \
+		GENERATED_PATTERN="internal/postgres/dbgen/*.go" \
+		GENERATED_FILES="$(GENERATED_SQL_FILES)" \
+		"$(COMMON_GO_TOOLING_DIR)/check-generated-drift.sh"
 
 coverage:
 	@test -n "$(strip $(COVERAGE_FILE))" || { echo "COVERAGE_FILE must not be empty" >&2; exit 1; }
@@ -194,18 +104,12 @@ test-integration:
 		FIXTURE_SET="$(FIXTURE_SET)" \
 		./scripts/test-integration.sh
 
-build:
-	@set -eu; \
-	output_dir=$$(mktemp -d); \
-	trap 'rm -rf "$$output_dir"' EXIT HUP INT TERM; \
-	GOWORK=off $(GO) build -mod=readonly -o "$$output_dir/" ./...; \
-	test -x "$$output_dir/server"
-
-vulncheck: verify-tools
-	GOWORK=off GOFLAGS=-mod=readonly $(GOVULNCHECK) ./...
-
 check: verify-tools format-check format-proto-check lint lint-proto test-race test-integration build \
 	check-deps check-proto-drift check-sql-drift check-proto-breaking vulncheck
+
+test-tooling: verify-tools
+	@MODULE_ROOT="$(CURDIR)" COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
+		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" ./scripts/test-tooling.sh
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server

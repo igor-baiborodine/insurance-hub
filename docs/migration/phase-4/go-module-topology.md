@@ -16,9 +16,9 @@ The repository currently owns two Go modules and no Go workspace.
 | `services/product-service` | `github.com/igor-baiborodine/insurance-hub/services/product-service` | Product business service; Product service maintainers | Its current executable and support packages | None | Standalone, `GOWORK=off` | `make -C services/product-service check` | `.github/workflows/go-modules.yml` |
 
 The scaffold owns its Protobuf source and generated bindings. It is not a deployed business
-service, shared business model, or independently distributed contract module. Product currently has
-a management-only shell; its Product v1 contract, SQL reader, and business listeners join the same
-module in later issue-132 steps. There is no approved cross-module application dependency,
+service, shared business model, or independently distributed contract module. Product owns its
+Product v1 contract, SQL reader, HTTP and gRPC adapters, and business listeners in one standalone
+module. There is no approved cross-module application dependency,
 private-module prerequisite, `go.work`, `go.work.sum`, or filesystem `replace`. The
 `services/example-copy` tree created by `check-copy` is a disposable reuse fixture and is excluded
 from topology.
@@ -38,7 +38,7 @@ Install pinned tools explicitly before running the full local job:
 
 ```sh
 make go-scaffold-bootstrap-tools
-make -C services/product-service bootstrap-tools
+make go-product-bootstrap-tools
 ```
 
 The Product validation also requires Docker daemon access. Its owning `check` target runs the
@@ -57,8 +57,8 @@ make go-topology-test
 
 `go-topology-check` compares discovered manifests with the inventory, checks module identity and
 owner targets, compares filesystem replacements with their approved inventory records, validates CI
-triggers and root invocations, loads every package graph with `GOWORK=off` and readonly module
-resolution, and enforces repository import boundaries.
+triggers, cache inputs, and root invocations, loads every package graph with `GOWORK=off` and
+readonly module resolution, and enforces repository import boundaries.
 
 `go-modules-check` runs topology validation first and then visits every inventory module exactly
 once. It forces standalone mode, rejects unapproved filesystem replacements, forwards only the
@@ -67,14 +67,20 @@ remain unchanged. `FORMAT_SCOPE=all` covers every eligible handwritten Go file i
 The scaffold and Product `./...` scopes cover all their current packages. Product coverage includes
 `cmd/server`, the test-owned HTTP boundary, generated Product v1 bindings, sqlc-generated queries,
 the bounded PostgreSQL reader, contract tests, the authoritative QA fixture loader, and the tagged
-PostgreSQL harness/reader suites invoked by `test-integration`. Later Product transport adapters
-must enter this aggregate.
+PostgreSQL harness/reader suites invoked by `test-integration`.
+
+Both modules include the root-owned `scripts/go/module/common.mk`. The shared scripts implement
+tool verification, formatting, dependency reproduction, and exact generated-output drift checks;
+module Makefiles retain their pins and explicit Protobuf, SQL, integration, and run targets. The
+scaffold copy proof installs a private copy of the helper inside the disposable service, so the
+renamed service remains runnable after it leaves this checkout. No runtime package imports or Go
+module dependency point at the scaffold or shared tooling directory.
 
 `go-topology-test` creates local temporary repositories with no network requirement. It proves
 malformed and drifted inventory failures, workspace and replacement masking, allowed contract
-sharing, and prohibited private, scaffold, undeclared, and unknown-owner imports. It removes its
-fixtures after success, failure, or interruption and checks that real source and manifest bytes did
-not change.
+sharing, prohibited private, scaffold, undeclared, and unknown-owner imports, and missing CI
+triggers, cache inputs, or required Make invocations. It removes its fixtures after success,
+failure, or interruption and checks that real source and manifest bytes did not change.
 
 These checks do not install tools, format source, tidy or upgrade dependencies, regenerate output,
 advance compatibility baselines, create a workspace, deploy, or contact shared infrastructure.
@@ -90,24 +96,27 @@ with their generated and manifest changes.
 and workflow itself. The topology checker fails if an inventory module's workflow lacks its module
 path triggers or does not call
 both `make go-modules-check` and `make go-topology-test` through the restricted inline step-level
-`run` forms used by this repository. Block scalars, comments, and values under unrelated workflow
-keys do not count as execution evidence.
+`run` forms used by this repository. It also requires both bootstrap targets, both controlled
+tooling suites, the renamed scaffold copy proof, both module cache inputs, and the immutable Product
+baseline trigger. Block scalars, comments, and values under unrelated workflow keys do not count
+as execution evidence.
 
 CI uses `ubuntu-24.04`, checkout v6 with full history, setup-go v7 with Go 1.27.2, both module
 `go.sum` cache inputs, and `contents: read`. It bootstraps each module's pinned tools through Make,
 resolves changed formatting scope from the pull-request base or push predecessor, runs the aggregate
-module and
-topology targets, then retains the scaffold tooling-failure and renamed-copy proofs. It requires no
-secret or live service.
+module and topology targets, then runs both modules' tooling-failure suites and the renamed-copy
+proof. Product integration checks use the hosted runner's Docker daemon and the immutable baseline
+fixture; they require no secret or live service.
 
 The equivalent full-file local sequence is:
 
 ```sh
 make go-scaffold-bootstrap-tools
-make -C services/product-service bootstrap-tools
+make go-product-bootstrap-tools
 make go-modules-check FORMAT_SCOPE=all
 make go-topology-test
 make go-scaffold-test-tooling
+make go-product-test-tooling
 make go-scaffold-check-copy
 ```
 

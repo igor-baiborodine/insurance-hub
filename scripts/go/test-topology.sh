@@ -79,7 +79,7 @@ snapshot_checkout() {
 				-o -name .tools -o -name vendor -o -name node_modules -o -name third_party \) -prune \
 			-o -type f \( -name '*.go' -o -name go.mod -o -name go.sum -o -name go.work \
 				-o -name go.work.sum -o -name Makefile -o -name 'go-module-topology.json' \
-				-o -path '*/scripts/go/*.sh' \) -print0 | sort -z
+				-o -name '*.mk' -o -path '*/scripts/go/*.sh' \) -print0 | sort -z
 	)
 }
 
@@ -133,6 +133,7 @@ write_ci_workflow() {
 		for trigger_path in go.mod go.sum go.work go.work.sum \
 			'**/go.mod' '**/go.sum' '**/go.work' '**/go.work.sum' \
 			'go-module-topology.json' 'scripts/go/**' \
+			'legacy/product-service/src/test/resources/product-read-baseline/**' \
 			'docs/migration/phase-4/go-module-topology.md' '.github/workflows/test.yml' 'Makefile'
 		do
 			printf "      - '%s'\n" "${trigger_path}"
@@ -147,6 +148,7 @@ write_ci_workflow() {
 		for trigger_path in go.mod go.sum go.work go.work.sum \
 			'**/go.mod' '**/go.sum' '**/go.work' '**/go.work.sum' \
 			'go-module-topology.json' 'scripts/go/**' \
+			'legacy/product-service/src/test/resources/product-read-baseline/**' \
 			'docs/migration/phase-4/go-module-topology.md' '.github/workflows/test.yml' 'Makefile'
 		do
 			printf "      - '%s'\n" "${trigger_path}"
@@ -159,8 +161,19 @@ write_ci_workflow() {
 			'jobs:' \
 			'  validate:' \
 			'    steps:' \
+			'      - uses: actions/setup-go@v7' \
+			'        with:' \
+			'          cache: true' \
+			'          cache-dependency-path: |' \
+			'            templates/go-service/go.sum' \
+			'            services/product-service/go.sum' \
+			'      - run: make go-scaffold-bootstrap-tools' \
+			'      - run: make go-product-bootstrap-tools' \
 			'      - run: make go-modules-check' \
-			'      - run: make go-topology-test'
+			'      - run: make go-topology-test' \
+			'      - run: make go-scaffold-test-tooling' \
+			'      - run: make go-product-test-tooling' \
+			'      - run: make go-scaffold-check-copy'
 	} >"${workflow_path}"
 }
 
@@ -373,6 +386,30 @@ grep -Fv -- "- 'module/**'" "${case_root}/.github/workflows/test.yml" \
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
 expect_failure "missing CI module trigger" "${case_root}" \
 	'workflow .github/workflows/test.yml is missing push path trigger for inventory module directory module: module/\*\*' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case missing-ci-baseline-trigger)"
+grep -Fv -- "- 'legacy/product-service/src/test/resources/product-read-baseline/**'" \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "missing CI baseline trigger" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing push path trigger for repository topology policy: legacy/product-service/src/test/resources/product-read-baseline/\*\*' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case missing-product-tooling-target)"
+grep -Fv -- "- run: make go-product-test-tooling" \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "missing Product tooling target" "${case_root}" \
+	'workflow .github/workflows/test.yml does not invoke executable Make target: go-product-test-tooling' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case missing-product-cache-input)"
+grep -Fv -- "services/product-service/go.sum" \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "missing Product cache input" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing active Product setup-go cache input: services/product-service/go.sum' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
 case_root="$(new_single_case commented-ci-target)"

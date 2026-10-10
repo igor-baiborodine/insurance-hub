@@ -2,6 +2,8 @@
 
 set -eu
 
+module_root=${MODULE_ROOT:?MODULE_ROOT is required}
+cd "$module_root"
 config=${GOLANGCI_CONFIG:-.golangci.yml}
 module_path=$(awk '$1 == "module" { print $2; exit }' go.mod)
 module_go_version=$(awk '$1 == "go" { print $2; exit }' go.mod)
@@ -50,6 +52,25 @@ govulncheck_version=$(
 		sed -n 's/^Scanner: govulncheck@\([^ ]*\).*/\1/p'
 )
 expect_equal "govulncheck version" "$GOVULNCHECK_VERSION" "$govulncheck_version"
+
+old_ifs=$IFS
+IFS=';'
+for specification in ${EXTRA_TOOL_SPECS:-}; do
+	[ -n "$specification" ] || continue
+	IFS='|' read -r name path expected_version version_command <<EOF
+$specification
+EOF
+	IFS=';'
+	[ -n "$name" ] && [ -n "$path" ] && [ -n "$expected_version" ] &&
+		[ -n "$version_command" ] || fail "malformed extra tool specification"
+	require_executable "$name" "$path"
+	case "$version_command" in
+		version) actual_version=$("$path" version) ;;
+		*) fail "unsupported extra tool version command: $version_command" ;;
+	esac
+	expect_equal "$name version" "$expected_version" "$actual_version"
+done
+IFS=$old_ifs
 
 "$GOLANGCI_LINT" config verify --config "$config" >/dev/null
 

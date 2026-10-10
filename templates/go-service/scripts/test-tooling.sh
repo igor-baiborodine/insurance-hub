@@ -2,106 +2,11 @@
 
 set -euo pipefail
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-module_root=$(dirname -- "$script_dir")
-make_command=${MAKE_COMMAND:-make}
-tools_bin=${TOOLS_BIN:?TOOLS_BIN is required}
-
-fail() {
-	printf 'test-tooling: %s\n' "$*" >&2
-	exit 1
-}
-
-for tool in buf protoc-gen-go protoc-gen-go-grpc golangci-lint govulncheck; do
-	[[ -x "$tools_bin/$tool" ]] || fail "missing pinned tool: $tools_bin/$tool"
-done
-
-temporary_root=$(mktemp -d "${TMPDIR:-/tmp}/go-service-tooling.XXXXXX")
-case "$temporary_root" in
-	"${TMPDIR:-/tmp}"/go-service-tooling.*) ;;
-	*) fail "unexpected temporary path: $temporary_root" ;;
-esac
-
-cleanup() {
-	rm -rf -- "$temporary_root"
-}
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-printf 'test-tooling: temporary fixture root: %s\n' "$temporary_root"
-if [[ ${TEST_TOOLING_SELF_INTERRUPT:-0} == 1 ]]; then
-	kill -TERM "$$"
-	fail 'continued after controlled interrupt'
-fi
-
-base_fixture=$temporary_root/base
-mkdir -p "$base_fixture/.tools/bin" "$temporary_root/logs"
-tar --exclude='./.tools' -C "$module_root" -cf - . | tar -C "$base_fixture" -xf -
-for tool in buf protoc-gen-go protoc-gen-go-grpc golangci-lint govulncheck; do
-	ln -s "$tools_bin/$tool" "$base_fixture/.tools/bin/$tool"
-done
-
-new_fixture() {
-	local name=$1
-	local fixture=$temporary_root/$name
-	mkdir -p "$fixture"
-	cp -a "$base_fixture/." "$fixture/"
-	printf '%s\n' "$fixture"
-}
-
-write_inventory() {
-	local fixture=$1
-	find "$fixture" -path "$fixture/.tools" -prune -o -type f -exec sha256sum {} + |
-		LC_ALL=C sort
-}
-
-expect_success() {
-	local name=$1
-	local target=$2
-	local fixture=$3
-	shift 3
-	local log=$temporary_root/logs/$name.log
-	local before after
-
-	before=$(write_inventory "$fixture")
-	if ! "$make_command" --no-print-directory -C "$fixture" "$target" "$@" >"$log" 2>&1; then
-		cat "$log" >&2
-		fail "$name could not establish a passing $target baseline"
-	fi
-	after=$(write_inventory "$fixture")
-	if [[ "$before" != "$after" ]]; then
-		cat "$log" >&2
-		fail "$name baseline mutated its disposable checkout"
-	fi
-}
-
-expect_failure() {
-	local name=$1
-	local target=$2
-	local expected=$3
-	local fixture=$4
-	shift 4
-	local log=$temporary_root/logs/$name.log
-	local before after
-
-	before=$(write_inventory "$fixture")
-	if "$make_command" --no-print-directory -C "$fixture" "$target" "$@" >"$log" 2>&1; then
-		cat "$log" >&2
-		fail "$name unexpectedly passed target $target"
-	fi
-	after=$(write_inventory "$fixture")
-	if [[ "$before" != "$after" ]]; then
-		cat "$log" >&2
-		fail "$name mutated its disposable checkout"
-	fi
-	if ! grep -Fq -- "$expected" "$log"; then
-		cat "$log" >&2
-		fail "$name failed without expected diagnostic: $expected"
-	fi
-	printf 'test-tooling: passed controlled failure: %s -> %s\n' "$name" "$target"
-}
+common_tooling_dir=${COMMON_GO_TOOLING_DIR:?COMMON_GO_TOOLING_DIR is required}
+# shellcheck source=/dev/null
+source "$common_tooling_dir/test-tooling-lib.sh"
+tooling_initialize go-service-tooling \
+	buf protoc-gen-go protoc-gen-go-grpc golangci-lint govulncheck
 
 fixture=$(new_fixture format-new-file)
 cat >"$fixture/tooling_format_defect.go" <<'EOF'

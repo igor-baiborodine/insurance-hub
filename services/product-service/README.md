@@ -11,9 +11,10 @@ The module path is
 required. From the repository root, use its owning Makefile:
 
 ```sh
-make -C services/product-service bootstrap-tools
+make go-product-bootstrap-tools
 make -C services/product-service format FORMAT_SCOPE=all
 make -C services/product-service check FORMAT_SCOPE=all
+make go-product-test-tooling
 make -C services/product-service build
 make -C services/product-service run
 ```
@@ -86,6 +87,12 @@ format, lint, drift, and breaking checks, plus sqlc output drift. Tools are pinn
 and installed under ignored `.tools/bin/`.
 Normal checks use readonly module resolution. `FORMAT_SCOPE=changed` is the default for local
 formatting; `FORMAT_SCOPE=all` checks every eligible handwritten Go file.
+
+The module includes the root-owned `scripts/go/module/common.mk` for identical tool verification,
+formatting, dependency reproduction, and generated-output drift logic. Its Makefile continues to
+own all version pins, SQL generation, integration selection, and service execution. The controlled
+`test-tooling` suite proves Product formatting, dependency, compatibility, Protobuf/SQL drift, and
+integration-selection failures without changing its disposable fixture.
 
 Configuration is read once and validated before service resources are acquired. Duration values use
 Go duration syntax. Listener ports may be zero for test-owned ephemeral listeners; listener hosts

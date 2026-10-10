@@ -116,8 +116,8 @@ make check-copy
 
 ### Root scaffold delegates
 
-The repository root exposes only these narrowly scoped delegates. They cover
-`templates/go-service` and do not discover or validate future Go modules.
+The repository root exposes these narrowly scoped scaffold delegates. Repository-wide discovery
+and Product-specific delegates are documented in the topology guide.
 
 | Root target                        | Owning module target                           |
 |------------------------------------|------------------------------------------------|
@@ -134,22 +134,25 @@ The repository root exposes only these narrowly scoped delegates. They cover
 and pushes to `main` when this module, any Go module/workspace manifest, the canonical topology,
 topology scripts, the workflow, or the root Makefile changes. It uses `ubuntu-24.04`, checkout v6
 with full history, setup-go v7 with exact Go 1.27.2, the nested `go.sum` cache key, and read-only
-repository permissions. It requires no secret, database, broker, container runtime, deployment
-environment, or telemetry collector.
+repository permissions. Product integration checks use the hosted Docker daemon and disposable
+PostgreSQL; the job requires no secret, live database, broker, deployment environment, or telemetry
+collector.
 
-CI bootstraps the scaffold tools, runs the repository-wide `go-modules-check` and
-`go-topology-test`, then retains the scaffold-specific `test-tooling` and `check-copy` proofs. It
-invokes only documented Make targets. Pull requests use the base SHA for `FORMAT_BASE`; pushes use
-the before SHA. A missing, all-zero, or unresolvable event base visibly falls back to
+CI bootstraps both modules' tools, runs the repository-wide `go-modules-check` and
+`go-topology-test`, then runs both controlled tooling suites and the scaffold-specific `check-copy`
+proof. It invokes only documented Make targets. Pull requests use the base SHA for `FORMAT_BASE`;
+pushes use the before SHA. A missing, all-zero, or unresolvable event base visibly falls back to
 `FORMAT_SCOPE=all`.
 
 The equivalent full-file local job is:
 
 ```sh
 make go-scaffold-bootstrap-tools
+make go-product-bootstrap-tools
 make go-modules-check FORMAT_SCOPE=all
 make go-topology-test
 make go-scaffold-test-tooling
+make go-product-test-tooling
 make go-scaffold-check-copy
 ```
 
@@ -160,10 +163,16 @@ a successful GitHub Actions run on a pushed branch or pull request is hosted-CI 
 
 The root [Go module topology guide](../../docs/migration/phase-4/go-module-topology.md) defines
 repository-wide discovery, resolution, import boundaries, CI coverage, and onboarding. This
-scaffold is the only current inventory module. Its supported mode is standalone `GOWORK=off`, it
+scaffold and Product service are the current inventory modules. The scaffold's supported mode is
+standalone `GOWORK=off`, it
 has no filesystem replacement or cross-module runtime dependency, and the repository has no
 approved workspace. Future modules are uncovered until their inventory, owning target, consumers,
 CI triggers, and controlled fixtures are reviewed together.
+
+The scaffold itself includes the repository's shared `scripts/go/module/common.mk`. During
+`check-copy`, that helper is copied into the renamed service and its Makefile is redirected to the
+private copy. The resulting service can run its Make targets outside this checkout and has no
+runtime dependency on this scaffold or a shared Go module.
 
 ## Create an independently owned service
 

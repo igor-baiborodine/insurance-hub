@@ -70,7 +70,7 @@ jobs:
         run: make go-scaffold-bootstrap-tools
 
       - name: Bootstrap pinned Product tools
-        run: make -C services/product-service bootstrap-tools
+        run: make go-product-bootstrap-tools
 
       - name: Resolve formatting scope
         shell: bash
@@ -107,8 +107,11 @@ jobs:
       - name: Prove controlled topology failures
         run: make go-topology-test
 
-      - name: Prove controlled tooling failures
+      - name: Prove controlled scaffold tooling failures
         run: make go-scaffold-test-tooling
+
+      - name: Prove controlled Product tooling failures
+        run: make go-product-test-tooling
 
       - name: Prove renamed scaffold copy
         run: make go-scaffold-check-copy
