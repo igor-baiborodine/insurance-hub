@@ -22,6 +22,8 @@ const (
 type CatalogFixture struct {
 	ScenarioID     string       `json:"scenarioId"`
 	Environment    FixtureSet   `json:"environment"`
+	Provenance     string       `json:"provenance"`
+	SourceRevision string       `json:"sourceRevision"`
 	SchemaIdentity Identity     `json:"schemaIdentity"`
 	DataIdentity   DataIdentity `json:"dataIdentity"`
 	Rows           []FixtureRow `json:"rows"`
@@ -98,7 +100,8 @@ func LoadCatalog(baselineRoot string, fixtureSet FixtureSet) (CatalogFixture, er
 			decoderErr,
 		)
 	}
-	if fixture.Environment != fixtureSet || fixture.ScenarioID == "" {
+	if fixture.Environment != fixtureSet || fixture.ScenarioID == "" ||
+		fixture.Provenance == "" || fixture.SourceRevision == "" {
 		return CatalogFixture{}, fmt.Errorf(
 			"load catalog %s: fixture identity mismatch",
 			fixtureSet,

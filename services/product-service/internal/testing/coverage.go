@@ -46,10 +46,10 @@ func ScenarioRegistry() map[string]ScenarioRegistration {
 	add("PostgreSQL reader and Step 14 catalog parity", DispositionCurrentTest, `
 		DATA-QA-001
 	`)
-	add("Step 14 accepted local catalog replay", DispositionLaterStep, `
+	add("local-dev capture excluded from issue-132 automated replay", DispositionNonTransport, `
 		DATA-LOCAL-001
 	`)
-	add("Steps 12 and 14 direct HTTP parity", DispositionLaterStep, `
+	add("Steps 12 and 14 direct HTTP parity", DispositionCurrentTest, `
 		HTTP-DIRECT-LIST-001 HTTP-DIRECT-GET-CAR-001 HTTP-DIRECT-GET-FAI-001
 		HTTP-DIRECT-GET-HSI-001 HTTP-DIRECT-GET-TRI-001 HTTP-EMPTY-CATALOG-001
 		HTTP-SINGLE-CATALOG-001 HTTP-MISSING-001 HTTP-LOOKUP-PATHS-001
@@ -58,7 +58,7 @@ func ScenarioRegistry() map[string]ScenarioRegistration {
 		DATA-DECIMAL-001 DATA-QUESTION-VARIANTS-001 DATA-PRESENCE-DEFAULTS-001
 		DATA-UNKNOWN-FIELDS-001 DATA-UNKNOWN-SUBTYPE-001 DATA-ORDERING-001
 	`)
-	add("Steps 11 through 15 safe backend failures", DispositionLaterStep, `
+	add("Steps 11 through 15 safe backend failures", DispositionCurrentTest, `
 		FAIL-DECODE-001 FAIL-DATABASE-001
 	`)
 	add("Step 18 anonymous direct access", DispositionLaterStep, `
@@ -73,7 +73,7 @@ func ScenarioRegistry() map[string]ScenarioRegistration {
 		ACCESS-GATEWAY-LIST-001 ACCESS-GATEWAY-GET-001 ACCESS-PROPAGATION-001
 	`)
 
-	add("current routing tests and Steps 12 through 14", DispositionLaterStep, `
+	add("current routing tests and Steps 12 through 14", DispositionCurrentTest, `
 		FAIL-PRODUCT-EMPTY-LIST-001 FAIL-PRODUCT-SINGLE-LIST-001
 		FAIL-PRODUCT-SINGLE-GET-001 FAIL-PRODUCT-MISSING-001
 		FAIL-PRODUCT-LOOKUP-LOWERCASE-001 FAIL-PRODUCT-LOOKUP-WHITESPACE-001
