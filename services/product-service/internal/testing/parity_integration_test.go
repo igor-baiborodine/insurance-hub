@@ -97,7 +97,7 @@ func TestProductParity(t *testing.T) {
 	}
 }
 
-type parityRuntime struct {
+type productRuntime struct {
 	addresses   serviceAddresses
 	http        *http.Client
 	grpc        productv1.ProductServiceClient
@@ -108,7 +108,7 @@ type parityRuntime struct {
 	stopped     bool
 }
 
-func startParityRuntime(t *testing.T, harness *Harness) *parityRuntime {
+func startParityRuntime(t *testing.T, harness *Harness) *productRuntime {
 	t.Helper()
 	addresses := serviceAddresses{
 		http: freeAddress(t), grpc: freeAddress(t), health: freeAddress(t),
@@ -137,7 +137,7 @@ func startParityRuntime(t *testing.T, harness *Harness) *parityRuntime {
 		stopService()
 		t.Fatalf("create parity gRPC client: %v", err)
 	}
-	runtime := &parityRuntime{
+	runtime := &productRuntime{
 		addresses:   addresses,
 		http:        &http.Client{Timeout: 5 * time.Second},
 		grpc:        productv1.NewProductServiceClient(connection),
@@ -154,7 +154,7 @@ func startParityRuntime(t *testing.T, harness *Harness) *parityRuntime {
 	return runtime
 }
 
-func (runtime *parityRuntime) stop(t *testing.T) {
+func (runtime *productRuntime) stop(t *testing.T) {
 	t.Helper()
 	if runtime.stopped {
 		return
@@ -178,7 +178,7 @@ func replayQACatalog(
 	t *testing.T,
 	ctx context.Context,
 	harness *Harness,
-	runtime *parityRuntime,
+	runtime *productRuntime,
 	baselineRoot string,
 	image string,
 	serverVersion string,
@@ -289,7 +289,7 @@ func replayDataEdges(
 	t *testing.T,
 	ctx context.Context,
 	harness *Harness,
-	runtime *parityRuntime,
+	runtime *productRuntime,
 	baselineRoot string,
 ) {
 	t.Helper()
@@ -342,7 +342,7 @@ func replayHTTPDataEdge(
 	t *testing.T,
 	ctx context.Context,
 	harness *Harness,
-	runtime *parityRuntime,
+	runtime *productRuntime,
 	testCase dataEdgeCase,
 ) {
 	t.Helper()
@@ -464,7 +464,7 @@ func replayDirectFailures(
 	t *testing.T,
 	ctx context.Context,
 	harness *Harness,
-	runtime *parityRuntime,
+	runtime *productRuntime,
 	baselineRoot string,
 ) {
 	t.Helper()

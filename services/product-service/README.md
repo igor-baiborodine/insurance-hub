@@ -28,7 +28,8 @@ after the run:
 make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXTURE_SET=qa
 ```
 
-`INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, `parity`, or `all`.
+`INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, `parity`,
+`cancellation`, or `all`.
 `FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
@@ -59,6 +60,11 @@ The `parity` suite uses that production composition path to replay the immutable
 accepted synthetic data-edge case, and every direct Product failure case through its applicable
 HTTP and gRPC boundary. The malformed URI case is HTTP-only because gRPC has no URI parser. The two
 SQL-null cases remain database-constraint checks and must fail with SQLSTATE `23502`.
+
+The `cancellation` suite uses deterministic PostgreSQL table locks and a one-connection runtime
+pool to prove caller cancellation, configured and caller deadlines, bounded acquisition, HTTP
+disconnect propagation, backend-connection loss, probe behavior, connection release, and
+subsequent recovery. It controls only its disposable database and does not use timing sleeps.
 
 The Product v1 schema is `api/product/v1/product_service.proto`; generated Go bindings are under
 `gen/product/v1`. The frozen initial compatibility baseline lives in
