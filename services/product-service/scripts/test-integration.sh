@@ -14,7 +14,7 @@ fail() {
 }
 
 case "$integration_suite" in
-	all) test_pattern='^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation)$' ;;
+	all) test_pattern='^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle)$' ;;
 	harness) test_pattern='^TestPostgresHarness$' ;;
 	reader) test_pattern='^TestPostgresReader$' ;;
 	grpc) test_pattern='^TestProductGRPC$' ;;
@@ -22,6 +22,7 @@ case "$integration_suite" in
 	startup) test_pattern='^TestProductStartup$' ;;
 	parity) test_pattern='^TestProductParity$' ;;
 	cancellation) test_pattern='^TestProductCancellation$' ;;
+	lifecycle) test_pattern='^TestProductLifecycle$' ;;
 	'') fail 'INTEGRATION_SUITE must not be empty' ;;
 	*) fail "unknown INTEGRATION_SUITE: $integration_suite" ;;
 esac
@@ -42,19 +43,31 @@ command -v "$docker_command" >/dev/null 2>&1 || fail 'Docker CLI is required'
 "$docker_command" info >/dev/null 2>&1 || fail 'Docker daemon is unavailable'
 
 result_file=$(mktemp "${TMPDIR:-/tmp}/product-service-integration.XXXXXX")
+binary_dir=
 cleanup() {
 	rm -f -- "$result_file"
+	if [[ -n "$binary_dir" ]]; then
+		rm -rf -- "$binary_dir"
+	fi
 }
 trap cleanup EXIT
 
+server_binary=
+if [[ "$integration_suite" == all || "$integration_suite" == lifecycle ]]; then
+	binary_dir=$(mktemp -d "${TMPDIR:-/tmp}/product-service-binary.XXXXXX")
+	server_binary="$binary_dir/product-service"
+	GOWORK=off "$go_command" build -mod=readonly -race -o "$server_binary" ./cmd/server
+fi
+
 PRODUCT_TEST_POSTGRES_IMAGE="$postgres_image" \
 	PRODUCT_INTEGRATION_FIXTURE_SET="$fixture_set" \
+	PRODUCT_TEST_SERVER_BINARY="$server_binary" \
 	GOWORK=off "$go_command" test -mod=readonly -count=1 -race -tags=integration \
 	-json -run "$test_pattern" ./internal/testing ./internal/postgres | tee "$result_file"
 
 executed_count=$(
 	awk '
-		/"Action":"run"/ && /"Test":"(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation)/ { count++ }
+		/"Action":"run"/ && /"Test":"(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle)/ { count++ }
 		END { print count + 0 }
 	' "$result_file"
 )

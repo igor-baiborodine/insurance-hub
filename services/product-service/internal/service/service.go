@@ -89,8 +89,8 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 	httpHandler, err := producthttp.NewHandler(
 		logger,
 		producthttp.Settings{RequestTimeout: settings.RequestTimeout},
-		producthttp.ListProducts(listProducts.Execute),
-		producthttp.GetProduct(getProduct.Execute),
+		listProducts.Execute,
+		getProduct.Execute,
 	)
 	if err != nil {
 		return fmt.Errorf("run service: %w", err)
@@ -104,8 +104,8 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 			MaxReceiveBytes: settings.GRPC.MaxReceiveBytes,
 			MaxSendBytes:    settings.GRPC.MaxSendBytes,
 		},
-		productgrpc.ListProducts(listProducts.Execute),
-		productgrpc.GetProduct(getProduct.Execute),
+		listProducts.Execute,
+		getProduct.Execute,
 	)
 	if err != nil {
 		return fmt.Errorf("run service: %w", err)
@@ -181,14 +181,7 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 		slog.String("health_address", resources.managementListener.Addr().String()),
 	)
 
-	var serveErr error
-	select {
-	case <-ctx.Done():
-	case result := <-serveResults:
-		if !expectedServeError(result.err) {
-			serveErr = fmt.Errorf("serve %s: %w", result.name, result.err)
-		}
-	}
+	serveErr := waitForRunStop(ctx, serveResults)
 	shutdownErr := resources.shutdown(settings.ShutdownTimeout)
 	return errors.Join(serveErr, shutdownErr)
 }
@@ -196,6 +189,18 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 type serveResult struct {
 	name string
 	err  error
+}
+
+func waitForRunStop(ctx context.Context, results <-chan serveResult) error {
+	select {
+	case <-ctx.Done():
+		return nil
+	case result := <-results:
+		if expectedServeError(result.err) {
+			return nil
+		}
+		return fmt.Errorf("serve %s: %w", result.name, result.err)
+	}
 }
 
 type runtimeResources struct {

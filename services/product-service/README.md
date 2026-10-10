@@ -29,7 +29,7 @@ make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXT
 ```
 
 `INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, `parity`,
-`cancellation`, or `all`.
+`cancellation`, `lifecycle`, or `all`.
 `FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
@@ -65,6 +65,11 @@ The `cancellation` suite uses deterministic PostgreSQL table locks and a one-con
 pool to prove caller cancellation, configured and caller deadlines, bounded acquisition, HTTP
 disconnect propagation, backend-connection loss, probe behavior, connection release, and
 subsequent recovery. It controls only its disposable database and does not use timing sleeps.
+
+The `lifecycle` suite launches the race-built production executable and sends it `SIGTERM`. It
+proves bounded idle shutdown, graceful completion of accepted HTTP and gRPC work, forced
+termination of blocked work after the drain period, rejection of new work during shutdown, and
+release of listeners and PostgreSQL connections within the one configured shutdown budget.
 
 The Product v1 schema is `api/product/v1/product_service.proto`; generated Go bindings are under
 `gen/product/v1`. The frozen initial compatibility baseline lives in
