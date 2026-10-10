@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -96,9 +97,10 @@ func TestDirectProductRoutingMatchesAcceptedBoundaryCases(t *testing.T) {
 					fixture.Expected.RawBody,
 				)
 			}
-			if response.Header.Get("Location") != "" || !response.Close {
+			wantClose := test.id == "FAIL-PRODUCT-LOOKUP-BAD-ENCODING-001"
+			if response.Header.Get("Location") != "" || response.Close != wantClose {
 				t.Errorf(
-					"unexpected redirect or persistent connection: %v",
+					"unexpected redirect or connection policy: %v",
 					response.Header,
 				)
 			}
@@ -184,6 +186,111 @@ func TestCompatibilityListenerBoundsRequestLineAndHeaderTime(t *testing.T) {
 	defer func() { _ = listener.Close() }()
 	if err := Serve(&http.Server{Handler: handler}, listener); err == nil {
 		t.Error("compatibility listener accepted an unbounded read-header timeout")
+	}
+
+	listener, err = net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+	if err := Serve(&http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: time.Second,
+	}, listener); err == nil {
+		t.Error("compatibility listener accepted an unbounded idle timeout")
+	}
+}
+
+func TestCompatibilityListenerPreservesKeepAliveAndIdleTimeout(t *testing.T) {
+	// given
+	var calls atomic.Int64
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = io.WriteString(writer, "ok")
+	})
+	server, address, done := startConfiguredTestServer(t, handler, 40*time.Millisecond)
+	defer stopTestServer(t, server, done)
+	connection, err := net.DialTimeout("tcp", address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	reader := bufio.NewReader(connection)
+
+	// when
+	first := requestOnConnection(t, connection, reader, "/products")
+	second := requestOnConnection(t, connection, reader, "/products/ONLY")
+	_ = connection.SetReadDeadline(time.Now().Add(time.Second))
+	_, idleErr := reader.ReadByte()
+
+	// then
+	if first.StatusCode != http.StatusOK || first.Close ||
+		second.StatusCode != http.StatusOK || second.Close || calls.Load() != 2 {
+		t.Fatalf(
+			"responses=(%d close=%t, %d close=%t) calls=%d",
+			first.StatusCode,
+			first.Close,
+			second.StatusCode,
+			second.Close,
+			calls.Load(),
+		)
+	}
+	if !errors.Is(idleErr, io.EOF) {
+		t.Fatalf("idle connection read error = %v, want EOF", idleErr)
+	}
+}
+
+func TestCompatibilityListenerChecksMalformedTargetAfterKeepAliveRequest(t *testing.T) {
+	// given
+	var calls atomic.Int64
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = io.WriteString(writer, "ok")
+	})
+	server, address, done := startConfiguredTestServer(t, handler, time.Second)
+	defer stopTestServer(t, server, done)
+	connection, err := net.DialTimeout("tcp", address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	_ = connection.SetDeadline(time.Now().Add(2 * time.Second))
+	reader := bufio.NewReader(connection)
+	first := requestOnConnection(t, connection, reader, "/products")
+
+	// when
+	if _, err := fmt.Fprint(
+		connection,
+		"GET /products/%ZZ HTTP/1.1\r\nHost: localhost\r\n\r\n",
+	); err != nil {
+		t.Fatal(err)
+	}
+	malformed, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(malformed.Body)
+	_ = malformed.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// then
+	fixture := readFailureCases(t)["FAIL-PRODUCT-LOOKUP-BAD-ENCODING-001"]
+	if first.StatusCode != http.StatusOK || first.Close ||
+		malformed.StatusCode != fixture.Expected.Status ||
+		malformed.Header.Get("Content-Type") != fixture.Expected.ContentType ||
+		string(body) != fixture.Expected.RawBody || !malformed.Close || calls.Load() != 1 {
+		t.Fatalf(
+			"first=(%d close=%t) malformed=(%d close=%t type=%q body=%q) calls=%d",
+			first.StatusCode,
+			first.Close,
+			malformed.StatusCode,
+			malformed.Close,
+			malformed.Header.Get("Content-Type"),
+			body,
+			calls.Load(),
+		)
 	}
 }
 
@@ -624,7 +731,11 @@ func startTestServer(t *testing.T, handler http.Handler, compatible bool) string
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: time.Second}
+	server := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: time.Second,
+		IdleTimeout:       time.Second,
+	}
 	done := make(chan error, 1)
 	go func() {
 		if compatible {
@@ -633,15 +744,66 @@ func startTestServer(t *testing.T, handler http.Handler, compatible bool) string
 		}
 		done <- server.Serve(listener)
 	}()
-	t.Cleanup(func() {
-		_ = server.Close()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			t.Error("test HTTP server did not stop")
-		}
-	})
+	t.Cleanup(func() { stopTestServer(t, server, done) })
 	return listener.Addr().String()
+}
+
+func startConfiguredTestServer(
+	t *testing.T,
+	handler http.Handler,
+	idleTimeout time.Duration,
+) (*http.Server, string, <-chan error) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: time.Second,
+		IdleTimeout:       idleTimeout,
+	}
+	done := make(chan error, 1)
+	go func() { done <- Serve(server, listener) }()
+	return server, listener.Addr().String(), done
+}
+
+func stopTestServer(t *testing.T, server *http.Server, done <-chan error) {
+	t.Helper()
+	_ = server.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("test HTTP server did not stop")
+	}
+}
+
+func requestOnConnection(
+	t *testing.T,
+	connection net.Conn,
+	reader *bufio.Reader,
+	path string,
+) *http.Response {
+	t.Helper()
+	_ = connection.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := fmt.Fprintf(
+		connection,
+		"GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n",
+		path,
+	); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		t.Fatal(err)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return response
 }
 
 func rawGET(t *testing.T, address, path string, closeConnection bool) (*http.Response, string) {
