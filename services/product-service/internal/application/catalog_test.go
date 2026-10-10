@@ -36,7 +36,7 @@ func (reader *readerFake) GetProduct(
 	return reader.product, reader.found, reader.err
 }
 
-func TestListProductsReturnsWholeResultOrError(t *testing.T) {
+func TestListProducts_ReturnsWholeResultOrError(t *testing.T) {
 	// given
 	reader := &readerFake{}
 	useCase, err := NewListProducts(reader)
@@ -66,7 +66,7 @@ func TestListProductsReturnsWholeResultOrError(t *testing.T) {
 	}
 }
 
-func TestGetProductPreservesOpaqueCodeAndAbsence(t *testing.T) {
+func TestGetProduct_PreservesOpaqueCodeAndAbsence(t *testing.T) {
 	// given
 	reader := &readerFake{product: domain.Product{Code: "a/b "}, found: true}
 	useCase, err := NewGetProduct(reader)
@@ -98,7 +98,7 @@ func TestGetProductPreservesOpaqueCodeAndAbsence(t *testing.T) {
 	}
 }
 
-func TestUseCasesPreserveCancellationAndReaderFailures(t *testing.T) {
+func TestUseCases_PreserveCancellationAndReaderFailures(t *testing.T) {
 	// given
 	reader := &readerFake{err: errors.Join(ErrInvalidDefinition, context.DeadlineExceeded)}
 	list, _ := NewListProducts(reader)
@@ -139,7 +139,7 @@ func TestUseCasesPreserveCancellationAndReaderFailures(t *testing.T) {
 	}
 }
 
-func TestUseCasesNeedReader(t *testing.T) {
+func TestUseCases_NeedReader(t *testing.T) {
 	if _, err := NewListProducts(nil); !errors.Is(err, ErrReaderRequired) {
 		t.Errorf("list constructor: %v", err)
 	}

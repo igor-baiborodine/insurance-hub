@@ -19,7 +19,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/telemetry"
 )
 
-func TestRunRejectsInvalidProcessDependencies(t *testing.T) {
+func TestRun_RejectsInvalidProcessDependencies(t *testing.T) {
 	// given
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	tests := []struct {
@@ -53,7 +53,7 @@ func TestRunRejectsInvalidProcessDependencies(t *testing.T) {
 	}
 }
 
-func TestRunReportsTelemetryInitializationFailure(t *testing.T) {
+func TestRun_ReportsTelemetryInitializationFailure(t *testing.T) {
 	// given
 	settings := config.Config{
 		ServiceName:     "product-service",
@@ -78,7 +78,7 @@ func TestRunReportsTelemetryInitializationFailure(t *testing.T) {
 	}
 }
 
-func TestRunCleansUpAfterDatabaseConnectionFailure(t *testing.T) {
+func TestRun_CleansUpAfterDatabaseConnectionFailure(t *testing.T) {
 	// given
 	settings := loadUnavailableDatabaseSettings(t)
 
@@ -98,7 +98,7 @@ func TestRunCleansUpAfterDatabaseConnectionFailure(t *testing.T) {
 	}
 }
 
-func TestExpectedServeErrorRecognizesOwnedServerShutdown(t *testing.T) {
+func TestExpectedServeError_RecognizesOwnedServerShutdown(t *testing.T) {
 	// given
 	tests := []struct {
 		err  error
@@ -121,7 +121,7 @@ func TestExpectedServeErrorRecognizesOwnedServerShutdown(t *testing.T) {
 	}
 }
 
-func TestWaitForRunStopPreservesFatalServingError(t *testing.T) {
+func TestWaitForRunStop_PreservesFatalServingError(t *testing.T) {
 	// given
 	cause := errors.New("fatal listener failure")
 	results := make(chan serveResult, 1)
@@ -136,7 +136,7 @@ func TestWaitForRunStopPreservesFatalServingError(t *testing.T) {
 	}
 }
 
-func TestWaitForRunStopAcceptsSignalAndOwnedServerStops(t *testing.T) {
+func TestWaitForRunStop_AcceptsSignalAndOwnedServerStops(t *testing.T) {
 	// given
 	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -153,7 +153,7 @@ func TestWaitForRunStopAcceptsSignalAndOwnedServerStops(t *testing.T) {
 	}
 }
 
-func TestRuntimeResourcesShutdownIsRepeatableAndMarksUnready(t *testing.T) {
+func TestRuntimeResources_Shutdown_IsRepeatableAndMarksUnready(t *testing.T) {
 	// given
 	pool, err := pgxpool.New(
 		context.Background(),
@@ -199,7 +199,7 @@ func TestRuntimeResourcesShutdownIsRepeatableAndMarksUnready(t *testing.T) {
 	}
 }
 
-func TestRuntimeResourcesCloseAfterStartupFailureReleasesOwnedResources(t *testing.T) {
+func TestRuntimeResources_CloseAfterStartupFailure_ReleasesOwnedResources(t *testing.T) {
 	// given
 	pool, err := pgxpool.New(
 		context.Background(),

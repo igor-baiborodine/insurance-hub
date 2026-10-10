@@ -9,7 +9,7 @@ import (
 	productv1 "github.com/igor-baiborodine/insurance-hub/services/product-service/gen/product/v1"
 )
 
-func TestProductBinaryPresenceAndDefaults(t *testing.T) {
+func TestProductBinary_PresenceAndDefaults(t *testing.T) {
 	tests := []struct {
 		name    string
 		decimal *string
@@ -73,7 +73,7 @@ func TestProductBinaryPresenceAndDefaults(t *testing.T) {
 	}
 }
 
-func TestQuestionVariantsSurviveBinaryRoundTrip(t *testing.T) {
+func TestQuestionVariants_SurviveBinaryRoundTrip(t *testing.T) {
 	tests := []struct {
 		name     string
 		question *productv1.Question
@@ -125,7 +125,7 @@ func TestQuestionVariantsSurviveBinaryRoundTrip(t *testing.T) {
 	}
 }
 
-func TestProductContractValidation(t *testing.T) {
+func TestProductContract_Validation(t *testing.T) {
 	validator, err := protovalidate.New(
 		protovalidate.WithMessages(
 			&productv1.GetProductRequest{},

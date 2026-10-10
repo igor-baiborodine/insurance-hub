@@ -25,7 +25,7 @@ type edgeFixture struct {
 	} `json:"cases"`
 }
 
-func TestAcceptedDataEdgesDecodeWithoutChangingFixtures(t *testing.T) {
+func TestDecodeProduct_AcceptedDataEdgesWithoutChangingFixtures(t *testing.T) {
 	// given
 	path := filepath.Join(
 		"..", "..", "..", "..", "legacy", "product-service", "src", "test", "resources",
@@ -163,7 +163,7 @@ func assertAcceptedProduct(t *testing.T, caseID string, product domain.Product) 
 	}
 }
 
-func TestRichDefinitionPreservesDecimalTokensVariantsAndOrder(t *testing.T) {
+func TestDecodeProduct_RichDefinitionPreservesDecimalTokensVariantsAndOrder(t *testing.T) {
 	// given
 	raw := []byte(
 		`{"name":"Rich","covers":[{"sumInsured":12.3400},{"sumInsured":12345678901234567890.123456789},{"sumInsured":0.00},{"sumInsured":null}],"questions":[{"type":"choice","choices":[{"code":"B"},{"code":"A"}]},{"type":"date"},{"type":"numeric"}],"ignoredTopLevel":true}`,
@@ -201,7 +201,7 @@ func TestRichDefinitionPreservesDecimalTokensVariantsAndOrder(t *testing.T) {
 	}
 }
 
-func TestDefaultsAndMalformedShapes(t *testing.T) {
+func TestDecodeProduct_DefaultsAndMalformedShapes(t *testing.T) {
 	// given
 	valid := []struct {
 		name string

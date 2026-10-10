@@ -29,7 +29,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
 )
 
-func TestExampleServiceGeneratedIdentity(t *testing.T) {
+func TestExampleService_GeneratedIdentity(t *testing.T) {
 	// given
 	const (
 		wantFile       = "scaffold/v1/example_service.proto"
@@ -76,7 +76,7 @@ func TestExampleServiceGeneratedIdentity(t *testing.T) {
 	}
 }
 
-func TestExampleServiceEchoBoundaries(t *testing.T) {
+func TestExampleService_Echo_Boundaries(t *testing.T) {
 	// given
 	var calls atomic.Int64
 	echo := func(ctx context.Context, message string) (string, error) {
@@ -175,7 +175,7 @@ func TestExampleServiceEchoBoundaries(t *testing.T) {
 	}
 }
 
-func TestExampleServiceEchoPreservesCancellation(t *testing.T) {
+func TestExampleService_Echo_PreservesCancellation(t *testing.T) {
 	// given
 	started := make(chan struct{})
 	echo := func(ctx context.Context, _ string) (string, error) {
@@ -220,7 +220,7 @@ func TestExampleServiceEchoPreservesCancellation(t *testing.T) {
 	}
 }
 
-func TestExampleServiceEchoPreservesDeadline(t *testing.T) {
+func TestExampleService_Echo_PreservesDeadline(t *testing.T) {
 	// given
 	started := make(chan struct{})
 	echo := func(ctx context.Context, _ string) (string, error) {
@@ -261,7 +261,7 @@ func TestExampleServiceEchoPreservesDeadline(t *testing.T) {
 	}
 }
 
-func TestExampleServiceEchoMapsHandlerContextErrors(t *testing.T) {
+func TestExampleService_Echo_MapsHandlerContextErrors(t *testing.T) {
 	// given
 	tests := []struct {
 		name       string
@@ -328,7 +328,7 @@ func TestExampleServiceEchoMapsHandlerContextErrors(t *testing.T) {
 	}
 }
 
-func TestExampleServiceEchoMapsInternalFailureAndPropagatesTrace(t *testing.T) {
+func TestExampleService_Echo_MapsInternalFailureAndPropagatesTrace(t *testing.T) {
 	// given
 	const (
 		payloadMarker = "payload-marker"
@@ -414,7 +414,7 @@ func TestExampleServiceEchoMapsInternalFailureAndPropagatesTrace(t *testing.T) {
 	}
 }
 
-func TestNewServerRejectsMissingDependencies(t *testing.T) {
+func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 	// given
 	log := logger.New(new(bytes.Buffer), "go-service", 0)
 	tracerProvider := noop.NewTracerProvider()

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestDecimalPreservesPresencePrecisionAndScale(t *testing.T) {
+func TestDecimal_PreservesPresencePrecisionAndScale(t *testing.T) {
 	// given
 	valid := []string{
 		"0",
@@ -39,7 +39,7 @@ func TestDecimalPreservesPresencePrecisionAndScale(t *testing.T) {
 	}
 }
 
-func TestQuestionRequiresOneKnownValueVariant(t *testing.T) {
+func TestQuestion_RequiresOneKnownValueVariant(t *testing.T) {
 	// given
 	variants := []QuestionKind{
 		ChoiceQuestion{Choices: []Choice{{Code: "first"}, {Code: "second"}}},

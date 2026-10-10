@@ -16,7 +16,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 )
 
-func TestNewDisabledDoesNotCreateExporter(t *testing.T) {
+func TestNew_DisabledDoesNotCreateExporter(t *testing.T) {
 	// given
 	settings := config.Telemetry{Enabled: false, ExporterTimeout: time.Second}
 
@@ -49,7 +49,7 @@ func TestNewDisabledDoesNotCreateExporter(t *testing.T) {
 	}
 }
 
-func TestProviderExportsSpansWithServiceIdentity(t *testing.T) {
+func TestProvider_ExportsSpansWithServiceIdentity(t *testing.T) {
 	// given
 	exporter := newRecordingExporter()
 	provider := enabledProvider(t, exporter, time.Second)
@@ -100,7 +100,7 @@ func TestProviderExportsSpansWithServiceIdentity(t *testing.T) {
 	}
 }
 
-func TestProviderPropagatesW3CTraceContext(t *testing.T) {
+func TestProvider_PropagatesW3CTraceContext(t *testing.T) {
 	// given
 	provider, err := newProvider(
 		context.Background(),
@@ -142,7 +142,7 @@ func TestProviderPropagatesW3CTraceContext(t *testing.T) {
 	}
 }
 
-func TestProviderBoundsExporterInitializationAndHidesCauseDetails(t *testing.T) {
+func TestProvider_BoundsExporterInitializationAndHidesCauseDetails(t *testing.T) {
 	// given
 	const privateMarker = "private-marker"
 	cause := errors.New(privateMarker)
@@ -187,7 +187,7 @@ func TestProviderBoundsExporterInitializationAndHidesCauseDetails(t *testing.T) 
 	}
 }
 
-func TestProviderShutdownIsBoundedWhenExporterIsUnavailable(t *testing.T) {
+func TestProvider_Shutdown_IsBoundedWhenExporterIsUnavailable(t *testing.T) {
 	// given
 	exporter := &blockingExporter{
 		started:  make(chan struct{}),
@@ -227,7 +227,7 @@ func TestProviderShutdownIsBoundedWhenExporterIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestProviderDoesNotBlockSpanCompletionDuringExporterOutage(t *testing.T) {
+func TestProvider_DoesNotBlockSpanCompletionDuringExporterOutage(t *testing.T) {
 	// given
 	exporter := &blockingExporter{
 		started:  make(chan struct{}),
@@ -292,7 +292,7 @@ func TestProviderDoesNotBlockSpanCompletionDuringExporterOutage(t *testing.T) {
 	}
 }
 
-func TestNewRejectsInvalidEnabledSettings(t *testing.T) {
+func TestNew_RejectsInvalidEnabledSettings(t *testing.T) {
 	// given
 	tests := []struct {
 		name        string

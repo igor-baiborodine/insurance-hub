@@ -13,7 +13,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/health"
 )
 
-func TestHandlerReflectsLifecycleState(t *testing.T) {
+func TestHandler_ReflectsLifecycleState(t *testing.T) {
 	// given
 	var dependencyReady atomic.Bool
 	state, err := health.NewState(time.Second, func(context.Context) error {
@@ -120,7 +120,7 @@ func TestHandlerReflectsLifecycleState(t *testing.T) {
 	}
 }
 
-func TestReadinessCheckUsesProbeDeadline(t *testing.T) {
+func TestReadinessCheck_UsesProbeDeadline(t *testing.T) {
 	// given
 	const timeout = 20 * time.Millisecond
 	deadlineObserved := make(chan time.Duration, 1)
@@ -155,7 +155,7 @@ func TestReadinessCheckUsesProbeDeadline(t *testing.T) {
 	}
 }
 
-func TestNewStateRejectsInvalidDependencies(t *testing.T) {
+func TestNewState_RejectsInvalidDependencies(t *testing.T) {
 	// given
 	checks := []struct {
 		timeout time.Duration

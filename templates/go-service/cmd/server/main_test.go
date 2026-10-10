@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestRunLogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
+func TestRun_LogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 	// given
 	const privateMarker = "private-credential-marker"
 	t.Setenv("SERVICE_NAME", "configured-service")
@@ -51,7 +51,7 @@ func TestRunLogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 	}
 }
 
-func TestShutdownContextHandlesSIGTERM(t *testing.T) {
+func TestShutdownContext_HandlesSIGTERM(t *testing.T) {
 	// given
 	ctx, stop := shutdownContext(context.Background())
 	defer stop()

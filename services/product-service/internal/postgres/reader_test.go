@@ -10,7 +10,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
 )
 
-func TestReaderErrorClassificationPreservesSafeCauses(t *testing.T) {
+func TestReaderErrorClassification_PreservesSafeCauses(t *testing.T) {
 	// given
 	sensitiveCause := errors.New("connection failed with secret-password")
 
@@ -32,7 +32,7 @@ func TestReaderErrorClassificationPreservesSafeCauses(t *testing.T) {
 	}
 }
 
-func TestPoolAndReaderConstructorsRejectInvalidDependencies(t *testing.T) {
+func TestPoolAndReaderConstructors_RejectInvalidDependencies(t *testing.T) {
 	// given
 	tests := []struct {
 		name string

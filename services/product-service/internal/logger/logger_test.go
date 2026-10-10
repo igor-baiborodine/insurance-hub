@@ -15,7 +15,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
 )
 
-func TestNewWritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
+func TestNew_WritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
 	// given
 	var output bytes.Buffer
 	log := logger.New(&output, "product-service", slog.LevelInfo)
@@ -36,7 +36,7 @@ func TestNewWritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
 	}
 }
 
-func TestNewAddsTraceCorrelationFromContext(t *testing.T) {
+func TestNew_AddsTraceCorrelationFromContext(t *testing.T) {
 	// given
 	traceID := trace.TraceID{
 		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
@@ -64,7 +64,7 @@ func TestNewAddsTraceCorrelationFromContext(t *testing.T) {
 	}
 }
 
-func TestNewRedactsSensitiveAttributesAtEveryLevel(t *testing.T) {
+func TestNew_RedactsSensitiveAttributesAtEveryLevel(t *testing.T) {
 	// given
 	const privateMarker = "private-marker"
 	var output bytes.Buffer
@@ -103,7 +103,7 @@ func TestNewRedactsSensitiveAttributesAtEveryLevel(t *testing.T) {
 	}
 }
 
-func TestNewRedactsWrappedErrorsAndPreservesDiagnosticContext(t *testing.T) {
+func TestNew_RedactsWrappedErrorsAndPreservesDiagnosticContext(t *testing.T) {
 	// given
 	const privateMarker = "private-wrapped-cause"
 	traceID := trace.TraceID{
@@ -145,7 +145,7 @@ func TestNewRedactsWrappedErrorsAndPreservesDiagnosticContext(t *testing.T) {
 	}
 }
 
-func TestNewRedactsSensitiveKeysInsideAnyValues(t *testing.T) {
+func TestNew_RedactsSensitiveKeysInsideAnyValues(t *testing.T) {
 	// given
 	const privateMarker = "private-marker"
 	type structuredDetails struct {

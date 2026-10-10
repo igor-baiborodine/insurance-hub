@@ -18,7 +18,7 @@ type acceptedHTTPCase struct {
 	} `json:"expected"`
 }
 
-func TestHTTPComparatorAcceptsOnlyApprovedNormalization(t *testing.T) {
+func TestHTTPComparator_AcceptsOnlyApprovedNormalization(t *testing.T) {
 	// given
 	expected := HTTPExpectation{
 		Status:      200,
@@ -45,7 +45,7 @@ func TestHTTPComparatorAcceptsOnlyApprovedNormalization(t *testing.T) {
 	}
 }
 
-func TestHTTPComparatorRejectsControlledRegressions(t *testing.T) {
+func TestHTTPComparator_RejectsControlledRegressions(t *testing.T) {
 	base := HTTPExpectation{
 		Status:      200,
 		ContentType: "application/json",
@@ -175,7 +175,7 @@ func TestHTTPComparatorRejectsControlledRegressions(t *testing.T) {
 	}
 }
 
-func TestGoHTTPExpectationUsesOnlyExplicitServerErrorOverlay(t *testing.T) {
+func TestGoHTTPExpectation_UsesOnlyExplicitServerErrorOverlay(t *testing.T) {
 	// given
 	unsafeJava := HTTPExpectation{
 		Status:      500,
@@ -197,7 +197,7 @@ func TestGoHTTPExpectationUsesOnlyExplicitServerErrorOverlay(t *testing.T) {
 	}
 }
 
-func TestGRPCExpectationsPreserveTypedSemantics(t *testing.T) {
+func TestGRPCExpectations_PreserveTypedSemantics(t *testing.T) {
 	// given
 	body := []byte(
 		`{"code":"EDGE","covers":[{"code":"C","sumInsured":12.3400},{"code":"N"}],"questions":[{"type":"choice","code":"C","choices":[{"code":"B","label":"Second"},{"code":"A","label":"First"}]},{"type":"date","code":"D"},{"type":"numeric","code":"N"}],"maxNumberOfInsured":7}`,
@@ -222,7 +222,7 @@ func TestGRPCExpectationsPreserveTypedSemantics(t *testing.T) {
 	}
 }
 
-func TestGRPCExpectationsRejectUnknownQuestionVariant(t *testing.T) {
+func TestGRPCExpectations_RejectUnknownQuestionVariant(t *testing.T) {
 	// when
 	_, err := ParseGRPCExpectations(
 		[]byte(`{"code":"EDGE","questions":[{"type":"future","code":"Q"}]}`),
@@ -234,7 +234,7 @@ func TestGRPCExpectationsRejectUnknownQuestionVariant(t *testing.T) {
 	}
 }
 
-func TestParityToolsConsumeEveryAcceptedDirectProductBody(t *testing.T) {
+func TestParityTools_ConsumeEveryAcceptedDirectProductBody(t *testing.T) {
 	// given
 	baselineRoot, err := ResolveBaselineRoot(".")
 	if err != nil {
