@@ -1,8 +1,21 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Go Validation](#go-validation)
+  - [Discover the validation boundary](#discover-the-validation-boundary)
+  - [Required checks](#required-checks)
+  - [Migration acceptance](#migration-acceptance)
+  - [Evidence and current availability](#evidence-and-current-availability)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Go Validation
 
 Use only the corresponding Makefile targets, as required by
 [Go development](go-development.md#scope-and-makefile-interface). Never invoke underlying test,
 lint, build, generation, dependency, or security tools directly to bypass a missing/failing target.
+Apply [Go testing](go-test.md) when writing or reviewing test names, structure, and assertions;
+this file defines which checks to execute and what evidence to record.
 
 ## Discover the validation boundary
 

@@ -1,19 +1,23 @@
-# Contributing to Insurance Hub
-
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Clone Repository](#clone-repository)
-  - [Install Dependencies](#install-dependencies)
-- [Style Guides](#style-guides)
-  - [Go](#go)
-  - [Branch Names](#branch-names)
-  - [Commit Messages](#commit-messages)
-  - [Makefile](#makefile)
+- [Contributing to Insurance Hub](#contributing-to-insurance-hub)
+  - [Getting Started](#getting-started)
+    - [Prerequisites](#prerequisites)
+    - [Clone Repository](#clone-repository)
+    - [Install Dependencies](#install-dependencies)
+      - [Web Development](#web-development)
+      - [Kubernetes](#kubernetes)
+    - [Create Kubernetes Cluster](#create-kubernetes-cluster)
+  - [Style Guides](#style-guides)
+    - [Go](#go)
+    - [Branch Names](#branch-names)
+    - [Commit Messages](#commit-messages)
+    - [Makefile](#makefile)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
+# Contributing to Insurance Hub
 
 ## Getting Started
 
@@ -140,6 +144,7 @@ TODO
 ### Go
 
 Phase 4 Go services follow the repository's [Go development rules](ai/rules/go-development.md),
+[testing rules](ai/rules/go-test.md),
 [formatting policy](ai/rules/go-formatting.md), and [validation rules](ai/rules/go-validation.md).
 Use the owning Makefile targets for every Go operation, including tool installation, dependency
 maintenance, formatting, linting, tests, builds, execution, and generation. Do not replace them

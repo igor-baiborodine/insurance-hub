@@ -1,3 +1,14 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Go Testing Examples](#go-testing-examples)
+  - [Choose the test boundary](#choose-the-test-boundary)
+  - [Before adapting](#before-adapting)
+  - [Execute through Make](#execute-through-make)
+  - [Source and deliberate adaptations](#source-and-deliberate-adaptations)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Go Testing Examples
 
 These are **Markdown adaptation templates**, not an executable service or Insurance Hub business
@@ -7,6 +18,7 @@ Do not implement a new business rule just to make an example applicable. No gene
 production implementation is supplied, and the snippets have not been compiled or runtime-tested.
 
 Apply the [Go development](../../rules/go-development.md),
+[testing](../../rules/go-test.md),
 [formatting](../../rules/go-formatting.md), and [validation](../../rules/go-validation.md) rules.
 Use the module's pinned Go and library versions; verify API compatibility before adaptation.
 

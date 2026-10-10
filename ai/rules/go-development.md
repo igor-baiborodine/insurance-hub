@@ -1,7 +1,21 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Go Development](#go-development)
+  - [Scope and Makefile interface](#scope-and-makefile-interface)
+  - [Service structure and dependencies](#service-structure-and-dependencies)
+  - [Implementation and lifecycle](#implementation-and-lifecycle)
+  - [Contracts and persistence](#contracts-and-persistence)
+  - [Phase 4 migration and operations](#phase-4-migration-and-operations)
+  - [Tests](#tests)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Go Development
 
 Apply to handwritten Go services and their contracts, persistence, and runtime configuration.
-Load [Go formatting](go-formatting.md) and [Go validation](go-validation.md) alongside this rule.
+Load [Go testing](go-test.md), [Go formatting](go-formatting.md), and
+[Go validation](go-validation.md) alongside this rule.
 Before planning or editing, discover and read the service-local `AGENTS.md` files applicable to
 each affected path, following the scope, precedence, and conflict procedure in
 [the root guide](../../AGENTS.md). Local Go conventions may add scoped detail; they do not silently
@@ -123,23 +137,7 @@ Phase 4 and the 8-May-2026 Alloy update.
 
 ## Tests
 
-Use the [Go testing examples](../examples/go-testing/README.md) for concrete patterns; adapt their
-illustrative contracts to the ticket and actual module APIs.
-
-- Test changed observable behavior, failures, and boundaries. Use table-driven cases when helpful
-  and the module's established assertion conventions. Structure each applicable scenario with the
-  exact lowercase comments `// given`, `// when`, and `// then`: put scenario setup, test data, and
-  mock expectations under `given`; the behavior-triggering operation under `when`; and observations
-  plus mock/call verification under `then`. Shared immutable fixtures for table-driven tests may use
-  an outer `given`; keep per-case setup and the `when`/`then` phases in the subtest. Omit the markers
-  from shared setup helpers and trivial tests where a phase would be empty or misleading; do not add
-  placeholder blocks.
-- Follow the example's unit-test separation, generated Mockery/Testify mocks, and tagged
-  integration tests where those tools are adopted. Mock dependency boundaries, not implementation
-  details; regenerate mocks through Make when interfaces change.
-- Use isolated disposable dependencies (such as PostgreSQL Testcontainers) for integration tests,
-  with the actual migrations and reliable cleanup. Never point tests at shared production data.
-- Keep tests deterministic: control time and test data, use synchronization rather than sleeps,
-  register cleanup, and call `t.Helper()` in helpers. Do not weaken tests to accommodate regressions.
-- Include contract/status mapping, cancellation, rollback/conflicts, and legacy parity cases as
-  appropriate. See [Go validation](go-validation.md) for required Make-based checks and evidence.
+Follow [Go testing](go-test.md) for naming, test structure, assertions, isolation, and integration
+boundaries. Use the [Go testing examples](../examples/go-testing/README.md) for concrete patterns
+adapted to the ticket and actual module APIs, and [Go validation](go-validation.md) for required
+Make-based checks and evidence.
