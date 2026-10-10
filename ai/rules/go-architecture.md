@@ -50,6 +50,39 @@ Use these responsibilities within the existing layout, creating packages only wh
 | Versioned API definitions and generated packages | Public wire contracts and clients, separate from domain/application models. |
 | `db/migrations`, `internal/testing` | Migrations where the service owns them and reusable test support where needed. Test provisioning must not enter the production dependency closure. |
 
+The conceptual component diagram below illustrates these boundaries. Product names show how
+business purpose can remain visible within the existing package conventions; they are examples,
+not a required package layout for every service.
+
+```mermaid
+flowchart TB
+    entry["cmd: process entry point"]
+    composition["internal/service: composition root"]
+    inbound["Inbound adapters: HTTP / gRPC"]
+    outbound["Outbound adapter: PostgreSQL reader"]
+
+    subgraph core["Business core"]
+        application["Application: ListProducts / GetProduct<br/>Owns ProductReader port"]
+        domain["Domain: Product values and invariants"]
+    end
+
+    entry -->|imports| composition
+    composition -->|imports and constructs| inbound
+    composition -->|imports and constructs| outbound
+    composition -->|imports and constructs| application
+    inbound -->|imports| application
+    application -->|imports| domain
+    outbound -->|imports core values| domain
+    outbound -.->|satisfies ProductReader| application
+```
+
+Solid arrows denote source imports; the dashed arrow denotes implicit interface satisfaction,
+which does not itself require an import of the interface's package. At startup, the composition
+root injects the reader into the use cases and the use cases into inbound adapters. At runtime,
+an inbound adapter calls a use case, which calls the reader through its port. That runtime call
+does not introduce an application import of the outbound adapter. Injection and runtime calls
+are described here separately from the diagram's dependency arrows.
+
 - Domain and application must not import transport adapters, HTTP/protobuf DTOs, generated SQL
   row types, database drivers, concrete persistence implementations, or deployment/composition
   configuration. Do not hide these dependencies inside aliases, embedded fields, or port signatures.
