@@ -134,7 +134,9 @@ write_ci_workflow() {
 			'**/go.mod' '**/go.sum' '**/go.work' '**/go.work.sum' \
 			'go-module-topology.json' 'scripts/go/**' \
 			'legacy/product-service/src/test/resources/product-read-baseline/**' \
-			'docs/migration/phase-4/go-module-topology.md' '.github/workflows/test.yml' 'Makefile'
+			'docs/migration/phase-4/go-module-topology.md' \
+			'docs/migration/phase-4/product-service/README.md' \
+			'.github/workflows/test.yml' 'Makefile'
 		do
 			printf "      - '%s'\n" "${trigger_path}"
 		done
@@ -149,7 +151,9 @@ write_ci_workflow() {
 			'**/go.mod' '**/go.sum' '**/go.work' '**/go.work.sum' \
 			'go-module-topology.json' 'scripts/go/**' \
 			'legacy/product-service/src/test/resources/product-read-baseline/**' \
-			'docs/migration/phase-4/go-module-topology.md' '.github/workflows/test.yml' 'Makefile'
+			'docs/migration/phase-4/go-module-topology.md' \
+			'docs/migration/phase-4/product-service/README.md' \
+			'.github/workflows/test.yml' 'Makefile'
 		do
 			printf "      - '%s'\n" "${trigger_path}"
 		done
@@ -394,6 +398,14 @@ grep -Fv -- "- 'legacy/product-service/src/test/resources/product-read-baseline/
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
 expect_failure "missing CI baseline trigger" "${case_root}" \
 	'workflow .github/workflows/test.yml is missing push path trigger for repository topology policy: legacy/product-service/src/test/resources/product-read-baseline/\*\*' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case missing-ci-product-doc-trigger)"
+grep -Fv -- "- 'docs/migration/phase-4/product-service/README.md'" \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "missing CI Product documentation trigger" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing push path trigger for repository topology policy: docs/migration/phase-4/product-service/README.md' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
 case_root="$(new_single_case missing-product-tooling-target)"

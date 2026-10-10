@@ -196,6 +196,7 @@ for workflow_relative in "${workflows[@]}"; do
 		'scripts/go/**' \
 		'legacy/product-service/src/test/resources/product-read-baseline/**' \
 		'docs/migration/phase-4/go-module-topology.md' \
+		'docs/migration/phase-4/product-service/README.md' \
 		'Makefile' \
 		"${workflow_relative}"
 	do

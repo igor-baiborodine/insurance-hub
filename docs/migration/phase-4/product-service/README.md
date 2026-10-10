@@ -31,6 +31,20 @@ completed Go development foundation and its boundary. Its scaffold, Make/CI inte
 checks are available; Product-specific data, contracts, security, deployment, and qualification
 evidence are still owned by issues #131 through #136.
 
+## Go pilot implementation handoff
+
+Issue #132 implements the standalone Go Product catalog read service that consumes this baseline.
+Its [service README](../../../../services/product-service/README.md) records exact setup, execution,
+validation, configuration, tool and runtime pins, contracts, lifecycle behavior, and downstream
+ownership. The [Product catalog architecture](../../../../services/product-service/README.md#product-catalog-architecture)
+shows the delivered packages and symbols, source-dependency direction, startup wiring, runtime
+database calls, mapping boundaries, and a get-product walkthrough.
+
+This link does not change the Java observations or accepted fixtures documented here. Java remains
+the active traffic, schema, seed, and write owner. Issues #133 through #136 still own access
+coexistence, deployment and shared read-only credentials, telemetry delivery, and integrated
+qualification respectively; route cutover remains the separate #137 gate.
+
 ## Authoritative layout
 
 | Path | Ownership and purpose | Current state |

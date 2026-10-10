@@ -6,7 +6,8 @@ common_tooling_dir=${COMMON_GO_TOOLING_DIR:?COMMON_GO_TOOLING_DIR is required}
 # shellcheck source=/dev/null
 source "$common_tooling_dir/test-tooling-lib.sh"
 tooling_initialize product-service-tooling \
-	buf protoc-gen-go protoc-gen-go-grpc golangci-lint govulncheck sqlc
+	buf protoc-gen-go protoc-gen-go-grpc golangci-lint govulncheck sqlc mmdc
+ln -s "$module_root/.tools/puppeteer" "$base_fixture/.tools/puppeteer"
 
 fixture=$(new_fixture format-new-file)
 printf 'package config\n\nfunc controlled( ) { }\n' >"$fixture/internal/config/controlled.go"
@@ -58,5 +59,20 @@ expect_failure integration-empty-selection test-integration \
 fixture=$(new_fixture integration-zero-selection)
 expect_failure integration-zero-selection test-integration \
 	'suite all selected zero tests' "$fixture" PRODUCT_TEST_FORCE_ZERO_SELECTION=1
+
+fixture=$(new_fixture docs-broken-link)
+printf '\n[Controlled missing link](controlled-missing.md)\n' >>"$fixture/README.md"
+expect_failure docs-broken-link check-docs 'missing local link target' "$fixture" \
+	DOC_FILES=README.md
+
+fixture=$(new_fixture docs-invalid-mermaid)
+cat >>"$fixture/README.md" <<'EOF'
+
+```mermaid
+controlled invalid diagram
+```
+EOF
+expect_failure docs-invalid-mermaid check-docs 'Mermaid render failed' "$fixture" \
+	DOC_FILES=README.md
 
 printf 'test-tooling: Product controlled failures were rejected without fixture mutation\n'

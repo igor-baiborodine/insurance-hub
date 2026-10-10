@@ -2,6 +2,9 @@
 
 GO ?= go
 DOCKER ?= docker
+NODE ?= node
+NPM ?= npm
+PYTHON ?= python3
 
 TOOLS_DIR := $(CURDIR)/.tools
 TOOLS_BIN := $(TOOLS_DIR)/bin
@@ -11,6 +14,7 @@ PROTOC_GEN_GO_GRPC := $(TOOLS_BIN)/protoc-gen-go-grpc
 GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 SQLC := $(TOOLS_BIN)/sqlc
+MMDC := $(TOOLS_BIN)/mmdc
 GOLANGCI_CONFIG := .golangci.yml
 PROTO_SCHEMA := api/product/v1/product_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
@@ -33,6 +37,7 @@ X_NET_VERSION := v0.60.0
 PGX_VERSION := v5.11.0
 TESTCONTAINERS_VERSION := v0.44.0
 MOBY_GO_ARCHIVE_VERSION := v0.3.0
+MERMAID_CLI_VERSION := 11.12.0
 POSTGRES_IMAGE := postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
 SQL_SCHEMA := internal/postgres/sql/schema.sql
 SQL_QUERIES := internal/postgres/sql/queries.sql
@@ -42,6 +47,7 @@ TEST_PACKAGES ?= ./...
 COVERAGE_FILE ?= coverage.txt
 INTEGRATION_SUITE ?= all
 FIXTURE_SET ?= qa
+DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md
 EXTRA_TOOL_PACKAGES := github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
 VERIFY_EXTRA_TOOL_SPECS := sqlc|$(SQLC)|$(SQLC_VERSION)|version
 
@@ -52,7 +58,48 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage test-integration \
-	build vulncheck check test-tooling run
+	build vulncheck bootstrap-doc-tools check-docs preview-docs check test-tooling run
+
+bootstrap-tools: bootstrap-doc-tools
+
+bootstrap-doc-tools:
+	@major="$$($(NODE) -p 'process.versions.node.split(".")[0]')"; \
+		if test "$$major" -lt 20; then \
+			echo "Node.js >= 20 is required for Mermaid CLI" >&2; \
+			exit 1; \
+		fi
+	@set -eu; \
+		installed="$$($(MMDC) --version 2>/dev/null || true)"; \
+		if test "$$installed" != "$(MERMAID_CLI_VERSION)"; then \
+			mkdir -p "$(TOOLS_DIR)" "$(TOOLS_BIN)" "$(TOOLS_DIR)/puppeteer"; \
+			PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(NPM) install \
+				--prefix "$(TOOLS_DIR)" --no-save --no-package-lock \
+				"@mermaid-js/mermaid-cli@$(MERMAID_CLI_VERSION)"; \
+			ln -sfn ../node_modules/.bin/mmdc "$(MMDC)"; \
+		fi; \
+		if ! find "$(TOOLS_DIR)/puppeteer" -type f -name chrome-headless-shell \
+			-perm -u+x -print -quit 2>/dev/null | grep -q .; then \
+			PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(NPM) rebuild \
+				--prefix "$(TOOLS_DIR)" puppeteer; \
+		fi
+	@test "$$($(MMDC) --version)" = "$(MERMAID_CLI_VERSION)"
+
+check-docs:
+	@test "$$($(MMDC) --version 2>/dev/null)" = "$(MERMAID_CLI_VERSION)" || { \
+		echo "check-docs: Mermaid CLI $(MERMAID_CLI_VERSION) is required; run bootstrap-tools" >&2; \
+		exit 1; \
+	}
+	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(PYTHON) scripts/check-docs.py \
+		--renderer "$(MMDC)" $(DOC_FILES)
+
+preview-docs:
+	@test "$$($(MMDC) --version 2>/dev/null)" = "$(MERMAID_CLI_VERSION)" || { \
+		echo "preview-docs: Mermaid CLI $(MERMAID_CLI_VERSION) is required; run bootstrap-tools" >&2; \
+		exit 1; \
+	}
+	rm -rf "$(TOOLS_DIR)/docs-preview"
+	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(PYTHON) scripts/check-docs.py \
+		--renderer "$(MMDC)" --output-directory "$(TOOLS_DIR)/docs-preview" $(DOC_FILES)
 
 update-deps:
 	GOWORK=off $(GO) get \
@@ -104,7 +151,7 @@ test-integration:
 		FIXTURE_SET="$(FIXTURE_SET)" \
 		./scripts/test-integration.sh
 
-check: verify-tools format-check format-proto-check lint lint-proto test-race test-integration build \
+check: verify-tools check-docs format-check format-proto-check lint lint-proto test-race test-integration build \
 	check-deps check-proto-drift check-sql-drift check-proto-breaking vulncheck
 
 test-tooling: verify-tools

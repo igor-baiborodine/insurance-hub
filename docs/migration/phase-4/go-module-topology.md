@@ -41,8 +41,11 @@ make go-scaffold-bootstrap-tools
 make go-product-bootstrap-tools
 ```
 
-The Product validation also requires Docker daemon access. Its owning `check` target runs the
-race-enabled disposable PostgreSQL harness with Testcontainers Go v0.44.0 and
+The Product bootstrap additionally requires Node.js 20 or newer plus npm and installs Mermaid CLI
+11.12.0 under the module's ignored `.tools/` directory; hosted CI pins Node.js 24.13.0. Product
+documentation validation uses Python 3 to check local links/anchors and render every Mermaid block
+to a temporary SVG. The Product validation also requires Docker daemon access. Its owning `check`
+target runs the race-enabled disposable PostgreSQL harness with Testcontainers Go v0.44.0 and
 `postgres:17.10-alpine` pinned at
 `sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193`; it never uses
 `PRODUCT_DATABASE_URL` or another shared database.
@@ -67,7 +70,8 @@ remain unchanged. `FORMAT_SCOPE=all` covers every eligible handwritten Go file i
 The scaffold and Product `./...` scopes cover all their current packages. Product coverage includes
 `cmd/server`, the test-owned HTTP boundary, generated Product v1 bindings, sqlc-generated queries,
 the bounded PostgreSQL reader, contract tests, the authoritative QA fixture loader, and the tagged
-PostgreSQL harness/reader suites invoked by `test-integration`.
+PostgreSQL harness/reader suites invoked by `test-integration`. Product `check-docs` also validates
+the service README and versioned Product migration handoff, including a real Mermaid render.
 
 Both modules include the root-owned `scripts/go/module/common.mk`. The shared scripts implement
 tool verification, formatting, dependency reproduction, and exact generated-output drift checks;
@@ -101,8 +105,9 @@ tooling suites, the renamed scaffold copy proof, both module cache inputs, and t
 baseline trigger. Block scalars, comments, and values under unrelated workflow keys do not count
 as execution evidence.
 
-CI uses `ubuntu-24.04`, checkout v6 with full history, setup-go v7 with Go 1.27.2, both module
-`go.sum` cache inputs, and `contents: read`. It bootstraps each module's pinned tools through Make,
+CI uses `ubuntu-24.04`, checkout v6 with full history, setup-node v6 with Node.js 24.13.0,
+setup-go v7 with Go 1.27.2, both module `go.sum` cache inputs, and `contents: read`. It bootstraps
+each module's pinned tools through Make,
 resolves changed formatting scope from the pull-request base or push predecessor, runs the aggregate
 module and topology targets, then runs both modules' tooling-failure suites and the renamed-copy
 proof. Product integration checks use the hosted runner's Docker daemon and the immutable baseline

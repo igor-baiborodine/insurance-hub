@@ -41,10 +41,12 @@
         "FORMAT_SCOPE",
         "FORMAT_BASE"
       ],
-      "packageScope": "all Product packages under ./..., the server executable, HTTP and gRPC adapters, generated Product v1 contract, sqlc-generated Product queries and PostgreSQL reader, fixture loader and disposable PostgreSQL suites, Protobuf/SQL source and generated output, and module dependency metadata",
+      "packageScope": "all Product packages under ./..., the server executable, HTTP and gRPC adapters, generated Product v1 contract, sqlc-generated Product queries and PostgreSQL reader, fixture loader and disposable PostgreSQL suites, Protobuf/SQL source and generated output, Product and migration handoff documentation, and module dependency metadata",
       "prerequisites": [
         "Go 1.27.2",
         "pinned Product tools installed by make go-product-bootstrap-tools",
+        "Node.js >= 20 and npm for the pinned Mermaid documentation renderer",
+        "Python 3 for documentation link and render validation",
         "GCC for race-enabled tests",
         "Docker Engine with daemon access for race-enabled integration tests",
         "pinned postgres:17.10-alpine image digest available locally or from its public registry",
