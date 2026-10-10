@@ -22,12 +22,13 @@ const (
 	// DefaultPostgresImage is the reproducible database image used by Product integration tests.
 	DefaultPostgresImage = "postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
 
-	adminRole        = "product_test_admin"
-	databaseName     = "product_test"
-	runtimeRole      = "go_product_reader"
-	resourceTimeout  = 30 * time.Second
-	containerStartup = 60 * time.Second
-	credentialBytes  = 24
+	adminRole         = "product_test_admin"
+	databaseOwnerRole = "pg_database_owner"
+	databaseName      = "product_test"
+	runtimeRole       = "go_product_reader"
+	resourceTimeout   = 30 * time.Second
+	containerStartup  = 60 * time.Second
+	credentialBytes   = 24
 )
 
 // Options selects the fixture source and pinned PostgreSQL image.
@@ -61,6 +62,13 @@ type Snapshot struct {
 // RoleInspection records the runtime database identity and effective privileges.
 type RoleInspection struct {
 	CurrentUser         string
+	DatabaseOwner       string
+	SchemaOwner         string
+	TableOwner          string
+	OwnsDatabase        bool
+	OwnsSchema          bool
+	OwnsTable           bool
+	MemberOfRoles       []string
 	Superuser           bool
 	CreateDatabase      bool
 	CreateRole          bool
@@ -76,6 +84,10 @@ type RoleInspection struct {
 	CanUpdate           bool
 	CanDelete           bool
 	CanTruncate         bool
+	PublicTableGrants   int
+	PublicDefaultGrants int
+	ReaderDefaultGrants int
+	SequenceCount       int
 }
 
 // Start creates the isolated database, exact legacy table, and restricted reader identity.
@@ -392,6 +404,19 @@ func (harness *Harness) InspectRole(ctx context.Context) (RoleInspection, error)
 	var inspection RoleInspection
 	err = pool.QueryRow(ctx, `
 		SELECT current_user,
+			pg_get_userbyid(database_owner.datdba),
+			pg_get_userbyid(schema_owner.nspowner),
+			pg_get_userbyid(table_owner.relowner),
+			database_owner.datdba = role.oid,
+			schema_owner.nspowner = role.oid,
+			table_owner.relowner = role.oid,
+			ARRAY(
+				SELECT granted_role.rolname
+				FROM pg_auth_members membership
+				JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+				WHERE membership.member = role.oid
+				ORDER BY granted_role.rolname
+			),
 			rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolreplication, rolbypassrls,
 			has_database_privilege(current_user, current_database(), 'CONNECT'),
 			has_database_privilege(current_user, current_database(), 'CREATE'),
@@ -401,11 +426,47 @@ func (harness *Harness) InspectRole(ctx context.Context) (RoleInspection, error)
 			has_table_privilege(current_user, 'public.product', 'INSERT'),
 			has_table_privilege(current_user, 'public.product', 'UPDATE'),
 			has_table_privilege(current_user, 'public.product', 'DELETE'),
-			has_table_privilege(current_user, 'public.product', 'TRUNCATE')
-		FROM pg_roles
-		WHERE rolname = current_user
+			has_table_privilege(current_user, 'public.product', 'TRUNCATE'),
+			(
+				SELECT count(*)::integer
+				FROM aclexplode(
+					COALESCE(table_owner.relacl, acldefault('r', table_owner.relowner))
+				) privilege
+				WHERE privilege.grantee = 0
+			),
+			(
+				SELECT count(*)::integer
+				FROM pg_default_acl defaults
+				CROSS JOIN LATERAL aclexplode(defaults.defaclacl) privilege
+				WHERE defaults.defaclobjtype = 'r' AND privilege.grantee = 0
+			),
+			(
+				SELECT count(*)::integer
+				FROM pg_default_acl defaults
+				CROSS JOIN LATERAL aclexplode(defaults.defaclacl) privilege
+				WHERE defaults.defaclobjtype = 'r' AND privilege.grantee = role.oid
+			),
+			(
+				SELECT count(*)::integer
+				FROM pg_class sequence
+				JOIN pg_namespace namespace ON namespace.oid = sequence.relnamespace
+				WHERE namespace.nspname = 'public' AND sequence.relkind = 'S'
+			)
+		FROM pg_roles role
+		JOIN pg_database database_owner ON database_owner.datname = current_database()
+		JOIN pg_namespace schema_owner ON schema_owner.nspname = 'public'
+		JOIN pg_class table_owner ON table_owner.relnamespace = schema_owner.oid
+			AND table_owner.relname = 'product'
+		WHERE role.rolname = current_user
 	`).Scan(
 		&inspection.CurrentUser,
+		&inspection.DatabaseOwner,
+		&inspection.SchemaOwner,
+		&inspection.TableOwner,
+		&inspection.OwnsDatabase,
+		&inspection.OwnsSchema,
+		&inspection.OwnsTable,
+		&inspection.MemberOfRoles,
 		&inspection.Superuser,
 		&inspection.CreateDatabase,
 		&inspection.CreateRole,
@@ -421,11 +482,42 @@ func (harness *Harness) InspectRole(ctx context.Context) (RoleInspection, error)
 		&inspection.CanUpdate,
 		&inspection.CanDelete,
 		&inspection.CanTruncate,
+		&inspection.PublicTableGrants,
+		&inspection.PublicDefaultGrants,
+		&inspection.ReaderDefaultGrants,
+		&inspection.SequenceCount,
 	)
 	if err != nil {
 		return RoleInspection{}, fmt.Errorf("inspect role: query: %w", err)
 	}
 	return inspection, nil
+}
+
+// QueryRuntimeValue executes one fixture-owned scalar read as the restricted runtime role.
+func (harness *Harness) QueryRuntimeValue(ctx context.Context, statement string) (string, error) {
+	pool, err := pgxpool.New(ctx, harness.runtimeURL)
+	if err != nil {
+		return "", fmt.Errorf("query runtime value: open reader pool: %w", err)
+	}
+	defer pool.Close()
+	var value string
+	if err := pool.QueryRow(ctx, statement).Scan(&value); err != nil {
+		return "", fmt.Errorf("query runtime value: query: %w", err)
+	}
+	return value, nil
+}
+
+// ExecuteRuntimeStatement executes one fixture-owned mutation probe as the restricted runtime role.
+func (harness *Harness) ExecuteRuntimeStatement(ctx context.Context, statement string) error {
+	pool, err := pgxpool.New(ctx, harness.runtimeURL)
+	if err != nil {
+		return fmt.Errorf("execute runtime statement: open reader pool: %w", err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(ctx, statement); err != nil {
+		return fmt.Errorf("execute runtime statement: %w", err)
+	}
+	return nil
 }
 
 // ServerVersion returns the disposable PostgreSQL server version.

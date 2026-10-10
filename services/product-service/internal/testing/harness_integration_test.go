@@ -64,10 +64,14 @@ func TestPostgresHarness(t *testing.T) {
 			t.Fatalf("inspect role: %v", inspectionErr)
 		}
 		want := RoleInspection{
-			CurrentUser:  runtimeRole,
-			CanConnect:   true,
-			CanUseSchema: true,
-			CanSelect:    true,
+			CurrentUser:   runtimeRole,
+			DatabaseOwner: adminRole,
+			SchemaOwner:   databaseOwnerRole,
+			TableOwner:    adminRole,
+			MemberOfRoles: []string{},
+			CanConnect:    true,
+			CanUseSchema:  true,
+			CanSelect:     true,
 		}
 		if !reflect.DeepEqual(inspection, want) {
 			t.Errorf("role inspection = %#v, want %#v", inspection, want)

@@ -14,7 +14,7 @@ fail() {
 }
 
 case "$integration_suite" in
-	all) test_pattern='^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle)$' ;;
+	all) test_pattern='^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductReadOnly)$' ;;
 	harness) test_pattern='^TestPostgresHarness$' ;;
 	reader) test_pattern='^TestPostgresReader$' ;;
 	grpc) test_pattern='^TestProductGRPC$' ;;
@@ -23,6 +23,7 @@ case "$integration_suite" in
 	parity) test_pattern='^TestProductParity$' ;;
 	cancellation) test_pattern='^TestProductCancellation$' ;;
 	lifecycle) test_pattern='^TestProductLifecycle$' ;;
+	read-only) test_pattern='^TestProductReadOnly$' ;;
 	'') fail 'INTEGRATION_SUITE must not be empty' ;;
 	*) fail "unknown INTEGRATION_SUITE: $integration_suite" ;;
 esac
@@ -67,7 +68,7 @@ PRODUCT_TEST_POSTGRES_IMAGE="$postgres_image" \
 
 executed_count=$(
 	awk '
-		/"Action":"run"/ && /"Test":"(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle)/ { count++ }
+		/"Action":"run"/ && /"Test":"(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductReadOnly)/ { count++ }
 		END { print count + 0 }
 	' "$result_file"
 )

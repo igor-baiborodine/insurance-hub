@@ -64,7 +64,7 @@ func ScenarioRegistry() map[string]ScenarioRegistration {
 	add("Step 18 anonymous direct access", DispositionLaterStep, `
 		ACCESS-DIRECT-LIST-001 ACCESS-DIRECT-GET-001
 	`)
-	add("Steps 8, 9, and 17 restricted database role", DispositionLaterStep, `
+	add("Steps 8, 9, and 17 restricted database role", DispositionCurrentTest, `
 		DB-READ-001 DB-DML-DENY-001 DB-DDL-DENY-001
 	`)
 	add("Java gateway and later migration tickets", DispositionOutsideGo, `
@@ -144,7 +144,7 @@ func ScenarioRegistry() map[string]ScenarioRegistration {
 		ACCESS-GATEWAY-GET-AUDIENCE-001 ACCESS-GATEWAY-GET-ROLE-001
 		ACCESS-GATEWAY-GET-SUBJECT-001
 	`)
-	add("Steps 8, 9, and 17 restricted database role", DispositionLaterStep, `
+	add("Steps 8, 9, and 17 restricted database role", DispositionCurrentTest, `
 		DB-READ-CONNECT-001 DB-READ-LIST-001 DB-READ-GET-001
 		DB-DENY-INSERT-001 DB-DENY-UPDATE-001 DB-DENY-DELETE-001
 		DB-DENY-TRUNCATE-001 DB-DENY-CREATE-001 DB-DENY-ALTER-001
