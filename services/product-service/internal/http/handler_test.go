@@ -426,6 +426,107 @@ func TestHandlerUsesCallerContextAndConfiguredDeadline(t *testing.T) {
 			}
 		},
 	)
+
+	t.Run("configured deadline during mapping prevents success", func(t *testing.T) {
+		// given
+		product := productWithChoices(t, 100_000)
+		applicationReturnedWithBudget := false
+		handler, err := NewHandler(
+			slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Settings{RequestTimeout: time.Millisecond},
+			func(ctx context.Context) ([]domain.Product, error) {
+				applicationReturnedWithBudget = ctx.Err() == nil
+				return []domain.Product{product}, nil
+			},
+			func(context.Context, string) (domain.Product, error) {
+				return domain.Product{}, nil
+			},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := httptest.NewRecorder()
+
+		// when
+		handler.ServeHTTP(
+			response,
+			httptest.NewRequest(http.MethodGet, "/products", nil),
+		)
+
+		// then
+		if !applicationReturnedWithBudget {
+			t.Fatal("application did not return before the request deadline")
+		}
+		if response.Code != http.StatusInternalServerError ||
+			response.Body.String() != `{"message":"Internal Server Error"}` {
+			t.Errorf(
+				"mapping deadline response = (%d, %s)",
+				response.Code,
+				response.Body.String(),
+			)
+		}
+	})
+
+	t.Run("configured deadline during serialization prevents success", func(t *testing.T) {
+		// given
+		product := domain.Product{
+			Code:        "LARGE",
+			Description: strings.Repeat("x", 8<<20),
+		}
+		applicationReturnedWithBudget := false
+		handler, err := NewHandler(
+			slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Settings{RequestTimeout: time.Millisecond},
+			func(ctx context.Context) ([]domain.Product, error) {
+				applicationReturnedWithBudget = ctx.Err() == nil
+				return []domain.Product{product}, nil
+			},
+			func(context.Context, string) (domain.Product, error) {
+				return domain.Product{}, nil
+			},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := httptest.NewRecorder()
+
+		// when
+		handler.ServeHTTP(
+			response,
+			httptest.NewRequest(http.MethodGet, "/products", nil),
+		)
+
+		// then
+		if !applicationReturnedWithBudget {
+			t.Fatal("application did not return before the request deadline")
+		}
+		if response.Code != http.StatusInternalServerError ||
+			response.Body.String() != `{"message":"Internal Server Error"}` {
+			t.Errorf(
+				"serialization deadline response = (%d, body bytes=%d)",
+				response.Code,
+				response.Body.Len(),
+			)
+		}
+	})
+}
+
+func productWithChoices(t *testing.T, count int) domain.Product {
+	t.Helper()
+	choices := make([]domain.Choice, count)
+	for index := range choices {
+		choices[index] = domain.Choice{Code: "C", Label: "Choice"}
+	}
+	question, err := domain.NewQuestion(
+		"CHOICE",
+		1,
+		"Choice",
+		domain.ChoiceQuestion{Choices: choices},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return domain.Product{Code: "LARGE", Questions: []domain.Question{question}}
 }
 
 func TestNewHandlerRejectsInvalidDependencies(t *testing.T) {

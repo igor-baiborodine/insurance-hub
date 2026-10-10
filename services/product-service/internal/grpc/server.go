@@ -127,7 +127,14 @@ func (server *productServer) ListProducts(
 		Products: make([]*productv1.Product, 0, len(products)),
 	}
 	for _, product := range products {
-		mapped, mapErr := mapProduct(product)
+		if err := requestCtx.Err(); err != nil {
+			return nil, server.transportError(
+				requestCtx,
+				productv1.ProductService_ListProducts_FullMethodName,
+				err,
+			)
+		}
+		mapped, mapErr := mapProduct(requestCtx, product)
 		if mapErr != nil {
 			return nil, server.transportError(
 				requestCtx,
@@ -136,6 +143,13 @@ func (server *productServer) ListProducts(
 			)
 		}
 		response.Products = append(response.Products, mapped)
+	}
+	if err := requestCtx.Err(); err != nil {
+		return nil, server.transportError(
+			requestCtx,
+			productv1.ProductService_ListProducts_FullMethodName,
+			err,
+		)
 	}
 	return response, nil
 }
@@ -154,8 +168,15 @@ func (server *productServer) GetProduct(
 			err,
 		)
 	}
-	mapped, err := mapProduct(product)
+	mapped, err := mapProduct(requestCtx, product)
 	if err != nil {
+		return nil, server.transportError(
+			requestCtx,
+			productv1.ProductService_GetProduct_FullMethodName,
+			err,
+		)
+	}
+	if err := requestCtx.Err(); err != nil {
 		return nil, server.transportError(
 			requestCtx,
 			productv1.ProductService_GetProduct_FullMethodName,

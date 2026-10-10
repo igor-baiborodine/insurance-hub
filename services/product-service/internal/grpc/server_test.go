@@ -274,6 +274,45 @@ func TestProductServiceHonorsCallerCancellationAndConfiguredDeadline(t *testing.
 	}
 }
 
+func TestProductServiceDeadlineDuringMappingPreventsSuccess(t *testing.T) {
+	// given
+	product := productWithChoices(t, 100_000)
+	var applicationReturnedWithBudget atomic.Bool
+	settings := defaultSettings()
+	settings.RequestTimeout = time.Millisecond
+	client := newProductClient(
+		t,
+		settings,
+		func(ctx context.Context) ([]domain.Product, error) {
+			applicationReturnedWithBudget.Store(ctx.Err() == nil)
+			return []domain.Product{product}, nil
+		},
+		func(context.Context, string) (domain.Product, error) {
+			return domain.Product{}, nil
+		},
+		new(bytes.Buffer),
+	)
+
+	// when
+	response, err := client.ListProducts(
+		context.Background(),
+		&productv1.ListProductsRequest{},
+	)
+
+	// then
+	if !applicationReturnedWithBudget.Load() {
+		t.Fatal("application did not return before the request deadline")
+	}
+	if response != nil || status.Code(err) != codes.DeadlineExceeded {
+		t.Fatalf(
+			"response=%v status=%v error=%v",
+			response,
+			status.Code(err),
+			err,
+		)
+	}
+}
+
 func TestProductServiceEnforcesSendLimitWithoutTruncation(t *testing.T) {
 	// given
 	settings := defaultSettings()
@@ -436,6 +475,24 @@ func richProduct(t *testing.T) domain.Product {
 		MaxNumberOfInsured: 7,
 		Icon:               "edge",
 	}
+}
+
+func productWithChoices(t *testing.T, count int) domain.Product {
+	t.Helper()
+	choices := make([]domain.Choice, count)
+	for index := range choices {
+		choices[index] = domain.Choice{Code: "C", Label: "Choice"}
+	}
+	question, err := domain.NewQuestion(
+		"CHOICE",
+		1,
+		"Choice",
+		domain.ChoiceQuestion{Choices: choices},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return domain.Product{Code: "LARGE", Questions: []domain.Question{question}}
 }
 
 func assertMappedProduct(t *testing.T, product *productv1.Product) {

@@ -100,14 +100,18 @@ func (handler *catalogHandler) list(writer http.ResponseWriter, request *http.Re
 
 	mapped := make([]productDTO, 0, len(products))
 	for _, product := range products {
-		value, mapErr := mapProduct(product)
+		if err := ctx.Err(); err != nil {
+			handler.writeApplicationError(writer, request, err)
+			return
+		}
+		value, mapErr := mapProduct(ctx, product)
 		if mapErr != nil {
 			handler.writeApplicationError(writer, request, mapErr)
 			return
 		}
 		mapped = append(mapped, value)
 	}
-	handler.writeSuccess(writer, request, mapped)
+	handler.writeSuccess(ctx, writer, request, mapped)
 }
 
 func (handler *catalogHandler) get(
@@ -122,21 +126,30 @@ func (handler *catalogHandler) get(
 		handler.writeApplicationError(writer, request, err)
 		return
 	}
-	mapped, err := mapProduct(product)
+	mapped, err := mapProduct(ctx, product)
 	if err != nil {
 		handler.writeApplicationError(writer, request, err)
 		return
 	}
-	handler.writeSuccess(writer, request, mapped)
+	handler.writeSuccess(ctx, writer, request, mapped)
 }
 
 func (handler *catalogHandler) writeSuccess(
+	ctx context.Context,
 	writer http.ResponseWriter,
 	request *http.Request,
 	value any,
 ) {
+	if err := ctx.Err(); err != nil {
+		handler.writeApplicationError(writer, request, err)
+		return
+	}
 	body, err := json.Marshal(value)
 	if err != nil {
+		handler.writeApplicationError(writer, request, err)
+		return
+	}
+	if err := ctx.Err(); err != nil {
 		handler.writeApplicationError(writer, request, err)
 		return
 	}

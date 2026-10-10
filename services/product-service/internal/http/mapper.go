@@ -1,6 +1,7 @@
 package producthttp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,7 +43,10 @@ type choiceDTO struct {
 	Label string `json:"label,omitempty"`
 }
 
-func mapProduct(product domain.Product) (productDTO, error) {
+func mapProduct(ctx context.Context, product domain.Product) (productDTO, error) {
+	if err := ctx.Err(); err != nil {
+		return productDTO{}, err
+	}
 	if product.Code == "" {
 		return productDTO{}, fmt.Errorf(
 			"%w: product code is empty",
@@ -61,6 +65,9 @@ func mapProduct(product domain.Product) (productDTO, error) {
 		mapped.Covers = make([]coverDTO, 0, len(product.Covers))
 	}
 	for _, cover := range product.Covers {
+		if err := ctx.Err(); err != nil {
+			return productDTO{}, err
+		}
 		mappedCover := coverDTO{
 			Code: cover.Code, Name: cover.Name, Description: cover.Description,
 			Optional: cover.Optional,
@@ -81,6 +88,9 @@ func mapProduct(product domain.Product) (productDTO, error) {
 		mapped.Questions = make([]questionDTO, 0, len(product.Questions))
 	}
 	for _, question := range product.Questions {
+		if err := ctx.Err(); err != nil {
+			return productDTO{}, err
+		}
 		mappedQuestion := questionDTO{
 			Code: question.Code, Index: question.Index, Text: question.Text,
 		}
@@ -91,6 +101,9 @@ func mapProduct(product domain.Product) (productDTO, error) {
 				mappedQuestion.Choices = make([]choiceDTO, 0, len(kind.Choices))
 			}
 			for _, choice := range kind.Choices {
+				if err := ctx.Err(); err != nil {
+					return productDTO{}, err
+				}
 				mappedQuestion.Choices = append(mappedQuestion.Choices, choiceDTO{
 					Code: choice.Code, Label: choice.Label,
 				})
@@ -106,6 +119,9 @@ func mapProduct(product domain.Product) (productDTO, error) {
 			)
 		}
 		mapped.Questions = append(mapped.Questions, mappedQuestion)
+	}
+	if err := ctx.Err(); err != nil {
+		return productDTO{}, err
 	}
 	return mapped, nil
 }

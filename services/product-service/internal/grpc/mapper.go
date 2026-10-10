@@ -1,6 +1,7 @@
 package productgrpc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -10,7 +11,10 @@ import (
 
 var errInvalidDomainProduct = errors.New("invalid domain product")
 
-func mapProduct(product domain.Product) (*productv1.Product, error) {
+func mapProduct(ctx context.Context, product domain.Product) (*productv1.Product, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	mapped := &productv1.Product{
 		Code:               product.Code,
 		Name:               product.Name,
@@ -25,6 +29,9 @@ func mapProduct(product domain.Product) (*productv1.Product, error) {
 		return nil, fmt.Errorf("%w: product code is empty", errInvalidDomainProduct)
 	}
 	for _, cover := range product.Covers {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		mappedCover := &productv1.Cover{
 			Code:        cover.Code,
 			Name:        cover.Name,
@@ -44,6 +51,9 @@ func mapProduct(product domain.Product) (*productv1.Product, error) {
 		mapped.Covers = append(mapped.Covers, mappedCover)
 	}
 	for _, question := range product.Questions {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		mappedQuestion := &productv1.Question{
 			Code:  question.Code,
 			Index: question.Index,
@@ -53,6 +63,9 @@ func mapProduct(product domain.Product) (*productv1.Product, error) {
 		case domain.ChoiceQuestion:
 			choices := make([]*productv1.Choice, 0, len(kind.Choices))
 			for _, choice := range kind.Choices {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				choices = append(choices, &productv1.Choice{
 					Code: choice.Code, Label: choice.Label,
 				})
@@ -75,6 +88,9 @@ func mapProduct(product domain.Product) (*productv1.Product, error) {
 			)
 		}
 		mapped.Questions = append(mapped.Questions, mappedQuestion)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return mapped, nil
 }
