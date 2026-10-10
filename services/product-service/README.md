@@ -127,7 +127,9 @@ Configuration is read once and validated before service resources are acquired. 
 Go duration syntax. Listener ports may be zero for test-owned ephemeral listeners; listener hosts
 must be explicit, and the three configured addresses must be distinct. Invalid configuration
 returns a setting-name diagnostic without the rejected value. `PRODUCT_DATABASE_URL` has no
-fallback and is held in a redacting value type; it must identify the restricted Product reader.
+fallback and is held in a redacting value type; it must include an explicit, non-blank username
+in the URL authority identifying the restricted Product reader. A conflicting `user` query
+parameter is rejected.
 
 | Setting                       | Default           | Constraint                                                                                                              |
 |-------------------------------|-------------------|-------------------------------------------------------------------------------------------------------------------------|
@@ -135,7 +137,7 @@ fallback and is held in a redacting value type; it must identify the restricted 
 | `HTTP_ADDR`                   | `127.0.0.1:8081`  | Business HTTP host and numeric port.                                                                                    |
 | `GRPC_ADDR`                   | `127.0.0.1:9090`  | Business gRPC host and numeric port.                                                                                    |
 | `HEALTH_ADDR`                 | `127.0.0.1:8080`  | Management HTTP host and numeric port; all listener addresses must differ.                                              |
-| `PRODUCT_DATABASE_URL`        | required          | `postgres` or `postgresql` URL with a host and database name; never logged or echoed.                                   |
+| `PRODUCT_DATABASE_URL`        | required          | `postgres` or `postgresql` URL with an explicit non-blank reader username before `@`, host, and database name; a `user` query override is rejected; never logged or echoed. |
 | `DB_MAX_CONNS`                | `8`               | Integer from 1 through 32; minimum pool size remains zero.                                                              |
 | `DB_CONNECT_TIMEOUT`          | `3s`              | Positive; no greater than `STARTUP_TIMEOUT`.                                                                            |
 | `DB_ACQUIRE_TIMEOUT`          | `2s`              | Positive; no greater than `DB_QUERY_TIMEOUT`.                                                                           |

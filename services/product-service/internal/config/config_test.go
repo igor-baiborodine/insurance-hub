@@ -145,6 +145,34 @@ func TestLoadRejectsAbsentEmptyOrBlankDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsDatabaseURLWithoutExplicitUser(t *testing.T) {
+	// given
+	testCases := []struct {
+		name string
+		url  string
+	}{
+		{name: "missing user", url: "postgresql://127.0.0.1:5432/product"},
+		{name: "empty user", url: "postgresql://@127.0.0.1:5432/product"},
+		{name: "blank user", url: "postgresql://%20@127.0.0.1:5432/product"},
+		{
+			name: "query user overrides explicit user",
+			url:  "postgresql://product_reader@127.0.0.1:5432/product?user=",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// when
+			_, err := load(
+				mapLookup(map[string]string{databaseURLSetting: testCase.url}),
+			)
+
+			// then
+			assertSettingError(t, err, databaseURLSetting)
+		})
+	}
+}
+
 func TestLoadRejectsInvalidSettings(t *testing.T) {
 	// given
 	testCases := []struct {

@@ -357,8 +357,12 @@ func loadDatabaseURL(lookup lookupEnv) (DatabaseURL, error) {
 	}
 	parsed, err := url.Parse(value)
 	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") ||
-		!validHost(parsed.Hostname()) || parsed.Fragment != "" || parsed.Path == "" ||
-		parsed.Path == "/" {
+		!validHost(parsed.Hostname()) || parsed.User == nil ||
+		strings.TrimSpace(parsed.User.Username()) == "" || parsed.Fragment != "" ||
+		parsed.Path == "" || parsed.Path == "/" {
+		return DatabaseURL{}, invalid(databaseURLSetting, "must be a PostgreSQL URL")
+	}
+	if _, overridesUser := parsed.Query()["user"]; overridesUser {
 		return DatabaseURL{}, invalid(databaseURLSetting, "must be a PostgreSQL URL")
 	}
 	if port := parsed.Port(); port != "" {
