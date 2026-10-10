@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestResolveAndLoadAuthoritativeQACatalog(t *testing.T) {
+func TestResolveAndLoad_AuthoritativeQACatalog(t *testing.T) {
 	// given
 	workingDirectory, err := os.Getwd()
 	if err != nil {
@@ -43,7 +43,7 @@ func TestResolveAndLoadAuthoritativeQACatalog(t *testing.T) {
 	}
 }
 
-func TestFixtureLoadingRejectsMissingAndUnknownInputs(t *testing.T) {
+func TestFixtureLoading_RejectsMissingAndUnknownInputs(t *testing.T) {
 	// given
 	missingRoot := t.TempDir()
 

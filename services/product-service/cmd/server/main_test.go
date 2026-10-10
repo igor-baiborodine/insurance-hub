@@ -15,7 +15,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
 )
 
-func TestRunLogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
+func TestRun_LogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 	// given
 	const privateMarker = "private-credential-marker"
 	t.Setenv("SERVICE_NAME", "configured-service")
@@ -58,7 +58,7 @@ func TestRunLogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 	}
 }
 
-func TestShutdownContextHandlesSIGTERM(t *testing.T) {
+func TestShutdownContext_HandlesSIGTERM(t *testing.T) {
 	// given
 	ctx, stop := shutdownContext(context.Background())
 	defer stop()
@@ -76,7 +76,7 @@ func TestShutdownContextHandlesSIGTERM(t *testing.T) {
 	}
 }
 
-func TestRunWithReturnsAfterServiceStops(t *testing.T) {
+func TestRunWith_ReturnsAfterServiceStops(t *testing.T) {
 	// given
 	settings := config.Config{ServiceName: "configured-service", LogLevel: slog.LevelInfo}
 	var output bytes.Buffer
@@ -112,7 +112,7 @@ func TestRunWithReturnsAfterServiceStops(t *testing.T) {
 	}
 }
 
-func TestRunWithLogsServiceFailureUsingConfiguredIdentity(t *testing.T) {
+func TestRunWith_LogsServiceFailureUsingConfiguredIdentity(t *testing.T) {
 	// given
 	settings := config.Config{ServiceName: "configured-service", LogLevel: slog.LevelInfo}
 	serviceErr := errors.New("service stopped unexpectedly")

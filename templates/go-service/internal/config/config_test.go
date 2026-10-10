@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestLoadDefaults(t *testing.T) {
+func TestLoad_Defaults(t *testing.T) {
 	// given
 	lookup := mapLookup(nil)
 
@@ -47,7 +47,7 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadValidOverrides(t *testing.T) {
+func TestLoad_ValidOverrides(t *testing.T) {
 	// given
 	values := map[string]string{
 		serviceNameSetting:     "copy-service",
@@ -84,7 +84,7 @@ func TestLoadValidOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
+func TestLoad_RejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
 	// given
 	const privateMarker = "private-marker"
 	tests := []struct {
@@ -226,7 +226,7 @@ func TestLoadRejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
 	}
 }
 
-func TestLoadAllowsEmptyEndpointWhenTelemetryIsDisabled(t *testing.T) {
+func TestLoad_AllowsEmptyEndpointWhenTelemetryIsDisabled(t *testing.T) {
 	// given
 	lookup := mapLookup(map[string]string{otelEndpointSetting: ""})
 

@@ -32,7 +32,7 @@ type failureCase struct {
 	} `json:"expected"`
 }
 
-func TestDirectProductRoutingMatchesAcceptedBoundaryCases(t *testing.T) {
+func TestDirectProductRouting_MatchesAcceptedBoundaryCases(t *testing.T) {
 	fixtures := readFailureCases(t)
 	tests := []struct {
 		id       string
@@ -136,7 +136,7 @@ func TestDirectProductRoutingMatchesAcceptedBoundaryCases(t *testing.T) {
 	}
 }
 
-func TestNetHTTPRejectsMalformedEscapeBeforeHandlerWithNonJSONBody(t *testing.T) {
+func TestNetHTTP_RejectsMalformedEscapeBeforeHandlerWithNonJSONBody(t *testing.T) {
 	called := make(chan struct{}, 1)
 	address := startTestServer(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		called <- struct{}{}
@@ -154,7 +154,7 @@ func TestNetHTTPRejectsMalformedEscapeBeforeHandlerWithNonJSONBody(t *testing.T)
 	}
 }
 
-func TestCompatibilityListenerBoundsRequestLineAndHeaderTime(t *testing.T) {
+func TestCompatibilityListener_BoundsRequestLineAndHeaderTime(t *testing.T) {
 	called := make(chan struct{}, 1)
 	handler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		called <- struct{}{}
@@ -201,7 +201,7 @@ func TestCompatibilityListenerBoundsRequestLineAndHeaderTime(t *testing.T) {
 	}
 }
 
-func TestCompatibilityListenerPreservesKeepAliveAndIdleTimeout(t *testing.T) {
+func TestCompatibilityListener_PreservesKeepAliveAndIdleTimeout(t *testing.T) {
 	// given
 	var calls atomic.Int64
 	handler := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
@@ -240,7 +240,7 @@ func TestCompatibilityListenerPreservesKeepAliveAndIdleTimeout(t *testing.T) {
 	}
 }
 
-func TestCompatibilityListenerChecksMalformedTargetAfterKeepAliveRequest(t *testing.T) {
+func TestCompatibilityListener_ChecksMalformedTargetAfterKeepAliveRequest(t *testing.T) {
 	// given
 	var calls atomic.Int64
 	handler := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
@@ -294,7 +294,7 @@ func TestCompatibilityListenerChecksMalformedTargetAfterKeepAliveRequest(t *test
 	}
 }
 
-func TestHandlerSerializesLegacyProductShapeLosslessly(t *testing.T) {
+func TestHandler_SerializesLegacyProductShapeLosslessly(t *testing.T) {
 	// given
 	fraction, err := domain.NewDecimal("12.3400")
 	if err != nil {
@@ -370,7 +370,7 @@ func TestHandlerSerializesLegacyProductShapeLosslessly(t *testing.T) {
 	}
 }
 
-func TestHandlerOmitsEmptyLegacyFieldsButKeepsScalarDefaults(t *testing.T) {
+func TestHandler_OmitsEmptyLegacyFieldsButKeepsScalarDefaults(t *testing.T) {
 	handler := newTestHandler(t,
 		func(context.Context) ([]domain.Product, error) { return []domain.Product{}, nil },
 		func(context.Context, string) (domain.Product, error) {
@@ -389,7 +389,7 @@ func TestHandlerOmitsEmptyLegacyFieldsButKeepsScalarDefaults(t *testing.T) {
 	}
 }
 
-func TestHandlerMapsErrorsSafelyWithoutRetryOrPartialSuccess(t *testing.T) {
+func TestHandler_MapsErrorsSafelyWithoutRetryOrPartialSuccess(t *testing.T) {
 	privateMarker := "postgres://reader:secret@127.0.0.1/product raw definition"
 	tests := []struct {
 		name     string
@@ -481,7 +481,7 @@ func TestHandlerMapsErrorsSafelyWithoutRetryOrPartialSuccess(t *testing.T) {
 	}
 }
 
-func TestHandlerUsesCallerContextAndConfiguredDeadline(t *testing.T) {
+func TestHandler_UsesCallerContextAndConfiguredDeadline(t *testing.T) {
 	t.Run("caller cancellation writes no response", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -636,7 +636,7 @@ func productWithChoices(t *testing.T, count int) domain.Product {
 	return domain.Product{Code: "LARGE", Questions: []domain.Question{question}}
 }
 
-func TestNewHandlerRejectsInvalidDependencies(t *testing.T) {
+func TestNewHandler_RejectsInvalidDependencies(t *testing.T) {
 	list := ListProducts(func(context.Context) ([]domain.Product, error) { return nil, nil })
 	get := GetProduct(func(context.Context, string) (domain.Product, error) {
 		return domain.Product{}, nil

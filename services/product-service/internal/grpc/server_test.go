@@ -25,7 +25,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
 )
 
-func TestProductServiceMapsCompleteCatalog(t *testing.T) {
+func TestProductService_MapsCompleteCatalog(t *testing.T) {
 	// given
 	product := richProduct(t)
 	client := newProductClient(
@@ -67,7 +67,7 @@ func TestProductServiceMapsCompleteCatalog(t *testing.T) {
 	assertMappedProduct(t, getResponse.GetProduct())
 }
 
-func TestProductServiceReturnsEmptyList(t *testing.T) {
+func TestProductService_ReturnsEmptyList(t *testing.T) {
 	// given
 	client := newProductClient(
 		t,
@@ -88,7 +88,7 @@ func TestProductServiceReturnsEmptyList(t *testing.T) {
 	}
 }
 
-func TestProductServiceValidatesGetBeforeApplication(t *testing.T) {
+func TestProductService_ValidatesGetBeforeApplication(t *testing.T) {
 	// given
 	var calls atomic.Int64
 	client := newProductClient(
@@ -116,7 +116,7 @@ func TestProductServiceValidatesGetBeforeApplication(t *testing.T) {
 	}
 }
 
-func TestProductServiceMapsSafeApplicationErrorsOnce(t *testing.T) {
+func TestProductService_MapsSafeApplicationErrorsOnce(t *testing.T) {
 	privateMarker := "postgres://reader:secret@private/catalog raw-definition"
 	tests := []struct {
 		name        string
@@ -193,7 +193,7 @@ func TestProductServiceMapsSafeApplicationErrorsOnce(t *testing.T) {
 	}
 }
 
-func TestProductServiceHonorsCallerCancellationAndConfiguredDeadline(t *testing.T) {
+func TestProductService_HonorsCallerCancellationAndConfiguredDeadline(t *testing.T) {
 	tests := []struct {
 		name          string
 		settings      transport.Settings
@@ -274,7 +274,7 @@ func TestProductServiceHonorsCallerCancellationAndConfiguredDeadline(t *testing.
 	}
 }
 
-func TestProductServiceDeadlineDuringMappingPreventsSuccess(t *testing.T) {
+func TestProductService_DeadlineDuringMappingPreventsSuccess(t *testing.T) {
 	// given
 	product := productWithChoices(t, 100_000)
 	var applicationReturnedWithBudget atomic.Bool
@@ -313,7 +313,7 @@ func TestProductServiceDeadlineDuringMappingPreventsSuccess(t *testing.T) {
 	}
 }
 
-func TestProductServiceEnforcesSendLimitWithoutTruncation(t *testing.T) {
+func TestProductService_EnforcesSendLimitWithoutTruncation(t *testing.T) {
 	// given
 	settings := defaultSettings()
 	settings.MaxSendBytes = 64
@@ -340,7 +340,7 @@ func TestProductServiceEnforcesSendLimitWithoutTruncation(t *testing.T) {
 	}
 }
 
-func TestProductServiceEnforcesReceiveLimitBeforeApplication(t *testing.T) {
+func TestProductService_EnforcesReceiveLimitBeforeApplication(t *testing.T) {
 	// given
 	settings := defaultSettings()
 	settings.MaxReceiveBytes = 64
@@ -369,7 +369,7 @@ func TestProductServiceEnforcesReceiveLimitBeforeApplication(t *testing.T) {
 	}
 }
 
-func TestNewServerRejectsMissingDependenciesAndLimits(t *testing.T) {
+func TestNewServer_RejectsMissingDependenciesAndLimits(t *testing.T) {
 	// given
 	log := logger.New(new(bytes.Buffer), "product-service", 0)
 	tracer := noop.NewTracerProvider()

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestAcceptedBaselineHasExactScenarioCoverage(t *testing.T) {
+func TestAcceptedBaseline_HasExactScenarioCoverage(t *testing.T) {
 	// given
 	baselineRoot, err := ResolveBaselineRoot(".")
 	if err != nil {
@@ -26,7 +26,7 @@ func TestAcceptedBaselineHasExactScenarioCoverage(t *testing.T) {
 	}
 }
 
-func TestBaselineCoverageRejectsMissingRegistration(t *testing.T) {
+func TestBaselineCoverage_RejectsMissingRegistration(t *testing.T) {
 	// given
 	baselineRoot, err := ResolveBaselineRoot(".")
 	if err != nil {
@@ -44,7 +44,7 @@ func TestBaselineCoverageRejectsMissingRegistration(t *testing.T) {
 	}
 }
 
-func TestBaselineCoverageRejectsFixtureModification(t *testing.T) {
+func TestBaselineCoverage_RejectsFixtureModification(t *testing.T) {
 	// given
 	baselineRoot, err := ResolveBaselineRoot(".")
 	if err != nil {

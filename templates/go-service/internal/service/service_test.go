@@ -25,7 +25,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/health"
 )
 
-func TestRunWithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
+func TestRun_WithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
 	// given
 	settings := testConfig(time.Second)
 	deps := productionDependencies()
@@ -113,7 +113,7 @@ func TestRunWithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
 	}
 }
 
-func TestRunCleansUpAfterLaterStartupFailureAndPreservesErrors(t *testing.T) {
+func TestRun_CleansUpAfterLaterStartupFailureAndPreservesErrors(t *testing.T) {
 	// given
 	listenErr := errors.New("health listen failed")
 	closeErr := errors.New("gRPC listener close failed")
@@ -165,7 +165,7 @@ func TestRunCleansUpAfterLaterStartupFailureAndPreservesErrors(t *testing.T) {
 	}
 }
 
-func TestRunForcesGRPCStopAndReservesTelemetryCleanupTime(t *testing.T) {
+func TestRun_ForcesGRPCStopAndReservesTelemetryCleanupTime(t *testing.T) {
 	// given
 	const shutdownTimeout = 8 * time.Second
 	order := newOrderRecorder()
@@ -252,7 +252,7 @@ func TestRunForcesGRPCStopAndReservesTelemetryCleanupTime(t *testing.T) {
 	}
 }
 
-func TestRunBoundsSlowCleanupToOverallShutdownBudget(t *testing.T) {
+func TestRun_BoundsSlowCleanupToOverallShutdownBudget(t *testing.T) {
 	// given
 	const shutdownTimeout = 200 * time.Millisecond
 	order := newOrderRecorder()

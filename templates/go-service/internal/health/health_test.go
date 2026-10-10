@@ -9,7 +9,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/health"
 )
 
-func TestHandlerReflectsLifecycleState(t *testing.T) {
+func TestHandler_ReflectsLifecycleState(t *testing.T) {
 	// given
 	state := new(health.State)
 	handler := health.NewHandler(state)

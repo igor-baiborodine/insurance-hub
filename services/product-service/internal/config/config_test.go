@@ -9,7 +9,7 @@ import (
 
 const testDatabaseURL = "postgresql://product_reader:reader-password@127.0.0.1:5432/product"
 
-func TestLoadDefaults(t *testing.T) {
+func TestLoad_Defaults(t *testing.T) {
 	// given
 	values := map[string]string{databaseURLSetting: testDatabaseURL}
 
@@ -55,7 +55,7 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsTypedOverrides(t *testing.T) {
+func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 	// given
 	values := map[string]string{
 		serviceNameSetting:           "product-reader",
@@ -123,7 +123,7 @@ func TestLoadAcceptsTypedOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsAbsentEmptyOrBlankDatabaseURL(t *testing.T) {
+func TestLoad_RejectsAbsentEmptyOrBlankDatabaseURL(t *testing.T) {
 	// given
 	testCases := []struct {
 		name   string
@@ -145,7 +145,7 @@ func TestLoadRejectsAbsentEmptyOrBlankDatabaseURL(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsDatabaseURLWithoutExplicitUser(t *testing.T) {
+func TestLoad_RejectsDatabaseURLWithoutExplicitUser(t *testing.T) {
 	// given
 	testCases := []struct {
 		name string
@@ -173,7 +173,7 @@ func TestLoadRejectsDatabaseURLWithoutExplicitUser(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsInvalidSettings(t *testing.T) {
+func TestLoad_RejectsInvalidSettings(t *testing.T) {
 	// given
 	testCases := []struct {
 		name    string
@@ -249,7 +249,7 @@ func TestLoadRejectsInvalidSettings(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsDuplicateListenerAddresses(t *testing.T) {
+func TestLoad_RejectsDuplicateListenerAddresses(t *testing.T) {
 	// given
 	testCases := []struct {
 		name    string
@@ -284,7 +284,7 @@ func TestLoadRejectsDuplicateListenerAddresses(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsInvalidTimeoutRelationships(t *testing.T) {
+func TestLoad_RejectsInvalidTimeoutRelationships(t *testing.T) {
 	// given
 	testCases := []struct {
 		name    string
@@ -341,7 +341,7 @@ func TestLoadRejectsInvalidTimeoutRelationships(t *testing.T) {
 	}
 }
 
-func TestLoadAllowsDisabledTelemetryWithoutEndpoint(t *testing.T) {
+func TestLoad_AllowsDisabledTelemetryWithoutEndpoint(t *testing.T) {
 	// given
 	values := map[string]string{
 		databaseURLSetting: testDatabaseURL,
@@ -362,7 +362,7 @@ func TestLoadAllowsDisabledTelemetryWithoutEndpoint(t *testing.T) {
 	}
 }
 
-func TestLoadRequiresEndpointForEnabledTelemetry(t *testing.T) {
+func TestLoad_RequiresEndpointForEnabledTelemetry(t *testing.T) {
 	// given
 	values := map[string]string{
 		databaseURLSetting: testDatabaseURL,
@@ -376,7 +376,7 @@ func TestLoadRequiresEndpointForEnabledTelemetry(t *testing.T) {
 	assertSettingError(t, err, otelEndpointSetting)
 }
 
-func TestDatabaseURLAndErrorsRedactCredentialValues(t *testing.T) {
+func TestDatabaseURLAndErrors_RedactCredentialValues(t *testing.T) {
 	// given
 	const privateMarker = "private-password-marker"
 	rawURL := "postgresql://product_reader:" + privateMarker + "@127.0.0.1:5432/product"
@@ -410,7 +410,7 @@ func TestDatabaseURLAndErrorsRedactCredentialValues(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsInvalidTelemetryEndpointWithoutValue(t *testing.T) {
+func TestLoad_RejectsInvalidTelemetryEndpointWithoutValue(t *testing.T) {
 	// given
 	const privateMarker = "private-token-marker"
 	values := map[string]string{
