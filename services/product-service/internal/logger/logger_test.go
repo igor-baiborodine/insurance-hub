@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -98,6 +100,48 @@ func TestNewRedactsSensitiveAttributesAtEveryLevel(t *testing.T) {
 		if !ok || details["password"] != "[REDACTED]" {
 			t.Errorf("unexpected nested redaction: %#v", entry["details"])
 		}
+	}
+}
+
+func TestNewRedactsWrappedErrorsAndPreservesDiagnosticContext(t *testing.T) {
+	// given
+	const privateMarker = "private-wrapped-cause"
+	traceID := trace.TraceID{
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+	}
+	spanID := trace.SpanID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18}
+	ctx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(
+		trace.SpanContextConfig{
+			TraceID:    traceID,
+			SpanID:     spanID,
+			TraceFlags: trace.FlagsSampled,
+		},
+	))
+	wrapped := fmt.Errorf("cleanup telemetry: %w", errors.New(privateMarker))
+	var output bytes.Buffer
+	log := logger.New(&output, "product-service", slog.LevelDebug)
+
+	// when
+	log.DebugContext(ctx, "cleanup failed",
+		slog.String("component", "telemetry"),
+		slog.Any("error", wrapped),
+	)
+
+	// then
+	if strings.Contains(output.String(), privateMarker) {
+		t.Fatalf("captured logs expose wrapped cause: %s", output.String())
+	}
+	entries := decodeEntries(t, output.String())
+	if len(entries) != 1 {
+		t.Fatalf("entry count = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry["service"] != "product-service" || entry["level"] != "DEBUG" ||
+		entry["msg"] != "cleanup failed" || entry["component"] != "telemetry" ||
+		entry["error"] != "[REDACTED]" || entry["trace_id"] != traceID.String() ||
+		entry["span_id"] != spanID.String() {
+		t.Errorf("unexpected safe diagnostic: %#v", entry)
 	}
 }
 

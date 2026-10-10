@@ -30,7 +30,7 @@ make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXT
 ```
 
 `INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, `parity`,
-`cancellation`, `lifecycle`, or `all`.
+`cancellation`, `lifecycle`, `read-only`, `access`, or `all`.
 `FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,

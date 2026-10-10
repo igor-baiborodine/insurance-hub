@@ -84,7 +84,7 @@ func sanitize(attribute slog.Attr) slog.Attr {
 func sanitizeAny(value slog.Value) slog.Value {
 	data := value.Any()
 	if _, ok := data.(error); ok {
-		return value
+		return slog.StringValue(redactedValue)
 	}
 
 	encoded, err := json.Marshal(data)

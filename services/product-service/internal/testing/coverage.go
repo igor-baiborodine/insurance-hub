@@ -14,7 +14,6 @@ type ScenarioDisposition string
 
 const (
 	DispositionCurrentTest  ScenarioDisposition = "current-test"
-	DispositionLaterStep    ScenarioDisposition = "later-step"
 	DispositionNonTransport ScenarioDisposition = "non-transport"
 	DispositionOutsideGo    ScenarioDisposition = "outside-go-backend"
 )
@@ -61,7 +60,7 @@ func ScenarioRegistry() map[string]ScenarioRegistration {
 	add("Steps 11 through 15 safe backend failures", DispositionCurrentTest, `
 		FAIL-DECODE-001 FAIL-DATABASE-001
 	`)
-	add("Step 18 anonymous direct access", DispositionLaterStep, `
+	add("Step 18 anonymous direct access", DispositionCurrentTest, `
 		ACCESS-DIRECT-LIST-001 ACCESS-DIRECT-GET-001
 	`)
 	add("Steps 8, 9, and 17 restricted database role", DispositionCurrentTest, `
@@ -109,7 +108,7 @@ func ScenarioRegistry() map[string]ScenarioRegistration {
 	add("Steps 8 and 17 database constraint proof", DispositionNonTransport, `
 		DATA-EDGES-SQL-NULL-DEFINITION-001 DATA-EDGES-SQL-NULL-CODE-001
 	`)
-	add("Step 18 direct anonymous access", DispositionLaterStep, `
+	add("Step 18 direct anonymous access", DispositionCurrentTest, `
 		ACCESS-DIRECT-LIST-NONE-001 ACCESS-DIRECT-LIST-VALID-001
 		ACCESS-DIRECT-LIST-MALFORMED-001 ACCESS-DIRECT-LIST-SIGNATURE-001
 		ACCESS-DIRECT-LIST-EXPIRED-001 ACCESS-DIRECT-LIST-NBF-001
