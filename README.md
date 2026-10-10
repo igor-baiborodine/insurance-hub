@@ -1,4 +1,4 @@
-# Work in progress
+# Insurance Hub (WIP)
 
 This project is an exercise in migrating the
 original [Micronaut Microservices POC](https://github.com/asc-lab/micronaut-microservices-poc) from
