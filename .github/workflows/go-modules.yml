@@ -123,10 +123,11 @@ jobs:
       - name: Prove renamed scaffold copy
         run: make go-scaffold-check-copy
 
-      - name: Generate Product Service coverage
-        run: make -C services/product-service coverage
+      - name: Check Product Service coverage (minimum 75%)
+        run: make -C services/product-service coverage-check
 
       - name: Upload Product Service coverage to Codecov
+        if: ${{ always() && hashFiles('services/product-service/coverage.txt') != '' }}
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

@@ -1,9 +1,12 @@
 coverage:
+  range: "50...75"
   status:
     project:
       default:
-        target: auto
+        target: 75%
         threshold: 0%
+        flags:
+          - product-service
     patch:
       default:
         informational: true
