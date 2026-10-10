@@ -7,9 +7,10 @@
 
 # Go Rules
 
-For Go work, read and apply all five canonical rules:
+For Go work, read and apply all six canonical rules:
 
 - [Go architecture](go-architecture.md): business visibility, dependency boundaries, ports, composition, and architecture handoff.
+- [Go API and transport](go-api-transport.md): HTTP/gRPC boundaries, OpenAPI ownership, wire mappings, and compatibility.
 - [Go development](go-development.md): Makefile interface, implementation, lifecycle, contracts, and Phase 4 migration.
 - [Go testing](go-test.md): readable names, test structure, assertions, isolation, and integration boundaries.
 - [Go formatting](go-formatting.md): mandatory formatter policy and scope.

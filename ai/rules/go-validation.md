@@ -15,13 +15,18 @@ Use only the corresponding Makefile targets, as required by
 [Go development](go-development.md#scope-and-makefile-interface). Never invoke underlying test,
 lint, build, generation, dependency, or security tools directly to bypass a missing/failing target.
 Apply [Go architecture](go-architecture.md) for dependency, composition, and architecture handoff
-review, and [Go testing](go-test.md) for test names, structure, and assertions. This file defines
+review, [Go API and transport](go-api-transport.md) for contract and facade verification, and
+[Go testing](go-test.md) for test names, structure, and assertions. This file defines
 which checks to execute and what evidence to record.
 
 ## Discover the validation boundary
 
 - Read module/workspace manifests, Makefiles (including prerequisites), relevant CI, and service
   instructions. Identify changed modules, generated contracts, and dependent consumers.
+- For HTTP/gRPC changes, identify contract sources, the actual request path, OpenAPI/gateway
+  outputs, and affected callers using [API and transport verification](go-api-transport.md#verification-and-adoption).
+  Check HTTP compatibility separately from protobuf compatibility and exercise the deployed
+  transport composition, including middleware, identity, metadata, and deadline propagation.
 - For new services or changed boundaries/composition, inspect core imports and port signatures,
   adapter mappings, constructor wiring, and resource ownership against
   [the architecture rule](go-architecture.md#architecture-handoff-and-review). Verify the affected
@@ -54,6 +59,7 @@ the target. Use documented equivalents in the owning Makefile and its supported 
 | `test-integration` | When changing adapters, persistence, migrations, transport wiring, or cross-service behavior, and whenever CI requires it. The example uses the `integration` build tag and Testcontainers. |
 | `format-proto`, `lint-proto`, `gen-proto` | For changed protobuf contracts: format/lint definitions and regenerate all configured output. These targets exist in the example. |
 | `check-proto-breaking` | For changed published contracts: check compatibility against the documented released/base contract, including wire and HTTP behavior tests. Buf breaking configuration alone does not execute this check; the example has no such Make target. |
+| OpenAPI lint, generation/drift, and HTTP compatibility checks | For affected HTTP contracts: validate the adopted OpenAPI version, reproduce configured outputs, and compare with the accepted baseline alongside real transport tests. Discover or add owning Make targets; this rule does not establish that such targets already exist. |
 | `gen-mock`, generation drift checks | When interfaces or generators change: regenerate affected mocks/clients and verify reproducibility. The example has `gen-mock`, `check-proto-diff`, and `check-mock-diff`; inspect their scope before reuse. |
 | `mod-tidy`, `check-mod-diff` | Only for affected imports/dependencies or a required CI dependency gate. Review both manifest and checksum changes. These names exist in the example; its diff checks assume a clean baseline. |
 | `test-race` or race-enabled `test` | Required for concurrency, synchronization, caches, shared state, workers, and race-enabled CI. Do not repeat a check already covered by an equivalent race-enabled target. |

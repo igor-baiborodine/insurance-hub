@@ -18,6 +18,7 @@ Do not implement a new business rule just to make an example applicable. No gene
 production implementation is supplied, and the snippets have not been compiled or runtime-tested.
 
 Apply the [Go architecture](../../rules/go-architecture.md),
+[API and transport](../../rules/go-api-transport.md),
 [development](../../rules/go-development.md),
 [testing](../../rules/go-test.md),
 [formatting](../../rules/go-formatting.md), and [validation](../../rules/go-validation.md) rules.

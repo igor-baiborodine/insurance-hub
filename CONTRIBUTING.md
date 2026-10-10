@@ -144,6 +144,7 @@ TODO
 ### Go
 
 Phase 4 Go services follow the repository's [architecture rules](ai/rules/go-architecture.md),
+[API and transport rules](ai/rules/go-api-transport.md),
 [Go development rules](ai/rules/go-development.md),
 [testing rules](ai/rules/go-test.md),
 [formatting policy](ai/rules/go-formatting.md), and [validation rules](ai/rules/go-validation.md).

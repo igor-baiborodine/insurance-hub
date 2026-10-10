@@ -15,7 +15,8 @@
 # Go Design and Architecture
 
 Apply when designing, implementing, changing, or reviewing Go service boundaries and composition.
-Follow [Go development](go-development.md) for implementation, lifecycle, contract, migration, and
+Follow [Go API and transport](go-api-transport.md) for HTTP/gRPC facade and contract design,
+[Go development](go-development.md) for implementation, lifecycle, persistence, migration, and
 Makefile requirements; [Go testing](go-test.md) for test design; and
 [Go validation](go-validation.md) for required checks and evidence.
 
@@ -115,7 +116,7 @@ are described here separately from the diagram's dependency arrows.
   boundary; one transport's serializer is not automatically another transport's contract.
 - Translate infrastructure failures into errors meaningful to the consuming port while preserving
   inspectable causes. Transport adapters own safe protocol status/body mapping. See
-  [contracts and persistence](go-development.md#contracts-and-persistence) for detailed requirements.
+  [transport error mapping](go-api-transport.md#error-mapping) for detailed requirements.
 
 ## Composition and resource ownership
 

@@ -80,7 +80,8 @@ list. Nested instruction discovery is scoped to the affected paths as described 
 ## Maintenance Rules
 
 For Go implementation, migration, or tooling work, load [the Go entry point](rules/go-rules.md)
-and all five linked rules: [architecture](rules/go-architecture.md),
+and all six linked rules: [architecture](rules/go-architecture.md),
+[API and transport](rules/go-api-transport.md),
 [development](rules/go-development.md), [testing](rules/go-test.md),
 [formatting](rules/go-formatting.md), and [validation](rules/go-validation.md).
 They require Makefile targets for Go development operations and supplement root policy. Discover
