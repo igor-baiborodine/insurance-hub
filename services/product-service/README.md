@@ -119,6 +119,9 @@ The relevant reproducibility pins are:
 
 `check-docs` validates local Markdown links and anchors, extracts every Mermaid block, and renders
 it to SVG with the pinned CLI. It does not keep generated images in the working tree.
+The checked-in `puppeteer-config.json` supplies Chromium's `--no-sandbox` and
+`--disable-setuid-sandbox` launch arguments required by the Ubuntu 24.04 GitHub runner;
+documentation rendering is limited to repository-controlled Mermaid sources.
 
 Configuration is read once and validated before service resources are acquired. Duration values use
 Go duration syntax. Listener ports may be zero for test-owned ephemeral listeners; listener hosts

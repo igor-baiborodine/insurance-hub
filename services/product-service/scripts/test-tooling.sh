@@ -65,6 +65,16 @@ printf '\n[Controlled missing link](controlled-missing.md)\n' >>"$fixture/README
 expect_failure docs-broken-link check-docs 'missing local link target' "$fixture" \
 	DOC_FILES=README.md
 
+fixture=$(new_fixture docs-missing-puppeteer-config)
+rm -- "$fixture/puppeteer-config.json"
+expect_failure docs-missing-puppeteer-config check-docs \
+	'missing Puppeteer configuration' "$fixture" DOC_FILES=README.md
+
+fixture=$(new_fixture docs-missing-sandbox-argument)
+sed -i '/--no-sandbox/d' "$fixture/puppeteer-config.json"
+expect_failure docs-missing-sandbox-argument check-docs \
+	'missing required Chromium launch argument --no-sandbox' "$fixture" DOC_FILES=README.md
+
 fixture=$(new_fixture docs-invalid-mermaid)
 cat >>"$fixture/README.md" <<'EOF'
 

@@ -15,6 +15,7 @@ GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 SQLC := $(TOOLS_BIN)/sqlc
 MMDC := $(TOOLS_BIN)/mmdc
+PUPPETEER_CONFIG := puppeteer-config.json
 GOLANGCI_CONFIG := .golangci.yml
 PROTO_SCHEMA := api/product/v1/product_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
@@ -90,7 +91,7 @@ check-docs:
 		exit 1; \
 	}
 	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(PYTHON) scripts/check-docs.py \
-		--renderer "$(MMDC)" $(DOC_FILES)
+		--renderer "$(MMDC)" --puppeteer-config "$(PUPPETEER_CONFIG)" $(DOC_FILES)
 
 preview-docs:
 	@test "$$($(MMDC) --version 2>/dev/null)" = "$(MERMAID_CLI_VERSION)" || { \
@@ -99,7 +100,8 @@ preview-docs:
 	}
 	rm -rf "$(TOOLS_DIR)/docs-preview"
 	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(PYTHON) scripts/check-docs.py \
-		--renderer "$(MMDC)" --output-directory "$(TOOLS_DIR)/docs-preview" $(DOC_FILES)
+		--renderer "$(MMDC)" --puppeteer-config "$(PUPPETEER_CONFIG)" \
+		--output-directory "$(TOOLS_DIR)/docs-preview" $(DOC_FILES)
 
 update-deps:
 	GOWORK=off $(GO) get \

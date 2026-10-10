@@ -8,6 +8,7 @@ import argparse
 import contextlib
 import hashlib
 import html
+import json
 import re
 import subprocess
 import tempfile
@@ -22,6 +23,21 @@ HEADING_PATTERN = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
 
 def fail(message: str) -> None:
     raise SystemExit(f"check-docs: {message}")
+
+
+def validate_puppeteer_config(path: Path) -> None:
+    try:
+        configuration = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"invalid Puppeteer configuration {path}: {error}")
+    arguments = configuration.get("args")
+    if not isinstance(arguments, list) or not all(
+        isinstance(argument, str) for argument in arguments
+    ):
+        fail(f"invalid Puppeteer launch arguments in {path}")
+    for required in ("--no-sandbox", "--disable-setuid-sandbox"):
+        if required not in arguments:
+            fail(f"missing required Chromium launch argument {required} in {path}")
 
 
 def github_slug(heading: str) -> str:
@@ -74,6 +90,7 @@ def render_mermaid(
     document: Path,
     markdown: str,
     renderer: Path,
+    puppeteer_config: Path,
     output_directory: Path | None,
 ) -> int:
     diagrams = MERMAID_PATTERN.findall(markdown)
@@ -91,7 +108,15 @@ def render_mermaid(
             output = temporary_root / f"diagram-{document_id}-{index}{suffix}"
             source.write_text(diagram.strip() + "\n", encoding="utf-8")
             result = subprocess.run(
-                [str(renderer), "--input", str(source), "--output", str(output)],
+                [
+                    str(renderer),
+                    "--puppeteerConfigFile",
+                    str(puppeteer_config),
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                ],
                 capture_output=True,
                 check=False,
                 text=True,
@@ -109,6 +134,7 @@ def render_mermaid(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--renderer", required=True, type=Path)
+    parser.add_argument("--puppeteer-config", required=True, type=Path)
     parser.add_argument("--output-directory", type=Path)
     parser.add_argument("documents", nargs="+", type=Path)
     arguments = parser.parse_args()
@@ -116,6 +142,10 @@ def main() -> None:
     renderer = arguments.renderer.resolve()
     if not renderer.is_file():
         fail(f"missing Mermaid renderer: {renderer}")
+    puppeteer_config = arguments.puppeteer_config.resolve()
+    if not puppeteer_config.is_file():
+        fail(f"missing Puppeteer configuration: {puppeteer_config}")
+    validate_puppeteer_config(puppeteer_config)
 
     link_count = 0
     diagram_count = 0
@@ -129,6 +159,7 @@ def main() -> None:
             document,
             markdown,
             renderer,
+            puppeteer_config,
             arguments.output_directory,
         )
 
