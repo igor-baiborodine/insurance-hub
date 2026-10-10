@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"os"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
 )
 
 func TestRunLogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
@@ -69,5 +73,73 @@ func TestShutdownContextHandlesSIGTERM(t *testing.T) {
 	case <-ctx.Done():
 	case <-time.After(time.Second):
 		t.Fatal("SIGTERM did not cancel the shutdown context")
+	}
+}
+
+func TestRunWithReturnsAfterServiceStops(t *testing.T) {
+	// given
+	settings := config.Config{ServiceName: "configured-service", LogLevel: slog.LevelInfo}
+	var output bytes.Buffer
+	serviceCalled := false
+
+	// when
+	err := runWith(
+		context.Background(),
+		&output,
+		func() (config.Config, error) {
+			return settings, nil
+		},
+		func(_ context.Context, actual config.Config, serviceLogger *slog.Logger) error {
+			serviceCalled = true
+			if actual != settings {
+				t.Errorf("service config = %#v, want %#v", actual, settings)
+			}
+			if serviceLogger == nil {
+				t.Error("service logger = nil")
+			}
+			return nil
+		},
+	)
+	// then
+	if err != nil {
+		t.Fatalf("runWith() error = %v, want nil", err)
+	}
+	if !serviceCalled {
+		t.Fatal("runWith() did not start the service")
+	}
+	if output.Len() != 0 {
+		t.Fatalf("runWith() output = %q, want empty", output.String())
+	}
+}
+
+func TestRunWithLogsServiceFailureUsingConfiguredIdentity(t *testing.T) {
+	// given
+	settings := config.Config{ServiceName: "configured-service", LogLevel: slog.LevelInfo}
+	serviceErr := errors.New("service stopped unexpectedly")
+	var output bytes.Buffer
+
+	// when
+	err := runWith(
+		context.Background(),
+		&output,
+		func() (config.Config, error) {
+			return settings, nil
+		},
+		func(context.Context, config.Config, *slog.Logger) error {
+			return serviceErr
+		},
+	)
+
+	// then
+	if !errors.Is(err, serviceErr) {
+		t.Fatalf("runWith() error = %v, want %v", err, serviceErr)
+	}
+	var entry map[string]any
+	if decodeErr := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &entry); decodeErr != nil {
+		t.Fatalf("decode service log: %v", decodeErr)
+	}
+	if entry["service"] != settings.ServiceName || entry["level"] != "ERROR" ||
+		entry["msg"] != "service failed" || entry["error"] != "[REDACTED]" {
+		t.Errorf("unexpected service log: %#v", entry)
 	}
 }
