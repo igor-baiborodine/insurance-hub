@@ -67,6 +67,22 @@ jobs:
             printf '| %s | %s | %.1f%% | %s |\n' "$module" "$grade" "$score" "$issues" >> "$GITHUB_STEP_SUMMARY"
             printf '%s: grade %s, score %.1f%%, issues %s\n' "$module" "$grade" "$score" "$issues"
             jq -r '.checks[] | "  \(.name): \(.percentage * 100 | floor)% \(if .error == "" then "" else "(error: \(.error))" end)"' <<< "$result"
+            printf '%s issue details:\n' "$module"
+            jq -r --arg root "$GITHUB_WORKSPACE/" --arg module "$module" '
+              .checks[] as $check
+              | $check.file_summaries[]
+              | if .filename == "" then
+                  "  \($check.name): no recognized license file in \($module) directory"
+                else
+                  .filename as $file
+                  | if (.errors | length) == 0 then
+                      "  \($check.name): \($file | ltrimstr($root))"
+                    else
+                      .errors[]
+                      | "  \($check.name): \($file | ltrimstr($root)):\(.line_number): \(.error_string)"
+                    end
+                end
+            ' <<< "$result"
 
             if ! jq -e '.did_error == false and .average >= 0.75' <<< "$result" > /dev/null; then
               printf '%s: report checks failed or score is below 75%%\n' "$module" >&2
