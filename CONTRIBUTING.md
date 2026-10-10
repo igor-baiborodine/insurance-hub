@@ -143,7 +143,8 @@ TODO
 
 ### Go
 
-Phase 4 Go services follow the repository's [Go development rules](ai/rules/go-development.md),
+Phase 4 Go services follow the repository's [architecture rules](ai/rules/go-architecture.md),
+[Go development rules](ai/rules/go-development.md),
 [testing rules](ai/rules/go-test.md),
 [formatting policy](ai/rules/go-formatting.md), and [validation rules](ai/rules/go-validation.md).
 Use the owning Makefile targets for every Go operation, including tool installation, dependency

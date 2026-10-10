@@ -17,7 +17,8 @@ specification. Each example states the production API it assumes. Replace the il
 Do not implement a new business rule just to make an example applicable. No generated mock or
 production implementation is supplied, and the snippets have not been compiled or runtime-tested.
 
-Apply the [Go development](../../rules/go-development.md),
+Apply the [Go architecture](../../rules/go-architecture.md),
+[development](../../rules/go-development.md),
 [testing](../../rules/go-test.md),
 [formatting](../../rules/go-formatting.md), and [validation](../../rules/go-validation.md) rules.
 Use the module's pinned Go and library versions; verify API compatibility before adaptation.

@@ -14,13 +14,20 @@
 Use only the corresponding Makefile targets, as required by
 [Go development](go-development.md#scope-and-makefile-interface). Never invoke underlying test,
 lint, build, generation, dependency, or security tools directly to bypass a missing/failing target.
-Apply [Go testing](go-test.md) when writing or reviewing test names, structure, and assertions;
-this file defines which checks to execute and what evidence to record.
+Apply [Go architecture](go-architecture.md) for dependency, composition, and architecture handoff
+review, and [Go testing](go-test.md) for test names, structure, and assertions. This file defines
+which checks to execute and what evidence to record.
 
 ## Discover the validation boundary
 
 - Read module/workspace manifests, Makefiles (including prerequisites), relevant CI, and service
   instructions. Identify changed modules, generated contracts, and dependent consumers.
+- For new services or changed boundaries/composition, inspect core imports and port signatures,
+  adapter mappings, constructor wiring, and resource ownership against
+  [the architecture rule](go-architecture.md#architecture-handoff-and-review). Verify the affected
+  README package map, diagram, and walkthrough against code, and run the owning documentation
+  targets. Record inspection separately from test results; the current cross-module topology
+  check does not enforce layering within a service.
 - Inspect each target's actual coverage: package selection, nested modules, build tags, race
   instrumentation, integration dependencies, and whether it changes files. A root target or a
   workspace does not by itself prove that every service is tested.

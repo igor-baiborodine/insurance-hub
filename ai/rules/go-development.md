@@ -14,7 +14,7 @@
 # Go Development
 
 Apply to handwritten Go services and their contracts, persistence, and runtime configuration.
-Load [Go testing](go-test.md), [Go formatting](go-formatting.md), and
+Load [Go architecture](go-architecture.md), [Go testing](go-test.md), [Go formatting](go-formatting.md), and
 [Go validation](go-validation.md) alongside this rule.
 Before planning or editing, discover and read the service-local `AGENTS.md` files applicable to
 each affected path, following the scope, precedence, and conflict procedure in
@@ -45,31 +45,13 @@ override canonical repository requirements. Stop and surface conflicts for resol
 
 ## Service structure and dependencies
 
-Use the separation demonstrated by `campsite-booking-go`, adapted to each service's complexity:
+Follow [Go architecture](go-architecture.md) for business-oriented organization, inward dependencies,
+consumer-owned ports, adapter mappings, explicit composition, resource ownership, and architecture
+handoff. It includes the repository package responsibilities and the implemented Product reference.
 
-| Area | Responsibility |
-| --- | --- |
-| `cmd/` | Thin executable entry point; process exit belongs here. |
-| `internal/service` | Explicit construction, adapter wiring, startup, and shutdown. |
-| `internal/domain` | Business types, invariants, errors, and required repository interfaces. |
-| `internal/application` | Use cases; command/query handlers and validators where useful. |
-| `internal/grpc` and other transport adapters | Request validation, DTO mapping, transport error mapping. |
-| `internal/postgres` and other storage/integration adapters | Persistence and external-system implementations. |
-| `internal/config`, `internal/logger` | Typed environment configuration and logging setup. |
-| Versioned API definitions and generated packages | Public contracts and generated clients/servers, separate from domain types. |
-| `db/migrations`, `internal/testing` | Versioned migrations and reusable test support as needed. |
-
-- Dependencies point inward: adapters depend on application/domain; business logic must not import
-  transport, protobuf DTOs, database implementations, or deployment configuration.
-- Keep packages small and cohesive. Use explicit constructors and narrow interfaces owned by their
-  consumers (domain/application for repository ports). Do not mirror every concrete type with an
-  interface or require generic handlers/decorators where a simple function suffices.
-- Preserve service/module boundaries. Never import another service's private implementation.
-  Share contracts or common infrastructure only when required by the ticket; avoid a shared
-  business-model package introduced just to remove duplication.
-- Prefer standard-library facilities and established module libraries. New dependencies need a
-  concrete purpose and validation path. Maintain dependencies only through the owning Makefile,
-  only in affected modules, and review both `go.mod` and `go.sum` changes.
+Prefer standard-library facilities and established module libraries. New dependencies need a
+concrete purpose and validation path. Maintain dependencies only through the owning Makefile,
+only in affected modules, and review both `go.mod` and `go.sum` changes.
 
 ## Implementation and lifecycle
 
