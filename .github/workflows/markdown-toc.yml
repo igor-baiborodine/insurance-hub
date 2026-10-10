@@ -1,0 +1,68 @@
+name: Markdown TOC CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.md'
+      - '.github/workflows/markdown-toc.yml'
+      - 'scripts/markdown-toc.sh'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '**.md'
+      - '.github/workflows/markdown-toc.yml'
+      - 'scripts/markdown-toc.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate changed Markdown tables of contents
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js 24.13.0
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.13.0'
+
+      - name: Validate the Markdown TOC script
+        run: bash -n scripts/markdown-toc.sh
+
+      - name: Check changed Markdown files
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$PR_BASE"
+          elif [[ -n "$PUSH_BEFORE" && ! "$PUSH_BEFORE" =~ ^0+$ ]] &&
+            git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null
+          then
+            base="$PUSH_BEFORE"
+          else
+            base=$(git hash-object -t tree /dev/null)
+          fi
+
+          mapfile -d '' markdown_files < <(
+            git diff --name-only --diff-filter=ACMR -z "$base" HEAD -- '*.md'
+          )
+
+          if (( ${#markdown_files[@]} == 0 )); then
+            echo 'No added or modified Markdown files to check.'
+            exit 0
+          fi
+
+          ./scripts/markdown-toc.sh check "${markdown_files[@]}"

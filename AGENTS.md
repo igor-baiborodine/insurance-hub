@@ -1,3 +1,21 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Insurance Hub Agent Guide](#insurance-hub-agent-guide)
+  - [Repository Context](#repository-context)
+  - [Repository Shape](#repository-shape)
+  - [Instruction Precedence](#instruction-precedence)
+  - [Default Workflow](#default-workflow)
+  - [Skills](#skills)
+  - [Repository Conventions](#repository-conventions)
+  - [AI Directory](#ai-directory)
+  - [Artifact Rules](#artifact-rules)
+  - [Validation Expectations](#validation-expectations)
+  - [Safety Expectations](#safety-expectations)
+  - [References](#references)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Insurance Hub Agent Guide
 
 This repository uses a spec-first, AI-assisted development workflow. These instructions are the repository-wide entry point for AI agents and human collaborators using AI tools.
@@ -110,6 +128,11 @@ Copilot to their canonical workflows under `ai/skills/`.
 
 - Use `CONTRIBUTING.md` as the source of truth for branch naming, commit message conventions, prerequisites, and developer workflow expectations.
 - Prefer existing Make targets and module-local build tooling over inventing ad hoc commands.
+- After creating or updating any Markdown file, run
+  `./scripts/markdown-toc.sh format <file>...` for every Markdown file changed by the current task,
+  then run the same command with `check`. The script uses the repository-pinned `doctoc` version;
+  never hand-edit its generated table of contents. Pass only task-owned files so unrelated user
+  changes remain untouched.
 
 ## AI Directory
 

@@ -1,3 +1,10 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Insurance Hub (WIP)](#insurance-hub-wip)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Insurance Hub (WIP)
 
 This project is an exercise in migrating the
