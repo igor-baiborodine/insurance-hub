@@ -1,7 +1,22 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Go Development](#go-development)
+  - [Scope and Makefile interface](#scope-and-makefile-interface)
+  - [Service structure and dependencies](#service-structure-and-dependencies)
+  - [Implementation and lifecycle](#implementation-and-lifecycle)
+  - [Contracts and persistence](#contracts-and-persistence)
+  - [Phase 4 migration and operations](#phase-4-migration-and-operations)
+  - [Tests](#tests)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Go Development
 
 Apply to handwritten Go services and their contracts, persistence, and runtime configuration.
-Load [Go formatting](go-formatting.md) and [Go validation](go-validation.md) alongside this rule.
+Load [Go architecture](go-architecture.md), [Go API and transport](go-api-transport.md),
+[Go testing](go-test.md), [Go formatting](go-formatting.md), and
+[Go validation](go-validation.md) alongside this rule.
 Before planning or editing, discover and read the service-local `AGENTS.md` files applicable to
 each affected path, following the scope, precedence, and conflict procedure in
 [the root guide](../../AGENTS.md). Local Go conventions may add scoped detail; they do not silently
@@ -31,31 +46,13 @@ override canonical repository requirements. Stop and surface conflicts for resol
 
 ## Service structure and dependencies
 
-Use the separation demonstrated by `campsite-booking-go`, adapted to each service's complexity:
+Follow [Go architecture](go-architecture.md) for business-oriented organization, inward dependencies,
+consumer-owned ports, adapter mappings, explicit composition, resource ownership, and architecture
+handoff. It includes the repository package responsibilities and the implemented Product reference.
 
-| Area | Responsibility |
-| --- | --- |
-| `cmd/` | Thin executable entry point; process exit belongs here. |
-| `internal/service` | Explicit construction, adapter wiring, startup, and shutdown. |
-| `internal/domain` | Business types, invariants, errors, and required repository interfaces. |
-| `internal/application` | Use cases; command/query handlers and validators where useful. |
-| `internal/grpc` and other transport adapters | Request validation, DTO mapping, transport error mapping. |
-| `internal/postgres` and other storage/integration adapters | Persistence and external-system implementations. |
-| `internal/config`, `internal/logger` | Typed environment configuration and logging setup. |
-| Versioned API definitions and generated packages | Public contracts and generated clients/servers, separate from domain types. |
-| `db/migrations`, `internal/testing` | Versioned migrations and reusable test support as needed. |
-
-- Dependencies point inward: adapters depend on application/domain; business logic must not import
-  transport, protobuf DTOs, database implementations, or deployment configuration.
-- Keep packages small and cohesive. Use explicit constructors and narrow interfaces owned by their
-  consumers (domain/application for repository ports). Do not mirror every concrete type with an
-  interface or require generic handlers/decorators where a simple function suffices.
-- Preserve service/module boundaries. Never import another service's private implementation.
-  Share contracts or common infrastructure only when required by the ticket; avoid a shared
-  business-model package introduced just to remove duplication.
-- Prefer standard-library facilities and established module libraries. New dependencies need a
-  concrete purpose and validation path. Maintain dependencies only through the owning Makefile,
-  only in affected modules, and review both `go.mod` and `go.sum` changes.
+Prefer standard-library facilities and established module libraries. New dependencies need a
+concrete purpose and validation path. Maintain dependencies only through the owning Makefile,
+only in affected modules, and review both `go.mod` and `go.sum` changes.
 
 ## Implementation and lifecycle
 
@@ -75,14 +72,10 @@ Use the separation demonstrated by `campsite-booking-go`, adapted to each servic
 
 ## Contracts and persistence
 
-- Use versioned protobuf contracts for internal gRPC and the ticket's agreed HTTP mapping at the
-  edge. Validate request shape at the transport boundary (as with Buf/protovalidate in the example)
-  and business invariants in application/domain code. Keep domain and wire types separate.
-- Map known domain errors consistently to gRPC/HTTP statuses, including wrapped errors. Return
-  safe internal errors for unexpected failures; do not expose SQL, secrets, or internal details.
-- Preserve field numbers, presence/default semantics, validation, error responses, authentication,
-  and authorization unless the specification changes them. Reserve removed protobuf names/numbers.
-  Update callers, mocks, generated clients, gateway/OpenAPI output, and compatibility tests together.
+Follow [Go API and transport](go-api-transport.md) for versioned protobuf contracts, HTTP facade
+design, OpenAPI ownership, validation, wire/error mappings, security, and compatibility. Keep the
+ticket's accepted contract and migration behavior authoritative at each transport boundary.
+
 - Never edit generated files manually. Change definitions or interfaces, then invoke the owning
   Make targets for generation and checks. Pin generator versions in repository tooling.
 - Keep database details behind repository ports. The migration analysis proposes GORM; the example
@@ -123,23 +116,7 @@ Phase 4 and the 8-May-2026 Alloy update.
 
 ## Tests
 
-Use the [Go testing examples](../examples/go-testing/README.md) for concrete patterns; adapt their
-illustrative contracts to the ticket and actual module APIs.
-
-- Test changed observable behavior, failures, and boundaries. Use table-driven cases when helpful
-  and the module's established assertion conventions. Structure each applicable scenario with the
-  exact lowercase comments `// given`, `// when`, and `// then`: put scenario setup, test data, and
-  mock expectations under `given`; the behavior-triggering operation under `when`; and observations
-  plus mock/call verification under `then`. Shared immutable fixtures for table-driven tests may use
-  an outer `given`; keep per-case setup and the `when`/`then` phases in the subtest. Omit the markers
-  from shared setup helpers and trivial tests where a phase would be empty or misleading; do not add
-  placeholder blocks.
-- Follow the example's unit-test separation, generated Mockery/Testify mocks, and tagged
-  integration tests where those tools are adopted. Mock dependency boundaries, not implementation
-  details; regenerate mocks through Make when interfaces change.
-- Use isolated disposable dependencies (such as PostgreSQL Testcontainers) for integration tests,
-  with the actual migrations and reliable cleanup. Never point tests at shared production data.
-- Keep tests deterministic: control time and test data, use synchronization rather than sleeps,
-  register cleanup, and call `t.Helper()` in helpers. Do not weaken tests to accommodate regressions.
-- Include contract/status mapping, cancellation, rollback/conflicts, and legacy parity cases as
-  appropriate. See [Go validation](go-validation.md) for required Make-based checks and evidence.
+Follow [Go testing](go-test.md) for naming, test structure, assertions, isolation, and integration
+boundaries. Use the [Go testing examples](../examples/go-testing/README.md) for concrete patterns
+adapted to the ticket and actual module APIs, and [Go validation](go-validation.md) for required
+Make-based checks and evidence.

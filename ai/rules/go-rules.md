@@ -1,8 +1,18 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Go Rules](#go-rules)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Go Rules
 
-For Go work, read and apply all three canonical rules:
+For Go work, read and apply all six canonical rules:
 
-- [Go development](go-development.md): service boundaries, implementation, contracts, and Phase 4 migration.
+- [Go architecture](go-architecture.md): business visibility, dependency boundaries, ports, composition, and architecture handoff.
+- [Go API and transport](go-api-transport.md): HTTP/gRPC boundaries, OpenAPI ownership, wire mappings, and compatibility.
+- [Go development](go-development.md): Makefile interface, implementation, lifecycle, contracts, and Phase 4 migration.
+- [Go testing](go-test.md): readable names, test structure, assertions, isolation, and integration boundaries.
 - [Go formatting](go-formatting.md): mandatory formatter policy and scope.
 - [Go validation](go-validation.md): module-aware checks and evidence.
 

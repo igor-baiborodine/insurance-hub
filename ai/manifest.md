@@ -1,3 +1,17 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [AI Framework Manifest](#ai-framework-manifest)
+  - [Purpose](#purpose)
+  - [Structure](#structure)
+  - [Source Of Truth](#source-of-truth)
+  - [Vendor Adapters](#vendor-adapters)
+  - [Loading Order](#loading-order)
+  - [Precedence](#precedence)
+  - [Maintenance Rules](#maintenance-rules)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # AI Framework Manifest
 
 The `ai/` directory is the repository-owned, vendor-agnostic framework for AI-assisted development in Insurance Hub.
@@ -66,7 +80,9 @@ list. Nested instruction discovery is scoped to the affected paths as described 
 ## Maintenance Rules
 
 For Go implementation, migration, or tooling work, load [the Go entry point](rules/go-rules.md)
-and all three linked rules: [development](rules/go-development.md),
+and all six linked rules: [architecture](rules/go-architecture.md),
+[API and transport](rules/go-api-transport.md),
+[development](rules/go-development.md), [testing](rules/go-test.md),
 [formatting](rules/go-formatting.md), and [validation](rules/go-validation.md).
 They require Makefile targets for Go development operations and supplement root policy. Discover
 applicable service-local instructions using the procedure in [`AGENTS.md`](../AGENTS.md); surface

@@ -1,3 +1,14 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Repository Rules](#repository-rules)
+  - [General](#general)
+  - [Markdown Tables Of Contents](#markdown-tables-of-contents)
+  - [Git And Artifacts](#git-and-artifacts)
+  - [Validation](#validation)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Repository Rules
 
 ## General
@@ -8,6 +19,15 @@
 - Preserve behavior unless the spec explicitly changes it.
 - Avoid unrelated formatting, metadata churn, or refactors.
 - Update documentation when behavior, setup, workflow, or contracts change.
+
+## Markdown Tables Of Contents
+
+- Every Markdown file created or updated by an agent must contain a current `doctoc`-generated
+  table of contents.
+- After editing, run `./scripts/markdown-toc.sh format <file>...` with the exact task-owned Markdown
+  paths, followed by `./scripts/markdown-toc.sh check <file>...`.
+- Do not edit the generated table of contents by hand or run the formatter across unrelated files.
+- Treat a failed TOC check as incomplete validation and report it if it cannot be resolved.
 
 ## Git And Artifacts
 
@@ -21,5 +41,6 @@
 ## Validation
 
 - Run the narrowest meaningful tests or checks for the changed modules.
+- Run the Markdown TOC check for every Markdown file created or updated by the current task.
 - If validation is skipped or unavailable, state that explicitly and explain why.
 - Do not treat generated plans or summaries as a substitute for running checks.
