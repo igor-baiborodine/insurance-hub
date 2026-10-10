@@ -8,7 +8,7 @@
 # Insurance Hub (WIP)
 
 [![Go version](https://img.shields.io/github/go-mod/go-version/igor-baiborodine/insurance-hub/main?filename=services%2Fproduct-service%2Fgo.mod&label=Go)](services/product-service/go.mod)
-[![Go modules CI](https://github.com/igor-baiborodine/insurance-hub/actions/workflows/go-modules.yml/badge.svg?branch=main)](https://github.com/igor-baiborodine/insurance-hub/actions/workflows/go-modules.yml)
+[![Go Module Validation](https://github.com/igor-baiborodine/insurance-hub/actions/workflows/go-modules.yml/badge.svg?branch=main)](https://github.com/igor-baiborodine/insurance-hub/actions/workflows/go-modules.yml)
 [![Go Report Card](https://github.com/igor-baiborodine/insurance-hub/actions/workflows/go-report-card.yml/badge.svg?branch=main)](https://github.com/igor-baiborodine/insurance-hub/actions/workflows/go-report-card.yml)
 [![Product Service coverage](https://codecov.io/gh/igor-baiborodine/insurance-hub/graph/badge.svg?flag=product-service)](https://codecov.io/gh/igor-baiborodine/insurance-hub)
 

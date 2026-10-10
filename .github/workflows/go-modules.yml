@@ -1,4 +1,4 @@
-name: Go modules CI
+name: Go Module Validation
 
 on:
   push:

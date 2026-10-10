@@ -1,4 +1,4 @@
-name: Legacy Service Release CI
+name: Legacy Service Release
 
 on:
   push:

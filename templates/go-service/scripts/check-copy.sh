@@ -173,7 +173,7 @@ if grep -q '^check-copy:' "$copy_root/Makefile" ||
 fi
 if grep -Fq 'make go-scaffold-' "$copy_root/README.md" ||
 	grep -Fq 'Go service scaffold CI' "$copy_root/README.md" ||
-	grep -Fq 'Go modules CI' "$copy_root/README.md" ||
+	grep -Fq 'Go Module Validation' "$copy_root/README.md" ||
 	grep -Fq 'when this module, the workflow, or the root Makefile changes' \
 		"$copy_root/README.md"; then
 	echo 'check-copy: copied README claims scaffold-only root or CI coverage' >&2
