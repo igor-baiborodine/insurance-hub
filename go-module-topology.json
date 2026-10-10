@@ -17,7 +17,7 @@
       ],
       "packageScope": "all Go packages under ./..., the server executable, owned Protobuf schema and generated output, and module dependency metadata",
       "prerequisites": [
-        "Go 1.27.1",
+        "Go 1.27.2",
         "pinned scaffold tools installed by make go-scaffold-bootstrap-tools",
         "GCC for race-enabled tests",
         "public module, schema, tool, and vulnerability services unless cached"
@@ -26,7 +26,37 @@
         "github.com/igor-baiborodine/insurance-hub/templates/go-service"
       ],
       "localReplacements": [],
-      "ciWorkflow": ".github/workflows/go-scaffold.yml"
+      "ciWorkflow": ".github/workflows/go-modules.yml"
+    },
+    {
+      "directory": "services/product-service",
+      "modulePath": "github.com/igor-baiborodine/insurance-hub/services/product-service",
+      "role": "business-service",
+      "owner": "Product service maintainers",
+      "supportedModes": [
+        "standalone"
+      ],
+      "validationTarget": "check",
+      "validationVariables": [
+        "FORMAT_SCOPE",
+        "FORMAT_BASE"
+      ],
+      "packageScope": "all Product packages under ./..., the server executable, HTTP and gRPC adapters, generated Product v1 contract, sqlc-generated Product queries and PostgreSQL reader, fixture loader and disposable PostgreSQL suites, Protobuf/SQL source and generated output, Product and migration handoff documentation, and module dependency metadata",
+      "prerequisites": [
+        "Go 1.27.2",
+        "pinned Product tools installed by make go-product-bootstrap-tools",
+        "Node.js >= 20 and npm for the pinned Mermaid documentation renderer",
+        "Python 3 for documentation link and render validation",
+        "GCC for race-enabled tests",
+        "Docker Engine with daemon access for race-enabled integration tests",
+        "pinned postgres:17.10-alpine image digest available locally or from its public registry",
+        "public module and vulnerability services unless cached"
+      ],
+      "consumers": [
+        "github.com/igor-baiborodine/insurance-hub/services/product-service"
+      ],
+      "localReplacements": [],
+      "ciWorkflow": ".github/workflows/go-modules.yml"
     }
   ],
   "workspaces": [],

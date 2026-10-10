@@ -1,4 +1,4 @@
-name: Go service scaffold CI
+name: Go modules CI
 
 on:
   push:
@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'templates/go-service/**'
+      - 'services/product-service/**'
+      - 'legacy/product-service/src/test/resources/product-read-baseline/**'
       - 'go.mod'
       - 'go.sum'
       - 'go.work'
@@ -17,13 +19,17 @@ on:
       - 'go-module-topology.json'
       - 'scripts/go/**'
       - 'docs/migration/phase-4/go-module-topology.md'
-      - '.github/workflows/go-scaffold.yml'
+      - 'docs/migration/phase-4/product-service/README.md'
+      - '.github/workflows/go-modules.yml'
+      - 'codecov.yml'
       - 'Makefile'
   pull_request:
     branches:
       - main
     paths:
       - 'templates/go-service/**'
+      - 'services/product-service/**'
+      - 'legacy/product-service/src/test/resources/product-read-baseline/**'
       - 'go.mod'
       - 'go.sum'
       - 'go.work'
@@ -35,7 +41,9 @@ on:
       - 'go-module-topology.json'
       - 'scripts/go/**'
       - 'docs/migration/phase-4/go-module-topology.md'
-      - '.github/workflows/go-scaffold.yml'
+      - 'docs/migration/phase-4/product-service/README.md'
+      - '.github/workflows/go-modules.yml'
+      - 'codecov.yml'
       - 'Makefile'
 
 permissions:
@@ -43,7 +51,7 @@ permissions:
 
 jobs:
   validate:
-    name: Validate Go module topology and scaffold
+    name: Validate Go module topology and services
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository history
@@ -51,15 +59,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go 1.27.1
+      - name: Set up Node.js 24.13.0
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.13.0'
+
+      - name: Set up Go 1.27.2
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: true
-          cache-dependency-path: templates/go-service/go.sum
+          cache-dependency-path: |
+            templates/go-service/go.sum
+            services/product-service/go.sum
 
       - name: Bootstrap pinned scaffold tools
         run: make go-scaffold-bootstrap-tools
+
+      - name: Bootstrap pinned Product tools
+        run: make go-product-bootstrap-tools
 
       - name: Resolve formatting scope
         shell: bash
@@ -96,8 +114,24 @@ jobs:
       - name: Prove controlled topology failures
         run: make go-topology-test
 
-      - name: Prove controlled tooling failures
+      - name: Prove controlled scaffold tooling failures
         run: make go-scaffold-test-tooling
+
+      - name: Prove controlled Product tooling failures
+        run: make go-product-test-tooling
 
       - name: Prove renamed scaffold copy
         run: make go-scaffold-check-copy
+
+      - name: Generate Product Service coverage
+        run: make -C services/product-service coverage
+
+      - name: Upload Product Service coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./services/product-service/coverage.txt
+          flags: product-service
+          name: product-service
+          disable_search: true
+          fail_ci_if_error: true

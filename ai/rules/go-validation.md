@@ -75,11 +75,13 @@ the target. Use documented equivalents in the owning Makefile and its supported 
 - After checks, inspect tracked and relevant new files for unintended generated, formatting, or
   dependency changes. Complete the evidence record, map acceptance criteria to evidence at ticket
   completion, and apply the repository before-merge checklist.
-- Insurance Hub currently has one Go module manifest at `templates/go-service` and no approved
-  workspace. The scaffold owns pinned setup and non-mutating validation targets. Root
+- Insurance Hub currently has the scaffold at `templates/go-service` and the Product business
+  module at `services/product-service`, with no approved workspace. Each owns pinned setup and
+  non-mutating validation targets. Product's current checks cover its management shell; business,
+  contract, SQL, and integration gates join that module's `check` as implemented. Root
   `go-topology-check`, `go-modules-check`, and `go-topology-test` enforce the canonical inventory,
   standalone resolution, boundaries, controlled failures, and CI agreement. They cover only
-  modules recorded in `go-module-topology.json`; future business, contract, shared, or tool modules
-  require explicit owning targets, consumers, resolution modes, CI triggers, and onboarding before
-  repository validation may claim coverage. Documentation-only rule changes still require
-  reference, consistency, and whitespace review and do not establish runtime correctness.
+  modules recorded in `go-module-topology.json`; future modules require explicit owning targets,
+  consumers, resolution modes, CI triggers, and onboarding before repository validation may claim
+  coverage. Documentation-only rule changes still require reference, consistency, and whitespace
+  review and do not establish runtime correctness.

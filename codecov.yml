@@ -1,0 +1,20 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 0%
+    patch:
+      default:
+        informational: true
+
+flags:
+  product-service:
+    paths:
+      - services/product-service/
+    carryforward: false
+
+ignore:
+  - "services/product-service/gen/**"
+  - "services/product-service/internal/postgres/dbgen/**"
+  - "services/product-service/internal/testing/**"

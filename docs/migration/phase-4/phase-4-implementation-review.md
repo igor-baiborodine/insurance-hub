@@ -2,6 +2,11 @@
 
 **Review date: 30 September 2026. Status: reviewed documentation baseline; runtime adoption remains gated.**
 
+**Product transport follow-up: 10 October 2026.** The
+[issue-132 rationale](#product-http-compatibility-decision-issue-132) records the pilot's explicit
+HTTP adapter choice using the subsequent Product baseline and implementation. Other dated findings
+and adoption gates retain their original scope; this follow-up does not refresh the full review.
+
 This addendum supersedes the Phase 4 implementation recommendations in the
 [original migration analysis](../../system-overview-and-migration-analysis.md), including its
 [Architecture Pattern Migrations](../../system-overview-and-migration-analysis.md#architecture-pattern-migrations),
@@ -120,7 +125,7 @@ dependencies. Standard-library choices add no separate third-party runtime packa
 | <a id="p4-05"></a>P4-05 / D19-05 | Command/query handlers implemented with GORM. [A:487](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L487) | P:408 and D address adapter/interface boundaries | **qualify** | Optional use-case handlers independent of persistence; direct methods where sufficient. No mandatory generic bus/decorator abstraction. | [Assessment](#composition-and-lifecycle); [G19-01](#g19-01), [G19-04](#g19-04) |
 | <a id="p4-06"></a>P4-06 / D19-06 | Replace synchronous REST with grpc-go. [A:131–139, 176–179, 231–237, 480](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L131) | None | **qualify** | Internal versioned Go RPCs with deadlines and safe errors; preserve Java HTTP callers through tested adapters or separately migrated clients. All Go/callers. | [Assessment](#transport-and-validation); [G19-05](#g19-05) |
 | <a id="p4-07"></a>P4-07 / D19-07 | Protobuf and generated clients/OpenAPI. [A:135–139, 160–163, 373–374, 401–402, 415–416](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L135) | None | **qualify** | Preserve presence, numbers/names, JSON and consumers; pin generators and generate only needed outputs. Schema checks cannot prove HTTP parity. | [Assessment](#transport-and-validation); [G19-01](#g19-01), [G19-05](#g19-05) |
-| <a id="p4-08"></a>P4-08 / D19-08 | grpc-gateway preserves HTTP automatically. [A:136–137, 231–237, 308–313, 327–328, 377–378, 392, 405–406, 421–422, 442–443, 481](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L136) | None | **qualify** | Choose generated v2 mapping or explicit HTTP adapter per fixture-backed route; Java gateway remains interim edge. Include offer/search, principal override and document bytes. | [Assessment](#transport-and-validation); [G19-05](#g19-05), [G19-06](#g19-06) |
+| <a id="p4-08"></a>P4-08 / D19-08 | grpc-gateway preserves HTTP automatically. [A:136–137, 231–237, 308–313, 327–328, 377–378, 392, 405–406, 421–422, 442–443, 481](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L136) | None | **qualify** | Choose generated v2 mapping or explicit HTTP adapter per fixture-backed route; Java gateway remains interim edge. Product #132 selects an explicit `net/http` adapter for legacy parity; see the [Product rationale](#product-http-compatibility-decision-issue-132). Include offer/search, principal override and document bytes. | [Assessment](#transport-and-validation); [G19-05](#g19-05), [G19-06](#g19-06) |
 | <a id="p4-09"></a>P4-09 / D19-09 | protoc-gen-validate. [A:485](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L485) | None | **replace** | Provisional Protovalidate schema/runtime for transport shape, application/domain for invariants. Archived PGV is unsuitable as a new default; cover direct HTTP and stream entry points. | [Assessment](#transport-and-validation); [G19-01](#g19-01), [G19-05](#g19-05) |
 | <a id="p4-10"></a>P4-10 / D19-10 | GORM for seven PostgreSQL services. [A:307–313, 360–361, 375–376, 391–392, 403–404, 417–418, 482](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L307) | P directly proposes replacement | **replace** | Provisional sqlc with native pgx/v5/pgxpool for actual PG owners. GORM remains a justified local exception; no PG requirement inferred for chat/dashboard/search. | [Assessment](#postgresql-and-migrations); [G19-04](#g19-04) |
 | <a id="p4-11"></a>P4-11 / D19-11 | New JSONB migration and automatic index/performance gains. [A:107–114, 203–214, 448–459, 694–705](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L107) | P covers JSONB and direct-query exceptions | **qualify** | Java product already has JSONB mapping/default; inspect effective rows/schema/indexes and benchmark queries before claims. No second blanket MongoDB migration. | [Assessment](#postgresql-and-migrations); [G19-04](#g19-04), [G19-14](#g19-14) |
@@ -357,6 +362,58 @@ predates the [HTTP/2 fragmentation fix](https://github.com/grpc/grpc-go/security
 in 1.83.1 and is not a suitable platform pin. G19-01/05 require current advisory checks, a real
 [Buf breaking baseline](https://buf.build/docs/breaking/usage/), reproducible generation and affected
 Go/Java/browser/OpenAPI consumer tests. No RPC performance gain or wire parity is demonstrated here.
+
+#### Product HTTP compatibility decision (issue-132)
+
+The 10 October follow-up applies D19-08 to Product's two catalog-read operations. Issue #131's
+[contract baseline](product-service/contract-baseline.md#binding-field-mapping-and-presence-rules)
+and the #132 [service architecture](../../../services/product-service/README.md#product-catalog-architecture)
+support an explicit `net/http` adapter alongside versioned unary gRPC. This is a Product
+compatibility decision, not a blanket replacement of grpc-gateway for Phase 4.
+
+The HTTP API must preserve Java's observed representation, while the
+[Product v1 schema](../../../services/product-service/api/product/v1/product_service.proto)
+defines a separate typed RPC contract:
+
+| Concern | Required Product HTTP behavior | Gateway work beyond ordinary protobuf JSON mapping |
+| --- | --- | --- |
+| Response shape | List is a bare array, including `[]`; get is a bare product object. | Select or rewrite the payload instead of exposing the `ListProductsResponse.products` / `GetProductResponse.product` envelopes. |
+| Exact decimals | Emit `sumInsured` as an unquoted JSON number, preserving precision and trailing scale; omit it when absent. | Convert the optional protobuf decimal string to a validated JSON number token without binary floating-point conversion. |
+| Question variants | Emit the legacy flat `type` discriminator and variant fields such as `choices`. | Flatten the protobuf `oneof` message representation and supply the legacy discriminator. |
+| Field presence | Keep specified primitive defaults such as `optional: false` and `index: 0`, while omitting empty optional strings and nested collections. | Apply the baseline's field-specific rules rather than assuming a global default-emission setting is sufficient. |
+| Errors | Preserve captured `400`/`404` bodies and escaped self-links; database/decode failures return `500` with exactly `{"message":"Internal Server Error"}`. | Override the status/body mapping, including gRPC `Unavailable`, which the gateway normally maps to HTTP `503`. |
+| Paths | Preserve `/products/` as list, opaque encoded codes, and malformed-escape JSON errors without redirects. | Verify routing/unescaping and handle parser-level rejection before ordinary handler dispatch where necessary. |
+
+These differences follow the Product baseline, the
+[ProtoJSON specification](https://protobuf.dev/programming-guides/json/), and the gateway's
+[error mapping](https://github.com/grpc-ecosystem/grpc-gateway/blob/main/runtime/errors.go).
+grpc-gateway supports custom marshalers, response rewriting, error handlers and unescaping
+configuration; compatibility is achievable. However, these customizations retain much of the
+handwritten mapping while adding gateway runtime and generation configuration. Runtime response
+rewriting can also diverge from generated OpenAPI output, as the
+[gateway customization guide](https://grpc-ecosystem.github.io/grpc-gateway/docs/mapping/customizing_your_gateway/)
+explains. For two operations, the explicit adapter makes the required transformations easier to
+inspect and test directly against the accepted fixtures.
+
+Both transports call the same `ListProducts` and `GetProduct` application use cases in process.
+The [HTTP mapper](../../../services/product-service/internal/http/mapper.go) owns legacy DTOs,
+presence and decimal rendering; the [gRPC mapper](../../../services/product-service/internal/grpc/mapper.go)
+owns protobuf values. Catalog business logic and PostgreSQL access are shared. Keeping these
+representations at their boundaries avoids coupling the legacy HTTP shape to protobuf evolution.
+
+The comparison is between direct HTTP handlers and a generated translation layer: grpc-gateway
+also uses `net/http` and supports in-process server registration, so an extra network hop is not
+inevitable. Direct handlers still require maintenance and transport-specific tests. Product's
+[compatibility listener](../../../services/product-service/internal/http/listener.go) handles
+malformed percent escapes because the standard HTTP parser otherwise rejects them with a
+plain-text error before invoking the handler. Choosing `net/http` does not remove that complexity.
+
+Retain grpc-gateway as an option for later routes whose HTTP contracts align with protobuf
+mapping and where generated routing/OpenAPI saves substantial work. Product's choice is justified
+by contract control and limited endpoint scope, not a measured latency or throughput advantage.
+This follow-up records design and source evidence only; it runs no runtime qualification and
+closes no adoption gate. The Java gateway remains the edge and retry/fallback owner, with access,
+deployment, observability, live parity/load/rollback and cutover qualification owned by #133–#137.
 
 ### Kafka and event processing
 

@@ -115,7 +115,7 @@ awk '
     print "### Repository onboarding"
     print ""
     print "The scaffold-only `go-scaffold-*` root delegates and"
-    print "`.github/workflows/go-scaffold.yml` do not cover this copied module. Run module-owned"
+    print "`.github/workflows/go-modules.yml` do not cover this copied module. Run module-owned"
     print "Make targets from this directory. Add root and CI coverage only through the repository"
     print "documented in ../../docs/migration/phase-4/go-module-topology.md."
     skipping = 1
@@ -127,8 +127,9 @@ awk '
 mv README.md.copy README.md
 ```
 
-The repository root Makefile and scaffold workflow still point to `templates/go-service`. Do not
-claim that they cover the copied service until the repository onboarding workflow updates them.
+The root `go-scaffold-*` delegates still point to `templates/go-service`. The Go modules workflow
+covers only modules recorded in `go-module-topology.json`; do not claim it covers the copied service
+until the repository onboarding workflow updates the inventory and CI coverage.
 
 Review `README.md` and replace the template introduction with the real service purpose when it is
 known. Update any service-specific ports or configuration defaults required by the service ticket.

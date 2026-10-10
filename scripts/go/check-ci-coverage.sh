@@ -142,6 +142,39 @@ require_run_command() {
 	fi
 }
 
+require_setup_go_cache_input() {
+	local workflow_path="$1"
+	local workflow_relative="$2"
+	local cache_input="$3"
+	local description="$4"
+	if ! awk -v cache_input="${cache_input}" '
+	  function finish_step() {
+	    if (setup_go && cache_enabled && cache_block && cache_found) {
+	      found = 1
+	    }
+	  }
+	  /^      - / {
+	    finish_step()
+	    setup_go = 0
+	    cache_enabled = 0
+	    cache_block = 0
+	    cache_found = 0
+	  }
+	  /^        uses: actions\/setup-go@/ || /^      - uses: actions\/setup-go@/ {
+	    setup_go = 1
+	  }
+	  setup_go && $0 == "          cache: true" { cache_enabled = 1 }
+	  setup_go && $0 == "          cache-dependency-path: |" { cache_block = 1; next }
+	  setup_go && cache_block && $0 == "            " cache_input { cache_found = 1 }
+	  END {
+	    finish_step()
+	    exit(found ? 0 : 1)
+	  }
+	' "${workflow_path}"; then
+		fail "workflow ${workflow_relative} is missing active ${description}: ${cache_input}"
+	fi
+}
+
 mapfile -t workflows < <(
 	jq -r '[.modules[].ciWorkflow, .workspaces[].ciWorkflow] | unique[]' "${inventory_path}"
 )
@@ -161,7 +194,9 @@ for workflow_relative in "${workflows[@]}"; do
 		'**/go.work.sum' \
 		'go-module-topology.json' \
 		'scripts/go/**' \
+		'legacy/product-service/src/test/resources/product-read-baseline/**' \
 		'docs/migration/phase-4/go-module-topology.md' \
+		'docs/migration/phase-4/product-service/README.md' \
 		'Makefile' \
 		"${workflow_relative}"
 	do
@@ -191,12 +226,21 @@ for workflow_relative in "${workflows[@]}"; do
 
 	require_run_command "${workflow_path}" "${workflow_relative}" "go-modules-check"
 	require_run_command "${workflow_path}" "${workflow_relative}" "go-topology-test"
+	require_run_command "${workflow_path}" "${workflow_relative}" "go-scaffold-bootstrap-tools"
+	require_run_command "${workflow_path}" "${workflow_relative}" "go-product-bootstrap-tools"
+	require_run_command "${workflow_path}" "${workflow_relative}" "go-scaffold-test-tooling"
+	require_run_command "${workflow_path}" "${workflow_relative}" "go-product-test-tooling"
+	require_run_command "${workflow_path}" "${workflow_relative}" "go-scaffold-check-copy"
+	require_setup_go_cache_input "${workflow_path}" "${workflow_relative}" \
+		'templates/go-service/go.sum' 'scaffold setup-go cache input'
+	require_setup_go_cache_input "${workflow_path}" "${workflow_relative}" \
+		'services/product-service/go.sum' 'Product setup-go cache input'
 
 	module_count="$(jq --arg workflow "${workflow_relative}" \
 		'[.modules[] | select(.ciWorkflow == $workflow)] | length' "${inventory_path}")"
 	workspace_count="$(jq --arg workflow "${workflow_relative}" \
 		'[.workspaces[] | select(.ciWorkflow == $workflow)] | length' "${inventory_path}")"
-	printf 'ci-coverage: workflow=%s modules=%d workspaces=%d targets=go-modules-check,go-topology-test\n' \
+	printf 'ci-coverage: workflow=%s modules=%d workspaces=%d tooling-and-topology-targets=7\n' \
 		"${workflow_relative}" "${module_count}" "${workspace_count}"
 done
 
