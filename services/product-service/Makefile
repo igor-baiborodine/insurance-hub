@@ -48,6 +48,7 @@ TEST_PACKAGES ?= ./...
 COVERAGE_FILE ?= coverage.txt
 INTEGRATION_SUITE ?= all
 FIXTURE_SET ?= qa
+SECURITY_HARNESS_OUTPUT ?=
 DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md
 EXTRA_TOOL_PACKAGES := github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
 VERIFY_EXTRA_TOOL_SPECS := sqlc|$(SQLC)|$(SQLC_VERSION)|version
@@ -59,7 +60,12 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage test-integration \
-	build vulncheck bootstrap-doc-tools check-docs preview-docs check test-tooling run
+	build build-security-harness vulncheck bootstrap-doc-tools check-docs preview-docs check test-tooling run
+
+build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
+	@test -n "$(strip $(SECURITY_HARNESS_OUTPUT))" || { echo "SECURITY_HARNESS_OUTPUT is required" >&2; exit 1; }
+	GOWORK=off $(GO) build -mod=readonly -race -o "$(SECURITY_HARNESS_OUTPUT)" \
+		./internal/testing/cmd/securityharness
 
 bootstrap-tools: bootstrap-doc-tools
 

@@ -225,6 +225,11 @@ func (harness *Harness) RuntimeDatabaseURL() string {
 	return harness.runtimeURL
 }
 
+// ContainerID identifies the disposable container for test cleanup verification.
+func (harness *Harness) ContainerID() string {
+	return harness.container.GetContainerID()
+}
+
 // LoadCatalog replaces catalog rows using one immutable authoritative fixture.
 func (harness *Harness) LoadCatalog(
 	ctx context.Context,
