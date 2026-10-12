@@ -1,4 +1,7 @@
-.PHONY: product-security-test product-security-check product-security-test-tooling
+.PHONY: product-security-test product-security-check product-security-test-tooling product-security-verify
+
+product-security-verify: ## Read-only Product HTTP/gRPC and management probes against explicit target endpoints
+	@./scripts/product-security/verify.sh
 
 product-security-test: ## Run the isolated Java gateway to Go Product security smoke check
 	@./scripts/product-security/test.sh

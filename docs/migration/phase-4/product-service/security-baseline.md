@@ -1,3 +1,16 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Product security baseline](#product-security-baseline)
+  - [Current trust and credential ownership](#current-trust-and-credential-ownership)
+  - [Observed access matrix](#observed-access-matrix)
+  - [Identity propagation and transport](#identity-propagation-and-transport)
+  - [Final Java-compatible mapping for #133](#final-java-compatible-mapping-for-133)
+  - [Go deployment exposure gate for #134](#go-deployment-exposure-gate-for-134)
+  - [Reproduction](#reproduction)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Product security baseline
 
 This document records the observed Java identity and access model for issue #131. The accepted live
@@ -103,6 +116,69 @@ The existing HMAC key lifecycle remains owned by Auth and the Java gateway confi
 Product service does not consume that signing key under this mapping. Rotation redesign, issuer or
 audience enforcement, future-`nbf` enforcement, product-role authorization, mTLS, and workload
 identity require separate explicit hardening decisions and cannot be added under a parity claim.
+
+## Go deployment exposure gate for #134
+
+The separate `product-security-verify` target checks an **already running** Go Product target. It
+requires explicit Kubernetes context, namespace, environment, and three reachable endpoints; it
+has no default cluster target. It reads the accepted `access/<environment>.json` observations as
+response oracles and sends anonymous `GET /products`, `GET /products/TRI`, generated Product v1
+gRPC list/get, `/livez`, `/readyz`, and disabled-profiling/reflection probes. HTTP bodies are compared
+with the accepted lossless Product comparator; gRPC fields are compared to the same accepted catalog.
+Requests have finite deadlines and responses have a size limit. Failures report only the failing
+probe category. The target does not load data into PostgreSQL, change roles or Secrets, or deploy.
+
+For the disposable issue #133 harness, set `PRODUCT_SECURITY_TARGET_CONTEXT=isolated` and
+`PRODUCT_SECURITY_TARGET_NAMESPACE=isolated` and pass its three published loopback addresses as
+`http://host:port`, `host:port`, and `http://host:port` respectively. For a deployed target, first
+select and confirm the intended context and namespace, then start explicit local port-forwards for
+the Go Service's HTTP, gRPC, and management ports. Run from the repository root, substituting the
+actual forwarded ports and one environment at a time:
+
+```shell
+PRODUCT_SECURITY_TARGET_CONTEXT=kind-local-dev-insurance-hub \
+PRODUCT_SECURITY_TARGET_NAMESPACE=local-dev-all \
+PRODUCT_SECURITY_EXPECTED_ENV=local-dev \
+PRODUCT_SECURITY_HTTP_ENDPOINT=http://127.0.0.1:<http-port> \
+PRODUCT_SECURITY_GRPC_ENDPOINT=127.0.0.1:<grpc-port> \
+PRODUCT_SECURITY_HEALTH_ENDPOINT=http://127.0.0.1:<management-port> \
+make product-security-verify
+```
+
+Use `qa-insurance-hub`, `qa-svc`, and `qa` for QA after stopping local-dev forwards and switching
+environments. The target rejects an active context or namespace mismatch before probing. A local
+port-forward proves reachability through that forward only; it does not prove cluster-only exposure
+or that the gateway selects a particular backend. #134 must record the selected resource names,
+ports, revision, active context, namespace, and probe result for each environment.
+
+Before each local-dev or QA run, #134 must complete these checks in sequence:
+
+1. Stop the prior environment and its forwards. Select the new Kubernetes context, verify its
+   namespace, target cluster/revision, ready Go and Java workloads, and current UTC host and node
+   clocks. Correct QA clock drift before token-dependent captures; compare with the accepted
+   environment snapshot only after the context and clock preflight passes.
+2. Inspect both rendered manifests and effective Deployment, Pod, Service, EndpointSlice, Ingress,
+   Gateway, HTTPRoute, GRPCRoute, and any other installed route resources. Require distinct Go and
+   Java workload labels/selectors and a ready Go endpoint behind the intended Go Service. Require
+   internal `ClusterIP` Services for Go business HTTP/gRPC and management ports. Reject any
+   Go-related external IP, NodePort, LoadBalancer, Ingress/Gateway route, host port, or host network
+   setting that publishes those listeners outside the intended cluster boundary. Include management
+   exposure and namespace-wide or shared routing in the inspection, not just the Product Service.
+3. Verify the deployed Go Secret reference and effective database login identify the separate
+   restricted reader. Check grants, ownership, membership, `PUBLIC` and default grants, and denied
+   write/DDL behavior through #134's database role proof; preserve the accepted catalog/schema
+   before and after. The verifier does not inspect PostgreSQL or prove those grants.
+4. Run the anonymous read-only verifier through explicit Go Service forwards and retain its result.
+   Verify the existing Java gateway destination and effective routing still select the Java Product
+   Service, using a separate live gateway observation. Do not infer routing from the Go probe.
+5. Repeat the context, namespace, clock, rendered/effective resource, role, and read checks after
+   switching to the second environment. Keep fixture loading and negative dependency tests on
+   disposable infrastructure only.
+
+Anonymous internal Product access is the selected parity behavior. `ClusterIP` does not authenticate
+or restrict reachable in-cluster clients. This gate makes no claim of gateway-exclusive access,
+mTLS, workload identity, or live #134 completion; issue #133's verifier is proven against the
+isolated harness, while #134 owns effective deployment evidence in both environments.
 
 ## Reproduction
 
