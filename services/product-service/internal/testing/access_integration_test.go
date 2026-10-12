@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	reflectionv1alpha "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	productv1 "github.com/igor-baiborodine/insurance-hub/services/product-service/gen/product/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
@@ -122,24 +123,34 @@ func TestProductAccess(t *testing.T) {
 	defer func() { _ = connection.Close() }()
 	grpcClient := productv1.NewProductServiceClient(connection)
 	directCases := loadDirectAccessCases(t, baselineRoot)
+	assertDirectAccessCaseSet(t, directCases)
 	captured := loadCapturedDirectAccess(t, baselineRoot)
+	grpcCaptured := loadQAGRPCExpectations(t, baselineRoot)
+	identityMarker := generatedMarker(t, "access-identity")
 
 	t.Run("accepted HTTP credential matrix remains anonymous", func(t *testing.T) {
-		if len(directCases) != 18 || len(captured) != 8 {
+		if len(captured) != 8 {
 			t.Fatalf(
-				"direct access fixtures = (%d, %d), want (18, 8)",
-				len(directCases),
+				"captured direct access fixtures = %d, want 8",
 				len(captured),
 			)
 		}
 		for _, accessCase := range directCases {
 			t.Run(accessCase.ID, func(t *testing.T) {
-				actual := executeAccessHTTP(
+				anonymous := executeAccessHTTP(
+					t,
+					addresses.http,
+					accessCase.Path,
+					"",
+					"",
+				)
+				actual := executeAccessHTTPWithHeaders(
 					t,
 					addresses.http,
 					accessCase.Path,
 					authorizationValue(accessCase.Credential, tokenMarker),
 					"",
+					accessIdentityHeaders(identityMarker),
 				)
 				if actual.Status != accessCase.Expected.Status ||
 					actual.ContentType != accessCase.Expected.ContentType {
@@ -152,6 +163,12 @@ func TestProductAccess(t *testing.T) {
 					)
 				}
 				assertAccessBodyType(t, actual.Body, accessCase.Expected.BodyType)
+				if compareErr := CompareHTTP(anonymous, actual); compareErr != nil {
+					t.Errorf(
+						"HTTP identity metadata changed catalog result: %v",
+						compareErr,
+					)
+				}
 				if want, ok := captured[accessCase.ID]; ok {
 					if compareErr := CompareHTTP(
 						want,
@@ -167,34 +184,168 @@ func TestProductAccess(t *testing.T) {
 		}
 	})
 
-	t.Run("generated gRPC client ignores bearer variants", func(t *testing.T) {
+	t.Run("generated gRPC client ignores identity metadata", func(t *testing.T) {
 		for _, accessCase := range directCases {
 			t.Run(accessCase.ID, func(t *testing.T) {
-				callCtx := outgoingAuthorizationContext(
+				callCtx := outgoingAccessContext(
 					ctx,
 					authorizationValue(accessCase.Credential, tokenMarker),
+					identityMarker,
 				)
 				if strings.Contains(accessCase.ID, "-LIST-") {
+					anonymous, anonymousErr := grpcClient.ListProducts(
+						ctx,
+						&productv1.ListProductsRequest{},
+					)
 					response, callErr := grpcClient.ListProducts(
 						callCtx,
 						&productv1.ListProductsRequest{},
 					)
-					if callErr != nil || len(response.GetProducts()) != 4 {
+					if anonymousErr != nil || callErr != nil {
 						t.Fatalf(
-							"anonymous gRPC list = (%v, %v)",
-							response,
+							"gRPC list calls: anonymous=%v supplied=%v",
+							anonymousErr,
 							callErr,
 						)
 					}
+					if len(response.GetProducts()) != 4 ||
+						!proto.Equal(anonymous, response) {
+						t.Fatal(
+							"gRPC list with identity metadata differs from anonymous catalog",
+						)
+					}
+					assertGRPCProducts(
+						t,
+						grpcCaptured["HTTP-DIRECT-LIST-001"],
+						response.GetProducts(),
+					)
 					return
 				}
+				anonymous, anonymousErr := grpcClient.GetProduct(
+					ctx,
+					&productv1.GetProductRequest{Code: "TRI"},
+				)
 				response, callErr := grpcClient.GetProduct(
 					callCtx,
 					&productv1.GetProductRequest{Code: "TRI"},
 				)
-				if callErr != nil || response.GetProduct().GetCode() != "TRI" {
-					t.Fatalf("anonymous gRPC get = (%v, %v)", response, callErr)
+				if anonymousErr != nil || callErr != nil {
+					t.Fatalf(
+						"gRPC get calls: anonymous=%v supplied=%v",
+						anonymousErr,
+						callErr,
+					)
 				}
+				if response.GetProduct().GetCode() != "TRI" ||
+					!proto.Equal(anonymous, response) {
+					t.Fatal(
+						"gRPC get with identity metadata differs from anonymous product",
+					)
+				}
+				assertGRPCProducts(t, grpcCaptured["HTTP-DIRECT-GET-TRI-001"],
+					[]*productv1.Product{response.GetProduct()})
+			})
+		}
+	})
+
+	t.Run("application errors ignore identity metadata", func(t *testing.T) {
+		failures := loadHTTPFailureExpectations(t, baselineRoot)
+		headers := accessIdentityHeaders(identityMarker)
+		headers.Set("Authorization", "Bearer "+tokenMarker)
+		for _, caseID := range []string{
+			"FAIL-PRODUCT-MISSING-001",
+			"FAIL-PRODUCT-LOOKUP-BAD-ENCODING-001",
+		} {
+			t.Run(caseID, func(t *testing.T) {
+				fixture, ok := failures[caseID]
+				if !ok {
+					t.Fatalf("missing HTTP failure fixture %s", caseID)
+				}
+				want, err := GoHTTPExpectation(caseID, fixture.Expectation)
+				if err != nil {
+					t.Fatalf("resolve HTTP failure expectation: %v", err)
+				}
+				var anonymous, supplied HTTPExpectation
+				if caseID == "FAIL-PRODUCT-LOOKUP-BAD-ENCODING-001" {
+					anonymous = rawHTTPIntegrationGET(
+						t,
+						addresses.http,
+						fixture.Path,
+					)
+					supplied = rawHTTPIntegrationGETWithHeaders(
+						t, addresses.http, fixture.Path, headers,
+					)
+				} else {
+					anonymous = executeAccessHTTP(
+						t,
+						addresses.http,
+						fixture.Path,
+						"",
+						"",
+					)
+					supplied = executeAccessHTTPWithHeaders(
+						t,
+						addresses.http,
+						fixture.Path,
+						"Bearer "+tokenMarker,
+						"",
+						accessIdentityHeaders(identityMarker),
+					)
+				}
+				for label, actual := range map[string]HTTPExpectation{
+					"anonymous": anonymous,
+					"supplied":  supplied,
+				} {
+					if compareErr := CompareHTTP(
+						want,
+						actual,
+					); compareErr != nil {
+						t.Errorf(
+							"%s HTTP error contract: %v",
+							label,
+							compareErr,
+						)
+					}
+				}
+			})
+		}
+
+		missing := failures["FAIL-PRODUCT-MISSING-001"]
+		if !strings.HasPrefix(missing.Path, "/products/") {
+			t.Fatalf("missing product fixture path = %q", missing.Path)
+		}
+		missingCode := strings.TrimPrefix(missing.Path, "/products/")
+		callCtx := outgoingAccessContext(ctx, "Bearer "+tokenMarker, identityMarker)
+		for _, testCase := range []struct {
+			name    string
+			request *productv1.GetProductRequest
+			code    codes.Code
+			message string
+		}{
+			{
+				"missing product", &productv1.GetProductRequest{Code: missingCode},
+				codes.NotFound, "product not found",
+			},
+			{
+				"invalid request", &productv1.GetProductRequest{},
+				codes.InvalidArgument, "invalid request",
+			},
+		} {
+			t.Run(testCase.name, func(t *testing.T) {
+				_, anonymousErr := grpcClient.GetProduct(ctx, testCase.request)
+				_, suppliedErr := grpcClient.GetProduct(callCtx, testCase.request)
+				assertSafeGRPCFailure(
+					t,
+					anonymousErr,
+					testCase.code,
+					testCase.message,
+				)
+				assertSafeGRPCFailure(
+					t,
+					suppliedErr,
+					testCase.code,
+					testCase.message,
+				)
 			})
 		}
 	})
@@ -364,6 +515,61 @@ type directAccessCase struct {
 	} `json:"expected"`
 }
 
+func assertDirectAccessCaseSet(t *testing.T, cases []directAccessCase) {
+	t.Helper()
+	credentials := map[string]string{
+		"NONE": "missing", "VALID": "valid", "MALFORMED": "malformed",
+		"SIGNATURE": "invalid-signature", "EXPIRED": "expired", "NBF": "not-before",
+		"ISSUER": "issuer-variation", "AUDIENCE": "audience-variation",
+		"ROLE": "role-variation",
+	}
+	type expectedCase struct {
+		path       string
+		credential string
+		bodyType   string
+	}
+	want := make(map[string]expectedCase, 18)
+	for _, route := range []struct {
+		name, path, bodyType string
+	}{
+		{"LIST", "/products", "array"},
+		{"GET", "/products/TRI", "object"},
+	} {
+		for suffix, credential := range credentials {
+			id := fmt.Sprintf("ACCESS-DIRECT-%s-%s-001", route.name, suffix)
+			want[id] = expectedCase{route.path, credential, route.bodyType}
+		}
+	}
+	seen := make(map[string]bool, len(cases))
+	for _, accessCase := range cases {
+		expected, ok := want[accessCase.ID]
+		if !ok || seen[accessCase.ID] {
+			t.Fatalf(
+				"direct access case set has unknown or duplicate ID %q",
+				accessCase.ID,
+			)
+		}
+		seen[accessCase.ID] = true
+		if accessCase.Path != expected.path ||
+			accessCase.Credential != expected.credential ||
+			accessCase.Expected.Status != http.StatusOK ||
+			accessCase.Expected.ContentType != "application/json" ||
+			accessCase.Expected.BodyType != expected.bodyType {
+			t.Fatalf(
+				"direct access case %s disagrees with accepted path, credential, or result",
+				accessCase.ID,
+			)
+		}
+	}
+	if len(seen) != len(want) {
+		for id := range want {
+			if !seen[id] {
+				t.Errorf("direct access case set is missing %s", id)
+			}
+		}
+	}
+}
+
 func loadDirectAccessCases(t *testing.T, baselineRoot string) []directAccessCase {
 	t.Helper()
 	content, err := os.ReadFile(filepath.Join(baselineRoot, "access", "cases.json"))
@@ -429,6 +635,18 @@ func executeAccessHTTP(
 	traceparent string,
 ) HTTPExpectation {
 	t.Helper()
+	return executeAccessHTTPWithHeaders(t, address, path, authorization, traceparent, nil)
+}
+
+func executeAccessHTTPWithHeaders(
+	t *testing.T,
+	address string,
+	path string,
+	authorization string,
+	traceparent string,
+	headers http.Header,
+) HTTPExpectation {
+	t.Helper()
 	request, err := http.NewRequestWithContext(
 		context.Background(), http.MethodGet, "http://"+address+path, nil,
 	)
@@ -440,6 +658,11 @@ func executeAccessHTTP(
 	}
 	if traceparent != "" {
 		request.Header.Set("traceparent", traceparent)
+	}
+	for name, values := range headers {
+		for _, value := range values {
+			request.Header.Add(name, value)
+		}
 	}
 	response, err := (&http.Client{Timeout: 3 * time.Second}).Do(request)
 	if err != nil {
@@ -467,11 +690,28 @@ func authorizationValue(credential, tokenMarker string) string {
 	return "Bearer " + tokenMarker + "-" + credential
 }
 
-func outgoingAuthorizationContext(ctx context.Context, authorization string) context.Context {
-	if authorization == "" {
-		return ctx
+func accessIdentityHeaders(marker string) http.Header {
+	values := make(http.Header)
+	values.Set("X-User", marker)
+	values.Set("X-Principal", marker)
+	values.Set("X-Role", "UNRELATED")
+	values.Set("X-Authentication", marker)
+	values.Set("X-Forwarded-User", marker)
+	return values
+}
+
+func outgoingAccessContext(ctx context.Context, authorization, marker string) context.Context {
+	values := []string{
+		"x-user", marker,
+		"x-principal", marker,
+		"x-role", "UNRELATED",
+		"x-authentication", marker,
+		"x-forwarded-user", marker,
 	}
-	return metadata.AppendToOutgoingContext(ctx, "authorization", authorization)
+	if authorization != "" {
+		values = append(values, "authorization", authorization)
+	}
+	return metadata.AppendToOutgoingContext(ctx, values...)
 }
 
 func assertAccessBodyType(t *testing.T, body []byte, want string) {
