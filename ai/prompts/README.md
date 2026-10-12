@@ -1,3 +1,13 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Prompt and Skill Invocations](#prompt-and-skill-invocations)
+  - [Reusable prompt](#reusable-prompt)
+  - [Example requests](#example-requests)
+  - [Workflow sources](#workflow-sources)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Prompt and Skill Invocations
 
 This directory contains reusable prompt fragments and copyable examples for common repository
@@ -17,16 +27,16 @@ For local ticket work, [AGENTS.md Artifact Rules](../../AGENTS.md#artifact-rules
 artifact directory, including tickets grouped under an epic. You may supply the exact path, for
 example: `Continue issue-131 using ai/artifacts/epic-4.2/issue-131/issue-131-ticket-content.md`.
 
-| Task and context                                        | Example request                                                                |
-|---------------------------------------------------------|--------------------------------------------------------------------------------|
-| Start ticket implementation                             | `Please implement issue-<number>.`                                             |
-| Continue ticket work in a new local session             | `Read ai/prompts/session-bootstrap.md and continue working on issue-<number>.` |
-| Review from a local checkout                            | `Please conduct a local code review for issue-<number>.`                       |
-| Review a GitHub pull request                            | `Please conduct a code review for PR #<number>.`                               |
-| Draft and update the current GitHub PR                  | `Please draft and update the PR description for issue-<number>.`               |
-| Draft and update a PR outside its page or agent context | `Please draft and update the description for PR #<number>.`                    |
-| Draft a GitHub PR description without changing the PR   | `Please draft the description for PR #<number>, but do not update it.`         |
-| Draft a PR description from a local checkout            | `Please draft a PR description locally for issue-<number>.`                    |
+| Task and context                                        | Example request                                                                   |
+|---------------------------------------------------------|-----------------------------------------------------------------------------------|
+| Start ticket implementation                             | `Please implement issue-<number>.`                                                |
+| Continue ticket work in a new local session             | `You will continue working on issue-<number>. Please proceed with step <number>.` |
+| Review from a local checkout                            | `Please conduct a local code review for issue-<number>.`                          |
+| Review a GitHub pull request                            | `Please conduct a code review for PR #<number>.`                                  |
+| Draft and update the current GitHub PR                  | `Please draft and update the PR description for issue-<number>.`                  |
+| Draft and update a PR outside its page or agent context | `Please draft and update the description for PR #<number>.`                       |
+| Draft a GitHub PR description without changing the PR   | `Please draft the description for PR #<number>, but do not update it.`            |
+| Draft a PR description from a local checkout            | `Please draft a PR description locally for issue-<number>.`                       |
 
 The mode words are intentional:
 

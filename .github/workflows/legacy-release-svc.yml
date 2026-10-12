@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   detect-changes:
+    name: Detect service module changes
     runs-on: ubuntu-latest
     outputs:
       module: ${{ steps.detect.outputs.module }}
@@ -103,6 +104,7 @@ jobs:
           if-no-files-found: error
 
   release-service:
+    name: Release service module
     needs: detect-changes
     runs-on: ubuntu-latest
     env:

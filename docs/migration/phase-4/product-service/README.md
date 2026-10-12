@@ -1,3 +1,25 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Product read baseline](#product-read-baseline)
+  - [Scope and foundation](#scope-and-foundation)
+  - [Go pilot implementation handoff](#go-pilot-implementation-handoff)
+  - [Interim security proof and handoff](#interim-security-proof-and-handoff)
+  - [Authoritative layout](#authoritative-layout)
+  - [Source inventory](#source-inventory)
+    - [Read routes and data path](#read-routes-and-data-path)
+    - [Writers and configuration sources](#writers-and-configuration-sources)
+    - [Security sources](#security-sources)
+    - [Consumers](#consumers)
+  - [Scenario register](#scenario-register)
+  - [Reproduction status](#reproduction-status)
+  - [Toolchain, refresh, and reset](#toolchain-refresh-and-reset)
+  - [Acceptance evidence](#acceptance-evidence)
+  - [Downstream handoff](#downstream-handoff)
+  - [Qualification limits](#qualification-limits)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Product read baseline
 
 This directory is the versioned entry point for issue #131's Product catalog read baseline. The
@@ -41,9 +63,41 @@ shows the delivered packages and symbols, source-dependency direction, startup w
 database calls, mapping boundaries, and a get-product walkthrough.
 
 This link does not change the Java observations or accepted fixtures documented here. Java remains
-the active traffic, schema, seed, and write owner. Issues #133 through #136 still own access
-coexistence, deployment and shared read-only credentials, telemetry delivery, and integrated
-qualification respectively; route cutover remains the separate #137 gate.
+the active traffic, schema, seed, and write owner. Issue #133 has locally proved the interim
+application security boundary and supplied #134's deployment gate. #134 still owns deployed
+exposure and shared read-only credentials, #135 telemetry delivery, and #136 integrated
+qualification; route cutover remains the separate #137 gate.
+
+## Interim security proof and handoff
+
+The [security boundary matrix](security-baseline.md#final-java-compatible-mapping-for-issue-133)
+separates Auth issuance, Java gateway authentication, the anonymous gateway-to-Go hop, direct Go
+HTTP/gRPC, in-process dispatch, management routes, and PostgreSQL identity. Its
+[#133 isolated evidence](security-baseline.md#isolated-application-evidence-for-issue-133) records the
+real Java gateway → Go → disposable PostgreSQL proof: ten rejected gateway cases stop before Go,
+ten accepted cases return the accepted QA catalog with one Go call, and no bearer or caller-identity
+metadata reaches Go. The direct Go access suite checks all eighteen accepted IDs on each transport,
+including supplied credential/identity metadata, and retains normal application errors. These are
+local isolated results; #131's previous local-dev/QA live captures still describe Java behavior,
+and #134 has not yet proved a deployed Go target.
+
+From the repository root, bootstrap the pinned Product tools and use the owning gates:
+
+```shell
+make go-product-bootstrap-tools
+make product-security-test-tooling
+make product-security-check
+make -C services/product-service check
+```
+
+The security aggregate owns accepted access fixtures, Java baseline access regression, and the
+combined gateway/Go test. The Product module's full `check` owns the direct Go HTTP/gRPC matrix, so
+the two CI gates do not execute it twice. The [security reproduction and token-handling guide](security-baseline.md#reproduction)
+records prerequisites, disposable cleanup, and safe live-token handling. The separate
+[`product-security-verify` handoff](security-baseline.md#go-deployment-exposure-gate-for-issue-134)
+probes only an explicitly selected, already running target; #134 must inspect effective exposure,
+database grants, and unchanged Java routing in local-dev and QA. Hosted CI execution and final
+#133 acceptance remain part of the final audit.
 
 ## Authoritative layout
 
@@ -52,12 +106,13 @@ qualification respectively; route cutover remains the separate #137 gate.
 | `docs/migration/phase-4/product-service/README.md` | Baseline entry point, source inventory, reproduction guidance, limits, and downstream handoff. | Inventory and current workflow status documented. |
 | `docs/migration/phase-4/product-service/data-baseline.md` | Effective environment/schema/writer inventory, catalog provenance, shared topology, and database-permission proof. | Local-dev/QA identities, final shared topology, snapshot rules, and restricted-role proof documented. |
 | `docs/migration/phase-4/product-service/contract-baseline.md` | Consumer and field mappings, HTTP observations, parity rules, and transport semantics. | Observations plus binding field/scenario comparison and unary gRPC/HTTP decisions documented. |
-| `docs/migration/phase-4/product-service/security-baseline.md` | Observed Java access and identity behavior and the compatible future Go model. | Live/isolated evidence and final HTTP/gRPC/hop mapping documented. |
+| `docs/migration/phase-4/product-service/security-baseline.md` | Observed Java access, #133 isolated Go proof, trust ownership, and #134 exposure gate. | Entry/hop/owner/evidence mapping and reproducible checks documented; deployed Go evidence remains #134 work. |
 | `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and index for the sanitized fixture corpus. | Evidence scenarios captured, parity decisions documented, and replay, drift, safety, and handoff checks validated. |
 | `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | Accepted local-dev/QA captures plus isolated data, failure, access, and database-permission fixtures present. |
 | `legacy/product-service/src/test/java/…` | Product/PostgreSQL listener, fixture, edge, failure, and permission tests. | Disposable listener/PostgreSQL happy paths, raw-JSONB edges, lookup/decode/dependency failures, SQL-null constraints, and shared-database override guard implemented. |
 | `legacy/agent-portal-gateway/src/test/…` | Gateway listener, retry/fallback, and access tests against the shared corpus. | Real-listener failure and complete controlled access/propagation matrices implemented. |
 | `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Capture, fixture, smoke, happy, data-edge, failure, access, permission, comparator, environment replay, live verification, and aggregate entry points are implemented. |
+| `scripts/product-security/` and its root Make targets | #133 combined security gate, controlled failures, and read-only deployed-target verifier. | Isolated gateway/Go proof and verifier passed locally; the deployed target and hosted CI require separate evidence. |
 
 Ticket plans, execution records, step summaries, and Git snapshots stay in the ignored
 `ai/artifacts/epic-4.2/issue-131/` directory. They are evidence records rather than reusable
@@ -315,7 +370,7 @@ step records under `ai/artifacts/epic-4.2/issue-131/`.
 | AC131-03 — Observable HTTP behavior | satisfied | [Contract observations](contract-baseline.md#successful-http-observations), accepted HTTP fixtures, and [failure observations](contract-baseline.md#failure-and-boundary-observations) | Real Product/PostgreSQL and gateway listener suites passed for success, lookup, decode, dependency, retry, and fallback behavior. |
 | AC131-04 — Agreed parity contract | satisfied | [Binding field mapping](contract-baseline.md#binding-field-mapping-and-presence-rules), [scenario decisions](contract-baseline.md#scenario-parity-decisions), and [HTTP/gRPC boundary](contract-baseline.md#versioned-unary-grpc-and-http-boundary) | Consumer trace and comparator tests validated exact and permitted-normalization rules; no contract decision remains open. |
 | AC131-05 — Current permission evidence | satisfied | [Observed access matrix](security-baseline.md#observed-access-matrix), local-dev/QA access fixtures, and isolated access cases | Live valid/absent/malformed/bad-signature reads and the full isolated claim/propagation matrix passed. |
-| AC131-06 — Java-compatible security | satisfied | [Final entry and hop mapping](security-baseline.md#final-java-compatible-mapping-for-133) | Gateway authentication, anonymous backend/direct access, absent identity propagation, transport, trust, and #133 positive/negative cases are explicit. |
+| AC131-06 — Java-compatible security | satisfied | [Final entry and hop mapping](security-baseline.md#final-java-compatible-mapping-for-issue-133) | Gateway authentication, anonymous backend/direct access, absent identity propagation, transport, trust, and #133 positive/negative cases are explicit. |
 | AC131-07 — Shared data topology | satisfied | [Final shared-data decision](data-baseline.md#final-shared-data-decision) and [candidate role proof](data-baseline.md#candidate-go-runtime-role) | Isolated restricted-role reads passed; catalog and schema writes failed with PostgreSQL `42501`; #134 deployment obligations are explicit. |
 | AC131-08 — Repeatable capture and replay | satisfied | Reproduction commands above, [manifest tooling index](../../../../legacy/product-service/src/test/resources/product-read-baseline/manifest.json), and `scripts/product-baseline/` | Comparator, both environment replays, all fixture checks, and the complete offline aggregate passed. |
 | AC131-09 — Safe baseline collection | satisfied | [Data capture boundary](data-baseline.md#capture-status), [security reproduction](security-baseline.md#reproduction), and live verifier | Before/after identities matched in both live environments; mutation cases stayed disposable; credential and secret scans found no reusable secret. |
@@ -329,8 +384,8 @@ evidence.
 
 | Owner | Required input from this baseline | Remaining work |
 | --- | --- | --- |
-| #132 — Go Product service | Field/presence table, scenario parity matrix, HTTP/gRPC semantics, accepted fixture corpus, shared table decision | Choose concrete protobuf names/numbers and exact-decimal representation; pin generators and SQL/runtime dependencies; implement read-only PostgreSQL, HTTP, and gRPC paths with no startup writer. |
-| #133 — Security coexistence | Final entry/hop mapping and access fixtures | Prove the real Go listener matrix: existing gateway authentication, no bearer/principal forwarding, anonymous internal HTTP/gRPC, no product-role denial, and distinct database identity. Any hardening requires a separate explicit decision. |
+| #132 — Go Product service | Field/presence table, scenario parity matrix, HTTP/gRPC semantics, accepted fixture corpus, shared table decision | Delivered as the standalone Go service; see its README for the implemented contracts and validation. |
+| #133 — Security coexistence | Final entry/hop mapping and access fixtures | Isolated gateway/Go and direct-access proof plus #134 handoff delivered; final #133 acceptance and hosted CI evidence remain to audit. Any hardening requires a separate explicit decision. |
 | #134 — Deployment and data access | Same-table topology, candidate role/grants, snapshot identity, Java ownership, internal exposure boundary | Provision the separate Secret/role in each environment; verify effective grants, workload wiring, no Go startup writes, internal-only Go exposure, unchanged Java routing, and unchanged shared schema/data. |
 | #135 — Observability | Stable service boundaries, routes, scenario IDs, failure categories, and sanitization limits | Instrument the implemented HTTP/gRPC/database path; prove safe queryable logs, metrics, and traces without credentials, raw definitions, or unbounded product/question labels. |
 | #136 — Integrated qualification | Accepted corpora, comparator rules, replay commands, consumer inventory, and snapshot invalidation rules | Define measurable workloads and pass/abort thresholds; run Java/Go differential, gateway/frontend compatibility, failure, lifecycle, load, and rollback qualification against a matching snapshot. |
@@ -338,10 +393,12 @@ evidence.
 
 ## Qualification limits
 
-This baseline covers the four agreed demo products and the observed Java list/get behavior. It does
-not qualify a Go implementation, protobuf definition, deployed restricted role, Go endpoint
-exposure, browser compatibility, telemetry delivery, load capacity, route cutover, or Java
-retirement. Full claim variants were exercised in the isolated access suite; the safe live subset
+Issue #131's baseline covers the four agreed demo products and the observed Java list/get behavior.
+By itself it does not qualify a Go implementation, protobuf definition, deployed restricted role,
+Go endpoint exposure, browser compatibility, telemetry delivery, load capacity, route cutover, or
+Java retirement. #132 and #133 provide the separate Go implementation and isolated application
+security evidence described above; they do not close the later deployed or integrated gates. Full
+claim variants were exercised in the isolated access suite; the safe live subset
 covered valid, absent, malformed, and invalid-signature credentials. Local-dev and QA run different
 PostgreSQL patch versions recorded in the data baseline, so every later comparison must retain its
 environment and snapshot identity. Anonymous direct backend access is a measured Java-parity result,

@@ -328,15 +328,32 @@ func assertHTTPExpectation(
 
 func rawHTTPIntegrationGET(t *testing.T, address, path string) HTTPExpectation {
 	t.Helper()
+	return rawHTTPIntegrationGETWithHeaders(t, address, path, nil)
+}
+
+func rawHTTPIntegrationGETWithHeaders(
+	t *testing.T,
+	address, path string,
+	headers http.Header,
+) HTTPExpectation {
+	t.Helper()
 	connection, err := net.DialTimeout("tcp", address, time.Second)
 	if err != nil {
 		t.Fatalf("dial HTTP server: %v", err)
 	}
 	defer func() { _ = connection.Close() }()
 	_ = connection.SetDeadline(time.Now().Add(2 * time.Second))
-	if _, err := fmt.Fprintf(
-		connection, "GET %s HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n", path,
-	); err != nil {
+	var request bytes.Buffer
+	_, _ = fmt.Fprintf(
+		&request,
+		"GET %s HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n",
+		path,
+	)
+	if err := headers.Write(&request); err != nil {
+		t.Fatalf("write raw HTTP headers: %v", err)
+	}
+	_, _ = request.WriteString("\r\n")
+	if _, err := connection.Write(request.Bytes()); err != nil {
 		t.Fatalf("write raw HTTP request: %v", err)
 	}
 	response, err := http.ReadResponse(

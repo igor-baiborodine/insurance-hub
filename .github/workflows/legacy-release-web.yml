@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   detect-changes:
+    name: Detect web module changes
     runs-on: ubuntu-latest
     outputs:
       module: ${{ steps.detect.outputs.module }}
@@ -81,6 +82,7 @@ jobs:
           if-no-files-found: error
 
   release-web-vue:
+    name: Release Vue application
     needs: detect-changes
     runs-on: ubuntu-latest
     env:

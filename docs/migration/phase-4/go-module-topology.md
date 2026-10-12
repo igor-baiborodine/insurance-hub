@@ -1,3 +1,16 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Go module topology and onboarding](#go-module-topology-and-onboarding)
+  - [Current topology](#current-topology)
+  - [Supported commands and mutation boundary](#supported-commands-and-mutation-boundary)
+  - [Continuous integration](#continuous-integration)
+  - [Import and consumer policy](#import-and-consumer-policy)
+  - [Onboard a module or workspace](#onboard-a-module-or-workspace)
+  - [Evidence](#evidence)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Go module topology and onboarding
 
 This document defines the supported Go module resolution and validation boundary for Insurance
@@ -112,6 +125,12 @@ resolves changed formatting scope from the pull-request base or push predecessor
 module and topology targets, then runs both modules' tooling-failure suites and the renamed-copy
 proof. Product integration checks use the hosted runner's Docker daemon and the immutable baseline
 fixture; they require no secret or live service.
+
+Go Module Validation owns the direct Product HTTP/gRPC access matrix. Its full Product integration
+suite enforces the exact access case IDs for both transports. The separate
+[Product Security Boundary Validation](../../../.github/workflows/product-security.yml) workflow
+owns accepted access fixtures, Java access regression, and the combined gateway-to-Go suite; it
+does not rerun the direct Go access suite. Each workflow prepares its own runner and Product tools.
 
 The equivalent full-file local sequence is:
 

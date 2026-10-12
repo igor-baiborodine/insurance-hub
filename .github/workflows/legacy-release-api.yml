@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   detect-changes:
+    name: Detect API module changes
     runs-on: ubuntu-latest
     outputs:
       module: ${{ steps.detect.outputs.module }}
@@ -101,6 +102,7 @@ jobs:
           if-no-files-found: error
 
   release-service-api:
+    name: Release API module
     needs: detect-changes
     runs-on: ubuntu-latest
     steps:
@@ -185,6 +187,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   update-dependents:
+    name: Update dependent services
     needs: [ detect-changes, release-service-api ]
     runs-on: ubuntu-latest
     steps:

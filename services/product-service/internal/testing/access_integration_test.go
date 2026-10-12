@@ -5,6 +5,9 @@ package integrationtest
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +29,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	reflectionv1alpha "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	productv1 "github.com/igor-baiborodine/insurance-hub/services/product-service/gen/product/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
@@ -57,6 +61,24 @@ func TestProductAccess(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
+	// The Product process has no gateway verifier or signing configuration.
+	for _, key := range []string{
+		"MICRONAUT_SECURITY_TOKEN_JWT_SIGNATURES_SECRET_GENERATOR_SECRET",
+		"JWT_SECRET",
+	} {
+		previous, present := os.LookupEnv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("remove gateway signing setting %s: %v", key, err)
+		}
+		t.Cleanup(func() {
+			if present {
+				_ = os.Setenv(key, previous)
+			}
+		})
+		if _, present := os.LookupEnv(key); present {
+			t.Fatalf("gateway signing setting %s remains set", key)
+		}
+	}
 	harness, err := Start(ctx, Options{FixtureRoot: baselineRoot, Image: image})
 	if err != nil {
 		t.Fatalf("start harness: %v", err)
@@ -67,6 +89,7 @@ func TestProductAccess(t *testing.T) {
 	}
 
 	tokenMarker := generatedMarker(t, "access-token")
+	directAuthorizations, directSensitiveMarkers := newDirectAuthorizations(t, tokenMarker)
 	catalogMarker := generatedMarker(t, "catalog-definition")
 	runtimeURL := harness.RuntimeDatabaseURL()
 	runtimePassword := databasePassword(t, runtimeURL)
@@ -122,24 +145,34 @@ func TestProductAccess(t *testing.T) {
 	defer func() { _ = connection.Close() }()
 	grpcClient := productv1.NewProductServiceClient(connection)
 	directCases := loadDirectAccessCases(t, baselineRoot)
+	assertDirectAccessCaseSet(t, directCases)
 	captured := loadCapturedDirectAccess(t, baselineRoot)
+	grpcCaptured := loadQAGRPCExpectations(t, baselineRoot)
+	identityMarker := generatedMarker(t, "access-identity")
 
 	t.Run("accepted HTTP credential matrix remains anonymous", func(t *testing.T) {
-		if len(directCases) != 18 || len(captured) != 8 {
+		if len(captured) != 8 {
 			t.Fatalf(
-				"direct access fixtures = (%d, %d), want (18, 8)",
-				len(directCases),
+				"captured direct access fixtures = %d, want 8",
 				len(captured),
 			)
 		}
 		for _, accessCase := range directCases {
 			t.Run(accessCase.ID, func(t *testing.T) {
-				actual := executeAccessHTTP(
+				anonymous := executeAccessHTTP(
 					t,
 					addresses.http,
 					accessCase.Path,
-					authorizationValue(accessCase.Credential, tokenMarker),
 					"",
+					"",
+				)
+				actual := executeAccessHTTPWithHeaders(
+					t,
+					addresses.http,
+					accessCase.Path,
+					directAuthorizations[accessCase.Credential],
+					"",
+					accessIdentityHeaders(identityMarker),
 				)
 				if actual.Status != accessCase.Expected.Status ||
 					actual.ContentType != accessCase.Expected.ContentType {
@@ -152,6 +185,12 @@ func TestProductAccess(t *testing.T) {
 					)
 				}
 				assertAccessBodyType(t, actual.Body, accessCase.Expected.BodyType)
+				if compareErr := CompareHTTP(anonymous, actual); compareErr != nil {
+					t.Errorf(
+						"HTTP identity metadata changed catalog result: %v",
+						compareErr,
+					)
+				}
 				if want, ok := captured[accessCase.ID]; ok {
 					if compareErr := CompareHTTP(
 						want,
@@ -167,34 +206,168 @@ func TestProductAccess(t *testing.T) {
 		}
 	})
 
-	t.Run("generated gRPC client ignores bearer variants", func(t *testing.T) {
+	t.Run("generated gRPC client ignores identity metadata", func(t *testing.T) {
 		for _, accessCase := range directCases {
 			t.Run(accessCase.ID, func(t *testing.T) {
-				callCtx := outgoingAuthorizationContext(
+				callCtx := outgoingAccessContext(
 					ctx,
-					authorizationValue(accessCase.Credential, tokenMarker),
+					directAuthorizations[accessCase.Credential],
+					identityMarker,
 				)
 				if strings.Contains(accessCase.ID, "-LIST-") {
+					anonymous, anonymousErr := grpcClient.ListProducts(
+						ctx,
+						&productv1.ListProductsRequest{},
+					)
 					response, callErr := grpcClient.ListProducts(
 						callCtx,
 						&productv1.ListProductsRequest{},
 					)
-					if callErr != nil || len(response.GetProducts()) != 4 {
+					if anonymousErr != nil || callErr != nil {
 						t.Fatalf(
-							"anonymous gRPC list = (%v, %v)",
-							response,
-							callErr,
+							"gRPC list calls failed: anonymous=%v supplied=%v",
+							status.Code(anonymousErr),
+							status.Code(callErr),
 						)
 					}
+					if len(response.GetProducts()) != 4 ||
+						!proto.Equal(anonymous, response) {
+						t.Fatal(
+							"gRPC list with identity metadata differs from anonymous catalog",
+						)
+					}
+					assertGRPCProducts(
+						t,
+						grpcCaptured["HTTP-DIRECT-LIST-001"],
+						response.GetProducts(),
+					)
 					return
 				}
+				anonymous, anonymousErr := grpcClient.GetProduct(
+					ctx,
+					&productv1.GetProductRequest{Code: "TRI"},
+				)
 				response, callErr := grpcClient.GetProduct(
 					callCtx,
 					&productv1.GetProductRequest{Code: "TRI"},
 				)
-				if callErr != nil || response.GetProduct().GetCode() != "TRI" {
-					t.Fatalf("anonymous gRPC get = (%v, %v)", response, callErr)
+				if anonymousErr != nil || callErr != nil {
+					t.Fatalf(
+						"gRPC get calls failed: anonymous=%v supplied=%v",
+						status.Code(anonymousErr),
+						status.Code(callErr),
+					)
 				}
+				if response.GetProduct().GetCode() != "TRI" ||
+					!proto.Equal(anonymous, response) {
+					t.Fatal(
+						"gRPC get with identity metadata differs from anonymous product",
+					)
+				}
+				assertGRPCProducts(t, grpcCaptured["HTTP-DIRECT-GET-TRI-001"],
+					[]*productv1.Product{response.GetProduct()})
+			})
+		}
+	})
+
+	t.Run("application errors ignore identity metadata", func(t *testing.T) {
+		failures := loadHTTPFailureExpectations(t, baselineRoot)
+		headers := accessIdentityHeaders(identityMarker)
+		headers.Set("Authorization", directAuthorizations["valid"])
+		for _, caseID := range []string{
+			"FAIL-PRODUCT-MISSING-001",
+			"FAIL-PRODUCT-LOOKUP-BAD-ENCODING-001",
+		} {
+			t.Run(caseID, func(t *testing.T) {
+				fixture, ok := failures[caseID]
+				if !ok {
+					t.Fatalf("missing HTTP failure fixture %s", caseID)
+				}
+				want, err := GoHTTPExpectation(caseID, fixture.Expectation)
+				if err != nil {
+					t.Fatalf("resolve HTTP failure expectation: %v", err)
+				}
+				var anonymous, supplied HTTPExpectation
+				if caseID == "FAIL-PRODUCT-LOOKUP-BAD-ENCODING-001" {
+					anonymous = rawHTTPIntegrationGET(
+						t,
+						addresses.http,
+						fixture.Path,
+					)
+					supplied = rawHTTPIntegrationGETWithHeaders(
+						t, addresses.http, fixture.Path, headers,
+					)
+				} else {
+					anonymous = executeAccessHTTP(
+						t,
+						addresses.http,
+						fixture.Path,
+						"",
+						"",
+					)
+					supplied = executeAccessHTTPWithHeaders(
+						t,
+						addresses.http,
+						fixture.Path,
+						directAuthorizations["valid"],
+						"",
+						accessIdentityHeaders(identityMarker),
+					)
+				}
+				for label, actual := range map[string]HTTPExpectation{
+					"anonymous": anonymous,
+					"supplied":  supplied,
+				} {
+					if compareErr := CompareHTTP(
+						want,
+						actual,
+					); compareErr != nil {
+						t.Errorf(
+							"%s HTTP error contract: %v",
+							label,
+							compareErr,
+						)
+					}
+				}
+			})
+		}
+
+		missing := failures["FAIL-PRODUCT-MISSING-001"]
+		if !strings.HasPrefix(missing.Path, "/products/") {
+			t.Fatalf("missing product fixture path = %q", missing.Path)
+		}
+		missingCode := strings.TrimPrefix(missing.Path, "/products/")
+		callCtx := outgoingAccessContext(ctx, directAuthorizations["valid"], identityMarker)
+		for _, testCase := range []struct {
+			name    string
+			request *productv1.GetProductRequest
+			code    codes.Code
+			message string
+		}{
+			{
+				"missing product", &productv1.GetProductRequest{Code: missingCode},
+				codes.NotFound, "product not found",
+			},
+			{
+				"invalid request", &productv1.GetProductRequest{},
+				codes.InvalidArgument, "invalid request",
+			},
+		} {
+			t.Run(testCase.name, func(t *testing.T) {
+				_, anonymousErr := grpcClient.GetProduct(ctx, testCase.request)
+				_, suppliedErr := grpcClient.GetProduct(callCtx, testCase.request)
+				assertSafeGRPCFailure(
+					t,
+					anonymousErr,
+					testCase.code,
+					testCase.message,
+				)
+				assertSafeGRPCFailure(
+					t,
+					suppliedErr,
+					testCase.code,
+					testCase.message,
+				)
 			})
 		}
 	})
@@ -239,13 +412,13 @@ func TestProductAccess(t *testing.T) {
 			t,
 			addresses.http,
 			"/products/CORRUPT",
-			"Bearer "+tokenMarker,
+			directAuthorizations["valid"],
 			traceparent,
 		)
 		assertGenericHTTPFailure(t, httpFailure)
 		callCtx := metadata.AppendToOutgoingContext(
 			ctx,
-			"authorization", "Bearer "+tokenMarker,
+			"authorization", directAuthorizations["valid"],
 			"traceparent", traceparent,
 		)
 		_, grpcFailure := grpcClient.GetProduct(
@@ -282,7 +455,7 @@ func TestProductAccess(t *testing.T) {
 			t,
 			addresses.http,
 			"/products",
-			"Bearer "+tokenMarker,
+			directAuthorizations["valid"],
 			"",
 		)
 		assertGenericHTTPFailure(t, failure)
@@ -341,14 +514,17 @@ func TestProductAccess(t *testing.T) {
 	})
 
 	assertStructuredSafeLogs(t, logs.String(), accessServiceName)
+	sensitiveMarkers := append([]string{
+		identityMarker,
+		catalogMarker,
+		runtimePassword,
+		runtimeURL,
+	}, directSensitiveMarkers...)
 	assertNoSensitiveText(
 		t,
 		"service diagnostics",
 		logs.String(),
-		tokenMarker,
-		catalogMarker,
-		runtimePassword,
-		runtimeURL,
+		sensitiveMarkers...,
 	)
 }
 
@@ -362,6 +538,61 @@ type directAccessCase struct {
 		ContentType string `json:"contentType"`
 		BodyType    string `json:"bodyType"`
 	} `json:"expected"`
+}
+
+func assertDirectAccessCaseSet(t *testing.T, cases []directAccessCase) {
+	t.Helper()
+	credentials := map[string]string{
+		"NONE": "missing", "VALID": "valid", "MALFORMED": "malformed",
+		"SIGNATURE": "invalid-signature", "EXPIRED": "expired", "NBF": "not-before",
+		"ISSUER": "issuer-variation", "AUDIENCE": "audience-variation",
+		"ROLE": "role-variation",
+	}
+	type expectedCase struct {
+		path       string
+		credential string
+		bodyType   string
+	}
+	want := make(map[string]expectedCase, 18)
+	for _, route := range []struct {
+		name, path, bodyType string
+	}{
+		{"LIST", "/products", "array"},
+		{"GET", "/products/TRI", "object"},
+	} {
+		for suffix, credential := range credentials {
+			id := fmt.Sprintf("ACCESS-DIRECT-%s-%s-001", route.name, suffix)
+			want[id] = expectedCase{route.path, credential, route.bodyType}
+		}
+	}
+	seen := make(map[string]bool, len(cases))
+	for _, accessCase := range cases {
+		expected, ok := want[accessCase.ID]
+		if !ok || seen[accessCase.ID] {
+			t.Fatalf(
+				"direct access case set has unknown or duplicate ID %q",
+				accessCase.ID,
+			)
+		}
+		seen[accessCase.ID] = true
+		if accessCase.Path != expected.path ||
+			accessCase.Credential != expected.credential ||
+			accessCase.Expected.Status != http.StatusOK ||
+			accessCase.Expected.ContentType != "application/json" ||
+			accessCase.Expected.BodyType != expected.bodyType {
+			t.Fatalf(
+				"direct access case %s disagrees with accepted path, credential, or result",
+				accessCase.ID,
+			)
+		}
+	}
+	if len(seen) != len(want) {
+		for id := range want {
+			if !seen[id] {
+				t.Errorf("direct access case set is missing %s", id)
+			}
+		}
+	}
 }
 
 func loadDirectAccessCases(t *testing.T, baselineRoot string) []directAccessCase {
@@ -429,6 +660,18 @@ func executeAccessHTTP(
 	traceparent string,
 ) HTTPExpectation {
 	t.Helper()
+	return executeAccessHTTPWithHeaders(t, address, path, authorization, traceparent, nil)
+}
+
+func executeAccessHTTPWithHeaders(
+	t *testing.T,
+	address string,
+	path string,
+	authorization string,
+	traceparent string,
+	headers http.Header,
+) HTTPExpectation {
+	t.Helper()
 	request, err := http.NewRequestWithContext(
 		context.Background(), http.MethodGet, "http://"+address+path, nil,
 	)
@@ -440,6 +683,11 @@ func executeAccessHTTP(
 	}
 	if traceparent != "" {
 		request.Header.Set("traceparent", traceparent)
+	}
+	for name, values := range headers {
+		for _, value := range values {
+			request.Header.Add(name, value)
+		}
 	}
 	response, err := (&http.Client{Timeout: 3 * time.Second}).Do(request)
 	if err != nil {
@@ -457,21 +705,103 @@ func executeAccessHTTP(
 	}
 }
 
-func authorizationValue(credential, tokenMarker string) string {
-	if credential == "missing" {
-		return ""
-	}
-	if credential == "malformed" {
-		return "Malformed " + tokenMarker
-	}
-	return "Bearer " + tokenMarker + "-" + credential
+type directJWTClaims struct {
+	Subject   string   `json:"sub"`
+	Roles     []string `json:"roles"`
+	Issuer    string   `json:"iss"`
+	Audience  []string `json:"aud"`
+	IssuedAt  int64    `json:"iat"`
+	NotBefore int64    `json:"nbf"`
+	ExpiresAt int64    `json:"exp"`
 }
 
-func outgoingAuthorizationContext(ctx context.Context, authorization string) context.Context {
-	if authorization == "" {
-		return ctx
+func newDirectAuthorizations(t *testing.T, marker string) (map[string]string, []string) {
+	t.Helper()
+	signingMaterial, err := randomCredential()
+	if err != nil {
+		t.Fatalf("generate disposable JWT signing material: %v", err)
 	}
-	return metadata.AppendToOutgoingContext(ctx, "authorization", authorization)
+	key := []byte(signingMaterial)
+	wrongKey := append([]byte(nil), key...)
+	wrongKey[0] ^= 1
+	now := time.Now().UTC()
+	baseline := directJWTClaims{
+		Subject:   marker,
+		Roles:     []string{"CAR"},
+		Issuer:    "auth-service",
+		Audience:  []string{"product-service"},
+		IssuedAt:  now.Add(-time.Minute).Unix(),
+		NotBefore: now.Add(-time.Minute).Unix(),
+		ExpiresAt: now.Add(10 * time.Minute).Unix(),
+	}
+	expired := baseline
+	expired.IssuedAt = now.Add(-15 * time.Minute).Unix()
+	expired.NotBefore = expired.IssuedAt
+	expired.ExpiresAt = now.Add(-5 * time.Minute).Unix()
+	future := baseline
+	future.NotBefore = now.Add(5 * time.Minute).Unix()
+	issuer := baseline
+	issuer.Issuer = "different-issuer"
+	audience := baseline
+	audience.Audience = []string{"different-audience"}
+	role := baseline
+	role.Roles = []string{"UNRELATED"}
+	values := map[string]string{
+		"missing":            "",
+		"malformed":          "Bearer not-a-jwt-" + marker,
+		"valid":              "Bearer " + signDirectJWT(t, key, baseline),
+		"invalid-signature":  "Bearer " + signDirectJWT(t, wrongKey, baseline),
+		"expired":            "Bearer " + signDirectJWT(t, key, expired),
+		"not-before":         "Bearer " + signDirectJWT(t, key, future),
+		"issuer-variation":   "Bearer " + signDirectJWT(t, key, issuer),
+		"audience-variation": "Bearer " + signDirectJWT(t, key, audience),
+		"role-variation":     "Bearer " + signDirectJWT(t, key, role),
+	}
+	sensitive := []string{marker, signingMaterial, string(wrongKey)}
+	for _, value := range values {
+		if value != "" {
+			sensitive = append(sensitive, strings.TrimPrefix(value, "Bearer "))
+		}
+	}
+	return values, sensitive
+}
+
+func signDirectJWT(t *testing.T, key []byte, claims directJWTClaims) string {
+	t.Helper()
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("encode disposable JWT claims: %v", err)
+	}
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	encodedPayload := base64.RawURLEncoding.EncodeToString(payload)
+	unsigned := header + "." + encodedPayload
+	signature := hmac.New(sha256.New, key)
+	_, _ = signature.Write([]byte(unsigned))
+	return unsigned + "." + base64.RawURLEncoding.EncodeToString(signature.Sum(nil))
+}
+
+func accessIdentityHeaders(marker string) http.Header {
+	values := make(http.Header)
+	values.Set("X-User", marker)
+	values.Set("X-Principal", marker)
+	values.Set("X-Role", "UNRELATED")
+	values.Set("X-Authentication", marker)
+	values.Set("X-Forwarded-User", marker)
+	return values
+}
+
+func outgoingAccessContext(ctx context.Context, authorization, marker string) context.Context {
+	values := []string{
+		"x-user", marker,
+		"x-principal", marker,
+		"x-role", "UNRELATED",
+		"x-authentication", marker,
+		"x-forwarded-user", marker,
+	}
+	if authorization != "" {
+		values = append(values, "authorization", authorization)
+	}
+	return metadata.AppendToOutgoingContext(ctx, values...)
 }
 
 func assertAccessBodyType(t *testing.T, body []byte, want string) {
@@ -522,15 +852,14 @@ func assertGenericHTTPFailure(t *testing.T, actual HTTPExpectation) {
 	if actual.Status != http.StatusInternalServerError ||
 		actual.ContentType != "application/json" ||
 		string(actual.Body) != `{"message":"Internal Server Error"}` {
-		t.Fatalf("unsafe HTTP failure: %#v", actual)
+		t.Fatal("HTTP failure did not match the generic error contract")
 	}
 }
 
 func assertSafeGRPCFailure(t *testing.T, err error, wantCode codes.Code, wantMessage string) {
 	t.Helper()
 	if status.Code(err) != wantCode || status.Convert(err).Message() != wantMessage {
-		t.Fatalf("gRPC failure = %v/%q, want %v/%q: %v",
-			status.Code(err), status.Convert(err).Message(), wantCode, wantMessage, err)
+		t.Fatalf("gRPC failure did not match code %v and the safe message", wantCode)
 	}
 }
 
@@ -587,10 +916,10 @@ func assertStructuredSafeLogs(t *testing.T, content, serviceName string) {
 	for _, line := range lines {
 		var entry map[string]any
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			t.Fatalf("decode structured log %q: %v", line, err)
+			t.Fatalf("decode structured log entry: %v", err)
 		}
 		if entry["service"] != serviceName || entry["level"] == nil || entry["msg"] == nil {
-			t.Fatalf("log lacks service/level/message context: %#v", entry)
+			t.Fatal("log lacks service/level/message context")
 		}
 		switch entry["msg"] {
 		case "product service started":
@@ -600,7 +929,7 @@ func assertStructuredSafeLogs(t *testing.T, content, serviceName string) {
 		}
 	}
 	if !started || !failedRequest {
-		t.Fatalf("expected startup and request diagnostics: %s", content)
+		t.Fatal("expected startup and request diagnostics were missing")
 	}
 }
 
@@ -608,7 +937,7 @@ func assertNoSensitiveText(t *testing.T, label, text string, markers ...string) 
 	t.Helper()
 	for _, marker := range markers {
 		if marker != "" && strings.Contains(text, marker) {
-			t.Fatalf("%s expose marker %q: %s", label, marker, text)
+			t.Fatalf("%s exposed a generated sensitive marker", label)
 		}
 	}
 }

@@ -76,13 +76,14 @@ expect_failure docs-missing-sandbox-argument check-docs \
 	'missing required Chromium launch argument --no-sandbox' "$fixture" DOC_FILES=README.md
 
 fixture=$(new_fixture docs-invalid-mermaid)
-cat >>"$fixture/README.md" <<'EOF'
+cat >"$fixture/controlled-invalid-mermaid.md" <<'EOF'
+# Controlled invalid Mermaid
 
 ```mermaid
 controlled invalid diagram
 ```
 EOF
 expect_failure docs-invalid-mermaid check-docs 'Mermaid render failed' "$fixture" \
-	DOC_FILES=README.md
+	DOC_FILES=controlled-invalid-mermaid.md
 
 printf 'test-tooling: Product controlled failures were rejected without fixture mutation\n'
