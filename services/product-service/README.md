@@ -1,3 +1,13 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Product catalog read service](#product-catalog-read-service)
+  - [Runtime contracts and boundaries](#runtime-contracts-and-boundaries)
+    - [Interim security validation](#interim-security-validation)
+  - [Product catalog architecture](#product-catalog-architecture)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Product catalog read service
 
 This standalone module is the Go Product pilot. Its executable serves the direct Product HTTP API,
@@ -169,8 +179,8 @@ after partial startup or process shutdown.
 
 The two business listeners are intentionally anonymous internal entries for this migration stage.
 They do not validate JWTs, enforce Product roles, or expose gRPC reflection or HTTP profiling.
-They must not be published directly. Issue #133 owns the complete gateway/direct credential and
-identity-propagation matrix, while #134 owns internal-only deployed exposure.
+They must not be published directly. Issue #133's isolated gateway/direct tests prove the accepted
+credential and identity-propagation matrix; #134 owns internal-only deployed exposure.
 
 | Entry | Successful behavior | Bounded failure behavior |
 | --- | --- | --- |
@@ -192,6 +202,33 @@ use, and Product table select privileges. Java retains schema, seed, and write o
 #134 must provision the environment-specific role, grants, and Secret; the service never falls back
 to an owner credential and never migrates or seeds the table. Issue #136 owns live Java/Go
 differential, consumer, load, failure, and rollback qualification. Route cutover remains #137.
+
+### Interim security validation
+
+The [Product security baseline](../../docs/migration/phase-4/product-service/security-baseline.md)
+maps Auth issuance, Java gateway verification, the anonymous gateway-to-Go HTTP hop, direct
+HTTP/gRPC, management, and the separate PostgreSQL reader identity to owners and evidence. Go
+consumes `PRODUCT_DATABASE_URL` but no gateway HMAC signing setting. Auth and the Java gateway keep
+their existing HS256 trust configuration and configured 86,400-second token lifetime; this service
+adds no JWT parser, role check, rotation, or revocation behavior.
+
+From the repository root, after `make go-product-bootstrap-tools`, run
+`make product-security-test-tooling` and `make product-security-check` for the accepted access
+fixtures, Java baseline regression, and real gateway → Go → disposable PostgreSQL suite. The
+module's `make -C services/product-service check` runs the direct HTTP/gRPC access matrix as part
+of its full integration gate, enforcing all eighteen accepted case IDs on each transport. The
+security aggregate deliberately leaves that direct suite to the module gate. These checks use
+generated test signing material and a disposable QA catalog, reject an external database URL, and
+clean up listeners, processes, and containers on completion or failure. See the
+[reproduction instructions](../../docs/migration/phase-4/product-service/security-baseline.md#reproduction)
+for prerequisites and safe temporary-token handling.
+
+`make product-security-verify` is a separate read-only probe for an explicitly selected, already
+running Go target. The [#134 exposure gate](../../docs/migration/phase-4/product-service/security-baseline.md#go-deployment-exposure-gate-for-issue-134)
+defines its endpoint/context inputs and the rendered/effective resource, read-only role, and
+unchanged Java-routing checks still required in local-dev and QA. Anonymous internal access is an
+interim compatibility constraint; `ClusterIP` does not authenticate in-cluster callers. #135 owns
+telemetry delivery, #136 integrated qualification, and #137 any traffic cutover.
 
 ## Product catalog architecture
 
