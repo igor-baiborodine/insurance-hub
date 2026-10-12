@@ -1,4 +1,4 @@
-name: Legacy Web Release CI
+name: Legacy Web Release
 
 on:
   push:

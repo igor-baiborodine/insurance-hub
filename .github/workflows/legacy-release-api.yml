@@ -1,4 +1,4 @@
-name: Legacy API Release CI
+name: Legacy API Release
 
 on:
   push:

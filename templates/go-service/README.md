@@ -1,3 +1,22 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Go service scaffold](#go-service-scaffold)
+  - [Prerequisites](#prerequisites)
+    - [Mutating and runtime targets](#mutating-and-runtime-targets)
+    - [Non-mutating validation targets](#non-mutating-validation-targets)
+    - [Go file selection](#go-file-selection)
+    - [Setup and normal validation](#setup-and-normal-validation)
+    - [Root scaffold delegates](#root-scaffold-delegates)
+    - [Continuous integration](#continuous-integration)
+    - [Repository topology](#repository-topology)
+  - [Create an independently owned service](#create-an-independently-owned-service)
+  - [Runtime configuration](#runtime-configuration)
+  - [Run and stop the service](#run-and-stop-the-service)
+  - [Example RPC](#example-rpc)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Go service scaffold
 
 This standalone module is the reference structure for new Insurance Hub Go services. Its module
@@ -130,7 +149,7 @@ and Product-specific delegates are documented in the topology guide.
 
 ### Continuous integration
 
-[Go modules CI](../../.github/workflows/go-modules.yml) runs on pull requests to `main`
+[Go Module Validation](../../.github/workflows/go-modules.yml) runs on pull requests to `main`
 and pushes to `main` when this module, any Go module/workspace manifest, the canonical topology,
 topology scripts, the workflow, or the root Makefile changes. It uses `ubuntu-24.04`, checkout v6
 with full history, setup-go v7 with exact Go 1.27.2, the nested `go.sum` cache key, and read-only

@@ -59,7 +59,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage test-integration \
+	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage coverage-check test-integration \
 	build build-security-harness vulncheck bootstrap-doc-tools check-docs preview-docs check test-tooling run
 
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
@@ -150,6 +150,9 @@ coverage:
 	@test -n "$(strip $(COVERAGE_FILE))" || { echo "COVERAGE_FILE must not be empty" >&2; exit 1; }
 	GOWORK=off $(GO) test -mod=readonly -count=1 \
 		-covermode=atomic -coverprofile="$(COVERAGE_FILE)" ./...
+
+coverage-check: coverage
+	@../../scripts/go/check-coverage.sh "$(COVERAGE_FILE)" 75
 
 test-integration:
 	@GO="$(GO)" \
