@@ -17,13 +17,17 @@ import org.junit.jupiter.api.TestInstance;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
@@ -94,6 +98,7 @@ public class GatewayProductSecurityIT {
     private JsonNode acceptedAccess;
     private JsonNode accessCases;
     private JwtTokenGenerator tokenGenerator;
+    private Path markerFile;
 
     @BeforeAll
     void setup() throws IOException {
@@ -103,6 +108,11 @@ public class GatewayProductSecurityIT {
         assertThat(endpointFile).as("product.security.endpoint.file").isNotBlank();
         assertThat(qaAccessFile).as("product.security.qa.access.file").isNotBlank();
         assertThat(casesFile).as("product.security.cases.file").isNotBlank();
+        String markerPath = System.getProperty("product.security.markers.file");
+        assertThat(markerPath).as("product.security.markers.file").isNotBlank();
+        markerFile = Paths.get(markerPath);
+        Files.createFile(markerFile,
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
         JsonNode endpoint;
         try (InputStream input = Files.newInputStream(Paths.get(endpointFile))) {
             endpoint = mapper.readTree(input);
@@ -131,6 +141,7 @@ public class GatewayProductSecurityIT {
         byte[] signingMaterial = new byte[64];
         new SecureRandom().nextBytes(signingMaterial);
         String testSecret = Base64.getEncoder().encodeToString(signingMaterial);
+        recordMarker(testSecret);
         Map<String, Object> properties = new HashMap<>();
         properties.put("micronaut.environments", "test");
         properties.put("micronaut.server.port", -1);
@@ -143,6 +154,8 @@ public class GatewayProductSecurityIT {
         bearerToken = tokenGenerator
                 .generateToken(new UserDetails("security-smoke", Collections.singletonList("UNRELATED")), 600)
                 .orElseThrow(() -> new IllegalStateException("Could not generate disposable token"));
+        recordMarker(bearerToken);
+        recordMarker("security-smoke");
     }
 
     @AfterAll
@@ -432,7 +445,18 @@ public class GatewayProductSecurityIT {
             token = token.substring(0, signatureStart) + (original == 'A' ? 'B' : 'A')
                     + token.substring(signatureStart + 1);
         }
+        recordMarker(token);
+        recordMarker(subject);
         return token;
+    }
+
+    private void recordMarker(String marker) {
+        try {
+            Files.write(markerFile, (marker + "\n").getBytes(StandardCharsets.UTF_8),
+                    StandardOpenOption.APPEND);
+        } catch (IOException failure) {
+            throw new UncheckedIOException("Could not record private diagnostic marker", failure);
+        }
     }
 
     private void assertAcceptedBody(String scenarioID, String path, RawResponse response) throws IOException {

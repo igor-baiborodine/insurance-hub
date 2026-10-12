@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -50,22 +51,23 @@ type endpointRecord struct {
 
 func main() {
 	endpointFile := flag.String("endpoint-file", "", "private endpoint record path")
+	markersFile := flag.String("markers-file", "", "private diagnostic marker path")
 	stopFile := flag.String("stop-file", "", "private graceful-stop marker path")
 	flag.Parse()
-	if *endpointFile == "" || *stopFile == "" {
+	if *endpointFile == "" || *markersFile == "" || *stopFile == "" {
 		fmt.Fprintln(
 			os.Stderr,
-			"security harness: endpoint-file and stop-file are required",
+			"security harness: endpoint-file, markers-file and stop-file are required",
 		)
 		os.Exit(2)
 	}
-	if err := run(*endpointFile, *stopFile); err != nil {
+	if err := run(*endpointFile, *markersFile, *stopFile); err != nil {
 		fmt.Fprintf(os.Stderr, "security harness: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(endpointFile, stopFile string) (runErr error) {
+func run(endpointFile, markersFile, stopFile string) (runErr error) {
 	if _, present := os.LookupEnv("PRODUCT_DATABASE_URL"); present {
 		return errors.New("PRODUCT_DATABASE_URL must be unset")
 	}
@@ -90,6 +92,9 @@ func run(endpointFile, stopFile string) (runErr error) {
 		return fmt.Errorf("start disposable PostgreSQL: %w", err)
 	}
 	defer func() { runErr = errors.Join(runErr, harness.Close()) }()
+	if err := writeDatabaseMarkers(markersFile, harness.RuntimeDatabaseURL()); err != nil {
+		return err
+	}
 	fixture, err := harness.LoadCatalog(setupCtx, integrationtest.FixtureQA)
 	if err != nil {
 		return fmt.Errorf("load accepted QA catalog: %w", err)
@@ -163,6 +168,30 @@ func run(endpointFile, stopFile string) (runErr error) {
 			}
 		}
 	}
+}
+
+func writeDatabaseMarkers(path, databaseURL string) error {
+	parsed, err := url.Parse(databaseURL)
+	if err != nil {
+		return errors.New("parse disposable reader URL for diagnostic markers")
+	}
+	password, present := parsed.User.Password()
+	if !present || password == "" {
+		return errors.New("disposable reader password is missing")
+	}
+	content := []byte(databaseURL + "\n" + password + "\n")
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("create private database marker file: %w", err)
+	}
+	if _, err := file.Write(content); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write private database markers: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close private database marker file: %w", err)
+	}
+	return nil
 }
 
 type addresses struct {

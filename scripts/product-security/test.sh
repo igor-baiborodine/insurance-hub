@@ -9,7 +9,7 @@ fail() {
   exit 1
 }
 
-for tool in java mvn go docker jq python3 timeout; do
+for tool in java mvn go docker jq python3 timeout setsid; do
   command -v "$tool" >/dev/null 2>&1 || fail "missing prerequisite: $tool"
 done
 mvn -version | grep -q 'Java version: 14\.' || fail 'Java 14 is required'
@@ -19,7 +19,17 @@ docker info >/dev/null 2>&1 || fail 'Docker daemon is unavailable'
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/product-security.XXXXXX")
 chmod 700 "$work_dir"
 helper_pid=
+java_pid=
 cleanup() {
+  if [[ -n "$java_pid" ]]; then
+    kill -TERM -- "-$java_pid" 2>/dev/null || true
+    for _ in {1..50}; do
+      kill -0 -- "-$java_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -KILL -- "-$java_pid" 2>/dev/null || true
+    wait "$java_pid" 2>/dev/null || true
+  fi
   if [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null; then
     touch "$work_dir/stop"
     for _ in {1..100}; do
@@ -47,10 +57,52 @@ trap 'exit 143' TERM
 endpoint_file="$work_dir/endpoint.json"
 helper_log="$work_dir/helper.log"
 java_log="$work_dir/java.log"
+database_markers="$work_dir/database-markers"
+java_markers="$work_dir/java-markers"
+
+scan_output() {
+  python3 - "$helper_log" "$java_log" "$database_markers" "$java_markers" <<'PY' || \
+    fail 'captured output exposed a generated marker or database connection string'
+import pathlib
+import re
+import sys
+
+logs = [pathlib.Path(value) for value in sys.argv[1:3]]
+marker_files = [pathlib.Path(value) for value in sys.argv[3:]]
+output = "\n".join(path.read_text(errors="replace") for path in logs if path.exists())
+markers = [marker for path in marker_files if path.exists()
+           for marker in path.read_text().splitlines() if marker]
+if not markers or any(marker in output for marker in markers):
+    raise SystemExit(1)
+if re.search(r"postgres(?:ql)?://|password=", output, re.IGNORECASE):
+    raise SystemExit(1)
+PY
+}
+
+run_java() {
+  local duration=$1 method=$2 cases=$3
+  local result=0
+  rm -f -- "$java_markers"
+  setsid timeout -k 5s "$duration" mvn -B -ntp -f legacy/agent-portal-gateway/pom.xml \
+    -Dskip.surefire.tests=true \
+    -Dit.test="$method" \
+    -Dproduct.security.endpoint.file="$endpoint_file" \
+    -Dproduct.security.qa.access.file="$qa_access" \
+    -Dproduct.security.cases.file="$cases" \
+    -Dproduct.security.markers.file="$java_markers" \
+    verify >"$java_log" 2>&1 &
+  java_pid=$!
+  wait "$java_pid" || result=$?
+  java_pid=
+  scan_output
+  [[ -s "$java_markers" ]] || fail 'Java test did not write private diagnostic markers'
+  return "$result"
+}
 
 timeout 180s make -C services/product-service build-security-harness \
   SECURITY_HARNESS_OUTPUT="$work_dir/security-harness"
-"$work_dir/security-harness" -endpoint-file "$endpoint_file" -stop-file "$work_dir/stop" \
+"$work_dir/security-harness" -endpoint-file "$endpoint_file" \
+  -markers-file "$database_markers" -stop-file "$work_dir/stop" \
   >"$helper_log" 2>&1 &
 helper_pid=$!
 
@@ -69,16 +121,15 @@ jq -e --argjson pid "$helper_pid" '
   and (.containerId | test("^[0-9a-f]{64}$"))
   and ([.http,.grpc,.health] | all(test("^127[.]0[.]0[.]1:[0-9]+$")))
 ' "$endpoint_file" >/dev/null || fail 'invalid Go endpoint handshake'
+scan_output
+if [[ ${PRODUCT_SECURITY_TEST_INJECT_FAILURE:-} == after_helper_ready ]]; then
+  sleep 2
+  fail 'injected partial startup failure after Go readiness'
+fi
 
 qa_access="$repo_root/legacy/product-service/src/test/resources/product-read-baseline/access/qa.json"
 cases_file="$repo_root/legacy/product-service/src/test/resources/product-read-baseline/access/cases.json"
-timeout 150s mvn -B -ntp -f legacy/agent-portal-gateway/pom.xml \
-  -Dskip.surefire.tests=true \
-  -Dit.test=GatewayProductSecurityIT \
-  -Dproduct.security.endpoint.file="$endpoint_file" \
-  -Dproduct.security.qa.access.file="$qa_access" \
-  -Dproduct.security.cases.file="$cases_file" \
-  verify >"$java_log" 2>&1 || {
+run_java 150s GatewayProductSecurityIT "$cases_file" || {
     tail -n 65 "$java_log" >&2
     fail 'healthy gateway-to-Go smoke test failed'
   }
@@ -90,13 +141,7 @@ expect_case_set_rejection() {
   local altered_file=$2
   local method=$3
   local guard=$4
-  if timeout 90s mvn -B -ntp -f legacy/agent-portal-gateway/pom.xml \
-    -Dskip.surefire.tests=true \
-    -Dit.test="GatewayProductSecurityIT#$method" \
-    -Dproduct.security.endpoint.file="$endpoint_file" \
-    -Dproduct.security.qa.access.file="$qa_access" \
-    -Dproduct.security.cases.file="$altered_file" \
-    verify >"$java_log" 2>&1; then
+  if run_java 90s "GatewayProductSecurityIT#$method" "$altered_file"; then
     fail "$label omission did not fail the case-set guard"
   fi
   if ! grep -q "$guard" "$java_log"; then
@@ -152,13 +197,7 @@ for name in ("http", "grpc", "health"):
             raise SystemExit(f"{name} listener still accepts connections")
 PY
 
-if timeout 90s mvn -B -ntp -f legacy/agent-portal-gateway/pom.xml \
-  -Dskip.surefire.tests=true \
-  -Dit.test=GatewayProductSecurityIT#happyPath \
-  -Dproduct.security.endpoint.file="$endpoint_file" \
-  -Dproduct.security.qa.access.file="$qa_access" \
-  -Dproduct.security.cases.file="$cases_file" \
-  verify >"$java_log" 2>&1; then
+if run_java 90s GatewayProductSecurityIT#happyPath "$cases_file"; then
   fail 'healthy gateway assertion passed after Go stopped'
 fi
 grep -q 'PRODUCT_SECURITY_SMOKE_LIST_START' "$java_log" || \

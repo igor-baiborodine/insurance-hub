@@ -58,6 +58,24 @@ func TestProductAccess(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
+	// The Product process has no gateway verifier or signing configuration.
+	for _, key := range []string{
+		"MICRONAUT_SECURITY_TOKEN_JWT_SIGNATURES_SECRET_GENERATOR_SECRET",
+		"JWT_SECRET",
+	} {
+		previous, present := os.LookupEnv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("remove gateway signing setting %s: %v", key, err)
+		}
+		t.Cleanup(func() {
+			if present {
+				_ = os.Setenv(key, previous)
+			}
+		})
+		if _, present := os.LookupEnv(key); present {
+			t.Fatalf("gateway signing setting %s remains set", key)
+		}
+	}
 	harness, err := Start(ctx, Options{FixtureRoot: baselineRoot, Image: image})
 	if err != nil {
 		t.Fatalf("start harness: %v", err)
@@ -497,6 +515,7 @@ func TestProductAccess(t *testing.T) {
 		"service diagnostics",
 		logs.String(),
 		tokenMarker,
+		identityMarker,
 		catalogMarker,
 		runtimePassword,
 		runtimeURL,
@@ -762,15 +781,14 @@ func assertGenericHTTPFailure(t *testing.T, actual HTTPExpectation) {
 	if actual.Status != http.StatusInternalServerError ||
 		actual.ContentType != "application/json" ||
 		string(actual.Body) != `{"message":"Internal Server Error"}` {
-		t.Fatalf("unsafe HTTP failure: %#v", actual)
+		t.Fatal("HTTP failure did not match the generic error contract")
 	}
 }
 
 func assertSafeGRPCFailure(t *testing.T, err error, wantCode codes.Code, wantMessage string) {
 	t.Helper()
 	if status.Code(err) != wantCode || status.Convert(err).Message() != wantMessage {
-		t.Fatalf("gRPC failure = %v/%q, want %v/%q: %v",
-			status.Code(err), status.Convert(err).Message(), wantCode, wantMessage, err)
+		t.Fatalf("gRPC failure did not match code %v and the safe message", wantCode)
 	}
 }
 
@@ -827,10 +845,10 @@ func assertStructuredSafeLogs(t *testing.T, content, serviceName string) {
 	for _, line := range lines {
 		var entry map[string]any
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			t.Fatalf("decode structured log %q: %v", line, err)
+			t.Fatalf("decode structured log entry: %v", err)
 		}
 		if entry["service"] != serviceName || entry["level"] == nil || entry["msg"] == nil {
-			t.Fatalf("log lacks service/level/message context: %#v", entry)
+			t.Fatal("log lacks service/level/message context")
 		}
 		switch entry["msg"] {
 		case "product service started":
@@ -840,7 +858,7 @@ func assertStructuredSafeLogs(t *testing.T, content, serviceName string) {
 		}
 	}
 	if !started || !failedRequest {
-		t.Fatalf("expected startup and request diagnostics: %s", content)
+		t.Fatal("expected startup and request diagnostics were missing")
 	}
 }
 
@@ -848,7 +866,7 @@ func assertNoSensitiveText(t *testing.T, label, text string, markers ...string) 
 	t.Helper()
 	for _, marker := range markers {
 		if marker != "" && strings.Contains(text, marker) {
-			t.Fatalf("%s expose marker %q: %s", label, marker, text)
+			t.Fatalf("%s exposed a generated sensitive marker", label)
 		}
 	}
 }
