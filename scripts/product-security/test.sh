@@ -82,8 +82,8 @@ timeout 150s mvn -B -ntp -f legacy/agent-portal-gateway/pom.xml \
     tail -n 65 "$java_log" >&2
     fail 'healthy gateway-to-Go smoke test failed'
   }
-grep -q 'Tests run: 3, Failures: 0, Errors: 0, Skipped: 0' "$java_log" || \
-  fail 'gateway smoke, rejection, and accepted-claims matrix did not all pass'
+grep -q 'Tests run: 4, Failures: 0, Errors: 0, Skipped: 0' "$java_log" || \
+  fail 'gateway smoke, rejection, accepted-claims, and observer-sentinel checks did not all pass'
 
 expect_case_set_rejection() {
   local label=$1
@@ -166,4 +166,4 @@ grep -q 'PRODUCT_SECURITY_SMOKE_LIST_START' "$java_log" || \
 grep -Eq 'Tests run: 1, Failures: [1-9]|Tests run: 1, Failures: 0, Errors: [1-9]' "$java_log" || \
   fail 'Go-absent run failed outside the expected test assertion'
 
-printf 'product-security-test: real gateway list/get, ten rejections, ten accepted claims, and anonymous gRPC passed; omission guards and Go-absent rerun failed as expected; resources released\n'
+printf 'product-security-test: real gateway list/get, ten rejections, ten accepted claims, identity and trace observer, and anonymous gRPC passed; omission guards and Go-absent rerun failed as expected; resources released\n'

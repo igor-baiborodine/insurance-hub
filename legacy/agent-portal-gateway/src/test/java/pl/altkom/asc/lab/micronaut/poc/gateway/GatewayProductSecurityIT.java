@@ -35,6 +35,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -52,6 +53,9 @@ public class GatewayProductSecurityIT {
             "missing", "malformed", "invalid-signature", "expired", "missing-subject");
     private static final Set<String> ACCEPTED_CREDENTIALS = Set.of(
             "valid", "not-before", "issuer-variation", "audience-variation", "role-variation");
+    private static final String TRACE_ID = "0102030405060708090a0b0c0d0e0f10";
+    private static final String SPAN_ID = "1112131415161718";
+    private static final String TRACEPARENT = "00-" + TRACE_ID + "-" + SPAN_ID + "-01";
     private static final Map<String, String> REJECTED_CASES = Map.ofEntries(
             Map.entry("ACCESS-GATEWAY-LIST-MISSING-001", "missing"),
             Map.entry("ACCESS-GATEWAY-LIST-MALFORMED-001", "malformed"),
@@ -78,8 +82,11 @@ public class GatewayProductSecurityIT {
     private final ObjectMapper mapper = new ObjectMapper()
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
     private final AtomicInteger forwardedRequests = new AtomicInteger();
-    private final AtomicReference<List<String>> observedHeaderNames =
-            new AtomicReference<>(Collections.emptyList());
+    private final AtomicReference<HeaderObservation> observedHeaders =
+            new AtomicReference<>(HeaderObservation.empty());
+    private final AtomicReference<String> expectedTokenMarker = new AtomicReference<>();
+    private final AtomicReference<String> expectedIdentityMarker = new AtomicReference<>();
+    private final AtomicReference<String> downstreamTarget = new AtomicReference<>();
     private HttpServer observer;
     private EmbeddedServer gateway;
     private String goHTTP;
@@ -108,6 +115,7 @@ public class GatewayProductSecurityIT {
         assertThat(endpoint.path("reader").asText()).isEqualTo("go_product_reader");
         goHTTP = endpoint.path("http").asText();
         assertThat(goHTTP).startsWith("127.0.0.1:");
+        downstreamTarget.set(goHTTP);
         try (InputStream input = Files.newInputStream(Paths.get(qaAccessFile))) {
             acceptedAccess = mapper.readTree(input);
         }
@@ -152,11 +160,15 @@ public class GatewayProductSecurityIT {
         // given
         assertThat(gateway.isRunning()).isTrue();
         forwardedRequests.set(0);
+        expectedTokenMarker.set(bearerToken);
+        expectedIdentityMarker.set("security-smoke");
 
         // when
         System.out.println("PRODUCT_SECURITY_SMOKE_LIST_START");
         RawResponse list = get("/api/products");
+        HeaderObservation listHeaders = observedHeaders.get();
         RawResponse get = get("/api/products/TRI");
+        HeaderObservation getHeaders = observedHeaders.get();
 
         // then
         assertThat(list.status).isEqualTo(200);
@@ -174,7 +186,8 @@ public class GatewayProductSecurityIT {
         assertThat(mapper.readTree(get.body).path("name").asText()).isEqualTo("Safe Traveller");
         assertThat(normalizeList(listBody)).isEqualTo(normalizeList(acceptedBody("ACCESS-GATEWAY-LIST-VALID-001")));
         assertThat(mapper.readTree(get.body)).isEqualTo(acceptedBody("ACCESS-GATEWAY-GET-VALID-001"));
-        assertThat(observedHeaderNames.get()).isNotEmpty();
+        assertNoCallerIdentity("smoke list", listHeaders);
+        assertNoCallerIdentity("smoke get", getHeaders);
     }
 
     @Test
@@ -203,7 +216,9 @@ public class GatewayProductSecurityIT {
             assertThat(Duration.between(reference, Instant.now()).abs())
                     .as("%s bounded token clock drift", id).isLessThan(Duration.ofSeconds(120));
             forwardedRequests.set(0);
-            observedHeaderNames.set(Collections.emptyList());
+            observedHeaders.set(HeaderObservation.empty());
+            expectedTokenMarker.set(null);
+            expectedIdentityMarker.set(null);
 
             // when
             RawResponse result = get(path, tokenFor(credential, reference));
@@ -213,10 +228,12 @@ public class GatewayProductSecurityIT {
             assertThat(result.body).as("%s body", id).isEmpty();
             assertThat(result.contentType).as("%s content type", id).isEmpty();
             assertThat(forwardedRequests.get()).as("%s downstream calls", id).isZero();
-            assertThat(observedHeaderNames.get()).as("%s downstream headers", id).isEmpty();
+            assertThat(observedHeaders.get().names).as("%s downstream headers", id).isEmpty();
 
             // A valid call immediately after each rejection must still reach the real Go catalog.
             forwardedRequests.set(0);
+            expectedTokenMarker.set(bearerToken);
+            expectedIdentityMarker.set("security-smoke");
             // when
             RawResponse followingResult = get(path);
             // then
@@ -224,6 +241,7 @@ public class GatewayProductSecurityIT {
             assertThat(forwardedRequests.get()).as("%s following valid downstream calls", id)
                     .isEqualTo(1);
             assertAcceptedBody(id, path, followingResult);
+            assertNoCallerIdentity(id + " following valid", observedHeaders.get());
         }
     }
 
@@ -250,10 +268,14 @@ public class GatewayProductSecurityIT {
             assertThat(Duration.between(reference, Instant.now()).abs())
                     .as("%s bounded token clock drift", id).isLessThan(Duration.ofSeconds(120));
             forwardedRequests.set(0);
-            observedHeaderNames.set(Collections.emptyList());
+            observedHeaders.set(HeaderObservation.empty());
+            String identityMarker = "identity-" + id.toLowerCase(Locale.ROOT);
+            String token = tokenFor(credential, reference, identityMarker);
+            expectedTokenMarker.set(token);
+            expectedIdentityMarker.set(identityMarker);
 
             // when
-            RawResponse result = get(path, tokenFor(credential, reference));
+            RawResponse result = get(path, token, suppliedIdentityHeaders(identityMarker));
 
             // then
             assertThat(result.status).as("%s status", id).isEqualTo(200);
@@ -261,10 +283,76 @@ public class GatewayProductSecurityIT {
             assertThat(forwardedRequests.get()).as("%s downstream calls", id).isEqualTo(1);
             // The baseline access body is canned; the QA capture is the real catalog oracle.
             assertAcceptedBody(id, path, result);
+            assertNoCallerIdentity(id, observedHeaders.get());
             if ("role-variation".equals(credential) && "/api/products/TRI".equals(path)) {
                 assertThat(mapper.readTree(result.body).path("code").asText())
                         .as("%s requested product", id).isEqualTo("TRI");
             }
+        }
+    }
+
+    @Test
+    void givenTestOwnedSentinel_thenObserverDetectsIdentityAndPreservesTrace() throws IOException {
+        // given
+        String tokenMarker = "sentinel-bearer";
+        String identityMarker = "sentinel-identity";
+        AtomicReference<Boolean> forwardedMarkers = new AtomicReference<>(false);
+        AtomicReference<Boolean> forwardedTrace = new AtomicReference<>(false);
+        HttpServer sink = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        sink.createContext("/products", exchange -> {
+            forwardedMarkers.set(("Bearer " + tokenMarker).equals(
+                    exchange.getRequestHeaders().getFirst("Authorization")) &&
+                    identityMarker.equals(exchange.getRequestHeaders().getFirst("X-User")));
+            forwardedTrace.set(TRACE_ID.equals(exchange.getRequestHeaders().getFirst("X-B3-TraceId")) &&
+                    SPAN_ID.equals(exchange.getRequestHeaders().getFirst("X-B3-SpanId")) &&
+                    "1".equals(exchange.getRequestHeaders().getFirst("X-B3-Sampled")) &&
+                    TRACEPARENT.equals(exchange.getRequestHeaders().getFirst("traceparent")));
+            byte[] response = "[]".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        sink.start();
+        forwardedRequests.set(0);
+        observedHeaders.set(HeaderObservation.empty());
+        expectedTokenMarker.set(tokenMarker);
+        expectedIdentityMarker.set(identityMarker);
+        downstreamTarget.set("127.0.0.1:" + sink.getAddress().getPort());
+
+        try {
+            // when
+            HttpURLConnection connection = (HttpURLConnection) new URL("http://127.0.0.1:"
+                    + observer.getAddress().getPort() + "/products").openConnection();
+            connection.setConnectTimeout(2000);
+            connection.setReadTimeout(3000);
+            connection.setRequestProperty("Authorization", "Bearer " + tokenMarker);
+            connection.setRequestProperty("X-User", identityMarker);
+            connection.setRequestProperty("X-B3-TraceId", TRACE_ID);
+            connection.setRequestProperty("X-B3-SpanId", SPAN_ID);
+            connection.setRequestProperty("X-B3-Sampled", "1");
+            connection.setRequestProperty("traceparent", TRACEPARENT);
+            int status;
+            try {
+                status = connection.getResponseCode();
+            } finally {
+                connection.disconnect();
+            }
+
+            // then
+            HeaderObservation observation = observedHeaders.get();
+            assertThat(status).isEqualTo(200);
+            assertThat(forwardedRequests.get()).isEqualTo(1);
+            assertThat(observation.identityNames).contains("authorization", "x-user");
+            assertThat(observation.tokenMarkerPresent).isTrue();
+            assertThat(observation.identityMarkerPresent).isTrue();
+            assertThat(observation.names).contains("x-b3-traceid", "x-b3-spanid",
+                    "x-b3-sampled", "traceparent");
+            assertThat(forwardedMarkers.get()).isTrue();
+            assertThat(forwardedTrace.get()).isTrue();
+        } finally {
+            downstreamTarget.set(goHTTP);
+            sink.stop(0);
         }
     }
 
@@ -311,6 +399,10 @@ public class GatewayProductSecurityIT {
     }
 
     private String tokenFor(String credential, Instant reference) {
+        return tokenFor(credential, reference, "security-boundary");
+    }
+
+    private String tokenFor(String credential, Instant reference, String subject) {
         if ("missing".equals(credential)) {
             return null;
         }
@@ -319,7 +411,7 @@ public class GatewayProductSecurityIT {
         }
         Map<String, Object> claims = new HashMap<>();
         if (!"missing-subject".equals(credential)) {
-            claims.put("sub", "security-boundary");
+            claims.put("sub", subject);
         }
         claims.put("roles", Collections.singletonList(
                 "role-variation".equals(credential) ? "UNRELATED" : "CAR"));
@@ -372,11 +464,32 @@ public class GatewayProductSecurityIT {
         return products;
     }
 
+    private Map<String, String> suppliedIdentityHeaders(String marker) {
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("X-User", marker);
+        headers.put("X-Principal", marker);
+        headers.put("X-Role", marker);
+        headers.put("X-Authentication", marker);
+        headers.put("X-Forwarded-User", marker);
+        return headers;
+    }
+
+    private void assertNoCallerIdentity(String scenario, HeaderObservation observation) {
+        assertThat(observation.names).as("%s observed header names", scenario).isNotEmpty();
+        assertThat(observation.identityNames).as("%s identity header names", scenario).isEmpty();
+        assertThat(observation.tokenMarkerPresent).as("%s token marker present", scenario).isFalse();
+        assertThat(observation.identityMarkerPresent).as("%s identity marker present", scenario).isFalse();
+    }
+
     private RawResponse get(String path) throws IOException {
         return get(path, bearerToken);
     }
 
     private RawResponse get(String path, String token) throws IOException {
+        return get(path, token, Collections.emptyMap());
+    }
+
+    private RawResponse get(String path, String token, Map<String, String> headers) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(gateway.getURL().toString() + path)
                 .openConnection();
         connection.setRequestMethod("GET");
@@ -384,6 +497,7 @@ public class GatewayProductSecurityIT {
         if (token != null) {
             connection.setRequestProperty("Authorization", "Bearer " + token);
         }
+        headers.forEach(connection::setRequestProperty);
         connection.setConnectTimeout(2000);
         connection.setReadTimeout(10000);
         try {
@@ -399,16 +513,12 @@ public class GatewayProductSecurityIT {
 
     private void forwardToGo(HttpExchange exchange) throws IOException {
         forwardedRequests.incrementAndGet();
-        List<String> names = new ArrayList<>();
-        for (String name : exchange.getRequestHeaders().keySet()) {
-            names.add(name.toLowerCase());
-        }
-        Collections.sort(names);
-        observedHeaderNames.set(names);
+        observedHeaders.set(HeaderObservation.capture(exchange, expectedTokenMarker.get(),
+                expectedIdentityMarker.get()));
 
         HttpURLConnection downstream = null;
         try {
-            downstream = (HttpURLConnection) new URL("http://" + goHTTP + exchange.getRequestURI())
+            downstream = (HttpURLConnection) new URL("http://" + downstreamTarget.get() + exchange.getRequestURI())
                     .openConnection();
             downstream.setRequestMethod(exchange.getRequestMethod());
             downstream.setConnectTimeout(1000);
@@ -449,6 +559,58 @@ public class GatewayProductSecurityIT {
                 output.write(buffer, 0, count);
             }
             return output.toByteArray();
+        }
+    }
+
+    private static final class HeaderObservation {
+        private final List<String> names;
+        private final List<String> identityNames;
+        private final boolean tokenMarkerPresent;
+        private final boolean identityMarkerPresent;
+
+        private HeaderObservation(List<String> names, List<String> identityNames,
+                boolean tokenMarkerPresent, boolean identityMarkerPresent) {
+            this.names = names;
+            this.identityNames = identityNames;
+            this.tokenMarkerPresent = tokenMarkerPresent;
+            this.identityMarkerPresent = identityMarkerPresent;
+        }
+
+        private static HeaderObservation empty() {
+            return new HeaderObservation(Collections.emptyList(), Collections.emptyList(), false, false);
+        }
+
+        private static HeaderObservation capture(HttpExchange exchange, String tokenMarker,
+                String identityMarker) {
+            List<String> names = new ArrayList<>();
+            List<String> identityNames = new ArrayList<>();
+            boolean tokenPresent = false;
+            boolean identityPresent = false;
+            for (Map.Entry<String, List<String>> header : exchange.getRequestHeaders().entrySet()) {
+                String name = header.getKey().toLowerCase(Locale.ROOT);
+                names.add(name);
+                if (isIdentityHeader(name)) {
+                    identityNames.add(name);
+                }
+                for (String value : header.getValue()) {
+                    tokenPresent |= tokenMarker != null && value.contains(tokenMarker);
+                    identityPresent |= identityMarker != null && value.contains(identityMarker);
+                }
+            }
+            Collections.sort(names);
+            Collections.sort(identityNames);
+            return new HeaderObservation(names, identityNames, tokenPresent, identityPresent);
+        }
+
+        private static boolean isIdentityHeader(String name) {
+            return name.equals("authorization") || name.equals("proxy-authorization") ||
+                    name.equals("authentication") || name.equals("cookie") ||
+                    name.equals("remote-user") || name.startsWith("x-user") ||
+                    name.startsWith("x-principal") || name.startsWith("x-role") ||
+                    name.startsWith("x-auth") || name.startsWith("x-forwarded-user") ||
+                    name.startsWith("x-forwarded-principal") ||
+                    name.startsWith("x-forwarded-role") || name.startsWith("x-identity") ||
+                    name.startsWith("x-jwt");
         }
     }
 
