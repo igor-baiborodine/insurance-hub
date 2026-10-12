@@ -46,6 +46,7 @@ permissions:
 
 jobs:
   verify:
+    name: Validate product security boundary
     runs-on: ubuntu-24.04
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,3 +1,13 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Prompt and Skill Invocations](#prompt-and-skill-invocations)
+  - [Reusable prompt](#reusable-prompt)
+  - [Example requests](#example-requests)
+  - [Workflow sources](#workflow-sources)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Prompt and Skill Invocations
 
 This directory contains reusable prompt fragments and copyable examples for common repository
