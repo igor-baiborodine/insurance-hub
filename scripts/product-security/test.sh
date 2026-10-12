@@ -82,22 +82,24 @@ timeout 150s mvn -B -ntp -f legacy/agent-portal-gateway/pom.xml \
     tail -n 65 "$java_log" >&2
     fail 'healthy gateway-to-Go smoke test failed'
   }
-grep -q 'Tests run: 2, Failures: 0, Errors: 0, Skipped: 0' "$java_log" || \
-  fail 'gateway smoke and rejection matrix did not both pass'
+grep -q 'Tests run: 3, Failures: 0, Errors: 0, Skipped: 0' "$java_log" || \
+  fail 'gateway smoke, rejection, and accepted-claims matrix did not all pass'
 
 expect_case_set_rejection() {
   local label=$1
   local altered_file=$2
+  local method=$3
+  local guard=$4
   if timeout 90s mvn -B -ntp -f legacy/agent-portal-gateway/pom.xml \
     -Dskip.surefire.tests=true \
-    -Dit.test=GatewayProductSecurityIT#rejectedCredentialsStopAtGateway \
+    -Dit.test="GatewayProductSecurityIT#$method" \
     -Dproduct.security.endpoint.file="$endpoint_file" \
     -Dproduct.security.qa.access.file="$qa_access" \
     -Dproduct.security.cases.file="$altered_file" \
     verify >"$java_log" 2>&1; then
-    fail "$label omission did not fail the rejection case-set guard"
+    fail "$label omission did not fail the case-set guard"
   fi
-  if ! grep -q 'REJECTION_CASE_SET_MISMATCH' "$java_log"; then
+  if ! grep -q "$guard" "$java_log"; then
     tail -n 30 "$java_log" >&2
     fail "$label omission failed outside the rejection case-set guard"
   fi
@@ -105,10 +107,21 @@ expect_case_set_rejection() {
 
 jq 'del(.cases[] | select(.id == "ACCESS-GATEWAY-LIST-EXPIRED-001"))' \
   "$cases_file" >"$work_dir/missing-category.json"
-expect_case_set_rejection 'rejection category' "$work_dir/missing-category.json"
+expect_case_set_rejection 'rejection category' "$work_dir/missing-category.json" \
+  rejectedCredentialsStopAtGateway REJECTION_CASE_SET_MISMATCH
 jq 'del(.cases[] | select(.target == "gateway" and .path == "/api/products/TRI"
   and .expected.status == 401))' "$cases_file" >"$work_dir/missing-route.json"
-expect_case_set_rejection 'gateway get route' "$work_dir/missing-route.json"
+expect_case_set_rejection 'rejected gateway get route' "$work_dir/missing-route.json" \
+  rejectedCredentialsStopAtGateway REJECTION_CASE_SET_MISMATCH
+
+jq 'del(.cases[] | select(.id == "ACCESS-GATEWAY-LIST-AUDIENCE-001"))' \
+  "$cases_file" >"$work_dir/missing-accepted-category.json"
+expect_case_set_rejection 'accepted category' "$work_dir/missing-accepted-category.json" \
+  givenAcceptedClaimVariants_thenCatalogResultsPreserved ACCEPTED_CASE_SET_MISMATCH
+jq 'del(.cases[] | select(.target == "gateway" and .path == "/api/products/TRI"
+  and .expected.status == 200))' "$cases_file" >"$work_dir/missing-accepted-route.json"
+expect_case_set_rejection 'accepted gateway get route' "$work_dir/missing-accepted-route.json" \
+  givenAcceptedClaimVariants_thenCatalogResultsPreserved ACCEPTED_CASE_SET_MISMATCH
 
 touch "$work_dir/stop"
 for _ in {1..350}; do
@@ -153,4 +166,4 @@ grep -q 'PRODUCT_SECURITY_SMOKE_LIST_START' "$java_log" || \
 grep -Eq 'Tests run: 1, Failures: [1-9]|Tests run: 1, Failures: 0, Errors: [1-9]' "$java_log" || \
   fail 'Go-absent run failed outside the expected test assertion'
 
-printf 'product-security-test: real gateway list/get, ten rejections, and anonymous gRPC passed; omission guards and Go-absent rerun failed as expected; resources released\n'
+printf 'product-security-test: real gateway list/get, ten rejections, ten accepted claims, and anonymous gRPC passed; omission guards and Go-absent rerun failed as expected; resources released\n'

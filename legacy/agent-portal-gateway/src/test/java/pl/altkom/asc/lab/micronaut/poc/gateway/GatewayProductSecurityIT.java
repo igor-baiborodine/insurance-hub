@@ -50,6 +50,8 @@ public class GatewayProductSecurityIT {
             "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade");
     private static final Set<String> REJECTED_CREDENTIALS = Set.of(
             "missing", "malformed", "invalid-signature", "expired", "missing-subject");
+    private static final Set<String> ACCEPTED_CREDENTIALS = Set.of(
+            "valid", "not-before", "issuer-variation", "audience-variation", "role-variation");
     private static final Map<String, String> REJECTED_CASES = Map.ofEntries(
             Map.entry("ACCESS-GATEWAY-LIST-MISSING-001", "missing"),
             Map.entry("ACCESS-GATEWAY-LIST-MALFORMED-001", "malformed"),
@@ -61,6 +63,17 @@ public class GatewayProductSecurityIT {
             Map.entry("ACCESS-GATEWAY-GET-SIGNATURE-001", "invalid-signature"),
             Map.entry("ACCESS-GATEWAY-GET-EXPIRED-001", "expired"),
             Map.entry("ACCESS-GATEWAY-GET-SUBJECT-001", "missing-subject"));
+    private static final Map<String, String> ACCEPTED_CASES = Map.ofEntries(
+            Map.entry("ACCESS-GATEWAY-LIST-VALID-001", "valid"),
+            Map.entry("ACCESS-GATEWAY-LIST-NBF-001", "not-before"),
+            Map.entry("ACCESS-GATEWAY-LIST-ISSUER-001", "issuer-variation"),
+            Map.entry("ACCESS-GATEWAY-LIST-AUDIENCE-001", "audience-variation"),
+            Map.entry("ACCESS-GATEWAY-LIST-ROLE-001", "role-variation"),
+            Map.entry("ACCESS-GATEWAY-GET-VALID-001", "valid"),
+            Map.entry("ACCESS-GATEWAY-GET-NBF-001", "not-before"),
+            Map.entry("ACCESS-GATEWAY-GET-ISSUER-001", "issuer-variation"),
+            Map.entry("ACCESS-GATEWAY-GET-AUDIENCE-001", "audience-variation"),
+            Map.entry("ACCESS-GATEWAY-GET-ROLE-001", "role-variation"));
 
     private final ObjectMapper mapper = new ObjectMapper()
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
@@ -210,8 +223,70 @@ public class GatewayProductSecurityIT {
             assertThat(followingResult.status).as("%s following valid status", id).isEqualTo(200);
             assertThat(forwardedRequests.get()).as("%s following valid downstream calls", id)
                     .isEqualTo(1);
-            assertAcceptedBody(path, followingResult);
+            assertAcceptedBody(id, path, followingResult);
         }
+    }
+
+    @Test
+    void givenAcceptedClaimVariants_thenCatalogResultsPreserved() throws IOException {
+        // given
+        Map<String, JsonNode> cases = acceptedCasesByID();
+        Instant reference = Instant.now();
+
+        for (Map.Entry<String, JsonNode> entry : cases.entrySet()) {
+            String id = entry.getKey();
+            JsonNode testCase = entry.getValue();
+            String path = testCase.path("path").asText();
+            String credential = testCase.path("credential").asText();
+            assertThat(path).as("%s route", id).isEqualTo(
+                    id.contains("-LIST-") ? "/api/products" : "/api/products/TRI");
+            assertThat(credential).as("%s category", id).isEqualTo(ACCEPTED_CASES.get(id));
+            assertThat(testCase.path("expected").path("status").asInt()).as("%s fixture status", id)
+                    .isEqualTo(200);
+            assertThat(testCase.path("expected").path("contentType").asText())
+                    .as("%s fixture content type", id).isEqualTo("application/json");
+            assertThat(testCase.path("expected").path("downstreamRequests").asInt())
+                    .as("%s fixture downstream count", id).isEqualTo(1);
+            assertThat(Duration.between(reference, Instant.now()).abs())
+                    .as("%s bounded token clock drift", id).isLessThan(Duration.ofSeconds(120));
+            forwardedRequests.set(0);
+            observedHeaderNames.set(Collections.emptyList());
+
+            // when
+            RawResponse result = get(path, tokenFor(credential, reference));
+
+            // then
+            assertThat(result.status).as("%s status", id).isEqualTo(200);
+            assertThat(result.contentType).as("%s content type", id).isEqualTo("application/json");
+            assertThat(forwardedRequests.get()).as("%s downstream calls", id).isEqualTo(1);
+            // The baseline access body is canned; the QA capture is the real catalog oracle.
+            assertAcceptedBody(id, path, result);
+            if ("role-variation".equals(credential) && "/api/products/TRI".equals(path)) {
+                assertThat(mapper.readTree(result.body).path("code").asText())
+                        .as("%s requested product", id).isEqualTo("TRI");
+            }
+        }
+    }
+
+    private Map<String, JsonNode> acceptedCasesByID() {
+        Map<String, JsonNode> cases = new LinkedHashMap<>();
+        for (JsonNode testCase : accessCases.path("cases")) {
+            String id = testCase.path("id").asText();
+            String credential = testCase.path("credential").asText();
+            if (!"gateway".equals(testCase.path("target").asText()) ||
+                    !(ACCEPTED_CREDENTIALS.contains(credential) || ACCEPTED_CASES.containsKey(id) ||
+                            testCase.path("expected").path("status").asInt() == 200)) {
+                continue;
+            }
+            if (cases.putIfAbsent(id, testCase) != null) {
+                throw new AssertionError("ACCEPTED_CASE_SET_MISMATCH duplicate=" + id);
+            }
+        }
+        if (!cases.keySet().equals(ACCEPTED_CASES.keySet())) {
+            throw new AssertionError("ACCEPTED_CASE_SET_MISMATCH expected=" + ACCEPTED_CASES.keySet()
+                    + " actual=" + cases.keySet());
+        }
+        return cases;
     }
 
     private Map<String, JsonNode> rejectedCasesByID() {
@@ -244,16 +319,21 @@ public class GatewayProductSecurityIT {
         }
         Map<String, Object> claims = new HashMap<>();
         if (!"missing-subject".equals(credential)) {
-            claims.put("sub", "security-rejection");
+            claims.put("sub", "security-boundary");
         }
-        claims.put("roles", Collections.singletonList("CAR"));
-        claims.put("iss", "auth-service");
+        claims.put("roles", Collections.singletonList(
+                "role-variation".equals(credential) ? "UNRELATED" : "CAR"));
+        claims.put("iss", "issuer-variation".equals(credential) ? "different-issuer" : "auth-service");
         claims.put("iat", Date.from(reference));
-        claims.put("nbf", Date.from(reference.minusSeconds(120)));
+        claims.put("nbf", Date.from("not-before".equals(credential)
+                ? reference.plusSeconds(300) : reference.minusSeconds(120)));
         claims.put("exp", Date.from("expired".equals(credential)
                 ? reference.minusSeconds(300) : reference.plusSeconds(600)));
+        if ("audience-variation".equals(credential)) {
+            claims.put("aud", Collections.singletonList("different-audience"));
+        }
         String token = tokenGenerator.generateToken(claims)
-                .orElseThrow(() -> new IllegalStateException("Could not generate disposable rejection token"));
+                .orElseThrow(() -> new IllegalStateException("Could not generate disposable test token"));
         if ("invalid-signature".equals(credential)) {
             int signatureStart = token.lastIndexOf('.') + 1;
             char original = token.charAt(signatureStart);
@@ -263,13 +343,15 @@ public class GatewayProductSecurityIT {
         return token;
     }
 
-    private void assertAcceptedBody(String path, RawResponse response) throws IOException {
-        assertThat(response.contentType).as("following valid content type").isEqualTo("application/json");
+    private void assertAcceptedBody(String scenarioID, String path, RawResponse response) throws IOException {
+        assertThat(response.contentType).as("%s content type", scenarioID).isEqualTo("application/json");
         if ("/api/products".equals(path)) {
             assertThat(normalizeList(mapper.readTree(response.body)))
+                    .as("%s QA catalog", scenarioID)
                     .isEqualTo(normalizeList(acceptedBody("ACCESS-GATEWAY-LIST-VALID-001")));
         } else {
             assertThat(mapper.readTree(response.body))
+                    .as("%s QA product", scenarioID)
                     .isEqualTo(acceptedBody("ACCESS-GATEWAY-GET-VALID-001"));
         }
     }
