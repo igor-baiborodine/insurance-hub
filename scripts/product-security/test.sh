@@ -57,8 +57,12 @@ trap 'exit 143' TERM
 endpoint_file="$work_dir/endpoint.json"
 helper_log="$work_dir/helper.log"
 java_log="$work_dir/java.log"
+java_report="$repo_root/legacy/agent-portal-gateway/target/failsafe-reports/TEST-pl.altkom.asc.lab.micronaut.poc.gateway.GatewayProductSecurityIT.xml"
 database_markers="$work_dir/database-markers"
 java_markers="$work_dir/java-markers"
+qa_access="$repo_root/legacy/product-service/src/test/resources/product-read-baseline/access/qa.json"
+cases_file="${PRODUCT_SECURITY_CASES_FILE:-$repo_root/legacy/product-service/src/test/resources/product-read-baseline/access/cases.json}"
+python3 scripts/product-security/check-cases.py "$cases_file"
 
 scan_output() {
   python3 - "$helper_log" "$java_log" "$database_markers" "$java_markers" <<'PY' || \
@@ -83,6 +87,7 @@ run_java() {
   local duration=$1 method=$2 cases=$3
   local result=0
   rm -f -- "$java_markers"
+  rm -f -- "$java_report"
   setsid timeout -k 5s "$duration" mvn -B -ntp -f legacy/agent-portal-gateway/pom.xml \
     -Dskip.surefire.tests=true \
     -Dit.test="$method" \
@@ -90,11 +95,13 @@ run_java() {
     -Dproduct.security.qa.access.file="$qa_access" \
     -Dproduct.security.cases.file="$cases" \
     -Dproduct.security.markers.file="$java_markers" \
+    -Dproduct.security.clock.offset.seconds="${PRODUCT_SECURITY_TEST_CLOCK_OFFSET_SECONDS:-0}" \
     verify >"$java_log" 2>&1 &
   java_pid=$!
   wait "$java_pid" || result=$?
   java_pid=
   scan_output
+  [[ "$result" != 124 ]] || fail 'Java security suite timed out'
   [[ -s "$java_markers" ]] || fail 'Java test did not write private diagnostic markers'
   return "$result"
 }
@@ -126,15 +133,24 @@ if [[ ${PRODUCT_SECURITY_TEST_INJECT_FAILURE:-} == after_helper_ready ]]; then
   sleep 2
   fail 'injected partial startup failure after Go readiness'
 fi
+if [[ ${PRODUCT_SECURITY_TEST_INJECT_FAILURE:-} == backend_down ]]; then
+  touch "$work_dir/stop"
+  for _ in {1..350}; do
+    kill -0 "$helper_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -0 "$helper_pid" 2>/dev/null && fail 'injected backend did not stop'
+  wait "$helper_pid" || fail 'injected backend shutdown failed'
+  helper_pid=
+fi
 
-qa_access="$repo_root/legacy/product-service/src/test/resources/product-read-baseline/access/qa.json"
-cases_file="$repo_root/legacy/product-service/src/test/resources/product-read-baseline/access/cases.json"
-run_java 150s GatewayProductSecurityIT "$cases_file" || {
+run_java "${PRODUCT_SECURITY_TEST_JAVA_TIMEOUT:-150s}" GatewayProductSecurityIT "$cases_file" || {
     tail -n 65 "$java_log" >&2
     fail 'healthy gateway-to-Go smoke test failed'
   }
 grep -q 'Tests run: 4, Failures: 0, Errors: 0, Skipped: 0' "$java_log" || \
   fail 'gateway smoke, rejection, accepted-claims, and observer-sentinel checks did not all pass'
+python3 scripts/product-security/check-java-results.py "$java_report"
 
 expect_case_set_rejection() {
   local label=$1

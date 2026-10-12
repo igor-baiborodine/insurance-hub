@@ -76,5 +76,8 @@ executed_count=$(
 if [[ "$executed_count" -eq 0 ]]; then
 	fail "suite $integration_suite selected zero tests"
 fi
+if [[ "$integration_suite" == access ]]; then
+	python3 ./scripts/check-access-results.py "$result_file"
+fi
 printf 'test-integration: suite=%s fixture-set=%s executed-tests=%s image=%s\n' \
 	"$integration_suite" "$fixture_set" "$executed_count" "$postgres_image"

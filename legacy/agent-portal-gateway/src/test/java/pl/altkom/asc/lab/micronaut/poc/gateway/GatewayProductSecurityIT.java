@@ -207,7 +207,8 @@ public class GatewayProductSecurityIT {
     void rejectedCredentialsStopAtGateway() throws IOException {
         // given
         Map<String, JsonNode> cases = rejectedCasesByID();
-        Instant reference = Instant.now();
+        Instant reference = Instant.now().plusSeconds(
+                Long.parseLong(System.getProperty("product.security.clock.offset.seconds", "0")));
 
         for (Map.Entry<String, JsonNode> entry : cases.entrySet()) {
             // given
@@ -262,7 +263,8 @@ public class GatewayProductSecurityIT {
     void givenAcceptedClaimVariants_thenCatalogResultsPreserved() throws IOException {
         // given
         Map<String, JsonNode> cases = acceptedCasesByID();
-        Instant reference = Instant.now();
+        Instant reference = Instant.now().plusSeconds(
+                Long.parseLong(System.getProperty("product.security.clock.offset.seconds", "0")));
 
         for (Map.Entry<String, JsonNode> entry : cases.entrySet()) {
             String id = entry.getKey();
