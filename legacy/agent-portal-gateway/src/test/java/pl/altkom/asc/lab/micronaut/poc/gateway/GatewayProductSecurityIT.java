@@ -25,11 +25,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.SecureRandom;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,6 +48,19 @@ public class GatewayProductSecurityIT {
     private static final Set<String> HOP_HEADERS = Set.of(
             "connection", "content-length", "host", "keep-alive", "proxy-authenticate",
             "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade");
+    private static final Set<String> REJECTED_CREDENTIALS = Set.of(
+            "missing", "malformed", "invalid-signature", "expired", "missing-subject");
+    private static final Map<String, String> REJECTED_CASES = Map.ofEntries(
+            Map.entry("ACCESS-GATEWAY-LIST-MISSING-001", "missing"),
+            Map.entry("ACCESS-GATEWAY-LIST-MALFORMED-001", "malformed"),
+            Map.entry("ACCESS-GATEWAY-LIST-SIGNATURE-001", "invalid-signature"),
+            Map.entry("ACCESS-GATEWAY-LIST-EXPIRED-001", "expired"),
+            Map.entry("ACCESS-GATEWAY-LIST-SUBJECT-001", "missing-subject"),
+            Map.entry("ACCESS-GATEWAY-GET-MISSING-001", "missing"),
+            Map.entry("ACCESS-GATEWAY-GET-MALFORMED-001", "malformed"),
+            Map.entry("ACCESS-GATEWAY-GET-SIGNATURE-001", "invalid-signature"),
+            Map.entry("ACCESS-GATEWAY-GET-EXPIRED-001", "expired"),
+            Map.entry("ACCESS-GATEWAY-GET-SUBJECT-001", "missing-subject"));
 
     private final ObjectMapper mapper = new ObjectMapper()
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
@@ -55,13 +72,17 @@ public class GatewayProductSecurityIT {
     private String goHTTP;
     private String bearerToken;
     private JsonNode acceptedAccess;
+    private JsonNode accessCases;
+    private JwtTokenGenerator tokenGenerator;
 
     @BeforeAll
     void setup() throws IOException {
         String endpointFile = System.getProperty("product.security.endpoint.file");
         String qaAccessFile = System.getProperty("product.security.qa.access.file");
+        String casesFile = System.getProperty("product.security.cases.file");
         assertThat(endpointFile).as("product.security.endpoint.file").isNotBlank();
         assertThat(qaAccessFile).as("product.security.qa.access.file").isNotBlank();
+        assertThat(casesFile).as("product.security.cases.file").isNotBlank();
         JsonNode endpoint;
         try (InputStream input = Files.newInputStream(Paths.get(endpointFile))) {
             endpoint = mapper.readTree(input);
@@ -78,6 +99,9 @@ public class GatewayProductSecurityIT {
             acceptedAccess = mapper.readTree(input);
         }
         assertThat(acceptedAccess.path("environment").asText()).isEqualTo("qa");
+        try (InputStream input = Files.newInputStream(Paths.get(casesFile))) {
+            accessCases = mapper.readTree(input);
+        }
 
         observer = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         observer.createContext("/products", this::forwardToGo);
@@ -94,8 +118,9 @@ public class GatewayProductSecurityIT {
                 Collections.singletonList("http://127.0.0.1:" + observer.getAddress().getPort()));
         properties.put("micronaut.security.token.jwt.signatures.secret.generator.secret", testSecret);
         gateway = ApplicationContext.run(EmbeddedServer.class, properties);
-        bearerToken = gateway.getApplicationContext().getBean(JwtTokenGenerator.class)
-                .generateToken(new UserDetails("security-smoke", Collections.singletonList("UNRELATED")), 300)
+        tokenGenerator = gateway.getApplicationContext().getBean(JwtTokenGenerator.class);
+        bearerToken = tokenGenerator
+                .generateToken(new UserDetails("security-smoke", Collections.singletonList("UNRELATED")), 600)
                 .orElseThrow(() -> new IllegalStateException("Could not generate disposable token"));
     }
 
@@ -139,6 +164,116 @@ public class GatewayProductSecurityIT {
         assertThat(observedHeaderNames.get()).isNotEmpty();
     }
 
+    @Test
+    void rejectedCredentialsStopAtGateway() throws IOException {
+        // given
+        Map<String, JsonNode> cases = rejectedCasesByID();
+        Instant reference = Instant.now();
+
+        for (Map.Entry<String, JsonNode> entry : cases.entrySet()) {
+            // given
+            String id = entry.getKey();
+            JsonNode testCase = entry.getValue();
+            String path = testCase.path("path").asText();
+            String credential = testCase.path("credential").asText();
+            assertThat(path).as("%s route", id).isEqualTo(
+                    id.contains("-LIST-") ? "/api/products" : "/api/products/TRI");
+            assertThat(credential).as("%s category", id).isEqualTo(REJECTED_CASES.get(id));
+            assertThat(testCase.path("expected").path("status").asInt()).as("%s fixture status", id)
+                    .isEqualTo(401);
+            assertThat(testCase.path("expected").path("rawBody").asText()).as("%s fixture body", id)
+                    .isEmpty();
+            assertThat(testCase.path("expected").path("contentType").asText()).as("%s fixture type", id)
+                    .isEmpty();
+            assertThat(testCase.path("expected").path("downstreamRequests").asInt())
+                    .as("%s fixture downstream count", id).isZero();
+            assertThat(Duration.between(reference, Instant.now()).abs())
+                    .as("%s bounded token clock drift", id).isLessThan(Duration.ofSeconds(120));
+            forwardedRequests.set(0);
+            observedHeaderNames.set(Collections.emptyList());
+
+            // when
+            RawResponse result = get(path, tokenFor(credential, reference));
+
+            // then
+            assertThat(result.status).as("%s status", id).isEqualTo(401);
+            assertThat(result.body).as("%s body", id).isEmpty();
+            assertThat(result.contentType).as("%s content type", id).isEmpty();
+            assertThat(forwardedRequests.get()).as("%s downstream calls", id).isZero();
+            assertThat(observedHeaderNames.get()).as("%s downstream headers", id).isEmpty();
+
+            // A valid call immediately after each rejection must still reach the real Go catalog.
+            forwardedRequests.set(0);
+            // when
+            RawResponse followingResult = get(path);
+            // then
+            assertThat(followingResult.status).as("%s following valid status", id).isEqualTo(200);
+            assertThat(forwardedRequests.get()).as("%s following valid downstream calls", id)
+                    .isEqualTo(1);
+            assertAcceptedBody(path, followingResult);
+        }
+    }
+
+    private Map<String, JsonNode> rejectedCasesByID() {
+        Map<String, JsonNode> cases = new LinkedHashMap<>();
+        for (JsonNode testCase : accessCases.path("cases")) {
+            String id = testCase.path("id").asText();
+            String credential = testCase.path("credential").asText();
+            if (!"gateway".equals(testCase.path("target").asText()) ||
+                    !(REJECTED_CREDENTIALS.contains(credential) || REJECTED_CASES.containsKey(id) ||
+                            testCase.path("expected").path("status").asInt() == 401)) {
+                continue;
+            }
+            if (cases.putIfAbsent(id, testCase) != null) {
+                throw new AssertionError("REJECTION_CASE_SET_MISMATCH duplicate=" + id);
+            }
+        }
+        if (!cases.keySet().equals(REJECTED_CASES.keySet())) {
+            throw new AssertionError("REJECTION_CASE_SET_MISMATCH expected=" + REJECTED_CASES.keySet()
+                    + " actual=" + cases.keySet());
+        }
+        return cases;
+    }
+
+    private String tokenFor(String credential, Instant reference) {
+        if ("missing".equals(credential)) {
+            return null;
+        }
+        if ("malformed".equals(credential)) {
+            return "not-a-jwt";
+        }
+        Map<String, Object> claims = new HashMap<>();
+        if (!"missing-subject".equals(credential)) {
+            claims.put("sub", "security-rejection");
+        }
+        claims.put("roles", Collections.singletonList("CAR"));
+        claims.put("iss", "auth-service");
+        claims.put("iat", Date.from(reference));
+        claims.put("nbf", Date.from(reference.minusSeconds(120)));
+        claims.put("exp", Date.from("expired".equals(credential)
+                ? reference.minusSeconds(300) : reference.plusSeconds(600)));
+        String token = tokenGenerator.generateToken(claims)
+                .orElseThrow(() -> new IllegalStateException("Could not generate disposable rejection token"));
+        if ("invalid-signature".equals(credential)) {
+            int signatureStart = token.lastIndexOf('.') + 1;
+            char original = token.charAt(signatureStart);
+            token = token.substring(0, signatureStart) + (original == 'A' ? 'B' : 'A')
+                    + token.substring(signatureStart + 1);
+        }
+        return token;
+    }
+
+    private void assertAcceptedBody(String path, RawResponse response) throws IOException {
+        assertThat(response.contentType).as("following valid content type").isEqualTo("application/json");
+        if ("/api/products".equals(path)) {
+            assertThat(normalizeList(mapper.readTree(response.body)))
+                    .isEqualTo(normalizeList(acceptedBody("ACCESS-GATEWAY-LIST-VALID-001")));
+        } else {
+            assertThat(mapper.readTree(response.body))
+                    .isEqualTo(acceptedBody("ACCESS-GATEWAY-GET-VALID-001"));
+        }
+    }
+
     private JsonNode acceptedBody(String scenarioID) throws IOException {
         for (JsonNode observation : acceptedAccess.path("observations")) {
             if (scenarioID.equals(observation.path("scenarioId").asText())) {
@@ -156,11 +291,17 @@ public class GatewayProductSecurityIT {
     }
 
     private RawResponse get(String path) throws IOException {
+        return get(path, bearerToken);
+    }
+
+    private RawResponse get(String path, String token) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(gateway.getURL().toString() + path)
                 .openConnection();
         connection.setRequestMethod("GET");
         connection.setRequestProperty("Accept", "application/json");
-        connection.setRequestProperty("Authorization", "Bearer " + bearerToken);
+        if (token != null) {
+            connection.setRequestProperty("Authorization", "Bearer " + token);
+        }
         connection.setConnectTimeout(2000);
         connection.setReadTimeout(10000);
         try {

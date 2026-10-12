@@ -71,17 +71,44 @@ jq -e --argjson pid "$helper_pid" '
 ' "$endpoint_file" >/dev/null || fail 'invalid Go endpoint handshake'
 
 qa_access="$repo_root/legacy/product-service/src/test/resources/product-read-baseline/access/qa.json"
+cases_file="$repo_root/legacy/product-service/src/test/resources/product-read-baseline/access/cases.json"
 timeout 150s mvn -B -ntp -f legacy/agent-portal-gateway/pom.xml \
   -Dskip.surefire.tests=true \
-  -Dit.test=GatewayProductSecurityIT#happyPath \
+  -Dit.test=GatewayProductSecurityIT \
   -Dproduct.security.endpoint.file="$endpoint_file" \
   -Dproduct.security.qa.access.file="$qa_access" \
+  -Dproduct.security.cases.file="$cases_file" \
   verify >"$java_log" 2>&1 || {
     tail -n 65 "$java_log" >&2
     fail 'healthy gateway-to-Go smoke test failed'
   }
-grep -q 'Tests run: 1, Failures: 0, Errors: 0, Skipped: 0' "$java_log" || \
-  fail 'healthy gateway smoke test did not execute exactly one passing test'
+grep -q 'Tests run: 2, Failures: 0, Errors: 0, Skipped: 0' "$java_log" || \
+  fail 'gateway smoke and rejection matrix did not both pass'
+
+expect_case_set_rejection() {
+  local label=$1
+  local altered_file=$2
+  if timeout 90s mvn -B -ntp -f legacy/agent-portal-gateway/pom.xml \
+    -Dskip.surefire.tests=true \
+    -Dit.test=GatewayProductSecurityIT#rejectedCredentialsStopAtGateway \
+    -Dproduct.security.endpoint.file="$endpoint_file" \
+    -Dproduct.security.qa.access.file="$qa_access" \
+    -Dproduct.security.cases.file="$altered_file" \
+    verify >"$java_log" 2>&1; then
+    fail "$label omission did not fail the rejection case-set guard"
+  fi
+  if ! grep -q 'REJECTION_CASE_SET_MISMATCH' "$java_log"; then
+    tail -n 30 "$java_log" >&2
+    fail "$label omission failed outside the rejection case-set guard"
+  fi
+}
+
+jq 'del(.cases[] | select(.id == "ACCESS-GATEWAY-LIST-EXPIRED-001"))' \
+  "$cases_file" >"$work_dir/missing-category.json"
+expect_case_set_rejection 'rejection category' "$work_dir/missing-category.json"
+jq 'del(.cases[] | select(.target == "gateway" and .path == "/api/products/TRI"
+  and .expected.status == 401))' "$cases_file" >"$work_dir/missing-route.json"
+expect_case_set_rejection 'gateway get route' "$work_dir/missing-route.json"
 
 touch "$work_dir/stop"
 for _ in {1..350}; do
@@ -117,6 +144,7 @@ if timeout 90s mvn -B -ntp -f legacy/agent-portal-gateway/pom.xml \
   -Dit.test=GatewayProductSecurityIT#happyPath \
   -Dproduct.security.endpoint.file="$endpoint_file" \
   -Dproduct.security.qa.access.file="$qa_access" \
+  -Dproduct.security.cases.file="$cases_file" \
   verify >"$java_log" 2>&1; then
   fail 'healthy gateway assertion passed after Go stopped'
 fi
@@ -125,4 +153,4 @@ grep -q 'PRODUCT_SECURITY_SMOKE_LIST_START' "$java_log" || \
 grep -Eq 'Tests run: 1, Failures: [1-9]|Tests run: 1, Failures: 0, Errors: [1-9]' "$java_log" || \
   fail 'Go-absent run failed outside the expected test assertion'
 
-printf 'product-security-test: real gateway list/get and anonymous gRPC passed; Go-absent rerun failed; listeners and container released\n'
+printf 'product-security-test: real gateway list/get, ten rejections, and anonymous gRPC passed; omission guards and Go-absent rerun failed as expected; resources released\n'
