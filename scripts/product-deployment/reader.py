@@ -20,7 +20,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 ROLE = "go_product_reader"
 DATABASE = "product"
-CA_MOUNT = "/var/run/secrets/insurance-hub/product-db-ca/ca.crt"
+CA_MOUNT = "/etc/product-service/postgres/ca.crt"
 ENVIRONMENTS = {
     "local-dev": ("kind-local-dev-insurance-hub", "local-dev-all", "local-dev-all"),
     "qa": ("qa-insurance-hub", "qa-data", "qa-svc"),
@@ -322,39 +322,49 @@ class Kubernetes:
             passfile.write_text(f"{self.hostname}:*:{DATABASE}:{ROLE}:{password.replace('\\', '\\\\').replace(':', '\\:')}\n")
             cert.chmod(0o600)
             passfile.chmod(0o600)
-            with socket.socket() as sock:
-                sock.bind(("127.0.0.1", 0))
-                port = sock.getsockname()[1]
-            proc = subprocess.Popen(["kubectl", f"--context={self.context}", "-n", self.data_ns,
-                                     "port-forward", f"pod/{self.primary}", f"{port}:5432",
-                                     "--address=127.0.0.1"], stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.DEVNULL)
-            try:
-                for _ in range(40):
-                    if proc.poll() is not None:
-                        raise RoleError("reader port-forward ended before connection")
-                    with socket.socket() as check:
-                        check.settimeout(0.1)
-                        if check.connect_ex(("127.0.0.1", port)) == 0:
-                            break
-                    time.sleep(0.1)
-                else:
-                    raise RoleError("reader port-forward did not become ready")
-                options = (f"host={self.hostname} hostaddr=127.0.0.1 port={port} dbname={DATABASE} "
-                           f"user={ROLE} sslmode=verify-full sslrootcert={cert}")
-                environment = {key: value for key, value in os.environ.items()
-                               if not key.startswith("PG")}
-                environment.update(PGPASSFILE=str(passfile), PGCONNECT_TIMEOUT="5")
-                yield lambda sql: command(["psql", "-X", "-q", "-A", "-t", "-v",
-                                           "ON_ERROR_STOP=1", "-d", options],
-                                          input_text=sql, env=environment)
-            finally:
-                proc.terminate()
+
+            def execute(sql: str) -> str:
+                with socket.socket() as sock:
+                    sock.bind(("127.0.0.1", 0))
+                    port = sock.getsockname()[1]
+                proc = subprocess.Popen(
+                    ["kubectl", f"--context={self.context}", "-n", self.data_ns,
+                     "port-forward", f"pod/{self.primary}", f"{port}:5432",
+                     "--address=127.0.0.1"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
                 try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(timeout=5)
+                    for _ in range(40):
+                        if proc.poll() is not None:
+                            raise RoleError("reader port-forward ended before connection")
+                        with socket.socket() as check:
+                            check.settimeout(0.1)
+                            if check.connect_ex(("127.0.0.1", port)) == 0:
+                                break
+                        time.sleep(0.1)
+                    else:
+                        raise RoleError("reader port-forward did not become ready")
+                    options = (f"host={self.hostname} hostaddr=127.0.0.1 port={port} "
+                               f"dbname={DATABASE} user={ROLE} sslmode=verify-full "
+                               f"sslrootcert={cert}")
+                    environment = {key: value for key, value in os.environ.items()
+                                   if not key.startswith("PG")}
+                    environment.update(PGPASSFILE=str(passfile), PGCONNECT_TIMEOUT="5")
+                    return command(["psql", "-X", "-q", "-A", "-t", "-v",
+                                    "ON_ERROR_STOP=1", "-d", options],
+                                   input_text=sql, env=environment)
+                finally:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=5)
+
+            # Each SQL operation uses a fresh bounded forward. Some Kubernetes transports close
+            # a port-forward after its first database connection; verification performs several
+            # independent probes and must not assume that tunnel remains reusable.
+            yield execute
 
 
 def verify_reader(runtime, *, safe: bool = True) -> None:

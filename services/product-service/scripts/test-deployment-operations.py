@@ -15,10 +15,24 @@ import deployment  # noqa: E402
 
 
 class DeploymentGuardTests(unittest.TestCase):
+    def test_probe_comparison_accepts_only_the_known_server_default(self) -> None:
+        declared = {"httpGet": {"path": "/livez", "port": "management"},
+                    "failureThreshold": 30}
+        self.assertTrue(deployment.matching_probe(declared, declared))
+        self.assertTrue(deployment.matching_probe({**declared, "successThreshold": 1}, declared))
+        self.assertFalse(deployment.matching_probe({**declared, "successThreshold": 2}, declared))
+        self.assertFalse(deployment.matching_probe({**declared, "periodSeconds": 3}, declared))
+
+    def test_stopped_endpoint_slice_may_have_null_endpoints(self) -> None:
+        endpoints = {"items": [{"endpoints": None}]}
+        self.assertFalse(any(endpoint.get("conditions", {}).get("ready") is True
+                             for item in endpoints["items"]
+                             for endpoint in (item.get("endpoints") or [])))
+
     def test_rendered_local_inventory_and_image_pin(self) -> None:
         values = {"DEPLOY_ENV": "local-dev", "DEPLOY_CONTEXT": "kind-local-dev-insurance-hub",
                   "DEPLOY_SVC_NS": "local-dev-all", "DEPLOY_DATA_NS": "local-dev-all",
-                  "DEPLOY_IMAGE_REF": "insurance-hub-product-api:git-cbe942ab9328"}
+                  "DEPLOY_IMAGE_REF": "insurance-hub-product-api:git-00dab628c9cd"}
         with patch.dict(os.environ, values):
             target = deployment.Target()
             yaml, items, image = target.rendered()

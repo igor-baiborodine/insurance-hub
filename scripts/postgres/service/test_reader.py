@@ -8,6 +8,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -101,6 +102,14 @@ def secret_adapter_test():
           "Secret roundtrip changed protected data")
 
 
+def deployment_ca_contract_test():
+    deployment = (ROOT / "k8s/apps/svc/product/base/deployment.yaml").read_text()
+    match = re.search(r"- name: postgres-ca\n\s+mountPath: (\S+)", deployment)
+    check(match is not None, "Product Deployment has no postgres-ca mount")
+    check(reader.CA_MOUNT == f"{match.group(1)}/ca.crt",
+          "reader URL CA path differs from the Product Deployment mount")
+
+
 def forward_cleanup_test():
     manager = object.__new__(reader.Kubernetes)
     manager.context = "kind-local-dev-insurance-hub"
@@ -123,8 +132,9 @@ def forward_cleanup_test():
     process = FailedForward()
     with patch.object(reader.subprocess, "Popen", return_value=process):
         try:
-            with manager.connection("a" * 64, b"-----BEGIN CERTIFICATE-----\ntest\n"):
-                raise AssertionError("failed port-forward entered reader operation")
+            with manager.connection("a" * 64, b"-----BEGIN CERTIFICATE-----\ntest\n") as runtime:
+                runtime("SELECT 1")
+                raise AssertionError("failed port-forward executed reader operation")
         except reader.RoleError:
             pass
     check(process.terminated, "failed port-forward was not cleaned up")
@@ -183,7 +193,6 @@ class DisposableProduct:
                                         timeout=15, env=env)
                 if result.returncode:
                     raise reader.RoleError("disposable reader SQL rejected")
-                import re
                 probe = re.search(r"reader-probe-state:([0-9A-Z]{5})", result.stderr)
                 return result.stdout.strip() + ("\nreader-probe-state:" + probe.group(1)
                                                 if probe else "")
@@ -396,5 +405,6 @@ RESET ROLE;
 if __name__ == "__main__":
     dispatch_guards()
     secret_adapter_test()
+    deployment_ca_contract_test()
     forward_cleanup_test()
     disposable_test()

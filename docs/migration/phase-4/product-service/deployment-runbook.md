@@ -224,8 +224,10 @@ A role without its Secret is a recovery condition, not permission to silently ge
 
 Verification opens a new connection using the actual Secret, checks effective identity and
 privileges, performs reads and rollback-safe denial probes, and proves Java owner reads and
-unchanged schema/catalog identity. Destructive denial tests belong only to the disposable suite.
-Never use the security fixture-loading harness against these shared databases.
+unchanged schema/catalog identity. Each SQL operation owns a fresh bounded loopback port-forward
+and cleans it up because a cluster transport may close a tunnel after one database connection.
+Destructive denial tests belong only to the disposable suite. Never use the security
+fixture-loading harness against these shared databases.
 
 ## Local-dev deployment and verification
 

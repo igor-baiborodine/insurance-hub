@@ -87,6 +87,16 @@ def matching_volumes(actual: Any, expected: Any) -> bool:
     return True
 
 
+def matching_probe(actual: Any, expected: Any) -> bool:
+    if actual == expected:
+        return True
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    declared_with_defaults = dict(expected)
+    declared_with_defaults.setdefault("successThreshold", 1)
+    return actual == declared_with_defaults
+
+
 class Target:
     def __init__(self) -> None:
         self.environment = os.environ.get("DEPLOY_ENV", "")
@@ -198,8 +208,12 @@ class Target:
             require(len(live_containers) == 1,
                     "live Go Deployment has an unexpected container inventory")
             for field in ("name", "securityContext", "ports", "env", "volumeMounts", "resources",
-                          "startupProbe", "livenessProbe", "readinessProbe", "imagePullPolicy"):
+                          "imagePullPolicy"):
                 require(live_containers[0].get(field) == desired_template["containers"][0].get(field),
+                        f"live Go Deployment container {field} differs from rendered settings")
+            for field in ("startupProbe", "livenessProbe", "readinessProbe"):
+                require(matching_probe(live_containers[0].get(field),
+                                       desired_template["containers"][0].get(field)),
                         f"live Go Deployment container {field} differs from rendered settings")
             actual_env_from = live_containers[0].get("envFrom")
             desired_env_from = desired_template["containers"][0].get("envFrom")
@@ -280,8 +294,12 @@ class Target:
             containers = spec.get("containers", [])
             require(len(containers) == 1, "Go Pod has an unexpected container inventory")
             for field in ("securityContext", "ports", "env", "volumeMounts", "resources",
-                          "startupProbe", "livenessProbe", "readinessProbe", "imagePullPolicy"):
+                          "imagePullPolicy"):
                 require(containers[0].get(field) == desired_spec["containers"][0].get(field),
+                        f"Go Pod {field} differs from rendered settings")
+            for field in ("startupProbe", "livenessProbe", "readinessProbe"):
+                require(matching_probe(containers[0].get(field),
+                                       desired_spec["containers"][0].get(field)),
                         f"Go Pod {field} differs from rendered settings")
             if require_deployment:
                 statuses = pod.get("status", {}).get("containerStatuses", [])
@@ -292,7 +310,7 @@ class Target:
         slices = self.json("get", "endpointslices", "-l", f"kubernetes.io/service-name={self.business}")
         if require_deployment:
             require(any(endpoint.get("conditions", {}).get("ready") is True for item in
-                        slices.get("items", []) for endpoint in item.get("endpoints", [])),
+                        slices.get("items", []) for endpoint in (item.get("endpoints") or [])),
                     "Go business Service has no ready endpoint")
         legacy_service = self.json("get", "service", self.prefix + "product-api-legacy")
         require(legacy_service.get("spec", {}).get("selector") == java_selector,
@@ -300,7 +318,7 @@ class Target:
         legacy_slices = self.json("get", "endpointslices", "-l",
                                   f"kubernetes.io/service-name={self.prefix}product-api-legacy")
         require(any(endpoint.get("conditions", {}).get("ready") is True for item in
-                    legacy_slices.get("items", []) for endpoint in item.get("endpoints", [])),
+                    legacy_slices.get("items", []) for endpoint in (item.get("endpoints") or [])),
                 "Java Product Service has no ready endpoint")
         gateway = self.json("get", "deployment", self.prefix + "agent-portal-gateway-legacy")
         gateway_spec = gateway.get("spec", {}).get("template", {}).get("spec", {})
@@ -533,7 +551,7 @@ def main() -> None:
         endpoints = target.json("get", "endpointslices", "-l",
                                 f"kubernetes.io/service-name={target.business}")
         require(not any(endpoint.get("conditions", {}).get("ready") is True for item in
-                        endpoints.get("items", []) for endpoint in item.get("endpoints", [])),
+                        endpoints.get("items", []) for endpoint in (item.get("endpoints") or [])),
                 "Go Service still has a ready endpoint after stop")
         java = target.json("get", "deployment", target.prefix + "product-api-legacy")
         require(java.get("status", {}).get("readyReplicas", 0) > 0,

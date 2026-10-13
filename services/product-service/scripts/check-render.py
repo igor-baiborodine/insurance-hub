@@ -314,8 +314,10 @@ def validate_go_environment(
         ],
         f"{environment} reader Secret CA reference is incorrect",
     )
+    expected_credential_revision = "rotation-20261013T1450Z" if environment == "local-dev" else "1"
     require(
-        pod_metadata.get("annotations", {}).get("insurance-hub.io/product-reader-credential-revision") == "1",
+        pod_metadata.get("annotations", {}).get("insurance-hub.io/product-reader-credential-revision")
+        == expected_credential_revision,
         f"{environment} credential rollout revision is missing",
     )
     validate_probe(container, "startupProbe", "/livez", 2, 30)

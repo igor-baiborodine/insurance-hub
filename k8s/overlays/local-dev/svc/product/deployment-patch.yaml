@@ -4,6 +4,9 @@ metadata:
   name: product-api
 spec:
   template:
+    metadata:
+      annotations:
+        insurance-hub.io/product-reader-credential-revision: "rotation-20261013T1450Z"
     spec:
       containers:
         - name: product-api
