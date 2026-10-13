@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 from copy import deepcopy
 import hashlib
+from http.client import RemoteDisconnected
 import json
 import os
 from pathlib import Path
@@ -232,7 +233,7 @@ def verify_inflight_drain(cluster: Cluster, database: str, pod: str) -> None:
                                          timeout=0.3) as response:
                                 if response.status != 200:
                                     break
-                        except (HTTPError, URLError, TimeoutError):
+                        except (HTTPError, URLError, TimeoutError, RemoteDisconnected):
                             break
                         time.sleep(0.05)
                     else:
