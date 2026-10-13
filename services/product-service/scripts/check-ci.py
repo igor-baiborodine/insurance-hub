@@ -19,6 +19,8 @@ def validate(checks: dict, release: dict, modules: dict) -> None:
     require(checks['permissions'] == {'contents': 'read', 'packages': 'read'},
             'PR permissions must be read-only')
     job = checks['jobs']['validate']
+    require(job.get('name') == 'Validate Product image and deployment tooling',
+            'Product deployment job display name differs')
     require(job['runs-on'] == 'ubuntu-24.04' and 'permissions' not in job and 'environment' not in job,
             'PR job may not elevate permissions or use deployment environment')
     for event in ('push', 'pull_request'):
@@ -70,6 +72,8 @@ def validate(checks: dict, release: dict, modules: dict) -> None:
             'recovery dispatch must require an explicit revision')
     require(release['permissions'] == {'contents': 'read'}, 'release default permissions changed')
     publish = release['jobs']['release']
+    require(publish.get('name') == 'Release Product image and QA digest',
+            'Product release job display name differs')
     require(publish['permissions'] == {'contents': 'write', 'packages': 'write'},
             'release privileges differ')
     require(publish['if'] == "github.ref == 'refs/heads/main' && github.repository == 'igor-baiborodine/insurance-hub'",
@@ -120,10 +124,12 @@ def main() -> None:
                                ('product-deployment.yml', 'product-image-release.yml', 'go-modules.yml'))
     validate(checks, release, modules)
     corruptions = [
+        lambda c, r: c['jobs']['validate'].update(name='Build'),
         lambda c, r: c['permissions'].update(packages='write'),
         lambda c, r: c['on']['pull_request']['paths'].remove('scripts/postgres/**'),
         lambda c, r: c['jobs']['validate']['steps'].append({'run': 'make go-svc-image-publish SVC_NAME=product'}),
         lambda c, r: r['on']['push']['paths'].append('k8s/overlays/qa/svc/product/**'),
+        lambda c, r: r['jobs']['release'].update(name='Release'),
         lambda c, r: r['jobs']['release'].update({'if': 'true'}),
     ]
     for corrupt in corruptions:
@@ -134,7 +140,7 @@ def main() -> None:
         except ValueError:
             continue
         raise ValueError('controlled workflow corruption was accepted')
-    print('check-ci: workflow YAML, permissions, triggers, Make boundaries and five corruptions passed')
+    print('check-ci: workflow names, YAML, permissions, triggers, Make boundaries and seven corruptions passed')
 
 
 if __name__ == '__main__':
