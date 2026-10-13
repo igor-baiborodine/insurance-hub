@@ -26,6 +26,11 @@ ENV = {"RELEASE_REVISION": REVISION, "RELEASE_VERSION": VERSION, "RELEASE_TAG": 
 
 
 class ReleaseTests(unittest.TestCase):
+    def setUp(self) -> None:
+        source_root = patch.object(release, "SOURCE_ROOT", release.ROOT)
+        source_root.start()
+        self.addCleanup(source_root.stop)
+
     def details(self, revision: str = REVISION, image_id: str = IMAGE_ID) -> str:
         return json.dumps([{"Id": image_id, "Os": "linux", "Architecture": "amd64",
                             "RepoDigests": [release.REGISTRY + "@" + DIGEST],
