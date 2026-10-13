@@ -307,7 +307,7 @@ spec:
   template:
     metadata:
       annotations:
-        insurance-hub.io/reader-credential-revision: "rotation-<UTC-change-id>"
+        insurance-hub.io/product-reader-credential-revision: "rotation-<UTC-change-id>"
 ```
 
 Choose a new revision for each rotation/restoration. Review that change before rotating, especially
