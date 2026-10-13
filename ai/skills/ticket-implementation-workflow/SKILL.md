@@ -3,6 +3,20 @@ name: ticket-implementation-workflow
 description: Use when implementing a ticket in this repository from start to finish. This workflow validates ticket readiness, creates a delivery-step artifact, implements step by step, and applies the ticket post-step workflow after each completed step.
 ---
 
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Ticket Implementation Workflow](#ticket-implementation-workflow)
+  - [Prerequisite](#prerequisite)
+  - [Workflow](#workflow)
+    - [1. Validate Ticket Readiness](#1-validate-ticket-readiness)
+    - [2. Produce The Detailed Plan](#2-produce-the-detailed-plan)
+    - [3. Implement Step By Step](#3-implement-step-by-step)
+    - [4. Apply Post-Step Workflow](#4-apply-post-step-workflow)
+  - [Completion Checklist](#completion-checklist)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Ticket Implementation Workflow
 
 Use this skill for ticket-based specification-first development work in Insurance Hub.
@@ -82,6 +96,9 @@ For each step:
 - prefer established repository patterns over inventing new ones
 - keep scope tight to the step at hand
 - validate the proposed implementation critically instead of accepting the first workable approach
+- For QA cluster, Flux, DNS, or registry-pull work, apply the repository
+  [QA cluster network recovery rule](../../rules/repo-rules.md#qa-cluster-network-recovery) before
+  classifying stale source or image state as a repository defect.
 
 ### 4. Apply Post-Step Workflow
 
