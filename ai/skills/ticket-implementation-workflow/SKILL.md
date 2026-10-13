@@ -59,6 +59,12 @@ Check for:
 - permissions and security requirements
 - acceptance criteria that can be tested
 
+For auxiliary Python work, load [the Python rules](../../rules/python-rules.md) and their linked
+development and validation rules. Establish why Python fits better than a simple shell workflow,
+identify the script owner and Make interface, and define target selection, mutation boundaries,
+rerun/recovery behavior, and secret handling where applicable. Do not turn a tooling request into
+a Python service or a wholesale shell rewrite.
+
 If information is missing or ambiguous:
 
 - stop implementation work
@@ -75,6 +81,11 @@ Once the ticket is implementation-ready:
 - make the steps granular enough to track progress and validate behavior incrementally
 - include a progress section
 - identify module boundaries, tests, and validation checkpoints
+
+For Python tooling, distinguish pure logic/fake-adapter tests, disposable integration tests, and
+any separately authorized live operations. Select checks through
+[Python validation](../../rules/python-validation.md); record missing targets or prerequisites
+without treating them as successful validation.
 
 ### 3. Implement Step By Step
 

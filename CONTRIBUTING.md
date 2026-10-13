@@ -11,6 +11,7 @@
     - [Create Kubernetes Cluster](#create-kubernetes-cluster)
   - [Style Guides](#style-guides)
     - [Go](#go)
+    - [Python Auxiliary Tooling](#python-auxiliary-tooling)
     - [Branch Names](#branch-names)
     - [Commit Messages](#commit-messages)
     - [Makefile](#makefile)
@@ -33,6 +34,8 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
 * **Git** `>=2.43.0`,
   see [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
 * **Go** `1.27.2` for the Go modules, see [Install Go](https://go.dev/doc/install).
+* **Python 3** for auxiliary tooling; use the minimum version documented by the affected tool
+  and its owning Make/CI configuration. See [Python Auxiliary Tooling](#python-auxiliary-tooling).
 * **Node.js** `12.22.12`, see [Install Node.js](https://nodejs.org/en/download/).
 * **Yarn** `1.22.22`, see [Install Yarn](https://classic.yarnpkg.com/en/docs/install).
 * **jq** `>=1.6`, see [Install jq](https://stedolan.github.io/jq/download/).
@@ -175,6 +178,30 @@ tools with `make -C services/product-service bootstrap-tools` before running the
 [Go module topology guide](docs/migration/phase-4/go-module-topology.md) defines exact local and CI
 commands, exclusions, mutation boundaries, consumer validation, and the reviewed onboarding
 process for future modules or workspaces.
+
+### Python Auxiliary Tooling
+
+Use Python for administrative automation, deployment helpers, structured-data validation, and
+test harnesses when substantial parsing, branching, state management, or recovery makes Bash
+difficult to maintain. Keep short, straightforward CLI sequences in Bash. Python supports the
+repository's tooling; service implementation follows the existing Java-to-Go migration.
+
+Follow the [Python rules](ai/rules/python-rules.md),
+[development guidance](ai/rules/python-development.md), and
+[validation guidance](ai/rules/python-validation.md). Keep scripts with their existing owner,
+prefer the standard library, and document interpreter requirements. Additional packages need a
+concrete purpose and reproducible, isolated setup; do not install them into system Python.
+
+Use the owning Makefile targets for repeatable development, validation, and administrative
+operations. Read their prerequisites, supported variables, and side effects before running them.
+Keep explicit target selection, secret handling, timeouts, cleanup, and partial-failure recovery
+in the implementation. Administrative tools and elevated credentials belong outside application
+runtime images and startup paths.
+
+Test changed behavior and failure paths through the relevant Make targets, using disposable
+resources for mutation tests. For database administration, derive allowed and denied operations
+from each role profile's contract, including reader, writer, or migrator profiles. Record the
+limits of fake-adapter and disposable tests separately from live-environment evidence.
 
 ### Branch Names
 

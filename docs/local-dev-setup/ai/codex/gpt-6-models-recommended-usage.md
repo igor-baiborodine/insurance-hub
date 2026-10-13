@@ -1,12 +1,12 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents** 
 
 - [Recommended configuration](#recommended-configuration)
 - [Research and planning](#research-and-planning)
   - [A planning prompt pattern](#a-planning-prompt-pattern)
 - [Implementation](#implementation)
 - [Execution prompt](#execution-prompt)
+- [Python auxiliary tooling](#python-auxiliary-tooling)
 - [A practical model ladder](#a-practical-model-ladder)
 - [Verification pass](#verification-pass)
 
@@ -131,6 +131,37 @@ Rules:
 ```
 
 For IntelliJ AI Assistant, split a larger feature into small agent runs: domain/contracts first, then persistence/transport, then tests and verification. This improves reviewability and prevents an implementation run from consuming context and quota on unrelated parts of the repository.
+
+## Python auxiliary tooling
+
+Python supports administrative automation, deployment helpers, structured-data checks, and test
+harnesses where Bash becomes difficult to reason about. Keep short command sequences in Bash;
+service implementation continues to follow the Java-to-Go migration. The canonical
+[Python rules](../../../../ai/rules/python-rules.md),
+[development guidance](../../../../ai/rules/python-development.md), and
+[validation guidance](../../../../ai/rules/python-validation.md) define the repository policy.
+The existing ticket implementation and code-review skills apply to this work as well.
+
+Use this Python-specific addition to a planning or execution prompt:
+
+```text
+For the auxiliary tooling in this task, apply ai/rules/python-rules.md and both linked rules.
+Explain the Python-versus-Bash choice using the actual workflow. Identify the script owner,
+supported Python version, and owning Make targets before implementation.
+
+Keep administrative tooling separate from application runtime behavior. For state-changing
+operations, define explicit targets, authorization boundaries, idempotency, partial-failure
+recovery, subprocess timeouts/cleanup, and secret handling. Derive permissions from the selected
+role profile; do not assume every profile is a reader.
+
+Run the relevant Make-based checks with disposable resources where mutations are needed. Record
+what was tested, what used fake adapters, and what still requires live-environment evidence.
+```
+
+For a review prompt, ask for findings on those same boundaries and evidence. A small script can
+still carry consequential administrative permissions; assess the operation's impact and recovery
+requirements as well as its size. This section is a human-facing prompt aid, not another source
+of repository instructions.
 
 ## A practical model ladder
 
