@@ -1,10 +1,15 @@
 name: Product Image Release
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/product-service/**'
+      - '.github/workflows/product-image-release.yml'
   workflow_dispatch:
     inputs:
       revision:
-        description: 'Full 40-character commit SHA already merged to main'
+        description: 'Full Product source SHA on main to recover'
         required: true
         type: string
 
@@ -16,49 +21,119 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  release:
+    name: Release Product image and QA digest
     if: github.ref == 'refs/heads/main' && github.repository == 'igor-baiborodine/insurance-hub'
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 60
     permissions:
-      contents: read
+      contents: write
       packages: write
     env:
-      RELEASE_REVISION: ${{ inputs.revision }}
+      RELEASE_REVISION: ${{ github.event_name == 'workflow_dispatch' && inputs.revision || github.sha }}
     steps:
-      - name: Checkout trusted main history
+      - name: Checkout trusted canonical-main history
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
-          persist-credentials: false
-      - name: Verify merged revision before executing its code
+      - name: Verify the selected source before executing its code
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$RELEASE_REVISION" =~ ^[0-9a-f]{40}$ ]] || { echo 'A full commit SHA is required' >&2; exit 1; }
+          [[ "$RELEASE_REVISION" =~ ^[0-9a-f]{40}$ ]] || exit 1
           git merge-base --is-ancestor "$RELEASE_REVISION" origin/main
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            [[ "$GITHUB_SHA" == "$RELEASE_REVISION" ]] || exit 1
+          fi
           git checkout --detach "$RELEASE_REVISION"
-          make go-svc-image-release-check SVC_NAME=product
+      - name: Initialize external release workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/product-release"
+          echo "RELEASE_METADATA=$RUNNER_TEMP/product-release/image.json" >> "$GITHUB_ENV"
+          echo "RELEASE_NOTES=$RUNNER_TEMP/product-release/notes.md" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.13.0'
       - uses: actions/setup-go@v7
         with:
           go-version: '1.27.2'
           cache-dependency-path: services/product-service/go.sum
+      - name: Bootstrap pinned release validation tools
+        run: |
+          make go-product-bootstrap-tools
+          make -C services/product-service bootstrap-ci-tools
+          echo "$GITHUB_WORKSPACE/services/product-service/.tools/bin" >> "$GITHUB_PATH"
+      - name: Pass release automation and image gates before versioning
+        run: |
+          make go-svc-release-test SVC_NAME=product
+          make -C services/product-service check-ci
+          make go-svc-image-check SVC_NAME=product
+      - name: Calculate the next scoped Product version
+        id: monotag
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t existing_tags < <(git tag --points-at "$RELEASE_REVISION" \
+            --list 'services/product-service/v*')
+          if (( ${#existing_tags[@]} > 1 )); then
+            echo 'More than one Product release tag points at the selected revision' >&2
+            exit 1
+          elif (( ${#existing_tags[@]} == 1 )); then
+            existing_tag="${existing_tags[0]}"
+            existing_version="${existing_tag#services/product-service/v}"
+            [[ "$existing_version" =~ ^1\.[0-9]+\.[0-9]+$ ]] || exit 1
+            [[ "$(git cat-file -t "refs/tags/$existing_tag")" == tag ]] || exit 1
+            printf '%s\n' "$existing_tag" > "$RUNNER_TEMP/product-release/tag.txt"
+            printf '%s\n' "$existing_version" > "$RUNNER_TEMP/product-release/version.txt"
+            printf '# Product Go %s\n' "$existing_version" > "$RELEASE_NOTES"
+          else
+            npx -y monotag tag \
+              --repo-dir . \
+              --path services/product-service \
+              --prefix services/product-service/v \
+              --tag-file "$RUNNER_TEMP/product-release/tag.txt" \
+              --version-file "$RUNNER_TEMP/product-release/version.txt" \
+              --notes-file "$RELEASE_NOTES" \
+              --min-version 1.0.0 \
+              --max-version 1.999.999
+          fi
+          test -s "$RUNNER_TEMP/product-release/tag.txt"
+          test -s "$RUNNER_TEMP/product-release/version.txt"
+          echo "tag=$(cat "$RUNNER_TEMP/product-release/tag.txt")" >> "$GITHUB_OUTPUT"
+          echo "version=$(cat "$RUNNER_TEMP/product-release/version.txt")" >> "$GITHUB_OUTPUT"
+      - name: Validate the calculated release identity
+        env:
+          RELEASE_TAG: ${{ steps.monotag.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
+        run: make go-svc-image-release-check SVC_NAME=product
       - name: Log in to GHCR for this release only
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Validate, publish, and verify exact image digest
+      - name: Validate, publish, and verify both image tags
         env:
-          RELEASE_METADATA: ${{ runner.temp }}/product-image.json
+          RELEASE_TAG: ${{ steps.monotag.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
         run: make go-svc-image-publish SVC_NAME=product
-      - name: Preserve image identity for activation review
+      - name: Create release identities and update dormant QA digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.monotag.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
+        run: make go-svc-release-finalize SVC_NAME=product
+      - name: Preserve automatic release evidence
         uses: actions/upload-artifact@v7
         with:
-          name: product-image-${{ inputs.revision }}
-          path: ${{ runner.temp }}/product-image.json
+          name: product-release-${{ env.RELEASE_REVISION }}
+          path: |
+            ${{ runner.temp }}/product-release/image.json
+            ${{ runner.temp }}/product-release/notes.md
+            ${{ runner.temp }}/product-release/product-release-body.md
           if-no-files-found: error
       - name: Show release metadata
-        run: cat "$RUNNER_TEMP/product-image.json" >> "$GITHUB_STEP_SUMMARY"
+        run: cat "$RELEASE_METADATA" >> "$GITHUB_STEP_SUMMARY"

@@ -103,6 +103,21 @@ def matching_probe(actual: Any, expected: Any) -> bool:
     return actual == declared_with_defaults
 
 
+def pod_image_allowed(
+    pod: dict[str, Any], desired: str, previous: str, environment: str, require_deployment: bool
+) -> bool:
+    images = [container.get("image") for container in pod.get("spec", {}).get("containers", [])]
+    if images and all(image == desired for image in images):
+        return True
+    return bool(
+        images
+        and environment == "local-dev"
+        and previous
+        and all(image == previous for image in images)
+        and (not require_deployment or pod.get("metadata", {}).get("deletionTimestamp"))
+    )
+
+
 class Target:
     def __init__(self) -> None:
         self.environment = os.environ.get("DEPLOY_ENV", "")
@@ -276,13 +291,9 @@ class Target:
             spec = pod.get("spec", {})
             desired_spec = resource(items, "Deployment", self.deployment)["spec"]["template"]["spec"]
             pod_image = desired_spec["containers"][0]["image"]
-            allowed_images = {pod_image}
-            if not require_deployment and self.environment == "local-dev":
-                previous = os.environ.get("DEPLOY_PREVIOUS_IMAGE_REF", "")
-                if previous:
-                    allowed_images.add(previous)
-            require(all(container.get("image") in allowed_images for container in spec.get("containers", [])),
-                    "Go Pod image differs from rendered image")
+            previous = os.environ.get("DEPLOY_PREVIOUS_IMAGE_REF", "")
+            require(pod_image_allowed(pod, pod_image, previous, self.environment, require_deployment),
+                    "Go Pod image differs from rendered image or is not a declared terminating predecessor")
             require(not spec.get("hostNetwork") and not any("hostPort" in port for container in
                     spec.get("containers", []) for port in container.get("ports", [])),
                     "Go Pod has host networking or a host port")

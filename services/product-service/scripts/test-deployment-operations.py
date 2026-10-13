@@ -87,6 +87,17 @@ class DeploymentGuardTests(unittest.TestCase):
         actual[0]["secret"]["secretName"] = "java-owner"
         self.assertFalse(deployment.matching_volumes(actual, desired))
 
+    def test_declared_previous_image_is_allowed_only_during_local_termination(self) -> None:
+        desired = "insurance-hub-product-api:git-222222222222"
+        previous = "insurance-hub-product-api:git-111111111111"
+        pod = {"metadata": {}, "spec": {"containers": [{"image": previous}]}}
+        self.assertTrue(deployment.pod_image_allowed(pod, desired, previous, "local-dev", False))
+        self.assertFalse(deployment.pod_image_allowed(pod, desired, previous, "local-dev", True))
+        pod["metadata"]["deletionTimestamp"] = "2026-10-13T18:30:00Z"
+        self.assertTrue(deployment.pod_image_allowed(pod, desired, previous, "local-dev", True))
+        self.assertFalse(deployment.pod_image_allowed(pod, desired, previous, "qa", True))
+        self.assertFalse(deployment.pod_image_allowed(pod, desired, "", "local-dev", True))
+
     def test_reader_secret_guard_rejects_extra_key_before_docker(self) -> None:
         target = deployment.Target.__new__(deployment.Target)
         target.secret = "local-dev-postgres-product-reader-creds"

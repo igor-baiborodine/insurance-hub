@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit Product publication; Python 3.10+, standard library only."""
+"""Automatic Product release orchestration; Python 3.10+, standard library only."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[3]
 REGISTRY = "ghcr.io/igor-baiborodine/insurance-hub/product-api"
+REPOSITORY = "igor-baiborodine/insurance-hub"
+MANIFEST = ROOT / "k8s/overlays/qa/svc/product/kustomization.yaml"
 
 
 class ReleaseError(Exception):
@@ -23,12 +25,16 @@ def require(condition: bool, message: str) -> None:
         raise ReleaseError(message)
 
 
-def command(argv: list[str], timeout: int = 60) -> str:
+def execute(argv: list[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
     try:
-        result = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
-                                timeout=timeout, check=False)
+        return subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
+                              timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise ReleaseError(f"command unavailable or timed out: {argv[0]}") from error
+
+
+def command(argv: list[str], timeout: int = 60) -> str:
+    result = execute(argv, timeout)
     require(result.returncode == 0, f"command failed: {' '.join(argv[:3])}")
     return result.stdout.strip()
 
@@ -38,64 +44,242 @@ def clean() -> None:
             "release requires a clean checkout, including untracked files")
 
 
-def check() -> str:
+def release_inputs() -> tuple[str, str, str, str]:
     revision = os.environ.get("RELEASE_REVISION", "")
+    version = os.environ.get("RELEASE_VERSION", "")
+    tag = os.environ.get("RELEASE_TAG", "")
     require(bool(re.fullmatch(r"[0-9a-f]{40}", revision)),
             "RELEASE_REVISION must be a full lowercase commit SHA")
-    require(os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" and
+    require(bool(re.fullmatch(r"1\.[0-9]+\.[0-9]+", version)),
+            "RELEASE_VERSION must be a semantic 1.x version")
+    require(tag == f"services/product-service/v{version}",
+            "RELEASE_TAG does not match the Product scoped version")
+    short = command(["git", "rev-parse", "--short", "HEAD"])
+    require(bool(re.fullmatch(r"[0-9a-f]{7,40}", short)), "Git did not derive a unique short SHA")
+    return revision, version, tag, short
+
+
+def check() -> str:
+    event = os.environ.get("GITHUB_EVENT_NAME")
+    require(event in {"push", "workflow_dispatch"} and
             os.environ.get("GITHUB_REF") == "refs/heads/main" and
-            os.environ.get("GITHUB_REPOSITORY") == "igor-baiborodine/insurance-hub",
-            "publication requires an explicit workflow_dispatch from repository main")
+            os.environ.get("GITHUB_REPOSITORY") == REPOSITORY,
+            "publication requires a canonical main push or explicit recovery dispatch")
+    revision, _, _, _ = release_inputs()
     require(command(["git", "rev-parse", "HEAD"]) == revision,
             "checked-out HEAD differs from RELEASE_REVISION")
+    if event == "push":
+        require(os.environ.get("GITHUB_SHA") == revision,
+                "push release revision differs from the event revision")
     command(["git", "merge-base", "--is-ancestor", revision, "origin/main"])
     clean()
     return revision
 
 
-def publish() -> None:
-    revision = check()
+def metadata_path() -> Path:
     output = Path(os.environ.get("RELEASE_METADATA", ""))
     require(output.is_absolute() and output.parent.is_dir() and not output.exists(),
             "RELEASE_METADATA must be an unused absolute path in an existing directory")
     require(not output.is_relative_to(ROOT), "release metadata must be outside the checkout")
+    return output
+
+
+def image_details(reference: str) -> dict:
+    values = json.loads(command(["docker", "image", "inspect", reference]))
+    require(isinstance(values, list) and len(values) == 1, "image inspection returned an invalid result")
+    return values[0]
+
+
+def digest_from_image(details: dict) -> str:
+    matches = [value.split("@", 1)[1] for value in details.get("RepoDigests", [])
+               if value.startswith(REGISTRY + "@")]
+    require(len(set(matches)) == 1 and bool(matches), "image does not resolve to one registry digest")
+    digest = matches[0]
+    require(bool(re.fullmatch(r"sha256:[0-9a-f]{64}", digest)), "registry returned an invalid digest")
+    return digest
+
+
+def existing_tag(reference: str, image_id: str, revision: str) -> str | None:
+    probe = execute(["docker", "manifest", "inspect", reference])
+    if probe.returncode != 0:
+        diagnostic = (probe.stderr + probe.stdout).lower()
+        require("manifest unknown" in diagnostic or "no such manifest" in diagnostic,
+                "registry tag inspection failed; refusing to treat it as absent")
+        return None
+    command(["docker", "pull", "--platform", "linux/amd64", reference], timeout=300)
+    details = image_details(reference)
+    require(details.get("Id") == image_id and
+            details.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") == revision,
+            f"release tag collision: {reference} names a different image")
+    return digest_from_image(details)
+
+
+def push_tag(local: str, reference: str) -> str:
+    command(["docker", "tag", local, reference])
+    pushed = command(["docker", "push", reference], timeout=600)
+    digests = re.findall(r"digest: (sha256:[0-9a-f]{64})", pushed)
+    require(len(set(digests)) == 1 and bool(digests),
+            "push did not report one digest; inspect registry before retry")
+    return digests[0]
+
+
+def publish() -> None:
+    revision = check()
+    _, version, release_tag, short = release_inputs()
+    output = metadata_path()
     local = f"insurance-hub-product-api:git-{revision[:12]}"
-    tag = f"{REGISTRY}:sha-{revision}"
-    # Rebuild and exercise the image before any registry write. No mutable input tag is accepted.
+    references = [f"{REGISTRY}:{version}", f"{REGISTRY}:sha-{short}"]
+
+    # Validate the exact source before the first registry mutation.
     command(["make", "go-svc-image-check", "SVC_NAME=product"], timeout=1200)
     clean()
     image_id = command(["docker", "image", "inspect", "--format", "{{.Id}}", local])
     require(bool(re.fullmatch(r"sha256:[0-9a-f]{64}", image_id)), "invalid local image ID")
-    command(["docker", "tag", local, tag])
-    pushed = command(["docker", "push", tag], timeout=600)
-    digests = re.findall(r"digest: (sha256:[0-9a-f]{64})", pushed)
-    require(len(digests) == 1, "push did not report one digest; inspect registry before retry")
-    immutable = f"{REGISTRY}@{digests[0]}"
+
+    resolved = {reference: existing_tag(reference, image_id, revision) for reference in references}
+    for reference, digest in list(resolved.items()):
+        if digest is None:
+            resolved[reference] = push_tag(local, reference)
+    digests = set(resolved.values())
+    require(len(digests) == 1, "semantic and short-SHA tags do not resolve to the same digest")
+    digest = digests.pop()
+    immutable = f"{REGISTRY}@{digest}"
     command(["docker", "pull", "--platform", "linux/amd64", immutable], timeout=300)
-    pulled = json.loads(command(["docker", "image", "inspect", immutable]))[0]
-    require(pulled["Id"] == image_id and pulled["Os"] == "linux" and
-            pulled["Architecture"] == "amd64" and
-            pulled["Config"]["Labels"]["org.opencontainers.image.revision"] == revision,
+    pulled = image_details(immutable)
+    require(pulled.get("Id") == image_id and pulled.get("Os") == "linux" and
+            pulled.get("Architecture") == "amd64" and
+            pulled.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") == revision,
             "published digest does not match the validated image")
-    metadata = {"revision": revision, "tag": tag, "image": immutable,
-                "imageId": image_id, "platform": "linux/amd64"}
+    metadata = {"revision": revision, "version": version, "releaseTag": release_tag,
+                "semanticTag": references[0], "shaTag": references[1], "image": immutable,
+                "digest": digest, "imageId": image_id, "platform": "linux/amd64"}
     with output.open("x", encoding="utf-8") as stream:
         json.dump(metadata, stream, indent=2)
         stream.write("\n")
     print(json.dumps(metadata, sort_keys=True))
 
 
+def read_metadata() -> tuple[Path, dict]:
+    path = Path(os.environ.get("RELEASE_METADATA", ""))
+    require(path.is_absolute() and path.is_file() and not path.is_relative_to(ROOT),
+            "RELEASE_METADATA must identify the verified external metadata file")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    revision, version, tag, short = release_inputs()
+    expected = {"revision": revision, "version": version, "releaseTag": tag,
+                "semanticTag": f"{REGISTRY}:{version}", "shaTag": f"{REGISTRY}:sha-{short}"}
+    require(all(value.get(key) == item for key, item in expected.items()),
+            "release metadata differs from the selected release identity")
+    require(value.get("image") == f"{REGISTRY}@{value.get('digest', '')}" and
+            bool(re.fullmatch(r"sha256:[0-9a-f]{64}", value.get("digest", ""))),
+            "release metadata has an invalid immutable image")
+    return path, value
+
+
+def ensure_tag(tag: str, revision: str, version: str) -> None:
+    result = execute(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"])
+    if result.returncode == 0:
+        require(result.stdout.strip() == revision, "scoped Git tag collision")
+        require(command(["git", "cat-file", "-t", f"refs/tags/{tag}"]) == "tag",
+                "existing scoped Git tag is not annotated")
+        return
+    command(["git", "tag", "-a", tag, revision, "-m", f"Release Product Go {version}"])
+    command(["git", "push", "origin", f"refs/tags/{tag}"], timeout=120)
+
+
+def release_body(metadata: dict) -> Path:
+    notes = Path(os.environ.get("RELEASE_NOTES", ""))
+    require(notes.is_absolute() and notes.is_file() and not notes.is_relative_to(ROOT),
+            "RELEASE_NOTES must be an external monotag notes file")
+    body = notes.with_name("product-release-body.md")
+    require(not body.exists(), "release body path already exists")
+    text = notes.read_text(encoding="utf-8").rstrip() + (
+        f"\n\nSource revision: `{metadata['revision']}`\n\n"
+        f"Image: `{metadata['image']}`\n"
+    )
+    body.write_text(text, encoding="utf-8")
+    return body
+
+
+def ensure_github_release(tag: str, body: Path, revision: str, image: str) -> None:
+    result = execute(["gh", "release", "view", tag, "--repo", REPOSITORY,
+                      "--json", "tagName,body,isDraft,isPrerelease"])
+    if result.returncode == 0:
+        value = json.loads(result.stdout)
+        identity = f"Source revision: `{revision}`\n\nImage: `{image}`"
+        require(value.get("tagName") == tag and value.get("isDraft") is False and
+                value.get("isPrerelease") is False and identity in value.get("body", ""),
+                "existing GitHub Release differs from the accepted identity")
+        return
+    diagnostic = (result.stderr + result.stdout).lower()
+    require("release not found" in diagnostic or "http 404" in diagnostic,
+            "GitHub Release inspection failed; refusing to treat it as absent")
+    command(["gh", "release", "create", tag, "--repo", REPOSITORY, "--verify-tag",
+             "--title", tag, "--notes-file", str(body)], timeout=120)
+
+
+def desired_manifest(text: str, digest: str) -> str:
+    pattern = re.compile(
+        r"(?m)^(    newName: " + re.escape(REGISTRY) +
+        r"\n)    (?:newTag: [^\n]+|digest: sha256:[0-9a-f]{64})$"
+    )
+    updated, count = pattern.subn(r"\1    digest: " + digest, text)
+    require(count == 1, "QA Product overlay image stanza is missing or ambiguous")
+    return updated
+
+
+def update_manifest(metadata: dict) -> None:
+    revision = metadata["revision"]
+    digest = metadata["digest"]
+    version = metadata["version"]
+    command(["git", "fetch", "origin", "main"], timeout=120)
+    relative = str(MANIFEST.relative_to(ROOT))
+    remote_text = command(["git", "show", f"origin/main:{relative}"]) + "\n"
+    wanted = desired_manifest(remote_text, digest)
+    if wanted == remote_text:
+        subject = command(["git", "log", "-1", "--format=%s", "origin/main", "--", relative])
+        require(subject == f"chore(k8s): update Product Go image to {version}",
+                "existing QA digest was not written by this release identity")
+        return
+    newer_product = command(["git", "diff", "--name-only", f"{revision}..origin/main", "--",
+                             "services/product-service", ".github/workflows/product-image-release.yml"])
+    require(not newer_product, "main contains a newer Product release source; refusing a stale digest update")
+    command(["git", "checkout", "--detach", "origin/main"])
+    MANIFEST.write_text(wanted, encoding="utf-8")
+    command(["make", "go-svc-deploy-check", "SVC_NAME=product"], timeout=180)
+    command(["git", "add", relative])
+    staged = command(["git", "diff", "--cached", "--name-only"])
+    require(staged == relative, "release attempted to stage an unexpected path")
+    command(["git", "config", "user.name", "github-actions[bot]"])
+    command(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"])
+    command(["git", "commit", "-m", f"chore(k8s): update Product Go image to {version}"])
+    command(["git", "push", "origin", "HEAD:main"], timeout=120)
+
+
+def finalize() -> None:
+    check()
+    _, metadata = read_metadata()
+    revision, version, tag, _ = release_inputs()
+    body = release_body(metadata)
+    ensure_tag(tag, revision, version)
+    ensure_github_release(tag, body, revision, metadata["image"])
+    update_manifest(metadata)
+    print(f"product-release: finalized {tag} at {metadata['image']}")
+
+
 def main() -> None:
-    require(len(sys.argv) == 2 and sys.argv[1] in {"check", "publish"}, "unknown release action")
+    require(len(sys.argv) == 2 and sys.argv[1] in {"check", "publish", "finalize"},
+            "unknown release action")
     if sys.argv[1] == "check":
-        print(f"product-release: verified merged revision {check()}")
-    else:
+        print(f"product-release: verified source revision {check()}")
+    elif sys.argv[1] == "publish":
         publish()
+    else:
+        finalize()
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (ReleaseError, OSError, ValueError, KeyError, IndexError) as error:
+    except (ReleaseError, OSError, ValueError, KeyError, IndexError, json.JSONDecodeError) as error:
         print(f"product-release: {error}", file=sys.stderr)
         sys.exit(1)

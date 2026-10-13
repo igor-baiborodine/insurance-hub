@@ -325,9 +325,11 @@ the core.
 The [Product Go deployment runbook](../../docs/migration/phase-4/product-service/deployment-runbook.md)
 owns image publication, local-dev/QA prerequisites, reader provisioning, rollout/rotation recovery,
 and Go-only stop/restoration. Use root `go-svc-* SVC_NAME=product` targets and separate
-`postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader` operations. PR checks build and test;
-**Product Image Release** is explicitly dispatched for a merged SHA and records a verified GHCR
-digest without changing QA manifests. QA activation remains a reviewed Git/Flux operation.
+`postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader` operations. PR checks build and test.
+For qualifying Product changes merged to canonical `main`, **Product Image Release** automatically
+creates the scoped semantic release, publishes semantic and unique short-SHA image tags, verifies
+their shared immutable digest, and commits that digest to the dormant QA overlay. QA activation
+remains a separate reviewed Git/Flux operation.
 
 **Product Deployment Validation** runs the image, overlay, role, and disposable lifecycle gates.
 It complements the existing module and combined security workflows. Its runner-only
@@ -335,4 +337,5 @@ It complements the existing module and combined security workflows. Its runner-o
 disposable namespace in the existing local Kind cluster. Neither establishes shared-environment
 acceptance. `make -C services/product-service bootstrap-ci-tools` installs the pinned CI helpers;
 `check-ci` checks workflow permissions/triggers, and `go-svc-release-test SVC_NAME=product` proves
-release and runner setup failure boundaries using fake external commands.
+release identity, ordering, collision, retry, manifest-update, and runner setup boundaries using
+fake external commands.

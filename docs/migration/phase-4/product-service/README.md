@@ -408,7 +408,8 @@ not a general security recommendation.
 ## Deployment operations
 
 The [Product Go deployment runbook](deployment-runbook.md) documents the #134 foundation,
-explicit merged-revision image release, separate QA activation, reader lifecycle, verification,
-and recovery. The foundation keeps Go outside QA reconciliation. Follow its evidence boundaries:
+automatic scoped release and QA digest update, separate QA activation, reader lifecycle,
+verification, and recovery. The release automation keeps Go outside QA reconciliation until the
+activation PR. Follow its evidence boundaries:
 disposable and CI checks do not establish live local-dev or QA acceptance, and existing gateway
 traffic remains on Java until #137.
