@@ -108,10 +108,9 @@ def validate(checks: dict, release: dict, modules: dict) -> None:
     require('make go-svc-release-finalize SVC_NAME=product' in commands,
             'release must finalize through the owning Make interface')
     source_image_check = 'make -C "$PRODUCT_RELEASE_SOURCE_ROOT" go-svc-image-check SVC_NAME=product'
-    require(source_image_check in commands,
-            'selected source worktree must own image validation')
+    require(source_image_check not in commands,
+            'workflow must not duplicate selected source validation owned by the publisher')
     require(commands.index('make go-svc-release-test') < commands.index('npx -y monotag tag') and
-            commands.index(source_image_check) < commands.index('npx -y monotag tag') and
             commands.index('make go-svc-image-release-check') < commands.index('make go-svc-image-publish') <
             commands.index('make go-svc-release-finalize'), 'release gate or mutation order differs')
     require('git config user.name "github-actions[bot]"' in commands and

@@ -68,11 +68,10 @@ jobs:
           make go-product-bootstrap-tools
           make -C services/product-service bootstrap-ci-tools
           echo "$GITHUB_WORKSPACE/services/product-service/.tools/bin" >> "$GITHUB_PATH"
-      - name: Pass release automation and image gates before versioning
+      - name: Pass release automation gates before versioning
         run: |
           make go-svc-release-test SVC_NAME=product
           make -C services/product-service check-ci
-          make -C "$PRODUCT_RELEASE_SOURCE_ROOT" go-svc-image-check SVC_NAME=product
       - name: Calculate the next scoped Product version
         id: monotag
         shell: bash
