@@ -16,7 +16,8 @@ def require(condition: bool, message: str) -> None:
 
 def validate(checks: dict, release: dict, modules: dict) -> None:
     require(set(checks['on']) == {'push', 'pull_request'}, 'checks must use push and pull_request only')
-    require(checks['permissions'] == {'contents': 'read'}, 'PR permissions must be read-only')
+    require(checks['permissions'] == {'contents': 'read', 'packages': 'read'},
+            'PR permissions must be read-only')
     job = checks['jobs']['validate']
     require(job['runs-on'] == 'ubuntu-24.04' and 'permissions' not in job and 'environment' not in job,
             'PR job may not elevate permissions or use deployment environment')
@@ -39,8 +40,17 @@ def validate(checks: dict, release: dict, modules: dict) -> None:
             require(any(fnmatchcase(example, pattern) for pattern in paths), f'uncovered {event} path: {example}')
         require('docs/migration/phase-4/product-service/**' in modules['on'][event]['paths'],
                 'module documentation gate must include runbook')
+    java_steps = [step for step in job['steps'] if step.get('uses') == 'actions/setup-java@v5']
+    require(len(java_steps) == 1 and java_steps[0].get('with') == {
+        'java-version': '14', 'distribution': 'zulu', 'cache': 'maven', 'server-id': 'github',
+        'server-username': 'GITHUB_ACTOR', 'server-password': 'GITHUB_TOKEN'},
+        'PR checks must pin Java 14 and configure Maven package access')
+    require(job.get('env') == {'GITHUB_TOKEN': '${{ secrets.GITHUB_TOKEN }}'},
+            'PR Maven package token wiring differs')
     runs = '\n'.join(step.get('run', '') for step in job['steps'])
-    require('secrets.' not in str(job) and 'login-action' not in str(job), 'PR may not receive publishing credentials')
+    job_without_package_token = str(job).replace('${{ secrets.GITHUB_TOKEN }}', '')
+    require('secrets.' not in job_without_package_token and 'login-action' not in str(job),
+            'PR may not receive publishing credentials')
     allowed = {'make go-product-bootstrap-tools', 'make -C services/product-service bootstrap-ci-tools',
                'make -C services/product-service check-ci', 'make go-svc-release-test SVC_NAME=product',
                'make go-svc-dispatch-test', 'make go-svc-deploy-check SVC_NAME=product',

@@ -44,6 +44,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: product-deployment-${{ github.ref }}
@@ -54,10 +55,21 @@ jobs:
     name: Validate Product image and deployment tooling
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+      - name: Set up Java 14 and Maven package access
+        uses: actions/setup-java@v5
+        with:
+          java-version: '14'
+          distribution: 'zulu'
+          cache: 'maven'
+          server-id: 'github'
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
       - uses: actions/setup-node@v6
         with:
           node-version: '24.13.0'
