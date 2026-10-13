@@ -15,6 +15,7 @@ import time
 from typing import Any, Iterator
 
 ROOT = Path(__file__).resolve().parents[3]
+YAML_PYTHON = ROOT / "services" / "product-service" / ".tools" / "ci-venv" / "bin" / "python"
 TARGETS = {
     "local-dev": ("kind-local-dev-insurance-hub", "local-dev-all", "local-dev-all"),
     "qa": ("qa-insurance-hub", "qa-svc", "qa-data"),
@@ -44,14 +45,19 @@ def run(argv: list[str], *, input_text: str | None = None, timeout: int = 30) ->
 
 
 def documents(text: str) -> list[dict[str, Any]]:
-    decoder = json.JSONDecoder()
-    output = []
-    remaining = text.strip()
-    while remaining:
-        value, offset = decoder.raw_decode(remaining)
-        output.extend(value.get("items", []) if value.get("kind") == "List" else [value])
-        remaining = remaining[offset:].strip()
-    require(bool(output) and all(isinstance(item, dict) for item in output),
+    require(YAML_PYTHON.is_file(),
+            "pinned YAML parser is required; run make -C services/product-service bootstrap-ci-tools")
+    converted = run(
+        [str(YAML_PYTHON), "-c",
+         "import json, sys, yaml; json.dump(list(yaml.safe_load_all(sys.stdin)), sys.stdout)"],
+        input_text=text,
+    )
+    try:
+        output = json.loads(converted)
+    except json.JSONDecodeError as error:
+        raise DeploymentError("rendered resources are malformed") from error
+    require(bool(output) and isinstance(output, list) and
+            all(isinstance(item, dict) for item in output),
             "rendered resources are missing or malformed")
     return output
 
@@ -138,9 +144,7 @@ class Target:
 
     def rendered(self) -> tuple[str, list[dict[str, Any]], str]:
         yaml = self.kubectl("kustomize", str(self.overlay))
-        converted = self.kubectl("create", "--dry-run=client", "--validate=false",
-                                 "-f", "-", "-o", "json", input_text=yaml)
-        items = documents(converted)
+        items = documents(yaml)
         names = {(item.get("kind"), item.get("metadata", {}).get("name")) for item in items}
         expected = {("Deployment", self.deployment), ("Service", self.business),
                     ("Service", self.management)}

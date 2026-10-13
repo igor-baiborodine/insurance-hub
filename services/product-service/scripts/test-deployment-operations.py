@@ -35,13 +35,15 @@ class DeploymentGuardTests(unittest.TestCase):
                   "DEPLOY_IMAGE_REF": "insurance-hub-product-api:git-00dab628c9cd"}
         with patch.dict(os.environ, values):
             target = deployment.Target()
-            yaml, items, image = target.rendered()
-            self.assertIn("kind: Deployment", yaml)
-            self.assertEqual(image, values["DEPLOY_IMAGE_REF"])
-            self.assertEqual(len(items), 4)
-            os.environ["DEPLOY_IMAGE_REF"] = "insurance-hub-product-api:git-000000000000"
-            with self.assertRaisesRegex(deployment.DeploymentError, "DEPLOY_IMAGE_REF"):
-                target.rendered()
+            with patch.object(target, "kubectl", wraps=target.kubectl) as kubectl:
+                yaml, items, image = target.rendered()
+                self.assertIn("kind: Deployment", yaml)
+                self.assertEqual(image, values["DEPLOY_IMAGE_REF"])
+                self.assertEqual(len(items), 4)
+                os.environ["DEPLOY_IMAGE_REF"] = "insurance-hub-product-api:git-000000000000"
+                with self.assertRaisesRegex(deployment.DeploymentError, "DEPLOY_IMAGE_REF"):
+                    target.rendered()
+                self.assertTrue(all(call.args[0] == "kustomize" for call in kubectl.call_args_list))
 
     def test_target_requires_exact_coordinates_before_kubectl(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
