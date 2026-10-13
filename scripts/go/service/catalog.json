@@ -18,6 +18,10 @@
       "capabilities": [
         "image-build",
         "image-check",
+        "image-release-check",
+        "image-publish",
+        "release-test",
+        "deploy-test-ci",
         "deploy-render",
         "deploy-check",
         "deploy-preflight",

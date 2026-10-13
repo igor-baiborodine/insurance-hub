@@ -11,7 +11,8 @@ export SVC_NAME
 .PHONY: go-svc-image-build go-svc-image-check go-svc-deploy-render go-svc-deploy-check \
 	go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test \
-	go-svc-dispatch-test
+	go-svc-dispatch-test go-svc-image-release-check go-svc-image-publish \
+	go-svc-release-test go-svc-deploy-test-ci
 
 go-svc-image-build: ## Build one cataloged Go service image. Usage: make go-svc-image-build SVC_NAME=<svc-name>
 	+@set -eu; \
@@ -43,8 +44,13 @@ go-svc-deploy-verify: ## Verify selected Go resources, reader permissions and HT
 go-svc-stop: ## Stop only the selected local-dev Go Deployment
 go-svc-deploy-test-tooling: ## Test selected-service deployment guards and cleanup
 go-svc-deploy-test: ## Exercise one service in an owned disposable Kind namespace
+go-svc-image-release-check: ## Verify a clean merged revision for explicit image release
+go-svc-image-publish: ## Validate and publish an image without editing deployment manifests
+go-svc-release-test: ## Prove selected-service release guards and failure handling
+go-svc-deploy-test-ci: ## Run disposable Kubernetes lifecycle on an isolated hosted runner
 go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
-go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test:
+go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test \
+go-svc-image-release-check go-svc-image-publish go-svc-release-test go-svc-deploy-test-ci:
 	+@set -eu; \
 		capability='$(@:go-svc-%=%)'; \
 		module_path="$$($(GO_SERVICE_RESOLVER) "$$capability")"; \

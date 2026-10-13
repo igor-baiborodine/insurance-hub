@@ -36,9 +36,14 @@ render() {
 to_json() {
 	local source="$1"
 	local output="$2"
-	"${KUBECTL:-kubectl}" create --dry-run=client --validate=false -f "${source}" -o json |
-		"${JQ:-jq}" -s '.' >"${output}"
+	# kubectl client dry-run still uses API discovery. Parse YAML locally instead.
+	"${script_dir}/../.tools/ci-venv/bin/python" -c \
+		'import json, sys, yaml; json.dump(list(yaml.safe_load_all(sys.stdin)), sys.stdout)' \
+		<"${source}" >"${output}"
 }
+
+[[ -x "${script_dir}/../.tools/ci-venv/bin/python" ]] || \
+	fail "pinned YAML parser is required; run make -C services/product-service bootstrap-ci-tools"
 
 render "${repo_root}/k8s/overlays/local-dev/svc/product" "${temporary_root}/local-go.yaml"
 render "${repo_root}/k8s/overlays/local-dev/svc/product/legacy" "${temporary_root}/local-legacy.yaml"

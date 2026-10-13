@@ -27,7 +27,7 @@ expect_failure() {
 expect_failure "missing service" env -u SVC_NAME "${script_dir}/resolve.sh" image-build
 expect_failure "invalid service" env SVC_NAME='../product' "${script_dir}/resolve.sh" image-build
 expect_failure "unknown service" env SVC_NAME='unknown' "${script_dir}/resolve.sh" image-build
-expect_failure "unsupported capability" env SVC_NAME='product' "${script_dir}/resolve.sh" image-publish
+expect_failure "unsupported capability" env SVC_NAME='product' "${script_dir}/resolve.sh" unsupported-capability
 
 resolved="$(SVC_NAME=product "${script_dir}/resolve.sh" image-build)"
 [[ "${resolved}" == "services/product-service" ]] || {
@@ -35,7 +35,7 @@ resolved="$(SVC_NAME=product "${script_dir}/resolve.sh" image-build)"
 	exit 1
 }
 
-for capability in image-check deploy-render deploy-check deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test; do
+for capability in image-release-check image-publish release-test deploy-test-ci image-check deploy-render deploy-check deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test; do
 	resolved="$(SVC_NAME=product "${script_dir}/resolve.sh" "${capability}")"
 	[[ "${resolved}" == "services/product-service" ]] || {
 		printf 'go-service-dispatch-test: Product %s module = %s\n' "${capability}" "${resolved}" >&2

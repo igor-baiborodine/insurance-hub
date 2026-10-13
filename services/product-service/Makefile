@@ -221,3 +221,26 @@ test-tooling: verify-tools
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
+
+# Publication is explicit and separate from image validation and deployment.
+.PHONY: image-release-check image-publish release-test bootstrap-ci-tools check-ci deploy-test-ci
+image-release-check: ## Validate clean exact merged revision; no build, push, or deployment
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/release_image.py check
+
+image-publish: ## Validate and publish merged image, then verify digest pull and write RELEASE_METADATA
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/release_image.py publish
+
+release-test: ## Prove release refusal, ordering, publication failure, and digest identity with fake adapters
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test-release.py
+
+bootstrap-ci-tools: ## Install pinned YAML parser and Kubernetes clients in module-local .tools
+	@bash scripts/bootstrap-ci-tools.sh
+
+check-ci: ## Validate workflow permissions, triggers, and release/deployment boundaries
+	@bash -n scripts/bootstrap-ci-tools.sh scripts/check-deployment.sh
+	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/product-deployment.yml ../../.github/workflows/product-image-release.yml ../../.github/workflows/go-modules.yml
+	@PYTHONDONTWRITEBYTECODE=1 .tools/ci-venv/bin/python scripts/check-ci.py
+
+# Runner-only setup owns a fresh cluster and isolated kubeconfig; local tests use deploy-test.
+deploy-test-ci: ## Create, test, and remove disposable Kubernetes on a GitHub-hosted runner
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/ci_cluster.py
