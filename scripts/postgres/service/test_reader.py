@@ -29,9 +29,9 @@ def check(condition, message):
         raise AssertionError(message)
 
 
-def run(argv, *, input_text=None, env=None):
+def run(argv, *, input_text=None, env=None, timeout=45):
     result = subprocess.run(argv, input=input_text, text=True, capture_output=True,
-                            timeout=45, env=env)
+                            timeout=timeout, env=env)
     if result.returncode:
         raise AssertionError(f"test command failed: {argv[0]} (exit {result.returncode})")
     return result.stdout.strip()
@@ -201,7 +201,10 @@ class DisposableProduct:
 
 
 def disposable_test():
+    print("product-reader-test: pulling pinned disposable PostgreSQL image", flush=True)
+    run(["docker", "pull", IMAGE], timeout=180)
     run(["docker", "image", "inspect", IMAGE])
+    print("product-reader-test: starting disposable PostgreSQL", flush=True)
     name = "issue134-reader-" + os.urandom(5).hex()
     run(["docker", "run", "-d", "--rm", "--name", name, "-e", "POSTGRES_PASSWORD",
          "-e", "POSTGRES_DB=product", "-p", "127.0.0.1::5432", IMAGE],
@@ -403,8 +406,13 @@ RESET ROLE;
 
 
 if __name__ == "__main__":
-    dispatch_guards()
-    secret_adapter_test()
-    deployment_ca_contract_test()
-    forward_cleanup_test()
-    disposable_test()
+    try:
+        print("product-reader-test: checking dispatch and Kubernetes adapters", flush=True)
+        dispatch_guards()
+        secret_adapter_test()
+        deployment_ca_contract_test()
+        forward_cleanup_test()
+        disposable_test()
+    except (AssertionError, OSError, subprocess.SubprocessError) as error:
+        print(f"product-reader-test: {error}", file=sys.stderr, flush=True)
+        raise SystemExit(1) from None
