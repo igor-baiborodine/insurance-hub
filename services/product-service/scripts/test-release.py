@@ -97,6 +97,31 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn(["git", "rev-parse", "HEAD"], calls)
         self.assertIn(["git", "-C", str(source_root), "rev-parse", "HEAD"], calls)
 
+    def test_publish_validates_selected_source_worktree_once(self) -> None:
+        source_root = Path("/tmp/product-release-source")
+        calls = []
+
+        def command(argv: list[str], timeout: int = 60) -> str:
+            calls.append(argv)
+            source_prefix = ["git", "-C", str(source_root)]
+            if argv[:3] == source_prefix:
+                return self.fake(["git", *argv[3:]], timeout)
+            if argv[:3] == ["make", "-C", str(source_root)]:
+                return ""
+            return self.fake(argv, timeout)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "metadata.json"
+            with patch.dict(os.environ, {**ENV, "RELEASE_METADATA": str(output)}, clear=True), \
+                 patch.object(release, "SOURCE_ROOT", source_root), \
+                 patch.object(release, "command", side_effect=command), \
+                 patch.object(release, "existing_tag", return_value=None):
+                release.publish()
+
+        source_check = ["make", "-C", str(source_root), "go-svc-image-check", "SVC_NAME=product"]
+        self.assertEqual(calls.count(source_check), 1)
+        self.assertNotIn(["make", "go-svc-image-check", "SVC_NAME=product"], calls)
+
     def test_unmerged_mismatched_and_dirty_revisions_cannot_publish(self) -> None:
         for failure in ("head", "ancestry", "dirty"):
             def command(argv: list[str], timeout: int = 60) -> str:
