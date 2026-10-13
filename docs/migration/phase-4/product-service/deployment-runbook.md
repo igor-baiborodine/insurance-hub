@@ -27,24 +27,26 @@ for issue #134; it does not certify that either shared environment has passed ac
 | Resource or action | Owner and boundary |
 | --- | --- |
 | Runtime image | Product module Makefile; pinned Go 1.27.2 builder and minimal non-root runtime; `linux/amd64`, `GOWORK=off` |
-| Publication | Repository maintainer dispatches **Product Image Release** for a full merged `main` SHA; GHCR write permission only in that release job |
+| Publication | **Product Image Release** runs automatically for qualifying Product pushes to canonical `main`; its serialized job owns GHCR publication, scoped Git/GitHub release identities, and the dormant QA digest update |
 | PR validation | **Go Module Validation** owns module tests/docs; **Product Security Boundary Validation** owns combined Java/Go security; **Product Deployment Validation** owns image, manifests, role tooling, and disposable Kubernetes tests |
-| QA desired state | Reviewed Git changes on `main`, reconciled by `flux-system/insurance-hub` and `flux-system/qa-svc`; publishing an image does not update Git |
+| QA desired state | The release workflow commits only its verified immutable digest; activation separately adds `./product` through review, after which `flux-system/insurance-hub` and `flux-system/qa-svc` reconcile `main` |
 | Local-dev desired state | Explicit `go-svc-* SVC_NAME=product` commands and the local Go overlay |
 | Database login and Secret | Maintainer with Kubernetes/CNPG administrative access, through `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader`; outside application startup and Flux |
 | Catalog and Java routing | Existing Java owner and gateway configuration; never changed by Go deployment |
 
-Initial activation has two PRs. PR 1 supplies the foundation and local-dev evidence with Go
-excluded from the QA aggregate. After merge, publish its image, then provision and verify QA's
-reader/Secret. PR 2 pins the published digest and adds `./product` to
-`k8s/overlays/qa/svc/kustomization.yaml` while retaining `./product/legacy`. Review the complete
-QA render, prerequisites, capacity, and rollback before merge. Flux then deploys the merged state;
-live QA verification and lifecycle rehearsals must pass before closing #134. Neither PR should
-use automatic issue-closing keywords.
+Initial activation has three staged PRs. The foundation PR supplies the runtime, deployment, and
+local-dev evidence with Go excluded from the QA aggregate. The release-automation PR replaces its
+bootstrap dispatch path; merging it must create the automatic release and digest-only bot commit
+while the overlay remains dormant. After the reader, Secret, image, and capacity prerequisites
+pass, the activation PR adds `./product` to `k8s/overlays/qa/svc/kustomization.yaml` while retaining
+`./product/legacy`. Review the complete QA render, prerequisites, and rollback before merge. Flux
+then deploys the reconciled `main` state. Live QA verification and lifecycle rehearsals must pass
+before closing #134. No delivery PR uses an automatic issue-closing keyword.
 
-The current foundation manifest checker deliberately requires disconnected QA and an unpublished
-placeholder. PR 2 must update that phase-specific assertion and its corruption fixtures to require
-the reviewed digest and active inclusion. Do not bypass the checker to activate Go.
+The pre-activation manifest checker requires disconnected QA and accepts either the initial
+unpublished placeholder or a release-owned immutable digest. The activation PR must update that
+phase-specific assertion and its corruption fixtures to require the reviewed digest and active
+inclusion. Do not bypass the checker to activate Go.
 
 ## Prerequisites and validation commands
 
@@ -98,46 +100,50 @@ registry access, effective exposure, or Java routing.
 
 ## Publish a merged image
 
-After PR 1 merges and required checks pass, record its full merged SHA. A repository maintainer
-with Actions access dispatches the workflow from `main`, using GitHub's Actions UI or:
+A canonical `main` push that changes `services/product-service/**` or the Product release workflow
+automatically starts **Product Image Release**. The digest-only QA bot commit is outside those
+paths, so it cannot recursively publish. Releases are serialized and never cancel an in-flight
+publication. Record the source push SHA and inspect the matching run:
 
 ```sh
-export RELEASE_REVISION='<full-40-character-merged-SHA>'
-gh workflow run product-image-release.yml --ref main -f revision="$RELEASE_REVISION"
+export RELEASE_REVISION='<full-40-character-source-SHA>'
 gh run list --workflow product-image-release.yml --limit 5
 ```
 
 Select the run matching that revision and record its run ID, URL, and conclusion. Download its
-`product-image-<SHA>` artifact outside the checkout:
+`product-release-<SHA>` artifact outside the checkout:
 
 ```sh
 export RELEASE_RUN_ID='<matching-run-id>'
 export RELEASE_ARTIFACT_DIR='/absolute/private-working-directory/product-release'
 gh run watch "$RELEASE_RUN_ID"
-gh run download "$RELEASE_RUN_ID" --name "product-image-$RELEASE_REVISION" --dir "$RELEASE_ARTIFACT_DIR"
-jq . "$RELEASE_ARTIFACT_DIR/product-image.json"
+gh run download "$RELEASE_RUN_ID" --name "product-release-$RELEASE_REVISION" --dir "$RELEASE_ARTIFACT_DIR"
+jq . "$RELEASE_ARTIFACT_DIR/image.json"
 ```
 
-The workflow verifies SHA syntax and `origin/main` ancestry before checking out and executing
-that revision. `go-svc-image-release-check` additionally requires the canonical repository's
-explicit `workflow_dispatch` on `main`, exact HEAD, and a clean tracked/untracked working tree.
-`go-svc-image-publish` reruns the actual image check, pushes
-`ghcr.io/igor-baiborodine/insurance-hub/product-api:sha-<full-SHA>`, pulls the reported digest,
-and requires the pulled image ID, architecture, and source label to match the tested image.
-It records `revision`, `tag`, `image` (digest reference), `imageId`, and `platform` in the artifact.
-Its `RELEASE_METADATA` path must be unused, absolute, and outside the checkout.
+The workflow uses `monotag` to calculate the next scoped 1.x version, starting at `1.0.0`, under
+`services/product-service/v<version>`. Before any registry or Git mutation, it verifies the exact
+source revision, canonical event/repository/branch, clean checkout, workflow boundary tests, and
+the actual image. It publishes `<version>` and `sha-<unique-short-SHA>` tags and requires both to
+resolve to one pulled linux/amd64 digest whose image ID and full OCI source revision match the
+validated image. It then creates the annotated scoped Git tag and matching GitHub Release, and
+commits only that digest to the dormant QA Product overlay. The evidence artifact records the full
+revision, version, scoped tag, both registry tags, immutable image, digest, image ID, and platform.
 
-The digest is the QA identity. A SHA tag is a lookup convenience and can be overwritten by a
-rerun; a failed or timed-out push may already have published an image. Inspect the run and GHCR
-before retrying, preserve the accepted digest, and never assume a rebuild is byte-identical.
-Publication does not create semantic-version Git tags, a GitHub Release, or a manifest commit.
-It differs from the legacy workflow's automatic version-tag push and direct QA manifest update.
+Existing tags, releases, and manifest commits are accepted on retry only when they match the same
+release identity. Collisions, partial mismatches, a newer Product source on `main`, or a digest
+that differs between tags stops progression. A failed or timed-out mutation may have completed;
+rerun the same Actions run after inspecting its state. For recovery when rerunning is unavailable,
+a maintainer may explicitly dispatch `product-image-release.yml` from `main` with the original full
+source revision. That path applies the same identity and ancestry checks and cannot move an
+accepted tag or release.
 
-The release job authenticates to GHCR with its scoped `GITHUB_TOKEN`; PR checks receive no GHCR
-write or deployment credentials. These boundaries follow GitHub's
+The release job authenticates to GHCR and GitHub with its scoped `GITHUB_TOKEN`; PR checks receive
+no publishing credentials. The workflow never receives cluster or database credentials and never
+applies QA resources. These boundaries follow GitHub's
 [package permissions](https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions)
 and [manual dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
-contracts. Local `docker login` is not required to dispatch the hosted release.
+contracts. Local `docker login` is not required for the automatic hosted release.
 
 Before activation, verify package visibility and pullability using QA's intended registry access.
 The checked-in Go Pod has no `imagePullSecrets`; public pull access must actually work. If the
@@ -262,15 +268,14 @@ does not establish which service the gateway reached. Keep tokens out of argumen
 
 ## QA activation and verification
 
-Before PR 2, establish a fresh QA preflight using the explicit context, reader inventory/proof,
-published image availability, node capacity, and full rendered QA diff. Go's preflight currently
-rejects the unpublished QA placeholder; this is expected before activation. Do not substitute
-an invented digest merely to pass it.
+Before the activation PR, establish a fresh QA preflight using the explicit context, reader
+inventory/proof, automatically published image availability, node capacity, and full rendered QA
+diff. Require the dormant overlay digest to match the release evidence and bot commit; do not
+manually retag or replace the release-owned digest.
 
-In PR 2 replace QA's `newTag: sha-unpublished` with `digest: sha256:<published-digest>` under the
-existing suffix-free `newName`, and include Go in the aggregate. Review the entire render and
-update the phase-specific manifest checks described above. The QA source stays on `main` with
-`wait` and `prune`; existing gateway routes and `./product/legacy` remain intact.
+The activation PR adds only `./product` to the aggregate. Review the entire render and update the
+phase-specific activation checks described above. The QA source stays on `main` with `wait` and
+`prune`; existing gateway routes, the release-owned digest, and `./product/legacy` remain intact.
 
 After merge, await reconciliation and inspect:
 

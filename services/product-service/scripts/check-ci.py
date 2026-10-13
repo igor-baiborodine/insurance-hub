@@ -59,24 +59,56 @@ def validate(checks: dict, release: dict, modules: dict) -> None:
                'make go-svc-image-check SVC_NAME=product', 'make go-svc-deploy-test-ci SVC_NAME=product',
                'echo "$GITHUB_WORKSPACE/services/product-service/.tools/bin" >> "$GITHUB_PATH"'}
     require(set(filter(None, runs.splitlines())) == allowed, 'PR commands differ from non-publishing validation contract')
-    require(set(release['on']) == {'workflow_dispatch'}, 'release must be explicitly dispatched')
+    require(set(release['on']) == {'push', 'workflow_dispatch'},
+            'release must use canonical-main push plus explicit recovery dispatch')
+    trigger = release['on']['push']
+    require(trigger == {'branches': ['main'], 'paths': [
+        'services/product-service/**', '.github/workflows/product-image-release.yml']},
+        'release paths must include Product source and its workflow only')
+    dispatch = release['on']['workflow_dispatch']['inputs']['revision']
+    require(dispatch.get('required') == 'true' and dispatch.get('type') == 'string',
+            'recovery dispatch must require an explicit revision')
     require(release['permissions'] == {'contents': 'read'}, 'release default permissions changed')
-    publish = release['jobs']['publish']
-    require(publish['permissions'] == {'contents': 'read', 'packages': 'write'}, 'publication privileges differ')
+    publish = release['jobs']['release']
+    require(publish['permissions'] == {'contents': 'write', 'packages': 'write'},
+            'release privileges differ')
     require(publish['if'] == "github.ref == 'refs/heads/main' && github.repository == 'igor-baiborodine/insurance-hub'",
             'release must run from canonical main')
     require(release['concurrency']['cancel-in-progress'] == 'false', 'release must not cancel a publication')
     steps = publish['steps']
     checkout = steps[0]['with']
-    require(checkout == {'ref': 'main', 'fetch-depth': '0', 'persist-credentials': 'false'}, 'trusted checkout differs')
-    guard = steps[1]['run']
-    require('[[ "$RELEASE_REVISION" =~ ^[0-9a-f]{40}$ ]]' in guard and
-            guard.index('git merge-base --is-ancestor') < guard.index('git checkout --detach') < guard.index('make '),
-            'selected code must not execute before SHA and ancestry validation')
+    require(checkout == {'ref': 'main', 'fetch-depth': '0'}, 'trusted source checkout differs')
+    require(publish['env']['RELEASE_REVISION'] ==
+            "${{ github.event_name == 'workflow_dispatch' && inputs.revision || github.sha }}",
+            'release revision selection differs')
     commands = '\n'.join(step.get('run', '') for step in steps)
+    source_guard = steps[1]['run']
+    require('[[ "$RELEASE_REVISION" =~ ^[0-9a-f]{40}$ ]]' in source_guard and
+            source_guard.index('git merge-base --is-ancestor') <
+            source_guard.index('git checkout --detach'),
+            'selected source must be validated before checkout')
+    require('npx -y monotag tag' in commands and '--path services/product-service' in commands and
+            '--prefix services/product-service/v' in commands and '--min-version 1.0.0' in commands and
+            '--max-version 1.999.999' in commands and
+            'git tag --points-at "$RELEASE_REVISION"' in commands and
+            'git cat-file -t "refs/tags/$existing_tag"' in commands,
+            'scoped Product monotag or retry contract differs')
+    require('make go-svc-image-release-check SVC_NAME=product' in commands and
+            'make go-svc-release-test SVC_NAME=product' in commands and
+            'make -C services/product-service check-ci' in commands and
+            'make go-svc-image-check SVC_NAME=product' in commands,
+            'release gates differ')
     require('make go-svc-image-publish SVC_NAME=product' in commands, 'release must use owning Make interface')
-    require(not any(word in commands for word in ('kubectl', 'git push', 'git commit', 'postgres-svc-role-provision')),
-            'release must not deploy or edit desired state')
+    require('make go-svc-release-finalize SVC_NAME=product' in commands,
+            'release must finalize through the owning Make interface')
+    require(commands.index('make go-svc-release-test') < commands.index('npx -y monotag tag') and
+            commands.index('make go-svc-image-check') < commands.index('npx -y monotag tag') and
+            commands.index('make go-svc-image-release-check') < commands.index('make go-svc-image-publish') <
+            commands.index('make go-svc-release-finalize'), 'release gate or mutation order differs')
+    require(not any(word in commands for word in ('kubectl', 'psql', 'postgres-svc-role-provision')),
+            'release workflow must not directly deploy or provision infrastructure')
+    require('k8s/overlays/qa/svc/product/**' not in trigger['paths'],
+            'digest-only bot commits must not retrigger Product release')
     require(not any('image-publish' in step.get('run', '') for step in modules['jobs']['validate']['steps']),
             'module validation may not publish')
 
@@ -91,8 +123,8 @@ def main() -> None:
         lambda c, r: c['permissions'].update(packages='write'),
         lambda c, r: c['on']['pull_request']['paths'].remove('scripts/postgres/**'),
         lambda c, r: c['jobs']['validate']['steps'].append({'run': 'make go-svc-image-publish SVC_NAME=product'}),
-        lambda c, r: r['on'].update(pull_request={}),
-        lambda c, r: r['jobs']['publish'].update({'if': 'true'}),
+        lambda c, r: r['on']['push']['paths'].append('k8s/overlays/qa/svc/product/**'),
+        lambda c, r: r['jobs']['release'].update({'if': 'true'}),
     ]
     for corrupt in corruptions:
         bad_checks, bad_release = deepcopy(checks), deepcopy(release)

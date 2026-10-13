@@ -223,12 +223,15 @@ run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
 
 # Publication is explicit and separate from image validation and deployment.
-.PHONY: image-release-check image-publish release-test bootstrap-ci-tools check-ci deploy-test-ci
+.PHONY: image-release-check image-publish release-finalize release-test bootstrap-ci-tools check-ci deploy-test-ci
 image-release-check: ## Validate clean exact merged revision; no build, push, or deployment
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/release_image.py check
 
 image-publish: ## Validate and publish merged image, then verify digest pull and write RELEASE_METADATA
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/release_image.py publish
+
+release-finalize: ## Create matching Git/GitHub release identities and commit the verified QA digest
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/release_image.py finalize
 
 release-test: ## Prove release refusal, ordering, publication failure, and digest identity with fake adapters
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test-release.py
