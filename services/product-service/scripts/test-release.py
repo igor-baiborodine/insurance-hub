@@ -97,30 +97,24 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn(["git", "rev-parse", "HEAD"], calls)
         self.assertIn(["git", "-C", str(source_root), "rev-parse", "HEAD"], calls)
 
-    def test_publish_validates_selected_source_worktree_once(self) -> None:
+    def test_source_image_validation_drops_trusted_checkout_identity(self) -> None:
         source_root = Path("/tmp/product-release-source")
-        calls = []
-
-        def command(argv: list[str], timeout: int = 60) -> str:
-            calls.append(argv)
-            source_prefix = ["git", "-C", str(source_root)]
-            if argv[:3] == source_prefix:
-                return self.fake(["git", *argv[3:]], timeout)
-            if argv[:3] == ["make", "-C", str(source_root)]:
-                return ""
-            return self.fake(argv, timeout)
-
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "metadata.json"
-            with patch.dict(os.environ, {**ENV, "RELEASE_METADATA": str(output)}, clear=True), \
-                 patch.object(release, "SOURCE_ROOT", source_root), \
-                 patch.object(release, "command", side_effect=command), \
-                 patch.object(release, "existing_tag", return_value=None):
-                release.publish()
+        inherited = {name: "trusted-checkout-value" for name in release.SOURCE_IMAGE_VARIABLES}
+        completed = subprocess.CompletedProcess(["make"], 0)
+        with patch.dict(os.environ, {**inherited, "PRESERVED_VALUE": "yes"}, clear=True), \
+             patch.object(release, "SOURCE_ROOT", source_root), \
+             patch.object(subprocess, "run", return_value=completed) as run:
+            release.validate_source_image()
 
         source_check = ["make", "-C", str(source_root), "go-svc-image-check", "SVC_NAME=product"]
-        self.assertEqual(calls.count(source_check), 1)
-        self.assertNotIn(["make", "go-svc-image-check", "SVC_NAME=product"], calls)
+        self.assertEqual(run.call_args.args[0], source_check)
+        self.assertEqual(run.call_args.kwargs["cwd"], release.ROOT)
+        self.assertEqual(run.call_args.kwargs["timeout"], 1200)
+        self.assertFalse(run.call_args.kwargs["check"])
+        self.assertNotIn("capture_output", run.call_args.kwargs)
+        environment = run.call_args.kwargs["env"]
+        self.assertTrue(all(name not in environment for name in release.SOURCE_IMAGE_VARIABLES))
+        self.assertEqual(environment["PRESERVED_VALUE"], "yes")
 
     def test_unmerged_mismatched_and_dirty_revisions_cannot_publish(self) -> None:
         for failure in ("head", "ancestry", "dirty"):
@@ -141,8 +135,16 @@ class ReleaseTests(unittest.TestCase):
     def test_success_publishes_semantic_and_unique_short_sha_tags_to_one_digest(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "metadata.json"
+            events = []
+
+            def command(argv: list[str], timeout: int = 60) -> str:
+                if argv[:2] == ["docker", "push"]:
+                    events.append("push")
+                return self.fake(argv, timeout)
+
             with patch.dict(os.environ, {**ENV, "RELEASE_METADATA": str(output)}, clear=True), \
-                 patch.object(release, "command", side_effect=self.fake) as run, \
+                 patch.object(release, "validate_source_image", side_effect=lambda: events.append("validation")), \
+                 patch.object(release, "command", side_effect=command) as run, \
                  patch.object(release, "existing_tag", return_value=None):
                 release.publish()
             metadata = json.loads(output.read_text(encoding="utf-8"))
@@ -150,10 +152,9 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(metadata["semanticTag"], release.REGISTRY + ":" + VERSION)
             self.assertEqual(metadata["shaTag"], release.REGISTRY + ":sha-" + SHORT)
             commands = [call.args[0] for call in run.call_args_list]
-            validation = commands.index(["make", "go-svc-image-check", "SVC_NAME=product"])
             pushes = [index for index, value in enumerate(commands) if value[:2] == ["docker", "push"]]
             self.assertEqual(len(pushes), 2)
-            self.assertTrue(all(validation < index for index in pushes))
+            self.assertEqual(events, ["validation", "push", "push"])
             self.assertFalse(any(value[0] in ("kubectl", "psql") or value[:2] == ["git", "push"]
                                  for value in commands))
 
@@ -169,6 +170,7 @@ class ReleaseTests(unittest.TestCase):
                 return self.fake(argv, timeout)
             with patch.dict(os.environ, {**ENV, "RELEASE_METADATA": str(output)}, clear=True), \
                  patch.object(release, "execute", return_value=present), \
+                 patch.object(release, "validate_source_image"), \
                  patch.object(release, "command", side_effect=command) as run:
                 release.publish()
             self.assertFalse(any(call.args[0][:2] == ["docker", "push"] for call in run.call_args_list))
@@ -178,6 +180,7 @@ class ReleaseTests(unittest.TestCase):
             output = Path(directory) / "metadata.json"
             with patch.dict(os.environ, {**ENV, "RELEASE_METADATA": str(output)}, clear=True), \
                  patch.object(release, "command", side_effect=self.fake), \
+                 patch.object(release, "validate_source_image"), \
                  patch.object(release, "existing_tag", side_effect=[(DIGEST, IMAGE_ID), None]):
                 with self.assertRaisesRegex(release.ReleaseError, "partial or inconsistent"):
                     release.publish()
@@ -199,8 +202,7 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
                 output = Path(directory) / "metadata.json"
                 def command(argv: list[str], timeout: int = 60) -> str:
-                    if (failure == "validation" and argv[0] == "make" or
-                            failure == "push" and argv[:2] == ["docker", "push"] or
+                    if (failure == "push" and argv[:2] == ["docker", "push"] or
                             failure == "pull" and argv[:2] == ["docker", "pull"]):
                         raise release.ReleaseError("synthetic failure")
                     result = self.fake(argv, timeout)
@@ -209,6 +211,9 @@ class ReleaseTests(unittest.TestCase):
                     return result
                 with patch.dict(os.environ, {**ENV, "RELEASE_METADATA": str(output)}, clear=True), \
                      patch.object(release, "command", side_effect=command), \
+                     patch.object(release, "validate_source_image",
+                                  side_effect=release.ReleaseError("synthetic failure")
+                                  if failure == "validation" else None), \
                      patch.object(release, "existing_tag", return_value=None):
                     with self.assertRaises(release.ReleaseError):
                         release.publish()

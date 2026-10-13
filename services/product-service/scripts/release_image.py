@@ -15,6 +15,10 @@ SOURCE_ROOT = Path(os.environ.get("PRODUCT_RELEASE_SOURCE_ROOT", ROOT)).resolve(
 REGISTRY = "ghcr.io/igor-baiborodine/insurance-hub/product-api"
 REPOSITORY = "igor-baiborodine/insurance-hub"
 MANIFEST = ROOT / "k8s/overlays/qa/svc/product/kustomization.yaml"
+SOURCE_IMAGE_VARIABLES = (
+    "IMAGE_NAME", "IMAGE_TAG", "IMAGE_REF", "SOURCE_CREATED", "SOURCE_REPOSITORY",
+    "SOURCE_REVISION", "SOURCE_VERSION", "TARGET_PLATFORM",
+)
 
 
 class ReleaseError(Exception):
@@ -44,6 +48,20 @@ def source_command(argv: list[str], timeout: int = 60) -> str:
     if SOURCE_ROOT == ROOT:
         return command(argv, timeout)
     return command([argv[0], "-C", str(SOURCE_ROOT), *argv[1:]], timeout)
+
+
+def validate_source_image() -> None:
+    argv = ["make", "go-svc-image-check", "SVC_NAME=product"]
+    if SOURCE_ROOT != ROOT:
+        argv = ["make", "-C", str(SOURCE_ROOT), *argv[1:]]
+    environment = os.environ.copy()
+    for name in SOURCE_IMAGE_VARIABLES:
+        environment.pop(name, None)
+    try:
+        result = subprocess.run(argv, cwd=ROOT, env=environment, timeout=1200, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ReleaseError("selected source image validation was unavailable or timed out") from error
+    require(result.returncode == 0, "selected source image validation failed")
 
 
 def clean(source: bool = False) -> None:
@@ -156,7 +174,7 @@ def publish() -> None:
     created = source_command(["git", "show", "-s", "--format=%cI", revision])
 
     # Validate the exact source before the first registry mutation.
-    source_command(["make", "go-svc-image-check", "SVC_NAME=product"], timeout=1200)
+    validate_source_image()
     clean()
     if SOURCE_ROOT != ROOT:
         clean(source=True)
