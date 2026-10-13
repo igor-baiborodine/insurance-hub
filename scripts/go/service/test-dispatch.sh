@@ -35,4 +35,12 @@ resolved="$(SVC_NAME=product "${script_dir}/resolve.sh" image-build)"
 	exit 1
 }
 
-printf 'go-service-dispatch-test: passed missing, invalid, unknown, unsupported, and Product cases\n'
+for capability in image-check deploy-render deploy-check; do
+	resolved="$(SVC_NAME=product "${script_dir}/resolve.sh" "${capability}")"
+	[[ "${resolved}" == "services/product-service" ]] || {
+		printf 'go-service-dispatch-test: Product %s module = %s\n' "${capability}" "${resolved}" >&2
+		exit 1
+	}
+done
+
+printf 'go-service-dispatch-test: passed missing, invalid, unknown, unsupported, and Product capability cases\n'

@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-api
+  labels:
+    app.kubernetes.io/name: product-api
+    app.kubernetes.io/instance: insurance-hub-product-api
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  minReadySeconds: 5
+  progressDeadlineSeconds: 180
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: product-api
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: product-api
+        app.kubernetes.io/instance: insurance-hub-product-api
+        app.kubernetes.io/component: api
+      annotations:
+        insurance-hub.io/product-reader-credential-revision: "1"
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: product-api
+          image: insurance-hub-product-api:unconfigured
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+            - name: grpc
+              containerPort: 9090
+              protocol: TCP
+            - name: management
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: product-config
+          env:
+            - name: PRODUCT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-product-reader-creds
+                  key: database-url
+          volumeMounts:
+            - name: postgres-ca
+              mountPath: /etc/product-service/postgres
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: management
+              scheme: HTTP
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: management
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: management
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: postgres-product-reader-creds
+            items:
+              - key: ca.crt
+                path: ca.crt

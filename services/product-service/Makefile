@@ -5,6 +5,9 @@ DOCKER ?= docker
 NODE ?= node
 NPM ?= npm
 PYTHON ?= python3
+KUBECTL ?= kubectl
+JQ ?= jq
+DEPLOY_ENV ?=
 
 TOOLS_DIR := $(CURDIR)/.tools
 TOOLS_BIN := $(TOOLS_DIR)/bin
@@ -71,7 +74,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage coverage-check test-integration \
-	build build-security-harness build-security-verifier image-build image-check vulncheck \
+	build build-security-harness build-security-verifier image-build image-check deploy-render deploy-check vulncheck \
 	bootstrap-doc-tools check-docs preview-docs check test-tooling run
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
@@ -81,6 +84,12 @@ image-build: ## Build the pinned linux/amd64 Product runtime image
 
 image-check: image-build ## Build and validate Product image identity, contents, startup, reads, and SIGTERM
 	@./scripts/check-image.sh
+
+deploy-render: ## Render Product Go overlays without applying them. Usage: make deploy-render [DEPLOY_ENV=local-dev|qa]
+	@KUBECTL="$(KUBECTL)" DEPLOY_ENV="$(DEPLOY_ENV)" ./scripts/render-deployment.sh
+
+deploy-check: ## Validate Product Go overlays, Java isolation, and disconnected QA activation
+	@KUBECTL="$(KUBECTL)" JQ="$(JQ)" PYTHON="$(PYTHON)" ./scripts/check-deployment.sh
 
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
 	@test -n "$(strip $(SECURITY_HARNESS_OUTPUT))" || { echo "SECURITY_HARNESS_OUTPUT is required" >&2; exit 1; }
