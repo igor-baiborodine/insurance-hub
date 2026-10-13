@@ -109,6 +109,10 @@ def validate(checks: dict, release: dict, modules: dict) -> None:
             commands.index('make go-svc-image-check') < commands.index('npx -y monotag tag') and
             commands.index('make go-svc-image-release-check') < commands.index('make go-svc-image-publish') <
             commands.index('make go-svc-release-finalize'), 'release gate or mutation order differs')
+    require('git config user.name "github-actions[bot]"' in commands and
+            'git config user.email "41898282+github-actions[bot]@users.noreply.github.com"' in commands and
+            commands.index('git config user.name') < commands.index('make go-svc-release-finalize'),
+            'annotated release tag requires bot Git identity before finalization')
     require(not any(word in commands for word in ('kubectl', 'psql', 'postgres-svc-role-provision')),
             'release workflow must not directly deploy or provision infrastructure')
     require('k8s/overlays/qa/svc/product/**' not in trigger['paths'],
@@ -131,6 +135,8 @@ def main() -> None:
         lambda c, r: r['on']['push']['paths'].append('k8s/overlays/qa/svc/product/**'),
         lambda c, r: r['jobs']['release'].update(name='Release'),
         lambda c, r: r['jobs']['release'].update({'if': 'true'}),
+        lambda c, r: next(step for step in r['jobs']['release']['steps']
+                          if step.get('name') == 'Configure release Git identity').update(run='true'),
     ]
     for corrupt in corruptions:
         bad_checks, bad_release = deepcopy(checks), deepcopy(release)
@@ -140,7 +146,7 @@ def main() -> None:
         except ValueError:
             continue
         raise ValueError('controlled workflow corruption was accepted')
-    print('check-ci: workflow names, YAML, permissions, triggers, Make boundaries and seven corruptions passed')
+    print('check-ci: workflow names, YAML, permissions, triggers, Make boundaries and eight corruptions passed')
 
 
 if __name__ == '__main__':

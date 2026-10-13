@@ -185,6 +185,24 @@ class ReleaseTests(unittest.TestCase):
                 with self.assertRaisesRegex(release.ReleaseError, "differs"):
                     release.ensure_github_release(TAG, body, REVISION, release.REGISTRY + "@" + DIGEST)
 
+    def test_finalize_configures_git_identity_before_annotated_tag(self) -> None:
+        events = []
+        metadata = {"revision": REVISION, "version": VERSION, "releaseTag": TAG,
+                    "image": release.REGISTRY + "@" + DIGEST}
+        with patch.object(release, "check"), \
+             patch.object(release, "read_metadata", return_value=(Path("/tmp/image.json"), metadata)), \
+             patch.object(release, "release_inputs", return_value=(REVISION, VERSION, TAG, SHORT)), \
+             patch.object(release, "release_body", return_value=Path("/tmp/body.md")), \
+             patch.object(release, "command", side_effect=lambda argv, timeout=60: events.append(argv) or ""), \
+             patch.object(release, "ensure_tag", side_effect=lambda *args: events.append(["ensure-tag"])), \
+             patch.object(release, "ensure_github_release"), patch.object(release, "update_manifest"):
+            release.finalize()
+        self.assertLess(events.index(["git", "config", "user.name", "github-actions[bot]"]),
+                        events.index(["ensure-tag"]))
+        self.assertLess(events.index(["git", "config", "user.email",
+                                      "41898282+github-actions[bot]@users.noreply.github.com"]),
+                        events.index(["ensure-tag"]))
+
 
 class ClusterTests(unittest.TestCase):
     def test_cleanup_failure_preserves_original_failure(self) -> None:

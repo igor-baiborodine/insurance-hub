@@ -175,6 +175,11 @@ def read_metadata() -> tuple[Path, dict]:
     return path, value
 
 
+def configure_git_identity() -> None:
+    command(["git", "config", "user.name", "github-actions[bot]"])
+    command(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"])
+
+
 def ensure_tag(tag: str, revision: str, version: str) -> None:
     result = execute(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"])
     if result.returncode == 0:
@@ -249,8 +254,6 @@ def update_manifest(metadata: dict) -> None:
     command(["git", "add", relative])
     staged = command(["git", "diff", "--cached", "--name-only"])
     require(staged == relative, "release attempted to stage an unexpected path")
-    command(["git", "config", "user.name", "github-actions[bot]"])
-    command(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"])
     command(["git", "commit", "-m", f"chore(k8s): update Product Go image to {version}"])
     command(["git", "push", "origin", "HEAD:main"], timeout=120)
 
@@ -260,6 +263,7 @@ def finalize() -> None:
     _, metadata = read_metadata()
     revision, version, tag, _ = release_inputs()
     body = release_body(metadata)
+    configure_git_identity()
     ensure_tag(tag, revision, version)
     ensure_github_release(tag, body, revision, metadata["image"])
     update_manifest(metadata)
