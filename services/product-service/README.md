@@ -5,6 +5,7 @@
   - [Runtime contracts and boundaries](#runtime-contracts-and-boundaries)
     - [Interim security validation](#interim-security-validation)
   - [Product catalog architecture](#product-catalog-architecture)
+  - [Container release and deployment](#container-release-and-deployment)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -318,3 +319,20 @@ Stored JSONB exists only at the PostgreSQL boundary, Product domain values cross
 port, and protobuf messages and legacy HTTP DTOs stay inside their owning adapters. Both transports
 therefore reuse the same use cases without importing one another or moving wire/storage types into
 the core.
+
+## Container release and deployment
+
+The [Product Go deployment runbook](../../docs/migration/phase-4/product-service/deployment-runbook.md)
+owns image publication, local-dev/QA prerequisites, reader provisioning, rollout/rotation recovery,
+and Go-only stop/restoration. Use root `go-svc-* SVC_NAME=product` targets and separate
+`postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader` operations. PR checks build and test;
+**Product Image Release** is explicitly dispatched for a merged SHA and records a verified GHCR
+digest without changing QA manifests. QA activation remains a reviewed Git/Flux operation.
+
+**Product Deployment Validation** runs the image, overlay, role, and disposable lifecycle gates.
+It complements the existing module and combined security workflows. Its runner-only
+`go-svc-deploy-test-ci` owns a fresh Kind cluster; local `go-svc-deploy-test` owns only its labelled
+disposable namespace in the existing local Kind cluster. Neither establishes shared-environment
+acceptance. `make -C services/product-service bootstrap-ci-tools` installs the pinned CI helpers;
+`check-ci` checks workflow permissions/triggers, and `go-svc-release-test SVC_NAME=product` proves
+release and runner setup failure boundaries using fake external commands.

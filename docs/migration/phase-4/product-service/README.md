@@ -17,6 +17,7 @@
   - [Acceptance evidence](#acceptance-evidence)
   - [Downstream handoff](#downstream-handoff)
   - [Qualification limits](#qualification-limits)
+  - [Deployment operations](#deployment-operations)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -403,3 +404,11 @@ covered valid, absent, malformed, and invalid-signature credentials. Local-dev a
 PostgreSQL patch versions recorded in the data baseline, so every later comparison must retain its
 environment and snapshot identity. Anonymous direct backend access is a measured Java-parity result,
 not a general security recommendation.
+
+## Deployment operations
+
+The [Product Go deployment runbook](deployment-runbook.md) documents the #134 foundation,
+explicit merged-revision image release, separate QA activation, reader lifecycle, verification,
+and recovery. The foundation keeps Go outside QA reconciliation. Follow its evidence boundaries:
+disposable and CI checks do not establish live local-dev or QA acceptance, and existing gateway
+traffic remains on Java until #137.

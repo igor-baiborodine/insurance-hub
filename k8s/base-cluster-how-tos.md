@@ -2,7 +2,6 @@
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**
 
 - [Prerequisites](#prerequisites)
 - [Local Dev](#local-dev)
@@ -47,11 +46,7 @@
     sudo netfilter-persistent save
     ```
 
-- Restart key services:
-    ```bash
-    sudo systemctl restart docker
-    sudo snap restart lxd
-    ```
+- The forwarding change takes effect without restarting Docker or LXD.
 
 - Validate if the rule was applied:
     ```bash

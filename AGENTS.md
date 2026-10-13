@@ -126,6 +126,10 @@ Copilot to their canonical workflows under `ai/skills/`.
 
 ## Repository Conventions
 
+- Use Python as an auxiliary language for administrative and repository tooling when structured
+  data, validation, or orchestration makes Bash unwieldy. Keep simple shell tasks in Bash and
+  preserve the existing service languages and migration direction. For Python work, load
+  [the Python rules](ai/rules/python-rules.md) and their linked development and validation rules.
 - Use `CONTRIBUTING.md` as the source of truth for branch naming, commit message conventions, prerequisites, and developer workflow expectations.
 - Prefer existing Make targets and module-local build tooling over inventing ad hoc commands.
 - After creating or updating any Markdown file, run

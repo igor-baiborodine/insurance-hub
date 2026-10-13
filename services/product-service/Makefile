@@ -5,6 +5,9 @@ DOCKER ?= docker
 NODE ?= node
 NPM ?= npm
 PYTHON ?= python3
+KUBECTL ?= kubectl
+JQ ?= jq
+DEPLOY_ENV ?=
 
 TOOLS_DIR := $(CURDIR)/.tools
 TOOLS_BIN := $(TOOLS_DIR)/bin
@@ -40,6 +43,17 @@ TESTCONTAINERS_VERSION := v0.44.0
 MOBY_GO_ARCHIVE_VERSION := v0.3.0
 MERMAID_CLI_VERSION := 11.12.0
 POSTGRES_IMAGE := postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
+HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
+HEAD_VERSION := git-$(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
+IMAGE_NAME ?= insurance-hub-product-api
+SOURCE_REVISION ?= $(HEAD_REVISION)
+SOURCE_CREATED ?= $(HEAD_CREATED)
+SOURCE_REPOSITORY ?= https://github.com/igor-baiborodine/insurance-hub
+SOURCE_VERSION ?= $(HEAD_VERSION)
+IMAGE_TAG ?= $(SOURCE_VERSION)
+IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
+TARGET_PLATFORM ?= linux/amd64
 SQL_SCHEMA := internal/postgres/sql/schema.sql
 SQL_QUERIES := internal/postgres/sql/queries.sql
 GENERATED_SQL_FILES := internal/postgres/dbgen/db.go internal/postgres/dbgen/models.go \
@@ -49,7 +63,8 @@ COVERAGE_FILE ?= coverage.txt
 INTEGRATION_SUITE ?= all
 FIXTURE_SET ?= qa
 SECURITY_HARNESS_OUTPUT ?=
-DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md
+DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md \
+	../../docs/migration/phase-4/product-service/deployment-runbook.md
 EXTRA_TOOL_PACKAGES := github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
 VERIFY_EXTRA_TOOL_SPECS := sqlc|$(SQLC)|$(SQLC_VERSION)|version
 
@@ -60,7 +75,32 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage coverage-check test-integration \
-	build build-security-harness build-security-verifier vulncheck bootstrap-doc-tools check-docs preview-docs check test-tooling run
+	build build-security-harness build-security-verifier build-lifecycle-client image-build image-check deploy-render deploy-check \
+	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test vulncheck \
+	bootstrap-doc-tools check-docs preview-docs check test-tooling run
+
+export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
+
+image-build: ## Build the pinned linux/amd64 Product runtime image
+	@./scripts/build-image.sh
+
+image-check: image-build ## Build and validate Product image identity, contents, startup, reads, and SIGTERM
+	@./scripts/check-image.sh
+
+deploy-render: ## Render Product Go overlays without applying them. Usage: make deploy-render [DEPLOY_ENV=local-dev|qa]
+	@KUBECTL="$(KUBECTL)" DEPLOY_ENV="$(DEPLOY_ENV)" ./scripts/render-deployment.sh
+
+deploy-check: ## Validate Product Go overlays, Java isolation, and disconnected QA activation
+	@KUBECTL="$(KUBECTL)" JQ="$(JQ)" PYTHON="$(PYTHON)" ./scripts/check-deployment.sh
+
+deploy-preflight deploy-status image-load deploy deploy-verify stop: ## Guarded Product deployment operation; requires exact DEPLOY_* target coordinates
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/deployment.py '$@'
+
+deploy-test-tooling: ## Exercise guarded Product deployment operations with fake cluster adapters
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test-deployment-operations.py
+
+deploy-test: image-build ## Exercise the image and rendered pod in an owned disposable Kind namespace
+	@PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" $(PYTHON) scripts/test-deployment-lifecycle.py
 
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
 	@test -n "$(strip $(SECURITY_HARNESS_OUTPUT))" || { echo "SECURITY_HARNESS_OUTPUT is required" >&2; exit 1; }
@@ -71,6 +111,11 @@ build-security-verifier: verify-tools ## Build the read-only Product security ve
 	@test -n "$(strip $(SECURITY_VERIFIER_OUTPUT))" || { echo "SECURITY_VERIFIER_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(SECURITY_VERIFIER_OUTPUT)" \
 		./internal/testing/cmd/securityverify
+
+build-lifecycle-client: verify-tools ## Build disposable HTTP/gRPC lifecycle client at LIFECYCLE_CLIENT_OUTPUT
+	@test -n "$(strip $(LIFECYCLE_CLIENT_OUTPUT))" || { echo "LIFECYCLE_CLIENT_OUTPUT is required" >&2; exit 1; }
+	GOWORK=off $(GO) build -mod=readonly -o "$(LIFECYCLE_CLIENT_OUTPUT)" \
+		./internal/testing/cmd/lifecycleclient
 
 bootstrap-tools: bootstrap-doc-tools
 
@@ -176,3 +221,26 @@ test-tooling: verify-tools
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
+
+# Publication is explicit and separate from image validation and deployment.
+.PHONY: image-release-check image-publish release-test bootstrap-ci-tools check-ci deploy-test-ci
+image-release-check: ## Validate clean exact merged revision; no build, push, or deployment
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/release_image.py check
+
+image-publish: ## Validate and publish merged image, then verify digest pull and write RELEASE_METADATA
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/release_image.py publish
+
+release-test: ## Prove release refusal, ordering, publication failure, and digest identity with fake adapters
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test-release.py
+
+bootstrap-ci-tools: ## Install pinned YAML parser and Kubernetes clients in module-local .tools
+	@bash scripts/bootstrap-ci-tools.sh
+
+check-ci: ## Validate workflow permissions, triggers, and release/deployment boundaries
+	@bash -n scripts/bootstrap-ci-tools.sh scripts/check-deployment.sh
+	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/product-deployment.yml ../../.github/workflows/product-image-release.yml ../../.github/workflows/go-modules.yml
+	@PYTHONDONTWRITEBYTECODE=1 .tools/ci-venv/bin/python scripts/check-ci.py
+
+# Runner-only setup owns a fresh cluster and isolated kubeconfig; local tests use deploy-test.
+deploy-test-ci: ## Create, test, and remove disposable Kubernetes on a GitHub-hosted runner
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/ci_cluster.py

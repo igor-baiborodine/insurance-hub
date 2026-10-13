@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "product": {
+      "reader": "scripts/product-deployment/reader.py"
+    }
+  }
+}

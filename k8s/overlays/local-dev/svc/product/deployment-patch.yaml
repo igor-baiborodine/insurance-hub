@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-api
+spec:
+  template:
+    metadata:
+      annotations:
+        insurance-hub.io/product-reader-credential-revision: "rotation-20261013T1450Z"
+    spec:
+      containers:
+        - name: product-api
+          imagePullPolicy: Never
+          env:
+            - name: PRODUCT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-postgres-product-reader-creds
+                  key: database-url
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: local-dev-postgres-product-reader-creds
+            items:
+              - key: ca.crt
+                path: ca.crt

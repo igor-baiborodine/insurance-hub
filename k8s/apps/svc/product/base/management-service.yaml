@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-api-management
+  labels:
+    app.kubernetes.io/name: product-api
+    app.kubernetes.io/instance: insurance-hub-product-api
+    app.kubernetes.io/component: management
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: product-api
+    app.kubernetes.io/component: api
+  ports:
+    - name: management
+      port: 8080
+      targetPort: management
+      protocol: TCP

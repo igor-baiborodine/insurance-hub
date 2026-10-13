@@ -1,0 +1,103 @@
+name: Product Deployment Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/product-service/**'
+      - 'scripts/go/**'
+      - 'scripts/postgres/**'
+      - 'scripts/product-deployment/**'
+      - 'scripts/product-baseline/**'
+      - 'scripts/product-security/**'
+      - 'legacy/product-service/src/test/resources/product-read-baseline/**'
+      - 'k8s/apps/svc/**'
+      - 'k8s/overlays/local-dev/svc/**'
+      - 'k8s/overlays/qa/svc/**'
+      - 'k8s/flux/qa/**'
+      - 'k8s/Makefile'
+      - 'Makefile'
+      - 'docs/migration/phase-4/product-service/**'
+      - '.github/workflows/product-deployment.yml'
+      - '.github/workflows/product-image-release.yml'
+      - '.github/workflows/go-modules.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/product-service/**'
+      - 'scripts/go/**'
+      - 'scripts/postgres/**'
+      - 'scripts/product-deployment/**'
+      - 'scripts/product-baseline/**'
+      - 'scripts/product-security/**'
+      - 'legacy/product-service/src/test/resources/product-read-baseline/**'
+      - 'k8s/apps/svc/**'
+      - 'k8s/overlays/local-dev/svc/**'
+      - 'k8s/overlays/qa/svc/**'
+      - 'k8s/flux/qa/**'
+      - 'k8s/Makefile'
+      - 'Makefile'
+      - 'docs/migration/phase-4/product-service/**'
+      - '.github/workflows/product-deployment.yml'
+      - '.github/workflows/product-image-release.yml'
+      - '.github/workflows/go-modules.yml'
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: product-deployment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Product image and deployment tooling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Java 14 and Maven package access
+        uses: actions/setup-java@v5
+        with:
+          java-version: '14'
+          distribution: 'zulu'
+          cache: 'maven'
+          server-id: 'github'
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.13.0'
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.2'
+          cache-dependency-path: services/product-service/go.sum
+      - name: Bootstrap pinned Product and CI tools
+        run: |
+          make go-product-bootstrap-tools
+          make -C services/product-service bootstrap-ci-tools
+          echo "$GITHUB_WORKSPACE/services/product-service/.tools/bin" >> "$GITHUB_PATH"
+      - name: Check workflow boundaries and release guards
+        run: |
+          make -C services/product-service check-ci
+          make go-svc-release-test SVC_NAME=product
+          make go-svc-dispatch-test
+      - name: Validate manifests and deployment guards
+        run: |
+          make go-svc-deploy-check SVC_NAME=product
+          make go-svc-deploy-test-tooling SVC_NAME=product
+      - name: Verify reader provisioning and permission lifecycle
+        run: make postgres-svc-role-test
+      - name: Verify accepted fixtures and database permission baseline
+        run: |
+          make product-baseline-fixtures-check
+          make product-baseline-test BASELINE_SUITE=db-permissions
+      - name: Validate actual runtime image
+        run: make go-svc-image-check SVC_NAME=product
+      - name: Exercise disposable Kubernetes lifecycle
+        run: make go-svc-deploy-test-ci SVC_NAME=product

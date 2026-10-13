@@ -6,6 +6,7 @@
   - [GitHub Actions](#github-actions)
   - [Markdown Tables Of Contents](#markdown-tables-of-contents)
   - [Git And Artifacts](#git-and-artifacts)
+  - [QA Cluster Network Recovery](#qa-cluster-network-recovery)
   - [Validation](#validation)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -46,6 +47,37 @@
   Store the specification, delivery plan, step summaries, and diff snapshots together there,
   whether the ticket is standalone or grouped under an epic.
 - Keep committed AI framework files under `ai/` concise and reusable.
+
+## QA Cluster Network Recovery
+
+The maintainer's `qa-insurance-hub` cluster runs through host networking that can lose outbound
+forwarding when the host `iptables` `FORWARD` policy is not `ACCEPT`. Consider this host condition
+before diagnosing a repository, Flux, DNS, or image defect when several of these symptoms appear
+together:
+
+- Flux reports `lookup github.com on 10.43.0.10:53: server misbehaving`.
+- CoreDNS reports upstream UDP timeouts to `8.8.8.8:53`.
+- workloads report GHCR HTTPS timeouts or `ImagePullBackOff`.
+- the Flux source and Kustomization remain on an older revision despite the newer desired state.
+
+Follow [`k8s/base-cluster-how-tos.md`](../../k8s/base-cluster-how-tos.md#prerequisites). A maintainer
+with host administration access should inspect the active policy with
+`sudo iptables -L FORWARD -v -n`, set it with `sudo iptables -P FORWARD ACCEPT` when required, and
+persist it with `sudo netfilter-persistent save`. The policy change takes effect without restarting
+Docker or LXD. Do not claim persistence unless the save command or equivalent persistent
+configuration was verified.
+
+After recovery, use the explicit `qa-insurance-hub` context and request or await normal Flux
+reconciliation. In this repository the source is `flux-system/insurance-hub` and the service
+Kustomization is `flux-system/qa-svc`. Verify a fresh result rather than relying on historical
+conditions or events: the GitRepository must be ready on the expected current `main` revision, the
+Kustomization must be ready on that revision, and affected deployments must use their checked-in
+images and become ready. Keep deployment changes under Flux ownership; do not bypass the failure
+with an ad hoc workload apply.
+
+If interactive `sudo` is unavailable, record the host action as blocked and give the maintainer the
+exact inspection and recovery commands. Treat later QA provisioning or activation as blocked until
+fresh source, reconciliation, image-pull, and workload-readiness evidence passes.
 
 ## Validation
 

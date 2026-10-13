@@ -1,0 +1,64 @@
+name: Product Image Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: 'Full 40-character commit SHA already merged to main'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-image-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main' && github.repository == 'igor-baiborodine/insurance-hub'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    env:
+      RELEASE_REVISION: ${{ inputs.revision }}
+    steps:
+      - name: Checkout trusted main history
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify merged revision before executing its code
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_REVISION" =~ ^[0-9a-f]{40}$ ]] || { echo 'A full commit SHA is required' >&2; exit 1; }
+          git merge-base --is-ancestor "$RELEASE_REVISION" origin/main
+          git checkout --detach "$RELEASE_REVISION"
+          make go-svc-image-release-check SVC_NAME=product
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.2'
+          cache-dependency-path: services/product-service/go.sum
+      - name: Log in to GHCR for this release only
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate, publish, and verify exact image digest
+        env:
+          RELEASE_METADATA: ${{ runner.temp }}/product-image.json
+        run: make go-svc-image-publish SVC_NAME=product
+      - name: Preserve image identity for activation review
+        uses: actions/upload-artifact@v7
+        with:
+          name: product-image-${{ inputs.revision }}
+          path: ${{ runner.temp }}/product-image.json
+          if-no-files-found: error
+      - name: Show release metadata
+        run: cat "$RUNNER_TEMP/product-image.json" >> "$GITHUB_STEP_SUMMARY"

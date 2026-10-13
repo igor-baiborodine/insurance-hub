@@ -10,6 +10,7 @@ include k8s/Makefile
 include k8s/bootstrap/Makefile
 include scripts/product-baseline/Makefile
 include scripts/product-security/Makefile
+include scripts/go/service/Makefile
 
 ################################################################################
 # Variables

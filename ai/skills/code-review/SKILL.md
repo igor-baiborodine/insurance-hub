@@ -3,6 +3,15 @@ name: code-review
 description: Review Insurance Hub pull requests or proposed changes against ticket requirements, repository rules, contracts, tests, and recorded evidence. Use for local review artifacts and GitHub Copilot code review; do not use to implement fixes.
 ---
 
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Insurance Hub Code Review](#insurance-hub-code-review)
+  - [Shared review standard](#shared-review-standard)
+  - [Findings](#findings)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Insurance Hub Code Review
 
 Conduct a read-only, evidence-based review. Follow root `AGENTS.md`, `ai/manifest.md`, applicable
@@ -38,6 +47,13 @@ Verify implementation and execution evidence directly. Plans are not results. A 
 contradictory execution record is unverified, not a pass. Do not report an unrelated pre-existing
 issue as a regression unless it directly blocks acceptance, and label it as pre-existing when it
 must be reported.
+
+For auxiliary Python changes, load [the Python rules](../../rules/python-rules.md) and both linked
+rules. Check the language/ownership boundary, Make recipes and their side effects, target guards,
+subprocess and secret handling, cleanup, and recovery for the behavior changed. Assess permissions
+against the selected profile's contract, and distinguish fake-adapter or disposable test results
+from live evidence. Apply the same review-only boundary; do not execute mutating administrative
+targets to reproduce a finding.
 
 ## Findings
 
