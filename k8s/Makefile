@@ -532,14 +532,15 @@ postgres-svc-secret-create: _env-check _data-ns-check _svc-ns-check _svc-name-ch
 
 # Service-owned database role profiles are administered inside an existing cluster.
 # These targets never depend on postgres-svc-deploy or namespace-changing legacy prerequisites.
-.PHONY: postgres-svc-role-inventory postgres-svc-role-provision postgres-svc-role-verify \
+.PHONY: postgres-svc-role-inventory postgres-svc-role-snapshot postgres-svc-role-provision postgres-svc-role-verify \
 	postgres-svc-role-rotate postgres-svc-role-revoke postgres-svc-role-test
 postgres-svc-role-inventory: ## Inspect a selected service-owned database role profile. Requires SVC_NAME, ROLE_PROFILE, and explicit target coordinates.
+postgres-svc-role-snapshot: ## Capture sanitized catalog/schema identity for a selected service-owned profile. Requires explicit target coordinates.
 postgres-svc-role-provision: ## Provision/reapply a selected service-owned database role profile. Requires explicit target coordinates.
 postgres-svc-role-verify: ## Verify a selected service-owned database role profile. Requires explicit target coordinates.
 postgres-svc-role-rotate: ## Rotate credentials for a selected role profile. Requires explicit target coordinates.
 postgres-svc-role-revoke: ## Revoke a selected role profile. Requires explicit target coordinates and profile-specific confirmation.
-postgres-svc-role-inventory postgres-svc-role-provision postgres-svc-role-verify \
+postgres-svc-role-inventory postgres-svc-role-snapshot postgres-svc-role-provision postgres-svc-role-verify \
 postgres-svc-role-rotate postgres-svc-role-revoke:
 	@PYTHONDONTWRITEBYTECODE=1 python3 scripts/postgres/service/dispatch.py '$(@:postgres-svc-role-%=%)'
 

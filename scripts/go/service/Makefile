@@ -9,6 +9,8 @@ DEPLOY_ENV ?=
 export SVC_NAME
 
 .PHONY: go-svc-image-build go-svc-image-check go-svc-deploy-render go-svc-deploy-check \
+	go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
+	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling \
 	go-svc-dispatch-test
 
 go-svc-image-build: ## Build one cataloged Go service image. Usage: make go-svc-image-build SVC_NAME=<svc-name>
@@ -30,6 +32,22 @@ go-svc-deploy-check: ## Validate one cataloged Go service's isolated deployment 
 	+@set -eu; \
 		module_path="$$($(GO_SERVICE_RESOLVER) deploy-check)"; \
 		$(MAKE) --no-print-directory -C "$$module_path" deploy-check
+
+# The service Makefile owns resource identity and environment policy. Resolve the
+# catalog capability before invoking it, so unsupported services never reach kubectl.
+go-svc-deploy-preflight: ## Check exact target, ownership, image and resource prerequisites
+go-svc-deploy-status: ## Observe selected Go and Java workload status and exposure
+go-svc-image-load: ## Load the selected image into local-dev Kind
+go-svc-deploy: ## Apply the selected local-dev Go overlay with bounded rollout
+go-svc-deploy-verify: ## Verify selected Go resources, reader permissions and HTTP/gRPC reads
+go-svc-stop: ## Stop only the selected local-dev Go Deployment
+go-svc-deploy-test-tooling: ## Test selected-service deployment guards and cleanup
+go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
+go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling:
+	+@set -eu; \
+		capability='$(@:go-svc-%=%)'; \
+		module_path="$$($(GO_SERVICE_RESOLVER) "$$capability")"; \
+		$(MAKE) --no-print-directory -C "$$module_path" "$$capability"
 
 go-svc-dispatch-test: ## Test fail-closed Go service selection and capability dispatch
 	@$(GO_SERVICE_DISPATCH_DIR)test-dispatch.sh

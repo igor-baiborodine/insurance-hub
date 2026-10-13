@@ -522,13 +522,15 @@ def revoke(manager: Kubernetes) -> None:
 
 def main() -> None:
     require(len(sys.argv) == 2 and sys.argv[1] in
-            {"inventory", "provision", "verify", "rotate", "revoke"}, "unsupported role action")
+            {"inventory", "snapshot", "provision", "verify", "rotate", "revoke"}, "unsupported role action")
     manager = Kubernetes(os.environ.get("POSTGRES_ROLE_ENV", ""))
     action = sys.argv[1]
     if action == "inventory":
         state = inventory(manager.admin)
         # Names and privilege counts are safe; no Secret payload is read in this operation.
         print(json.dumps(state, sort_keys=True))
+    elif action == "snapshot":
+        print(json.dumps(snapshot(manager.admin), sort_keys=True))
     elif action == "provision":
         provision(manager)
     elif action == "verify":

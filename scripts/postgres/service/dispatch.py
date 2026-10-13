@@ -8,7 +8,7 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[3]
-ACTIONS = {"inventory", "provision", "verify", "rotate", "revoke"}
+ACTIONS = {"inventory", "snapshot", "provision", "verify", "rotate", "revoke"}
 
 
 def fail(message: str) -> None:

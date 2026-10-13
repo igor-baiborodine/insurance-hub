@@ -19,7 +19,14 @@
         "image-build",
         "image-check",
         "deploy-render",
-        "deploy-check"
+        "deploy-check",
+        "deploy-preflight",
+        "deploy-status",
+        "image-load",
+        "deploy",
+        "deploy-verify",
+        "stop",
+        "deploy-test-tooling"
       ]
     }
   }

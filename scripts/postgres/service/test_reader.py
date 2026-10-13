@@ -50,6 +50,11 @@ def dispatch_guards():
         check("password" not in result.stderr.lower(), "dispatch diagnostic exposed credential text")
     selected = reader_path("product", "reader")
     check(selected == MODULE, "Product reader did not resolve to its service-owned script")
+    spec = importlib.util.spec_from_file_location("dispatch", dispatch)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    check(module.resolve("snapshot", "product", "reader") == MODULE,
+          "Product snapshot did not resolve to its service-owned script")
 
 
 def reader_path(service, profile):

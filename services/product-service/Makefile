@@ -63,7 +63,8 @@ COVERAGE_FILE ?= coverage.txt
 INTEGRATION_SUITE ?= all
 FIXTURE_SET ?= qa
 SECURITY_HARNESS_OUTPUT ?=
-DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md
+DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md \
+	../../docs/migration/phase-4/product-service/deployment-runbook.md
 EXTRA_TOOL_PACKAGES := github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
 VERIFY_EXTRA_TOOL_SPECS := sqlc|$(SQLC)|$(SQLC_VERSION)|version
 
@@ -74,7 +75,8 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage coverage-check test-integration \
-	build build-security-harness build-security-verifier image-build image-check deploy-render deploy-check vulncheck \
+	build build-security-harness build-security-verifier image-build image-check deploy-render deploy-check \
+	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling vulncheck \
 	bootstrap-doc-tools check-docs preview-docs check test-tooling run
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
@@ -90,6 +92,12 @@ deploy-render: ## Render Product Go overlays without applying them. Usage: make 
 
 deploy-check: ## Validate Product Go overlays, Java isolation, and disconnected QA activation
 	@KUBECTL="$(KUBECTL)" JQ="$(JQ)" PYTHON="$(PYTHON)" ./scripts/check-deployment.sh
+
+deploy-preflight deploy-status image-load deploy deploy-verify stop: ## Guarded Product deployment operation; requires exact DEPLOY_* target coordinates
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/deployment.py '$@'
+
+deploy-test-tooling: ## Exercise guarded Product deployment operations with fake cluster adapters
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test-deployment-operations.py
 
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
 	@test -n "$(strip $(SECURITY_HARNESS_OUTPUT))" || { echo "SECURITY_HARNESS_OUTPUT is required" >&2; exit 1; }

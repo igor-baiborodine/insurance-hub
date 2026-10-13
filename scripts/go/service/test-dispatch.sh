@@ -35,7 +35,7 @@ resolved="$(SVC_NAME=product "${script_dir}/resolve.sh" image-build)"
 	exit 1
 }
 
-for capability in image-check deploy-render deploy-check; do
+for capability in image-check deploy-render deploy-check deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling; do
 	resolved="$(SVC_NAME=product "${script_dir}/resolve.sh" "${capability}")"
 	[[ "${resolved}" == "services/product-service" ]] || {
 		printf 'go-service-dispatch-test: Product %s module = %s\n' "${capability}" "${resolved}" >&2
@@ -43,4 +43,41 @@ for capability in image-check deploy-render deploy-check; do
 	}
 done
 
-printf 'go-service-dispatch-test: passed missing, invalid, unknown, unsupported, and Product capability cases\n'
+# Two disposable catalog entries prove that selected service metadata, not a
+# hard-coded Product path, controls the same shared capability.
+mkdir -p "${temporary_root}/repository/scripts/go/service" \
+  "${temporary_root}/repository/services/first" "${temporary_root}/repository/services/second"
+cp "${script_dir}/resolve.sh" "${temporary_root}/repository/scripts/go/service/resolve.sh"
+cp "${script_dir}/Makefile" "${temporary_root}/repository/scripts/go/service/Makefile"
+for service in first second; do
+  cat >"${temporary_root}/repository/services/${service}/Makefile" <<EOF
+.PHONY: deploy-preflight
+deploy-preflight:
+	@printf 'fixture:${service}\\n'
+EOF
+done
+jq '{schemaVersion: 1, services: {
+  first: {repositoryRoot:"services",modulePath:"services/first",localImage:"first",
+    registryImage:"example.org/first",kustomizeBase:"k8s/first",
+    overlays:{"local-dev":"k8s/local/first",qa:"k8s/qa/first"},
+    environments:["local-dev","qa"],capabilities:["deploy-preflight"]},
+  second: {repositoryRoot:"services",modulePath:"services/second",localImage:"second",
+    registryImage:"example.org/second",kustomizeBase:"k8s/second",
+    overlays:{"local-dev":"k8s/local/second",qa:"k8s/qa/second"},
+    environments:["local-dev","qa"],capabilities:["deploy-preflight"]}}}' \
+  <<< '{}' >"${temporary_root}/repository/scripts/go/service/catalog.json"
+for service in first second; do
+  resolved="$(SVC_NAME="${service}" "${temporary_root}/repository/scripts/go/service/resolve.sh" deploy-preflight)"
+  [[ "${resolved}" == "services/${service}" ]] || {
+    printf 'go-service-dispatch-test: fixture %s resolved to %s\n' "${service}" "${resolved}" >&2
+    exit 1
+  }
+  invoked="$(make --no-print-directory -s -C "${temporary_root}/repository" \
+    -f scripts/go/service/Makefile go-svc-deploy-preflight SVC_NAME="${service}")"
+  [[ "${invoked}" == "fixture:${service}" ]] || {
+    printf 'go-service-dispatch-test: fixture recipe %s returned %s\n' "${service}" "${invoked}" >&2
+    exit 1
+  }
+done
+
+printf 'go-service-dispatch-test: passed guards, Product capabilities, and two fixture service paths\n'
