@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "services": {
+    "product": {
+      "repositoryRoot": "services",
+      "modulePath": "services/product-service",
+      "localImage": "insurance-hub-product-api",
+      "registryImage": "ghcr.io/igor-baiborodine/insurance-hub/product-api",
+      "kustomizeBase": "k8s/apps/svc/product/base",
+      "overlays": {
+        "local-dev": "k8s/overlays/local-dev/svc/product",
+        "qa": "k8s/overlays/qa/svc/product"
+      },
+      "environments": [
+        "local-dev",
+        "qa"
+      ],
+      "capabilities": [
+        "image-build",
+        "image-check"
+      ]
+    }
+  }
+}

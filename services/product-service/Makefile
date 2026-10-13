@@ -40,6 +40,17 @@ TESTCONTAINERS_VERSION := v0.44.0
 MOBY_GO_ARCHIVE_VERSION := v0.3.0
 MERMAID_CLI_VERSION := 11.12.0
 POSTGRES_IMAGE := postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
+HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
+HEAD_VERSION := git-$(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
+IMAGE_NAME ?= insurance-hub-product-api
+SOURCE_REVISION ?= $(HEAD_REVISION)
+SOURCE_CREATED ?= $(HEAD_CREATED)
+SOURCE_REPOSITORY ?= https://github.com/igor-baiborodine/insurance-hub
+SOURCE_VERSION ?= $(HEAD_VERSION)
+IMAGE_TAG ?= $(SOURCE_VERSION)
+IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
+TARGET_PLATFORM ?= linux/amd64
 SQL_SCHEMA := internal/postgres/sql/schema.sql
 SQL_QUERIES := internal/postgres/sql/queries.sql
 GENERATED_SQL_FILES := internal/postgres/dbgen/db.go internal/postgres/dbgen/models.go \
@@ -60,7 +71,16 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage coverage-check test-integration \
-	build build-security-harness build-security-verifier vulncheck bootstrap-doc-tools check-docs preview-docs check test-tooling run
+	build build-security-harness build-security-verifier image-build image-check vulncheck \
+	bootstrap-doc-tools check-docs preview-docs check test-tooling run
+
+export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
+
+image-build: ## Build the pinned linux/amd64 Product runtime image
+	@./scripts/build-image.sh
+
+image-check: image-build ## Build and validate Product image identity, contents, startup, reads, and SIGTERM
+	@./scripts/check-image.sh
 
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
 	@test -n "$(strip $(SECURITY_HARNESS_OUTPUT))" || { echo "SECURITY_HARNESS_OUTPUT is required" >&2; exit 1; }
