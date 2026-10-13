@@ -120,6 +120,10 @@ jobs:
           RELEASE_TAG: ${{ steps.monotag.outputs.tag }}
           RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
         run: make go-svc-image-publish SVC_NAME=product
+      - name: Configure release Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Create release identities and update dormant QA digest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
