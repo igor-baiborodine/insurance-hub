@@ -75,8 +75,8 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 .PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage coverage-check test-integration \
-	build build-security-harness build-security-verifier image-build image-check deploy-render deploy-check \
-	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling vulncheck \
+	build build-security-harness build-security-verifier build-lifecycle-client image-build image-check deploy-render deploy-check \
+	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test vulncheck \
 	bootstrap-doc-tools check-docs preview-docs check test-tooling run
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
@@ -99,6 +99,9 @@ deploy-preflight deploy-status image-load deploy deploy-verify stop: ## Guarded 
 deploy-test-tooling: ## Exercise guarded Product deployment operations with fake cluster adapters
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test-deployment-operations.py
 
+deploy-test: image-build ## Exercise the image and rendered pod in an owned disposable Kind namespace
+	@PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" $(PYTHON) scripts/test-deployment-lifecycle.py
+
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
 	@test -n "$(strip $(SECURITY_HARNESS_OUTPUT))" || { echo "SECURITY_HARNESS_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -race -o "$(SECURITY_HARNESS_OUTPUT)" \
@@ -108,6 +111,11 @@ build-security-verifier: verify-tools ## Build the read-only Product security ve
 	@test -n "$(strip $(SECURITY_VERIFIER_OUTPUT))" || { echo "SECURITY_VERIFIER_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(SECURITY_VERIFIER_OUTPUT)" \
 		./internal/testing/cmd/securityverify
+
+build-lifecycle-client: verify-tools ## Build disposable HTTP/gRPC lifecycle client at LIFECYCLE_CLIENT_OUTPUT
+	@test -n "$(strip $(LIFECYCLE_CLIENT_OUTPUT))" || { echo "LIFECYCLE_CLIENT_OUTPUT is required" >&2; exit 1; }
+	GOWORK=off $(GO) build -mod=readonly -o "$(LIFECYCLE_CLIENT_OUTPUT)" \
+		./internal/testing/cmd/lifecycleclient
 
 bootstrap-tools: bootstrap-doc-tools
 

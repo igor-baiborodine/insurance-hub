@@ -26,7 +26,8 @@
         "deploy",
         "deploy-verify",
         "stop",
-        "deploy-test-tooling"
+        "deploy-test-tooling",
+        "deploy-test"
       ]
     }
   }

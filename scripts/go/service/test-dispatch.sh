@@ -35,7 +35,7 @@ resolved="$(SVC_NAME=product "${script_dir}/resolve.sh" image-build)"
 	exit 1
 }
 
-for capability in image-check deploy-render deploy-check deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling; do
+for capability in image-check deploy-render deploy-check deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test; do
 	resolved="$(SVC_NAME=product "${script_dir}/resolve.sh" "${capability}")"
 	[[ "${resolved}" == "services/product-service" ]] || {
 		printf 'go-service-dispatch-test: Product %s module = %s\n' "${capability}" "${resolved}" >&2
