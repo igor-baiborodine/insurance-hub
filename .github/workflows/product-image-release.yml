@@ -37,7 +37,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Verify the selected source before executing its code
+      - name: Prepare the selected source worktree
         shell: bash
         run: |
           set -euo pipefail
@@ -46,7 +46,9 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == push ]]; then
             [[ "$GITHUB_SHA" == "$RELEASE_REVISION" ]] || exit 1
           fi
-          git checkout --detach "$RELEASE_REVISION"
+          source_root="$RUNNER_TEMP/product-release-source"
+          git worktree add --detach "$source_root" "$RELEASE_REVISION"
+          echo "PRODUCT_RELEASE_SOURCE_ROOT=$source_root" >> "$GITHUB_ENV"
       - name: Initialize external release workspace
         shell: bash
         run: |
@@ -70,13 +72,14 @@ jobs:
         run: |
           make go-svc-release-test SVC_NAME=product
           make -C services/product-service check-ci
-          make go-svc-image-check SVC_NAME=product
+          make -C "$PRODUCT_RELEASE_SOURCE_ROOT" go-svc-image-check SVC_NAME=product
       - name: Calculate the next scoped Product version
         id: monotag
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t existing_tags < <(git tag --points-at "$RELEASE_REVISION" \
+          mapfile -t existing_tags < <(git -C "$PRODUCT_RELEASE_SOURCE_ROOT" \
+            tag --points-at "$RELEASE_REVISION" \
             --list 'services/product-service/v*')
           if (( ${#existing_tags[@]} > 1 )); then
             echo 'More than one Product release tag points at the selected revision' >&2
@@ -85,13 +88,14 @@ jobs:
             existing_tag="${existing_tags[0]}"
             existing_version="${existing_tag#services/product-service/v}"
             [[ "$existing_version" =~ ^1\.[0-9]+\.[0-9]+$ ]] || exit 1
-            [[ "$(git cat-file -t "refs/tags/$existing_tag")" == tag ]] || exit 1
+            [[ "$(git -C "$PRODUCT_RELEASE_SOURCE_ROOT" \
+              cat-file -t "refs/tags/$existing_tag")" == tag ]] || exit 1
             printf '%s\n' "$existing_tag" > "$RUNNER_TEMP/product-release/tag.txt"
             printf '%s\n' "$existing_version" > "$RUNNER_TEMP/product-release/version.txt"
             printf '# Product Go %s\n' "$existing_version" > "$RELEASE_NOTES"
           else
             npx -y monotag tag \
-              --repo-dir . \
+              --repo-dir "$PRODUCT_RELEASE_SOURCE_ROOT" \
               --path services/product-service \
               --prefix services/product-service/v \
               --tag-file "$RUNNER_TEMP/product-release/tag.txt" \

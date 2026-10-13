@@ -89,24 +89,29 @@ def validate(checks: dict, release: dict, modules: dict) -> None:
     source_guard = steps[1]['run']
     require('[[ "$RELEASE_REVISION" =~ ^[0-9a-f]{40}$ ]]' in source_guard and
             source_guard.index('git merge-base --is-ancestor') <
-            source_guard.index('git checkout --detach'),
-            'selected source must be validated before checkout')
+            source_guard.index('git worktree add --detach') and
+            'PRODUCT_RELEASE_SOURCE_ROOT=' in source_guard and
+            'git checkout --detach' not in source_guard,
+            'selected source must use a validated external worktree')
     require('npx -y monotag tag' in commands and '--path services/product-service' in commands and
+            '--repo-dir "$PRODUCT_RELEASE_SOURCE_ROOT"' in commands and
             '--prefix services/product-service/v' in commands and '--min-version 1.0.0' in commands and
             '--max-version 1.999.999' in commands and
-            'git tag --points-at "$RELEASE_REVISION"' in commands and
-            'git cat-file -t "refs/tags/$existing_tag"' in commands,
+            'tag --points-at "$RELEASE_REVISION"' in commands and
+            'cat-file -t "refs/tags/$existing_tag"' in commands,
             'scoped Product monotag or retry contract differs')
     require('make go-svc-image-release-check SVC_NAME=product' in commands and
             'make go-svc-release-test SVC_NAME=product' in commands and
-            'make -C services/product-service check-ci' in commands and
-            'make go-svc-image-check SVC_NAME=product' in commands,
+            'make -C services/product-service check-ci' in commands,
             'release gates differ')
     require('make go-svc-image-publish SVC_NAME=product' in commands, 'release must use owning Make interface')
     require('make go-svc-release-finalize SVC_NAME=product' in commands,
             'release must finalize through the owning Make interface')
+    source_image_check = 'make -C "$PRODUCT_RELEASE_SOURCE_ROOT" go-svc-image-check SVC_NAME=product'
+    require(source_image_check in commands,
+            'selected source worktree must own image validation')
     require(commands.index('make go-svc-release-test') < commands.index('npx -y monotag tag') and
-            commands.index('make go-svc-image-check') < commands.index('npx -y monotag tag') and
+            commands.index(source_image_check) < commands.index('npx -y monotag tag') and
             commands.index('make go-svc-image-release-check') < commands.index('make go-svc-image-publish') <
             commands.index('make go-svc-release-finalize'), 'release gate or mutation order differs')
     require('git config user.name "github-actions[bot]"' in commands and
@@ -137,6 +142,8 @@ def main() -> None:
         lambda c, r: r['jobs']['release'].update({'if': 'true'}),
         lambda c, r: next(step for step in r['jobs']['release']['steps']
                           if step.get('name') == 'Configure release Git identity').update(run='true'),
+        lambda c, r: next(step for step in r['jobs']['release']['steps']
+                          if step.get('name') == 'Prepare the selected source worktree').update(run='true'),
     ]
     for corrupt in corruptions:
         bad_checks, bad_release = deepcopy(checks), deepcopy(release)
@@ -146,7 +153,7 @@ def main() -> None:
         except ValueError:
             continue
         raise ValueError('controlled workflow corruption was accepted')
-    print('check-ci: workflow names, YAML, permissions, triggers, Make boundaries and eight corruptions passed')
+    print('check-ci: workflow names, YAML, permissions, triggers, Make boundaries and nine corruptions passed')
 
 
 if __name__ == '__main__':

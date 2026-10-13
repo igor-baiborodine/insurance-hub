@@ -19,6 +19,7 @@ VERSION = "1.2.3"
 TAG = f"services/product-service/v{VERSION}"
 IMAGE_ID = "sha256:" + "b" * 64
 DIGEST = "sha256:" + "c" * 64
+CREATED = "2026-10-13T12:00:00-04:00"
 ENV = {"RELEASE_REVISION": REVISION, "RELEASE_VERSION": VERSION, "RELEASE_TAG": TAG,
        "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": REVISION,
        "GITHUB_REPOSITORY": release.REPOSITORY}
@@ -28,13 +29,20 @@ class ReleaseTests(unittest.TestCase):
     def details(self, revision: str = REVISION, image_id: str = IMAGE_ID) -> str:
         return json.dumps([{"Id": image_id, "Os": "linux", "Architecture": "amd64",
                             "RepoDigests": [release.REGISTRY + "@" + DIGEST],
-                            "Config": {"Labels": {"org.opencontainers.image.revision": revision}}}])
+                            "Config": {"Labels": {
+                                "org.opencontainers.image.created": CREATED,
+                                "org.opencontainers.image.source": f"https://github.com/{release.REPOSITORY}",
+                                "org.opencontainers.image.revision": revision,
+                                "org.opencontainers.image.version": f"git-{revision[:12]}",
+                            }}}])
 
     def fake(self, argv: list[str], timeout: int = 60) -> str:
         if argv == ["git", "rev-parse", "--short", "HEAD"]:
             return SHORT
         if argv == ["git", "rev-parse", "HEAD"]:
             return REVISION
+        if argv[:3] == ["git", "show", "-s"]:
+            return CREATED
         if argv[:3] == ["docker", "image", "inspect"]:
             return IMAGE_ID if "--format" in argv else self.details()
         if argv[:2] == ["docker", "push"]:
@@ -57,11 +65,32 @@ class ReleaseTests(unittest.TestCase):
     def test_recovery_dispatch_and_canonical_push_are_accepted(self) -> None:
         for event in ("push", "workflow_dispatch"):
             values = {**ENV, "GITHUB_EVENT_NAME": event}
-            if event == "workflow_dispatch":
-                values.pop("GITHUB_SHA")
             with self.subTest(event=event), patch.dict(os.environ, values, clear=True), \
                  patch.object(release, "command", side_effect=self.fake):
                 self.assertEqual(release.check(), REVISION)
+
+    def test_recovery_uses_current_main_tooling_with_selected_source_worktree(self) -> None:
+        main_revision = "e" * 40
+        source_root = Path("/tmp/product-release-source")
+        calls = []
+
+        def command(argv: list[str], timeout: int = 60) -> str:
+            calls.append(argv)
+            source_prefix = ["git", "-C", str(source_root)]
+            if argv == source_prefix + ["rev-parse", "--short", "HEAD"]:
+                return SHORT
+            if argv == source_prefix + ["rev-parse", "HEAD"]:
+                return REVISION
+            if argv == ["git", "rev-parse", "HEAD"]:
+                return main_revision
+            return ""
+
+        values = {**ENV, "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_SHA": main_revision}
+        with patch.dict(os.environ, values, clear=True), patch.object(release, "SOURCE_ROOT", source_root), \
+             patch.object(release, "command", side_effect=command):
+            self.assertEqual(release.check(), REVISION)
+        self.assertIn(["git", "rev-parse", "HEAD"], calls)
+        self.assertIn(["git", "-C", str(source_root), "rev-parse", "HEAD"], calls)
 
     def test_unmerged_mismatched_and_dirty_revisions_cannot_publish(self) -> None:
         for failure in ("head", "ancestry", "dirty"):
@@ -101,23 +130,39 @@ class ReleaseTests(unittest.TestCase):
     def test_matching_existing_tags_make_publication_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "metadata.json"
+            present = subprocess.CompletedProcess(["docker"], 0, "{}", "")
+            rebuilt_id = "sha256:" + "d" * 64
+
+            def command(argv: list[str], timeout: int = 60) -> str:
+                if argv[:3] == ["docker", "image", "inspect"] and "--format" in argv:
+                    return rebuilt_id
+                return self.fake(argv, timeout)
             with patch.dict(os.environ, {**ENV, "RELEASE_METADATA": str(output)}, clear=True), \
-                 patch.object(release, "command", side_effect=self.fake) as run, \
-                 patch.object(release, "existing_tag", return_value=DIGEST):
+                 patch.object(release, "execute", return_value=present), \
+                 patch.object(release, "command", side_effect=command) as run:
                 release.publish()
             self.assertFalse(any(call.args[0][:2] == ["docker", "push"] for call in run.call_args_list))
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["imageId"], IMAGE_ID)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "metadata.json"
+            with patch.dict(os.environ, {**ENV, "RELEASE_METADATA": str(output)}, clear=True), \
+                 patch.object(release, "command", side_effect=self.fake), \
+                 patch.object(release, "existing_tag", side_effect=[(DIGEST, IMAGE_ID), None]):
+                with self.assertRaisesRegex(release.ReleaseError, "partial or inconsistent"):
+                    release.publish()
 
     def test_existing_tag_collision_and_registry_errors_fail_closed(self) -> None:
         completed = subprocess.CompletedProcess(["docker"], 0, "{}", "")
         with patch.object(release, "execute", return_value=completed), \
              patch.object(release, "command", side_effect=lambda argv, timeout=60:
-                          self.details(image_id="sha256:" + "d" * 64) if argv[:3] == ["docker", "image", "inspect"] else ""):
-            with self.assertRaisesRegex(release.ReleaseError, "collision"):
-                release.existing_tag(release.REGISTRY + ":1.2.3", IMAGE_ID, REVISION)
+                          self.details(revision="d" * 40) if argv[:3] == ["docker", "image", "inspect"] else ""):
+            with self.assertRaisesRegex(release.ReleaseError, "identity differs"):
+                release.existing_tag(release.REGISTRY + ":1.2.3", REVISION, CREATED)
         failed = subprocess.CompletedProcess(["docker"], 1, "", "unauthorized")
         with patch.object(release, "execute", return_value=failed):
             with self.assertRaisesRegex(release.ReleaseError, "refusing"):
-                release.existing_tag(release.REGISTRY + ":1.2.3", IMAGE_ID, REVISION)
+                release.existing_tag(release.REGISTRY + ":1.2.3", REVISION, CREATED)
 
     def test_failures_do_not_emit_success_metadata(self) -> None:
         for failure in ("validation", "push", "pull", "wrong-image"):
@@ -162,6 +207,10 @@ class ReleaseTests(unittest.TestCase):
                             next(index for index, value in enumerate(calls) if value[:2] == ["git", "commit"]))
             self.assertLess(next(index for index, value in enumerate(calls) if value[:2] == ["git", "commit"]),
                             next(index for index, value in enumerate(calls) if value[:2] == ["git", "push"]))
+            stale_guard = next(value for value in calls if value[:3] == ["git", "diff", "--name-only"])
+            self.assertIn("services/product-service/internal", stale_guard)
+            self.assertNotIn("services/product-service/scripts/release_image.py", stale_guard)
+            self.assertNotIn(".github/workflows/product-image-release.yml", stale_guard)
 
     def test_existing_manifest_tag_and_release_require_exact_identity(self) -> None:
         current = release.desired_manifest(

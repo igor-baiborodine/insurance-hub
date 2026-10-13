@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[3]
+SOURCE_ROOT = Path(os.environ.get("PRODUCT_RELEASE_SOURCE_ROOT", ROOT)).resolve()
 REGISTRY = "ghcr.io/igor-baiborodine/insurance-hub/product-api"
 REPOSITORY = "igor-baiborodine/insurance-hub"
 MANIFEST = ROOT / "k8s/overlays/qa/svc/product/kustomization.yaml"
@@ -39,9 +40,16 @@ def command(argv: list[str], timeout: int = 60) -> str:
     return result.stdout.strip()
 
 
-def clean() -> None:
-    require(not command(["git", "status", "--porcelain", "--untracked-files=all"]),
-            "release requires a clean checkout, including untracked files")
+def source_command(argv: list[str], timeout: int = 60) -> str:
+    if SOURCE_ROOT == ROOT:
+        return command(argv, timeout)
+    return command([argv[0], "-C", str(SOURCE_ROOT), *argv[1:]], timeout)
+
+
+def clean(source: bool = False) -> None:
+    run = source_command if source else command
+    require(not run(["git", "status", "--porcelain", "--untracked-files=all"]),
+            "release requires clean trusted and source checkouts")
 
 
 def release_inputs() -> tuple[str, str, str, str]:
@@ -54,7 +62,7 @@ def release_inputs() -> tuple[str, str, str, str]:
             "RELEASE_VERSION must be a semantic 1.x version")
     require(tag == f"services/product-service/v{version}",
             "RELEASE_TAG does not match the Product scoped version")
-    short = command(["git", "rev-parse", "--short", "HEAD"])
+    short = source_command(["git", "rev-parse", "--short", "HEAD"])
     require(bool(re.fullmatch(r"[0-9a-f]{7,40}", short)), "Git did not derive a unique short SHA")
     return revision, version, tag, short
 
@@ -66,13 +74,17 @@ def check() -> str:
             os.environ.get("GITHUB_REPOSITORY") == REPOSITORY,
             "publication requires a canonical main push or explicit recovery dispatch")
     revision, _, _, _ = release_inputs()
-    require(command(["git", "rev-parse", "HEAD"]) == revision,
-            "checked-out HEAD differs from RELEASE_REVISION")
+    require(command(["git", "rev-parse", "HEAD"]) == os.environ.get("GITHUB_SHA"),
+            "trusted main checkout differs from GITHUB_SHA")
+    require(source_command(["git", "rev-parse", "HEAD"]) == revision,
+            "selected source checkout differs from RELEASE_REVISION")
     if event == "push":
         require(os.environ.get("GITHUB_SHA") == revision,
                 "push release revision differs from the event revision")
     command(["git", "merge-base", "--is-ancestor", revision, "origin/main"])
     clean()
+    if SOURCE_ROOT != ROOT:
+        clean(source=True)
     return revision
 
 
@@ -80,7 +92,8 @@ def metadata_path() -> Path:
     output = Path(os.environ.get("RELEASE_METADATA", ""))
     require(output.is_absolute() and output.parent.is_dir() and not output.exists(),
             "RELEASE_METADATA must be an unused absolute path in an existing directory")
-    require(not output.is_relative_to(ROOT), "release metadata must be outside the checkout")
+    require(not output.is_relative_to(ROOT) and not output.is_relative_to(SOURCE_ROOT),
+            "release metadata must be outside the checkouts")
     return output
 
 
@@ -99,7 +112,21 @@ def digest_from_image(details: dict) -> str:
     return digest
 
 
-def existing_tag(reference: str, image_id: str, revision: str) -> str | None:
+def validate_registry_image(details: dict, revision: str, created: str) -> tuple[str, str]:
+    labels = details.get("Config", {}).get("Labels", {})
+    image_id = details.get("Id", "")
+    require(bool(re.fullmatch(r"sha256:[0-9a-f]{64}", image_id)),
+            "registry image has an invalid image ID")
+    require(details.get("Os") == "linux" and details.get("Architecture") == "amd64" and
+            labels.get("org.opencontainers.image.created") == created and
+            labels.get("org.opencontainers.image.source") == f"https://github.com/{REPOSITORY}" and
+            labels.get("org.opencontainers.image.revision") == revision and
+            labels.get("org.opencontainers.image.version") == f"git-{revision[:12]}",
+            "registry image identity differs from the selected source")
+    return digest_from_image(details), image_id
+
+
+def existing_tag(reference: str, revision: str, created: str) -> tuple[str, str] | None:
     probe = execute(["docker", "manifest", "inspect", reference])
     if probe.returncode != 0:
         diagnostic = (probe.stderr + probe.stdout).lower()
@@ -108,10 +135,7 @@ def existing_tag(reference: str, image_id: str, revision: str) -> str | None:
         return None
     command(["docker", "pull", "--platform", "linux/amd64", reference], timeout=300)
     details = image_details(reference)
-    require(details.get("Id") == image_id and
-            details.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") == revision,
-            f"release tag collision: {reference} names a different image")
-    return digest_from_image(details)
+    return validate_registry_image(details, revision, created)
 
 
 def push_tag(local: str, reference: str) -> str:
@@ -129,26 +153,33 @@ def publish() -> None:
     output = metadata_path()
     local = f"insurance-hub-product-api:git-{revision[:12]}"
     references = [f"{REGISTRY}:{version}", f"{REGISTRY}:sha-{short}"]
+    created = source_command(["git", "show", "-s", "--format=%cI", revision])
 
     # Validate the exact source before the first registry mutation.
-    command(["make", "go-svc-image-check", "SVC_NAME=product"], timeout=1200)
+    source_command(["make", "go-svc-image-check", "SVC_NAME=product"], timeout=1200)
     clean()
-    image_id = command(["docker", "image", "inspect", "--format", "{{.Id}}", local])
-    require(bool(re.fullmatch(r"sha256:[0-9a-f]{64}", image_id)), "invalid local image ID")
+    if SOURCE_ROOT != ROOT:
+        clean(source=True)
+    local_image_id = command(["docker", "image", "inspect", "--format", "{{.Id}}", local])
+    require(bool(re.fullmatch(r"sha256:[0-9a-f]{64}", local_image_id)), "invalid local image ID")
 
-    resolved = {reference: existing_tag(reference, image_id, revision) for reference in references}
-    for reference, digest in list(resolved.items()):
-        if digest is None:
-            resolved[reference] = push_tag(local, reference)
-    digests = set(resolved.values())
-    require(len(digests) == 1, "semantic and short-SHA tags do not resolve to the same digest")
-    digest = digests.pop()
+    existing = {reference: existing_tag(reference, revision, created) for reference in references}
+    accepted = [identity for identity in existing.values() if identity is not None]
+    if accepted:
+        require(len(accepted) == len(references) and len(set(accepted)) == 1,
+                "partial or inconsistent existing release tags")
+        digest, image_id = accepted[0]
+    else:
+        resolved = {reference: push_tag(local, reference) for reference in references}
+        digests = set(resolved.values())
+        require(len(digests) == 1, "semantic and short-SHA tags do not resolve to the same digest")
+        digest = digests.pop()
+        image_id = local_image_id
     immutable = f"{REGISTRY}@{digest}"
     command(["docker", "pull", "--platform", "linux/amd64", immutable], timeout=300)
     pulled = image_details(immutable)
-    require(pulled.get("Id") == image_id and pulled.get("Os") == "linux" and
-            pulled.get("Architecture") == "amd64" and
-            pulled.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") == revision,
+    pulled_digest, pulled_image_id = validate_registry_image(pulled, revision, created)
+    require(pulled_digest == digest and pulled_image_id == image_id,
             "published digest does not match the validated image")
     metadata = {"revision": revision, "version": version, "releaseTag": release_tag,
                 "semanticTag": references[0], "shaTag": references[1], "image": immutable,
@@ -193,7 +224,8 @@ def ensure_tag(tag: str, revision: str, version: str) -> None:
 
 def release_body(metadata: dict) -> Path:
     notes = Path(os.environ.get("RELEASE_NOTES", ""))
-    require(notes.is_absolute() and notes.is_file() and not notes.is_relative_to(ROOT),
+    require(notes.is_absolute() and notes.is_file() and not notes.is_relative_to(ROOT) and
+            not notes.is_relative_to(SOURCE_ROOT),
             "RELEASE_NOTES must be an external monotag notes file")
     body = notes.with_name("product-release-body.md")
     require(not body.exists(), "release body path already exists")
@@ -245,8 +277,13 @@ def update_manifest(metadata: dict) -> None:
         require(subject == f"chore(k8s): update Product Go image to {version}",
                 "existing QA digest was not written by this release identity")
         return
-    newer_product = command(["git", "diff", "--name-only", f"{revision}..origin/main", "--",
-                             "services/product-service", ".github/workflows/product-image-release.yml"])
+    newer_product = command([
+        "git", "diff", "--name-only", f"{revision}..origin/main", "--",
+        "services/product-service/Dockerfile", "services/product-service/go.mod",
+        "services/product-service/go.sum", "services/product-service/cmd",
+        "services/product-service/gen", "services/product-service/internal",
+        "services/product-service/scripts/build-image.sh",
+    ])
     require(not newer_product, "main contains a newer Product release source; refusing a stale digest update")
     command(["git", "checkout", "--detach", "origin/main"])
     MANIFEST.write_text(wanted, encoding="utf-8")
