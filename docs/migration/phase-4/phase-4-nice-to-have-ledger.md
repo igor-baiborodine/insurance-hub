@@ -4,6 +4,15 @@
 - [Phase 4 nice-to-have requirements ledger](#phase-4-nice-to-have-requirements-ledger)
   - [Maintaining the ledger](#maintaining-the-ledger)
   - [Sub-epic 4.2 Product catalog read pilot in Go](#sub-epic-42-product-catalog-read-pilot-in-go)
+    - [Issue 134 Deploy Product Go alongside Java](#issue-134-deploy-product-go-alongside-java)
+      - [issue-134-N01 Go package publication](#issue-134-n01-go-package-publication)
+      - [issue-134-N02 Source metadata and release evidence](#issue-134-n02-source-metadata-and-release-evidence)
+      - [issue-134-N03 Immutable digest verification and QA pinning](#issue-134-n03-immutable-digest-verification-and-qa-pinning)
+      - [issue-134-N04 Historical-revision recovery](#issue-134-n04-historical-revision-recovery)
+      - [issue-134-N05 Serialized and idempotent release repair](#issue-134-n05-serialized-and-idempotent-release-repair)
+      - [issue-134-N06 Full validation replay during publication](#issue-134-n06-full-validation-replay-during-publication)
+      - [issue-134-N07 Hosted disposable deployment validation](#issue-134-n07-hosted-disposable-deployment-validation)
+      - [issue-134-N08 Signed supply-chain evidence](#issue-134-n08-signed-supply-chain-evidence)
     - [Issue 135 Product observability through Alloy](#issue-135-product-observability-through-alloy)
       - [issue-135-N01 Persistent local observability stack](#issue-135-n01-persistent-local-observability-stack)
       - [issue-135-N02 External alert notifications](#issue-135-n02-external-alert-notifications)
@@ -51,6 +60,164 @@ ticket, not in this ledger.
 
 Parent: [issue 130](https://github.com/igor-baiborodine/insurance-hub/issues/130),
 “Implement and qualify the Product catalog read pilot in Go.”
+
+### Issue 134 Deploy Product Go alongside Java
+
+Origin: the revised issue-134 requirements, optional items N01–N08. They were reclassified on
+2026-10-14 when the Product-specific release and deployment workflows were replaced in the
+specification by a lightweight generic Go service release model. These entries preserve the
+removed release-hardening capabilities without adding them back to issue 134's mandatory scope.
+
+Source ticket: [issue 134](https://github.com/igor-baiborodine/insurance-hub/issues/134).
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-134-N01](#issue-134-n01-go-package-publication) | Go package publication | Deferred | Unassigned |
+| [issue-134-N02](#issue-134-n02-source-metadata-and-release-evidence) | Source metadata and release evidence | Deferred | Unassigned |
+| [issue-134-N03](#issue-134-n03-immutable-digest-verification-and-qa-pinning) | Immutable digest verification and QA pinning | Deferred | Unassigned |
+| [issue-134-N04](#issue-134-n04-historical-revision-recovery) | Historical-revision recovery | Deferred | Unassigned |
+| [issue-134-N05](#issue-134-n05-serialized-and-idempotent-release-repair) | Serialized and idempotent release repair | Deferred | Unassigned |
+| [issue-134-N06](#issue-134-n06-full-validation-replay-during-publication) | Full validation replay during publication | Deferred | Unassigned |
+| [issue-134-N07](#issue-134-n07-hosted-disposable-deployment-validation) | Hosted disposable deployment validation | Deferred | Unassigned |
+| [issue-134-N08](#issue-134-n08-signed-supply-chain-evidence) | Signed supply-chain evidence | Deferred | Unassigned |
+
+#### issue-134-N01 Go package publication
+
+**Requirement:** Publish a versioned Go module or another reusable Go package artifact as part of
+the selected service's release.
+
+**Why deferred:** Product is deployed as a container and no external consumer requires a published
+Go package. Package coordinates, compatibility guarantees, access, retention, and ownership would
+add release work without supporting the current pilot.
+
+**Reconsider when:** A named consumer must import a repository Go module independently of the
+service image, and its compatibility and distribution requirements are agreed.
+
+**Acceptance evidence:** The consumer resolves the versioned package from the agreed registry;
+module identity, compatibility, access, retention, and deprecation policy are documented; and
+container-only services remain unaffected.
+
+#### issue-134-N02 Source metadata and release evidence
+
+**Requirement:** Preserve the full source commit and detailed release identity in OCI labels and an
+uploaded evidence bundle that correlates the source, image tags, QA manifest commit, scoped Git
+tag, and GitHub Release.
+
+**Why deferred:** The mandatory scoped source tag, short-SHA image tag, semantic image tag, QA bot
+commit, and GitHub Release provide sufficient traceability for the pilot. Building, validating,
+uploading, retaining, and later discovering a separate evidence bundle increases runner time and
+storage.
+
+**Reconsider when:** Audit, incident response, or promotion workflows repeatedly need a durable
+machine-readable release record that cannot be reconstructed reliably from Git, GHCR, and GitHub
+Release identities.
+
+**Acceptance evidence:** OCI labels and the evidence bundle agree with the source tag, both image
+tags, QA commit, and GitHub Release. The schema, redaction rules, retention, discovery procedure,
+and owner are documented and tested.
+
+#### issue-134-N03 Immutable digest verification and QA pinning
+
+**Requirement:** Resolve the registry digest after publication, prove the semantic and short-SHA
+tags resolve to the same image, pull and validate that digest using QA-equivalent access, and commit
+the digest as QA desired state.
+
+**Why deferred:** Issue 134 accepts an immutable-by-convention semantic version for non-production
+QA. Registry pullback, digest inspection, metadata correlation, and digest-oriented manifest
+finalization materially increased workflow duration and implementation complexity.
+
+**Reconsider when:** The service enters a promotion stage that requires cryptographic artifact
+identity, tags are observed moving or resolving inconsistently, or an environment policy requires
+digest-only deployment.
+
+**Acceptance evidence:** Both published tags resolve to one digest; pullback and runtime-image
+checks pass using the intended access path; QA records that digest; Flux deploys it; and the running
+Pod image ID is correlated with the release record.
+
+#### issue-134-N04 Historical-revision recovery
+
+**Requirement:** Allow an operator to select an earlier full source revision from canonical
+`main`, build it from an isolated or detached checkout, and recover its incomplete release without
+using current source files as build inputs.
+
+**Why deferred:** The pilot can recover through a reviewed corrective merge and a new release.
+Historical-revision recovery introduced detached-worktree, environment, and recursive-Make identity
+problems and consumed substantial debugging time without a demonstrated operational need.
+
+**Reconsider when:** Releasing a corrective commit cannot restore a required missing artifact, or
+an operational policy requires exact recovery of a previously accepted source revision.
+
+**Acceptance evidence:** The selected revision is proven to belong to canonical `main`; every build
+and release input comes from that revision; trusted current automation cannot contaminate it; and
+the resulting tag, image, release, and QA identities remain unambiguous.
+
+#### issue-134-N05 Serialized and idempotent release repair
+
+**Requirement:** Serialize releases and make retries detect, validate, and safely converge existing
+Git tags, GitHub Releases, image tags, metadata, and QA manifest commits after interruption or
+partial success.
+
+**Why deferred:** One-service-at-a-time delivery and corrective releases are sufficient for the
+current repository. Transaction-style ordering, collision detection, fake adapters, and automatic
+repair were the main sources of complexity in the Product-specific workflow.
+
+**Reconsider when:** Concurrent releases become normal, partial external side effects occur often,
+or manual cleanup creates unacceptable risk or operator effort.
+
+**Acceptance evidence:** Controlled concurrent and interrupted executions never move an accepted
+identity, overwrite a different image, or create conflicting desired state. Retries converge from
+every tested failure boundary, with documented abort and manual recovery procedures.
+
+#### issue-134-N06 Full validation replay during publication
+
+**Requirement:** Re-run the complete Go module, coverage, tooling, release fake-adapter, manifest,
+database, security, image, and lifecycle validation suites inside the publishing workflow before
+release mutations.
+
+**Why deferred:** Pull-request and canonical-main CI plus owning Make targets already validate the
+source. Replaying the full suite during publication substantially increases hosted execution time
+and third-party CI cost without supplying a distinct acceptance environment.
+
+**Reconsider when:** A release-specific failure repeatedly escapes existing CI, or publication uses
+inputs or an environment materially different from the validated source build.
+
+**Acceptance evidence:** The duplicated gate is tied to a demonstrated failure mode, blocks the
+release when reproduced, and has measured runtime and cost. Test ownership, cache behavior, and
+the reason ordinary CI cannot own the check are documented.
+
+#### issue-134-N07 Hosted disposable deployment validation
+
+**Requirement:** Run a dedicated hosted workflow that creates disposable Kubernetes and database
+resources, builds or loads the service image, and exercises deployment, exposure, reader,
+lifecycle, drain, and cleanup behavior for every relevant change.
+
+**Why deferred:** The completed foundation and targeted acceptance work already provide disposable
+lifecycle evidence. Recreating Kind, PostgreSQL, images, fixtures, and service tests on routine
+changes consumes substantial hosted time and duplicates local or module validation.
+
+**Reconsider when:** Deployment tooling changes frequently, a regression escapes existing render
+and targeted checks, or hosted validation becomes cheaper than maintaining the equivalent local
+acceptance procedure.
+
+**Acceptance evidence:** The workflow covers a specific otherwise-uncovered risk, uses bounded
+runtime and resources, cleans up after success and failure, produces actionable results, and never
+mutates shared local-dev or QA infrastructure.
+
+#### issue-134-N08 Signed supply-chain evidence
+
+**Requirement:** Sign service images and release metadata and publish an SBOM, provenance statement,
+or other attestation that can be verified before deployment or promotion.
+
+**Why deferred:** No consumer or policy currently requires signed artifacts for the Product pilot.
+Signing identities, keyless or key-based trust, verification enforcement, retention, and
+revocation would broaden the release and operational scope.
+
+**Reconsider when:** A security policy, external consumer, preproduction promotion gate, or
+compliance requirement names the expected evidence and verification boundary.
+
+**Acceptance evidence:** Images and metadata are signed or attested by an agreed identity; SBOM and
+provenance content is reproducible; verification is enforced at the agreed boundary; and identity
+rotation, revocation, retention, and incident response are documented.
 
 ### Issue 135 Product observability through Alloy
 
