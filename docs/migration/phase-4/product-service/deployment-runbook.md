@@ -117,7 +117,7 @@ gh run watch "$RELEASE_RUN_ID"
 ```
 
 The workflow uses `monotag` to calculate the next scoped 1.x version, starting at `1.0.0`, under
-`services/product-service/v<version>`. It detects the changed standard module, derives `product`,
+`product-service/v<version>`. It detects the changed standard module, derives `product`,
 requires its Dockerfile and conventional QA image entry, and builds the module once. It publishes
 `<version>` and `sha-<short-source-SHA>` under
 `ghcr.io/igor-baiborodine/insurance-hub/product-api`, commits `<version>` to the dormant QA Product

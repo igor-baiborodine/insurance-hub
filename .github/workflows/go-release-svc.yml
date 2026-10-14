@@ -58,7 +58,7 @@ jobs:
           npx -y monotag tag \
             --repo-dir . \
             --path "$MODULE_PATH" \
-            --prefix "services/$MODULE_NAME/v" \
+            --prefix "$MODULE_NAME/v" \
             --tag-file "$metadata_dir/tag.txt" \
             --version-file "$metadata_dir/version.txt" \
             --notes-file "$metadata_dir/notes.md" \
@@ -68,7 +68,7 @@ jobs:
           release_tag="$(cat "$metadata_dir/tag.txt")"
           release_version="$(cat "$metadata_dir/version.txt")"
           [[ "$release_version" =~ ^1\.[0-9]+\.[0-9]+$ ]]
-          [[ "$release_tag" == "services/$MODULE_NAME/v$release_version" ]]
+          [[ "$release_tag" == "$MODULE_NAME/v$release_version" ]]
           echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
           echo "version=$release_version" >> "$GITHUB_OUTPUT"
           echo "notes=$metadata_dir/notes.md" >> "$GITHUB_OUTPUT"

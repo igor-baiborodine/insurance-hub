@@ -11,7 +11,7 @@ resources:
 images:
   - name: insurance-hub-product-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/product-api
-    newTag: 1.1.0
+    newTag: sha-unpublished
 patches:
   - path: deployment-patch.yaml
     target:

@@ -50,9 +50,10 @@ def validate_release(workflow: dict) -> None:
             "RELEASE_OUTPUT=\"$GITHUB_OUTPUT\"" in commands,
             "release must use the shared exact-service selector")
     require("npx -y monotag tag" in commands and '--path "$MODULE_PATH"' in commands and
-            '--prefix "services/$MODULE_NAME/v"' in commands and
+            '--prefix "$MODULE_NAME/v"' in commands and
+            '[[ "$release_tag" == "$MODULE_NAME/v$release_version" ]]' in commands and
             "--min-version 1.0.0" in commands and "--max-version 1.999.999" in commands,
-            "release must calculate a scoped 1.x version")
+            "release must calculate a module-scoped 1.x version")
     require(commands.count("docker build \\") == 1 and commands.count("docker push ") == 2 and
             '--tag "$image:$RELEASE_VERSION"' in commands and
             '--tag "$image:sha-$short_sha"' in commands,
