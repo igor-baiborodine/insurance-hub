@@ -65,9 +65,9 @@ database calls, mapping boundaries, and a get-product walkthrough.
 
 This link does not change the Java observations or accepted fixtures documented here. Java remains
 the active traffic, schema, seed, and write owner. Issue #133 has locally proved the interim
-application security boundary and supplied #134's deployment gate. #134 still owns deployed
-exposure and shared read-only credentials, #135 telemetry delivery, and #136 integrated
-qualification; route cutover remains the separate #137 gate.
+application security boundary and supplied #134's deployment gate. Issue #134 delivered and proved
+the deployed exposure and shared read-only credentials in local-dev and QA. #135 owns telemetry
+delivery, #136 owns integrated qualification, and route cutover remains the separate #137 gate.
 
 ## Interim security proof and handoff
 
@@ -80,7 +80,7 @@ ten accepted cases return the accepted QA catalog with one Go call, and no beare
 metadata reaches Go. The direct Go access suite checks all eighteen accepted IDs on each transport,
 including supplied credential/identity metadata, and retains normal application errors. These are
 local isolated results; #131's previous local-dev/QA live captures still describe Java behavior,
-and #134 has not yet proved a deployed Go target.
+and #134 subsequently proved the deployed Go target in both environments.
 
 From the repository root, bootstrap the pinned Product tools and use the owning gates:
 
@@ -96,9 +96,9 @@ combined gateway/Go test. The Product module's full `check` owns the direct Go H
 the two CI gates do not execute it twice. The [security reproduction and token-handling guide](security-baseline.md#reproduction)
 records prerequisites, disposable cleanup, and safe live-token handling. The separate
 [`product-security-verify` handoff](security-baseline.md#go-deployment-exposure-gate-for-issue-134)
-probes only an explicitly selected, already running target; #134 must inspect effective exposure,
-database grants, and unchanged Java routing in local-dev and QA. Hosted CI execution and final
-#133 acceptance remain part of the final audit.
+probes only an explicitly selected, already running target. Issue #134 combined it with effective
+exposure, database-grant, and unchanged Java-routing checks in local-dev and QA; later regression
+runs must retain those separate checks.
 
 ## Authoritative layout
 
@@ -107,7 +107,7 @@ database grants, and unchanged Java routing in local-dev and QA. Hosted CI execu
 | `docs/migration/phase-4/product-service/README.md` | Baseline entry point, source inventory, reproduction guidance, limits, and downstream handoff. | Inventory and current workflow status documented. |
 | `docs/migration/phase-4/product-service/data-baseline.md` | Effective environment/schema/writer inventory, catalog provenance, shared topology, and database-permission proof. | Local-dev/QA identities, final shared topology, snapshot rules, and restricted-role proof documented. |
 | `docs/migration/phase-4/product-service/contract-baseline.md` | Consumer and field mappings, HTTP observations, parity rules, and transport semantics. | Observations plus binding field/scenario comparison and unary gRPC/HTTP decisions documented. |
-| `docs/migration/phase-4/product-service/security-baseline.md` | Observed Java access, #133 isolated Go proof, trust ownership, and #134 exposure gate. | Entry/hop/owner/evidence mapping and reproducible checks documented; deployed Go evidence remains #134 work. |
+| `docs/migration/phase-4/product-service/security-baseline.md` | Observed Java access, #133 isolated Go proof, trust ownership, and #134 exposure gate. | Entry/hop/owner/evidence mapping and reproducible checks documented; #134 deployed evidence passed in local-dev and QA. |
 | `legacy/product-service/src/test/resources/product-read-baseline/manifest.json` | Canonical scenario register and index for the sanitized fixture corpus. | Evidence scenarios captured, parity decisions documented, and replay, drift, safety, and handoff checks validated. |
 | `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | Accepted local-dev/QA captures plus isolated data, failure, access, and database-permission fixtures present. |
 | `legacy/product-service/src/test/java/…` | Product/PostgreSQL listener, fixture, edge, failure, and permission tests. | Disposable listener/PostgreSQL happy paths, raw-JSONB edges, lookup/decode/dependency failures, SQL-null constraints, and shared-database override guard implemented. |
@@ -372,7 +372,7 @@ step records under `ai/artifacts/epic-4.2/issue-131/`.
 | AC131-04 — Agreed parity contract | satisfied | [Binding field mapping](contract-baseline.md#binding-field-mapping-and-presence-rules), [scenario decisions](contract-baseline.md#scenario-parity-decisions), and [HTTP/gRPC boundary](contract-baseline.md#versioned-unary-grpc-and-http-boundary) | Consumer trace and comparator tests validated exact and permitted-normalization rules; no contract decision remains open. |
 | AC131-05 — Current permission evidence | satisfied | [Observed access matrix](security-baseline.md#observed-access-matrix), local-dev/QA access fixtures, and isolated access cases | Live valid/absent/malformed/bad-signature reads and the full isolated claim/propagation matrix passed. |
 | AC131-06 — Java-compatible security | satisfied | [Final entry and hop mapping](security-baseline.md#final-java-compatible-mapping-for-issue-133) | Gateway authentication, anonymous backend/direct access, absent identity propagation, transport, trust, and #133 positive/negative cases are explicit. |
-| AC131-07 — Shared data topology | satisfied | [Final shared-data decision](data-baseline.md#final-shared-data-decision) and [candidate role proof](data-baseline.md#candidate-go-runtime-role) | Isolated restricted-role reads passed; catalog and schema writes failed with PostgreSQL `42501`; #134 deployment obligations are explicit. |
+| AC131-07 — Shared data topology | satisfied | [Final shared-data decision](data-baseline.md#final-shared-data-decision) and [candidate role proof](data-baseline.md#candidate-go-runtime-role) | Isolated restricted-role reads passed; catalog and schema writes failed with PostgreSQL `42501`; #134 subsequently completed the deployed reader proof. |
 | AC131-08 — Repeatable capture and replay | satisfied | Reproduction commands above, [manifest tooling index](../../../../legacy/product-service/src/test/resources/product-read-baseline/manifest.json), and `scripts/product-baseline/` | Comparator, both environment replays, all fixture checks, and the complete offline aggregate passed. |
 | AC131-09 — Safe baseline collection | satisfied | [Data capture boundary](data-baseline.md#capture-status), [security reproduction](security-baseline.md#reproduction), and live verifier | Before/after identities matched in both live environments; mutation cases stayed disposable; credential and secret scans found no reusable secret. |
 | AC131-10 — Evidence-backed handoff | satisfied | This index and the downstream ownership table below | All manifest scenarios are captured, documented, or validated; no required failed, blocked, registered, or unexecuted check remains. |
@@ -387,7 +387,7 @@ evidence.
 | --- | --- | --- |
 | #132 — Go Product service | Field/presence table, scenario parity matrix, HTTP/gRPC semantics, accepted fixture corpus, shared table decision | Delivered as the standalone Go service; see its README for the implemented contracts and validation. |
 | #133 — Security coexistence | Final entry/hop mapping and access fixtures | Isolated gateway/Go and direct-access proof plus #134 handoff delivered; final #133 acceptance and hosted CI evidence remain to audit. Any hardening requires a separate explicit decision. |
-| #134 — Deployment and data access | Same-table topology, candidate role/grants, snapshot identity, Java ownership, internal exposure boundary | Provision the separate Secret/role in each environment; verify effective grants, workload wiring, no Go startup writes, internal-only Go exposure, unchanged Java routing, and unchanged shared schema/data. |
+| #134 — Deployment and data access | Same-table topology, candidate role/grants, snapshot identity, Java ownership, internal exposure boundary | Delivered in local-dev and QA: separate Secret/role, effective grants, workload wiring, no Go startup writes, internal-only Go exposure, unchanged Java routing/data, and reversible lifecycle all passed. Use the deployment runbook for fresh verification. |
 | #135 — Observability | Stable service boundaries, routes, scenario IDs, failure categories, and sanitization limits | Instrument the implemented HTTP/gRPC/database path; prove safe queryable logs, metrics, and traces without credentials, raw definitions, or unbounded product/question labels. |
 | #136 — Integrated qualification | Accepted corpora, comparator rules, replay commands, consumer inventory, and snapshot invalidation rules | Define measurable workloads and pass/abort thresholds; run Java/Go differential, gateway/frontend compatibility, failure, lifecycle, load, and rollback qualification against a matching snapshot. |
 | #137 — Separate cutover gate | Existing Java routes remain authoritative throughout #131–#136 | Specify target environments and release criteria, then switch only the approved routes after #136; measure the observation window and verify reconciler-safe rollback. Java retirement remains separate. |
@@ -398,7 +398,7 @@ Issue #131's baseline covers the four agreed demo products and the observed Java
 By itself it does not qualify a Go implementation, protobuf definition, deployed restricted role,
 Go endpoint exposure, browser compatibility, telemetry delivery, load capacity, route cutover, or
 Java retirement. #132 and #133 provide the separate Go implementation and isolated application
-security evidence described above; they do not close the later deployed or integrated gates. Full
+security evidence described above; #134 completes the local-dev and QA deployment gate. Full
 claim variants were exercised in the isolated access suite; the safe live subset
 covered valid, absent, malformed, and invalid-signature credentials. Local-dev and QA run different
 PostgreSQL patch versions recorded in the data baseline, so every later comparison must retain its
@@ -409,7 +409,7 @@ not a general security recommendation.
 
 The [Product Go deployment runbook](deployment-runbook.md) documents the #134 foundation,
 automatic scoped release and QA semantic-tag update, separate QA activation, reader lifecycle,
-verification, and recovery. The release automation keeps Go outside QA reconciliation until the
-activation PR. Follow its evidence boundaries:
+verification, and recovery. The release automation kept Go outside QA reconciliation until the
+activation PR; the accepted QA aggregate now includes Go and Java together. Follow its evidence boundaries:
 disposable and CI checks do not establish live local-dev or QA acceptance, and existing gateway
 traffic remains on Java until #137.

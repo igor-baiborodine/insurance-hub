@@ -46,8 +46,8 @@ The [Go Product configuration](../../../../services/product-service/internal/con
 consumes a separate PostgreSQL reader URL and has no gateway signing-key setting.
 The [local-dev gateway destination](../../../../legacy/agent-portal-gateway/src/main/resources/application-local-dev.yml)
 and [QA gateway destination](../../../../legacy/agent-portal-gateway/src/main/resources/application-qa.yml)
-still name the Java Product Service; #134 must verify their effective deployed routing, not infer
-it from checked-in files.
+still name the Java Product Service. Issue #134 subsequently confirmed their effective routing in
+both deployed environments with live gateway responses and direct Java response comparisons.
 
 The gateway marks both `GET /api/products` and `GET /api/products/{productCode}` as authenticated.
 Micronaut verifies a signed token, requires a subject, and rejects an expired token. The observed
@@ -116,18 +116,18 @@ These rules preserve the effective Java security model; they do not claim that a
 Product access or shared symmetric trust is a sufficient long-term design.
 
 The binding entry and hop mapping separates source configuration, issue #131's Java observations,
-issue #133's isolated application tests, and the deployment checks still owned by #134:
+issue #133's isolated application tests, and the deployment checks completed by #134:
 
 | Entry or hop | Access result and identity | Transport and exposure | Configuration owner | Evidence and remaining gate |
 | --- | --- | --- | --- | --- |
 | Auth → caller | Auth issues an HS256 bearer token with the configured 86,400-second lifetime and product-code roles. | Existing Auth endpoint and token delivery. | Auth image and application configuration; gateway must share its verification material. | #131 source and safe live-token captures; #133 generates separate signing material only for isolated tests. |
 | Caller → Java gateway Product list/get | Signed, unexpired token with a non-empty subject succeeds. Missing, malformed, bad-signature, expired, or missing-subject token yields empty `401` with no content type. Future `nbf`, different issuer/audience, and unrelated role still succeed; no Product-role `403`. | Existing `GET /api/products` and `GET /api/products/{code}` routes. | Java gateway security configuration and Product controller; Auth/gateway trust material remains coupled. | #131 local-dev/QA live subset and isolated baseline; #133 real gateway → real Go tests cover ten rejected and ten accepted cases, with zero downstream calls for rejections. |
-| Java gateway → Product HTTP | Accepted call reaches the backend once without bearer token or user/principal/role/authentication metadata. Existing retry/fallback behavior remains. | Compatible HTTP `/products` and `/products/{code}`; existing gateway traffic still targets Java. | Java gateway Product client and its environment destination; #137 owns cutover. | #131 Java transport/propagation observation; #133 test observer forwards to real Go and detects identity-marker absence while preserving trace metadata. #134 must confirm deployed Java routing is unchanged. |
-| Direct Go HTTP list/get | Anonymous success with or without supplied credential/identity headers; missing/invalid products keep application errors rather than `401`/`403`. | Go business HTTP listener; #134 must keep its Service internal. | Go Product HTTP adapter and listener configuration; #134 owns Service exposure. | #133 real Go listener tests enforce all eighteen direct access case IDs for HTTP, identical catalog results, and unchanged errors; #134 live anonymous/internal reachability remains open. |
-| Direct Go unary gRPC list/get | Anonymous success with or without supplied credential/identity metadata; missing/invalid products keep `NotFound`/`InvalidArgument`, not authentication or permission status. | Generated Product v1 client against Go gRPC listener; #134 must keep its Service internal. | Go Product gRPC adapter and listener configuration; #134 owns Service exposure. | #133 real Go listener tests enforce all eighteen direct access case IDs for gRPC and matching catalog/error results; #134 live anonymous/internal reachability remains open. |
+| Java gateway → Product HTTP | Accepted call reaches the backend once without bearer token or user/principal/role/authentication metadata. Existing retry/fallback behavior remains. | Compatible HTTP `/products` and `/products/{code}`; existing gateway traffic still targets Java. | Java gateway Product client and its environment destination; #137 owns cutover. | #131 Java transport/propagation observation; #133 test observer forwards to real Go and detects identity-marker absence while preserving trace metadata; #134 live local-dev and QA checks confirmed the gateway still selected Java. |
+| Direct Go HTTP list/get | Anonymous success with or without supplied credential/identity headers; missing/invalid products keep application errors rather than `401`/`403`. | Internal Go business HTTP listener. | Go Product HTTP adapter, listener configuration, and Service exposure. | #133 real Go listener tests enforce all eighteen direct access case IDs for HTTP, identical catalog results, and unchanged errors; #134 live verification passed in local-dev and QA with internal-only exposure. |
+| Direct Go unary gRPC list/get | Anonymous success with or without supplied credential/identity metadata; missing/invalid products keep `NotFound`/`InvalidArgument`, not authentication or permission status. | Internal generated Product v1 gRPC listener. | Go Product gRPC adapter, listener configuration, and Service exposure. | #133 real Go listener tests enforce all eighteen direct access case IDs for gRPC and matching catalog/error results; #134 live verification passed in local-dev and QA with internal-only exposure. |
 | Go HTTP adapter → application use cases | No principal is created, filtered, or passed; headers do not change Product results. | In-process dispatch, with no network or gateway gRPC bridge. | Go Product composition and HTTP adapter. | #133 direct HTTP and adapter tests plus source inspection; trace context is separate from caller identity. |
-| Go management `/livez` and `/readyz` | Anonymous constant health responses; readiness checks database read access and returns safe `503` during dependency loss or drain. HTTP profiling and gRPC reflection stay unavailable. | Separate Go management listener; #134 must keep it internal along with business listeners. | Go Product health/configuration; #134 owns effective Service/route exposure. | #132/#133 real-listener diagnostics and isolated verifier; #134 rendered/effective exposure inspection remains open. |
-| Go service → PostgreSQL | Separate `go_product_reader` runtime login with read-only Product access, never an end-user subject or the Java owner. | Database connection using a separate runtime credential; no startup DDL, seeding, or writes. | #134 owns deployed role/grants and Secret; Go consumes `PRODUCT_DATABASE_URL`. | #131 candidate role and #132/#133 disposable read-only/startup tests; #134 must prove deployed effective grants, identity, and no-startup-write behavior in both environments. |
+| Go management `/livez` and `/readyz` | Anonymous constant health responses; readiness checks database read access and returns safe `503` during dependency loss or drain. HTTP profiling and gRPC reflection stay unavailable. | Separate internal Go management listener. | Go Product health/configuration and Service/route exposure. | #132/#133 real-listener diagnostics and isolated verifier; #134 rendered and effective exposure checks passed in local-dev and QA. |
+| Go service → PostgreSQL | Separate `go_product_reader` runtime login with read-only Product access, never an end-user subject or the Java owner. | Database connection using a separate runtime credential; no startup DDL, seeding, or writes. | Explicitly provisioned #134 role/grants and Secret; Go consumes `PRODUCT_DATABASE_URL`. | #131 candidate role and #132/#133 disposable read-only/startup tests; #134 actual Secret-backed login, effective-grant, safe-denial, and unchanged-catalog checks passed in both environments. |
 
 There is no denied product entitlement case in the Java model. An unrelated or product-mismatched
 role is therefore a positive access case after successful gateway authentication, and direct Go
@@ -191,10 +191,11 @@ make product-security-verify
 Use `qa-insurance-hub`, `qa-svc`, and `qa` for QA after stopping local-dev forwards and switching
 environments. The target rejects an active context or namespace mismatch before probing. A local
 port-forward proves reachability through that forward only; it does not prove cluster-only exposure
-or that the gateway selects a particular backend. #134 must record the selected resource names,
-ports, revision, active context, namespace, and probe result for each environment.
+or that the gateway selects a particular backend. Acceptance and regression records must retain
+the selected resource names, ports, revision, active context, namespace, and probe result for each
+environment.
 
-Before each local-dev or QA run, #134 must complete these checks in sequence:
+Before each local-dev or QA acceptance or regression run, complete these checks in sequence:
 
 1. Stop the prior environment and its forwards. Select the new Kubernetes context, verify its
    namespace, target cluster/revision, ready Go and Java workloads, and current UTC host and node
@@ -209,7 +210,7 @@ Before each local-dev or QA run, #134 must complete these checks in sequence:
    exposure and namespace-wide or shared routing in the inspection, not just the Product Service.
 3. Verify the deployed Go Secret reference and effective database login identify the separate
    restricted reader. Check grants, ownership, membership, `PUBLIC` and default grants, and denied
-   write/DDL behavior through #134's database role proof; preserve the accepted catalog/schema
+   write/DDL behavior through the database role proof; preserve the accepted catalog/schema
    before and after. The verifier does not inspect PostgreSQL or prove those grants.
 4. Run the anonymous read-only verifier through explicit Go Service forwards and retain its result.
    Verify the existing Java gateway destination and effective routing still select the Java Product
@@ -220,8 +221,10 @@ Before each local-dev or QA run, #134 must complete these checks in sequence:
 
 Anonymous internal Product access is the selected parity behavior. `ClusterIP` does not authenticate
 or restrict reachable in-cluster clients. This gate makes no claim of gateway-exclusive access,
-mTLS, workload identity, or live #134 completion; issue #133's verifier is proven against the
-isolated harness, while #134 owns effective deployment evidence in both environments.
+mTLS, or workload identity. The verifier alone does not prove complete deployment acceptance;
+issue #134 combined it with effective exposure, reader, catalog, lifecycle, and Java-routing
+evidence in both environments. The final coordinates and rerun procedure are in the
+[deployment runbook](deployment-runbook.md#acceptance-evidence-and-handoff).
 
 ## Reproduction
 
@@ -280,7 +283,8 @@ scripts/product-baseline/accept-access.sh \
 
 Repeat against QA only after stopping local-dev, starting QA, and passing the environment preflight.
 After resuming a paused QA VM, synchronize each node clock from its RTC before capture. The capture
-never copies the token into a fixture. #134 owns the later Go deployment and live exposure/role
-evidence; #135 owns telemetry delivery; #136 owns differential, consumer, load, failure, and rollback
-qualification; #137 alone owns any routing cutover. Anonymous internal Go access and shared HS256
-trust remain explicit interim limitations, not evidence of workload authentication or revocation.
+never copies the token into a fixture. Issue #134 delivered the Go deployment and live exposure/role
+evidence; #135 owns telemetry delivery; #136 owns differential, consumer, load, failure, and
+rollback qualification; #137 alone owns any routing cutover. Anonymous internal Go access and
+shared HS256 trust remain explicit interim limitations, not evidence of workload authentication or
+revocation.
