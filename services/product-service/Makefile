@@ -41,7 +41,8 @@ X_NET_VERSION := v0.60.0
 PGX_VERSION := v5.11.0
 TESTCONTAINERS_VERSION := v0.44.0
 MOBY_GO_ARCHIVE_VERSION := v0.3.0
-MERMAID_CLI_VERSION := 11.12.0
+MERMAID_CLI_VERSION := 11.14.0
+PUPPETEER_VERSION := 24.43.1
 POSTGRES_IMAGE := postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
 HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
@@ -127,11 +128,16 @@ bootstrap-doc-tools:
 		fi
 	@set -eu; \
 		installed="$$($(MMDC) --version 2>/dev/null || true)"; \
-		if test "$$installed" != "$(MERMAID_CLI_VERSION)"; then \
+		installed_puppeteer="$$($(NODE) -p \
+			"require('$(TOOLS_DIR)/node_modules/puppeteer/package.json').version" \
+			2>/dev/null || true)"; \
+		if test "$$installed" != "$(MERMAID_CLI_VERSION)" || \
+			test "$$installed_puppeteer" != "$(PUPPETEER_VERSION)"; then \
 			mkdir -p "$(TOOLS_DIR)" "$(TOOLS_BIN)" "$(TOOLS_DIR)/puppeteer"; \
 			PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(NPM) install \
 				--prefix "$(TOOLS_DIR)" --no-save --no-package-lock \
-				"@mermaid-js/mermaid-cli@$(MERMAID_CLI_VERSION)"; \
+				"@mermaid-js/mermaid-cli@$(MERMAID_CLI_VERSION)" \
+				"puppeteer@$(PUPPETEER_VERSION)"; \
 			ln -sfn ../node_modules/.bin/mmdc "$(MMDC)"; \
 		fi; \
 		if ! find "$(TOOLS_DIR)/puppeteer" -type f -name chrome-headless-shell \
@@ -140,6 +146,9 @@ bootstrap-doc-tools:
 				--prefix "$(TOOLS_DIR)" puppeteer; \
 		fi
 	@test "$$($(MMDC) --version)" = "$(MERMAID_CLI_VERSION)"
+	@test "$$($(NODE) -p \
+		"require('$(TOOLS_DIR)/node_modules/puppeteer/package.json').version")" = \
+		"$(PUPPETEER_VERSION)"
 
 check-docs:
 	@test "$$($(MMDC) --version 2>/dev/null)" = "$(MERMAID_CLI_VERSION)" || { \
@@ -222,28 +231,11 @@ test-tooling: verify-tools
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
 
-# Publication is explicit and separate from image validation and deployment.
-.PHONY: image-release-check image-publish release-finalize release-test bootstrap-ci-tools check-ci deploy-test-ci
-image-release-check: ## Validate clean exact merged revision; no build, push, or deployment
-	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/release_image.py check
-
-image-publish: ## Validate and publish merged image, then verify digest pull and write RELEASE_METADATA
-	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/release_image.py publish
-
-release-finalize: ## Create matching Git/GitHub release identities and commit the verified QA digest
-	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/release_image.py finalize
-
-release-test: ## Prove release refusal, ordering, publication failure, and digest identity with fake adapters
-	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test-release.py
-
+.PHONY: bootstrap-ci-tools check-ci
 bootstrap-ci-tools: ## Install pinned YAML parser and Kubernetes clients in module-local .tools
 	@bash scripts/bootstrap-ci-tools.sh
 
-check-ci: ## Validate workflow permissions, triggers, and release/deployment boundaries
+check-ci: ## Validate generic release and Go CI permissions, triggers, and boundaries
 	@bash -n scripts/bootstrap-ci-tools.sh scripts/check-deployment.sh
-	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/product-deployment.yml ../../.github/workflows/product-image-release.yml ../../.github/workflows/go-modules.yml
+	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/go-release-svc.yml ../../.github/workflows/go-modules.yml
 	@PYTHONDONTWRITEBYTECODE=1 .tools/ci-venv/bin/python scripts/check-ci.py
-
-# Runner-only setup owns a fresh cluster and isolated kubeconfig; local tests use deploy-test.
-deploy-test-ci: ## Create, test, and remove disposable Kubernetes on a GitHub-hosted runner
-	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/ci_cluster.py

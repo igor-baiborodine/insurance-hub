@@ -126,7 +126,7 @@ The relevant reproducibility pins are:
 | OpenTelemetry core / gRPC instrumentation | 1.46.0 / 0.71.0 |
 | Testcontainers Go | 0.44.0 |
 | PostgreSQL integration image | `postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193` |
-| Mermaid CLI | 11.12.0; Node.js 20 or newer, with CI pinned to 24.13.0 |
+| Mermaid CLI / Puppeteer | 11.14.0 / 24.43.1; Node.js 20 or newer, with CI pinned to 24.13.0 |
 
 `check-docs` validates local Markdown links and anchors, extracts every Mermaid block, and renders
 it to SVG with the pinned CLI. It does not keep generated images in the working tree.
@@ -326,16 +326,16 @@ The [Product Go deployment runbook](../../docs/migration/phase-4/product-service
 owns image publication, local-dev/QA prerequisites, reader provisioning, rollout/rotation recovery,
 and Go-only stop/restoration. Use root `go-svc-* SVC_NAME=product` targets and separate
 `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader` operations. PR checks build and test.
-For qualifying Product changes merged to canonical `main`, **Product Image Release** automatically
-creates the scoped semantic release, publishes semantic and unique short-SHA image tags, verifies
-their shared immutable digest, and commits that digest to the dormant QA overlay. QA activation
-remains a separate reviewed Git/Flux operation.
+For a qualifying Product change merged to canonical `main`, **Go Service Release** uses the same
+standard module convention intended for future Go services. It creates the scoped semantic release,
+builds once, publishes semantic and short-SHA image tags, and commits the semantic version to the
+dormant QA overlay. QA activation remains a separate reviewed Git/Flux operation.
 
-**Product Deployment Validation** runs the image, overlay, role, and disposable lifecycle gates.
-It complements the existing module and combined security workflows. Its runner-only
-`go-svc-deploy-test-ci` owns a fresh Kind cluster; local `go-svc-deploy-test` owns only its labelled
-disposable namespace in the existing local Kind cluster. Neither establishes shared-environment
-acceptance. `make -C services/product-service bootstrap-ci-tools` installs the pinned CI helpers;
-`check-ci` checks workflow permissions/triggers, and `go-svc-release-test SVC_NAME=product` proves
-release identity, ordering, collision, retry, manifest-update, and runner setup boundaries using
-fake external commands.
+**Go Module Validation** owns the nonpublishing module, generic release-selector, image, overlay,
+role-tooling, baseline, and local deployment-tooling gates. The release workflow does not repeat
+that suite or create a hosted disposable cluster. Local `go-svc-deploy-test` still owns only its
+labelled disposable namespace in an explicitly prepared local Kind cluster. Neither CI nor that
+local suite establishes shared-environment acceptance. `make -C services/product-service
+bootstrap-ci-tools` installs the pinned CI helpers; `check-ci` checks workflow boundaries, and
+`make go-svc-release-test` proves generic service selection, QA-entry requirements, and semantic-tag
+updates with controlled fixtures.

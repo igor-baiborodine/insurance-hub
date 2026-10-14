@@ -408,7 +408,7 @@ not a general security recommendation.
 ## Deployment operations
 
 The [Product Go deployment runbook](deployment-runbook.md) documents the #134 foundation,
-automatic scoped release and QA digest update, separate QA activation, reader lifecycle,
+automatic scoped release and QA semantic-tag update, separate QA activation, reader lifecycle,
 verification, and recovery. The release automation keeps Go outside QA reconciliation until the
 activation PR. Follow its evidence boundaries:
 disposable and CI checks do not establish live local-dev or QA acceptance, and existing gateway

@@ -173,8 +173,9 @@ class Target:
         require(os.environ.get("DEPLOY_IMAGE_REF") == image,
                 "DEPLOY_IMAGE_REF must equal the rendered image")
         if self.environment == "qa":
-            require(bool(re.fullmatch(r"ghcr\.io/igor-baiborodine/insurance-hub/product-api@sha256:[0-9a-f]{64}", image)),
-                    "QA image must use an immutable digest")
+            require(bool(re.fullmatch(
+                r"ghcr\.io/igor-baiborodine/insurance-hub/product-api:1\.[0-9]+\.[0-9]+", image)),
+                    "QA image must use the release-owned 1.x semantic tag")
         else:
             require(bool(re.fullmatch(r"insurance-hub-product-api:git-[0-9a-f]{12}", image)),
                     "local image must use the source-derived tag")

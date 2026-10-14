@@ -126,8 +126,8 @@ def validate_go_environment(
             "namespace": "qa-svc",
             "secret": "qa-postgres-product-reader-creds",
             "image": re.compile(
-                r"ghcr\.io/igor-baiborodine/insurance-hub/product-api:sha-unpublished"
-                r"|ghcr\.io/igor-baiborodine/insurance-hub/product-api@sha256:[0-9a-f]{64}"
+                r"ghcr\.io/igor-baiborodine/insurance-hub/product-api:"
+                r"(?:sha-unpublished|1\.[0-9]+\.[0-9]+)"
             ),
             "pull": "Always",
         },
