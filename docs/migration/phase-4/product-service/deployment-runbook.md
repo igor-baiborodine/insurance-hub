@@ -20,7 +20,9 @@
 Product Go reads the existing `product.public.product` catalog alongside Java. Java retains
 schema/seeding ownership and remains the gateway destination. Go uses a dedicated reader login,
 internal HTTP/gRPC Services, and a separate management Service. This is the operational procedure
-for issue #134; it does not certify that either shared environment has passed acceptance.
+delivered by issue #134. The issue's final acceptance audit passed in local-dev and QA on
+2026-10-14; every later operation must still establish fresh target, revision, workload, reader,
+catalog, and Java-routing evidence rather than relying on that historical pass.
 
 ## Ownership and delivery sequence
 
@@ -34,14 +36,13 @@ for issue #134; it does not certify that either shared environment has passed ac
 | Database login and Secret | Maintainer with Kubernetes/CNPG administrative access, through `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader`; outside application startup and Flux |
 | Catalog and Java routing | Existing Java owner and gateway configuration; never changed by Go deployment |
 
-Initial activation has three staged PRs. The foundation PR supplies the runtime, deployment, and
-local-dev evidence with Go excluded from the QA aggregate. The release-automation PR replaces its
-bootstrap dispatch path; merging it must create the automatic release and semantic-tag bot commit
-while the overlay remains dormant. After the reader, Secret, image, and capacity prerequisites
-pass, the activation PR adds `./product` to `k8s/overlays/qa/svc/kustomization.yaml` while retaining
-`./product/legacy`. Review the complete QA render, prerequisites, and rollback before merge. Flux
-then deploys the reconciled `main` state. Live QA verification and lifecycle rehearsals must pass
-before closing #134. No delivery PR uses an automatic issue-closing keyword.
+The delivered sequence used a foundation PR with Go excluded from the QA aggregate, a generic
+release-automation PR that produced the semantic image/tag/Release and dormant QA image update,
+and an activation PR that added `./product` while retaining `./product/legacy`. Subsequent reviewed
+changes exercised non-secret rollout, reader rotation, Flux-owned Go-only stop, and restoration.
+Repeat that ownership sequence for future services or material Product changes: validate the full
+QA render and prerequisites before activation, let Flux reconcile canonical `main`, and complete
+live verification before treating the change as accepted.
 
 The activation manifest checker requires the release-owned 1.x semantic tag and active `./product`
 inclusion alongside `./product/legacy`. Its corruption fixtures reject a missing activation,
@@ -401,6 +402,15 @@ UTC time, context/namespaces, source/Flux revisions, image reference/digest/ID, 
 generation, ready EndpointSlices, Pod UIDs, configuration revision, reader proof, accepted
 schema/catalog identity, Java routing observations, commands, outcomes, and CI run references.
 Never retain passwords, tokens, full URLs containing credentials, or raw Secret YAML there.
+
+Issue #134's accepted QA handoff uses release `product-service/v1.1.0`, source revision
+`854aab61920170f4740c56487251b3612df1e1ba`, image digest
+`sha256:7ca2e64ad560f35194444b67f2c37bd8de243ffecc3f34eaef179c1048621a99`, and restored Flux
+revision `ff43bfaf9baad6c9a6219d20d95b29954edd8eb4`. At the final audit, Go and Java each had one
+ready replica, Go used the rotated restricted-reader Secret through a fresh database connection,
+both Go Services were internal `ClusterIP`, and catalog/schema identity and Java gateway routing
+were unchanged. These coordinates are provenance for #135 and #136, not a substitute for their
+own fresh environment preflight.
 
 Separate rendered, fake-adapter, disposable container/Kind, hosted CI, shared local-dev, and QA
 results. Image tests do not prove cluster exposure. Port-forwards do not prove routes are absent.
