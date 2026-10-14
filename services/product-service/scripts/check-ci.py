@@ -59,9 +59,10 @@ def validate_release(workflow: dict) -> None:
             "release must build once and push semantic and short-SHA image tags")
     require("make go-svc-release-update-qa" in commands and
             "git push origin HEAD:main" in commands and
+            "git diff --cached --quiet" in commands and
             'git tag -a "$RELEASE_TAG" -m' in commands and
             'git push origin "$RELEASE_TAG"' in commands,
-            "release must create the scoped tag and commit the semantic QA tag")
+            "release must create the scoped tag and update the semantic QA tag when needed")
 
     tag_steps = [step for step in steps if step.get("name") == "Create scoped source tag"]
     require(len(tag_steps) == 1 and tag_steps[0].get("env") == {
