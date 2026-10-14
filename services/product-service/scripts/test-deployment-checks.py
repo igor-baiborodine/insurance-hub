@@ -46,7 +46,23 @@ def main() -> int:
         "qa-aggregate": load(arguments.qa_aggregate),
     }
 
-    semantic = copy.deepcopy(baseline)
+    active = copy.deepcopy(baseline)
+    java = find(active["qa-aggregate"], "Deployment", "qa-product-api-legacy")
+    java.get("metadata", {}).get("labels", {}).pop(
+        "insurance-hub.io/product-go-state", None
+    )
+    aggregate_identities = {
+        (document.get("kind"), document.get("metadata", {}).get("name"))
+        for document in active["qa-aggregate"]
+    }
+    active["qa-aggregate"].extend(
+        copy.deepcopy(document)
+        for document in active["qa-go"]
+        if (document.get("kind"), document.get("metadata", {}).get("name"))
+        not in aggregate_identities
+    )
+
+    semantic = copy.deepcopy(active)
     for key in ("qa-go", "qa-aggregate"):
         deployment = find(semantic[key], "Deployment", "qa-product-api")
         deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
@@ -84,6 +100,15 @@ def main() -> int:
             )
         ]
 
+    def mark_stopped(values: dict[str, list[dict[str, Any]]]) -> None:
+        deployment = find(values["qa-aggregate"], "Deployment", "qa-product-api-legacy")
+        deployment.setdefault("metadata", {}).setdefault("labels", {})[
+            "insurance-hub.io/product-go-state"
+        ] = "stopped"
+
+    def stopped_with_go(values: dict[str, list[dict[str, Any]]]) -> None:
+        mark_stopped(values)
+
     def unreleased_qa_tag(values: dict[str, list[dict[str, Any]]]) -> None:
         deployment = find(values["qa-go"], "Deployment", "qa-product-api")
         deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
@@ -102,6 +127,7 @@ def main() -> int:
         ("missing Secret reference", missing_secret, "PRODUCT_DATABASE_URL"),
         ("external exposure", external_exposure, "must remain ClusterIP"),
         ("missing QA activation", missing_activation, "does not contain Go Product"),
+        ("stopped marker with Go objects", stopped_with_go, "still contains Go Product objects"),
         ("unreleased QA image tag", unreleased_qa_tag, "qa image reference is invalid"),
         ("invalid QA image tag", invalid_qa_tag, "qa image reference is invalid"),
     ]
@@ -123,8 +149,26 @@ def main() -> int:
                 f"{semantic_result.stderr.strip()}", file=sys.stderr,
             )
             return 1
+        stopped = copy.deepcopy(active)
+        missing_activation(stopped)
+        mark_stopped(stopped)
+        stopped_paths: dict[str, Path] = {}
+        for key, documents in stopped.items():
+            path = fixture_root / f"stopped-{key}.json"
+            path.write_text(json.dumps(documents), encoding="utf-8")
+            stopped_paths[key] = path
+        stopped_command = [sys.executable, str(arguments.checker)]
+        for key in ("local-go", "local-legacy", "qa-go", "qa-legacy", "qa-aggregate"):
+            stopped_command.extend((f"--{key}", str(stopped_paths[key])))
+        stopped_result = subprocess.run(stopped_command, text=True, capture_output=True, check=False)
+        if stopped_result.returncode != 0:
+            print(
+                "product-deploy-check-test: explicit stopped QA state was rejected: "
+                f"{stopped_result.stderr.strip()}", file=sys.stderr,
+            )
+            return 1
         for index, (description, mutation, expected_error) in enumerate(cases):
-            values = copy.deepcopy(baseline)
+            values = copy.deepcopy(active)
             mutation(values)
             paths: dict[str, Path] = {}
             for key, documents in values.items():
@@ -159,7 +203,7 @@ def main() -> int:
 
     print(
         "product-deploy-check-test: passed semantic QA tag plus selector, port, Secret, "
-        "exposure, missing-activation, unreleased-tag, and invalid-tag failures"
+        "exposure, active/stopped-state, unreleased-tag, and invalid-tag scenarios"
     )
     return 0
 

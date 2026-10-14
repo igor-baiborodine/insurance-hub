@@ -23,7 +23,13 @@ def runs(job: dict) -> str:
 def validate_release(workflow: dict) -> None:
     require(set(workflow["on"]) == {"push"}, "release must be push-only")
     require(workflow["on"]["push"] == {
-        "branches": ["main"], "paths": ["services/*-service/**"],
+        "branches": ["main"],
+        "paths": [
+            "services/*-service/**",
+            "!services/*-service/scripts/check-ci.py",
+            "!services/*-service/scripts/check-render.py",
+            "!services/*-service/scripts/test-deployment-checks.py",
+        ],
     }, "release must select canonical-main standard Go service changes only")
     require(workflow["permissions"] == {"contents": "write", "packages": "write"},
             "release permissions must be limited to repository contents and packages")

@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - 'services/*-service/**'
+      - '!services/*-service/scripts/check-ci.py'
+      - '!services/*-service/scripts/check-render.py'
+      - '!services/*-service/scripts/test-deployment-checks.py'
 
 permissions:
   contents: write

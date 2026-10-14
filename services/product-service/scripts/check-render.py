@@ -352,10 +352,22 @@ def validate_aggregates(
     qa_go_index: dict[tuple[str, str, str], dict[str, Any]],
     aggregate: list[dict[str, Any]],
 ) -> None:
-    require_unique(aggregate, "active QA aggregate")
-    require(contains_qa_go(aggregate), "active QA aggregate does not contain Go Product")
-    one(aggregate, "Deployment", "qa-product-api-legacy")
+    require_unique(aggregate, "QA aggregate")
+    java = one(aggregate, "Deployment", "qa-product-api-legacy")
+    state = java.get("metadata", {}).get("labels", {}).get(
+        "insurance-hub.io/product-go-state", "active"
+    )
+    require(state in {"active", "stopped"}, "QA aggregate has an invalid Product Go state")
     aggregate_index = {identity(document): document for document in aggregate}
+    if state == "stopped":
+        require(
+            not contains_qa_go(aggregate)
+            and not any(object_identity in aggregate_index for object_identity in qa_go_index),
+            "stopped QA aggregate still contains Go Product objects",
+        )
+        return
+
+    require(contains_qa_go(aggregate), "active QA aggregate does not contain Go Product")
     for object_identity, expected in qa_go_index.items():
         require(
             aggregate_index.get(object_identity) == expected,
@@ -389,7 +401,7 @@ def main() -> int:
     except ValidationError as error:
         print(f"product-deploy-check: {error}", file=sys.stderr)
         return 1
-    print("product-deploy-check: rendered overlays, Java isolation, and active QA inclusion passed")
+    print("product-deploy-check: rendered overlays, Java isolation, and QA lifecycle state passed")
     return 0
 
 
