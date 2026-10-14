@@ -5,14 +5,19 @@
 GO_SERVICE_DISPATCH_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 GO_SERVICE_RESOLVER := $(GO_SERVICE_DISPATCH_DIR)resolve.sh
 DEPLOY_ENV ?=
+RELEASE_AFTER ?=
+RELEASE_BEFORE ?=
+RELEASE_OUTPUT ?=
+RELEASE_REPOSITORY ?=
+RELEASE_SERVICE ?=
+RELEASE_VERSION ?=
 
 export SVC_NAME
 
 .PHONY: go-svc-image-build go-svc-image-check go-svc-deploy-render go-svc-deploy-check \
 	go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test \
-	go-svc-dispatch-test go-svc-image-release-check go-svc-image-publish \
-	go-svc-release-finalize go-svc-release-test go-svc-deploy-test-ci
+	go-svc-dispatch-test go-svc-release-select go-svc-release-update-qa go-svc-release-test
 
 go-svc-image-build: ## Build one cataloged Go service image. Usage: make go-svc-image-build SVC_NAME=<svc-name>
 	+@set -eu; \
@@ -44,14 +49,8 @@ go-svc-deploy-verify: ## Verify selected Go resources, reader permissions and HT
 go-svc-stop: ## Stop only the selected local-dev Go Deployment
 go-svc-deploy-test-tooling: ## Test selected-service deployment guards and cleanup
 go-svc-deploy-test: ## Exercise one service in an owned disposable Kind namespace
-go-svc-image-release-check: ## Verify a clean merged revision for explicit image release
-go-svc-image-publish: ## Validate and publish an image without editing deployment manifests
-go-svc-release-finalize: ## Finalize release identities and update the verified QA digest
-go-svc-release-test: ## Prove selected-service release guards and failure handling
-go-svc-deploy-test-ci: ## Run disposable Kubernetes lifecycle on an isolated hosted runner
 go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
-go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test \
-go-svc-image-release-check go-svc-image-publish go-svc-release-finalize go-svc-release-test go-svc-deploy-test-ci:
+	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test:
 	+@set -eu; \
 		capability='$(@:go-svc-%=%)'; \
 		module_path="$$($(GO_SERVICE_RESOLVER) "$$capability")"; \
@@ -59,3 +58,16 @@ go-svc-image-release-check go-svc-image-publish go-svc-release-finalize go-svc-r
 
 go-svc-dispatch-test: ## Test fail-closed Go service selection and capability dispatch
 	@$(GO_SERVICE_DISPATCH_DIR)test-dispatch.sh
+
+go-svc-release-select: ## Select exactly one changed conventional Go service for release
+	@PYTHONDONTWRITEBYTECODE=1 python3 $(GO_SERVICE_DISPATCH_DIR)release.py select \
+		--before "$(RELEASE_BEFORE)" --after "$(RELEASE_AFTER)" \
+		--repository "$(RELEASE_REPOSITORY)" --output "$(RELEASE_OUTPUT)"
+
+go-svc-release-update-qa: ## Update the selected Go service QA overlay to a semantic release tag
+	@PYTHONDONTWRITEBYTECODE=1 python3 $(GO_SERVICE_DISPATCH_DIR)release.py update-qa \
+		--service "$(RELEASE_SERVICE)" --repository "$(RELEASE_REPOSITORY)" \
+		--version "$(RELEASE_VERSION)"
+
+go-svc-release-test: ## Test generic Go service selection and QA semantic-tag updates
+	@PYTHONDONTWRITEBYTECODE=1 python3 $(GO_SERVICE_DISPATCH_DIR)test-release.py

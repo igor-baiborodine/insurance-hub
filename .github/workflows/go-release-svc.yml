@@ -1,0 +1,145 @@
+name: Go Service Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'services/*-service/**'
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: go-service-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release changed Go service
+    if: github.repository == 'igor-baiborodine/insurance-hub'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      REGISTRY: ghcr.io
+      SOURCE_REVISION: ${{ github.sha }}
+    steps:
+      - name: Checkout triggering source revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node.js 24.13.0
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.13.0'
+
+      - name: Select exactly one standard Go service
+        id: service
+        env:
+          RELEASE_BEFORE: ${{ github.event.before }}
+          RELEASE_AFTER: ${{ github.sha }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: make go-svc-release-select RELEASE_OUTPUT="$GITHUB_OUTPUT"
+
+      - name: Calculate next scoped service version
+        id: monotag
+        shell: bash
+        env:
+          MODULE_NAME: ${{ steps.service.outputs.module }}
+          MODULE_PATH: ${{ steps.service.outputs.module_path }}
+        run: |
+          set -euo pipefail
+          metadata_dir="$RUNNER_TEMP/go-service-release"
+          mkdir -p "$metadata_dir"
+
+          npx -y monotag tag \
+            --repo-dir . \
+            --path "$MODULE_PATH" \
+            --prefix "services/$MODULE_NAME/v" \
+            --tag-file "$metadata_dir/tag.txt" \
+            --version-file "$metadata_dir/version.txt" \
+            --notes-file "$metadata_dir/notes.md" \
+            --min-version 1.0.0 \
+            --max-version 1.999.999
+
+          release_tag="$(cat "$metadata_dir/tag.txt")"
+          release_version="$(cat "$metadata_dir/version.txt")"
+          [[ "$release_version" =~ ^1\.[0-9]+\.[0-9]+$ ]]
+          [[ "$release_tag" == "services/$MODULE_NAME/v$release_version" ]]
+          echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "notes=$metadata_dir/notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build once and push semantic and source tags
+        shell: bash
+        env:
+          MODULE_PATH: ${{ steps.service.outputs.module_path }}
+          SVC_NAME: ${{ steps.service.outputs.service }}
+          RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
+        run: |
+          set -euo pipefail
+          short_sha="$(git rev-parse --short "$SOURCE_REVISION")"
+          source_created="$(git show -s --format=%cI "$SOURCE_REVISION")"
+          source_version="git-${SOURCE_REVISION:0:12}"
+          image="$REGISTRY/$GITHUB_REPOSITORY/$SVC_NAME-api"
+
+          docker build \
+            --build-arg "SOURCE_CREATED=$source_created" \
+            --build-arg "SOURCE_REPOSITORY=https://github.com/$GITHUB_REPOSITORY" \
+            --build-arg "SOURCE_REVISION=$SOURCE_REVISION" \
+            --build-arg "SOURCE_VERSION=$source_version" \
+            --tag "$image:$RELEASE_VERSION" \
+            --tag "$image:sha-$short_sha" \
+            --file "$MODULE_PATH/Dockerfile" \
+            "$MODULE_PATH"
+
+          docker push "$image:$RELEASE_VERSION"
+          docker push "$image:sha-$short_sha"
+
+      - name: Commit semantic QA image tag
+        env:
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_SERVICE: ${{ steps.service.outputs.service }}
+          RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
+          QA_KUSTOMIZATION: ${{ steps.service.outputs.qa_kustomization }}
+        run: |
+          set -euo pipefail
+          make go-svc-release-update-qa
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$QA_KUSTOMIZATION"
+          git diff --cached --check
+          git commit -m "chore(k8s): update $RELEASE_SERVICE Go image to $RELEASE_VERSION"
+          git push origin HEAD:main
+
+      - name: Create scoped source tag
+        env:
+          MODULE_NAME: ${{ steps.service.outputs.module }}
+          RELEASE_TAG: ${{ steps.monotag.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
+        run: |
+          set -euo pipefail
+          git tag -a "$RELEASE_TAG" "$SOURCE_REVISION" \
+            -m "Release $MODULE_NAME $RELEASE_VERSION"
+          git push origin "$RELEASE_TAG"
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: false
+          draft: false
+          makeLatest: true
+          name: ${{ steps.monotag.outputs.tag }}
+          tag: ${{ steps.monotag.outputs.tag }}
+          bodyFile: ${{ steps.monotag.outputs.notes }}
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -326,16 +326,16 @@ The [Product Go deployment runbook](../../docs/migration/phase-4/product-service
 owns image publication, local-dev/QA prerequisites, reader provisioning, rollout/rotation recovery,
 and Go-only stop/restoration. Use root `go-svc-* SVC_NAME=product` targets and separate
 `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader` operations. PR checks build and test.
-For qualifying Product changes merged to canonical `main`, **Product Image Release** automatically
-creates the scoped semantic release, publishes semantic and unique short-SHA image tags, verifies
-their shared immutable digest, and commits that digest to the dormant QA overlay. QA activation
-remains a separate reviewed Git/Flux operation.
+For a qualifying Product change merged to canonical `main`, **Go Service Release** uses the same
+standard module convention intended for future Go services. It creates the scoped semantic release,
+builds once, publishes semantic and short-SHA image tags, and commits the semantic version to the
+dormant QA overlay. QA activation remains a separate reviewed Git/Flux operation.
 
-**Product Deployment Validation** runs the image, overlay, role, and disposable lifecycle gates.
-It complements the existing module and combined security workflows. Its runner-only
-`go-svc-deploy-test-ci` owns a fresh Kind cluster; local `go-svc-deploy-test` owns only its labelled
-disposable namespace in the existing local Kind cluster. Neither establishes shared-environment
-acceptance. `make -C services/product-service bootstrap-ci-tools` installs the pinned CI helpers;
-`check-ci` checks workflow permissions/triggers, and `go-svc-release-test SVC_NAME=product` proves
-release identity, ordering, collision, retry, manifest-update, and runner setup boundaries using
-fake external commands.
+**Go Module Validation** owns the nonpublishing module, generic release-selector, image, overlay,
+role-tooling, baseline, and local deployment-tooling gates. The release workflow does not repeat
+that suite or create a hosted disposable cluster. Local `go-svc-deploy-test` still owns only its
+labelled disposable namespace in an explicitly prepared local Kind cluster. Neither CI nor that
+local suite establishes shared-environment acceptance. `make -C services/product-service
+bootstrap-ci-tools` installs the pinned CI helpers; `check-ci` checks workflow boundaries, and
+`make go-svc-release-test` proves generic service selection, QA-entry requirements, and semantic-tag
+updates with controlled fixtures.

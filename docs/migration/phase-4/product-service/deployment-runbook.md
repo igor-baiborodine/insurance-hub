@@ -27,16 +27,16 @@ for issue #134; it does not certify that either shared environment has passed ac
 | Resource or action | Owner and boundary |
 | --- | --- |
 | Runtime image | Product module Makefile; pinned Go 1.27.2 builder and minimal non-root runtime; `linux/amd64`, `GOWORK=off` |
-| Publication | **Product Image Release** runs automatically for qualifying Product pushes to canonical `main`; its serialized job owns GHCR publication, scoped Git/GitHub release identities, and the dormant QA digest update |
-| PR validation | **Go Module Validation** owns module tests/docs; **Product Security Boundary Validation** owns combined Java/Go security; **Product Deployment Validation** owns image, manifests, role tooling, and disposable Kubernetes tests |
-| QA desired state | The release workflow commits only its verified immutable digest; activation separately adds `./product` through review, after which `flux-system/insurance-hub` and `flux-system/qa-svc` reconcile `main` |
+| Publication | **Go Service Release** runs automatically for a canonical `main` push that changes exactly one `services/<service>-service`; it owns GHCR publication, scoped Git/GitHub release identities, and the dormant QA semantic-tag update |
+| PR validation | **Go Module Validation** owns module, release-selector, image, manifest, role-tooling, baseline, and local deployment-tooling checks; **Product Security Boundary Validation** owns combined Java/Go security |
+| QA desired state | The release workflow commits the generated 1.x semantic tag; activation separately adds `./product` through review, after which `flux-system/insurance-hub` and `flux-system/qa-svc` reconcile `main` |
 | Local-dev desired state | Explicit `go-svc-* SVC_NAME=product` commands and the local Go overlay |
 | Database login and Secret | Maintainer with Kubernetes/CNPG administrative access, through `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader`; outside application startup and Flux |
 | Catalog and Java routing | Existing Java owner and gateway configuration; never changed by Go deployment |
 
 Initial activation has three staged PRs. The foundation PR supplies the runtime, deployment, and
 local-dev evidence with Go excluded from the QA aggregate. The release-automation PR replaces its
-bootstrap dispatch path; merging it must create the automatic release and digest-only bot commit
+bootstrap dispatch path; merging it must create the automatic release and semantic-tag bot commit
 while the overlay remains dormant. After the reader, Secret, image, and capacity prerequisites
 pass, the activation PR adds `./product` to `k8s/overlays/qa/svc/kustomization.yaml` while retaining
 `./product/legacy`. Review the complete QA render, prerequisites, and rollback before merge. Flux
@@ -44,8 +44,8 @@ then deploys the reconciled `main` state. Live QA verification and lifecycle reh
 before closing #134. No delivery PR uses an automatic issue-closing keyword.
 
 The pre-activation manifest checker requires disconnected QA and accepts either the initial
-unpublished placeholder or a release-owned immutable digest. The activation PR must update that
-phase-specific assertion and its corruption fixtures to require the reviewed digest and active
+unpublished placeholder or a release-owned 1.x semantic tag. The activation PR must update that
+phase-specific assertion and its corruption fixtures to require the reviewed semantic tag and active
 inclusion. Do not bypass the checker to activate Go.
 
 ## Prerequisites and validation commands
@@ -60,7 +60,7 @@ its primary Pod and CA Secret. No application-owner password is accepted as a Go
 make go-product-bootstrap-tools
 make -C services/product-service bootstrap-ci-tools
 make -C services/product-service check-ci
-make go-svc-release-test SVC_NAME=product
+make go-svc-release-test
 make go-svc-dispatch-test
 make go-svc-image-check SVC_NAME=product
 make go-svc-deploy-check SVC_NAME=product
@@ -70,19 +70,18 @@ make product-baseline-fixtures-check
 make product-baseline-test BASELINE_SUITE=db-permissions
 ```
 
-`bootstrap-ci-tools` explicitly installs PyYAML 6.0.3 in `.tools/ci-venv` using Python's venv
-and pip, and checksum-verifies Kind 0.30.0, kubectl 1.34.1, and actionlint 1.7.7 into `.tools/bin`. It requires
-Python pip >=22.3 and Linux amd64. Check targets do not install tools. Hosted workflows add
-`.tools/bin` to PATH; local operators may continue using their existing compatible clients.
+`bootstrap-ci-tools` explicitly installs PyYAML 6.0.3 in `.tools/ci-venv` using Python's venv and
+pip, and checksum-verifies Kind 0.30.0, kubectl 1.34.1, and actionlint 1.7.7 into `.tools/bin`. It
+requires Python pip >=22.3 and Linux amd64. Check targets do not install tools. Hosted workflows
+add `.tools/bin` to PATH; local operators may continue using their existing compatible clients.
 
 `make go-svc-deploy-test SVC_NAME=product` requires the active local Kind cluster and a ready CNPG
 operator. It creates and removes a uniquely labelled namespace and a separate database; it must
 not receive `PRODUCT_DATABASE_URL`. It exercises startup failures, empty/accepted catalog reads,
 dependency loss/recovery, readiness versus liveness, rollout, HTTP/gRPC drain, and Pod termination.
-`make go-svc-deploy-test-ci SVC_NAME=product` is a GitHub-hosted-runner-only wrapper: it creates a
-fresh Kind cluster with an isolated kubeconfig, installs CNPG 1.27.0, calls that same test, and
-removes its cluster even after failure. It refuses an existing cluster. It has no shared QA
-credentials and does not use the repository's shared database deployment target.
+The generic release does not create a hosted disposable cluster; this local target remains
+available for explicitly prepared, owned disposable infrastructure and keeps its existing cleanup
+boundary.
 
 Module, security, and Markdown gates retain their existing ownership. For local reproduction:
 
@@ -100,58 +99,49 @@ registry access, effective exposure, or Java routing.
 
 ## Publish a merged image
 
-A canonical `main` push that changes `services/product-service/**` or the Product release workflow
-automatically starts **Product Image Release**. The digest-only QA bot commit is outside those
-paths, so it cannot recursively publish. Releases are serialized and never cancel an in-flight
+A canonical `main` push that changes exactly one `services/<service>-service/**` module
+automatically starts **Go Service Release**. Its Kubernetes-only QA bot commit is outside that
+path, so it cannot recursively publish. Releases are serialized and never cancel an in-flight
 publication. Record the source push SHA and inspect the matching run:
 
 ```sh
 export RELEASE_REVISION='<full-40-character-source-SHA>'
-gh run list --workflow product-image-release.yml --limit 5
+gh run list --workflow go-release-svc.yml --limit 5
 ```
 
-Select the run matching that revision and record its run ID, URL, and conclusion. Download its
-`product-release-<SHA>` artifact outside the checkout:
+Select the run matching that revision and record its run ID, URL, and conclusion:
 
 ```sh
 export RELEASE_RUN_ID='<matching-run-id>'
-export RELEASE_ARTIFACT_DIR='/absolute/private-working-directory/product-release'
 gh run watch "$RELEASE_RUN_ID"
-gh run download "$RELEASE_RUN_ID" --name "product-release-$RELEASE_REVISION" --dir "$RELEASE_ARTIFACT_DIR"
-jq . "$RELEASE_ARTIFACT_DIR/image.json"
 ```
 
 The workflow uses `monotag` to calculate the next scoped 1.x version, starting at `1.0.0`, under
-`services/product-service/v<version>`. Before any registry or Git mutation, it verifies the exact
-source revision, canonical event/repository/branch, clean checkout, workflow boundary tests, and
-the actual image. It publishes `<version>` and `sha-<unique-short-SHA>` tags and requires both to
-resolve to one pulled linux/amd64 digest whose image ID and full OCI source revision match the
-validated image. It then creates the annotated scoped Git tag and matching GitHub Release, and
-commits only that digest to the dormant QA Product overlay. The evidence artifact records the full
-revision, version, scoped tag, both registry tags, immutable image, digest, image ID, and platform.
+`services/product-service/v<version>`. It detects the changed standard module, derives `product`,
+requires its Dockerfile and conventional QA image entry, and builds the module once. It publishes
+`<version>` and `sha-<short-source-SHA>` under
+`ghcr.io/igor-baiborodine/insurance-hub/product-api`, commits `<version>` to the dormant QA Product
+overlay, creates the annotated scoped tag on the triggering source revision, and creates a
+non-draft GitHub Release from the generated notes.
 
-Existing tags, releases, and manifest commits are accepted on retry only when they match the same
-release identity. Collisions, partial mismatches, a newer Product source on `main`, or a digest
-that differs between tags stops progression. A failed or timed-out mutation may have completed;
-rerun the same Actions run after inspecting its state. For recovery when rerunning is unavailable,
-a maintainer may explicitly dispatch `product-image-release.yml` from `main` with the original full
-source revision. That path applies the same identity and ancestry checks and cannot move an
-accepted tag or release.
+The release deliberately has no manual dispatch, recovery mode, digest finalization, pullback
+verification, uploaded evidence bundle, Go package publication, complete module test suite, or
+hosted disposable cluster. A failed or timed-out mutation may have completed; inspect the image,
+QA commit, scoped tag, and GitHub Release before deciding on a separately reviewed repair.
 
 The release job authenticates to GHCR and GitHub with its scoped `GITHUB_TOKEN`; PR checks receive
 no publishing credentials. The workflow never receives cluster or database credentials and never
 applies QA resources. These boundaries follow GitHub's
 [package permissions](https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions)
-and [manual dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
-contracts. Local `docker login` is not required for the automatic hosted release.
+contract. Local `docker login` is not required for the automatic hosted release.
 
 Before activation, verify package visibility and pullability using QA's intended registry access.
 The checked-in Go Pod has no `imagePullSecrets`; public pull access must actually work. If the
 package is private, establish an explicitly reviewed pull-Secret reference and separately
 provisioned registry credential before activation. The reader database Secret is not a registry
 credential. A successful pull by the authenticated release runner alone does not prove QA access.
-Record the published digest and source revision; compare them with the locally tested artifact.
-If they differ, validate the release image before enabling QA.
+Record the published semantic and short-SHA tags, source revision, and pulled image ID/digest.
+Validate that release image before enabling QA.
 
 ## Environment switching and target inputs
 
@@ -171,7 +161,7 @@ Choose one complete column and export its values before running targets:
 | `DEPLOY_CONTEXT` | `kind-local-dev-insurance-hub` | `qa-insurance-hub` |
 | `DEPLOY_SVC_NS` | `local-dev-all` | `qa-svc` |
 | `DEPLOY_DATA_NS` | `local-dev-all` | `qa-data` |
-| `DEPLOY_IMAGE_REF` | `insurance-hub-product-api:git-<12-hex-revision>` matching the local overlay | `ghcr.io/igor-baiborodine/insurance-hub/product-api@sha256:<digest>` matching the QA overlay |
+| `DEPLOY_IMAGE_REF` | `insurance-hub-product-api:git-<12-hex-revision>` matching the local overlay | `ghcr.io/igor-baiborodine/insurance-hub/product-api:<1.x-semantic-version>` matching the QA overlay |
 | `DEPLOY_SOURCE_REVISION` | Unused | Full `main` SHA actually reconciled by the Flux source and `qa-svc`, which can differ from the image's source SHA |
 
 For example, local-dev selection is:
@@ -270,12 +260,13 @@ does not establish which service the gateway reached. Keep tokens out of argumen
 
 Before the activation PR, establish a fresh QA preflight using the explicit context, reader
 inventory/proof, automatically published image availability, node capacity, and full rendered QA
-diff. Require the dormant overlay digest to match the release evidence and bot commit; do not
-manually retag or replace the release-owned digest.
+diff. Require the dormant overlay semantic tag to match the release and bot commit; do not
+manually retag or replace the release-owned version.
 
 The activation PR adds only `./product` to the aggregate. Review the entire render and update the
 phase-specific activation checks described above. The QA source stays on `main` with `wait` and
-`prune`; existing gateway routes, the release-owned digest, and `./product/legacy` remain intact.
+`prune`; existing gateway routes, the release-owned semantic tag, and `./product/legacy` remain
+intact.
 
 After merge, await reconciliation and inspect:
 
@@ -288,7 +279,7 @@ Record their ready conditions and actual source/applied revisions. Set all QA ta
 including `DEPLOY_SOURCE_REVISION`, then run `go-svc-deploy-preflight`, `go-svc-deploy-status`,
 and `go-svc-deploy-verify` with `SVC_NAME=product`. Repeat the independent gateway checks and
 before/after accepted catalog identity comparisons. Record pod image IDs and compare with the
-release artifact. Direct QA `go-svc-deploy`, image load, and stop are rejected by design.
+recorded release coordinates. Direct QA `go-svc-deploy`, image load, and stop are rejected by design.
 
 If Flux DNS and GHCR pulls fail together, inspect the host forwarding condition described in
 [cluster prerequisites](../../../../k8s/base-cluster-how-tos.md#prerequisites) before changing
@@ -375,8 +366,9 @@ separately reviewed repair; the target is not a universal repair bypass.
 
 In QA, remove only `./product` from the aggregate through a reviewed Git change while retaining
 `./product/legacy`. Flux pruning removes Go resources. Verify reconciliation, absent Go endpoints,
-Java gateway reads, and unchanged catalog. Restore the exact accepted digest/configuration and
-re-add `./product` through review. A manual scale-down that Flux reverses is not durable stop;
+Java gateway reads, and unchanged catalog. Restore the exact accepted semantic
+version/configuration and re-add `./product` through review. A manual scale-down that Flux reverses
+is not durable stop;
 never suspend reconciliation or delete shared databases/PVCs/Java resources to stop Go. The
 activation-aware checks must support and test this reviewed stopped state too.
 

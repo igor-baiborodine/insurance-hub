@@ -48,6 +48,13 @@ def main() -> int:
         "qa-preview": load(arguments.qa_preview),
     }
 
+    semantic = copy.deepcopy(baseline)
+    for key in ("qa-go", "qa-preview"):
+        deployment = find(semantic[key], "Deployment", "qa-product-api")
+        deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
+            "ghcr.io/igor-baiborodine/insurance-hub/product-api:1.2.3"
+        )
+
     def bad_selector(values: dict[str, list[dict[str, Any]]]) -> None:
         service = find(values["local-go"], "Service", "local-dev-product-api")
         service["spec"]["selector"]["app.kubernetes.io/name"] = "product-api-legacy"
@@ -67,16 +74,38 @@ def main() -> int:
     def accidental_activation(values: dict[str, list[dict[str, Any]]]) -> None:
         values["qa-aggregate"] = copy.deepcopy(values["qa-preview"])
 
+    def invalid_qa_tag(values: dict[str, list[dict[str, Any]]]) -> None:
+        deployment = find(values["qa-go"], "Deployment", "qa-product-api")
+        deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
+            "ghcr.io/igor-baiborodine/insurance-hub/product-api:latest"
+        )
+
     cases: list[tuple[str, Callable[[dict[str, list[dict[str, Any]]]], None], str]] = [
         ("bad selector", bad_selector, "selector"),
         ("wrong port", wrong_port, "named container ports"),
         ("missing Secret reference", missing_secret, "PRODUCT_DATABASE_URL"),
         ("external exposure", external_exposure, "must remain ClusterIP"),
         ("accidental QA activation", accidental_activation, "unexpectedly contains Go Product"),
+        ("invalid QA image tag", invalid_qa_tag, "qa image reference is invalid"),
     ]
 
     with tempfile.TemporaryDirectory(prefix="product-deployment-checks.") as directory:
         fixture_root = Path(directory)
+        semantic_paths: dict[str, Path] = {}
+        for key, documents in semantic.items():
+            path = fixture_root / f"semantic-{key}.json"
+            path.write_text(json.dumps(documents), encoding="utf-8")
+            semantic_paths[key] = path
+        semantic_command = [sys.executable, str(arguments.checker)]
+        for key in ("local-go", "local-legacy", "qa-go", "qa-legacy", "qa-aggregate", "qa-preview"):
+            semantic_command.extend((f"--{key}", str(semantic_paths[key])))
+        semantic_result = subprocess.run(semantic_command, text=True, capture_output=True, check=False)
+        if semantic_result.returncode != 0:
+            print(
+                "product-deploy-check-test: semantic QA tag was rejected: "
+                f"{semantic_result.stderr.strip()}", file=sys.stderr,
+            )
+            return 1
         for index, (description, mutation, expected_error) in enumerate(cases):
             values = copy.deepcopy(baseline)
             mutation(values)
@@ -114,8 +143,8 @@ def main() -> int:
                 return 1
 
     print(
-        "product-deploy-check-test: passed selector, port, Secret, exposure, "
-        "and activation failures"
+        "product-deploy-check-test: passed semantic QA tag plus selector, port, Secret, "
+        "exposure, activation, and invalid-tag failures"
     )
     return 0
 

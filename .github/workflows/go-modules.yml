@@ -18,10 +18,20 @@ on:
       - '**/go.work.sum'
       - 'go-module-topology.json'
       - 'scripts/go/**'
+      - 'scripts/postgres/**'
+      - 'scripts/product-deployment/**'
+      - 'scripts/product-baseline/**'
+      - 'scripts/product-security/**'
+      - 'k8s/apps/svc/**'
+      - 'k8s/overlays/local-dev/svc/**'
+      - 'k8s/overlays/qa/svc/**'
+      - 'k8s/flux/qa/**'
+      - 'k8s/Makefile'
       - 'docs/migration/phase-4/go-module-topology.md'
       - 'docs/migration/phase-4/product-service/README.md'
       - 'docs/migration/phase-4/product-service/**'
       - '.github/workflows/go-modules.yml'
+      - '.github/workflows/go-release-svc.yml'
       - 'codecov.yml'
       - 'Makefile'
   pull_request:
@@ -41,20 +51,33 @@ on:
       - '**/go.work.sum'
       - 'go-module-topology.json'
       - 'scripts/go/**'
+      - 'scripts/postgres/**'
+      - 'scripts/product-deployment/**'
+      - 'scripts/product-baseline/**'
+      - 'scripts/product-security/**'
+      - 'k8s/apps/svc/**'
+      - 'k8s/overlays/local-dev/svc/**'
+      - 'k8s/overlays/qa/svc/**'
+      - 'k8s/flux/qa/**'
+      - 'k8s/Makefile'
       - 'docs/migration/phase-4/go-module-topology.md'
       - 'docs/migration/phase-4/product-service/README.md'
       - 'docs/migration/phase-4/product-service/**'
       - '.github/workflows/go-modules.yml'
+      - '.github/workflows/go-release-svc.yml'
       - 'codecov.yml'
       - 'Makefile'
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   validate:
     name: Validate Go module topology and services
     runs-on: ubuntu-24.04
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository history
         uses: actions/checkout@v6
@@ -75,11 +98,26 @@ jobs:
             templates/go-service/go.sum
             services/product-service/go.sum
 
+      - name: Set up Java 14 and Maven package access
+        uses: actions/setup-java@v5
+        with:
+          java-version: '14'
+          distribution: 'zulu'
+          cache: 'maven'
+          server-id: 'github'
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
       - name: Bootstrap pinned scaffold tools
         run: make go-scaffold-bootstrap-tools
 
       - name: Bootstrap pinned Product tools
         run: make go-product-bootstrap-tools
+
+      - name: Bootstrap pinned Product CI helpers
+        run: |
+          make -C services/product-service bootstrap-ci-tools
+          echo "$GITHUB_WORKSPACE/services/product-service/.tools/bin" >> "$GITHUB_PATH"
 
       - name: Resolve formatting scope
         shell: bash
@@ -124,6 +162,23 @@ jobs:
 
       - name: Prove renamed scaffold copy
         run: make go-scaffold-check-copy
+
+      - name: Check generic release and Product deployment tooling
+        run: |
+          make -C services/product-service check-ci
+          make go-svc-release-test
+          make go-svc-dispatch-test
+          make go-svc-deploy-check SVC_NAME=product
+          make go-svc-deploy-test-tooling SVC_NAME=product
+
+      - name: Verify Product reader and baseline tooling
+        run: |
+          make postgres-svc-role-test
+          make product-baseline-fixtures-check
+          make product-baseline-test BASELINE_SUITE=db-permissions
+
+      - name: Validate the Product runtime image
+        run: make go-svc-image-check SVC_NAME=product
 
       - name: Check Product Service coverage (minimum 75%)
         run: make -C services/product-service coverage-check
