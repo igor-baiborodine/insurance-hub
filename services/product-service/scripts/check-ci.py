@@ -148,7 +148,7 @@ def main() -> None:
         lambda release, modules: release["on"]["push"]["paths"].append("k8s/overlays/qa/svc/**"),
         lambda release, modules: release["jobs"]["release"].update({"if": "true"}),
         lambda release, modules: next(step for step in release["jobs"]["release"]["steps"]
-                                      if step.get("name") == "Create the scoped source tag")
+                                      if step.get("name") == "Create scoped source tag")
         .update(run='git tag -a "$RELEASE_TAG"'),
         lambda release, modules: next(step for step in release["jobs"]["release"]["steps"]
                                       if step.get("name") == "Build once and push semantic and source tags")

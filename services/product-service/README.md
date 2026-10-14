@@ -126,7 +126,7 @@ The relevant reproducibility pins are:
 | OpenTelemetry core / gRPC instrumentation | 1.46.0 / 0.71.0 |
 | Testcontainers Go | 0.44.0 |
 | PostgreSQL integration image | `postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193` |
-| Mermaid CLI | 11.12.0; Node.js 20 or newer, with CI pinned to 24.13.0 |
+| Mermaid CLI / Puppeteer | 11.14.0 / 24.43.1; Node.js 20 or newer, with CI pinned to 24.13.0 |
 
 `check-docs` validates local Markdown links and anchors, extracts every Mermaid block, and renders
 it to SVG with the pinned CLI. It does not keep generated images in the working tree.
