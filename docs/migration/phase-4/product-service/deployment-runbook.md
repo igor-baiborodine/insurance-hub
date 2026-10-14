@@ -43,10 +43,10 @@ pass, the activation PR adds `./product` to `k8s/overlays/qa/svc/kustomization.y
 then deploys the reconciled `main` state. Live QA verification and lifecycle rehearsals must pass
 before closing #134. No delivery PR uses an automatic issue-closing keyword.
 
-The pre-activation manifest checker requires disconnected QA and accepts either the initial
-unpublished placeholder or a release-owned 1.x semantic tag. The activation PR must update that
-phase-specific assertion and its corruption fixtures to require the reviewed semantic tag and active
-inclusion. Do not bypass the checker to activate Go.
+The activation manifest checker requires the release-owned 1.x semantic tag and active `./product`
+inclusion alongside `./product/legacy`. Its corruption fixtures reject a missing activation,
+unpublished or invalid tags, overlapping selectors, external exposure, and contract drift. Do not
+bypass the checker to activate Go.
 
 ## Prerequisites and validation commands
 

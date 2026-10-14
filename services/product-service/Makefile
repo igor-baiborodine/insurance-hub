@@ -91,7 +91,7 @@ image-check: image-build ## Build and validate Product image identity, contents,
 deploy-render: ## Render Product Go overlays without applying them. Usage: make deploy-render [DEPLOY_ENV=local-dev|qa]
 	@KUBECTL="$(KUBECTL)" DEPLOY_ENV="$(DEPLOY_ENV)" ./scripts/render-deployment.sh
 
-deploy-check: ## Validate Product Go overlays, Java isolation, and disconnected QA activation
+deploy-check: ## Validate Product Go overlays, Java isolation, and active QA inclusion
 	@KUBECTL="$(KUBECTL)" JQ="$(JQ)" PYTHON="$(PYTHON)" ./scripts/check-deployment.sh
 
 deploy-preflight deploy-status image-load deploy deploy-verify stop: ## Guarded Product deployment operation; requires exact DEPLOY_* target coordinates

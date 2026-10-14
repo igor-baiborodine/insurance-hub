@@ -7,7 +7,7 @@ fail() {
 	exit 1
 }
 
-for command_name in "${KUBECTL:-kubectl}" "${JQ:-jq}" "${PYTHON:-python3}" cp find; do
+for command_name in "${KUBECTL:-kubectl}" "${JQ:-jq}" "${PYTHON:-python3}" find; do
 	command -v "${command_name}" >/dev/null 2>&1 || fail "required command is unavailable: ${command_name}"
 done
 
@@ -51,14 +51,7 @@ render "${repo_root}/k8s/overlays/qa/svc/product" "${temporary_root}/qa-go.yaml"
 render "${repo_root}/k8s/overlays/qa/svc/product/legacy" "${temporary_root}/qa-legacy.yaml"
 render "${repo_root}/k8s/overlays/qa/svc" "${temporary_root}/qa-aggregate.yaml"
 
-cp -a "${repo_root}/k8s" "${temporary_root}/k8s"
-cat >>"${temporary_root}/k8s/overlays/qa/svc/kustomization.yaml" <<'EOF'
-
-  - ./product
-EOF
-render "${temporary_root}/k8s/overlays/qa/svc" "${temporary_root}/qa-preview.yaml"
-
-for name in local-go local-legacy qa-go qa-legacy qa-aggregate qa-preview; do
+for name in local-go local-legacy qa-go qa-legacy qa-aggregate; do
 	to_json "${temporary_root}/${name}.yaml" "${temporary_root}/${name}.json"
 done
 
@@ -68,7 +61,6 @@ checker_arguments=(
 	--qa-go "${temporary_root}/qa-go.json"
 	--qa-legacy "${temporary_root}/qa-legacy.json"
 	--qa-aggregate "${temporary_root}/qa-aggregate.json"
-	--qa-preview "${temporary_root}/qa-preview.json"
 )
 "${PYTHON:-python3}" "${script_dir}/check-render.py" "${checker_arguments[@]}"
 "${PYTHON:-python3}" "${script_dir}/test-deployment-checks.py" \

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Validate the isolated Product Go Kubernetes renders without cluster access."""
+"""Validate the active Product Go Kubernetes renders without cluster access."""
 
 from __future__ import annotations
 
@@ -127,7 +127,7 @@ def validate_go_environment(
             "secret": "qa-postgres-product-reader-creds",
             "image": re.compile(
                 r"ghcr\.io/igor-baiborodine/insurance-hub/product-api:"
-                r"(?:sha-unpublished|1\.[0-9]+\.[0-9]+)"
+                r"1\.[0-9]+\.[0-9]+"
             ),
             "pull": "Always",
         },
@@ -351,19 +351,15 @@ def contains_qa_go(documents: list[dict[str, Any]]) -> bool:
 def validate_aggregates(
     qa_go_index: dict[tuple[str, str, str], dict[str, Any]],
     aggregate: list[dict[str, Any]],
-    preview: list[dict[str, Any]],
 ) -> None:
     require_unique(aggregate, "active QA aggregate")
-    require_unique(preview, "combined QA preview")
-    require(not contains_qa_go(aggregate), "active QA aggregate unexpectedly contains Go Product")
+    require(contains_qa_go(aggregate), "active QA aggregate does not contain Go Product")
     one(aggregate, "Deployment", "qa-product-api-legacy")
-    require(contains_qa_go(preview), "combined QA preview does not contain Go Product")
-    one(preview, "Deployment", "qa-product-api-legacy")
-    preview_index = {identity(document): document for document in preview}
+    aggregate_index = {identity(document): document for document in aggregate}
     for object_identity, expected in qa_go_index.items():
         require(
-            preview_index.get(object_identity) == expected,
-            f"combined QA preview changed Go object {object_identity}",
+            aggregate_index.get(object_identity) == expected,
+            f"active QA aggregate changed Go object {object_identity}",
         )
 
 
@@ -374,7 +370,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--qa-go", required=True, type=Path)
     parser.add_argument("--qa-legacy", required=True, type=Path)
     parser.add_argument("--qa-aggregate", required=True, type=Path)
-    parser.add_argument("--qa-preview", required=True, type=Path)
     return parser.parse_args()
 
 
@@ -386,16 +381,15 @@ def main() -> int:
         qa_go = load_documents(arguments.qa_go)
         qa_legacy = load_documents(arguments.qa_legacy)
         qa_aggregate = load_documents(arguments.qa_aggregate)
-        qa_preview = load_documents(arguments.qa_preview)
         validate_go_environment(local_go, "local-dev")
         qa_go_index = validate_go_environment(qa_go, "qa")
         validate_disjoint(local_go, local_legacy, "local-dev")
         validate_disjoint(qa_go, qa_legacy, "qa")
-        validate_aggregates(qa_go_index, qa_aggregate, qa_preview)
+        validate_aggregates(qa_go_index, qa_aggregate)
     except ValidationError as error:
         print(f"product-deploy-check: {error}", file=sys.stderr)
         return 1
-    print("product-deploy-check: rendered overlays, Java isolation, and disconnected QA activation passed")
+    print("product-deploy-check: rendered overlays, Java isolation, and active QA inclusion passed")
     return 0
 
 
