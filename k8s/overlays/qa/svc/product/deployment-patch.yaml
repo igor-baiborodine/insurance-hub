@@ -6,7 +6,7 @@ spec:
   template:
     metadata:
       annotations:
-        insurance-hub.io/product-configuration-revision: "step15-20261014T205114Z"
+        insurance-hub.io/product-configuration-revision: "step15-reader-rotation-20261014T210228Z"
     spec:
       containers:
         - name: product-api
