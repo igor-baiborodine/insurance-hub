@@ -180,9 +180,21 @@ kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_DATA_NS" get cluster.postgresql.
 ```
 
 Check node clock synchronization through the host/VM administration interface; Kubernetes node
-readiness alone does not prove it. Capacity must allow Java/PostgreSQL plus up to two Go Pods:
-requests per Pod `100m`/`64Mi`, limits `300m`/`256Mi`, pool 8 (16 total during surge). A capacity
-failure blocks activation until a reviewed, tested rollout strategy fits the laptop.
+readiness alone does not prove it. For QA, run the host service, bounded synchronization, and
+two-second drift checks in
+[Synchronize host and QA VM clocks](../../../../k8s/base-cluster-how-tos.md#synchronize-host-and-qa-vm-clocks).
+If the installed host service is disabled or inactive, the required administrative correction is:
+
+```sh
+sudo systemctl enable --now systemd-timesyncd
+sudo timedatectl set-ntp true
+```
+
+Do not provision credentials or activate Go until the host reports `NTPSynchronized=yes` and the
+documented host-to-node drift check passes for all three QA VMs. Capacity must allow
+Java/PostgreSQL plus up to two Go Pods: requests per Pod `100m`/`64Mi`, limits `300m`/`256Mi`, pool
+8 (16 total during surge). A capacity failure blocks activation until a reviewed, tested rollout
+strategy fits the laptop.
 
 ## Provision and verify the reader
 

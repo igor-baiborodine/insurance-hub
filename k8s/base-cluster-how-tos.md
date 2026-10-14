@@ -9,6 +9,7 @@
 - [QA](#qa)
   - [Create LXD Virtual Machines](#create-lxd-virtual-machines)
   - [Deploy K3s Cluster](#deploy-k3s-cluster)
+  - [Synchronize Host and QA VM Clocks](#synchronize-host-and-qa-vm-clocks)
   - [Manage Cluster](#manage-cluster-1)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -151,6 +152,91 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
 
 > Please note that after this step the `kubectl` current context will be automatically set to
 `qa-insurance-hub`.
+
+### Synchronize Host and QA VM Clocks
+
+1. **Measure initial host-to-node drift**
+
+    Measure the drift before provisioning credentials, validating certificates, or changing a live
+    QA workload:
+
+    ```bash
+    for node in qa-master qa-worker1 qa-worker2; do
+      host_epoch=$(date +%s)
+      node_epoch=$(lxc exec "$node" -- date +%s)
+      drift=$((host_epoch - node_epoch))
+      ((drift < 0)) && drift=$((-drift))
+      printf '%s drift_seconds=%s\n' "$node" "$drift"
+    done
+    ```
+
+    Any result greater than two seconds requires investigation.
+
+2. **Check host time synchronization**
+
+    Check whether host NTP is enabled and synchronized:
+
+    ```bash
+    timedatectl show -p CanNTP -p NTP -p NTPSynchronized -p TimeUSec
+    systemctl is-enabled systemd-timesyncd || true
+    systemctl is-active systemd-timesyncd || true
+    ```
+
+3. **Enable persistent host time synchronization when required**
+
+    If the output reports `NTP=no`, `NTPSynchronized=no`, or `systemd-timesyncd` is disabled or
+    inactive, run these commands with interactive `sudo` access:
+
+    ```bash
+    sudo systemctl enable --now systemd-timesyncd
+    sudo timedatectl set-ntp true
+    ```
+
+4. **Wait for synchronization**
+
+    Wait up to 60 seconds and fail the check if the host does not report
+    `NTPSynchronized=yes`:
+
+    ```bash
+    for attempt in $(seq 1 30); do
+      [[ "$(timedatectl show -p NTPSynchronized --value)" == "yes" ]] && break
+      sleep 2
+    done
+
+    test "$(timedatectl show -p NTPSynchronized --value)" = "yes"
+    timedatectl timesync-status
+    ```
+
+5. **Verify the synchronized host**
+
+    Verify the host state and current UTC time again:
+
+    ```bash
+    date -u '+host %Y-%m-%dT%H:%M:%S.%NZ' & timedatectl show -p CanNTP -p NTP -p NTPSynchronized -p TimeUSec & wait
+    ```
+
+6. **Verify final host-to-node drift**
+
+    Require each QA VM to be within two seconds of the synchronized host. Track failures across
+    all nodes so a passing final node cannot hide an earlier failure:
+
+    ```bash
+    clock_drift_failed=0
+    for node in qa-master qa-worker1 qa-worker2; do
+      host_epoch=$(date +%s)
+      node_epoch=$(lxc exec "$node" -- date +%s)
+      drift=$((host_epoch - node_epoch))
+      ((drift < 0)) && drift=$((-drift))
+      printf '%s drift_seconds=%s\n' "$node" "$drift"
+      ((drift <= 2)) || clock_drift_failed=1
+    done
+    test "$clock_drift_failed" -eq 0
+    ```
+
+Do not continue the live operation unless the synchronization and drift checks pass. If
+synchronization stalls, inspect `journalctl -u systemd-timesyncd --since '-10 minutes' --no-pager`
+before retrying. Do not use a manual `date` adjustment as the persistent fix. Enabling host time
+synchronization does not require restarting Docker, LXD, or the QA VMs.
 
 ### Manage Cluster
 
