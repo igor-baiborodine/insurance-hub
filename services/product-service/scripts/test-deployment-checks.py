@@ -33,7 +33,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--qa-go", required=True, type=Path)
     parser.add_argument("--qa-legacy", required=True, type=Path)
     parser.add_argument("--qa-aggregate", required=True, type=Path)
-    parser.add_argument("--qa-preview", required=True, type=Path)
     return parser.parse_args()
 
 
@@ -45,11 +44,10 @@ def main() -> int:
         "qa-go": load(arguments.qa_go),
         "qa-legacy": load(arguments.qa_legacy),
         "qa-aggregate": load(arguments.qa_aggregate),
-        "qa-preview": load(arguments.qa_preview),
     }
 
     semantic = copy.deepcopy(baseline)
-    for key in ("qa-go", "qa-preview"):
+    for key in ("qa-go", "qa-aggregate"):
         deployment = find(semantic[key], "Deployment", "qa-product-api")
         deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
             "ghcr.io/igor-baiborodine/insurance-hub/product-api:1.2.3"
@@ -71,8 +69,26 @@ def main() -> int:
         service = find(values["local-go"], "Service", "local-dev-product-api")
         service["spec"]["type"] = "LoadBalancer"
 
-    def accidental_activation(values: dict[str, list[dict[str, Any]]]) -> None:
-        values["qa-aggregate"] = copy.deepcopy(values["qa-preview"])
+    def missing_activation(values: dict[str, list[dict[str, Any]]]) -> None:
+        values["qa-aggregate"] = [
+            document
+            for document in values["qa-aggregate"]
+            if document.get("metadata", {}).get("name")
+            not in {
+                "qa-product-api",
+                "qa-product-api-management",
+            }
+            and not (
+                document.get("kind") == "ConfigMap"
+                and document.get("metadata", {}).get("name", "").startswith("qa-product-config-")
+            )
+        ]
+
+    def unreleased_qa_tag(values: dict[str, list[dict[str, Any]]]) -> None:
+        deployment = find(values["qa-go"], "Deployment", "qa-product-api")
+        deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
+            "ghcr.io/igor-baiborodine/insurance-hub/product-api:sha-unpublished"
+        )
 
     def invalid_qa_tag(values: dict[str, list[dict[str, Any]]]) -> None:
         deployment = find(values["qa-go"], "Deployment", "qa-product-api")
@@ -85,7 +101,8 @@ def main() -> int:
         ("wrong port", wrong_port, "named container ports"),
         ("missing Secret reference", missing_secret, "PRODUCT_DATABASE_URL"),
         ("external exposure", external_exposure, "must remain ClusterIP"),
-        ("accidental QA activation", accidental_activation, "unexpectedly contains Go Product"),
+        ("missing QA activation", missing_activation, "does not contain Go Product"),
+        ("unreleased QA image tag", unreleased_qa_tag, "qa image reference is invalid"),
         ("invalid QA image tag", invalid_qa_tag, "qa image reference is invalid"),
     ]
 
@@ -97,7 +114,7 @@ def main() -> int:
             path.write_text(json.dumps(documents), encoding="utf-8")
             semantic_paths[key] = path
         semantic_command = [sys.executable, str(arguments.checker)]
-        for key in ("local-go", "local-legacy", "qa-go", "qa-legacy", "qa-aggregate", "qa-preview"):
+        for key in ("local-go", "local-legacy", "qa-go", "qa-legacy", "qa-aggregate"):
             semantic_command.extend((f"--{key}", str(semantic_paths[key])))
         semantic_result = subprocess.run(semantic_command, text=True, capture_output=True, check=False)
         if semantic_result.returncode != 0:
@@ -127,8 +144,6 @@ def main() -> int:
                 str(paths["qa-legacy"]),
                 "--qa-aggregate",
                 str(paths["qa-aggregate"]),
-                "--qa-preview",
-                str(paths["qa-preview"]),
             ]
             result = subprocess.run(command, text=True, capture_output=True, check=False)
             if result.returncode == 0:
@@ -144,7 +159,7 @@ def main() -> int:
 
     print(
         "product-deploy-check-test: passed semantic QA tag plus selector, port, Secret, "
-        "exposure, activation, and invalid-tag failures"
+        "exposure, missing-activation, unreleased-tag, and invalid-tag failures"
     )
     return 0
 
