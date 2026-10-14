@@ -59,10 +59,28 @@ def validate_release(workflow: dict) -> None:
             "release must build once and push semantic and short-SHA image tags")
     require("make go-svc-release-update-qa" in commands and
             "git push origin HEAD:main" in commands and
-            'git tag -a "$RELEASE_TAG" "$SOURCE_REVISION"' in commands,
-            "release must commit the semantic QA tag and tag the source revision")
-    require(commands.index("docker build") < commands.index("make go-svc-release-update-qa") <
-            commands.index('git tag -a "$RELEASE_TAG"'),
+            'git tag -a "$RELEASE_TAG" -m' in commands and
+            'git push origin "$RELEASE_TAG"' in commands,
+            "release must create the scoped tag and commit the semantic QA tag")
+
+    tag_steps = [step for step in steps if step.get("name") == "Create scoped source tag"]
+    require(len(tag_steps) == 1 and tag_steps[0].get("env") == {
+                "MODULE_NAME": "${{ steps.service.outputs.module }}",
+                "RELEASE_TAG": "${{ steps.monotag.outputs.tag }}",
+                "RELEASE_VERSION": "${{ steps.monotag.outputs.version }}",
+            }, "release scoped tag environment differs")
+    tag_commands = tag_steps[0].get("run", "")
+    require('test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"' in tag_commands and
+            'git config user.name "github-actions[bot]"' in tag_commands and
+            'git config user.email "github-actions[bot]@users.noreply.github.com"' in tag_commands and
+            'git tag -a "$RELEASE_TAG" -m "Release $MODULE_NAME $RELEASE_VERSION"' in tag_commands and
+            'git push origin "$RELEASE_TAG"' in tag_commands,
+            "release must tag the triggering source with the legacy Git commands")
+    names = [step.get("name") for step in steps]
+    require(names.index("Build once and push semantic and source tags") <
+            names.index("Create scoped source tag") <
+            names.index("Commit semantic QA image tag") <
+            names.index("Create GitHub Release"),
             "release mutation order differs")
 
     release_steps = [step for step in steps if step.get("uses") == "ncipollo/release-action@v1"]

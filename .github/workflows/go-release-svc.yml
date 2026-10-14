@@ -106,6 +106,19 @@ jobs:
           docker push "$image:$RELEASE_VERSION"
           docker push "$image:sha-$short_sha"
 
+      - name: Create scoped source tag
+        env:
+          MODULE_NAME: ${{ steps.service.outputs.module }}
+          RELEASE_TAG: ${{ steps.monotag.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$RELEASE_TAG" -m "Release $MODULE_NAME $RELEASE_VERSION"
+          git push origin "$RELEASE_TAG"
+
       - name: Commit semantic QA image tag
         env:
           RELEASE_REPOSITORY: ${{ github.repository }}
@@ -121,17 +134,6 @@ jobs:
           git diff --cached --check
           git commit -m "chore(k8s): update $RELEASE_SERVICE Go image to $RELEASE_VERSION"
           git push origin HEAD:main
-
-      - name: Create scoped source tag
-        env:
-          MODULE_NAME: ${{ steps.service.outputs.module }}
-          RELEASE_TAG: ${{ steps.monotag.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
-        run: |
-          set -euo pipefail
-          git tag -a "$RELEASE_TAG" "$SOURCE_REVISION" \
-            -m "Release $MODULE_NAME $RELEASE_VERSION"
-          git push origin "$RELEASE_TAG"
 
       - name: Create GitHub Release
         uses: ncipollo/release-action@v1
