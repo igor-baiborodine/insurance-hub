@@ -20,6 +20,8 @@
       - [issue-135-N04 Enhanced navigation between signals](#issue-135-n04-enhanced-navigation-between-signals)
       - [issue-135-N05 Extended runtime and database diagnostics](#issue-135-n05-extended-runtime-and-database-diagnostics)
       - [issue-135-N06 Production SLO and capacity analysis](#issue-135-n06-production-slo-and-capacity-analysis)
+    - [Issue 154 Upgrade the QA observability platform](#issue-154-upgrade-the-qa-observability-platform)
+      - [issue-154-N01 Rotate Loki MinIO service credentials](#issue-154-n01-rotate-loki-minio-service-credentials)
     - [Issue 156 Simplify CI workflows](#issue-156-simplify-ci-workflows)
       - [issue-156-N01 Automatic added-module selection](#issue-156-n01-automatic-added-module-selection)
       - [issue-156-N02 Automatic removed-module outcome](#issue-156-n02-automatic-removed-module-outcome)
@@ -333,6 +335,45 @@ retention needs have been agreed, with sufficient measurements to support longer
 **Acceptance evidence:** Record the agreed workload, SLO and evaluation window, retention, and
 capacity measurements. Production conclusions must be supported by representative evidence;
 the four-product pilot fixture alone is insufficient.
+
+### Issue 154 Upgrade the QA observability platform
+
+Origin: issue-154 Step 3 execution evidence from 2026-10-15. A read-only Kubernetes preflight
+command intended to list Secret key names rendered the Loki MinIO service-user Secret's base64
+data in the maintainer-visible interactive output. The ticket owner reclassified credential
+rotation as optional follow-up after the clean Loki replacement and retained route passed all
+runtime security, ingestion, query, persistence, resource, and recovery gates.
+
+Source ticket: [issue 154](https://github.com/igor-baiborodine/insurance-hub/issues/154).
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-154-N01](#issue-154-n01-rotate-loki-minio-service-credentials) | Rotate Loki MinIO service credentials | Deferred | Unassigned |
+
+#### issue-154-N01 Rotate Loki MinIO service credentials
+
+**Requirement:** Rotate the QA Loki MinIO service-user credentials with controlled old/new overlap.
+Preserve tenant `qa-minio-loki`, bucket `loki-logs`, policy `s3-policy-loki-logs`, and the fixed
+Secret name `qa-minio-loki-svc-user-creds` in its source and `qa-monitoring` copy. Restart Loki
+after updating both Secret copies, prove ingestion, query, restart persistence, and bucket access,
+then revoke the old user and prove its credentials no longer work. Keep credential values out of
+commands, process listings, logs, and recorded evidence.
+
+**Why deferred:** The affected credentials remain functional only in the QA observability path,
+and issue 154's mandatory platform-upgrade behavior passed with the existing scoped user, policy,
+tenant, bucket, and runtime security boundary. Rotation would add a separate credential lifecycle
+mutation after the Loki stage had passed and is not required to qualify the pinned observability
+baseline.
+
+**Reconsider when:** The QA MinIO credential workflow is hardened, Loki moves beyond this isolated
+QA boundary, a security review requires revocation after maintainer-visible exposure, or another
+change already needs to rotate or replace the Loki service user.
+
+**Acceptance evidence:** A redacted before/after inventory identifies both fixed-name Secret
+copies and the scoped policy without printing values. The replacement user authenticates only to
+the allowed bucket; Loki remains Ready and fresh direct and Alloy logs remain queryable across a
+restart; the old user is revoked and denied; unrelated buckets, users, policies, tenants, and
+workloads are unchanged; and no credential material appears in retained output.
 
 ### Issue 156 Simplify CI workflows
 
