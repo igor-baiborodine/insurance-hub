@@ -126,13 +126,13 @@ The relevant reproducibility pins are:
 | OpenTelemetry core / gRPC instrumentation | 1.46.0 / 0.71.0 |
 | Testcontainers Go | 0.44.0 |
 | PostgreSQL integration image | `postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193` |
-| Mermaid CLI / Puppeteer | 11.14.0 / 24.43.1; Node.js 20 or newer, with CI pinned to 24.13.0 |
+| Mermaid CLI / Puppeteer | 11.14.0 / 24.43.1; Node.js 20 or newer |
 
 `check-docs` validates local Markdown links and anchors, extracts every Mermaid block, and renders
 it to SVG with the pinned CLI. It does not keep generated images in the working tree.
 The checked-in `puppeteer-config.json` supplies Chromium's `--no-sandbox` and
-`--disable-setuid-sandbox` launch arguments required by the Ubuntu 24.04 GitHub runner;
-documentation rendering is limited to repository-controlled Mermaid sources.
+`--disable-setuid-sandbox` launch arguments for the supported Ubuntu environment; documentation
+rendering is limited to repository-controlled Mermaid sources.
 
 Configuration is read once and validated before service resources are acquired. Duration values use
 Go duration syntax. Listener ports may be zero for test-owned ephemeral listeners; listener hosts
@@ -222,7 +222,10 @@ security aggregate deliberately leaves that direct suite to the module gate. The
 generated test signing material and a disposable QA catalog, reject an external database URL, and
 clean up listeners, processes, and containers on completion or failure. See the
 [reproduction instructions](../../docs/migration/phase-4/product-service/security-baseline.md#reproduction)
-for prerequisites and safe temporary-token handling.
+for prerequisites and safe temporary-token handling. These are change-based local review checks;
+the hosted Product security workflow has been retired. The
+[contributor validation matrix](../../CONTRIBUTING.md#change-based-local-validation) records when
+the broader local checks and evidence are required.
 
 `make product-security-verify` is a separate read-only probe for an explicitly selected, already
 running Go target. The [#134 exposure gate](../../docs/migration/phase-4/product-service/security-baseline.md#go-deployment-exposure-gate-for-issue-134)

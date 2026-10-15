@@ -135,10 +135,11 @@ not run topology, tooling-fixture, copy, release, deployment, image, database-ro
 security checks.
 
 Product's selected-module validation owns the direct HTTP/gRPC access matrix and disposable
-PostgreSQL integration suite. The separate
-[Product Security Boundary Validation](../../../.github/workflows/product-security.yml) workflow
-currently owns accepted access fixtures, Java access regression, and the combined gateway-to-Go
-suite; local ownership after that workflow is retired is documented with the security commands.
+PostgreSQL integration suite. Accepted access fixtures, Java access regression, and the combined
+gateway-to-Go suite remain locally owned through `make product-security-test-tooling` and
+`make product-security-check`; the hosted Product security workflow has been retired. The
+[change-based local validation matrix](../../../CONTRIBUTING.md#change-based-local-validation)
+records when those and the other auxiliary checks are required and which evidence to retain.
 
 For shared tooling or topology changes, use the applicable local sequence:
 
@@ -152,8 +153,9 @@ make go-product-test-tooling
 make go-scaffold-check-copy
 ```
 
-A local pass is local evidence. YAML inspection is configuration evidence. Only a successful
-GitHub Actions run is hosted-CI evidence.
+A local pass is local evidence. YAML inspection is configuration evidence. Only a successful run
+of an active GitHub Actions workflow is hosted-CI evidence; historical results from retired
+workflows remain historical evidence.
 
 ## Import and consumer policy
 
