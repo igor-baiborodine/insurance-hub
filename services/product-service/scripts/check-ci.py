@@ -22,7 +22,7 @@ QUALIFYING_PATHS = [
     "templates/go-service/buf.lock",
     "templates/go-service/buf.gen.yaml",
     "templates/go-service/api/**/*.proto",
-    "templates/go-service/testdata/contract-baseline/**",
+    "templates/go-service/**/testdata/**",
     "services/*-service/**/*.go",
     "services/*-service/go.mod",
     "services/*-service/go.sum",
@@ -33,7 +33,7 @@ QUALIFYING_PATHS = [
     "services/*-service/sqlc.yaml",
     "services/*-service/api/**/*.proto",
     "services/*-service/internal/postgres/sql/*.sql",
-    "services/*-service/testdata/contract-baseline/**",
+    "services/*-service/**/testdata/**",
 ]
 
 
@@ -177,6 +177,7 @@ def validate_trigger_examples(patterns: list[str]) -> None:
         "templates/go-service/buf.gen.yaml",
         "templates/go-service/api/scaffold/v1/example_service.proto",
         "templates/go-service/testdata/contract-baseline/buf.yaml",
+        "templates/go-service/internal/catalog/testdata/case.json",
         "services/product-service/internal/testing/fixture_test.go",
         "services/product-service/gen/product/v1/product_service.pb.go",
         "services/product-service/go.mod",
@@ -189,6 +190,7 @@ def validate_trigger_examples(patterns: list[str]) -> None:
         "services/product-service/api/product/v1/product_service.proto",
         "services/product-service/internal/postgres/sql/schema.sql",
         "services/product-service/testdata/contract-baseline/buf.yaml",
+        "services/product-service/internal/catalog/testdata/case.json",
         "services/claims-service/internal/testing/fixture_test.go",
         "services/claims-service/gen/claims/v1/claims_service.pb.go",
         "services/claims-service/go.mod",
@@ -201,6 +203,7 @@ def validate_trigger_examples(patterns: list[str]) -> None:
         "services/claims-service/api/claims/v1/claims_service.proto",
         "services/claims-service/internal/postgres/sql/schema.sql",
         "services/claims-service/testdata/contract-baseline/buf.yaml",
+        "services/claims-service/internal/catalog/testdata/case.json",
     ]
     excluded = [
         "templates/go-service/Makefile",
@@ -247,6 +250,12 @@ def exercise_selection(selector: dict) -> None:
          "services/product-service"),
         ("future service only", {"services/claims-service/main.go": "package main\n"}, 0,
          "services/claims-service"),
+        ("scaffold JSON fixture", {
+            "templates/go-service/internal/catalog/testdata/case.json": "{}\n",
+        }, 0, "templates/go-service"),
+        ("future service JSON fixture", {
+            "services/claims-service/internal/catalog/testdata/case.json": "{}\n",
+        }, 0, "services/claims-service"),
         ("Go plus root auxiliary", {
             "services/product-service/main.go": "package main\n",
             "scripts/go/helper.sh": "#!/usr/bin/env bash\n",
@@ -602,7 +611,7 @@ def main() -> None:
             continue
         raise ValueError("controlled Go PR workflow corruption was accepted")
 
-    print("check-ci: generic release, selected-module PR validation, nine selection cases, "
+    print("check-ci: generic release, selected-module PR validation, eleven selection cases, "
           "one coverage path execution case, and twenty controlled corruptions passed")
 
 

@@ -137,6 +137,7 @@ write_ci_workflow() {
 				printf "      - '%s/**/*.go'\n" "${directory}"
 				printf "      - '%s/go.mod'\n" "${directory}"
 				printf "      - '%s/go.sum'\n" "${directory}"
+				printf "      - '%s/**/testdata/**'\n" "${directory}"
 			fi
 		done < <(jq -nr --argjson modules "${modules_json}" '$modules[].directory')
 		printf '%s\n' \
@@ -430,6 +431,14 @@ grep -Fv -- "- 'module/**/*.go'" "${case_root}/.github/workflows/test.yml" \
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
 expect_failure "missing CI module trigger" "${case_root}" \
 	'workflow .github/workflows/test.yml is missing pull_request path trigger for inventory module Go source module: module/\*\*/\*.go' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case missing-ci-module-fixture-trigger)"
+grep -Fv -- "- 'module/**/testdata/**'" "${case_root}/.github/workflows/test.yml" \
+	>"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "missing CI module fixture trigger" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing pull_request path trigger for inventory module test fixtures module: module/\*\*/testdata/\*\*' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
 case_root="$(new_single_case broad-ci-module-trigger)"

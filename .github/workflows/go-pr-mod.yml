@@ -13,7 +13,7 @@ on:
       - 'templates/go-service/buf.lock'
       - 'templates/go-service/buf.gen.yaml'
       - 'templates/go-service/api/**/*.proto'
-      - 'templates/go-service/testdata/contract-baseline/**'
+      - 'templates/go-service/**/testdata/**'
       - 'services/*-service/**/*.go'
       - 'services/*-service/go.mod'
       - 'services/*-service/go.sum'
@@ -24,7 +24,7 @@ on:
       - 'services/*-service/sqlc.yaml'
       - 'services/*-service/api/**/*.proto'
       - 'services/*-service/internal/postgres/sql/*.sql'
-      - 'services/*-service/testdata/contract-baseline/**'
+      - 'services/*-service/**/testdata/**'
 
 permissions:
   contents: read

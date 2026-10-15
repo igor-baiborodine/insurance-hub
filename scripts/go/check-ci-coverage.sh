@@ -128,6 +128,8 @@ for workflow_relative in "${workflows[@]}"; do
 				'services/*-service/go.mod' 'generic service manifest'
 			require_pull_request_trigger "${workflow_path}" "${workflow_relative}" \
 				'services/*-service/go.sum' 'generic service checksum'
+			require_pull_request_trigger "${workflow_path}" "${workflow_relative}" \
+				'services/*-service/**/testdata/**' 'generic service test fixtures'
 			forbid_pull_request_trigger "${workflow_path}" "${workflow_relative}" \
 				'services/*-service/**' 'broad generic service trigger'
 			for selector_contract in \
@@ -149,6 +151,8 @@ for workflow_relative in "${workflows[@]}"; do
 				"${directory}/go.mod" "inventory module manifest ${directory}"
 			require_pull_request_trigger "${workflow_path}" "${workflow_relative}" \
 				"${directory}/go.sum" "inventory module checksum ${directory}"
+			require_pull_request_trigger "${workflow_path}" "${workflow_relative}" \
+				"${directory}/**/testdata/**" "inventory module test fixtures ${directory}"
 			forbid_pull_request_trigger "${workflow_path}" "${workflow_relative}" \
 				"${directory}/**" "broad inventory module trigger ${directory}"
 			require_literal "${workflow_path}" "${workflow_relative}" "${directory}/*)" \
