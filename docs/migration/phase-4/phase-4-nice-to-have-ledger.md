@@ -337,35 +337,36 @@ the four-product pilot fixture alone is insufficient.
 ### Issue 156 Simplify CI workflows
 
 Origin: the revised issue-156 requirements. Go module lifecycle handling was reclassified on
-2026-10-15 because onboarding, decommissioning, directory movement, identity changes, and rename
-correlation are uncommon and do not need policy in ordinary PR workflow selection. These entries
-cover automatic selection or rejection for those cases.
+2026-10-15. Automatic added-service selection was promoted into issue 156 after the workflow scope
+was expanded to existing and upcoming `services/*-service` modules. Decommissioning, directory
+movement, identity changes, and rename correlation remain uncommon and deferred.
 
 Source ticket: [issue 156](https://github.com/igor-baiborodine/insurance-hub/issues/156).
 
 | Ledger ID | Improvement | Status | Follow-up ticket or disposition |
 | --- | --- | --- | --- |
-| [issue-156-N01](#issue-156-n01-automatic-added-module-selection) | Automatic added-module selection | Deferred | Unassigned |
+| [issue-156-N01](#issue-156-n01-automatic-added-module-selection) | Automatic added-module selection | Promoted | Included in issue 156 step 3 |
 | [issue-156-N02](#issue-156-n02-automatic-removed-module-outcome) | Automatic removed-module outcome | Deferred | Unassigned |
 | [issue-156-N03](#issue-156-n03-module-move-and-identity-correlation) | Module move and identity correlation | Deferred | Unassigned |
 
 #### issue-156-N01 Automatic added-module selection
 
-**Requirement:** Automatically select and validate a newly added Go module when the same change
-adds complete inventory ownership, standalone resolution metadata, and the common Make validation
-capabilities, while still enforcing the one-module rule.
+**Requirement:** Automatically select and validate a newly added immediate
+`services/<name>-service` module through the standard Make capabilities while still enforcing the
+one-module rule. Inventory ownership and standalone resolution remain mandatory onboarding checks.
 
-**Why deferred:** Adding a module is a deliberate onboarding event rather than routine pull-request
-validation. Existing local topology and module checks can prove that boundary without carrying
-two-revision onboarding policy in every ordinary hosted run.
+**Disposition:** Included in the revised issue-156 scope. Generic qualifying paths and inline
+module-root derivation select an immediate `services/<name>-service` module without a workflow edit.
+The module must still provide the standard Make capabilities and complete inventory and ownership
+onboarding.
 
-**Reconsider when:** Go service onboarding becomes frequent enough that the local handoff causes
-repeated manual reruns or materially slows migration delivery.
+**Delivered when:** Step 3's workflow and validators prove a future standard service is triggered,
+selected, and assigned generic business-service metadata while preserving the one-module rule.
 
-**Acceptance evidence:** Disposable repositories prove registered and unregistered additions,
-missing ownership/capabilities, standalone resolution, and mixed existing/new module changes. A
-correctly onboarded single module produces the generic selected-module metadata and passes its
-owning validation without service-specific workflow logic; incomplete onboarding fails clearly.
+**Acceptance evidence:** Workflow fixtures prove existing and future service selection, generic
+business-service metadata, and mixed existing/new module rejection without service-specific
+workflow logic. Existing topology checks continue to reject missing inventory ownership,
+standalone-resolution failures, and missing owning validation capabilities.
 
 #### issue-156-N02 Automatic removed-module outcome
 

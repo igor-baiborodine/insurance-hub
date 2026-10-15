@@ -235,5 +235,5 @@ bootstrap-ci-tools: ## Install pinned YAML parser and Kubernetes clients in modu
 
 check-ci: ## Validate generic release and Go CI permissions, triggers, and boundaries
 	@bash -n scripts/bootstrap-ci-tools.sh scripts/check-deployment.sh
-	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/go-release-svc.yml ../../.github/workflows/go-modules.yml
+	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/go-release-svc.yml ../../.github/workflows/go-pr-mod.yml
 	@PYTHONDONTWRITEBYTECODE=1 .tools/ci-venv/bin/python scripts/check-ci.py

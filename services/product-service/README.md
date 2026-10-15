@@ -331,11 +331,14 @@ standard module convention intended for future Go services. It creates the scope
 builds once, publishes semantic and short-SHA image tags, and commits the semantic version to the
 dormant QA overlay. QA activation remains a separate reviewed Git/Flux operation.
 
-**Go Module Validation** owns the nonpublishing module, generic release-selector, image, overlay,
-role-tooling, baseline, and local deployment-tooling gates. The release workflow does not repeat
-that suite or create a hosted disposable cluster. Local `go-svc-deploy-test` still owns only its
-labelled disposable namespace in an explicitly prepared local Kind cluster. Neither CI nor that
-local suite establishes shared-environment acceptance. `make -C services/product-service
-bootstrap-ci-tools` installs the pinned CI helpers; `check-ci` checks workflow boundaries, and
-`make go-svc-release-test` proves generic service selection, QA-entry requirements, and semantic-tag
-updates with controlled fixtures.
+**Go PR Module Validation** runs Product's focused `check-go-pr` target only when a qualifying
+Product input changes and the complete pull-request diff touches no second supported Go module. It
+owns Product's Go, Protobuf, SQL, race-enabled unit/coverage, disposable PostgreSQL integration,
+build, dependency, generated-code, contract, vulnerability, and 75% coverage gates. Release
+selection, image, overlay, role-tooling, baseline, and deployment-tooling checks remain local and
+run when their inputs change. Local `go-svc-deploy-test` owns only its labelled disposable namespace
+in an explicitly prepared local Kind cluster. Neither hosted validation nor that local suite
+establishes shared-environment acceptance. `make -C services/product-service bootstrap-ci-tools`
+installs the pinned workflow validators; `check-ci` checks release and selected-module workflow
+boundaries, and `make go-svc-release-test` proves generic service selection, QA-entry requirements,
+and semantic-tag updates with controlled fixtures.

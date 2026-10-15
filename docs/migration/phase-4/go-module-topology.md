@@ -25,8 +25,8 @@ The repository currently owns two Go modules and no Go workspace.
 
 | Directory | Module path | Role and owner | Consumers | Replacements | Supported mode | Owning validation | CI |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `templates/go-service` | `github.com/igor-baiborodine/insurance-hub/templates/go-service` | Reusable service scaffold; Insurance Hub repository maintainers | Itself only | None | Standalone, `GOWORK=off` | `make -C templates/go-service check` | `.github/workflows/go-modules.yml` |
-| `services/product-service` | `github.com/igor-baiborodine/insurance-hub/services/product-service` | Product business service; Product service maintainers | Its current executable and support packages | None | Standalone, `GOWORK=off` | `make -C services/product-service check` | `.github/workflows/go-modules.yml` |
+| `templates/go-service` | `github.com/igor-baiborodine/insurance-hub/templates/go-service` | Reusable service scaffold; Insurance Hub repository maintainers | Itself only | None | Standalone, `GOWORK=off` | `make -C templates/go-service check-go-pr` | `.github/workflows/go-pr-mod.yml` |
+| `services/product-service` | `github.com/igor-baiborodine/insurance-hub/services/product-service` | Product business service; Product service maintainers | Its current executable and support packages | None | Standalone, `GOWORK=off` | `make -C services/product-service check-go-pr` | `.github/workflows/go-pr-mod.yml` |
 
 The scaffold owns its Protobuf source and generated bindings. It is not a deployed business
 service, shared business model, or independently distributed contract module. Product owns its
@@ -54,11 +54,12 @@ make go-scaffold-bootstrap-tools
 make go-product-bootstrap-tools
 ```
 
-The Product bootstrap additionally requires Node.js 20 or newer plus npm and installs Mermaid CLI
-11.12.0 under the module's ignored `.tools/` directory; hosted CI pins Node.js 24.13.0. Product
-documentation validation uses Python 3 to check local links/anchors and render every Mermaid block
-to a temporary SVG. The Product validation also requires Docker daemon access. Its owning `check`
-target runs the race-enabled disposable PostgreSQL harness with Testcontainers Go v0.44.0 and
+The focused Product `bootstrap-go-tools` target installs only pinned Go validation tools. Its
+broader local `bootstrap-tools` target also requires Node.js 20 or newer plus npm and installs
+Mermaid CLI under the module's ignored `.tools/` directory. Product documentation validation uses
+Python 3 to check local links/anchors and render every Mermaid block to a temporary SVG. Product's
+`check-go-pr` target requires Docker daemon access and runs the race-enabled disposable PostgreSQL
+harness with Testcontainers Go v0.44.0 and
 `postgres:17.10-alpine` pinned at
 `sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193`; it never uses
 `PRODUCT_DATABASE_URL` or another shared database.
@@ -73,7 +74,8 @@ make go-topology-test
 
 `go-topology-check` compares discovered manifests with the inventory, checks module identity and
 owner targets, compares filesystem replacements with their approved inventory records, validates CI
-triggers, cache inputs, and root invocations, loads every package graph with `GOWORK=off` and
+qualifying paths, inline selection, selected-module cache and Make wiring, loads every package graph
+with `GOWORK=off` and
 readonly module resolution, and enforces repository import boundaries.
 
 `go-modules-check` runs topology validation first and then visits every inventory module exactly
@@ -96,7 +98,8 @@ module dependency point at the scaffold or shared tooling directory.
 `go-topology-test` creates local temporary repositories with no network requirement. It proves
 malformed and drifted inventory failures, workspace and replacement masking, allowed contract
 sharing, prohibited private, scaffold, undeclared, and unknown-owner imports, and missing CI
-triggers, cache inputs, or required Make invocations. It removes its fixtures after success,
+triggers, selection roots, version-checked setup, stale-report cleanup, scaffold upload exclusion,
+or required Make invocations. It removes its fixtures after success,
 failure, or interruption and checks that real source and manifest bytes did not change.
 
 These checks do not install tools, format source, tidy or upgrade dependencies, regenerate output,
@@ -107,32 +110,37 @@ with their generated and manifest changes.
 
 ## Continuous integration
 
-`.github/workflows/go-modules.yml` is the current topology workflow. Pushes and pull requests to
-`main` trigger it for both modules, the shared Product baseline corpus, every `go.mod`, `go.sum`,
-`go.work`, and `go.work.sum`, the canonical inventory, topology scripts, this guide, root Makefile,
-and workflow itself. The topology checker fails if an inventory module's workflow lacks its module
-path triggers or does not call
-both `make go-modules-check` and `make go-topology-test` through the restricted inline step-level
-`run` forms used by this repository. It also requires both bootstrap targets, both controlled
-tooling suites, the renamed scaffold copy proof, both module cache inputs, and the immutable Product
-baseline trigger. Block scalars, comments, and values under unrelated workflow keys do not count
-as execution evidence.
+`.github/workflows/go-pr-mod.yml` runs only for pull requests targeting `main` whose changed paths
+match the qualifying inputs for the scaffold or any immediate `services/*-service` directory.
+Qualifying inputs include Go source and generated output, `go.mod`/`go.sum`, owned Protobuf and SQL
+inputs, contract baselines, and module lint/generator configuration. Scripts, Makefiles,
+documentation, workflow YAML, topology metadata, Codecov configuration, legacy baseline fixtures,
+Dockerfiles, and deployment assets do not independently trigger hosted Go validation.
 
-CI uses `ubuntu-24.04`, checkout v6 with full history, setup-node v6 with Node.js 24.13.0,
-setup-go v7 with Go 1.27.2, both module `go.sum` cache inputs, and `contents: read`. It bootstraps
-each module's pinned tools through Make,
-resolves changed formatting scope from the pull-request base or push predecessor, runs the aggregate
-module and topology targets, then runs both modules' tooling-failure suites and the renamed-copy
-proof. Product integration checks use the hosted runner's Docker daemon and the immutable baseline
-fixture; they require no secret or live service.
+Once triggered, the workflow compares the explicit pull-request base and head revisions and maps
+the complete diff to the scaffold or conventionally named service roots. Zero supported modules is
+an explicit successful no-op. One module runs its `bootstrap-go-tools` and `check-go-pr` targets.
+More than one module fails before setup and asks the contributor to split the pull request,
+including when the second module change was not independently qualifying. A newly added
+`services/<name>-service` module receives the same selection, cache, validation, and coverage
+behavior without a workflow edit. Superseded runs for the same pull request are cancelled.
 
-Go Module Validation owns the direct Product HTTP/gRPC access matrix. Its full Product integration
-suite enforces the exact access case IDs for both transports. The separate
+CI uses `ubuntu-24.04`, checkout v6 with full history, and setup-go v7 with exact Go 1.27.2. Go
+dependencies and pinned tool binaries are cached for the selected module, while every run still
+executes version-verifying bootstrap. The selected module directory supplies its Make invocation,
+`go.sum`, coverage report path, and Codecov flag. Product retains its 75% coverage gate and
+`product-service` report identity. The scaffold's `service-scaffold` selector role prevents
+coverage collection and upload. The workflow does not install documentation or Java tools and does
+not run topology, tooling-fixture, copy, release, deployment, image, database-role, or combined
+security checks.
+
+Product's selected-module validation owns the direct HTTP/gRPC access matrix and disposable
+PostgreSQL integration suite. The separate
 [Product Security Boundary Validation](../../../.github/workflows/product-security.yml) workflow
-owns accepted access fixtures, Java access regression, and the combined gateway-to-Go suite; it
-does not rerun the direct Go access suite. Each workflow prepares its own runner and Product tools.
+currently owns accepted access fixtures, Java access regression, and the combined gateway-to-Go
+suite; local ownership after that workflow is retired is documented with the security commands.
 
-The equivalent full-file local sequence is:
+For shared tooling or topology changes, use the applicable local sequence:
 
 ```sh
 make go-scaffold-bootstrap-tools
@@ -175,8 +183,10 @@ Onboarding is one reviewed topology change. Complete all applicable items togeth
    fail-closed policy. A future workspace change must first implement comparison of its actual
    membership/replacements and execution of its owning target, with positive and mismatch fixtures;
    only then may its owner, validation target, and CI purpose be approved in the inventory.
-5. Update CI module path triggers, tool bootstrap, cache dependency paths, and the existing root
-   aggregate job. Do not create a competing workflow that bypasses topology validation.
+5. Place a business service directly under `services/` with a `-service` suffix and retain the
+   standard `bootstrap-go-tools` and `check-go-pr` targets. The Go PR workflow's generic paths,
+   selector, cache metadata, and coverage identity then apply without a workflow edit. Do not make
+   auxiliary paths independent triggers.
 6. Add positive boundary coverage for any approved public edge and negative fixtures for private,
    scaffold, unapproved-consumer, workspace-masking, or replacement risks introduced by the new
    topology.

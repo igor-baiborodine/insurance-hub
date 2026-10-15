@@ -84,9 +84,9 @@ remove_scaffold_only_copy_surface() {
 		/^### Root scaffold delegates$/ {
 			print "### Repository onboarding"
 			print ""
-			print "The scaffold-only `go-scaffold-*` root delegates and"
-			print "`.github/workflows/go-modules.yml` do not cover this copied module. Run module-owned"
-			print "Make targets from this directory. Add root and CI coverage only through the repository"
+			print "The scaffold-only `go-scaffold-*` root delegates do not cover this copied module."
+			print "When installed as an immediate `services/*-service` directory, the generic Go PR"
+			print "workflow selects its qualifying inputs. Complete the inventory and ownership onboarding"
 			print "documented in ../../docs/migration/phase-4/go-module-topology.md."
 			skipping = 1
 			next
@@ -173,13 +173,13 @@ if grep -q '^check-copy:' "$copy_root/Makefile" ||
 fi
 if grep -Fq 'make go-scaffold-' "$copy_root/README.md" ||
 	grep -Fq 'Go service scaffold CI' "$copy_root/README.md" ||
-	grep -Fq 'Go Module Validation' "$copy_root/README.md" ||
-	grep -Fq 'when this module, the workflow, or the root Makefile changes' \
+	grep -Fq 'maps the complete pull-request diff to the scaffold or' \
 		"$copy_root/README.md"; then
 	echo 'check-copy: copied README claims scaffold-only root or CI coverage' >&2
 	exit 1
 fi
-grep -Fq 'do not cover this copied module' "$copy_root/README.md"
+grep -Fq 'the generic Go PR' "$copy_root/README.md"
+grep -Fq 'workflow selects its qualifying inputs' "$copy_root/README.md"
 grep -Fq '../../docs/migration/phase-4/go-module-topology.md' "$copy_root/README.md"
 if grep -n -E '^replace([[:space:]]|$)' "$copy_root/go.mod"; then
 	echo 'check-copy: filesystem replacement found in copied go.mod' >&2

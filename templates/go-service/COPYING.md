@@ -1,3 +1,16 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Create a renamed service from the Go scaffold](#create-a-renamed-service-from-the-go-scaffold)
+  - [1. Copy only committed template files](#1-copy-only-committed-template-files)
+  - [2. Replace every active identity](#2-replace-every-active-identity)
+  - [3. Bootstrap tools and regenerate owned content](#3-bootstrap-tools-and-regenerate-owned-content)
+  - [4. Reject stale active identities](#4-reject-stale-active-identities)
+  - [5. Validate the independent module without mutation](#5-validate-the-independent-module-without-mutation)
+  - [6. Run the automated copy proof for scaffold changes](#6-run-the-automated-copy-proof-for-scaffold-changes)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Create a renamed service from the Go scaffold
 
 This guide travels with the template and intentionally names the original scaffold identities.
@@ -114,9 +127,9 @@ awk '
   /^### Root scaffold delegates$/ {
     print "### Repository onboarding"
     print ""
-    print "The scaffold-only `go-scaffold-*` root delegates and"
-    print "`.github/workflows/go-modules.yml` do not cover this copied module. Run module-owned"
-    print "Make targets from this directory. Add root and CI coverage only through the repository"
+    print "The scaffold-only `go-scaffold-*` root delegates do not cover this copied module."
+    print "When installed as an immediate `services/*-service` directory, the generic Go PR"
+    print "workflow selects its qualifying inputs. Complete the inventory and ownership onboarding"
     print "documented in ../../docs/migration/phase-4/go-module-topology.md."
     skipping = 1
     next
@@ -127,9 +140,11 @@ awk '
 mv README.md.copy README.md
 ```
 
-The root `go-scaffold-*` delegates still point to `templates/go-service`. The Go modules workflow
-covers only modules recorded in `go-module-topology.json`; do not claim it covers the copied service
-until the repository onboarding workflow updates the inventory and CI coverage.
+The root `go-scaffold-*` delegates still point to `templates/go-service`. When the copy is installed
+as an immediate `services/<name>-service` directory, the Go PR workflow automatically matches its
+qualifying paths and derives its module selection, cache, and coverage metadata. Repository support
+still requires the inventory, ownership, consumers, and controlled topology fixtures to be reviewed
+together.
 
 Review `README.md` and replace the template introduction with the real service purpose when it is
 known. Update any service-specific ports or configuration defaults required by the service ticket.
@@ -237,8 +252,8 @@ From the repository root, the narrowly scoped equivalent is:
 make go-scaffold-check-copy
 ```
 
-The topology workflow still covers only modules recorded in `go-module-topology.json`. A copied
-service is not covered automatically. Follow the [Go module topology onboarding guide](../../docs/migration/phase-4/go-module-topology.md):
-record ownership and resolution mode, add its owning validation target and consumers, update CI
-triggers/bootstrap/cache, add positive and negative boundary fixtures, and run both root topology
-targets before claiming coverage.
+The Go PR workflow automatically covers qualifying inputs when the copy is installed as an
+immediate `services/<name>-service` directory with the standard Make targets. Follow the
+[Go module topology onboarding guide](../../docs/migration/phase-4/go-module-topology.md): record
+ownership and resolution mode, add its owning validation target and consumers, add positive and
+negative boundary fixtures, and run both root topology targets before claiming repository support.
