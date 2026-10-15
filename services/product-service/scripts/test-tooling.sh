@@ -60,6 +60,41 @@ fixture=$(new_fixture integration-zero-selection)
 expect_failure integration-zero-selection test-integration \
 	'suite all selected zero tests' "$fixture" PRODUCT_TEST_FORCE_ZERO_SELECTION=1
 
+fixture=$(new_fixture go-bootstrap)
+mkdir -p "$fixture/.test-bin"
+cat >"$fixture/.test-bin/go" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'go %s\n' "$*" >>"${BOOTSTRAP_TRACE:?BOOTSTRAP_TRACE is required}"
+case "${1:-}" in
+install) exit 0 ;;
+env)
+	[[ "${2:-}" == "GOVERSION" ]]
+	printf 'go1.27.2\n'
+	;;
+*) exit 64 ;;
+esac
+EOF
+cat >"$fixture/.test-bin/forbidden-non-go-tool" <<'EOF'
+#!/usr/bin/env bash
+printf 'forbidden non-Go tool invoked: %s\n' "$0" >&2
+exit 65
+EOF
+chmod +x "$fixture/.test-bin/go" "$fixture/.test-bin/forbidden-non-go-tool"
+bootstrap_trace="$temporary_root/logs/go-bootstrap.trace"
+expect_success go-bootstrap bootstrap-go-tools "$fixture" \
+	GO="$fixture/.test-bin/go" \
+	NODE="$fixture/.test-bin/forbidden-non-go-tool" \
+	NPM="$fixture/.test-bin/forbidden-non-go-tool" \
+	MMDC="$fixture/.test-bin/forbidden-non-go-tool" \
+	PYTHON="$fixture/.test-bin/forbidden-non-go-tool" \
+	DOCKER="$fixture/.test-bin/forbidden-non-go-tool" \
+	KUBECTL="$fixture/.test-bin/forbidden-non-go-tool" \
+	JAVA="$fixture/.test-bin/forbidden-non-go-tool" \
+	BOOTSTRAP_TRACE="$bootstrap_trace"
+grep -Fq 'go install github.com/bufbuild/buf/cmd/buf@' "$bootstrap_trace" ||
+	tooling_fail 'bootstrap-go-tools did not invoke the Go tool installer'
+
 fixture=$(new_fixture docs-broken-link)
 printf '\n[Controlled missing link](controlled-missing.md)\n' >>"$fixture/README.md"
 expect_failure docs-broken-link check-docs 'missing local link target' "$fixture" \

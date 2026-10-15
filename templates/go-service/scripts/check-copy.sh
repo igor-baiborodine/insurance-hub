@@ -72,7 +72,7 @@ replace_identity() {
 }
 
 remove_scaffold_only_copy_surface() {
-	sed -i 's/^\([[:space:]]*\)check-copy run$/\1run/' "$copy_root/Makefile"
+	sed -i 's/\([[:space:]]\)check-copy\([[:space:]]\)/\1\2/' "$copy_root/Makefile"
 	sed -i '/^check-copy: verify-tools$/,+2d' "$copy_root/Makefile"
 	rm -- "$copy_root/scripts/check-copy.sh"
 
@@ -229,6 +229,18 @@ inventory_tree "$copy_root" "$copy_inventory"
 
 echo 'check-copy: running renamed copy non-race tests'
 run_copy_make test
+echo 'check-copy: running renamed copy service coverage capability'
+copy_coverage=$temporary_root/example-copy-coverage.out
+copy_coverage_log=$temporary_root/example-copy-coverage.log
+if ! run_copy_make coverage-check COVERAGE_FILE="$copy_coverage" >"$copy_coverage_log" 2>&1; then
+	grep -Fq 'coverage-check: below minimum' "$copy_coverage_log" || {
+		cat "$copy_coverage_log" >&2
+		echo 'check-copy: copied service coverage failed without the expected threshold diagnostic' >&2
+		exit 1
+	}
+fi
+cat "$copy_coverage_log"
+test -s "$copy_coverage"
 echo 'check-copy: running renamed copy aggregate checks'
 run_copy_make check FORMAT_SCOPE=all
 

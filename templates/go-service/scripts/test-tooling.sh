@@ -83,4 +83,11 @@ EOF
 expect_failure generated-stale check-proto-drift \
 	'stale generated output is no longer declared' "$fixture"
 
+fixture=$(new_fixture scaffold-pr-check)
+expect_success scaffold-pr-check check-go-pr "$fixture" FORMAT_SCOPE=all
+if grep -Fq -- '-coverprofile=' "$temporary_root/logs/scaffold-pr-check.log" ||
+	test -e "$fixture/coverage.txt"; then
+	tooling_fail 'scaffold check-go-pr unexpectedly collected coverage'
+fi
+
 printf 'test-tooling: all controlled failures were rejected without fixture mutation\n'
