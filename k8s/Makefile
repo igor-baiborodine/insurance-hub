@@ -311,11 +311,27 @@ prometheus-operator-crds-install: _monitoring-ns-check
 		--namespace $(MONITORING_NS) --create-namespace \
 		--wait --timeout 10m
 	@echo "Waiting for monitoring.coreos.com CRDs to be registered..."
-	@kubectl wait --for=condition=Established crd/alertmanagers.monitoring.coreos.com --timeout=60s
-	@echo "Waiting until Alertmanager custom resource is accepted by API server..."
-	@until kubectl get alertmanagers.monitoring.coreos.com --all-namespaces >/dev/null 2>&1; do \
-		echo "  Alertmanager CR still not usable, waiting..."; \
-		sleep 2; \
+	@kubectl --context "$(CUR_CTX)" wait --for=condition=Established --timeout=60s \
+		crd/alertmanagerconfigs.monitoring.coreos.com \
+		crd/alertmanagers.monitoring.coreos.com \
+		crd/podmonitors.monitoring.coreos.com \
+		crd/probes.monitoring.coreos.com \
+		crd/prometheusagents.monitoring.coreos.com \
+		crd/prometheuses.monitoring.coreos.com \
+		crd/prometheusrules.monitoring.coreos.com \
+		crd/scrapeconfigs.monitoring.coreos.com \
+		crd/servicemonitors.monitoring.coreos.com \
+		crd/thanosrulers.monitoring.coreos.com
+	@echo "Confirming existing monitoring custom resources remain readable..."
+	@for resource in \
+		alertmanagers.monitoring.coreos.com \
+		podmonitors.monitoring.coreos.com \
+		probes.monitoring.coreos.com \
+		prometheuses.monitoring.coreos.com \
+		prometheusrules.monitoring.coreos.com \
+		scrapeconfigs.monitoring.coreos.com \
+		servicemonitors.monitoring.coreos.com; do \
+		kubectl --context "$(CUR_CTX)" get "$$resource" --all-namespaces >/dev/null; \
 	done
 
 .PHONY: prometheus-stack-install
