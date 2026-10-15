@@ -158,6 +158,7 @@ write_ci_workflow() {
 			'        shell: bash' \
 			'        run: |' \
 			'          set -euo pipefail' \
+			'          merge_base=$(git merge-base "$PR_BASE" "$PR_HEAD")' \
 			'          declare -A selected=()' \
 			"          while IFS= read -r -d '' changed_path; do" \
 			'            case "$changed_path" in'
@@ -167,7 +168,7 @@ write_ci_workflow() {
 		done < <(jq -nr --argjson modules "${modules_json}" '$modules[].directory')
 		printf '%s\n' \
 			'            esac' \
-			'          done < <(git diff --name-only --diff-filter=ACDMRT -z "$PR_BASE" "$PR_HEAD")' \
+			'          done < <(git diff --name-only --diff-filter=ACDMRT -z "$merge_base" "$PR_HEAD")' \
 			"          mapfile -t modules < <(printf '%s\\n' \"\${!selected[@]}\" | sort)" \
 			'          if (( ${#modules[@]} == 0 )); then' \
 			"            echo 'module_dir=' >> \"\$GITHUB_OUTPUT\"" \
@@ -190,6 +191,7 @@ write_ci_workflow() {
 			'          echo "module_key=${module_dir//\//-}" >> "$GITHUB_OUTPUT"' \
 			'          echo "go_sum=$module_dir/go.sum" >> "$GITHUB_OUTPUT"' \
 			"          echo 'validation_target=check-go-pr' >> \"\$GITHUB_OUTPUT\"" \
+			'          echo "format_base=$merge_base" >> "$GITHUB_OUTPUT"' \
 			'          echo "coverage_file=$module_dir/coverage.txt" >> "$GITHUB_OUTPUT"' \
 			'          echo "coverage_flag=${module_dir##*/}" >> "$GITHUB_OUTPUT"' \
 			'      - uses: actions/setup-go@v7' \
@@ -203,11 +205,12 @@ write_ci_workflow() {
 			'      - run: make -C "$MODULE_DIR" bootstrap-go-tools' \
 			'      - env:' \
 			'          COVERAGE_FILE: ${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}' \
+			'          FORMAT_BASE: ${{ steps.select.outputs.format_base }}' \
 			'        run: |' \
 			"          if [[ \"\$MODULE_ROLE\" != 'service-scaffold' ]]; then" \
 			'            rm -f -- "$COVERAGE_FILE"' \
 			'          fi' \
-			'          make -C "$MODULE_DIR" "$VALIDATION_TARGET" FORMAT_SCOPE=changed FORMAT_BASE="$PR_BASE"' \
+			'          make -C "$MODULE_DIR" "$VALIDATION_TARGET" FORMAT_SCOPE=changed FORMAT_BASE="$FORMAT_BASE"' \
 			"      - if: success() && steps.select.outputs.module_role != 'service-scaffold'" \
 			'        uses: codecov/codecov-action@v7' \
 			'        with:' \
@@ -443,6 +446,30 @@ sed "/  pull_request:/i\\  push:" "${case_root}/.github/workflows/test.yml" \
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
 expect_failure "push CI event" "${case_root}" \
 	'workflow .github/workflows/test.yml must not run on push' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case missing-pr-merge-base)"
+grep -Fv -- 'merge_base=$(git merge-base "$PR_BASE" "$PR_HEAD")' \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "missing PR merge base" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing pull request merge-base resolution: merge_base=\$\(git merge-base "\$PR_BASE" "\$PR_HEAD"\)' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case endpoint-module-diff)"
+sed 's/"$merge_base" "$PR_HEAD"/"$PR_BASE" "$PR_HEAD"/' \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "endpoint module diff" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing merge-base-to-head module selection: git diff --name-only --diff-filter=ACDMRT -z "\$merge_base" "\$PR_HEAD"' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case base-tip-formatting)"
+sed 's#FORMAT_BASE: ${{ steps.select.outputs.format_base }}#FORMAT_BASE: ${{ github.event.pull_request.base.sha }}#' \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "base-tip formatting" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing selected-module validation contract: FORMAT_BASE: \${{ steps.select.outputs.format_base }}' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
 case_root="$(new_single_case missing-inline-selector-root)"

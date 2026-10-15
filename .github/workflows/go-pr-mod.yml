@@ -55,6 +55,7 @@ jobs:
 
           git cat-file -e "${PR_BASE}^{commit}"
           git cat-file -e "${PR_HEAD}^{commit}"
+          merge_base=$(git merge-base "$PR_BASE" "$PR_HEAD")
 
           declare -A selected=()
           while IFS= read -r -d '' changed_path; do
@@ -70,7 +71,7 @@ jobs:
                 fi
                 ;;
             esac
-          done < <(git diff --name-only --diff-filter=ACDMRT -z "$PR_BASE" "$PR_HEAD")
+          done < <(git diff --name-only --diff-filter=ACDMRT -z "$merge_base" "$PR_HEAD")
 
           mapfile -t modules < <(printf '%s\n' "${!selected[@]}" | sed '/^$/d' | sort)
           if (( ${#modules[@]} == 0 )); then
@@ -108,6 +109,7 @@ jobs:
             echo "module_role=$module_role"
             echo "go_sum=$module_dir/go.sum"
             echo 'validation_target=check-go-pr'
+            echo "format_base=$merge_base"
             echo "coverage_file=$coverage_file"
             echo "coverage_flag=$coverage_flag"
           } >> "$GITHUB_OUTPUT"
@@ -142,7 +144,7 @@ jobs:
           COVERAGE_FILE: ${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}
           MODULE_DIR: ${{ steps.select.outputs.module_dir }}
           MODULE_ROLE: ${{ steps.select.outputs.module_role }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          FORMAT_BASE: ${{ steps.select.outputs.format_base }}
           VALIDATION_TARGET: ${{ steps.select.outputs.validation_target }}
         run: |
           set -euo pipefail
@@ -150,7 +152,7 @@ jobs:
             rm -f -- "$COVERAGE_FILE"
           fi
           make -C "$MODULE_DIR" "$VALIDATION_TARGET" \
-            FORMAT_SCOPE=changed FORMAT_BASE="$PR_BASE"
+            FORMAT_SCOPE=changed FORMAT_BASE="$FORMAT_BASE"
 
       - name: Upload selected module coverage to Codecov
         if: >-

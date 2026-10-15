@@ -102,8 +102,13 @@ for workflow_relative in "${workflows[@]}"; do
 	require_literal "${workflow_path}" "${workflow_relative}" 'fetch-depth: 0' \
 		'complete checkout history'
 	require_literal "${workflow_path}" "${workflow_relative}" \
-		'git diff --name-only --diff-filter=ACDMRT -z "$PR_BASE" "$PR_HEAD"' \
-		'complete base/head module selection'
+		'merge_base=$(git merge-base "$PR_BASE" "$PR_HEAD")' \
+		'pull request merge-base resolution'
+	require_literal "${workflow_path}" "${workflow_relative}" \
+		'git diff --name-only --diff-filter=ACDMRT -z "$merge_base" "$PR_HEAD"' \
+		'merge-base-to-head module selection'
+	require_literal "${workflow_path}" "${workflow_relative}" \
+		'echo "format_base=$merge_base"' 'merge-base formatting output'
 	require_literal "${workflow_path}" "${workflow_relative}" \
 		'if (( ${#modules[@]} == 0 ))' 'explicit zero-module no-op'
 	require_literal "${workflow_path}" "${workflow_relative}" \
@@ -166,8 +171,9 @@ for workflow_relative in "${workflows[@]}"; do
 		'path: ${{ steps.select.outputs.module_dir }}/.tools' \
 		'make -C "$MODULE_DIR" bootstrap-go-tools' \
 		'COVERAGE_FILE: ${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}' \
+		'FORMAT_BASE: ${{ steps.select.outputs.format_base }}' \
 		'make -C "$MODULE_DIR" "$VALIDATION_TARGET"' \
-		'FORMAT_SCOPE=changed FORMAT_BASE="$PR_BASE"' \
+		'FORMAT_SCOPE=changed FORMAT_BASE="$FORMAT_BASE"' \
 		'rm -f -- "$COVERAGE_FILE"' \
 		"steps.select.outputs.module_role != 'service-scaffold'" \
 		'uses: codecov/codecov-action@v7' \

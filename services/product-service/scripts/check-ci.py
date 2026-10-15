@@ -301,12 +301,54 @@ def exercise_selection(selector: dict) -> None:
                     f"selection case {label!r} returned {completed.returncode}: "
                     f"{completed.stderr.strip()}")
             if expected_status == 0:
-                actual = parse_outputs(output).get("module_dir")
+                outputs = parse_outputs(output)
+                actual = outputs.get("module_dir")
                 require(actual == expected_module,
                         f"selection case {label!r} chose {actual!r}, expected {expected_module!r}")
+                if expected_module:
+                    require(outputs.get("format_base") == base,
+                            f"selection case {label!r} did not expose its merge base")
             else:
                 require("Multiple Go modules changed" in completed.stderr,
                         f"selection case {label!r} did not explain the multi-module failure")
+
+        subprocess.run(["git", "switch", "-qC", "pr-base", base], cwd=fixture, check=True,
+                       timeout=10)
+        scaffold = fixture / "templates/go-service/main.go"
+        scaffold.parent.mkdir(parents=True, exist_ok=True)
+        scaffold.write_text("package main\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=fixture, check=True, timeout=10)
+        subprocess.run(["git", "commit", "-qm", "base-advance"], cwd=fixture, check=True,
+                       timeout=10)
+        pr_base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture,
+                                          text=True, timeout=10).strip()
+
+        subprocess.run(["git", "switch", "-qC", "pr-head", base], cwd=fixture, check=True,
+                       timeout=10)
+        product = fixture / "services/product-service/main.go"
+        product.parent.mkdir(parents=True, exist_ok=True)
+        product.write_text("package main\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=fixture, check=True, timeout=10)
+        subprocess.run(["git", "commit", "-qm", "head-advance"], cwd=fixture, check=True,
+                       timeout=10)
+        pr_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture,
+                                          text=True, timeout=10).strip()
+        output = fixture / "github-output-diverged"
+        environment = os.environ.copy()
+        environment.update({
+            "GITHUB_OUTPUT": str(output), "PR_BASE": pr_base, "PR_HEAD": pr_head,
+        })
+        completed = subprocess.run(["bash", "-c", selector["run"]], cwd=fixture,
+                                   env=environment, text=True, capture_output=True, check=False,
+                                   timeout=10)
+        require(completed.returncode == 0,
+                f"diverged-history selection returned {completed.returncode}: "
+                f"{completed.stderr.strip()}")
+        outputs = parse_outputs(output)
+        require(outputs.get("module_dir") == "services/product-service",
+                "diverged-history selection attributed a base-only module change to the PR")
+        require(outputs.get("format_base") == base,
+                "diverged-history selection did not expose the common ancestor for formatting")
 
 
 def exercise_coverage_path(validation: dict, upload: dict) -> None:
@@ -330,9 +372,9 @@ def exercise_coverage_path(validation: dict, upload: dict) -> None:
         environment = os.environ.copy()
         environment.update({
             "COVERAGE_FILE": str(upload_path),
+            "FORMAT_BASE": "fixture-base",
             "MODULE_DIR": module_dir,
             "MODULE_ROLE": "business-service",
-            "PR_BASE": "fixture-base",
             "VALIDATION_TARGET": "check-go-pr",
         })
         completed = subprocess.run(
@@ -388,7 +430,8 @@ def validate_modules(workflow: dict, *, run_execution_cases: bool = False) -> No
     }, "Go PR module selection must use explicit pull request base and head revisions")
     selector_contract = [
         "set -euo pipefail",
-        'git diff --name-only --diff-filter=ACDMRT -z "$PR_BASE" "$PR_HEAD"',
+        'merge_base=$(git merge-base "$PR_BASE" "$PR_HEAD")',
+        'git diff --name-only --diff-filter=ACDMRT -z "$merge_base" "$PR_HEAD"',
         "templates/go-service/*)",
         "services/*)",
         'service_path=${changed_path#services/}',
@@ -403,6 +446,7 @@ def validate_modules(workflow: dict, *, run_execution_cases: bool = False) -> No
         "module_role='business-service'",
         'echo "go_sum=$module_dir/go.sum"',
         "echo 'validation_target=check-go-pr'",
+        'echo "format_base=$merge_base"',
         'echo "coverage_file=$coverage_file"',
         'echo "coverage_flag=$coverage_flag"',
     ]
@@ -434,15 +478,15 @@ def validate_modules(workflow: dict, *, run_execution_cases: bool = False) -> No
     require(validation.get("if") == "steps.select.outputs.module_dir != ''" and
             validation.get("env") == {
                 "COVERAGE_FILE": "${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}",
+                "FORMAT_BASE": "${{ steps.select.outputs.format_base }}",
                 "MODULE_DIR": "${{ steps.select.outputs.module_dir }}",
                 "MODULE_ROLE": "${{ steps.select.outputs.module_role }}",
-                "PR_BASE": "${{ github.event.pull_request.base.sha }}",
                 "VALIDATION_TARGET": "${{ steps.select.outputs.validation_target }}",
             }, "selected module validation output wiring differs")
     require('rm -f -- "$COVERAGE_FILE"' in validation["run"] and
             "if [[ \"$MODULE_ROLE\" != 'service-scaffold' ]]" in validation["run"] and
             'make -C "$MODULE_DIR" "$VALIDATION_TARGET"' in validation["run"] and
-            'FORMAT_SCOPE=changed FORMAT_BASE="$PR_BASE"' in validation["run"],
+            'FORMAT_SCOPE=changed FORMAT_BASE="$FORMAT_BASE"' in validation["run"],
             "selected module validation must clear current coverage and invoke its owning target")
 
     upload = step_named(job, "Upload selected module coverage to Codecov")
@@ -532,6 +576,16 @@ def main() -> None:
                 .replace('rm -f -- "$COVERAGE_FILE"', ":")),
         lambda item: step_named(item["jobs"]["validate"], "Run selected module validation")
         ["env"].update({"COVERAGE_FILE": "${{ steps.select.outputs.coverage_file }}"}),
+        lambda item: step_named(item["jobs"]["validate"], "Select Go module")
+        .update(run=step_named(item["jobs"]["validate"], "Select Go module")["run"]
+                .replace('merge_base=$(git merge-base "$PR_BASE" "$PR_HEAD")',
+                         'merge_base=$PR_BASE')),
+        lambda item: step_named(item["jobs"]["validate"], "Select Go module")
+        .update(run=step_named(item["jobs"]["validate"], "Select Go module")["run"]
+                .replace('git diff --name-only --diff-filter=ACDMRT -z "$merge_base" "$PR_HEAD"',
+                         'git diff --name-only --diff-filter=ACDMRT -z "$PR_BASE" "$PR_HEAD"')),
+        lambda item: step_named(item["jobs"]["validate"], "Run selected module validation")
+        ["env"].update({"FORMAT_BASE": "${{ github.event.pull_request.base.sha }}"}),
         lambda item: step_named(item["jobs"]["validate"],
                                 "Upload selected module coverage to Codecov")
         .update({"if": "success()"}),
@@ -548,8 +602,8 @@ def main() -> None:
             continue
         raise ValueError("controlled Go PR workflow corruption was accepted")
 
-    print("check-ci: generic release, selected-module PR validation, eight selection cases, "
-          "one coverage path execution case, and seventeen controlled corruptions passed")
+    print("check-ci: generic release, selected-module PR validation, nine selection cases, "
+          "one coverage path execution case, and twenty controlled corruptions passed")
 
 
 if __name__ == "__main__":
