@@ -309,7 +309,53 @@ def exercise_selection(selector: dict) -> None:
                         f"selection case {label!r} did not explain the multi-module failure")
 
 
-def validate_modules(workflow: dict, *, run_selection_cases: bool = False) -> None:
+def exercise_coverage_path(validation: dict, upload: dict) -> None:
+    module_dir = "services/claims-service"
+    coverage_relative = f"{module_dir}/coverage.txt"
+    with tempfile.TemporaryDirectory(prefix="insurance-hub-go-pr-coverage-") as temporary:
+        fixture = Path(temporary)
+        module = fixture / module_dir
+        module.mkdir(parents=True)
+        (module / "Makefile").write_text(
+            ".PHONY: check-go-pr\n"
+            "check-go-pr:\n"
+            "\t@mkdir -p \"$(dir $(COVERAGE_FILE))\"\n"
+            "\t@printf 'mode: atomic\\n' > \"$(COVERAGE_FILE)\"\n"
+            "\t@test \"$(FORMAT_SCOPE)\" = changed\n"
+            "\t@test -n \"$(FORMAT_BASE)\"\n",
+            encoding="utf-8",
+        )
+        upload_path = fixture / coverage_relative
+        upload_path.write_text("stale\n", encoding="utf-8")
+        environment = os.environ.copy()
+        environment.update({
+            "COVERAGE_FILE": str(upload_path),
+            "MODULE_DIR": module_dir,
+            "MODULE_ROLE": "business-service",
+            "PR_BASE": "fixture-base",
+            "VALIDATION_TARGET": "check-go-pr",
+        })
+        completed = subprocess.run(
+            ["bash", "-c", validation["run"]], cwd=fixture, env=environment,
+            text=True, capture_output=True, check=False, timeout=10,
+        )
+        require(completed.returncode == 0,
+                f"coverage path execution returned {completed.returncode}: "
+                f"{completed.stderr.strip()}")
+        selected_output = "${{ steps.select.outputs.coverage_file }}"
+        require(upload["with"]["files"] == selected_output,
+                "coverage path fixture requires the selected report output for upload")
+        resolved_upload = fixture / upload["with"]["files"].replace(
+            selected_output, coverage_relative)
+        require(upload_path == resolved_upload and resolved_upload.read_text(encoding="utf-8") ==
+                "mode: atomic\n",
+                "make -C coverage output does not match the Codecov upload path")
+        duplicated = module / coverage_relative
+        require(not duplicated.exists(),
+                "make -C generated coverage under a duplicated module path")
+
+
+def validate_modules(workflow: dict, *, run_execution_cases: bool = False) -> None:
     require(set(workflow["on"]) == {"pull_request"},
             "Go PR validation must be pull_request-only")
     trigger = workflow["on"]["pull_request"]
@@ -362,7 +408,7 @@ def validate_modules(workflow: dict, *, run_selection_cases: bool = False) -> No
     ]
     for fragment in selector_contract:
         require(fragment in selector["run"], f"Go PR module selector is missing: {fragment}")
-    if run_selection_cases:
+    if run_execution_cases:
         exercise_selection(selector)
 
     setup_go = step_named(job, "Set up Go 1.27.2")
@@ -387,7 +433,7 @@ def validate_modules(workflow: dict, *, run_selection_cases: bool = False) -> No
     validation = step_named(job, "Run selected module validation")
     require(validation.get("if") == "steps.select.outputs.module_dir != ''" and
             validation.get("env") == {
-                "COVERAGE_FILE": "${{ steps.select.outputs.coverage_file }}",
+                "COVERAGE_FILE": "${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}",
                 "MODULE_DIR": "${{ steps.select.outputs.module_dir }}",
                 "MODULE_ROLE": "${{ steps.select.outputs.module_role }}",
                 "PR_BASE": "${{ github.event.pull_request.base.sha }}",
@@ -414,6 +460,8 @@ def validate_modules(workflow: dict, *, run_selection_cases: bool = False) -> No
     }, "Codecov upload must use only the selected module's derived current report")
     require("services/product-service" not in str(upload),
             "generic coverage upload may not hard-code Product")
+    if run_execution_cases:
+        exercise_coverage_path(validation, upload)
 
     commands = runs(job)
     forbidden = (
@@ -438,7 +486,7 @@ def main() -> None:
     release = read("go-release-svc.yml")
     modules = read("go-pr-mod.yml")
     validate_release(release)
-    validate_modules(modules, run_selection_cases=True)
+    validate_modules(modules, run_execution_cases=True)
     require(not (ROOT / ".github/workflows/go-modules.yml").exists(),
             "retired all-module Go workflow still exists")
     require(not (ROOT / ".github/workflows/product-image-release.yml").exists() and
@@ -482,6 +530,8 @@ def main() -> None:
         lambda item: step_named(item["jobs"]["validate"], "Run selected module validation")
         .update(run=step_named(item["jobs"]["validate"], "Run selected module validation")["run"]
                 .replace('rm -f -- "$COVERAGE_FILE"', ":")),
+        lambda item: step_named(item["jobs"]["validate"], "Run selected module validation")
+        ["env"].update({"COVERAGE_FILE": "${{ steps.select.outputs.coverage_file }}"}),
         lambda item: step_named(item["jobs"]["validate"],
                                 "Upload selected module coverage to Codecov")
         .update({"if": "success()"}),
@@ -499,7 +549,7 @@ def main() -> None:
         raise ValueError("controlled Go PR workflow corruption was accepted")
 
     print("check-ci: generic release, selected-module PR validation, eight selection cases, "
-          "and sixteen controlled corruptions passed")
+          "one coverage path execution case, and seventeen controlled corruptions passed")
 
 
 if __name__ == "__main__":

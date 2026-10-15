@@ -165,6 +165,7 @@ for workflow_relative in "${workflows[@]}"; do
 		'uses: actions/cache@v5' \
 		'path: ${{ steps.select.outputs.module_dir }}/.tools' \
 		'make -C "$MODULE_DIR" bootstrap-go-tools' \
+		'COVERAGE_FILE: ${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}' \
 		'make -C "$MODULE_DIR" "$VALIDATION_TARGET"' \
 		'FORMAT_SCOPE=changed FORMAT_BASE="$PR_BASE"' \
 		'rm -f -- "$COVERAGE_FILE"' \

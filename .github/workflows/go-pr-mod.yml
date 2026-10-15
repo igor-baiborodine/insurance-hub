@@ -139,7 +139,7 @@ jobs:
       - name: Run selected module validation
         if: steps.select.outputs.module_dir != ''
         env:
-          COVERAGE_FILE: ${{ steps.select.outputs.coverage_file }}
+          COVERAGE_FILE: ${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}
           MODULE_DIR: ${{ steps.select.outputs.module_dir }}
           MODULE_ROLE: ${{ steps.select.outputs.module_role }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}

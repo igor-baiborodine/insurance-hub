@@ -201,7 +201,9 @@ write_ci_workflow() {
 			'          path: ${{ steps.select.outputs.module_dir }}/.tools' \
 			'          key: ${{ steps.select.outputs.module_key }}-scripts/go/module/common.mk' \
 			'      - run: make -C "$MODULE_DIR" bootstrap-go-tools' \
-			'      - run: |' \
+			'      - env:' \
+			'          COVERAGE_FILE: ${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}' \
+			'        run: |' \
 			"          if [[ \"\$MODULE_ROLE\" != 'service-scaffold' ]]; then" \
 			'            rm -f -- "$COVERAGE_FILE"' \
 			'          fi' \
@@ -474,6 +476,14 @@ grep -Fv -- 'rm -f -- "$COVERAGE_FILE"' "${case_root}/.github/workflows/test.yml
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
 expect_failure "stale coverage report" "${case_root}" \
 	'workflow .github/workflows/test.yml is missing selected-module validation contract: rm -f -- "\$COVERAGE_FILE"' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case relative-coverage-report)"
+sed 's#COVERAGE_FILE: ${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}#COVERAGE_FILE: ${{ steps.select.outputs.coverage_file }}#' \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "relative coverage report" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing selected-module validation contract: COVERAGE_FILE: \${{ github.workspace }}/\${{ steps.select.outputs.coverage_file }}' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
 case_root="$(new_single_case scaffold-coverage-upload)"
