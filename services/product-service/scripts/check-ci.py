@@ -13,6 +13,19 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 
+RELEASE_PATHS = [
+    "services/*-service/Dockerfile",
+    "services/*-service/.dockerignore",
+    "services/*-service/go.mod",
+    "services/*-service/go.sum",
+    "services/*-service/cmd/**",
+    "services/*-service/gen/**",
+    "services/*-service/internal/**",
+    "!services/*-service/**/*_test.go",
+    "!services/*-service/internal/testing/**",
+    "!services/*-service/internal/postgres/sql/**",
+]
+
 QUALIFYING_PATHS = [
     "templates/go-service/**/*.go",
     "templates/go-service/go.mod",
@@ -60,13 +73,9 @@ def validate_release(workflow: dict) -> None:
     require(set(workflow["on"]) == {"push"}, "release must be push-only")
     require(workflow["on"]["push"] == {
         "branches": ["main"],
-        "paths": [
-            "services/*-service/**",
-            "!services/*-service/scripts/check-ci.py",
-            "!services/*-service/scripts/check-render.py",
-            "!services/*-service/scripts/test-deployment-checks.py",
-        ],
-    }, "release must select canonical-main standard Go service changes only")
+        "paths": RELEASE_PATHS,
+    }, "release must select canonical-main service image build inputs only")
+    validate_release_trigger_examples(workflow["on"]["push"]["paths"])
     require(workflow["permissions"] == {"contents": "write", "packages": "write"},
             "release permissions must be limited to repository contents and packages")
     require(workflow["concurrency"] == {
@@ -162,7 +171,54 @@ def path_matches(path: str, patterns: list[str]) -> bool:
                 index += 1
         return "".join(result)
 
-    return any(re.fullmatch(github_glob(pattern), path) for pattern in patterns)
+    matched = False
+    for pattern in patterns:
+        excluded = pattern.startswith("!")
+        candidate = pattern[1:] if excluded else pattern
+        if re.fullmatch(github_glob(candidate), path):
+            matched = not excluded
+    return matched
+
+
+def validate_release_trigger_examples(patterns: list[str]) -> None:
+    qualifying = [
+        "services/product-service/Dockerfile",
+        "services/product-service/.dockerignore",
+        "services/product-service/go.mod",
+        "services/product-service/go.sum",
+        "services/product-service/cmd/server/main.go",
+        "services/product-service/cmd/server/assets/defaults.json",
+        "services/product-service/gen/product/v1/product_service.pb.go",
+        "services/product-service/internal/application/catalog.go",
+        "services/product-service/internal/application/assets/catalog.json",
+        "services/product-service/internal/postgres/dbgen/queries.sql.go",
+        "services/claims-service/internal/application/claims.go",
+    ]
+    excluded = [
+        "services/product-service/.gitignore",
+        "services/product-service/.golangci.yml",
+        "services/product-service/Makefile",
+        "services/product-service/README.md",
+        "services/product-service/api/product/v1/product_service.proto",
+        "services/product-service/buf.gen.yaml",
+        "services/product-service/buf.lock",
+        "services/product-service/buf.yaml",
+        "services/product-service/cmd/server/main_test.go",
+        "services/product-service/internal/application/catalog_test.go",
+        "services/product-service/internal/postgres/sql/queries.sql",
+        "services/product-service/internal/testing/fixture.go",
+        "services/product-service/puppeteer-config.json",
+        "services/product-service/scripts/build-image.sh",
+        "services/product-service/scripts/check-ci.py",
+        "services/product-service/scripts/test-tooling.sh",
+        "services/product-service/sqlc.yaml",
+        "services/product-service/testdata/contract-baseline/buf.yaml",
+        "docs/migration/phase-4/product-service/README.md",
+    ]
+    for path in qualifying:
+        require(path_matches(path, patterns), f"release trigger excludes image build input: {path}")
+    for path in excluded:
+        require(not path_matches(path, patterns), f"release trigger includes non-image input: {path}")
 
 
 def validate_trigger_examples(patterns: list[str]) -> None:
@@ -611,8 +667,9 @@ def main() -> None:
             continue
         raise ValueError("controlled Go PR workflow corruption was accepted")
 
-    print("check-ci: generic release, selected-module PR validation, eleven selection cases, "
-          "one coverage path execution case, and twenty controlled corruptions passed")
+    print("check-ci: generic release with thirty trigger cases, selected-module PR validation, "
+          "eleven selection cases, one coverage path execution case, and twenty controlled "
+          "corruptions passed")
 
 
 if __name__ == "__main__":

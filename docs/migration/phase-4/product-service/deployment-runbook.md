@@ -29,7 +29,7 @@ catalog, and Java-routing evidence rather than relying on that historical pass.
 | Resource or action | Owner and boundary |
 | --- | --- |
 | Runtime image | Product module Makefile; pinned Go 1.27.2 builder and minimal non-root runtime; `linux/amd64`, `GOWORK=off` |
-| Publication | **Go Service Release** runs automatically for a canonical `main` push that changes exactly one `services/<service>-service`; it owns GHCR publication, scoped Git/GitHub release identities, and the dormant QA semantic-tag update |
+| Publication | **Go Service Release** runs automatically for a canonical `main` push that changes image-build inputs for exactly one `services/<service>-service`; it owns GHCR publication, scoped Git/GitHub release identities, and the dormant QA semantic-tag update |
 | PR validation | **Go PR Module Validation** owns Product's focused selected-module Go checks for qualifying inputs; release-selector, image, manifest, role-tooling, baseline, deployment-tooling, and combined Java/Go security checks remain change-based local review evidence |
 | QA desired state | The release workflow commits the generated 1.x semantic tag; activation separately adds `./product` through review, after which `flux-system/insurance-hub` and `flux-system/qa-svc` reconcile `main` |
 | Local-dev desired state | Explicit `go-svc-* SVC_NAME=product` commands and the local Go overlay |
@@ -103,10 +103,14 @@ registry access, effective exposure, or Java routing.
 
 ## Publish a merged image
 
-A canonical `main` push that changes exactly one `services/<service>-service/**` module
-automatically starts **Go Service Release**. Its Kubernetes-only QA bot commit is outside that
-path, so it cannot recursively publish. Releases are serialized and never cancel an in-flight
-publication. Record the source push SHA and inspect the matching run:
+A canonical `main` push that changes image-build inputs for exactly one
+`services/<service>-service` module automatically starts **Go Service Release**. Qualifying inputs
+are the Dockerfile, `.dockerignore`, `go.mod`, `go.sum`, and non-test content under `cmd`, `gen`, or
+`internal` that is admitted to the Docker context. Documentation, scripts, test files and helpers,
+generator source inputs, and local validation configuration do not publish an image; their generated
+production output triggers publication when it changes. The Kubernetes-only QA bot commit is
+outside the qualifying paths, so it cannot recursively publish. Releases are serialized and never
+cancel an in-flight publication. Record the source push SHA and inspect the matching run:
 
 ```sh
 export RELEASE_REVISION='<full-40-character-source-SHA>'

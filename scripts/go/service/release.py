@@ -15,6 +15,8 @@ SHA = re.compile(r"[0-9a-f]{40}")
 SERVICE = re.compile(r"[a-z][a-z0-9-]*")
 VERSION = re.compile(r"1\.[0-9]+\.[0-9]+")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+RELEASE_ROOT_FILES = frozenset({".dockerignore", "Dockerfile", "go.mod", "go.sum"})
+RELEASE_DIRECTORIES = frozenset({"cmd", "gen", "internal"})
 
 
 class ReleaseSelectionError(RuntimeError):
@@ -32,6 +34,27 @@ class Selection:
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise ReleaseSelectionError(message)
+
+
+def release_module(value: str) -> str | None:
+    path = PurePosixPath(value)
+    if len(path.parts) < 3 or path.parts[0] != "services":
+        return None
+
+    module = path.parts[1]
+    if not module.endswith("-service"):
+        return None
+
+    relative = path.parts[2:]
+    if len(relative) == 1:
+        return module if relative[0] in RELEASE_ROOT_FILES else None
+    if relative[0] not in RELEASE_DIRECTORIES or relative[-1].endswith("_test.go"):
+        return None
+    if relative[:2] == ("internal", "testing"):
+        return None
+    if relative[:3] == ("internal", "postgres", "sql"):
+        return None
+    return module
 
 
 def image_entry(lines: list[str], service: str, repository: str) -> int:
@@ -67,12 +90,9 @@ def image_entry(lines: list[str], service: str, repository: str) -> int:
 
 def select_service(paths: list[str], root: Path, repository: str) -> Selection:
     require(bool(REPOSITORY.fullmatch(repository)), "repository must use owner/name format")
-    modules: set[str] = set()
-    for value in paths:
-        path = PurePosixPath(value)
-        if len(path.parts) >= 3 and path.parts[0] == "services" and path.parts[1].endswith("-service"):
-            modules.add(path.parts[1])
-    require(len(modules) == 1, "release push must change exactly one services/<service>-service module")
+    modules = {module for value in paths if (module := release_module(value)) is not None}
+    require(len(modules) == 1,
+            "release push must change build inputs for exactly one services/<service>-service module")
 
     module = next(iter(modules))
     service = module.removesuffix("-service")

@@ -5,10 +5,16 @@ on:
     branches:
       - main
     paths:
-      - 'services/*-service/**'
-      - '!services/*-service/scripts/check-ci.py'
-      - '!services/*-service/scripts/check-render.py'
-      - '!services/*-service/scripts/test-deployment-checks.py'
+      - 'services/*-service/Dockerfile'
+      - 'services/*-service/.dockerignore'
+      - 'services/*-service/go.mod'
+      - 'services/*-service/go.sum'
+      - 'services/*-service/cmd/**'
+      - 'services/*-service/gen/**'
+      - 'services/*-service/internal/**'
+      - '!services/*-service/**/*_test.go'
+      - '!services/*-service/internal/testing/**'
+      - '!services/*-service/internal/postgres/sql/**'
 
 permissions:
   contents: write

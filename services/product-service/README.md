@@ -329,10 +329,13 @@ The [Product Go deployment runbook](../../docs/migration/phase-4/product-service
 owns image publication, local-dev/QA prerequisites, reader provisioning, rollout/rotation recovery,
 and Go-only stop/restoration. Use root `go-svc-* SVC_NAME=product` targets and separate
 `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader` operations. PR checks build and test.
-For a qualifying Product change merged to canonical `main`, **Go Service Release** uses the same
-standard module convention intended for future Go services. It creates the scoped semantic release,
-builds once, publishes semantic and short-SHA image tags, and commits the semantic version to the
-dormant QA overlay. QA activation remains a separate reviewed Git/Flux operation.
+For a Product image-build input merged to canonical `main`, **Go Service Release** uses the same
+standard module convention intended for future Go services. Release inputs are the Dockerfile,
+Docker context policy, module manifests, and non-test content copied from `cmd`, `gen`, and
+`internal`; documentation, scripts, tests, generator inputs, and local validation configuration do
+not publish an image. The workflow creates the scoped semantic release, builds once, publishes
+semantic and short-SHA image tags, and commits the semantic version to the dormant QA overlay. QA
+activation remains a separate reviewed Git/Flux operation.
 
 **Go PR Module Validation** runs Product's focused `check-go-pr` target only when a qualifying
 Product input changes and the complete pull-request diff touches no second supported Go module. It
