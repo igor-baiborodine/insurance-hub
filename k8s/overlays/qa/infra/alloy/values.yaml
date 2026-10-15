@@ -2,6 +2,9 @@ controller:
   type: deployment
   replicas: 1
 
+image:
+  tag: v1.20.1
+
 alloy:
   enableHttpServerPort: true
   listenAddr: 0.0.0.0

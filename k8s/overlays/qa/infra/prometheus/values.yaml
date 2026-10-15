@@ -1,5 +1,8 @@
 enabled: true
 
+crds:
+  enabled: false
+
 kubeControllerManager:
   enabled: false
 
@@ -39,6 +42,8 @@ defaultRules:
 
 prometheus:
   prometheusSpec:
+    retention: 10d
+    enableRemoteWriteReceiver: false
     serviceMonitorNamespaceSelector: {}
     serviceMonitorSelector:
       matchLabels: {}

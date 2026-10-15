@@ -2,7 +2,6 @@
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**
 
 - [Automated Deployment](#automated-deployment)
 - [Step-by-Step Deployment](#step-by-step-deployment)
@@ -89,8 +88,20 @@ dependencies in [Infra](#infra) are installed.
 
 ### Observability (QA)
 
+The monitoring releases use exact chart versions from their upstream Helm repositories. The
+version pins in `k8s/Makefile` are authoritative; no checked-in kube-prometheus-stack chart copy is
+used. Prometheus Operator CRDs and kube-prometheus-stack come from `prometheus-community`, Loki and
+Tempo come from `grafana-community`, and Alloy remains on `grafana`.
+
+For the issue #154 upgrade, do not use `cluster-qa-monitoring-deploy`. Apply and prove the stages in
+this order: Prometheus Operator CRDs and kube-prometheus-stack, clean Loki replacement, clean Tempo
+replacement, then Alloy. The Loki and Tempo runbooks contain the one-time PVC and bucket cleanup
+commands. Complete each component's readiness, fresh-signal, persistence, resource, and recovery
+checks before continuing.
+
 #### Prometheus & Grafana
 
+- Target charts: Prometheus Operator CRDs `32.0.1` and kube-prometheus-stack `92.6.0`.
 - `make prometheus-stack-install`
 - `make prometheus-stack-status`
 - `kubectl get pods -n qa-monitoring | grep prometheus`
@@ -111,6 +122,7 @@ dependencies in [Infra](#infra) are installed.
 
 **Prerequisites**: MinIO Loki tenant and its credentials, see [MinIO](#minio).
 
+- Target chart/application: Grafana Community Loki `18.15.1` / Loki `3.7.8`.
 - `make loki-install`
 - `make loki-status`
 - `make loki-ui` and go to `http://localhost:3100/ready`
@@ -122,6 +134,7 @@ For verification, see [Loki runbook](tests/infra/verify-loki-logs/verify-loki-lo
 
 **Prerequisites**: MinIO Tempo tenant and its credentials, see [MinIO](#minio).
 
+- Target chart/application: Grafana Community Tempo `3.2.0` / Tempo `3.1.0`.
 - `make tempo-install`
 - `make tempo-status`
 - `make tempo-ui` and go to `http://localhost:3200/ready`
@@ -144,6 +157,7 @@ For verification, see [Tempo runbook](tests/infra/verify-tempo-traces/verify-tem
 
 **Prerequisites**: Loki, Tempo, and Zipkin must already be reachable in `qa-monitoring`.
 
+- Target chart/application: Grafana Alloy `1.13.1` / Alloy `v1.20.1`.
 - `make alloy-install`
 - `make alloy-status`
 - `make alloy-ui` and go to `http://localhost:12345/-/ready`

@@ -297,15 +297,19 @@ flux-suspend: _env-check ## Suspend QA Flux reconciliation
 # Prometheus & Grafana
 #########################################
 
-KUBE_PROMETHEUS_STACK_VERSION := 79.3.0
+PROMETHEUS_OPERATOR_CRDS_VERSION := 32.0.1
+KUBE_PROMETHEUS_STACK_VERSION := 92.6.0
 
 .PHONY: prometheus-operator-crds-install
 prometheus-operator-crds-install: _monitoring-ns-check
-	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
-	@helm repo update
-	@echo "Installing Prometheus Operator CRDs into $(MONITORING_NS) namespace..."
+	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
+	@helm repo update prometheus-community
+	@echo "Installing Prometheus Operator CRDs chart v$(PROMETHEUS_OPERATOR_CRDS_VERSION) into $(MONITORING_NS) namespace..."
 	@helm upgrade --install prometheus-operator-crds prometheus-community/prometheus-operator-crds \
-		--namespace $(MONITORING_NS) --create-namespace
+		--version "$(PROMETHEUS_OPERATOR_CRDS_VERSION)" \
+		--kube-context "$(CUR_CTX)" \
+		--namespace $(MONITORING_NS) --create-namespace \
+		--wait --timeout 10m
 	@echo "Waiting for monitoring.coreos.com CRDs to be registered..."
 	@kubectl wait --for=condition=Established crd/alertmanagers.monitoring.coreos.com --timeout=60s
 	@echo "Waiting until Alertmanager custom resource is accepted by API server..."
@@ -319,14 +323,16 @@ prometheus-stack-install: prometheus-operator-crds-install ## Install Kube Prome
 	@echo "Installing Kube Prometheus Stack using Helm chart v$(KUBE_PROMETHEUS_STACK_VERSION) into $(MONITORING_NS) namespace..."
 	@helm upgrade --install "$(ENV_NAME)"-prometheus prometheus-community/kube-prometheus-stack \
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
+		--kube-context "$(CUR_CTX)" \
 		--namespace $(MONITORING_NS) \
-		--values "$(OVERLAYS_FILE_PATH)"/infra/prometheus/values.yaml
+		--values "$(OVERLAYS_FILE_PATH)"/infra/prometheus/values.yaml \
+		--atomic --wait --timeout 10m
 	@echo "✅ Kube Prometheus Stack deployment initiated. Check status with: make prometheus-stack-status"
 
 .PHONY: prometheus-stack-uninstall
 prometheus-stack-uninstall: _monitoring-ns-check ## Uninstall Kube Prometheus Stack
 	@echo "Uninstalling Kube Prometheus Stack from '$(MONITORING_NS)' namespace..."
-	@helm uninstall "$(ENV_NAME)"-prometheus --namespace $(MONITORING_NS) || true
+	@helm uninstall "$(ENV_NAME)"-prometheus --kube-context "$(CUR_CTX)" --namespace $(MONITORING_NS) || true
 	@echo "🗑 Kube Prometheus Stack uninstalled."
 
 .PHONY: prometheus-stack-status
@@ -361,7 +367,7 @@ grafana-ui: ## Access Grafana UI via port-forward
 # Loki
 #########################################
 
-LOKI_HELM_CHART_VERSION := 7.0.0
+LOKI_HELM_CHART_VERSION := 18.15.1
 
 .PHONY: loki-install
 loki-install: _monitoring-ns-check ## Install Grafana Loki in QA cluster
@@ -369,19 +375,24 @@ loki-install: _monitoring-ns-check ## Install Grafana Loki in QA cluster
 		echo "ERROR: Missing Loki values file at '$(OVERLAYS_FILE_PATH)/infra/loki/values.yaml'."; \
 		exit 1; \
 	fi
-	@helm repo add grafana https://grafana.github.io/helm-charts || true
-	@helm repo update
+	@helm repo add grafana-community https://grafana-community.github.io/helm-charts --force-update
+	@helm repo update grafana-community
 	@echo "Installing Grafana Loki using Helm chart v$(LOKI_HELM_CHART_VERSION) into $(MONITORING_NS) namespace..."
-	@helm upgrade --install "$(ENV_NAME)"-loki grafana/loki \
+	@helm upgrade --install "$(ENV_NAME)"-loki grafana-community/loki \
 		--version "$(LOKI_HELM_CHART_VERSION)" \
+		--kube-context "$(CUR_CTX)" \
 		--namespace $(MONITORING_NS) \
-		--values "$(OVERLAYS_FILE_PATH)"/infra/loki/values.yaml
+		--values "$(OVERLAYS_FILE_PATH)"/infra/loki/values.yaml \
+		--atomic --wait --timeout 10m
 	@echo "✅ Loki deployment initiated. Check status with: make loki-status"
 
 .PHONY: loki-uninstall
 loki-uninstall: _monitoring-ns-check ## Uninstall Loki from QA cluster
 	@echo "Uninstalling Loki from '$(MONITORING_NS)' namespace..."
-	@helm uninstall "$(ENV_NAME)"-loki --namespace $(MONITORING_NS) || true
+	@helm uninstall "$(ENV_NAME)"-loki \
+		--kube-context "$(CUR_CTX)" \
+		--namespace $(MONITORING_NS) \
+		--wait --timeout 10m
 	@echo "🗑 Loki uninstalled."
 
 .PHONY: loki-status
@@ -402,7 +413,7 @@ loki-ui: _monitoring-ns-check ## Access Loki HTTP API via port-forward
 # Tempo
 #########################################
 
-TEMPO_HELM_CHART_VERSION := 1.24.4
+TEMPO_HELM_CHART_VERSION := 3.2.0
 
 .PHONY: tempo-install
 tempo-install: _monitoring-ns-check ## Install Grafana Tempo in QA cluster
@@ -410,19 +421,24 @@ tempo-install: _monitoring-ns-check ## Install Grafana Tempo in QA cluster
 		echo "ERROR: Missing Tempo values file at '$(OVERLAYS_FILE_PATH)/infra/tempo/values.yaml'."; \
 		exit 1; \
 	fi
-	@helm repo add grafana https://grafana.github.io/helm-charts || true
-	@helm repo update
+	@helm repo add grafana-community https://grafana-community.github.io/helm-charts --force-update
+	@helm repo update grafana-community
 	@echo "Installing Grafana Tempo using Helm chart v$(TEMPO_HELM_CHART_VERSION) into $(MONITORING_NS) namespace..."
-	@helm upgrade --install "$(ENV_NAME)"-tempo grafana/tempo \
+	@helm upgrade --install "$(ENV_NAME)"-tempo grafana-community/tempo \
 		--version "$(TEMPO_HELM_CHART_VERSION)" \
+		--kube-context "$(CUR_CTX)" \
 		--namespace $(MONITORING_NS) \
-		--values "$(OVERLAYS_FILE_PATH)"/infra/tempo/values.yaml
+		--values "$(OVERLAYS_FILE_PATH)"/infra/tempo/values.yaml \
+		--atomic --wait --timeout 10m
 	@echo "✅ Tempo deployment initiated. Check status with: make tempo-status"
 
 .PHONY: tempo-uninstall
 tempo-uninstall: _monitoring-ns-check ## Uninstall Tempo from QA cluster
 	@echo "Uninstalling Tempo from '$(MONITORING_NS)' namespace..."
-	@helm uninstall "$(ENV_NAME)"-tempo --namespace $(MONITORING_NS) || true
+	@helm uninstall "$(ENV_NAME)"-tempo \
+		--kube-context "$(CUR_CTX)" \
+		--namespace $(MONITORING_NS) \
+		--wait --timeout 10m
 	@echo "🗑 Tempo uninstalled."
 
 .PHONY: tempo-status
@@ -443,7 +459,7 @@ tempo-ui: _monitoring-ns-check ## Access Tempo HTTP API via port-forward
 # Alloy
 #########################################
 
-ALLOY_HELM_CHART_VERSION := 1.8.1
+ALLOY_HELM_CHART_VERSION := 1.13.1
 
 .PHONY: alloy-install
 alloy-install: _monitoring-ns-check ## Install Grafana Alloy in QA cluster
@@ -451,13 +467,15 @@ alloy-install: _monitoring-ns-check ## Install Grafana Alloy in QA cluster
 		echo "ERROR: Missing Alloy values file at '$(OVERLAYS_FILE_PATH)/infra/alloy/values.yaml'."; \
 		exit 1; \
 	fi
-	@helm repo add grafana https://grafana.github.io/helm-charts || true
-	@helm repo update
+	@helm repo add grafana https://grafana.github.io/helm-charts --force-update
+	@helm repo update grafana
 	@echo "Installing Grafana Alloy using Helm chart v$(ALLOY_HELM_CHART_VERSION) into $(MONITORING_NS) namespace..."
 	@helm upgrade --install "$(ENV_NAME)"-alloy grafana/alloy \
 		--version "$(ALLOY_HELM_CHART_VERSION)" \
+		--kube-context "$(CUR_CTX)" \
 		--namespace $(MONITORING_NS) \
-		--values "$(OVERLAYS_FILE_PATH)"/infra/alloy/values.yaml
+		--values "$(OVERLAYS_FILE_PATH)"/infra/alloy/values.yaml \
+		--atomic --wait --timeout 10m
 	@echo "✅ Alloy deployment initiated. Check status with: make alloy-status"
 
 .PHONY: alloy-uninstall

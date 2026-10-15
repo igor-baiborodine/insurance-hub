@@ -1,4 +1,4 @@
-deploymentMode: SingleBinary
+deploymentMode: Monolithic
 
 gateway:
   enabled: false
@@ -75,3 +75,6 @@ loki:
 monitoring:
   serviceMonitor:
     enabled: true
+
+test:
+  enabled: false
