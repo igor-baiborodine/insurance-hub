@@ -33,6 +33,13 @@ help:
 		awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 ################################################################################
+# Markdown Targets
+################################################################################
+.PHONY: markdown-toc-test
+markdown-toc-test: ## Test staged Markdown TOC validation in a disposable repository
+	@./scripts/test-markdown-pre-commit.sh
+
+################################################################################
 # Go Targets
 ################################################################################
 .PHONY: go-topology-check go-topology-test go-modules-check go-scaffold-bootstrap-tools go-scaffold-build \

@@ -1,21 +1,21 @@
 coverage:
   range: "50...75"
   status:
-    project:
-      default:
-        target: 75%
-        threshold: 0%
-        flags:
-          - product-service
     patch:
       default:
         informational: true
 
-flags:
-  product-service:
-    paths:
-      - services/product-service/
+flag_management:
+  default_rules:
     carryforward: false
+    statuses:
+      - type: project
+        target: 75%
+        threshold: 0%
+  individual_flags:
+    - name: product-service
+      paths:
+        - services/product-service/
 
 ignore:
   - "services/product-service/gen/**"

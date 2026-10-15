@@ -126,13 +126,13 @@ The relevant reproducibility pins are:
 | OpenTelemetry core / gRPC instrumentation | 1.46.0 / 0.71.0 |
 | Testcontainers Go | 0.44.0 |
 | PostgreSQL integration image | `postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193` |
-| Mermaid CLI / Puppeteer | 11.14.0 / 24.43.1; Node.js 20 or newer, with CI pinned to 24.13.0 |
+| Mermaid CLI / Puppeteer | 11.14.0 / 24.43.1; Node.js 20 or newer |
 
 `check-docs` validates local Markdown links and anchors, extracts every Mermaid block, and renders
 it to SVG with the pinned CLI. It does not keep generated images in the working tree.
 The checked-in `puppeteer-config.json` supplies Chromium's `--no-sandbox` and
-`--disable-setuid-sandbox` launch arguments required by the Ubuntu 24.04 GitHub runner;
-documentation rendering is limited to repository-controlled Mermaid sources.
+`--disable-setuid-sandbox` launch arguments for the supported Ubuntu environment; documentation
+rendering is limited to repository-controlled Mermaid sources.
 
 Configuration is read once and validated before service resources are acquired. Duration values use
 Go duration syntax. Listener ports may be zero for test-owned ephemeral listeners; listener hosts
@@ -222,7 +222,10 @@ security aggregate deliberately leaves that direct suite to the module gate. The
 generated test signing material and a disposable QA catalog, reject an external database URL, and
 clean up listeners, processes, and containers on completion or failure. See the
 [reproduction instructions](../../docs/migration/phase-4/product-service/security-baseline.md#reproduction)
-for prerequisites and safe temporary-token handling.
+for prerequisites and safe temporary-token handling. These are change-based local review checks;
+the hosted Product security workflow has been retired. The
+[contributor validation matrix](../../CONTRIBUTING.md#change-based-local-validation) records when
+the broader local checks and evidence are required.
 
 `make product-security-verify` is a separate read-only probe for an explicitly selected, already
 running Go target. The [#134 exposure gate](../../docs/migration/phase-4/product-service/security-baseline.md#go-deployment-exposure-gate-for-issue-134)
@@ -331,11 +334,14 @@ standard module convention intended for future Go services. It creates the scope
 builds once, publishes semantic and short-SHA image tags, and commits the semantic version to the
 dormant QA overlay. QA activation remains a separate reviewed Git/Flux operation.
 
-**Go Module Validation** owns the nonpublishing module, generic release-selector, image, overlay,
-role-tooling, baseline, and local deployment-tooling gates. The release workflow does not repeat
-that suite or create a hosted disposable cluster. Local `go-svc-deploy-test` still owns only its
-labelled disposable namespace in an explicitly prepared local Kind cluster. Neither CI nor that
-local suite establishes shared-environment acceptance. `make -C services/product-service
-bootstrap-ci-tools` installs the pinned CI helpers; `check-ci` checks workflow boundaries, and
-`make go-svc-release-test` proves generic service selection, QA-entry requirements, and semantic-tag
-updates with controlled fixtures.
+**Go PR Module Validation** runs Product's focused `check-go-pr` target only when a qualifying
+Product input changes and the complete pull-request diff touches no second supported Go module. It
+owns Product's Go, Protobuf, SQL, race-enabled unit/coverage, disposable PostgreSQL integration,
+build, dependency, generated-code, contract, vulnerability, and 75% coverage gates. Release
+selection, image, overlay, role-tooling, baseline, and deployment-tooling checks remain local and
+run when their inputs change. Local `go-svc-deploy-test` owns only its labelled disposable namespace
+in an explicitly prepared local Kind cluster. Neither hosted validation nor that local suite
+establishes shared-environment acceptance. `make -C services/product-service bootstrap-ci-tools`
+installs the pinned workflow validators; `check-ci` checks release and selected-module workflow
+boundaries, and `make go-svc-release-test` proves generic service selection, QA-entry requirements,
+and semantic-tag updates with controlled fixtures.

@@ -230,8 +230,8 @@ evidence in both environments. The final coordinates and rerun procedure are in 
 
 For the isolated #133 proof, use Java 14, system Maven, Go 1.27.2, a working Docker daemon,
 `jq`, Python 3, `timeout`, and `setsid`. Bootstrap the Product module's pinned tools explicitly;
-that step needs Node.js 20 or newer (CI uses 24.13.0) and dependency/Maven package access on a
-fresh machine. Leave `PRODUCT_DATABASE_URL` unset. From the repository root:
+that step needs Go module/tool and Maven package access on a fresh machine. Leave
+`PRODUCT_DATABASE_URL` unset. From the repository root:
 
 ```shell
 make go-product-bootstrap-tools
@@ -243,14 +243,16 @@ make -C services/product-service check
 `product-security-check` validates the accepted access fixtures, runs the Java Product/gateway
 access regression, and runs the real gateway → Go → disposable PostgreSQL matrix. The Product
 module's full `check` owns the direct Go HTTP/gRPC access suite and exact case-ID assertion, so the
-security aggregate does not run that suite twice. The dedicated
-[security workflow](../../../../.github/workflows/product-security.yml) runs the controlled failure
-checks and security aggregate on relevant PRs and main pushes; hosted results are separate from
-local runs. The test script enforces a bounded token-clock drift, Java execution timeout, and
-exact case/report selection. It uses generated test signing material, a disposable QA catalog and
-restricted reader, and private temporary files; success or failure stops the Java/Go processes,
-listeners, and PostgreSQL container. It rejects external database settings and does not rewrite
-accepted fixtures, deployed credentials, or gateway routing.
+security aggregate does not run that suite twice. The hosted Product security workflow has been
+retired; run these checks locally when gateway/Product access behavior, access fixtures, or their
+tooling changes, following the
+[contributor validation matrix](../../../../CONTRIBUTING.md#change-based-local-validation).
+Historical hosted results remain historical evidence and do not establish a current local pass.
+The test script enforces a bounded token-clock drift, Java execution timeout, and exact case/report
+selection. It uses generated test signing material, a disposable QA catalog and restricted reader,
+and private temporary files; success or failure stops the Java/Go processes, listeners, and
+PostgreSQL container. It rejects external database settings and does not rewrite accepted fixtures,
+deployed credentials, or gateway routing.
 
 For the earlier #131 Java baseline alone, the narrower commands remain:
 

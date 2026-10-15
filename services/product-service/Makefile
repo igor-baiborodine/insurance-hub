@@ -61,6 +61,8 @@ GENERATED_SQL_FILES := internal/postgres/dbgen/db.go internal/postgres/dbgen/mod
 	internal/postgres/dbgen/queries.sql.go internal/postgres/dbgen/querier.go
 TEST_PACKAGES ?= ./...
 COVERAGE_FILE ?= coverage.txt
+COVERAGE_MINIMUM ?= 75
+COVERAGE_EXCLUDE_PATHS := gen internal/postgres/dbgen internal/testing
 INTEGRATION_SUITE ?= all
 FIXTURE_SET ?= qa
 SECURITY_HARNESS_OUTPUT ?=
@@ -74,12 +76,13 @@ COMMON_GO_TOOLING_DIR ?= ../../scripts/go/module
 COMMON_GO_TOOLING_DIR := $(abspath $(COMMON_GO_TOOLING_DIR))
 include $(COMMON_GO_TOOLING_DIR)/common.mk
 
-.PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
+.PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage coverage-check test-integration \
+	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage \
+	coverage-validate coverage-check test-integration \
 	build build-security-harness build-security-verifier build-lifecycle-client image-build image-check deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test vulncheck \
-	bootstrap-doc-tools check-docs preview-docs check test-tooling run
+	bootstrap-doc-tools check-docs preview-docs check-go-pr check test-tooling run
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
@@ -206,14 +209,6 @@ check-sql-drift: verify-tools
 		GENERATED_FILES="$(GENERATED_SQL_FILES)" \
 		"$(COMMON_GO_TOOLING_DIR)/check-generated-drift.sh"
 
-coverage:
-	@test -n "$(strip $(COVERAGE_FILE))" || { echo "COVERAGE_FILE must not be empty" >&2; exit 1; }
-	GOWORK=off $(GO) test -mod=readonly -count=1 \
-		-covermode=atomic -coverprofile="$(COVERAGE_FILE)" ./...
-
-coverage-check: coverage
-	@../../scripts/go/check-coverage.sh "$(COVERAGE_FILE)" 75
-
 test-integration:
 	@GO="$(GO)" \
 		DOCKER="$(DOCKER)" \
@@ -222,8 +217,10 @@ test-integration:
 		FIXTURE_SET="$(FIXTURE_SET)" \
 		./scripts/test-integration.sh
 
-check: verify-tools check-docs format-check format-proto-check lint lint-proto test-race test-integration build \
+check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \
 	check-deps check-proto-drift check-sql-drift check-proto-breaking vulncheck
+
+check: check-go-pr check-docs
 
 test-tooling: verify-tools
 	@MODULE_ROOT="$(CURDIR)" COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
@@ -238,5 +235,5 @@ bootstrap-ci-tools: ## Install pinned YAML parser and Kubernetes clients in modu
 
 check-ci: ## Validate generic release and Go CI permissions, triggers, and boundaries
 	@bash -n scripts/bootstrap-ci-tools.sh scripts/check-deployment.sh
-	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/go-release-svc.yml ../../.github/workflows/go-modules.yml
+	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/go-release-svc.yml ../../.github/workflows/go-pr-mod.yml
 	@PYTHONDONTWRITEBYTECODE=1 .tools/ci-venv/bin/python scripts/check-ci.py

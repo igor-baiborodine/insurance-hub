@@ -3,6 +3,10 @@
 
 EXTRA_TOOL_PACKAGES ?=
 VERIFY_EXTRA_TOOL_SPECS ?=
+COVERAGE_FILE ?= coverage.txt
+COVERAGE_MINIMUM ?= 75
+COVERAGE_PACKAGES ?= ./...
+COVERAGE_EXCLUDE_PATHS ?=
 
 COMMON_TOOL_PACKAGES := \
 	github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION) \
@@ -11,17 +15,20 @@ COMMON_TOOL_PACKAGES := \
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) \
 	golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
-.PHONY: bootstrap-tools verify-tools format format-check check-deps update-proto-deps \
+.PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check check-deps update-proto-deps \
 	format-proto format-proto-check lint-proto check-proto-breaking gen-proto \
-	check-proto-drift lint test test-race build vulncheck
+	check-proto-drift lint test test-race coverage coverage-validate coverage-check \
+	test-coverage-tooling build vulncheck
 
-bootstrap-tools:
+bootstrap-go-tools:
 	mkdir -p "$(TOOLS_BIN)"
 	@set -eu; \
 	for package in $(COMMON_TOOL_PACKAGES) $(EXTRA_TOOL_PACKAGES); do \
 		GOWORK=off GOBIN="$(TOOLS_BIN)" $(GO) install "$$package"; \
 	done
 	@$(MAKE) --no-print-directory verify-tools
+
+bootstrap-tools: bootstrap-go-tools
 
 verify-tools:
 	@MODULE_ROOT="$(CURDIR)" \
@@ -122,6 +129,24 @@ test:
 
 test-race:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./...
+
+coverage:
+	@test -n "$(strip $(COVERAGE_FILE))" || { echo "COVERAGE_FILE must not be empty" >&2; exit 1; }
+	@mkdir -p "$(dir $(COVERAGE_FILE))"
+	GOWORK=off $(GO) test -mod=readonly -count=1 -race \
+		-covermode=atomic -coverprofile="$(COVERAGE_FILE)" $(COVERAGE_PACKAGES)
+
+coverage-validate:
+	@module_path="$$(GOWORK=off $(GO) list -mod=readonly -m -f '{{.Path}}')"; \
+		"$(COMMON_GO_TOOLING_DIR)/check-coverage.sh" \
+		"$(COVERAGE_FILE)" "$(COVERAGE_MINIMUM)" "$$module_path" $(COVERAGE_EXCLUDE_PATHS)
+
+coverage-check: coverage
+	@$(MAKE) --no-print-directory coverage-validate
+
+test-coverage-tooling:
+	@COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" GO="$(GO)" \
+		MAKE_COMMAND="$(MAKE)" "$(COMMON_GO_TOOLING_DIR)/test-coverage.sh"
 
 build:
 	@set -eu; \

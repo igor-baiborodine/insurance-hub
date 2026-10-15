@@ -5,12 +5,14 @@
   - [Getting Started](#getting-started)
     - [Prerequisites](#prerequisites)
     - [Clone Repository](#clone-repository)
+    - [Configure Repository Hooks](#configure-repository-hooks)
     - [Install Dependencies](#install-dependencies)
       - [Web Development](#web-development)
       - [Kubernetes](#kubernetes)
     - [Create Kubernetes Cluster](#create-kubernetes-cluster)
   - [Style Guides](#style-guides)
     - [Go](#go)
+      - [Change-Based Local Validation](#change-based-local-validation)
     - [Python Auxiliary Tooling](#python-auxiliary-tooling)
     - [Branch Names](#branch-names)
     - [Commit Messages](#commit-messages)
@@ -62,6 +64,31 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
 git clone git@github.com:your-org/insurance-hub.git
 cd insurance-hub
 ```
+
+### Configure Repository Hooks
+
+This repository provides a pre-commit hook that validates the table of contents in staged Markdown
+files and a pre-push hook that validates branch names. Enable both hooks from the repository root:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Before setting the path, inspect `git config --get core.hooksPath`. If it names another custom hook
+directory, integrate the repository hooks there instead of replacing that setup.
+
+The pre-commit hook checks added, modified, copied, and renamed Markdown files from the staged
+snapshot. It does not format files or change the index or working tree. If it reports a stale or
+missing table of contents, format the affected working-tree files and stage the result:
+
+```bash
+./scripts/markdown-toc.sh format path/to/file.md
+git add path/to/file.md
+```
+
+The hook requires `npx` only when staged Markdown needs validation. Run `make markdown-toc-test` to
+exercise the hook, including partial staging and controlled failure cases, in a disposable Git
+repository.
 
 ### Install Dependencies
 
@@ -175,9 +202,36 @@ The current inventory contains `templates/go-service` and
 `GOWORK=off`; no workspace or filesystem replacement is approved. Bootstrap Product's module-owned
 tools with `make -C services/product-service bootstrap-tools` before running the aggregate. The six
 `go-scaffold-*` root delegates remain narrow scaffold conveniences. The
-[Go module topology guide](docs/migration/phase-4/go-module-topology.md) defines exact local and CI
+[Go module topology guide](docs/migration/phase-4/go-module-topology.md) defines exact local and hosted
 commands, exclusions, mutation boundaries, consumer validation, and the reviewed onboarding
 process for future modules or workspaces.
+
+#### Change-Based Local Validation
+
+**Go PR Module Validation** runs only for qualifying module inputs and validates one selected module.
+Auxiliary scripts, Makefiles, documentation, workflow configuration, topology metadata, deployment
+assets, database-role tooling, images, and the combined Product security boundary remain local review
+responsibilities. Select checks from the changed behavior; do not run every command for every pull
+request or treat a local result as hosted evidence.
+
+| Changed behavior | Local commands from the repository root | Prerequisites and review evidence |
+| --- | --- | --- |
+| Go topology, inventory, ownership, resolution, or shared module tooling | `make go-topology-check`; `make go-topology-test`; bootstrap affected module tools, then `make go-modules-check FORMAT_SCOPE=all` when the aggregate is applicable | `jq >= 1.6`, exact module Go/tool pins, and Docker for Product integration. Record affected modules, standalone resolution, and controlled failures. |
+| Scaffold or Product validation tooling | `make go-scaffold-test-tooling`; `make go-product-test-tooling` | Bootstrap the corresponding module's pinned tools. Record the controlled defects rejected and confirm fixture/source cleanup. |
+| Scaffold reuse or copy behavior | `make go-scaffold-check-copy` | Bootstrap scaffold tools. Record renamed-copy identity, generation, validation, and cleanup results. |
+| Go PR, release, or service-dispatch workflow tooling | `make -C services/product-service bootstrap-ci-tools`; `make -C services/product-service check-ci`; `make go-svc-release-test`; `make go-svc-dispatch-test` | Python 3 with venv/pip, pinned local workflow clients, and any documented public downloads. Record configuration validation separately from any actual hosted run. |
+| Product deployment assets or tooling | `make go-svc-deploy-check SVC_NAME=product`; `make go-svc-deploy-test-tooling SVC_NAME=product` | Pinned Product CI/deployment tools. These checks use rendered or fake-adapter inputs and do not prove a live environment. |
+| Product reader role, permission fixtures, or baseline behavior | `make postgres-svc-role-test`; `make product-baseline-fixtures-check`; `make product-baseline-test BASELINE_SUITE=db-permissions` | Python 3, Java 14/Maven where selected, Docker, and disposable PostgreSQL as documented by the owning target. Record the selected suite and fixture scope. |
+| Product runtime image or container lifecycle | `make go-svc-image-check SVC_NAME=product` | Docker/Buildx and bootstrapped Product Go tools. Record image identity, contents, startup/read behavior, and cleanup. |
+| Gateway/Product access behavior, access fixtures, or combined security tooling | `make product-security-test-tooling`; `make product-security-check`; retain `make -C services/product-service check-go-pr FORMAT_SCOPE=all` for direct Go access and vulnerability coverage when Product Go inputs are affected | Java 14, Maven, Go 1.27.2, Docker, `jq`, Python 3, `timeout`, `setsid`, and bootstrapped Product Go tools. Record controlled failures, exact access cases/reports, and disposable cleanup; never supply a live database URL. |
+| Product documentation renderer or covered links | `make -C services/product-service bootstrap-doc-tools`; `make -C services/product-service check-docs` | Node.js 20 or newer, npm, Python 3, and the pinned module-local Mermaid tools. Record link and render counts. |
+| Markdown content | `./scripts/markdown-toc.sh format <file>...`; stage the result; the pre-commit hook runs `check` on the staged snapshot | `npx` is needed only when Markdown is selected. Record the exact task-owned files checked. |
+
+Review evidence identifies the revision, exact command and working directory, changed scope,
+prerequisites, execution source (`local`, `CI`, or `manual`), result, and any blocked or unexecuted
+follow-up. Heavy security, deployment, image, database, topology, and tooling checks do not belong in
+the pre-commit hook. Live-target commands retain their explicit environment, context, credential,
+and mutation safeguards in their owning runbooks.
 
 ### Python Auxiliary Tooling
 
@@ -250,10 +304,9 @@ This ensures clarity, easier traceability to issues, and automation support.
 4. Enforcing Branch Names
 
    A Git [pre-push hook](.githooks/pre-push) is used to validate branch names to ensure they follow
-   the
-   above convention. If the branch name does not comply with the convention, the **push will be
-   blocked**
-   until it's renamed.
+   the above convention. Configure the repository hooks as described in
+   [Configure Repository Hooks](#configure-repository-hooks). If the branch name does not comply
+   with the convention, the **push will be blocked** until it's renamed.
 
 ### Commit Messages
 

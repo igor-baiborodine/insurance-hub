@@ -123,61 +123,102 @@ write_ci_workflow() {
 	local modules_json="$2"
 	local workspaces_json="$3"
 	local workflow_path="${case_root}/.github/workflows/test.yml"
-	local directory
+	local directory role
 	{
 		printf '%s\n' \
 			'name: Fixture topology CI' \
 			'on:' \
-			'  push:' \
-			'    paths:'
-		for trigger_path in go.mod go.sum go.work go.work.sum \
-			'**/go.mod' '**/go.sum' '**/go.work' '**/go.work.sum' \
-			'go-module-topology.json' 'scripts/go/**' \
-			'legacy/product-service/src/test/resources/product-read-baseline/**' \
-			'docs/migration/phase-4/go-module-topology.md' \
-			'docs/migration/phase-4/product-service/README.md' \
-			'.github/workflows/test.yml' 'Makefile'
-		do
-			printf "      - '%s'\n" "${trigger_path}"
-		done
-		while IFS= read -r directory; do
-			[[ "${directory}" == "." ]] || printf "      - '%s/**'\n" "${directory}"
-		done < <(jq -nr --argjson modules "${modules_json}" --argjson workspaces "${workspaces_json}" \
-			'[$modules[].directory, $workspaces[].directory] | unique[]')
-		printf '%s\n' \
 			'  pull_request:' \
+			'    branches:' \
+			'      - main' \
 			'    paths:'
-		for trigger_path in go.mod go.sum go.work go.work.sum \
-			'**/go.mod' '**/go.sum' '**/go.work' '**/go.work.sum' \
-			'go-module-topology.json' 'scripts/go/**' \
-			'legacy/product-service/src/test/resources/product-read-baseline/**' \
-			'docs/migration/phase-4/go-module-topology.md' \
-			'docs/migration/phase-4/product-service/README.md' \
-			'.github/workflows/test.yml' 'Makefile'
-		do
-			printf "      - '%s'\n" "${trigger_path}"
-		done
 		while IFS= read -r directory; do
-			[[ "${directory}" == "." ]] || printf "      - '%s/**'\n" "${directory}"
-		done < <(jq -nr --argjson modules "${modules_json}" --argjson workspaces "${workspaces_json}" \
-			'[$modules[].directory, $workspaces[].directory] | unique[]')
+			if [[ "${directory}" != "." ]]; then
+				printf "      - '%s/**/*.go'\n" "${directory}"
+				printf "      - '%s/go.mod'\n" "${directory}"
+				printf "      - '%s/go.sum'\n" "${directory}"
+				printf "      - '%s/**/testdata/**'\n" "${directory}"
+			fi
+		done < <(jq -nr --argjson modules "${modules_json}" '$modules[].directory')
 		printf '%s\n' \
+			'permissions:' \
+			'  contents: read' \
+			'concurrency:' \
+			'  group: fixture-${{ github.event.pull_request.number }}' \
+			'  cancel-in-progress: true' \
 			'jobs:' \
 			'  validate:' \
+			'    runs-on: ubuntu-24.04' \
 			'    steps:' \
+			'      - uses: actions/checkout@v6' \
+			'        with:' \
+			'          ref: ${{ github.event.pull_request.head.sha }}' \
+			'          fetch-depth: 0' \
+			'      - name: Select Go module' \
+			'        id: select' \
+			'        shell: bash' \
+			'        run: |' \
+			'          set -euo pipefail' \
+			'          merge_base=$(git merge-base "$PR_BASE" "$PR_HEAD")' \
+			'          declare -A selected=()' \
+			"          while IFS= read -r -d '' changed_path; do" \
+			'            case "$changed_path" in'
+		while IFS= read -r directory; do
+			[[ "${directory}" == "." ]] || printf '%s\n' \
+				"              ${directory}/*) selected[${directory}]=1 ;;"
+		done < <(jq -nr --argjson modules "${modules_json}" '$modules[].directory')
+		printf '%s\n' \
+			'            esac' \
+			'          done < <(git diff --name-only --diff-filter=ACDMRT -z "$merge_base" "$PR_HEAD")' \
+			"          mapfile -t modules < <(printf '%s\\n' \"\${!selected[@]}\" | sort)" \
+			'          if (( ${#modules[@]} == 0 )); then' \
+			"            echo 'module_dir=' >> \"\$GITHUB_OUTPUT\"" \
+			'            exit 0' \
+			'          fi' \
+			'          if (( ${#modules[@]} > 1 )); then' \
+			"            echo 'Multiple Go modules changed; split the pull request' >&2" \
+			'            exit 1' \
+			'          fi' \
+			'          module_dir=${modules[0]}' \
+			'          case "$module_dir" in'
+		while IFS=$'\t' read -r directory role; do
+			[[ "${directory}" == "." ]] || printf '%s\n' \
+				"            ${directory}) module_role='${role}' ;;"
+		done < <(jq -nr --argjson modules "${modules_json}" '$modules[] | [.directory, .role] | @tsv')
+		printf '%s\n' \
+			'          esac' \
+			'          echo "module_dir=$module_dir" >> "$GITHUB_OUTPUT"' \
+			'          echo "module_role=$module_role" >> "$GITHUB_OUTPUT"' \
+			'          echo "module_key=${module_dir//\//-}" >> "$GITHUB_OUTPUT"' \
+			'          echo "go_sum=$module_dir/go.sum" >> "$GITHUB_OUTPUT"' \
+			"          echo 'validation_target=check-go-pr' >> \"\$GITHUB_OUTPUT\"" \
+			'          echo "format_base=$merge_base" >> "$GITHUB_OUTPUT"' \
+			'          echo "coverage_file=$module_dir/coverage.txt" >> "$GITHUB_OUTPUT"' \
+			'          echo "coverage_flag=${module_dir##*/}" >> "$GITHUB_OUTPUT"' \
 			'      - uses: actions/setup-go@v7' \
 			'        with:' \
 			'          cache: true' \
-			'          cache-dependency-path: |' \
-			'            templates/go-service/go.sum' \
-			'            services/product-service/go.sum' \
-			'      - run: make go-scaffold-bootstrap-tools' \
-			'      - run: make go-product-bootstrap-tools' \
-			'      - run: make go-modules-check' \
-			'      - run: make go-topology-test' \
-			'      - run: make go-scaffold-test-tooling' \
-			'      - run: make go-product-test-tooling' \
-			'      - run: make go-scaffold-check-copy'
+			'          cache-dependency-path: ${{ steps.select.outputs.go_sum }}' \
+			'      - uses: actions/cache@v5' \
+			'        with:' \
+			'          path: ${{ steps.select.outputs.module_dir }}/.tools' \
+			'          key: ${{ steps.select.outputs.module_key }}-scripts/go/module/common.mk' \
+			'      - run: make -C "$MODULE_DIR" bootstrap-go-tools' \
+			'      - env:' \
+			'          COVERAGE_FILE: ${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}' \
+			'          FORMAT_BASE: ${{ steps.select.outputs.format_base }}' \
+			'        run: |' \
+			"          if [[ \"\$MODULE_ROLE\" != 'service-scaffold' ]]; then" \
+			'            rm -f -- "$COVERAGE_FILE"' \
+			'          fi' \
+			'          make -C "$MODULE_DIR" "$VALIDATION_TARGET" FORMAT_SCOPE=changed FORMAT_BASE="$FORMAT_BASE"' \
+			"      - if: success() && steps.select.outputs.module_role != 'service-scaffold'" \
+			'        uses: codecov/codecov-action@v7' \
+			'        with:' \
+			'          files: ${{ steps.select.outputs.coverage_file }}' \
+			'          flags: ${{ steps.select.outputs.coverage_flag }}' \
+			'          disable_search: true' \
+			'          fail_ci_if_error: true'
 	} >"${workflow_path}"
 }
 
@@ -199,7 +240,7 @@ module_record() {
 		  role: $role,
 		  owner: "fixture owner",
 		  supportedModes: ["standalone"],
-		  validationTarget: "check",
+		  validationTarget: "check-go-pr",
 		  validationVariables: [],
 		  packageScope: "fixture ./...",
 		  prerequisites: [],
@@ -240,8 +281,8 @@ write_module() {
 	printf 'package %s\n\nconst Value = %q\n' "${package_name}" "${module_path}" \
 		>"${case_root}/${directory}/${package_name}.go"
 	cat >"${case_root}/${directory}/Makefile" <<'EOF'
-.PHONY: check
-check:
+.PHONY: check-go-pr
+check-go-pr:
 	@env -u GOFLAGS GOWORK=off GOPROXY=off GOSUMDB=off go list -mod=readonly ./... >/dev/null
 EOF
 }
@@ -381,136 +422,120 @@ expect_failure "approved workspace fails closed in aggregate" "${case_root}" \
 
 case_root="$(new_single_case missing-owning-target)"
 printf '.PHONY: other\nother:\n\t@true\n' >"${case_root}/module/Makefile"
-expect_failure "missing owning target" "${case_root}" 'missing validation target check in module/Makefile' \
+expect_failure "missing owning target" "${case_root}" 'missing validation target check-go-pr in module/Makefile' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
 case_root="$(new_single_case missing-ci-module-trigger)"
-grep -Fv -- "- 'module/**'" "${case_root}/.github/workflows/test.yml" \
+grep -Fv -- "- 'module/**/*.go'" "${case_root}/.github/workflows/test.yml" \
 	>"${case_root}/workflow.tmp"
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
 expect_failure "missing CI module trigger" "${case_root}" \
-	'workflow .github/workflows/test.yml is missing push path trigger for inventory module directory module: module/\*\*' \
+	'workflow .github/workflows/test.yml is missing pull_request path trigger for inventory module Go source module: module/\*\*/\*.go' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
-case_root="$(new_single_case missing-ci-baseline-trigger)"
-grep -Fv -- "- 'legacy/product-service/src/test/resources/product-read-baseline/**'" \
-	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
-mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
-expect_failure "missing CI baseline trigger" "${case_root}" \
-	'workflow .github/workflows/test.yml is missing push path trigger for repository topology policy: legacy/product-service/src/test/resources/product-read-baseline/\*\*' \
-	make --no-print-directory -C "${case_root}" go-topology-check
-
-case_root="$(new_single_case missing-ci-product-doc-trigger)"
-grep -Fv -- "- 'docs/migration/phase-4/product-service/README.md'" \
-	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
-mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
-expect_failure "missing CI Product documentation trigger" "${case_root}" \
-	'workflow .github/workflows/test.yml is missing push path trigger for repository topology policy: docs/migration/phase-4/product-service/README.md' \
-	make --no-print-directory -C "${case_root}" go-topology-check
-
-case_root="$(new_single_case missing-product-tooling-target)"
-grep -Fv -- "- run: make go-product-test-tooling" \
-	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
-mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
-expect_failure "missing Product tooling target" "${case_root}" \
-	'workflow .github/workflows/test.yml does not invoke executable Make target: go-product-test-tooling' \
-	make --no-print-directory -C "${case_root}" go-topology-check
-
-case_root="$(new_single_case missing-product-cache-input)"
-grep -Fv -- "services/product-service/go.sum" \
-	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
-mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
-expect_failure "missing Product cache input" "${case_root}" \
-	'workflow .github/workflows/test.yml is missing active Product setup-go cache input: services/product-service/go.sum' \
-	make --no-print-directory -C "${case_root}" go-topology-check
-
-case_root="$(new_single_case commented-ci-target)"
-grep -Fv -- "- run: make go-topology-test" "${case_root}/.github/workflows/test.yml" \
+case_root="$(new_single_case missing-ci-module-fixture-trigger)"
+grep -Fv -- "- 'module/**/testdata/**'" "${case_root}/.github/workflows/test.yml" \
 	>"${case_root}/workflow.tmp"
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
-printf '%s\n' '# make go-topology-test' >>"${case_root}/.github/workflows/test.yml"
-expect_failure "commented CI target is not execution" "${case_root}" \
-	'workflow .github/workflows/test.yml does not invoke executable Make target: go-topology-test' \
+expect_failure "missing CI module fixture trigger" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing pull_request path trigger for inventory module test fixtures module: module/\*\*/testdata/\*\*' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
-case_root="$(new_single_case inert-ci-target)"
-grep -Fv -- "- run: make go-topology-test" "${case_root}/.github/workflows/test.yml" \
+case_root="$(new_single_case broad-ci-module-trigger)"
+sed "/module\/go.sum/a\\      - 'module/**'" "${case_root}/.github/workflows/test.yml" \
 	>"${case_root}/workflow.tmp"
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
-printf '%s\n' \
-	'      - name: Retain the target as inert documentation' \
-	'        env:' \
-	'          DOCUMENTED_COMMAND: make go-topology-test' \
-	'        run: echo "$DOCUMENTED_COMMAND"' \
-	>>"${case_root}/.github/workflows/test.yml"
-expect_failure "inert CI target is not execution" "${case_root}" \
-	'workflow .github/workflows/test.yml does not invoke executable Make target: go-topology-test' \
+expect_failure "broad CI module trigger" "${case_root}" \
+	'workflow .github/workflows/test.yml contains forbidden pull_request path trigger for broad inventory module trigger module: module/\*\*' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
-case_root="$(new_single_case env-run-ci-target)"
-grep -Fv -- "- run: make go-topology-test" "${case_root}/.github/workflows/test.yml" \
+case_root="$(new_single_case push-ci-event)"
+sed "/  pull_request:/i\\  push:" "${case_root}/.github/workflows/test.yml" \
 	>"${case_root}/workflow.tmp"
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
-printf '%s\n' \
-	'      - name: Retain the target under a non-executable env key' \
-	'        env:' \
-	'          run: make go-topology-test' \
-	'        run: echo "$run"' \
-	>>"${case_root}/.github/workflows/test.yml"
-expect_failure "env run key is not execution" "${case_root}" \
-	'workflow .github/workflows/test.yml does not invoke executable Make target: go-topology-test' \
+expect_failure "push CI event" "${case_root}" \
+	'workflow .github/workflows/test.yml must not run on push' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
-case_root="$(new_single_case folded-ci-targets)"
-grep -Fv \
-	-e "- run: make go-modules-check" \
-	-e "- run: make go-topology-test" \
+case_root="$(new_single_case missing-pr-merge-base)"
+grep -Fv -- 'merge_base=$(git merge-base "$PR_BASE" "$PR_HEAD")' \
 	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
-printf '%s\n' \
-	'      - name: Fold target names into echo arguments' \
-	'        run: >' \
-	'          echo documentation' \
-	'          make go-modules-check' \
-	'          make go-topology-test' \
-	>>"${case_root}/.github/workflows/test.yml"
-expect_failure "folded CI target lines are not separate commands" "${case_root}" \
-	'workflow .github/workflows/test.yml does not invoke executable Make target: go-modules-check' \
+expect_failure "missing PR merge base" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing pull request merge-base resolution: merge_base=\$\(git merge-base "\$PR_BASE" "\$PR_HEAD"\)' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
-case_root="$(new_single_case heredoc-ci-targets)"
-grep -Fv \
-	-e "- run: make go-modules-check" \
-	-e "- run: make go-topology-test" \
+case_root="$(new_single_case endpoint-module-diff)"
+sed 's/"$merge_base" "$PR_HEAD"/"$PR_BASE" "$PR_HEAD"/' \
 	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
-printf '%s\n' \
-	'      - name: Retain target names as heredoc data' \
-	'        run: |' \
-	"          cat <<'COMMANDS'" \
-	'          make go-modules-check' \
-	'          make go-topology-test' \
-	'          COMMANDS' \
-	>>"${case_root}/.github/workflows/test.yml"
-expect_failure "heredoc CI target lines are shell data" "${case_root}" \
-	'workflow .github/workflows/test.yml does not invoke executable Make target: go-modules-check' \
+expect_failure "endpoint module diff" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing merge-base-to-head module selection: git diff --name-only --diff-filter=ACDMRT -z "\$merge_base" "\$PR_HEAD"' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
-case_root="$(new_single_case continued-argument-ci-targets)"
-grep -Fv \
-	-e "- run: make go-modules-check" \
-	-e "- run: make go-topology-test" \
+case_root="$(new_single_case base-tip-formatting)"
+sed 's#FORMAT_BASE: ${{ steps.select.outputs.format_base }}#FORMAT_BASE: ${{ github.event.pull_request.base.sha }}#' \
 	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
 mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
-printf '%s\n' \
-	'      - name: Retain target names as continued echo arguments' \
-	'        run: |' \
-	'          echo documentation \' \
-	'            make go-modules-check \' \
-	'            make go-topology-test' \
-	>>"${case_root}/.github/workflows/test.yml"
-expect_failure "continued CI target lines are shell arguments" "${case_root}" \
-	'workflow .github/workflows/test.yml does not invoke executable Make target: go-modules-check' \
+expect_failure "base-tip formatting" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing selected-module validation contract: FORMAT_BASE: \${{ steps.select.outputs.format_base }}' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case missing-inline-selector-root)"
+grep -Fv -- "module/*) selected[module]=1" "${case_root}/.github/workflows/test.yml" \
+	>"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "missing inline selector root" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing inline selector root module: module/\*\)' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case missing-selected-validation)"
+grep -Fv -- 'make -C "$MODULE_DIR" "$VALIDATION_TARGET"' \
+	"${case_root}/.github/workflows/test.yml" \
+	>"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "missing selected validation" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing selected-module validation contract: make -C "\$MODULE_DIR" "\$VALIDATION_TARGET"' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case cache-bypasses-version-check)"
+sed 's/bootstrap-go-tools/verify-tools/' "${case_root}/.github/workflows/test.yml" \
+	>"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "cache bypasses version check" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing selected-module validation contract: make -C "\$MODULE_DIR" bootstrap-go-tools' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case stale-coverage-report)"
+grep -Fv -- 'rm -f -- "$COVERAGE_FILE"' "${case_root}/.github/workflows/test.yml" \
+	>"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "stale coverage report" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing selected-module validation contract: rm -f -- "\$COVERAGE_FILE"' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case relative-coverage-report)"
+sed 's#COVERAGE_FILE: ${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}#COVERAGE_FILE: ${{ steps.select.outputs.coverage_file }}#' \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "relative coverage report" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing selected-module validation contract: COVERAGE_FILE: \${{ github.workspace }}/\${{ steps.select.outputs.coverage_file }}' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case scaffold-coverage-upload)"
+sed "s/steps.select.outputs.module_role != 'service-scaffold'/steps.select.outputs.module_dir != ''/" \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "scaffold coverage upload" "${case_root}" \
+	'workflow .github/workflows/test.yml is missing selected-module validation contract: steps.select.outputs.module_role != '\''service-scaffold'\''' \
+	make --no-print-directory -C "${case_root}" go-topology-check
+
+case_root="$(new_single_case forbidden-java-setup)"
+sed '/    steps:/a\      - uses: actions/setup-java@v5' \
+	"${case_root}/.github/workflows/test.yml" >"${case_root}/workflow.tmp"
+mv "${case_root}/workflow.tmp" "${case_root}/.github/workflows/test.yml"
+expect_failure "forbidden Java setup" "${case_root}" \
+	'workflow .github/workflows/test.yml contains forbidden non-Go or all-module execution: actions/setup-java@' \
 	make --no-print-directory -C "${case_root}" go-topology-check
 
 setup_edge_case() {

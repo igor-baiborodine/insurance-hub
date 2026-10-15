@@ -30,7 +30,7 @@ catalog, and Java-routing evidence rather than relying on that historical pass.
 | --- | --- |
 | Runtime image | Product module Makefile; pinned Go 1.27.2 builder and minimal non-root runtime; `linux/amd64`, `GOWORK=off` |
 | Publication | **Go Service Release** runs automatically for a canonical `main` push that changes exactly one `services/<service>-service`; it owns GHCR publication, scoped Git/GitHub release identities, and the dormant QA semantic-tag update |
-| PR validation | **Go Module Validation** owns module, release-selector, image, manifest, role-tooling, baseline, and local deployment-tooling checks; **Product Security Boundary Validation** owns combined Java/Go security |
+| PR validation | **Go PR Module Validation** owns Product's focused selected-module Go checks for qualifying inputs; release-selector, image, manifest, role-tooling, baseline, deployment-tooling, and combined Java/Go security checks remain change-based local review evidence |
 | QA desired state | The release workflow commits the generated 1.x semantic tag; activation separately adds `./product` through review, after which `flux-system/insurance-hub` and `flux-system/qa-svc` reconcile `main` |
 | Local-dev desired state | Explicit `go-svc-* SVC_NAME=product` commands and the local Go overlay |
 | Database login and Secret | Maintainer with Kubernetes/CNPG administrative access, through `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader`; outside application startup and Flux |
@@ -73,8 +73,8 @@ make product-baseline-test BASELINE_SUITE=db-permissions
 
 `bootstrap-ci-tools` explicitly installs PyYAML 6.0.3 in `.tools/ci-venv` using Python's venv and
 pip, and checksum-verifies Kind 0.30.0, kubectl 1.34.1, and actionlint 1.7.7 into `.tools/bin`. It
-requires Python pip >=22.3 and Linux amd64. Check targets do not install tools. Hosted workflows
-add `.tools/bin` to PATH; local operators may continue using their existing compatible clients.
+requires Python pip >=22.3 and Linux amd64. Check targets do not install tools. Local operators may
+continue using their existing compatible clients where the owning scripts permit them.
 
 `make go-svc-deploy-test SVC_NAME=product` requires the active local Kind cluster and a ready CNPG
 operator. It creates and removes a uniquely labelled namespace and a separate database; it must
@@ -84,7 +84,10 @@ The generic release does not create a hosted disposable cluster; this local targ
 available for explicitly prepared, owned disposable infrastructure and keeps its existing cleanup
 boundary.
 
-Module, security, and Markdown gates retain their existing ownership. For local reproduction:
+Shared topology, security, documentation, and deployment gates remain local responsibilities when
+their inputs change. The
+[contributor validation matrix](../../../../CONTRIBUTING.md#change-based-local-validation) maps
+change types to commands, prerequisites, and required review evidence. For local reproduction:
 
 ```sh
 make go-modules-check

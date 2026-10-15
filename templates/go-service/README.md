@@ -149,21 +149,20 @@ and Product-specific delegates are documented in the topology guide.
 
 ### Continuous integration
 
-[Go Module Validation](../../.github/workflows/go-modules.yml) runs on pull requests to `main`
-and pushes to `main` when this module, any Go module/workspace manifest, the canonical topology,
-topology scripts, the workflow, or the root Makefile changes. It uses `ubuntu-24.04`, checkout v6
-with full history, setup-go v7 with exact Go 1.27.2, the nested `go.sum` cache key, and read-only
-repository permissions. Product integration checks use the hosted Docker daemon and disposable
-PostgreSQL; the job requires no secret, live database, broker, deployment environment, or telemetry
-collector.
+[Go PR Module Validation](../../.github/workflows/go-pr-mod.yml) runs only on pull requests to
+`main` when qualifying Go source, generated Go output, module metadata, Protobuf contracts, contract
+baselines, or lint/generator configuration changes in this scaffold or an immediate
+`services/*-service` module. Module scripts, Makefiles, documentation, workflow files, topology
+metadata, deployment assets, and other auxiliary changes do not independently start the workflow.
 
-CI bootstraps both modules' tools, runs the repository-wide `go-modules-check` and
-`go-topology-test`, then runs both controlled tooling suites and the scaffold-specific `check-copy`
-proof. It invokes only documented Make targets. Pull requests use the base SHA for `FORMAT_BASE`;
-pushes use the before SHA. A missing, all-zero, or unresolvable event base visibly falls back to
-`FORMAT_SCOPE=all`.
+After workflow filtering, the job maps the complete pull-request diff to the scaffold or
+conventionally named service roots. It validates one selected module, reports a successful no-op for
+zero supported modules, and rejects a diff spanning multiple modules before installing tools. The
+scaffold runs `bootstrap-go-tools` and `check-go-pr`; its role excludes coverage collection,
+threshold enforcement, and Codecov upload. Pull requests use the explicit base SHA for
+`FORMAT_BASE`.
 
-The equivalent full-file local job is:
+Topology, tooling-fixture, and scaffold-copy changes are validated locally as applicable:
 
 ```sh
 make go-scaffold-bootstrap-tools
@@ -182,11 +181,14 @@ a successful GitHub Actions run on a pushed branch or pull request is hosted-CI 
 
 The root [Go module topology guide](../../docs/migration/phase-4/go-module-topology.md) defines
 repository-wide discovery, resolution, import boundaries, CI coverage, and onboarding. This
-scaffold and Product service are the current inventory modules. The scaffold's supported mode is
+scaffold and Product service are the current inventory modules. Generic workflow selection also
+covers newly added immediate `services/*-service` modules while their inventory and ownership are
+reviewed. The scaffold's supported mode is
 standalone `GOWORK=off`, it
 has no filesystem replacement or cross-module runtime dependency, and the repository has no
-approved workspace. Future modules are uncovered until their inventory, owning target, consumers,
-CI triggers, and controlled fixtures are reviewed together.
+approved workspace. Future modules are unsupported until their inventory, owning target,
+consumers, and controlled fixtures are reviewed together, even though standard service paths are
+selected automatically by the workflow.
 
 The scaffold itself includes the repository's shared `scripts/go/module/common.mk`. During
 `check-copy`, that helper is copied into the renamed service and its Makefile is redirected to the

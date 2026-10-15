@@ -37,10 +37,10 @@ COMMON_GO_TOOLING_DIR ?= ../../scripts/go/module
 COMMON_GO_TOOLING_DIR := $(abspath $(COMMON_GO_TOOLING_DIR))
 include $(COMMON_GO_TOOLING_DIR)/common.mk
 
-.PHONY: bootstrap-tools verify-tools format format-check update-deps check-deps \
+.PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto check-proto-drift lint test test-race build vulncheck check test-tooling \
-	check-copy run
+	gen-proto check-proto-drift lint test test-race coverage coverage-validate coverage-check \
+	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-copy run
 
 update-deps:
 	GOWORK=off $(GO) get \
@@ -55,12 +55,15 @@ update-deps:
 		golang.org/x/net@$(X_NET_VERSION)
 	GOWORK=off $(GO) mod tidy
 
-check: verify-tools format-check format-proto-check lint lint-proto test-race build \
+check-go-pr: verify-tools format-check format-proto-check lint lint-proto test-race build \
 	check-deps check-proto-drift check-proto-breaking vulncheck
+
+check: check-go-pr
 
 test-tooling: verify-tools
 	@MODULE_ROOT="$(CURDIR)" COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
 		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" ./scripts/test-tooling.sh
+	@$(MAKE) --no-print-directory test-coverage-tooling
 
 check-copy: verify-tools
 	@COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \

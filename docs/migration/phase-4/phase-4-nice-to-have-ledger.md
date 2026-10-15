@@ -20,6 +20,10 @@
       - [issue-135-N04 Enhanced navigation between signals](#issue-135-n04-enhanced-navigation-between-signals)
       - [issue-135-N05 Extended runtime and database diagnostics](#issue-135-n05-extended-runtime-and-database-diagnostics)
       - [issue-135-N06 Production SLO and capacity analysis](#issue-135-n06-production-slo-and-capacity-analysis)
+    - [Issue 156 Simplify CI workflows](#issue-156-simplify-ci-workflows)
+      - [issue-156-N01 Automatic added-module selection](#issue-156-n01-automatic-added-module-selection)
+      - [issue-156-N02 Automatic removed-module outcome](#issue-156-n02-automatic-removed-module-outcome)
+      - [issue-156-N03 Module move and identity correlation](#issue-156-n03-module-move-and-identity-correlation)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -329,3 +333,71 @@ retention needs have been agreed, with sufficient measurements to support longer
 **Acceptance evidence:** Record the agreed workload, SLO and evaluation window, retention, and
 capacity measurements. Production conclusions must be supported by representative evidence;
 the four-product pilot fixture alone is insufficient.
+
+### Issue 156 Simplify CI workflows
+
+Origin: the revised issue-156 requirements. Go module lifecycle handling was reclassified on
+2026-10-15. Automatic added-service selection was promoted into issue 156 after the workflow scope
+was expanded to existing and upcoming `services/*-service` modules. Decommissioning, directory
+movement, identity changes, and rename correlation remain uncommon and deferred.
+
+Source ticket: [issue 156](https://github.com/igor-baiborodine/insurance-hub/issues/156).
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-156-N01](#issue-156-n01-automatic-added-module-selection) | Automatic added-module selection | Promoted | Included in issue 156 step 3 |
+| [issue-156-N02](#issue-156-n02-automatic-removed-module-outcome) | Automatic removed-module outcome | Deferred | Unassigned |
+| [issue-156-N03](#issue-156-n03-module-move-and-identity-correlation) | Module move and identity correlation | Deferred | Unassigned |
+
+#### issue-156-N01 Automatic added-module selection
+
+**Requirement:** Automatically select and validate a newly added immediate
+`services/<name>-service` module through the standard Make capabilities while still enforcing the
+one-module rule. Inventory ownership and standalone resolution remain mandatory onboarding checks.
+
+**Disposition:** Included in the revised issue-156 scope. Generic qualifying paths and inline
+module-root derivation select an immediate `services/<name>-service` module without a workflow edit.
+The module must still provide the standard Make capabilities and complete inventory and ownership
+onboarding.
+
+**Delivered when:** Step 3's workflow and validators prove a future standard service is triggered,
+selected, and assigned generic business-service metadata while preserving the one-module rule.
+
+**Acceptance evidence:** Workflow fixtures prove existing and future service selection, generic
+business-service metadata, and mixed existing/new module rejection without service-specific
+workflow logic. Existing topology checks continue to reject missing inventory ownership,
+standalone-resolution failures, and missing owning validation capabilities.
+
+#### issue-156-N02 Automatic removed-module outcome
+
+**Requirement:** Recognize a complete Go module removal with matching inventory removal as one
+logical lifecycle change, report a successful removed-module outcome, and avoid bootstrapping or
+validating the deleted directory while rejecting partial removal and stale ownership.
+
+**Why deferred:** Module decommissioning is rare and requires deliberate consumer, topology,
+documentation, release, and deployment review outside ordinary PR validation. Those checks remain
+with the local decommissioning procedure rather than being embedded in ordinary workflow selection.
+
+**Reconsider when:** Multiple Go modules are scheduled for decommissioning or repeated removals show
+that manual coordination adds material effort without improving review quality.
+
+**Acceptance evidence:** Base/head fixtures prove complete removal, partial deletion, stale
+inventory, remaining consumers, and mixed-module changes. Only a complete approved removal returns
+the removed outcome, invokes no module setup, and preserves required local topology evidence.
+
+#### issue-156-N03 Module move and identity correlation
+
+**Requirement:** Correlate base/head inventory and `go.mod` identity so a pure module-directory move
+is treated as one logical module, while a module identity change is treated as removal plus addition.
+
+**Why deferred:** Directory and module-identity migrations are exceptional repository maintenance.
+Automatic correlation and rejection rules add substantial policy and test surface to the common PR
+path without a current migration need.
+
+**Reconsider when:** A planned repository restructuring or module-path migration needs hosted
+validation during the move and its identity, consumer, import, and rollback rules are agreed.
+
+**Acceptance evidence:** Disposable Git histories prove pure directory moves, moves with content
+changes, identity-preserving and identity-changing cases, stale inventory, and ambiguous ownership.
+Only the agreed lifecycle forms produce a selected outcome; other cases fail before bootstrap with
+explicit diagnostics.
