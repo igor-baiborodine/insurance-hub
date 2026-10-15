@@ -5,6 +5,7 @@
   - [Getting Started](#getting-started)
     - [Prerequisites](#prerequisites)
     - [Clone Repository](#clone-repository)
+    - [Configure Repository Hooks](#configure-repository-hooks)
     - [Install Dependencies](#install-dependencies)
       - [Web Development](#web-development)
       - [Kubernetes](#kubernetes)
@@ -62,6 +63,31 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
 git clone git@github.com:your-org/insurance-hub.git
 cd insurance-hub
 ```
+
+### Configure Repository Hooks
+
+This repository provides a pre-commit hook that validates the table of contents in staged Markdown
+files and a pre-push hook that validates branch names. Enable both hooks from the repository root:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Before setting the path, inspect `git config --get core.hooksPath`. If it names another custom hook
+directory, integrate the repository hooks there instead of replacing that setup.
+
+The pre-commit hook checks added, modified, copied, and renamed Markdown files from the staged
+snapshot. It does not format files or change the index or working tree. If it reports a stale or
+missing table of contents, format the affected working-tree files and stage the result:
+
+```bash
+./scripts/markdown-toc.sh format path/to/file.md
+git add path/to/file.md
+```
+
+The hook requires `npx` only when staged Markdown needs validation. Run `make markdown-toc-test` to
+exercise the hook, including partial staging and controlled failure cases, in a disposable Git
+repository.
 
 ### Install Dependencies
 
@@ -250,10 +276,9 @@ This ensures clarity, easier traceability to issues, and automation support.
 4. Enforcing Branch Names
 
    A Git [pre-push hook](.githooks/pre-push) is used to validate branch names to ensure they follow
-   the
-   above convention. If the branch name does not comply with the convention, the **push will be
-   blocked**
-   until it's renamed.
+   the above convention. Configure the repository hooks as described in
+   [Configure Repository Hooks](#configure-repository-hooks). If the branch name does not comply
+   with the convention, the **push will be blocked** until it's renamed.
 
 ### Commit Messages
 

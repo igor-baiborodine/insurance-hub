@@ -25,7 +25,7 @@
 ## GitHub Actions
 
 - Name workflows by scope and purpose in the top-level `name:` field, such as `Go Module
-  Validation`, `Go Report Card`, `Markdown TOC Check`, and `Legacy API Release`.
+  Validation`, `Go Report Card`, and `Legacy API Release`.
 - Use a concrete purpose instead of appending `CI` solely because a workflow runs in CI.
 - When changing a workflow display name, update badge labels and documentation that refer to it.
   Keep workflow filenames and job identifiers stable unless they also need to change.
