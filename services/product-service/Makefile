@@ -65,7 +65,8 @@ INTEGRATION_SUITE ?= all
 FIXTURE_SET ?= qa
 SECURITY_HARNESS_OUTPUT ?=
 DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md \
-	../../docs/migration/phase-4/product-service/deployment-runbook.md
+	../../docs/migration/phase-4/product-service/deployment-runbook.md \
+	../../docs/migration/phase-4/product-service/observability-contract.md
 EXTRA_TOOL_PACKAGES := github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
 VERIFY_EXTRA_TOOL_SPECS := sqlc|$(SQLC)|$(SQLC_VERSION)|version
 
