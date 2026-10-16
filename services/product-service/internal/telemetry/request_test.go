@@ -39,7 +39,7 @@ import (
 func TestRequestObserver_RealTransportSignals(t *testing.T) {
 	const private = "postgres://reader:private@database/catalog customer-secret"
 	logs := &completionLog{written: make(chan struct{}, 1)}
-	logger := logger.New(logs, "product-service", 0)
+	requestLogger := logger.New(logs, "product-service", 0)
 	spans := tracetest.NewSpanRecorder()
 	traceProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
 	reader := sdkmetric.NewManualReader()
@@ -74,7 +74,7 @@ func TestRequestObserver_RealTransportSignals(t *testing.T) {
 		),
 	)
 	observer, err := telemetry.NewRequestObserver(
-		logger, traceProvider, meterProvider, propagation.TraceContext{},
+		requestLogger, traceProvider, meterProvider, propagation.TraceContext{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +122,7 @@ func TestRequestObserver_RealTransportSignals(t *testing.T) {
 		)
 		return product, err
 	}
-	httpHandler, err := producthttp.NewHandler(logger, producthttp.Settings{
+	httpHandler, err := producthttp.NewHandler(requestLogger, producthttp.Settings{
 		RequestTimeout: time.Second, Observer: observer,
 	}, list, get)
 	if err != nil {
@@ -139,11 +139,17 @@ func TestRequestObserver_RealTransportSignals(t *testing.T) {
 	}
 	go func() { _ = producthttp.Serve(httpServer, httpListener) }()
 	t.Cleanup(func() { _ = httpServer.Close() })
-	grpcServer, err := productgrpc.NewServer(logger, traceProvider, propagation.TraceContext{},
+	grpcServer, err := productgrpc.NewServer(
+		requestLogger,
+		traceProvider,
+		propagation.TraceContext{},
 		productgrpc.Settings{
 			RequestTimeout: time.Second, MaxReceiveBytes: 1 << 20,
 			MaxSendBytes: 1 << 20, Observer: observer,
-		}, list, get)
+		},
+		list,
+		get,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
