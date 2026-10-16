@@ -43,7 +43,10 @@ defaultRules:
 prometheus:
   prometheusSpec:
     retention: 10d
-    enableRemoteWriteReceiver: false
+    # Alloy is the only intended writer for application/runtime OTLP metrics.
+    # Keep Prometheus's separate native OTLP receiver disabled below.
+    enableRemoteWriteReceiver: true
+    enableOTLPReceiver: false
     serviceMonitorNamespaceSelector: {}
     serviceMonitorSelector:
       matchLabels: {}

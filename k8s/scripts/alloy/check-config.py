@@ -188,6 +188,8 @@ def validate_source_policy(config: str, values: str, makefile: str) -> None:
         'otelcol.processor.filter "service_metric_policies"',
         r'Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"]',
         'keep_matching_keys(attributes',
+        "set(events, nil)",
+        "set(links, nil)",
         'discovery.kubernetes "qa_service_pods"',
         'declare "service_json_logs"',
         "regex = argument.container_name.value",
@@ -228,6 +230,8 @@ def validate_source_policy(config: str, values: str, makefile: str) -> None:
     ]
     if missing:
         raise ValidationError("missing required Alloy policy: " + ", ".join(missing))
+    if "set(events, [])" in config or "set(links, [])" in config:
+        raise ValidationError("span events and links must use typed nil clearing")
 
     forbidden_fragments = (
         'attributes["deployment.environment"]',

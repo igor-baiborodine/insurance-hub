@@ -299,6 +299,15 @@ flux-suspend: _env-check ## Suspend QA Flux reconciliation
 
 PROMETHEUS_OPERATOR_CRDS_VERSION := 32.0.1
 KUBE_PROMETHEUS_STACK_VERSION := 92.6.0
+PROMETHEUS_IMAGE := quay.io/prometheus/prometheus:v3.15.0-distroless
+PROMETHEUS_VALUES_PATH := overlays/qa/infra/prometheus/values.yaml
+OBSERVABILITY_BACKEND_CHECK_SCRIPT := scripts/alloy/check-backend-config.py
+OBSERVABILITY_BACKEND_CHECK_TEST := scripts/alloy/check-backend-config-test.py
+OBSERVABILITY_BACKEND_TEST_SCRIPT := scripts/alloy/test-backend-ingestion.py
+OBSERVABILITY_SERVICE_DOMAIN ?= product
+OBSERVABILITY_SERVICE_ROOT ?= ../services/$(OBSERVABILITY_SERVICE_DOMAIN)-service
+OBSERVABILITY_SERVICE_PROBE ?= scripts/alloy/probe-$(OBSERVABILITY_SERVICE_DOMAIN).py
+OBSERVABILITY_REQUEST_HISTOGRAM_BUCKETS ?= 15
 
 .PHONY: prometheus-operator-crds-install
 prometheus-operator-crds-install: _monitoring-ns-check
@@ -341,7 +350,7 @@ prometheus-stack-install: prometheus-operator-crds-install ## Install Kube Prome
 		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
 		--kube-context "$(CUR_CTX)" \
 		--namespace $(MONITORING_NS) \
-		--values "$(OVERLAYS_FILE_PATH)"/infra/prometheus/values.yaml \
+		--values "$(PROMETHEUS_VALUES_PATH)" \
 		--atomic --wait --timeout 10m
 	@echo "✅ Kube Prometheus Stack deployment initiated. Check status with: make prometheus-stack-status"
 
@@ -366,6 +375,43 @@ prometheus-stack-status: _monitoring-ns-check ## Show Kube Prometheus Stack depl
 	@kubectl get deployment -n $(MONITORING_NS) -l app.kubernetes.io/name=grafana || true
 	@echo "\nGrafana Service:"
 	@kubectl get svc -n $(MONITORING_NS) -l app.kubernetes.io/name=grafana || true
+
+.PHONY: prometheus-receiver-config-check
+prometheus-receiver-config-check: ## Validate the pinned remote-write receiver and disabled native OTLP route without applying
+	@command -v helm >/dev/null || { echo "ERROR: helm is required."; exit 1; }
+	@command -v python3 >/dev/null || { echo "ERROR: Python 3.9 or newer is required."; exit 1; }
+	@python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' || { \
+		echo "ERROR: Python 3.9 or newer is required."; exit 1; \
+	}
+	@helm template qa-prometheus prometheus-community/kube-prometheus-stack \
+		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
+		--namespace qa-monitoring \
+		--values "$(PROMETHEUS_VALUES_PATH)" \
+		--show-only templates/prometheus/prometheus.yaml | \
+		PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_BACKEND_CHECK_SCRIPT)" \
+			--values "$(PROMETHEUS_VALUES_PATH)" \
+			--makefile Makefile \
+			--rendered-prometheus -
+	@helm template qa-prometheus prometheus-community/kube-prometheus-stack \
+		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
+		--namespace qa-monitoring \
+		--values "$(PROMETHEUS_VALUES_PATH)" >/dev/null
+	@echo "✅ Prometheus chart $(KUBE_PROMETHEUS_STACK_VERSION) receiver configuration passed."
+
+.PHONY: observability-backend-test-tooling
+observability-backend-test-tooling: ## Exercise receiver, fixture, query, and cleanup policy checks
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_BACKEND_CHECK_TEST)" -v
+
+.PHONY: test-observability-backends
+test-observability-backends: ## Prove synthetic and real service signals in disposable pinned backends
+	@command -v docker >/dev/null || { echo "ERROR: docker is required."; exit 1; }
+	@command -v go >/dev/null || { echo "ERROR: Go is required for the real service probe."; exit 1; }
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_BACKEND_TEST_SCRIPT)" \
+		--config "$(ALLOY_CONFIG_PATH)" \
+		--service-domain "$(OBSERVABILITY_SERVICE_DOMAIN)" \
+		--service-root "$(OBSERVABILITY_SERVICE_ROOT)" \
+		--service-probe "$(OBSERVABILITY_SERVICE_PROBE)" \
+		--request-histogram-buckets "$(OBSERVABILITY_REQUEST_HISTOGRAM_BUCKETS)"
 
 .PHONY: prometheus-ui
 prometheus-ui: ## Access Prometheus UI via port-forward
@@ -529,7 +575,7 @@ alloy-test-tooling: ## Exercise shared Alloy identity, allowlist, target, positi
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ALLOY_CHECK_TEST)" -v
 
 .PHONY: check-observability
-check-observability: alloy-config-check alloy-test-tooling ## Run non-mutating Alloy configuration and policy checks
+check-observability: prometheus-receiver-config-check alloy-config-check alloy-test-tooling observability-backend-test-tooling ## Run non-mutating observability configuration and policy checks
 
 .PHONY: alloy-install
 alloy-install: _monitoring-ns-check ## Install Grafana Alloy in QA cluster

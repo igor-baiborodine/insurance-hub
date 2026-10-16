@@ -219,12 +219,12 @@ otelcol.processor.transform "service_trace_policies" {
       `set(name, "GET /products/{productCode}") where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["http.route"] == "/products/{productCode}"`,
       `set(name, "HTTP _OTHER") where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["http.route"] == nil`,
       `set(status.message, "") where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
-      `set(events, []) where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
-      `set(links, []) where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
+      `set(events, nil) where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
+      `set(links, nil) where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
       `keep_keys(attributes, ["insurance_hub.product.operation", "insurance_hub.product.transport", "insurance_hub.product.outcome", "http.request.method", "http.route", "http.response.status_code", "url.scheme", "network.protocol.version", "rpc.system.name", "rpc.method", "rpc.response.status_code", "db.system.name", "db.namespace", "db.collection.name", "db.operation.name", "db.query.summary", "insurance_hub.product.database.stage", "error.type"]) where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
       `set(status.message, "") where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
-      `set(events, []) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
-      `set(links, []) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(events, nil) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(links, nil) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
       `keep_matching_keys(attributes, Concat(["^(insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(operation|transport|outcome|database\\.stage)|http\\.(request\\.method|route|response\\.status_code)|url\\.scheme|network\\.protocol\\.version|rpc\\.(system\\.name|method|response\\.status_code)|db\\.(system\\.name|namespace|collection\\.name|operation\\.name|query\\.summary)|error\\.type)$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
     ]
   }
