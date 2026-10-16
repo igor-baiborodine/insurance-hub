@@ -12,7 +12,15 @@
     - [Metric names, units, buckets, and dimensions](#metric-names-units-buckets-and-dimensions)
     - [Alloy version and exporter identity mapping](#alloy-version-and-exporter-identity-mapping)
     - [Cardinality and backend contract](#cardinality-and-backend-contract)
-  - [Metrics route inspection and proposed decision](#metrics-route-inspection-and-proposed-decision)
+  - [Metrics route inspection and accepted decision](#metrics-route-inspection-and-accepted-decision)
+    - [Alloy versus direct Prometheus delivery for Insurance Hub](#alloy-versus-direct-prometheus-delivery-for-insurance-hub)
+      - [What the alternatives mean](#what-the-alternatives-mean)
+      - [Project facts that determine the tradeoff](#project-facts-that-determine-the-tradeoff)
+      - [A: Through Alloy benefits and costs](#a-through-alloy-benefits-and-costs)
+      - [B: Direct OTLP/HTTP benefits and costs](#b-direct-otlphttp-benefits-and-costs)
+      - [C: Direct scrape benefits and costs](#c-direct-scrape-benefits-and-costs)
+      - [Failure, security, and measurement implications](#failure-security-and-measurement-implications)
+      - [Recommendation and conditions for revisiting it](#recommendation-and-conditions-for-revisiting-it)
   - [Pod log collection decision and QA revalidation](#pod-log-collection-decision-and-qa-revalidation)
   - [Pilot acceptance budget decision](#pilot-acceptance-budget-decision)
     - [Workload and sampling](#workload-and-sampling)
@@ -35,9 +43,10 @@
 
 **Issue:** [#135 — Complete Product observability through Alloy](https://github.com/igor-baiborodine/insurance-hub/issues/135).
 
-**Status:** Normative detailed design for issue #135. This document records accepted technical
-decisions and one explicitly pending metrics-route acceptance; it does not claim implementation,
-deployment, or acceptance evidence.
+**Status:** Normative detailed design for issue #135. All recorded technical decisions are
+accepted, including option A (Alloy) explicitly selected by the maintainer on 2026-10-16.
+The metrics-route design gate is closed; implementation, deployment, and AC135-01–07 evidence
+remain outstanding.
 
 The GitHub issue owns the objective, M01–M11 requirements, acceptance criteria, exclusions, and
 dependencies. This contract owns the detailed propagation policy, telemetry identity and field
@@ -68,14 +77,14 @@ forwards are stopped before running the next environment.
 
 ## Decisions and readiness gates
 
-Mandatory scope is accepted. The table summarizes the completed design decisions and the one
-remaining metrics-route acceptance. None of these decisions supplies implementation or runtime
-evidence.
+Mandatory scope and the recorded design decisions are accepted. The maintainer accepted the
+Alloy metrics route on 2026-10-16. The table records the remaining implementation and verification
+obligations; design acceptance does not supply runtime evidence.
 
 | Decision                  | Starting direction                                                                                               | Required resolution                                                                                                                                                                                                                                                                  |
 |---------------------------|------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Log route                 | **Reaffirmed:** container stdout/stderr→Alloy Kubernetes API reader→target deduplication→JSON processing→existing Loki writer | Implement the Product-only route and replace Alloy's broad ClusterRole with the rendered `qa-svc` Role. Then validate the deployed Go target, parsing, correlation, duplication, volume, restart, and loss behavior described below. No application OTLP-log exporter is proposed. |
-| Metrics route             | **Proposed:** retain OTLP/gRPC→Alloy→Prometheus remote write and enable only Prometheus's remote-write receiver | Accept or reject the proposal below. If accepted, implement its bounded label/temporality rules and prove an identified counter and histogram through Alloy, including outage, restart, loss, and duplicate behavior.                                                                 |
+| Metrics route             | **Accepted 2026-10-16, option A:** retain OTLP/gRPC→Alloy→Prometheus remote write and enable only Prometheus's remote-write receiver | Implement the bounded label/temporality rules and prove an identified counter and histogram through Alloy, including outage, restart, loss, and duplicate behavior. Design acceptance is complete; implementation and runtime evidence remain required. |
 | Java context              | **Decided:** retain W3C and add B3 single/multi extraction plus B3 multi injection at the Go HTTP compatibility boundary; valid B3 wins conflicts | Implement the policy below, correct the Java QA sampler property, and prove the controlled HTTP/gRPC matrix without changing production gateway routing or adding a production Go→Java dependency.                                                                                   |
 | Identity and field schema | **Decided:** retain logical `product-service`; distinguish `go|java` with an application-owned resource attribute; consume #154's Alloy chart `1.13.1`/Alloy `v1.20.1` baseline | Verify #154's accepted Alloy baseline before applying the Product schema, then implement the resource, span, log, metric, backend-mapping, and cardinality contract below. Correct mutable version labels, replace deprecated collector attributes, and prove Kubernetes enrichment and exact backend fields before acceptance. |
 | Pilot acceptance budgets  | **Decided:** use the fixed healthy-load, failure/recovery, buffering, resource, overhead, and alert budgets below | Implement the selected SDK/Alloy limits and alert rules, then execute the paired disposable and deployed-QA checks. Treat every number as a pass/fail ceiling fixed before measurement; a failed result requires a reviewed design or budget change, not a post-run exception. |
@@ -441,10 +450,11 @@ Alloy `v1.20.1` accepts that exporter option. Runtime enrichment and the complet
 configuration remain implementation proofs. These observations are time-bound discovery evidence;
 revalidate them against the accepted #154 baseline before implementation.
 
-## Metrics route inspection and proposed decision
+## Metrics route inspection and accepted decision
 
-**Proposed decision:** Keep the existing Product-to-Alloy OTLP/gRPC boundary and complete this
-route:
+**Accepted decision — option A, 2026-10-16:** The maintainer explicitly selected the Alloy route
+after reviewing the project-specific comparison below. Keep the existing Product-to-Alloy
+OTLP/gRPC boundary and complete this route:
 
 ```text
 Product Go OpenTelemetry SDK
@@ -456,6 +466,11 @@ Product Go OpenTelemetry SDK
   -> prometheus.remote_write
   -> qa-prometheus ... /api/v1/write
 ```
+
+The decision retains cumulative sums, explicit-bucket histograms, the eight-field resource-label
+allowlist, and the existing cardinality, buffering, loss, and resource budgets. It closes the
+outstanding route-design gate and allows implementation planning. It does not claim that the
+receiver is enabled or that any implementation, deployment, or acceptance test has completed.
 
 Enable the final receiver with
 `prometheus.prometheusSpec.enableRemoteWriteReceiver: true` in the checked-in QA Prometheus
@@ -483,7 +498,8 @@ without a persistent volume, so buffered metrics may be lost when its pod is rep
 compatible with the ticket's non-lossless pilot boundary only if loss is bounded, visible, and
 covered by the required outage/restart tests.
 
-The proposal is based on the following read-only inspection at repository revision `c37ffdc`:
+The accepted route builds on the following historical read-only inspection at repository revision
+`c37ffdc`; these observations are not a fresh live-state report:
 
 | Area | Observed evidence | Decision consequence |
 | --- | --- | --- |
@@ -502,7 +518,7 @@ defines cumulative temporality and explicit-bucket histograms as defaults. Prome
 [`/api/v1/write` as its remote-write receiver endpoint](https://prometheus.io/docs/prometheus/latest/storage/#remote-storage-integrations)
 and requires the receiver to be explicitly enabled.
 
-If accepted, implementation must still prove all of the following before AC135-03 can pass:
+Implementation must still prove all of the following before AC135-03 can pass:
 
 1. Apply the checked-in receiver setting through the Prometheus Helm owner and verify the new pod,
    effective flag, internal exposure, normal scrape ingestion, and rollback.
@@ -524,6 +540,203 @@ sending a synthetic metric would only queue/retry or drop it and could not prove
 The resumed QA nodes were also about four minutes ahead of the host despite reporting NTP
 synchronization. Correct and recheck the clocks before using timestamp windows as acceptance
 evidence.
+
+### Alloy versus direct Prometheus delivery for Insurance Hub
+
+**Decision rationale, 2026-10-16:** Retain the accepted Alloy route for the current Product pilot.
+The main reasons are its fit with the existing deployment, shared identity enforcement, and bounded
+backend-outage buffering. Direct delivery is technically viable and offers useful isolation from
+Alloy failures. This comparison supports the maintainer's explicit acceptance of option A above;
+options B and C remain alternatives for a future reviewed design change.
+
+The assessment uses checkout `956b6345debdeefbb7e0ef52a882e7a427d9f757`, the completed dependency
+handoffs recorded in the issue-135 reassessment, and the official references linked below. It is
+source/documentation analysis, not a fresh QA inspection or a performance comparison. Current
+upstream documentation explains capabilities; exact configuration must still be validated against
+the repository's pinned Alloy `v1.20.1`, Prometheus `v3.15.0`, and Product SDK versions.
+
+#### What the alternatives mean
+
+There are two architectural choices: route Product metrics through Alloy or bypass Alloy. The
+direct choice has two materially different implementations:
+
+| Route | Metric data path | Required ingestion change |
+| --- | --- | --- |
+| A — Accepted Alloy route | Product OTLP/gRPC → Alloy conversion/label processing → Prometheus remote write `/api/v1/write` | Enable the remote-write receiver; complete the existing Alloy branch and Product metric provider. Keep native OTLP disabled. |
+| B — Direct OTLP push | Product OTLP/HTTP → Prometheus `/api/v1/otlp/v1/metrics` | Enable native OTLP ingestion; add a metrics-specific HTTP exporter, destination, and backend translation policy. Remote-write receive is unnecessary for this Product route. |
+| C — Direct scrape | Product exposes internal `/metrics`; Prometheus fetches it on a schedule | Add an exporter/handler and a selected ServiceMonitor or PodMonitor, including discovery and label mapping. Neither push receiver is needed for this route. |
+
+Prometheus's native OTLP receiver accepts **HTTP**, so B is not achieved by pointing Product's
+existing OTLP/gRPC exporter at Prometheus. It requires `--web.enable-otlp-receiver` and the metrics
+path above. Keep trace export independently directed to Alloy; changing a global exporter endpoint
+or protocol could otherwise redirect traces as well.
+[Prometheus OTLP guide](https://prometheus.io/docs/guides/opentelemetry/).
+
+Remote write is a different wire protocol with its own receiver flag. In A, Alloy translates OTLP
+before sending remote write; Product does not implement remote write itself.
+[Prometheus remote-storage interfaces](https://prometheus.io/docs/prometheus/latest/storage/#remote-storage-integrations).
+For C, OpenTelemetry Go provides a Prometheus exporter, so the instrumentation can still use OTel;
+scraping does not require replacing every instrument with a Prometheus client-library instrument.
+[OpenTelemetry Go exporters](https://opentelemetry.io/docs/languages/go/exporters/#prometheus-experimental).
+
+#### Project facts that determine the tradeoff
+
+- **Alloy already has other required jobs.** Java Zipkin traces, Go traces, and the selected
+  Kubernetes JSON-log route still use Alloy under B or C. Bypassing it for metrics saves incremental
+  metrics processing, not the entire collector Deployment or its resource reservation.
+- **The Product metrics path is unfinished under every option.** The current service has a trace
+  provider and a no-op gRPC meter provider. All three routes need real request, database/pool, and
+  runtime instrumentation. A is not merely a receiver-flag fix: its bounded transforms, delivery
+  settings, dashboard/rules, and real-service acceptance proofs are also outstanding.
+- **The topology already favors A.** The checked-in
+  [Alloy values](../../../../k8s/overlays/qa/infra/alloy/values.yaml) and
+  [adjacent configuration](../../../../k8s/overlays/qa/infra/alloy/config.alloy) contain OTLP
+  ingestion, conversion, and a Prometheus remote-write destination. The
+  [Prometheus values](../../../../k8s/overlays/qa/infra/prometheus/values.yaml) explicitly disable
+  remote-write receive. The #154 handoff preserved this idle branch; its successful scrape checks
+  do not establish Product metric delivery.
+- **This is a constrained pilot.** QA runs on the maintainer's laptop, sequentially with local-dev.
+  The contract budgets one Go replica plus one surge Pod, 800 application/runtime series per
+  instance, a ten-second metric interval, and a five-request/second healthy workload. At the series
+  ceiling, one sample per series per interval is approximately 80 samples/second, or 160 during
+  rollout, excluding platform/collector metrics and protocol overhead. This arithmetic describes
+  the intended load; it is not measured ingestion capacity.
+- **Identity and cardinality matter more than business volume alone.** Java and Go share logical
+  `product-service` identity. Dashboards must distinguish implementation, environment, version, and
+  instance. Product codes, raw paths, trace IDs, customer/policy/payment data, and error text must
+  never create metric labels. Histogram buckets multiply series even at low request rates.
+
+#### A: Through Alloy benefits and costs
+
+| Aspect | Benefit for Insurance Hub | Cost or limitation for Insurance Hub |
+| --- | --- | --- |
+| Delivery effort | Extends an installed branch and the existing OTLP/gRPC application boundary. Fits M04 and AC135-03 without redesigning their route requirement. | Still requires a shared Prometheus rollout and substantive Alloy configuration/testing. The installed idle branch is not a working Product telemetry implementation. |
+| Identity and safety | One place can assert QA/Kubernetes identity, enforce allowed fields, and produce the exact eight dashboard labels across future Go services. | The collector must actually enforce the policy; using Alloy alone does not make labels safe. Source instrumentation must avoid sensitive values before export. A shared transform error can affect several services. |
+| Backend interruption | Remote-write buffering/retry separates a short Prometheus interruption from the application's export loop. Product retains only bounded SDK work. | Adds a WAL, queues, retry policy, and delivery-health signals to operate. The current ephemeral collector storage does not survive Pod replacement reliably. |
+| Failures and debugging | Central sent/failed/pending/retry evidence helps identify whether an export stopped before Prometheus. Backend configuration changes can stay outside service deployments. | Alloy is another failure point. Its failure or bad rollout can interrupt Product metrics alongside logs/traces; accepted OTLP input does not prove stored samples. |
+| Resources and freshness | Batching and backend retries are shared infrastructure work. No new Product scrape handler is needed. | Conversion, batching, WAL I/O, and a network hop cost CPU, memory, disk, and latency on the laptop. Their incremental cost must fit the existing Alloy budget. |
+| Migration | A consistent OTLP service boundary supports incremental Java/Go migration and later backend changes without exposing backend-specific URLs to each service. | This is future flexibility, not a requirement to migrate all existing Java/platform scrape metrics through Alloy. Collector/backend schema changes still need compatibility tests. |
+
+Alloy's exporter supports explicit resource-to-datapoint mapping and drops delta-temporality
+metrics. Therefore the existing cumulative and explicit-bucket contract is a compatibility choice,
+and `resource_to_telemetry_conversion=false` plus the allowlist is meaningful protection against
+uncontrolled label expansion.
+[Alloy Prometheus exporter](https://grafana.com/docs/alloy/latest/reference/components/otelcol/otelcol.exporter.prometheus/).
+
+The remote-write component writes a WAL and exposes configurable queues, retry, and sample-age
+limits. This supplies a bounded buffer, not an exactly-once or lossless guarantee.
+[Alloy remote write](https://grafana.com/docs/alloy/latest/reference/components/prometheus/prometheus.remote_write/).
+For this pilot, the contract's five-minute sample-age limit and ephemeral storage remain material
+constraints even though WAL maximum retention is 15 minutes. Neither a longer nominal WAL
+retention nor collector readiness proves that delayed samples will reach Prometheus.
+
+#### B: Direct OTLP/HTTP benefits and costs
+
+| Aspect | Benefit for Insurance Hub | Cost or limitation for Insurance Hub |
+| --- | --- | --- |
+| Path simplicity | Removes Alloy conversion, batching, and forwarding from metrics delivery. Product and Prometheus are the two metric-path components to diagnose. | Logs and traces retain their Alloy path. Operators must maintain two signal-delivery configurations and distinguish independent failures. |
+| Failure isolation | Product metrics can continue during an Alloy outage or rollout, helping diagnose a collector incident while logs/traces are interrupted. | Prometheus outages and rejections reach each Product metrics exporter directly. Reads/readiness must remain independent through bounded asynchronous export. |
+| Application integration | Retains OTel instruments and a periodic metric reader; avoids a new scrape endpoint. | Requires a separate HTTP metric exporter/configuration alongside gRPC tracing. The current shared OTLP configuration cannot be assumed to support this without changes and tests. |
+| Resource use | Avoids incremental Alloy metric conversion and WAL work; may reduce metric delivery delay. | Moves translation to Prometheus and backend retry/error handling to the service exporter. Alloy still runs. No CPU/memory or latency improvement has been measured. |
+| Identity and safety | Prometheus can promote selected resource attributes; direct OTLP is compatible with bounded labels in principle. | Resource promotion is not Kubernetes enrichment or arbitrary field normalization. Product/Prometheus must take ownership of the policy currently assigned to Alloy, including safe resource and datapoint contents. |
+| Delivery resilience | Cumulative instruments can retain totals in a surviving Product process across missed exports. | There is no intermediary WAL in this route. Historical gauge values and missed sample timestamps are not recreated by the next export; a Product restart can lose unexported cumulative observations. |
+
+Prometheus supports selected resource promotion, translation settings, and retaining identifying
+attributes on `target_info`. These controls make B feasible but do not establish identical output
+to A automatically.
+[Prometheus OTLP configuration](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#configuration-file).
+For example, the contract maps `insurance_hub.service.implementation` to `service_implementation`;
+ordinary dot-to-underscore translation instead yields `insurance_hub_service_implementation`.
+B needs an explicit equivalent mapping and the required Kubernetes identity from deployment or
+application configuration. Test the exact metric names, suffixes, buckets, ordinary labels, scope
+labels, and `target_info` against the pinned backend before reusing dashboards.
+
+Resource promotion controls which resource values are copied to ordinary series; it is not a
+general sensitive-data filter. Prometheus also places resource attributes on `target_info`.
+[Prometheus resource handling](https://prometheus.io/docs/guides/opentelemetry/#including-resource-attributes-at-query-time).
+Consequently, B must prevent forbidden data in the emitted resource and datapoints, not merely
+omit it from the promoted-label list. The same source-side responsibility applies to A and C.
+
+#### C: Direct scrape benefits and costs
+
+| Aspect | Benefit for Insurance Hub | Cost or limitation for Insurance Hub |
+| --- | --- | --- |
+| Fit with Prometheus | Reuses the monitoring stack's existing discovery/scrape operating model and avoids enabling an inbound push receiver. | Adds an internal application endpoint, exporter, and monitor resource, with selector, port, routing, and exposure tests. Existing platform scraping does not automatically discover Product. |
+| Failure isolation | Metrics remain independent of Alloy. Product needs no outbound metrics destination or metrics push retry loop. | Prometheus must reach every selected Pod. Discovery failures or unsuccessful scrapes create gaps. Logs and traces still depend on Alloy. |
+| Diagnosis | Per-target scrape status and timing make missing-target versus failed-scrape problems easier to inspect. | A successful scrape proves endpoint reachability and valid exposition, not correct business instrumentation or healthy reads. |
+| Local investigation | A developer can inspect a local metrics response without an ingestion backend when that explicit diagnostic mode is enabled. | Normal disabled telemetry must still satisfy M09. Adding a handler does not justify a persistent local monitoring stack or public metrics exposure. |
+| History and identity | Cumulative counters/histograms can span a missed scrape if the Product process survives; Kubernetes discovery can supply bounded target labels. | No intermediary stores missed gauge samples. Pod discovery labels, OTel resource labels, and scrape `job`/`instance` labels need a deliberate mapping to the existing query contract. |
+
+Prometheus records `up`, scrape duration, and sample counts for each scraped instance.
+[Prometheus jobs and instances](https://prometheus.io/docs/concepts/jobs_instances/).
+Routes A and B do not create equivalent Product scrape-health evidence merely by receiving pushed
+samples. They need the contract's freshness, expected-series, exporter, and collector checks; a
+healthy scrape of Alloy itself is insufficient. C still needs business-metric absence and
+cardinality checks in addition to `up`.
+
+#### Failure, security, and measurement implications
+
+**A 60-second Prometheus outage:** A has the contract's explicit requirement to preserve the
+logical cumulative counter/histogram delta through Alloy's WAL while Alloy stays alive. B and C
+can also retain cumulative totals in the live Product process, but this does not restore the
+original ten-second samples or transient pool/memory gauge peaks. Under every route, restarting
+Product before the next successful collection/export can lose observations not yet delivered.
+Replay can restore stored history after an outage; it cannot make an alert fire while Prometheus
+itself is down. Compare totals, timestamp gaps, gauge loss, and alert timing separately.
+
+**An Alloy rollout or failure:** B and C preserve the metrics path if Product and Prometheus stay
+healthy. A must demonstrate the specified recovery/convergence and expose loss during ephemeral
+Pod replacement. This is the strongest operational argument for bypassing Alloy in this project;
+the pilot explicitly excludes a highly available collector design.
+
+**Internal exposure:** A enables a shared remote-write receiver; B enables a shared OTLP receiver;
+C exposes per-service scrape endpoints. ClusterIP keeps these within the cluster's network scope
+but does not authenticate writers/readers or ensure only Alloy can send metrics. The historical
+inspection found no monitoring NetworkPolicy. Centralizing the intended writer under A is useful
+operationally, but is not an enforced security boundary. All routes must preserve M10's internal
+exposure and M05's safe fields; any new isolation policy needs its own scoped design.
+
+**Performance and cardinality:** No route is inherently exempt from the Product `300m/256Mi`
+limits, the telemetry-overhead ceilings, or the 800-series-per-instance budget. At the same final
+label/bucket schema, bypassing Alloy does not reduce Prometheus's stored series. For example, the
+14 finite request-duration boundaries produce 15 classic bucket series including `+Inf`, plus
+`_sum` and `_count`: 17 series per populated dimension set before the request counter. The bounded
+operation/transport/outcome/status combinations therefore matter under every route. Benchmark
+actual overhead and query freshness rather than treating one fewer hop as proof of improvement.
+
+**Availability and correlation:** Direct backend delivery can remain asynchronous and independent
+of request success; it need not make Prometheus a readiness dependency. Conversely, Alloy does not
+automatically guarantee request independence. Both need the existing outage and shutdown tests.
+Shared trace/log/metric identity is possible with all routes; passing through one collector does
+not itself establish Java/Go parent continuity or correlate an aggregate metric to a single request.
+
+#### Recommendation and conditions for revisiting it
+
+For issue #135, **option A is accepted** because Alloy is already part of the required logs/traces topology,
+its metrics branch exists, and this route keeps bounded backend buffering and identity enforcement
+outside the Product process. The pilot's modest declared series/sample budget makes completing and
+measuring that route a reasonable next step. This is an engineering judgment based on the existing
+project, not a claim that a collector is always preferable to direct Prometheus ingestion.
+
+Reconsider **B** if keeping OTel push while making metrics independent of Alloy becomes the higher
+priority, and the project accepts separate exporter configuration, relocated label/enrichment
+policy, and revised outage evidence. Reconsider **C** if the intended long-term operating model becomes
+Prometheus scraping each service, with standard discovery and per-target scrape diagnostics.
+For a metrics-only service built from scratch, C's operational simplicity would be a stronger
+argument; Insurance Hub already has broader Alloy responsibilities.
+
+Revisit A if measured collector contention breaches the existing overhead/freshness ceilings,
+Alloy incidents repeatedly hide required diagnostic metrics, or a deliberate platform decision
+standardizes direct scraping/OTLP. A failed budget is a reason to investigate or review the design,
+not to relax its threshold after measurement.
+
+Accepting A closes the route-design gate, while leaving implementation and all seven ACs
+outstanding. A future switch to B or C requires revising the issue's M04 and AC135-03 “through Alloy”
+requirement together with this contract, and reviewing M06/M08/M11, configuration ownership,
+identity mapping, delivery-health alerts, outage/recovery budgets, rollout, and rollback. Keep the
+existing safety and local-independence requirements. Use one authoritative Product metrics route;
+parallel exports of the same instruments would need separate controls to prevent double counting
+or conflicting series. Recording this decision does not change deployed infrastructure.
 
 ## Pod log collection decision and QA revalidation
 
@@ -836,8 +1049,8 @@ chosen ownership path only. Re-render and validate the rules and dashboard on #1
 - For an Alloy regression, use `helm rollback qa-alloy <captured-revision> --namespace
   qa-monitoring --wait --timeout 5m`, then verify the prior image/config and every pre-existing
   route. For a Prometheus/Grafana regression, use the equivalent rollback for `qa-prometheus` and
-  verify flags, scrapes, rules, dashboards, and readiness. The prior live revisions are currently
-  `1`; capture them again immediately before each upgrade rather than hard-coding them.
+  verify flags, scrapes, rules, dashboards, and readiness. Revision `1` was historical discovery
+  evidence before #154; capture the actual rollback revision immediately before each change.
 - A Helm rollback restores live state but not repository intent. Follow it with a reviewed revert
   of the failed chart/values/assets before another install. Do not roll back or delete shared
   Loki, Tempo, Zipkin, databases, PVCs, Java resources, or the reader Secret to recover Product
@@ -866,7 +1079,7 @@ traffic cutover. Revalidate each control-plane identity immediately before imple
 
 ## Dependencies and completion boundaries
 
-Issue #154 must complete before #135 implementation starts. Recheck its recorded chart/image
+Issue #154 is complete and supplies the accepted platform baseline. Recheck its recorded chart/image
 matrix, effective values, Helm revisions, routes, retention, resource observations, and rollback
 points. Treat any live-version drift or unresolved Alloy, Loki, Tempo, Prometheus, or Grafana
 failure as a blocker; do not absorb another platform upgrade into #135.
@@ -877,7 +1090,15 @@ Recheck its recorded final revision, semantic image tag and running digest, read
 endpoints, catalog identity, and stop/restoration state before deployed verification. Stop on drift;
 do not bypass the generic release or Flux owners.
 
-Neither the hosted-CI outage nor an unreachable QA control plane reduces acceptance scope.
+Issue #156 is complete and supplies selected-module Go PR validation through `check-go-pr`,
+including the 75% atomic race coverage threshold, plus change-based local checks documented in
+[CONTRIBUTING.md](../../../../CONTRIBUTING.md#change-based-local-validation). Integrate applicable
+Product telemetry tests into that path. Validate auxiliary tooling, monitoring configuration,
+security, deployment, images, and documentation locally according to changed behavior; monitoring-only
+changes do not trigger Go validation. Generic release remains separate. Retired broad hosted jobs
+are not required evidence, and earlier CI/security limitations do not establish a current outage.
+
+Unavailable applicable hosted checks or an unreachable QA control plane do not reduce acceptance scope.
 Record unavailable checks as blocked. Issue #135 owns telemetry-specific failure, lifecycle,
 correlation, and delivery tests; #136 adds integrated differential/performance/rollback qualification.
 Only #137 changes existing gateway traffic.
