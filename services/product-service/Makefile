@@ -61,6 +61,7 @@ GENERATED_SQL_FILES := internal/postgres/dbgen/db.go internal/postgres/dbgen/mod
 	internal/postgres/dbgen/queries.sql.go internal/postgres/dbgen/querier.go
 TEST_PACKAGES ?= ./...
 COVERAGE_FILE ?= coverage.txt
+INTEGRATION_COVERAGE_FILE ?=
 COVERAGE_MINIMUM ?= 75
 COVERAGE_EXCLUDE_PATHS := gen internal/postgres/dbgen internal/testing
 INTEGRATION_SUITE ?= all
@@ -217,8 +218,10 @@ test-integration:
 		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" \
 		INTEGRATION_SUITE="$(INTEGRATION_SUITE)" \
 		FIXTURE_SET="$(FIXTURE_SET)" \
+		INTEGRATION_COVERAGE_FILE="$(INTEGRATION_COVERAGE_FILE)" \
 		./scripts/test-integration.sh
 
+check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \
 	check-deps check-proto-drift check-sql-drift check-proto-breaking vulncheck
 

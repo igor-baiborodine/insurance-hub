@@ -7,6 +7,7 @@ docker_command=${DOCKER:?DOCKER is required}
 postgres_image=${POSTGRES_IMAGE:?POSTGRES_IMAGE is required}
 integration_suite=${INTEGRATION_SUITE:-}
 fixture_set=${FIXTURE_SET:-}
+integration_coverage_file=${INTEGRATION_COVERAGE_FILE:-}
 
 fail() {
 	printf 'test-integration: %s\n' "$*" >&2
@@ -62,11 +63,17 @@ if [[ "$integration_suite" == all || "$integration_suite" == lifecycle || "$inte
 	GOWORK=off "$go_command" build -mod=readonly -race -o "$server_binary" ./cmd/server
 fi
 
+coverage_args=()
+if [[ -n "$integration_coverage_file" ]]; then
+	coverage_args=(-covermode=atomic "-coverprofile=$integration_coverage_file")
+	rm -f -- "$integration_coverage_file"
+fi
+
 PRODUCT_TEST_POSTGRES_IMAGE="$postgres_image" \
 	PRODUCT_INTEGRATION_FIXTURE_SET="$fixture_set" \
 	PRODUCT_TEST_SERVER_BINARY="$server_binary" \
 	GOWORK=off "$go_command" test -mod=readonly -count=1 -race -tags=integration \
-	-json -run "$test_pattern" ./internal/testing ./internal/postgres | tee "$result_file"
+	"${coverage_args[@]}" -json -run "$test_pattern" ./internal/testing ./internal/postgres | tee "$result_file"
 
 executed_count=$(
 	awk '
@@ -102,6 +109,9 @@ if [[ "$integration_suite" == all || "$integration_suite" == telemetry ]]; then
 fi
 if [[ "$integration_suite" == all || "$integration_suite" == access ]]; then
 	python3 ./scripts/check-access-results.py "$result_file"
+fi
+if [[ -n "$integration_coverage_file" && ! -s "$integration_coverage_file" ]]; then
+	fail "integration coverage profile was not created: $integration_coverage_file"
 fi
 printf 'test-integration: suite=%s fixture-set=%s executed-tests=%s image=%s\n' \
 	"$integration_suite" "$fixture_set" "$executed_count" "$postgres_image"

@@ -53,4 +53,5 @@
 *.tgz
 
 # Go coverage reports
-/services/product-service/coverage.txt
+/services/*-service/coverage.txt
+/services/*-service/integration-coverage.txt

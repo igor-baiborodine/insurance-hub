@@ -109,6 +109,55 @@ expect_failure reader-missing-case test-integration \
 	'suite reader did not pass database telemetry case' \
 	"$fixture" INTEGRATION_SUITE=reader GO="$fixture/.test-bin/go" DOCKER=true
 
+fixture=$(new_fixture reader-coverage-profile)
+mkdir -p "$fixture/.test-bin"
+cat >"$fixture/.test-bin/go" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == test ]]
+for argument in "$@"; do
+	case "$argument" in
+		-covermode=atomic) covermode_seen=1 ;;
+		-coverprofile=*) profile=${argument#-coverprofile=} ;;
+	esac
+done
+[[ ${covermode_seen:-0} == 1 && -n ${profile:-} ]]
+printf 'mode: atomic\n' >"$profile"
+printf '%s\n' \
+	'{"Action":"run","Test":"TestPostgresReader"}' \
+	'{"Action":"pass","Test":"TestPostgresReader/real_reads_emit_bounded_database_and_pool_signals"}' \
+	'{"Action":"pass","Test":"TestPostgresReader"}'
+EOF
+chmod +x "$fixture/.test-bin/go"
+if ! "$make_command" --no-print-directory -C "$fixture" test-integration \
+	COMMON_GO_TOOLING_DIR="$fixture/.common-go-tooling" \
+	INTEGRATION_SUITE=reader INTEGRATION_COVERAGE_FILE=integration-coverage.txt \
+	GO="$fixture/.test-bin/go" DOCKER=true \
+	>"$temporary_root/logs/reader-coverage-profile.log" 2>&1; then
+	cat "$temporary_root/logs/reader-coverage-profile.log" >&2
+	tooling_fail 'reader integration coverage profile was not produced'
+fi
+test -s "$fixture/integration-coverage.txt" ||
+	tooling_fail 'reader integration suite did not produce a coverage profile'
+
+fixture=$(new_fixture reader-missing-profile)
+rm -f -- "$fixture/integration-coverage.txt"
+mkdir -p "$fixture/.test-bin"
+cat >"$fixture/.test-bin/go" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == test ]]
+printf '%s\n' \
+	'{"Action":"run","Test":"TestPostgresReader"}' \
+	'{"Action":"pass","Test":"TestPostgresReader/real_reads_emit_bounded_database_and_pool_signals"}' \
+	'{"Action":"pass","Test":"TestPostgresReader"}'
+EOF
+chmod +x "$fixture/.test-bin/go"
+expect_failure reader-missing-profile test-integration \
+	'integration coverage profile was not created' "$fixture" \
+	INTEGRATION_SUITE=reader INTEGRATION_COVERAGE_FILE=integration-coverage.txt \
+	GO="$fixture/.test-bin/go" DOCKER=true
+
 fixture=$(new_fixture go-bootstrap)
 mkdir -p "$fixture/.test-bin"
 cat >"$fixture/.test-bin/go" <<'EOF'
