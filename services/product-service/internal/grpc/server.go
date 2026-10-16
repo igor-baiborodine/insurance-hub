@@ -88,7 +88,7 @@ func NewServer(
 	server := grpcgo.NewServer(
 		grpcgo.MaxRecvMsgSize(settings.MaxReceiveBytes),
 		grpcgo.MaxSendMsgSize(settings.MaxSendBytes),
-		grpcgo.StatsHandler(otelgrpc.NewServerHandler(
+		grpcgo.StatsHandler(&requestStatsHandler{Handler: otelgrpc.NewServerHandler(
 			otelgrpc.WithTracerProvider(tracerProvider),
 			otelgrpc.WithPropagators(propagator),
 			otelgrpc.WithMeterProvider(metricnoop.NewMeterProvider()),
@@ -96,7 +96,7 @@ func NewServer(
 				return info.FullMethodName == productv1.ProductService_ListProducts_FullMethodName ||
 					info.FullMethodName == productv1.ProductService_GetProduct_FullMethodName
 			}),
-		)),
+		)}),
 		grpcgo.ChainUnaryInterceptor(
 			requestInterceptor(settings.Observer),
 			validationInterceptor(validator),
@@ -237,6 +237,41 @@ func validationInterceptor(
 	}
 }
 
+type requestStateKey struct{}
+
+type requestStateSlot struct {
+	request *telemetry.Request
+}
+
+// The stats End event includes failures that occur after the unary handler returns,
+// including response encoding and the configured send-size check.
+type requestStatsHandler struct {
+	stats.Handler
+}
+
+func (handler *requestStatsHandler) TagRPC(
+	ctx context.Context,
+	info *stats.RPCTagInfo,
+) context.Context {
+	ctx = handler.Handler.TagRPC(ctx, info)
+	return context.WithValue(ctx, requestStateKey{}, &requestStateSlot{})
+}
+
+func (handler *requestStatsHandler) HandleRPC(ctx context.Context, event stats.RPCStats) {
+	if end, ok := event.(*stats.End); ok {
+		if slot, ok := ctx.Value(requestStateKey{}).(*requestStateSlot); ok &&
+			slot.request != nil {
+			slot.request.Finish(
+				ctx,
+				"rpc.response.status_code",
+				rpcCodeName(status.Code(end.Error)),
+			)
+		}
+	}
+	// Product attributes must be set before otelgrpc ends its server span.
+	handler.Handler.HandleRPC(ctx, event)
+}
+
 func requestInterceptor(observer *telemetry.RequestObserver) grpcgo.UnaryServerInterceptor {
 	return func(ctx context.Context, request any, info *grpcgo.UnaryServerInfo,
 		handler grpcgo.UnaryHandler,
@@ -254,9 +289,8 @@ func requestInterceptor(observer *telemetry.RequestObserver) grpcgo.UnaryServerI
 			return handler(ctx, request)
 		}
 		ctx, state := observer.StartGRPC(ctx, operation)
-		response, err := handler(ctx, request)
-		state.Finish(ctx, "rpc.response.status_code", rpcCodeName(status.Code(err)))
-		return response, err
+		ctx.Value(requestStateKey{}).(*requestStateSlot).request = state
+		return handler(ctx, request)
 	}
 }
 

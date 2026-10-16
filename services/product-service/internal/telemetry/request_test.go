@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,8 +38,8 @@ import (
 
 func TestRequestObserver_RealTransportSignals(t *testing.T) {
 	const private = "postgres://reader:private@database/catalog customer-secret"
-	var logs bytes.Buffer
-	logger := logger.New(&logs, "product-service", 0)
+	logs := &completionLog{written: make(chan struct{}, 1)}
+	logger := logger.New(logs, "product-service", 0)
 	spans := tracetest.NewSpanRecorder()
 	traceProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
 	reader := sdkmetric.NewManualReader()
@@ -269,6 +270,17 @@ func TestRequestObserver_RealTransportSignals(t *testing.T) {
 			)
 		}
 	}
+	completionDeadline := time.After(time.Second)
+	for strings.Count(logs.String(), "\n") < 18 {
+		select {
+		case <-logs.written:
+		case <-completionDeadline:
+			t.Fatalf(
+				"completion logs = %d, want 18",
+				strings.Count(logs.String(), "\n"),
+			)
+		}
+	}
 
 	var metrics metricdata.ResourceMetrics
 	if err := reader.Collect(context.Background(), &metrics); err != nil {
@@ -360,6 +372,10 @@ func TestRequestObserver_RealTransportSignals(t *testing.T) {
 			)
 		}
 	}
+	spanDeadline := time.Now().Add(time.Second)
+	for len(spans.Ended()) < 34 && time.Now().Before(spanDeadline) {
+		time.Sleep(time.Millisecond)
+	}
 	ended := spans.Ended()
 	if len(ended) != 34 {
 		t.Fatalf(
@@ -412,6 +428,175 @@ func TestRequestObserver_RealTransportSignals(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestRequestObserver_GRPCSendLimitUsesFinalStatus(t *testing.T) {
+	logs := &completionLog{written: make(chan struct{}, 1)}
+	log := logger.New(logs, "product-service", 0)
+	spans := tracetest.NewSpanRecorder()
+	traceProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
+	reader := sdkmetric.NewManualReader()
+	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	observer, err := telemetry.NewRequestObserver(
+		log, traceProvider, meterProvider, propagation.TraceContext{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := func(ctx context.Context) (products []domain.Product, err error) {
+		err = observer.Application(
+			ctx,
+			telemetry.OperationList,
+			func(context.Context) error {
+				products = []domain.Product{
+					{Code: "BIG", Description: strings.Repeat("x", 1024)},
+				}
+				return nil
+			},
+		)
+		return products, err
+	}
+	server, err := productgrpc.NewServer(
+		log,
+		traceProvider,
+		propagation.TraceContext{},
+		productgrpc.Settings{
+			RequestTimeout: time.Second, MaxReceiveBytes: 1 << 20,
+			MaxSendBytes: 64, Observer: observer,
+		},
+		list,
+		func(context.Context, string) (domain.Product, error) { return domain.Product{}, nil },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(server.Stop)
+	connection, err := grpcgo.NewClient(
+		listener.Addr().
+			String(),
+		grpcgo.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	response, err := productv1.NewProductServiceClient(connection).ListProducts(
+		context.Background(), &productv1.ListProductsRequest{},
+	)
+	if response != nil || status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("response=%v status=%v error=%v", response, status.Code(err), err)
+	}
+	select {
+	case <-logs.written:
+	case <-time.After(time.Second):
+		t.Fatal("gRPC completion log was not written")
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(logs.String()), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record["msg"] != "Product request completed" ||
+		record["outcome"] != "invalid_request" ||
+		record["rpc_status_code"] != "RESOURCE_EXHAUSTED" ||
+		record["error_type"] != "invalid_request" {
+		t.Fatalf("completion record: %v", record)
+	}
+	var metrics metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &metrics); err != nil {
+		t.Fatal(err)
+	}
+	metricCount, durationCount := 0, 0
+	for _, scope := range metrics.ScopeMetrics {
+		for _, instrument := range scope.Metrics {
+			var points []attribute.Set
+			switch instrument.Name {
+			case "insurance_hub.product.requests":
+				for _, point := range instrument.Data.(metricdata.Sum[int64]).DataPoints {
+					metricCount += int(point.Value)
+					points = append(points, point.Attributes)
+				}
+			case "insurance_hub.product.request.duration":
+				for _, point := range instrument.Data.(metricdata.Histogram[float64]).DataPoints {
+					durationCount += int(point.Count)
+					points = append(points, point.Attributes)
+				}
+			default:
+				t.Fatalf("unexpected request metric %s", instrument.Name)
+			}
+			for _, attrs := range points {
+				if value, ok := attrs.Value("rpc.response.status_code"); !ok ||
+					value.AsString() != "RESOURCE_EXHAUSTED" {
+					t.Fatalf("request status attributes: %v", attrs)
+				}
+				if value, ok := attrs.Value("insurance_hub.product.outcome"); !ok ||
+					value.AsString() != "invalid_request" {
+					t.Fatalf("request outcome attributes: %v", attrs)
+				}
+			}
+		}
+	}
+	if metricCount != 1 || durationCount != 1 {
+		t.Fatalf(
+			"request metric count=%d duration count=%d, want 1 each",
+			metricCount,
+			durationCount,
+		)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(spans.Ended()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	serverSpans := 0
+	for _, span := range spans.Ended() {
+		if span.SpanKind() != trace.SpanKindServer {
+			continue
+		}
+		serverSpans++
+		attrs := attribute.NewSet(span.Attributes()...)
+		if value, ok := attrs.Value("rpc.response.status_code"); !ok ||
+			value.AsString() != "RESOURCE_EXHAUSTED" {
+			t.Fatalf("server span status attributes: %v", attrs)
+		}
+		if value, ok := attrs.Value("insurance_hub.product.outcome"); !ok ||
+			value.AsString() != "invalid_request" {
+			t.Fatalf("server span outcome attributes: %v", attrs)
+		}
+		if record["trace_id"] != span.SpanContext().TraceID().String() ||
+			record["span_id"] != span.SpanContext().SpanID().String() {
+			t.Fatalf("completion log is not correlated with server span: %v", record)
+		}
+	}
+	if serverSpans != 1 {
+		t.Fatalf("server spans = %d, want 1", serverSpans)
+	}
+}
+
+type completionLog struct {
+	mu      sync.Mutex
+	buffer  bytes.Buffer
+	written chan struct{}
+}
+
+func (log *completionLog) Write(data []byte) (int, error) {
+	log.mu.Lock()
+	count, err := log.buffer.Write(data)
+	log.mu.Unlock()
+	select {
+	case log.written <- struct{}{}:
+	default:
+	}
+	return count, err
+}
+
+func (log *completionLog) String() string {
+	log.mu.Lock()
+	defer log.mu.Unlock()
+	return log.buffer.String()
 }
 
 func assertMetricFields(t *testing.T, set attribute.Set) {
