@@ -44,7 +44,6 @@ tempo:
           endpoint: 0.0.0.0:6831
         thrift_http:
           endpoint: 0.0.0.0:14268
-    opencensus: null
     otlp:
       protocols:
         grpc:
