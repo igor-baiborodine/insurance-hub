@@ -184,15 +184,26 @@ its version/Pod UID wiring remain disabled until the separate QA activation step
 uses parent-based root sampling, a bounded trace batch, and a ten-second cumulative metric reader
 with explicit request, database, and pool-wait histogram buckets. Both business listeners now
 emit a bounded server span, an application child span for dispatched use cases, one request counter
-and duration observation, and one safe completion log per routed request. HTTP extracts W3C context
-after route selection; gRPC limits tracing to the two registered Product methods and disables its
-automatic meter. Probes, unmatched paths, and malformed requests rejected before dispatch have no
-Product business measurement. Each dispatched read also records pool acquisition and safe SELECT
-child spans, bounded acquire/query/decode outcomes, query and pool-wait durations, and pool
+and duration observation, and one safe completion log per routed request. After route selection,
+HTTP extracts W3C Trace Context and B3 single or multi headers; a valid B3 context takes precedence
+over a conflicting valid W3C context. HTTP injection writes W3C and B3 multi headers from the same
+span so the test-only Go-to-Java consumer can continue context into legacy Brave. Production gRPC
+remains W3C-only, limits tracing to the two registered Product methods, and disables its automatic
+meter. Probes, unmatched paths, and malformed requests rejected before dispatch have no Product
+business measurement. Each dispatched read also records pool acquisition and safe SELECT child
+spans, bounded acquire/query/decode outcomes, query and pool-wait durations, and pool
 usage/max/timeout metrics. An owned runtime callback records Go memory, allocation, GC-cycle,
 goroutine, and processor signals. The Go memory-limit datapoint is present only when a runtime
-memory limit is configured. The database and runtime callbacks stop during the shared
-shutdown budget. Request logs remain local JSON when telemetry is disabled.
+memory limit is configured. The database and runtime callbacks stop during the shared shutdown
+budget. Request logs remain local JSON when telemetry is disabled.
+
+The owning mixed-language continuity check requires Go 1.27.2, Java 14, system Maven, the Docker
+CLI, and a running Docker daemon. It exercises disposable Brave Java-to-Go and test-only Go-to-Java
+HTTP paths without changing the production gateway route:
+
+```sh
+make -C services/product-service test-telemetry-continuity
+```
 
 Callers with a shorter deadline keep that deadline. Acquisition and query work share the request
 budget rather than starting new clocks. Startup, readiness, and shutdown each use their one
