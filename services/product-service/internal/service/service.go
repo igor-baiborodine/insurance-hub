@@ -69,11 +69,21 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 	if err := postgres.CheckReadAccess(startupCtx, pool); err != nil {
 		return fmt.Errorf("run service: verify Product database: %w", err)
 	}
+	databaseObserver, err := postgres.NewObserver(
+		pool,
+		provider.TracerProvider(),
+		provider.MeterProvider(),
+	)
+	if err != nil {
+		return fmt.Errorf("run service: create database observer: %w", err)
+	}
+	resources.databaseObserver = databaseObserver
 
 	reader, err := postgres.NewReader(
 		pool,
 		settings.Database.AcquireTimeout,
 		settings.Database.QueryTimeout,
+		databaseObserver,
 	)
 	if err != nil {
 		return fmt.Errorf("run service: %w", err)
@@ -242,6 +252,7 @@ func waitForRunStop(ctx context.Context, results <-chan serveResult) error {
 type runtimeResources struct {
 	provider           *telemetry.Provider
 	pool               *pgxpool.Pool
+	databaseObserver   *postgres.Observer
 	healthState        *health.State
 	httpServer         *http.Server
 	grpcServer         *grpcgo.Server
@@ -257,6 +268,9 @@ func (resources *runtimeResources) closeAfterStartupFailure(timeout time.Duratio
 	closeListener(resources.managementListener)
 	closeListener(resources.grpcListener)
 	closeListener(resources.httpListener)
+	if resources.databaseObserver != nil {
+		_ = resources.databaseObserver.Close()
+	}
 	if resources.pool != nil {
 		resources.pool.Close()
 	}
@@ -315,8 +329,10 @@ func (resources *runtimeResources) shutdown(timeout time.Duration) (error, error
 			shutdownErr = errors.Join(shutdownErr, err)
 		}
 	}
+	telemetryErr := resources.provider.Shutdown(shutdownCtx)
+	observerErr := resources.databaseObserver.Close()
 	resources.pool.Close()
-	return shutdownErr, resources.provider.Shutdown(shutdownCtx)
+	return errors.Join(shutdownErr, observerErr), telemetryErr
 }
 
 func closeListener(listener net.Listener) {

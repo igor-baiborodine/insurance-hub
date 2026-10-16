@@ -75,6 +75,7 @@ func NewReader(
 	pool *pgxpool.Pool,
 	acquireTimeout time.Duration,
 	queryTimeout time.Duration,
+	observers ...*Observer,
 ) (*Reader, error) {
 	if acquireTimeout <= 0 {
 		return nil, errors.New("create PostgreSQL reader: acquire timeout must be positive")
@@ -85,9 +86,17 @@ func NewReader(
 	if pool == nil {
 		return nil, errors.New("create PostgreSQL reader: pool is required")
 	}
+	var observer *Observer
+	if len(observers) > 1 {
+		return nil, errors.New("create PostgreSQL reader: at most one observer is allowed")
+	}
+	if len(observers) == 1 {
+		observer = observers[0]
+	}
 	return &Reader{
 		pool:           pool,
 		acquireTimeout: acquireTimeout,
 		queryTimeout:   queryTimeout,
+		observer:       observer,
 	}, nil
 }

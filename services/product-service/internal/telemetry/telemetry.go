@@ -53,15 +53,16 @@ var (
 
 // Provider owns the trace and metric providers, propagation, and bounded cleanup.
 type Provider struct {
-	tracerProvider   trace.TracerProvider
-	meterProvider    metric.MeterProvider
-	httpPropagator   propagation.TextMapPropagator
-	grpcPropagator   propagation.TextMapPropagator
-	sdkProvider      *sdktrace.TracerProvider
-	sdkMeterProvider *sdkmetric.MeterProvider
-	exporter         *ownedExporter
-	queueObserver    *spanQueueObserver
-	exporterTimeout  time.Duration
+	tracerProvider      trace.TracerProvider
+	meterProvider       metric.MeterProvider
+	httpPropagator      propagation.TextMapPropagator
+	grpcPropagator      propagation.TextMapPropagator
+	sdkProvider         *sdktrace.TracerProvider
+	sdkMeterProvider    *sdkmetric.MeterProvider
+	runtimeRegistration metric.Registration
+	exporter            *ownedExporter
+	queueObserver       *spanQueueObserver
+	exporterTimeout     time.Duration
 }
 
 // New constructs disabled no-op telemetry or OTLP/gRPC-backed trace and metric providers.
@@ -111,11 +112,15 @@ func (provider *Provider) Shutdown(ctx context.Context) error {
 	}
 	shutdownContext, cancel := context.WithTimeout(ctx, provider.exporterTimeout)
 	defer cancel()
-	return errors.Join(
+	err := errors.Join(
 		provider.sdkProvider.Shutdown(shutdownContext),
 		provider.sdkMeterProvider.Shutdown(shutdownContext),
 		provider.exporter.Shutdown(shutdownContext),
 	)
+	if provider.runtimeRegistration != nil {
+		err = errors.Join(err, provider.runtimeRegistration.Unregister())
+	}
+	return err
 }
 
 type (
@@ -211,16 +216,29 @@ func newProvider(
 			histogramView("db.client.connection.wait_time", databaseBuckets),
 		),
 	)
+	runtimeRegistration, err := registerRuntime(meterProvider)
+	if err != nil {
+		cleanupContext, cancelCleanup := context.WithTimeout(
+			context.Background(),
+			settings.ExporterTimeout,
+		)
+		defer cancelCleanup()
+		_ = meterProvider.Shutdown(cleanupContext)
+		_ = tracerProvider.Shutdown(cleanupContext)
+		_ = owned.Shutdown(cleanupContext)
+		return nil, errors.New("initialize telemetry: runtime instruments failed")
+	}
 	return &Provider{
-		tracerProvider:   tracerProvider,
-		meterProvider:    meterProvider,
-		httpPropagator:   httpPropagator,
-		grpcPropagator:   grpcPropagator,
-		sdkProvider:      tracerProvider,
-		sdkMeterProvider: meterProvider,
-		exporter:         owned,
-		queueObserver:    queueObserver,
-		exporterTimeout:  settings.ExporterTimeout,
+		tracerProvider:      tracerProvider,
+		meterProvider:       meterProvider,
+		httpPropagator:      httpPropagator,
+		grpcPropagator:      grpcPropagator,
+		sdkProvider:         tracerProvider,
+		sdkMeterProvider:    meterProvider,
+		runtimeRegistration: runtimeRegistration,
+		exporter:            owned,
+		queueObserver:       queueObserver,
+		exporterTimeout:     settings.ExporterTimeout,
 	}, nil
 }
 

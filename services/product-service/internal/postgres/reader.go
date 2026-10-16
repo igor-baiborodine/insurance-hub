@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/domain"
@@ -19,13 +20,14 @@ type Reader struct {
 	pool           *pgxpool.Pool
 	acquireTimeout time.Duration
 	queryTimeout   time.Duration
+	observer       *Observer
 }
 
 var _ application.ProductReader = (*Reader)(nil)
 
 // ListProducts returns a complete decoded catalog or an error without a partial result.
 func (reader *Reader) ListProducts(ctx context.Context) ([]domain.Product, error) {
-	connection, err := reader.acquire(ctx)
+	connection, err := reader.acquire(ctx, "list")
 	if err != nil {
 		return nil, err
 	}
@@ -33,19 +35,36 @@ func (reader *Reader) ListProducts(ctx context.Context) ([]domain.Product, error
 
 	queryCtx, cancel := context.WithTimeout(ctx, reader.queryTimeout)
 	defer cancel()
-	rows, err := dbgen.New(connection).ListProducts(queryCtx)
+	var rows []dbgen.Product
+	err = reader.observer.stage(
+		queryCtx,
+		"list",
+		"query",
+		"SELECT products",
+		trace.SpanKindClient,
+		func(ctx context.Context) error {
+			var queryErr error
+			rows, queryErr = dbgen.New(connection).ListProducts(ctx)
+			if queryErr != nil {
+				return classifyContext("list products", ctx, queryErr)
+			}
+			return nil
+		},
+	)
 	if err != nil {
-		return nil, classifyContext("list products", queryCtx, err)
+		return nil, err
 	}
 
 	products := make([]domain.Product, 0, len(rows))
 	for _, row := range rows {
 		product, decodeErr := DecodeProduct(row.Code, row.Definition)
 		if decodeErr != nil {
+			reader.observer.decode(queryCtx, "list", decodeErr)
 			return nil, fmt.Errorf("decode listed product: %w", decodeErr)
 		}
 		products = append(products, product)
 	}
+	reader.observer.decode(queryCtx, "list", nil)
 	return products, nil
 }
 
@@ -54,7 +73,7 @@ func (reader *Reader) GetProduct(
 	ctx context.Context,
 	code string,
 ) (domain.Product, bool, error) {
-	connection, err := reader.acquire(ctx)
+	connection, err := reader.acquire(ctx, "get")
 	if err != nil {
 		return domain.Product{}, false, err
 	}
@@ -62,28 +81,75 @@ func (reader *Reader) GetProduct(
 
 	queryCtx, cancel := context.WithTimeout(ctx, reader.queryTimeout)
 	defer cancel()
-	row, err := dbgen.New(connection).GetProduct(queryCtx, code)
-	if errors.Is(err, pgx.ErrNoRows) {
+	var row dbgen.Product
+	missing := false
+	err = reader.observer.stage(
+		queryCtx,
+		"get",
+		"query",
+		"SELECT product",
+		trace.SpanKindClient,
+		func(ctx context.Context) error {
+			var queryErr error
+			row, queryErr = dbgen.New(connection).GetProduct(ctx, code)
+			if errors.Is(queryErr, pgx.ErrNoRows) {
+				missing = true
+				return nil
+			}
+			if queryErr != nil {
+				return classifyContext("get product", ctx, queryErr)
+			}
+			return nil
+		},
+	)
+	if missing {
 		return domain.Product{}, false, nil
 	}
 	if err != nil {
-		return domain.Product{}, false, classifyContext("get product", queryCtx, err)
+		return domain.Product{}, false, err
 	}
 	product, err := DecodeProduct(row.Code, row.Definition)
+	reader.observer.decode(queryCtx, "get", err)
 	if err != nil {
 		return domain.Product{}, false, fmt.Errorf("decode product: %w", err)
 	}
 	return product, true, nil
 }
 
-func (reader *Reader) acquire(ctx context.Context) (*pgxpool.Conn, error) {
+func (reader *Reader) acquire(ctx context.Context, operation string) (*pgxpool.Conn, error) {
+	readerContext := ctx
 	acquireCtx, cancel := context.WithTimeout(ctx, reader.acquireTimeout)
 	defer cancel()
-	connection, err := reader.pool.Acquire(acquireCtx)
-	if err != nil {
-		return nil, classifyContext("acquire connection", acquireCtx, err)
-	}
-	return connection, nil
+	var connection *pgxpool.Conn
+	err := reader.observer.stage(
+		acquireCtx,
+		operation,
+		"acquire",
+		"product.db.acquire",
+		trace.SpanKindInternal,
+		func(ctx context.Context) error {
+			started := time.Now()
+			var acquireErr error
+			connection, acquireErr = reader.pool.Acquire(ctx)
+			if reader.observer != nil {
+				reader.observer.waitTime.Record(
+					ctx,
+					time.Since(started).Seconds(),
+					poolAttributes,
+				)
+				if acquireErr != nil &&
+					errors.Is(ctx.Err(), context.DeadlineExceeded) &&
+					readerContext.Err() == nil {
+					reader.observer.timeouts.Add(ctx, 1, poolAttributes)
+				}
+			}
+			if acquireErr != nil {
+				return classifyContext("acquire connection", ctx, acquireErr)
+			}
+			return nil
+		},
+	)
+	return connection, err
 }
 
 func classify(operation string, err error) error {

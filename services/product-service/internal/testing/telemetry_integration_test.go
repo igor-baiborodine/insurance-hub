@@ -165,11 +165,19 @@ func TestProductTelemetry(t *testing.T) {
 		for _, name := range []string{
 			"GET /products", "GET /products/{productCode}",
 			"product.v1.ProductService/ListProducts", "product.v1.ProductService/GetProduct",
-			"product.list", "product.get",
+			"product.list", "product.get", "product.db.acquire",
+			"SELECT products", "SELECT product",
 		} {
 			want := 1
 			if name == "product.list" || name == "product.get" {
 				want = 2
+			}
+			if name == "product.db.acquire" || name == "SELECT products" ||
+				name == "SELECT product" {
+				want = 4
+				if name != "product.db.acquire" {
+					want = 2
+				}
 			}
 			if spanNames[name] != want {
 				t.Fatalf(
@@ -180,6 +188,9 @@ func TestProductTelemetry(t *testing.T) {
 					spanNames,
 				)
 			}
+		}
+		if len(spanNames) != 9 {
+			t.Fatalf("unexpected span names: %v", spanNames)
 		}
 		var metricExports []*collectormetric.ExportMetricsServiceRequest
 		for len(collector.metrics) != 0 {
@@ -214,7 +225,47 @@ func TestProductTelemetry(t *testing.T) {
 		if strings.Count(process.logs.String(), "Product request completed") != 4 {
 			t.Fatalf("completion log count != four: %s", process.logs.String())
 		}
+		assertDatabaseAndRuntimeExports(t, metricExports)
 	})
+
+	t.Run(
+		"replacement process has new metric identity and cumulative start",
+		func(t *testing.T) {
+			collector := &telemetryTraceCollector{
+				started:  make(chan struct{}, 4),
+				accepted: make(chan struct{}, 4),
+				metrics: make(
+					chan *collectormetric.ExportMetricsServiceRequest,
+					16,
+				),
+			}
+			endpoint := startTelemetryCollector(t, collector)
+			var instances [2]string
+			var starts [2]uint64
+			for index := range instances {
+				process := startLifecycleProcess(
+					t,
+					binary,
+					harness.RuntimeDatabaseURL(),
+					telemetryEnvironment(endpoint)...)
+				assertGracefulGRPCResult(t, process.getProduct("CAR"), "CAR")
+				started := process.signal(t)
+				process.assertCleanExit(t, started, harness)
+				var exports []*collectormetric.ExportMetricsServiceRequest
+				for len(collector.metrics) != 0 {
+					exports = append(exports, <-collector.metrics)
+				}
+				instances[index], starts[index] = databaseMetricIdentity(t, exports)
+			}
+			if instances[0] == instances[1] || starts[0] == starts[1] {
+				t.Fatalf(
+					"replacement reused identity or counter start: %v %v",
+					instances,
+					starts,
+				)
+			}
+		},
+	)
 
 	t.Run("disabled mode makes no exporter connection", func(t *testing.T) {
 		for _, level := range []string{"info", "warn", "error"} {
@@ -360,8 +411,110 @@ func TestProductTelemetry(t *testing.T) {
 	})
 }
 
+func assertDatabaseAndRuntimeExports(
+	t *testing.T,
+	exports []*collectormetric.ExportMetricsServiceRequest,
+) {
+	t.Helper()
+	if len(exports) == 0 {
+		t.Fatal("no Product metrics exported")
+	}
+	latest := exports[len(exports)-1]
+	metrics := map[string]*metricv1.Metric{}
+	for _, resource := range latest.ResourceMetrics {
+		for _, scope := range resource.ScopeMetrics {
+			for _, measurement := range scope.Metrics {
+				metrics[measurement.Name] = measurement
+			}
+		}
+	}
+	for _, name := range []string{
+		"insurance_hub.product.database.operations", "db.client.operation.duration",
+		"db.client.connection.count", "db.client.connection.max",
+		"db.client.connection.wait_time", "go.memory.used", "go.memory.limit",
+		"go.memory.allocated", "go.memory.allocations", "go.memory.gc.goal",
+		"go.memory.gc.cycles", "go.goroutine.count", "go.processor.limit",
+	} {
+		if metrics[name] == nil {
+			t.Errorf("missing Product metric %q", name)
+		}
+	}
+	if t.Failed() {
+		return
+	}
+	var operations int64
+	for _, point := range metrics["insurance_hub.product.database.operations"].GetSum().DataPoints {
+		operations += point.GetAsInt()
+	}
+	if operations != 12 {
+		t.Errorf("database stage observations=%d, want 12", operations)
+	}
+	var queryCount uint64
+	for _, point := range metrics["db.client.operation.duration"].GetHistogram().DataPoints {
+		queryCount += point.Count
+	}
+	if queryCount != 4 {
+		t.Errorf("database query observations=%d, want 4", queryCount)
+	}
+	var waitCount uint64
+	for _, point := range metrics["db.client.connection.wait_time"].GetHistogram().DataPoints {
+		waitCount += point.Count
+	}
+	if waitCount != 4 {
+		t.Errorf("pool wait observations=%d, want 4", waitCount)
+	}
+	if len(metrics["go.memory.used"].GetSum().DataPoints) != 2 {
+		t.Errorf("go.memory.used must have stack and other points")
+	}
+	if len(metrics["go.memory.gc.cycles"].GetSum().DataPoints) != 1 {
+		t.Errorf("go.memory.gc.cycles must have one process-local point")
+	}
+}
+
+func databaseMetricIdentity(
+	t *testing.T,
+	exports []*collectormetric.ExportMetricsServiceRequest,
+) (string, uint64) {
+	t.Helper()
+	for index := len(exports) - 1; index >= 0; index-- {
+		for _, resource := range exports[index].ResourceMetrics {
+			instance := ""
+			for _, attr := range resource.Resource.Attributes {
+				if attr.Key == "service.instance.id" {
+					instance = attr.Value.GetStringValue()
+				}
+			}
+			for _, scope := range resource.ScopeMetrics {
+				for _, measurement := range scope.Metrics {
+					if measurement.Name != "insurance_hub.product.database.operations" {
+						continue
+					}
+					var total int64
+					var start uint64
+					for _, point := range measurement.GetSum().DataPoints {
+						total += point.GetAsInt()
+						start = point.StartTimeUnixNano
+					}
+					if instance == "" || start == 0 || total != 3 {
+						t.Fatalf(
+							"database counter identity=%q start=%d total=%d",
+							instance,
+							start,
+							total,
+						)
+					}
+					return instance, start
+				}
+			}
+		}
+	}
+	t.Fatal("replacement process exported no database counter")
+	return "", 0
+}
+
 func telemetryEnvironment(endpoint string) []string {
 	return []string{
+		"GOMEMLIMIT=512MiB",
 		"SERVICE_NAME=product-service",
 		"OTEL_ENABLED=true",
 		"OTEL_EXPORTER_OTLP_ENDPOINT=" + endpoint,
