@@ -476,11 +476,65 @@ tempo-ui: _monitoring-ns-check ## Access Tempo HTTP API via port-forward
 #########################################
 
 ALLOY_HELM_CHART_VERSION := 1.13.1
+ALLOY_IMAGE := grafana/alloy:v1.20.1
+ALLOY_CONFIG_PATH := overlays/qa/infra/alloy/config.alloy
+ALLOY_VALUES_PATH := overlays/qa/infra/alloy/values.yaml
+ALLOY_CHECK_SCRIPT := scripts/alloy/check-config.py
+ALLOY_CHECK_TEST := scripts/alloy/check-config-test.py
+
+.PHONY: alloy-config-check
+alloy-config-check: ## Validate Alloy source injection, pinned config, render, and scoped RBAC without applying
+	@command -v helm >/dev/null || { echo "ERROR: helm is required."; exit 1; }
+	@command -v docker >/dev/null || { echo "ERROR: docker is required."; exit 1; }
+	@command -v python3 >/dev/null || { echo "ERROR: Python 3.9 or newer is required."; exit 1; }
+	@python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' || { \
+		echo "ERROR: Python 3.9 or newer is required."; exit 1; \
+	}
+	@docker image inspect "$(ALLOY_IMAGE)" >/dev/null 2>&1 || { \
+		echo "ERROR: Missing pinned image $(ALLOY_IMAGE). Pull it explicitly before validation."; \
+		exit 1; \
+	}
+	@helm template qa-alloy grafana/alloy \
+		--version "$(ALLOY_HELM_CHART_VERSION)" \
+		--namespace qa-monitoring \
+		--values "$(ALLOY_VALUES_PATH)" \
+		--set-file alloy.configMap.content="$(ALLOY_CONFIG_PATH)" \
+		--show-only templates/rbac.yaml | \
+		PYTHONDONTWRITEBYTECODE=1 python3 "$(ALLOY_CHECK_SCRIPT)" \
+			--values "$(ALLOY_VALUES_PATH)" \
+			--config "$(ALLOY_CONFIG_PATH)" \
+			--makefile Makefile \
+			--rendered-rbac -
+	@helm template qa-alloy grafana/alloy \
+		--version "$(ALLOY_HELM_CHART_VERSION)" \
+		--namespace qa-monitoring \
+		--values "$(ALLOY_VALUES_PATH)" \
+		--set-file alloy.configMap.content="$(ALLOY_CONFIG_PATH)" \
+		--show-only templates/configmap.yaml | \
+		awk 'copy { sub(/^    /, ""); print } /^  config\.alloy: \|-$$/ { copy = 1 }' | \
+		cmp -s - "$(ALLOY_CONFIG_PATH)" || { \
+			echo "ERROR: Rendered Alloy ConfigMap differs from $(ALLOY_CONFIG_PATH)."; \
+			exit 1; \
+		}
+	@docker run --rm -i "$(ALLOY_IMAGE)" validate /dev/stdin < "$(ALLOY_CONFIG_PATH)"
+	@helm template qa-alloy grafana/alloy \
+		--version "$(ALLOY_HELM_CHART_VERSION)" \
+		--namespace qa-monitoring \
+		--values "$(ALLOY_VALUES_PATH)" \
+		--set-file alloy.configMap.content="$(ALLOY_CONFIG_PATH)" >/dev/null
+	@echo "✅ Alloy chart $(ALLOY_HELM_CHART_VERSION) and $(ALLOY_IMAGE) configuration passed."
+
+.PHONY: alloy-test-tooling
+alloy-test-tooling: ## Exercise shared Alloy identity, allowlist, target, position, and RBAC fixtures
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ALLOY_CHECK_TEST)" -v
+
+.PHONY: check-observability
+check-observability: alloy-config-check alloy-test-tooling ## Run non-mutating Alloy configuration and policy checks
 
 .PHONY: alloy-install
 alloy-install: _monitoring-ns-check ## Install Grafana Alloy in QA cluster
-	@if [ ! -f "$(OVERLAYS_FILE_PATH)/infra/alloy/values.yaml" ]; then \
-		echo "ERROR: Missing Alloy values file at '$(OVERLAYS_FILE_PATH)/infra/alloy/values.yaml'."; \
+	@if [ ! -f "$(ALLOY_VALUES_PATH)" ]; then \
+		echo "ERROR: Missing Alloy values file at '$(ALLOY_VALUES_PATH)'."; \
 		exit 1; \
 	fi
 	@helm repo add grafana https://grafana.github.io/helm-charts --force-update
@@ -490,7 +544,8 @@ alloy-install: _monitoring-ns-check ## Install Grafana Alloy in QA cluster
 		--version "$(ALLOY_HELM_CHART_VERSION)" \
 		--kube-context "$(CUR_CTX)" \
 		--namespace $(MONITORING_NS) \
-		--values "$(OVERLAYS_FILE_PATH)"/infra/alloy/values.yaml \
+		--values "$(ALLOY_VALUES_PATH)" \
+		--set-file alloy.configMap.content="$(ALLOY_CONFIG_PATH)" \
 		--atomic --wait --timeout 10m
 	@echo "✅ Alloy deployment initiated. Check status with: make alloy-status"
 
