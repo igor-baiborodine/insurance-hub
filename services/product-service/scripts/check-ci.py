@@ -419,6 +419,7 @@ def exercise_selection(selector: dict) -> None:
 def exercise_coverage_path(validation: dict, upload: dict) -> None:
     module_dir = "services/claims-service"
     coverage_relative = f"{module_dir}/coverage.txt"
+    integration_coverage_relative = f"{module_dir}/integration-coverage.txt"
     with tempfile.TemporaryDirectory(prefix="insurance-hub-go-pr-coverage-") as temporary:
         fixture = Path(temporary)
         module = fixture / module_dir
@@ -428,12 +429,15 @@ def exercise_coverage_path(validation: dict, upload: dict) -> None:
             "check-go-pr:\n"
             "\t@mkdir -p \"$(dir $(COVERAGE_FILE))\"\n"
             "\t@printf 'mode: atomic\\n' > \"$(COVERAGE_FILE)\"\n"
+            "\t@printf 'mode: atomic\\n' > integration-coverage.txt\n"
             "\t@test \"$(FORMAT_SCOPE)\" = changed\n"
             "\t@test -n \"$(FORMAT_BASE)\"\n",
             encoding="utf-8",
         )
         upload_path = fixture / coverage_relative
+        integration_upload_path = fixture / integration_coverage_relative
         upload_path.write_text("stale\n", encoding="utf-8")
+        integration_upload_path.write_text("stale\n", encoding="utf-8")
         environment = os.environ.copy()
         environment.update({
             "COVERAGE_FILE": str(upload_path),
@@ -449,17 +453,20 @@ def exercise_coverage_path(validation: dict, upload: dict) -> None:
         require(completed.returncode == 0,
                 f"coverage path execution returned {completed.returncode}: "
                 f"{completed.stderr.strip()}")
-        selected_output = "${{ steps.select.outputs.coverage_file }}"
+        selected_output = "${{ steps.select.outputs.coverage_files }}"
         require(upload["with"]["files"] == selected_output,
-                "coverage path fixture requires the selected report output for upload")
-        resolved_upload = fixture / upload["with"]["files"].replace(
-            selected_output, coverage_relative)
-        require(upload_path == resolved_upload and resolved_upload.read_text(encoding="utf-8") ==
-                "mode: atomic\n",
-                "make -C coverage output does not match the Codecov upload path")
-        duplicated = module / coverage_relative
-        require(not duplicated.exists(),
-                "make -C generated coverage under a duplicated module path")
+                "coverage path fixture requires the selected report outputs for upload")
+        coverage_files = f"{coverage_relative},{integration_coverage_relative}"
+        resolved_uploads = [fixture / relative for relative in
+                            upload["with"]["files"].replace(
+                                selected_output, coverage_files).split(",")]
+        require(resolved_uploads == [upload_path, integration_upload_path] and
+                all(path.read_text(encoding="utf-8") == "mode: atomic\n"
+                    for path in resolved_uploads),
+                "make -C coverage outputs do not match the Codecov upload paths")
+        duplicated = [module / coverage_relative, module / integration_coverage_relative]
+        require(not any(path.exists() for path in duplicated),
+                "make -C generated coverage under duplicated module paths")
 
 
 def validate_modules(workflow: dict, *, run_execution_cases: bool = False) -> None:
@@ -513,6 +520,9 @@ def validate_modules(workflow: dict, *, run_execution_cases: bool = False) -> No
         "echo 'validation_target=check-go-pr'",
         'echo "format_base=$merge_base"',
         'echo "coverage_file=$coverage_file"',
+        'coverage_files="$coverage_file"',
+        'coverage_files+=",$module_dir/integration-coverage.txt"',
+        'echo "coverage_files=$coverage_files"',
         'echo "coverage_flag=$coverage_flag"',
     ]
     for fragment in selector_contract:
@@ -549,6 +559,7 @@ def validate_modules(workflow: dict, *, run_execution_cases: bool = False) -> No
                 "VALIDATION_TARGET": "${{ steps.select.outputs.validation_target }}",
             }, "selected module validation output wiring differs")
     require('rm -f -- "$COVERAGE_FILE"' in validation["run"] and
+            'rm -f -- "$MODULE_DIR/integration-coverage.txt"' in validation["run"] and
             "if [[ \"$MODULE_ROLE\" != 'service-scaffold' ]]" in validation["run"] and
             'make -C "$MODULE_DIR" "$VALIDATION_TARGET"' in validation["run"] and
             'FORMAT_SCOPE=changed FORMAT_BASE="$FORMAT_BASE"' in validation["run"],
@@ -561,12 +572,12 @@ def validate_modules(workflow: dict, *, run_execution_cases: bool = False) -> No
         "Codecov upload must run only after successful non-scaffold validation")
     require(upload.get("uses") == "codecov/codecov-action@v7" and upload.get("with") == {
         "token": "${{ secrets.CODECOV_TOKEN }}",
-        "files": "${{ steps.select.outputs.coverage_file }}",
+        "files": "${{ steps.select.outputs.coverage_files }}",
         "flags": "${{ steps.select.outputs.coverage_flag }}",
         "name": "${{ steps.select.outputs.coverage_flag }}",
         "disable_search": "true",
         "fail_ci_if_error": "true",
-    }, "Codecov upload must use only the selected module's derived current report")
+    }, "Codecov upload must use only the selected module's derived current reports")
     require("services/product-service" not in str(upload),
             "generic coverage upload may not hard-code Product")
     if run_execution_cases:
@@ -640,6 +651,9 @@ def main() -> None:
         .update(run=step_named(item["jobs"]["validate"], "Run selected module validation")["run"]
                 .replace('rm -f -- "$COVERAGE_FILE"', ":")),
         lambda item: step_named(item["jobs"]["validate"], "Run selected module validation")
+        .update(run=step_named(item["jobs"]["validate"], "Run selected module validation")["run"]
+                .replace('rm -f -- "$MODULE_DIR/integration-coverage.txt"', ":")),
+        lambda item: step_named(item["jobs"]["validate"], "Run selected module validation")
         ["env"].update({"COVERAGE_FILE": "${{ steps.select.outputs.coverage_file }}"}),
         lambda item: step_named(item["jobs"]["validate"], "Select Go module")
         .update(run=step_named(item["jobs"]["validate"], "Select Go module")["run"]
@@ -668,7 +682,7 @@ def main() -> None:
         raise ValueError("controlled Go PR workflow corruption was accepted")
 
     print("check-ci: generic release with thirty trigger cases, selected-module PR validation, "
-          "eleven selection cases, one coverage path execution case, and twenty controlled "
+          "eleven selection cases, one coverage path execution case, and twenty-one controlled "
           "corruptions passed")
 
 

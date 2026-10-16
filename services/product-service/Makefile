@@ -37,6 +37,7 @@ PROTOVALIDATE_GO_VERSION := v1.4.0
 PROTOVALIDATE_SCHEMA_GO_VERSION := v1.36.12-20260825204119-511051f7f437.1
 OTEL_VERSION := v1.46.0
 OTEL_GRPC_VERSION := v0.71.0
+OTEL_B3_VERSION := v1.46.0
 X_NET_VERSION := v0.60.0
 PGX_VERSION := v5.11.0
 TESTCONTAINERS_VERSION := v0.44.0
@@ -80,7 +81,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 .PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage \
-	coverage-validate coverage-check test-integration \
+	coverage-validate coverage-check test-integration test-telemetry-continuity \
 	build build-security-harness build-security-verifier build-lifecycle-client image-build image-check deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test vulncheck \
 	bootstrap-doc-tools check-docs preview-docs check-go-pr check test-tooling run
@@ -184,6 +185,7 @@ update-deps:
 		go.opentelemetry.io/otel/sdk/metric@$(OTEL_VERSION) \
 		go.opentelemetry.io/otel/trace@$(OTEL_VERSION) \
 		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
+		go.opentelemetry.io/contrib/propagators/b3@$(OTEL_B3_VERSION) \
 		google.golang.org/grpc@$(GRPC_GO_VERSION) \
 		google.golang.org/protobuf@$(PROTOBUF_GO_VERSION) \
 		github.com/jackc/pgx/v5@$(PGX_VERSION) \
@@ -220,6 +222,9 @@ test-integration:
 		FIXTURE_SET="$(FIXTURE_SET)" \
 		INTEGRATION_COVERAGE_FILE="$(INTEGRATION_COVERAGE_FILE)" \
 		./scripts/test-integration.sh
+
+test-telemetry-continuity: ## Exercise disposable Brave Java ↔ Go HTTP trace continuity
+	@GO="$(GO)" ./scripts/test-telemetry-continuity.sh
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \

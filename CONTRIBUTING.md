@@ -208,7 +208,7 @@ process for future modules or workspaces.
 
 #### Change-Based Local Validation
 
-**Go PR Module Validation** runs only for qualifying module inputs and validates one selected module.
+**Go Module PR Check** runs only for qualifying module inputs and validates one selected module.
 Auxiliary scripts, Makefiles, documentation, workflow configuration, topology metadata, deployment
 assets, database-role tooling, images, and the combined Product security boundary remain local review
 responsibilities. Select checks from the changed behavior; do not run every command for every pull
