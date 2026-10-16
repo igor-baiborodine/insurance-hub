@@ -22,6 +22,39 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/telemetry"
 )
 
+type notifyingSpanRecorder struct {
+	*tracetest.SpanRecorder
+	ended chan struct{}
+}
+
+func newNotifyingSpanRecorder() *notifyingSpanRecorder {
+	return &notifyingSpanRecorder{
+		SpanRecorder: tracetest.NewSpanRecorder(),
+		ended:        make(chan struct{}, 1),
+	}
+}
+
+func (recorder *notifyingSpanRecorder) OnEnd(span sdktrace.ReadOnlySpan) {
+	recorder.SpanRecorder.OnEnd(span)
+	select {
+	case recorder.ended <- struct{}{}:
+	default:
+	}
+}
+
+func (recorder *notifyingSpanRecorder) waitForEnded(t *testing.T, want int) {
+	t.Helper()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for len(recorder.Ended()) < want {
+		select {
+		case <-recorder.ended:
+		case <-timer.C:
+			t.Fatalf("ended spans = %d, want at least %d", len(recorder.Ended()), want)
+		}
+	}
+}
+
 func TestProductGRPC_W3CParentAndB3IsolationOnActualListener(t *testing.T) {
 	// given
 	propagationProvider, err := telemetry.New(
@@ -32,7 +65,7 @@ func TestProductGRPC_W3CParentAndB3IsolationOnActualListener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recorder := tracetest.NewSpanRecorder()
+	recorder := newNotifyingSpanRecorder()
 	tracerProvider := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
 		sdktrace.WithSpanProcessor(recorder),
@@ -98,9 +131,10 @@ func TestProductGRPC_W3CParentAndB3IsolationOnActualListener(t *testing.T) {
 		}
 	}
 	cases := []struct {
-		name    string
-		headers metadata.MD
-		check   func(*testing.T, []sdktrace.ReadOnlySpan)
+		name      string
+		headers   metadata.MD
+		wantSpans int
+		check     func(*testing.T, []sdktrace.ReadOnlySpan)
 	}{
 		{
 			name: "sampled w3c joins remote parent",
@@ -108,6 +142,7 @@ func TestProductGRPC_W3CParentAndB3IsolationOnActualListener(t *testing.T) {
 				"traceparent",
 				"00-"+remoteTrace+"-"+remoteSpan+"-01",
 			),
+			wantSpans: 1,
 			check: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
 				t.Helper()
 				if len(spans) != 1 {
@@ -152,6 +187,7 @@ func TestProductGRPC_W3CParentAndB3IsolationOnActualListener(t *testing.T) {
 				"x-b3-sampled",
 				"1",
 			),
+			wantSpans: 1,
 			check: func(t *testing.T, spans []sdktrace.ReadOnlySpan) {
 				t.Helper()
 				if len(spans) != 1 {
@@ -177,6 +213,7 @@ func TestProductGRPC_W3CParentAndB3IsolationOnActualListener(t *testing.T) {
 
 			// when
 			call(t, ctx)
+			recorder.waitForEnded(t, before+test.wantSpans)
 
 			// then
 			spans := recorder.Ended()[before:]
