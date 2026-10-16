@@ -30,7 +30,7 @@ catalog, and Java-routing evidence rather than relying on that historical pass.
 | --- | --- |
 | Runtime image | Product module Makefile; pinned Go 1.27.2 builder and minimal non-root runtime; `linux/amd64`, `GOWORK=off` |
 | Publication | **Go Service Release** runs automatically for a canonical `main` push that changes image-build inputs for exactly one `services/<service>-service`; it owns GHCR publication, scoped Git/GitHub release identities, and the dormant QA semantic-tag update |
-| PR validation | **Go PR Module Validation** owns Product's focused selected-module Go checks for qualifying inputs; release-selector, image, manifest, role-tooling, baseline, deployment-tooling, and combined Java/Go security checks remain change-based local review evidence |
+| PR validation | **Go Module PR Check** owns Product's focused selected-module Go checks for qualifying inputs; release-selector, image, manifest, role-tooling, baseline, deployment-tooling, and combined Java/Go security checks remain change-based local review evidence |
 | QA desired state | The release workflow commits the generated 1.x semantic tag; activation separately adds `./product` through review, after which `flux-system/insurance-hub` and `flux-system/qa-svc` reconcile `main` |
 | Local-dev desired state | Explicit `go-svc-* SVC_NAME=product` commands and the local Go overlay |
 | Database login and Secret | Maintainer with Kubernetes/CNPG administrative access, through `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader`; outside application startup and Flux |

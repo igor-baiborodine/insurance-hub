@@ -149,7 +149,7 @@ and Product-specific delegates are documented in the topology guide.
 
 ### Continuous integration
 
-[Go PR Module Validation](../../.github/workflows/go-pr-mod.yml) runs only on pull requests to
+[Go Module PR Check](../../.github/workflows/go-pr-mod.yml) runs only on pull requests to
 `main` when qualifying Go source, generated Go output, module metadata, Protobuf contracts, contract
 baselines, or lint/generator configuration changes in this scaffold or an immediate
 `services/*-service` module. Module scripts, Makefiles, documentation, workflow files, topology

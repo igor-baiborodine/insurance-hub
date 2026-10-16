@@ -1,4 +1,4 @@
-name: Go PR Module Validation
+name: Go Module PR Check
 
 on:
   pull_request:

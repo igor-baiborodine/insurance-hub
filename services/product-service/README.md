@@ -365,7 +365,7 @@ not publish an image. The workflow creates the scoped semantic release, builds o
 semantic and short-SHA image tags, and commits the semantic version to the dormant QA overlay. QA
 activation remains a separate reviewed Git/Flux operation.
 
-**Go PR Module Validation** runs Product's focused `check-go-pr` target only when a qualifying
+**Go Module PR Check** runs Product's focused `check-go-pr` target only when a qualifying
 Product input changes and the complete pull-request diff touches no second supported Go module. It
 owns Product's Go, Protobuf, SQL, race-enabled unit/coverage, disposable PostgreSQL integration,
 build, dependency, generated-code, contract, vulnerability, and 75% coverage gates. Release
