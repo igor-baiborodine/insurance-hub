@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/contrib/propagators/b3"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
@@ -135,7 +136,10 @@ func newProvider(
 	createExporter exporterFactory,
 	createMetricReader metricReaderFactory,
 ) (*Provider, error) {
-	httpPropagator := propagation.TraceContext{}
+	httpPropagator := propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		b3.New(b3.WithInjectEncoding(b3.B3MultipleHeader)),
+	)
 	grpcPropagator := propagation.TraceContext{}
 	if !settings.Enabled {
 		return &Provider{
