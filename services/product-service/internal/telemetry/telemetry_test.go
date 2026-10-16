@@ -1,8 +1,10 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/url"
 	"reflect"
 	"strings"
@@ -500,7 +502,32 @@ func TestProvider_SaturatedQueueDropsWithoutBlockingAndRecovers(t *testing.T) {
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
+	defer func() {
+		select {
+		case <-exporter.release:
+		default:
+			close(exporter.release)
+		}
+	}()
 	provider := enabledProvider(t, exporter, 2*time.Second)
+	var warnings bytes.Buffer
+	diagnostics := &exportDiagnostics{
+		logger: slog.New(slog.NewJSONHandler(&warnings, nil)),
+	}
+	warningStarted := make(chan struct{})
+	releaseWarning := make(chan struct{})
+	defer func() {
+		select {
+		case <-releaseWarning:
+		default:
+			close(releaseWarning)
+		}
+	}()
+	provider.queueObserver.errorHandler = errorHandlerFunc(func(err error) {
+		close(warningStarted)
+		<-releaseWarning
+		diagnostics.Handle(err)
+	})
 	tracer := provider.TracerProvider().Tracer("test")
 	for range traceBatchSize {
 		_, span := tracer.Start(context.Background(), "first-batch")
@@ -521,14 +548,32 @@ func TestProvider_SaturatedQueueDropsWithoutBlockingAndRecovers(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 2*time.Second {
 		t.Fatalf("span completion blocked under saturation: %s", elapsed)
 	}
+	select {
+	case <-warningStarted:
+	case <-time.After(time.Second):
+		t.Fatal("queue saturation warning did not start")
+	}
 	close(exporter.release)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := provider.ForceFlush(ctx); err != nil {
 		t.Fatalf("flush after recovery: %v", err)
 	}
-	if err := provider.Shutdown(ctx); err != nil {
-		t.Fatalf("shutdown after recovery: %v", err)
+	shutdownResult := make(chan error, 1)
+	go func() { shutdownResult <- provider.Shutdown(ctx) }()
+	select {
+	case err := <-shutdownResult:
+		t.Fatalf("shutdown returned before the warning was emitted: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseWarning)
+	select {
+	case err := <-shutdownResult:
+		if err != nil {
+			t.Fatalf("shutdown after recovery: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("shutdown did not finish after releasing the warning")
 	}
 	wantProduced := int64(traceBatchSize + traceQueueSize + excess)
 	gotExported := exporter.exported.Load()
@@ -542,6 +587,15 @@ func TestProvider_SaturatedQueueDropsWithoutBlockingAndRecovers(t *testing.T) {
 	if !provider.queueObserver.saturated.Load() {
 		t.Fatal("queue saturation was not reported")
 	}
+	if got := strings.Count(warnings.String(), "telemetry span queue saturated"); got != 1 {
+		t.Fatalf("queue saturation warnings after shutdown = %d, want one", got)
+	}
+}
+
+type errorHandlerFunc func(error)
+
+func (handler errorHandlerFunc) Handle(err error) {
+	handler(err)
 }
 
 func TestNew_RejectsInvalidEnabledSettings(t *testing.T) {

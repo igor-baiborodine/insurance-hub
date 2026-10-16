@@ -191,7 +191,12 @@ func newProvider(
 		sdktrace.WithBatchTimeout(traceBatchDelay),
 		sdktrace.WithExportTimeout(exportTimeout),
 	)
-	queueObserver := &spanQueueObserver{SpanProcessor: batchProcessor, exporter: owned}
+	queueObserver := &spanQueueObserver{
+		SpanProcessor: batchProcessor,
+		exporter:      owned,
+		errorHandler:  otel.GetErrorHandler(),
+		warningDone:   make(chan struct{}),
+	}
 	tracerProvider := sdktrace.NewTracerProvider(
 		sdktrace.WithResource(resourceIdentity),
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
@@ -287,9 +292,11 @@ func (exporter *ownedExporter) ExportSpans(
 // At most one batch and one queue of spans can be waiting before export begins.
 type spanQueueObserver struct {
 	sdktrace.SpanProcessor
-	exporter  *ownedExporter
-	ended     atomic.Uint64
-	saturated atomic.Bool
+	exporter     *ownedExporter
+	errorHandler otel.ErrorHandler
+	warningDone  chan struct{}
+	ended        atomic.Uint64
+	saturated    atomic.Bool
 }
 
 func (observer *spanQueueObserver) OnEnd(span sdktrace.ReadOnlySpan) {
@@ -297,8 +304,23 @@ func (observer *spanQueueObserver) OnEnd(span sdktrace.ReadOnlySpan) {
 	ended := observer.ended.Add(1)
 	if ended > observer.exporter.attempted.Load()+traceQueueSize+traceBatchSize &&
 		observer.saturated.CompareAndSwap(false, true) {
-		go otel.Handle(errSpanQueueSaturated)
+		go func() {
+			defer close(observer.warningDone)
+			observer.errorHandler.Handle(errSpanQueueSaturated)
+		}()
 	}
+}
+
+func (observer *spanQueueObserver) Shutdown(ctx context.Context) error {
+	err := observer.SpanProcessor.Shutdown(ctx)
+	if observer.saturated.Load() {
+		select {
+		case <-observer.warningDone:
+		case <-ctx.Done():
+			err = errors.Join(err, ctx.Err())
+		}
+	}
+	return err
 }
 
 func (exporter *ownedExporter) Shutdown(ctx context.Context) error {
