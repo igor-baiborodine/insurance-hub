@@ -11,6 +11,11 @@ import (
 	"testing"
 	"time"
 
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
 	integrationtest "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/testing"
 )
@@ -257,6 +262,221 @@ func TestPostgresReader(t *testing.T) {
 			t.Errorf("bounded acquisition list = %+v, error=%v", products, listErr)
 		}
 		assertNoAcquiredConnections(t, reader)
+	})
+
+	t.Run("real reads emit bounded database and pool signals", func(t *testing.T) {
+		if _, loadErr := harness.LoadCatalog(
+			ctx,
+			integrationtest.FixtureQA,
+		); loadErr != nil {
+			t.Fatalf("load catalog: %v", loadErr)
+		}
+		metricReader := sdkmetric.NewManualReader()
+		meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(metricReader))
+		spanRecorder := tracetest.NewSpanRecorder()
+		traceProvider := sdktrace.NewTracerProvider(
+			sdktrace.WithSpanProcessor(spanRecorder),
+		)
+		observer, observerErr := NewObserver(pool, traceProvider, meterProvider)
+		if observerErr != nil {
+			t.Fatalf("new observer: %v", observerErr)
+		}
+		t.Cleanup(func() {
+			_ = observer.Close()
+			_ = meterProvider.Shutdown(context.Background())
+			_ = traceProvider.Shutdown(context.Background())
+		})
+		observedReader, readerErr := NewReader(pool, time.Second, time.Second, observer)
+		if readerErr != nil {
+			t.Fatalf("observed reader: %v", readerErr)
+		}
+		readCtx, parent := traceProvider.Tracer("test").Start(ctx, "read")
+		if _, listErr := observedReader.ListProducts(readCtx); listErr != nil {
+			t.Fatalf("list: %v", listErr)
+		}
+		if _, found, getErr := observedReader.GetProduct(
+			readCtx,
+			"CAR",
+		); getErr != nil ||
+			!found {
+			t.Fatalf("get: found=%t error=%v", found, getErr)
+		}
+		if _, found, getErr := observedReader.GetProduct(
+			readCtx,
+			"MISSING",
+		); getErr != nil ||
+			found {
+			t.Fatalf("missing: found=%t error=%v", found, getErr)
+		}
+		parent.End()
+		spans := spanRecorder.Ended()
+		if len(spans) != 7 {
+			t.Fatalf("ended spans=%d, want parent plus six database spans", len(spans))
+		}
+		for _, span := range spans {
+			if span.Name() == "read" {
+				continue
+			}
+			if span.Parent().SpanID() != parent.SpanContext().SpanID() {
+				t.Fatalf("span %q has unexpected parent", span.Name())
+			}
+			for _, attr := range span.Attributes() {
+				if attr.Key == "db.statement" || attr.Key == "db.query.text" {
+					t.Fatalf("span %q includes SQL text", span.Name())
+				}
+			}
+		}
+		if resetErr := harness.ResetRows(ctx, []integrationtest.FixtureRow{
+			{
+				Code:                      "CORRUPT",
+				RawLosslessDefinitionJSON: `{"covers":[{"unexpected":true}]}`,
+			},
+		}); resetErr != nil {
+			t.Fatalf("reset corrupt row: %v", resetErr)
+		}
+		if _, _, corruptErr := observedReader.GetProduct(
+			ctx,
+			"CORRUPT",
+		); !errors.Is(
+			corruptErr,
+			application.ErrInvalidDefinition,
+		) {
+			t.Fatalf("corrupt read: %v", corruptErr)
+		}
+		canceledCtx, cancelRead := context.WithCancel(ctx)
+		cancelRead()
+		if _, canceledErr := observedReader.ListProducts(
+			canceledCtx,
+		); !errors.Is(
+			canceledErr,
+			context.Canceled,
+		) {
+			t.Fatalf("canceled read: %v", canceledErr)
+		}
+		held, acquireErr := pool.Acquire(ctx)
+		if acquireErr != nil {
+			t.Fatalf("hold connection: %v", acquireErr)
+		}
+		var pressured metricdata.ResourceMetrics
+		if collectErr := metricReader.Collect(ctx, &pressured); collectErr != nil {
+			t.Fatalf("collect pool pressure: %v", collectErr)
+		}
+		used := int64(-1)
+		maximum := int64(-1)
+		for _, scope := range pressured.ScopeMetrics {
+			for _, measurement := range scope.Metrics {
+				switch measurement.Name {
+				case "db.client.connection.count":
+					for _, point := range measurement.Data.(metricdata.Sum[int64]).DataPoints {
+						for _, attr := range point.Attributes.ToSlice() {
+							if string(
+								attr.Key,
+							) == "db.client.connection.state" &&
+								attr.Value.AsString() == "used" {
+								used = point.Value
+							}
+						}
+					}
+				case "db.client.connection.max":
+					maximum = measurement.Data.(metricdata.Sum[int64]).DataPoints[0].Value
+				}
+			}
+		}
+		if used != 1 || maximum != 1 {
+			t.Fatalf("pool pressure used/max=%d/%d, want 1/1", used, maximum)
+		}
+		observedReader.acquireTimeout = 20 * time.Millisecond
+		_, timeoutErr := observedReader.ListProducts(ctx)
+		held.Release()
+		if !errors.Is(timeoutErr, context.DeadlineExceeded) {
+			t.Fatalf("pool timeout: %v", timeoutErr)
+		}
+		closedPool, openErr := openPool(ctx, harness.RuntimeDatabaseURL(), 1, time.Second)
+		if openErr != nil {
+			t.Fatalf("open second reader pool: %v", openErr)
+		}
+		closedReader, closedReaderErr := NewReader(
+			closedPool,
+			time.Second,
+			time.Second,
+			observer,
+		)
+		if closedReaderErr != nil {
+			t.Fatalf("create second reader: %v", closedReaderErr)
+		}
+		closedPool.Close()
+		if _, unavailableErr := closedReader.ListProducts(
+			ctx,
+		); !errors.Is(
+			unavailableErr,
+			application.ErrUnavailable,
+		) {
+			t.Fatalf("closed pool read: %v", unavailableErr)
+		}
+		var result metricdata.ResourceMetrics
+		if collectErr := metricReader.Collect(ctx, &result); collectErr != nil {
+			t.Fatalf("collect metrics: %v", collectErr)
+		}
+		metrics := map[string]metricdata.Metrics{}
+		for _, scope := range result.ScopeMetrics {
+			for _, measurement := range scope.Metrics {
+				metrics[measurement.Name] = measurement
+			}
+		}
+		for _, name := range []string{
+			"insurance_hub.product.database.operations", "db.client.operation.duration",
+			"db.client.connection.count", "db.client.connection.max",
+			"db.client.connection.timeouts", "db.client.connection.wait_time",
+		} {
+			if _, exists := metrics[name]; !exists {
+				t.Errorf("missing metric %q", name)
+			}
+		}
+		if sum, ok := metrics["db.client.connection.timeouts"].Data.(metricdata.Sum[int64]); !ok ||
+			len(sum.DataPoints) != 1 ||
+			sum.DataPoints[0].Value != 1 {
+			t.Errorf(
+				"pool timeout counter = %#v",
+				metrics["db.client.connection.timeouts"],
+			)
+		}
+		if histogram, ok := metrics["db.client.operation.duration"].Data.(metricdata.Histogram[float64]); !ok ||
+			len(histogram.DataPoints) != 2 ||
+			histogram.DataPoints[0].Count+histogram.DataPoints[1].Count != 4 {
+			t.Errorf("query histogram = %#v", metrics["db.client.operation.duration"])
+		}
+		outcomes := map[string]int64{}
+		var getQuerySuccess int64
+		if operations, ok := metrics["insurance_hub.product.database.operations"].Data.(metricdata.Sum[int64]); ok {
+			for _, point := range operations.DataPoints {
+				attrs := map[string]string{}
+				for _, attr := range point.Attributes.ToSlice() {
+					attrs[string(attr.Key)] = attr.Value.AsString()
+					if string(
+						attr.Key,
+					) == "insurance_hub.product.database.outcome" {
+						outcomes[attr.Value.AsString()] += point.Value
+					}
+				}
+				if attrs["insurance_hub.product.operation"] == "get" &&
+					attrs["insurance_hub.product.database.stage"] == "query" &&
+					attrs["insurance_hub.product.database.outcome"] == "success" {
+					getQuerySuccess += point.Value
+				}
+			}
+		}
+		if getQuerySuccess != 3 || outcomes["not_found"] != 0 {
+			t.Errorf(
+				"missing row database classification: get-query-success=%d outcomes=%v",
+				getQuerySuccess,
+				outcomes,
+			)
+		}
+		for _, outcome := range []string{"success", "invalid_data", "cancelled", "deadline_exceeded", "storage_unavailable"} {
+			if outcomes[outcome] == 0 {
+				t.Errorf("no %s database outcome: %v", outcome, outcomes)
+			}
+		}
 	})
 
 	// when

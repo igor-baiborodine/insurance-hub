@@ -187,8 +187,12 @@ emit a bounded server span, an application child span for dispatched use cases, 
 and duration observation, and one safe completion log per routed request. HTTP extracts W3C context
 after route selection; gRPC limits tracing to the two registered Product methods and disables its
 automatic meter. Probes, unmatched paths, and malformed requests rejected before dispatch have no
-Product business measurement. Request logs remain local JSON when telemetry is disabled. Database
-and runtime instruments are added in the next delivery step.
+Product business measurement. Each dispatched read also records pool acquisition and safe SELECT
+child spans, bounded acquire/query/decode outcomes, query and pool-wait durations, and pool
+usage/max/timeout metrics. An owned runtime callback records Go memory, allocation, GC-cycle,
+goroutine, and processor signals. The Go memory-limit datapoint is present only when a runtime
+memory limit is configured. The database and runtime callbacks stop during the shared
+shutdown budget. Request logs remain local JSON when telemetry is disabled.
 
 Callers with a shorter deadline keep that deadline. Acquisition and query work share the request
 budget rather than starting new clocks. Startup, readiness, and shutdown each use their one
@@ -322,12 +326,12 @@ The concrete package and file responsibilities are:
 | [`internal/service/service.go`](internal/service/service.go) | Constructs the singleton pool, reader, use cases, HTTP/gRPC/management servers, and optional telemetry; owns startup, drain, and cleanup. |
 | [`internal/domain/catalog.go`](internal/domain/catalog.go) | Owns transport-independent Product catalog values and exact decimal tokens. |
 | [`internal/application/catalog.go`](internal/application/catalog.go) | Owns `ProductReader`, `ListProducts`, `GetProduct`, and application errors. |
-| [`internal/postgres`](internal/postgres) | Owns pool creation, restricted read execution, sqlc use, JSONB decoding, and storage error classification. |
+| [`internal/postgres`](internal/postgres) | Owns pool creation, restricted read execution, sqlc use, JSONB decoding, storage error classification, and safe database/pool telemetry. |
 | [`internal/http`](internal/http) | Owns direct URI behavior, legacy-compatible DTO/presence/decimal mapping, JSON responses, and HTTP error mapping. |
 | [`internal/grpc`](internal/grpc) | Owns generated-service registration, validation, domain-to-protobuf mapping, limits, tracing hooks, and status mapping. |
 | [`internal/config`](internal/config) | Parses and validates the bounded runtime settings and holds the database URL in a redacting type. |
 | [`internal/health`](internal/health) | Owns process liveness and bounded dependency-aware readiness. |
-| [`internal/logger`](internal/logger) / [`internal/telemetry`](internal/telemetry) | Own structured redaction/identity/context, the optional bounded trace and metric provider lifecycle, and shared request classification/accounting. |
+| [`internal/logger`](internal/logger) / [`internal/telemetry`](internal/telemetry) | Own structured redaction/identity/context, the optional bounded trace and metric provider lifecycle, shared request classification/accounting, and Go runtime instruments. |
 | [`api/product/v1`](api/product/v1) / [`gen/product/v1`](gen/product/v1) | Own the versioned protobuf source and generated Go boundary. |
 
 For a get-product request:

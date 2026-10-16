@@ -102,6 +102,10 @@ jobs:
 
           module_key=${module_dir//\//-}
           coverage_file="$module_dir/coverage.txt"
+          coverage_files="$coverage_file"
+          if [[ "$module_role" == 'business-service' ]]; then
+            coverage_files+=",$module_dir/integration-coverage.txt"
+          fi
           coverage_flag=${module_dir##*/}
           {
             echo "module_dir=$module_dir"
@@ -111,6 +115,7 @@ jobs:
             echo 'validation_target=check-go-pr'
             echo "format_base=$merge_base"
             echo "coverage_file=$coverage_file"
+            echo "coverage_files=$coverage_files"
             echo "coverage_flag=$coverage_flag"
           } >> "$GITHUB_OUTPUT"
 
@@ -150,6 +155,9 @@ jobs:
           set -euo pipefail
           if [[ "$MODULE_ROLE" != 'service-scaffold' ]]; then
             rm -f -- "$COVERAGE_FILE"
+            if [[ "$MODULE_ROLE" == 'business-service' ]]; then
+              rm -f -- "$MODULE_DIR/integration-coverage.txt"
+            fi
           fi
           make -C "$MODULE_DIR" "$VALIDATION_TARGET" \
             FORMAT_SCOPE=changed FORMAT_BASE="$FORMAT_BASE"
@@ -161,7 +169,7 @@ jobs:
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ${{ steps.select.outputs.coverage_file }}
+          files: ${{ steps.select.outputs.coverage_files }}
           flags: ${{ steps.select.outputs.coverage_flag }}
           name: ${{ steps.select.outputs.coverage_flag }}
           disable_search: true

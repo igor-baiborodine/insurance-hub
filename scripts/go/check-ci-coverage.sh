@@ -168,6 +168,18 @@ for workflow_relative in "${workflows[@]}"; do
 			"${inventory_path}"
 	)
 
+	coverage_upload='files: ${{ steps.select.outputs.coverage_file }}'
+	if grep -Fq 'coverage_files=' "${workflow_path}"; then
+		coverage_upload='files: ${{ steps.select.outputs.coverage_files }}'
+		require_literal "${workflow_path}" "${workflow_relative}" \
+			'echo "coverage_files=$coverage_files"' 'selected-module coverage file list'
+		require_literal "${workflow_path}" "${workflow_relative}" \
+			"if [[ \"\$module_role\" == 'business-service' ]]; then" \
+			'generic business-service coverage selection'
+		require_literal "${workflow_path}" "${workflow_relative}" \
+			'rm -f -- "$MODULE_DIR/integration-coverage.txt"' \
+			'business-service integration coverage cleanup'
+	fi
 	for required in \
 		'uses: actions/setup-go@v7' \
 		'cache-dependency-path: ${{ steps.select.outputs.go_sum }}' \
@@ -181,7 +193,7 @@ for workflow_relative in "${workflows[@]}"; do
 		'rm -f -- "$COVERAGE_FILE"' \
 		"steps.select.outputs.module_role != 'service-scaffold'" \
 		'uses: codecov/codecov-action@v7' \
-		'files: ${{ steps.select.outputs.coverage_file }}' \
+		"${coverage_upload}" \
 		'flags: ${{ steps.select.outputs.coverage_flag }}' \
 		'disable_search: true' \
 		'fail_ci_if_error: true'

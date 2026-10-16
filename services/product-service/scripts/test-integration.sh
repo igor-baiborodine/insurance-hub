@@ -7,6 +7,7 @@ docker_command=${DOCKER:?DOCKER is required}
 postgres_image=${POSTGRES_IMAGE:?POSTGRES_IMAGE is required}
 integration_suite=${INTEGRATION_SUITE:-}
 fixture_set=${FIXTURE_SET:-}
+integration_coverage_file=${INTEGRATION_COVERAGE_FILE:-}
 
 fail() {
 	printf 'test-integration: %s\n' "$*" >&2
@@ -62,11 +63,17 @@ if [[ "$integration_suite" == all || "$integration_suite" == lifecycle || "$inte
 	GOWORK=off "$go_command" build -mod=readonly -race -o "$server_binary" ./cmd/server
 fi
 
+coverage_args=()
+if [[ -n "$integration_coverage_file" ]]; then
+	coverage_args=(-covermode=atomic "-coverprofile=$integration_coverage_file")
+	rm -f -- "$integration_coverage_file"
+fi
+
 PRODUCT_TEST_POSTGRES_IMAGE="$postgres_image" \
 	PRODUCT_INTEGRATION_FIXTURE_SET="$fixture_set" \
 	PRODUCT_TEST_SERVER_BINARY="$server_binary" \
 	GOWORK=off "$go_command" test -mod=readonly -count=1 -race -tags=integration \
-	-json -run "$test_pattern" ./internal/testing ./internal/postgres | tee "$result_file"
+	"${coverage_args[@]}" -json -run "$test_pattern" ./internal/testing ./internal/postgres | tee "$result_file"
 
 executed_count=$(
 	awk '
@@ -77,9 +84,18 @@ executed_count=$(
 if [[ "$executed_count" -eq 0 ]]; then
 	fail "suite $integration_suite selected zero tests"
 fi
+if [[ "$integration_suite" == all || "$integration_suite" == reader ]]; then
+	reader_case='TestPostgresReader/real_reads_emit_bounded_database_and_pool_signals'
+	if ! awk -v expected="$reader_case" \
+		'index($0, "\"Action\":\"pass\"") && index($0, "\"Test\":\"" expected "\"") { found=1 } END { exit !found }' \
+		"$result_file"; then
+		fail "suite $integration_suite did not pass database telemetry case"
+	fi
+fi
 if [[ "$integration_suite" == all || "$integration_suite" == telemetry ]]; then
 	for scenario in \
 		'real_HTTP_and_gRPC_reads_export_one_request_observation_each' \
+		'replacement_process_has_new_metric_identity_and_cumulative_start' \
 		'disabled_mode_makes_no_exporter_connection' \
 		'refused_collector_does_not_affect_reads_or_probes' \
 		'collector_recovery_exports_without_a_Product_restart' \
@@ -93,6 +109,9 @@ if [[ "$integration_suite" == all || "$integration_suite" == telemetry ]]; then
 fi
 if [[ "$integration_suite" == all || "$integration_suite" == access ]]; then
 	python3 ./scripts/check-access-results.py "$result_file"
+fi
+if [[ -n "$integration_coverage_file" && ! -s "$integration_coverage_file" ]]; then
+	fail "integration coverage profile was not created: $integration_coverage_file"
 fi
 printf 'test-integration: suite=%s fixture-set=%s executed-tests=%s image=%s\n' \
 	"$integration_suite" "$fixture_set" "$executed_count" "$postgres_image"
