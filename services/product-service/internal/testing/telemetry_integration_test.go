@@ -14,6 +14,8 @@ import (
 
 	collectormetric "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
+	metricv1 "go.opentelemetry.io/proto/otlp/metrics/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -125,7 +127,7 @@ func TestProductTelemetry(t *testing.T) {
 		collector := &telemetryTraceCollector{
 			started: make(chan struct{}, 4), accepted: make(chan struct{}, 4),
 			spans:   make(chan *collectortrace.ExportTraceServiceRequest, 4),
-			metrics: make(chan *collectormetric.ExportMetricsServiceRequest, 4),
+			metrics: make(chan *collectormetric.ExportMetricsServiceRequest, 16),
 		}
 		endpoint := startTelemetryCollector(t, collector)
 		process := startLifecycleProcess(t, binary, harness.RuntimeDatabaseURL(),
@@ -179,34 +181,35 @@ func TestProductTelemetry(t *testing.T) {
 				)
 			}
 		}
-		metricCounts := map[string]uint64{}
+		var metricExports []*collectormetric.ExportMetricsServiceRequest
 		for len(collector.metrics) != 0 {
-			request := <-collector.metrics
-			for _, resource := range request.ResourceMetrics {
-				for _, scope := range resource.ScopeMetrics {
-					for _, metric := range scope.Metrics {
-						switch metric.Name {
-						case "insurance_hub.product.requests":
-							for _, point := range metric.GetSum().DataPoints {
-								metricCounts[metric.Name] += uint64(
-									point.GetAsInt(),
-								)
-							}
-						case "insurance_hub.product.request.duration":
-							for _, point := range metric.GetHistogram().DataPoints {
-								metricCounts[metric.Name] += point.Count
-							}
-						}
+			metricExports = append(metricExports, <-collector.metrics)
+		}
+		if len(metricExports) == 0 {
+			t.Fatal("no request metric export received")
+		}
+		// Replay every export so the assertion detects cumulative double-counting.
+		metricExports = append(metricExports, metricExports...)
+		metricCounts := latestCumulativeRequestMetrics(t, metricExports)
+		if len(metricCounts) != 8 {
+			t.Fatalf(
+				"request metric series = %d, want 8: %v",
+				len(metricCounts),
+				metricCounts,
+			)
+		}
+		for _, name := range []string{
+			"insurance_hub.product.requests", "insurance_hub.product.request.duration",
+		} {
+			for _, transport := range []string{"http", "grpc"} {
+				for _, operation := range []string{"list", "get"} {
+					key := requestMetricSeries{name, transport, operation}
+					if metricCounts[key] != 1 {
+						t.Fatalf("request metric %v = %d, want 1: %v",
+							key, metricCounts[key], metricCounts)
 					}
 				}
 			}
-		}
-		if metricCounts["insurance_hub.product.requests"] != 4 ||
-			metricCounts["insurance_hub.product.request.duration"] != 4 {
-			t.Fatalf(
-				"exported request metric counts = %v, want four each",
-				metricCounts,
-			)
 		}
 		if strings.Count(process.logs.String(), "Product request completed") != 4 {
 			t.Fatalf("completion log count != four: %s", process.logs.String())
@@ -366,4 +369,147 @@ func telemetryEnvironment(endpoint string) []string {
 		"DEPLOYMENT_ENVIRONMENT=test",
 		"SERVICE_VERSION=test-telemetry",
 	}
+}
+
+type requestMetricSeries struct {
+	name      string
+	transport string
+	operation string
+}
+
+type cumulativeRequestPoint struct {
+	time  uint64
+	count uint64
+}
+
+func latestCumulativeRequestMetrics(
+	t *testing.T,
+	exports []*collectormetric.ExportMetricsServiceRequest,
+) map[requestMetricSeries]uint64 {
+	t.Helper()
+	latest := map[requestMetricSeries]cumulativeRequestPoint{}
+	for _, export := range exports {
+		for _, resource := range export.ResourceMetrics {
+			for _, scope := range resource.ScopeMetrics {
+				for _, metric := range scope.Metrics {
+					switch metric.Name {
+					case "insurance_hub.product.requests":
+						sum := metric.GetSum()
+						if sum == nil || !sum.IsMonotonic ||
+							sum.AggregationTemporality != metricv1.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE {
+							t.Fatalf(
+								"request counter is not cumulative and monotonic: %v",
+								metric,
+							)
+						}
+						for _, point := range sum.DataPoints {
+							if point.GetAsInt() < 0 {
+								t.Fatalf(
+									"negative request counter: %v",
+									point,
+								)
+							}
+							recordLatestRequestPoint(
+								t,
+								latest,
+								metric.Name,
+								point.Attributes,
+								point.TimeUnixNano,
+								uint64(point.GetAsInt()),
+							)
+						}
+					case "insurance_hub.product.request.duration":
+						histogram := metric.GetHistogram()
+						if histogram == nil ||
+							histogram.AggregationTemporality != metricv1.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE {
+							t.Fatalf(
+								"request duration is not cumulative: %v",
+								metric,
+							)
+						}
+						for _, point := range histogram.DataPoints {
+							recordLatestRequestPoint(
+								t,
+								latest,
+								metric.Name,
+								point.Attributes,
+								point.TimeUnixNano,
+								point.Count,
+							)
+						}
+					}
+				}
+			}
+		}
+	}
+	counts := make(map[requestMetricSeries]uint64, len(latest))
+	for key, point := range latest {
+		counts[key] = point.count
+	}
+	return counts
+}
+
+func recordLatestRequestPoint(
+	t *testing.T,
+	latest map[requestMetricSeries]cumulativeRequestPoint,
+	name string,
+	attrs []*commonv1.KeyValue,
+	timestamp, count uint64,
+) {
+	t.Helper()
+	if timestamp == 0 {
+		t.Fatal("request metric point has no timestamp")
+	}
+	key := requestMetricSeriesFromAttributes(t, name, attrs)
+	if previous, exists := latest[key]; exists {
+		if timestamp < previous.time {
+			return
+		}
+		if timestamp == previous.time && count != previous.count {
+			t.Fatalf("conflicting cumulative points for %v at %d", key, timestamp)
+		}
+	}
+	latest[key] = cumulativeRequestPoint{time: timestamp, count: count}
+}
+
+func requestMetricSeriesFromAttributes(
+	t *testing.T,
+	name string,
+	attrs []*commonv1.KeyValue,
+) requestMetricSeries {
+	t.Helper()
+	if len(attrs) != 4 {
+		t.Fatalf("request metric %s has %d attributes, want 4: %v", name, len(attrs), attrs)
+	}
+	key := requestMetricSeries{name: name}
+	var outcome, statusTransport string
+	for _, attr := range attrs {
+		switch attr.Key {
+		case "insurance_hub.product.operation":
+			key.operation = attr.Value.GetStringValue()
+		case "insurance_hub.product.transport":
+			key.transport = attr.Value.GetStringValue()
+		case "insurance_hub.product.outcome":
+			outcome = attr.Value.GetStringValue()
+		case "http.response.status_code":
+			if attr.Value.GetIntValue() != 200 {
+				t.Fatalf("unexpected HTTP request metric status: %v", attr)
+			}
+			statusTransport = "http"
+		case "rpc.response.status_code":
+			if attr.Value.GetStringValue() != "OK" {
+				t.Fatalf("unexpected gRPC request metric status: %v", attr)
+			}
+			statusTransport = "grpc"
+		default:
+			t.Fatalf("unapproved request metric attribute: %v", attr)
+		}
+	}
+	if (key.operation != "list" && key.operation != "get") ||
+		(key.transport != "http" && key.transport != "grpc") ||
+		outcome != "success" || statusTransport != key.transport {
+		t.Fatalf("unexpected request metric series %v outcome=%s status=%s", key,
+			outcome, statusTransport)
+	}
+	return key
 }
