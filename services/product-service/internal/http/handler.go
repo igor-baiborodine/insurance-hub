@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -78,6 +79,11 @@ func (handler *catalogHandler) serveHTTP(writer http.ResponseWriter, request *ht
 		request, state = handler.observer.StartHTTP(request, operation, route)
 		statusWriter := &statusResponseWriter{ResponseWriter: writer}
 		defer func() {
+			if err := request.Context().Err(); err != nil {
+				state.SetError(err)
+			} else if statusWriter.writeErr != nil {
+				state.SetError(statusWriter.writeErr)
+			}
 			status := ""
 			if statusWriter.status != 0 {
 				status = strconv.Itoa(statusWriter.status)
@@ -208,7 +214,8 @@ func (handler *catalogHandler) writeApplicationError(
 
 type statusResponseWriter struct {
 	http.ResponseWriter
-	status int
+	status   int
+	writeErr error
 }
 
 func (writer *statusResponseWriter) WriteHeader(status int) {
@@ -220,7 +227,16 @@ func (writer *statusResponseWriter) Write(body []byte) (int, error) {
 	if writer.status == 0 {
 		writer.status = http.StatusOK
 	}
-	return writer.ResponseWriter.Write(body)
+	written, err := writer.ResponseWriter.Write(body)
+	if writer.writeErr == nil {
+		switch {
+		case err != nil:
+			writer.writeErr = err
+		case written < len(body):
+			writer.writeErr = io.ErrShortWrite
+		}
+	}
+	return written, err
 }
 
 // WriteNotFound preserves the incoming encoded path in the legacy self link.

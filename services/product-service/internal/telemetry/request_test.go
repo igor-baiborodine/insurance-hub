@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -605,6 +606,178 @@ func TestRequestObserver_GRPCSendLimitUsesFinalStatus(t *testing.T) {
 	if serverSpans != 1 {
 		t.Fatalf("server spans = %d, want 1", serverSpans)
 	}
+}
+
+func TestRequestObserver_HTTPWriteFailureIsNotSuccess(t *testing.T) {
+	const privateWriteError = "private-write-failure-marker"
+	for _, test := range []struct {
+		name          string
+		writeErr      error
+		shortWrite    bool
+		fullWrite     bool
+		cancelOnWrite bool
+		wantOutcome   string
+		wantLevel     string
+	}{
+		{"write error", errors.New(privateWriteError), false, false, false, "internal_error", "ERROR"},
+		{"caller disconnect", io.ErrClosedPipe, false, false, true, "cancelled", "WARN"},
+		{"short write", nil, true, false, false, "internal_error", "ERROR"},
+		{"cancel after buffered write", nil, false, true, true, "cancelled", "WARN"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			logs := &completionLog{written: make(chan struct{}, 1)}
+			log := logger.New(logs, "product-service", slog.LevelError)
+			spans := tracetest.NewSpanRecorder()
+			traceProvider := sdktrace.NewTracerProvider(
+				sdktrace.WithSpanProcessor(spans),
+			)
+			reader := sdkmetric.NewManualReader()
+			meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			observer, err := telemetry.NewRequestObserver(
+				log, traceProvider, meterProvider, propagation.TraceContext{},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler, err := producthttp.NewHandler(log, producthttp.Settings{
+				RequestTimeout: time.Second, Observer: observer,
+			},
+				func(context.Context) ([]domain.Product, error) {
+					return []domain.Product{{Code: "CAR"}}, nil
+				},
+				func(context.Context, string) (domain.Product, error) {
+					return domain.Product{}, nil
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			writer := &failingHTTPResponseWriter{
+				ResponseRecorder: httptest.NewRecorder(),
+				writeErr:         test.writeErr,
+				shortWrite:       test.shortWrite,
+				fullWrite:        test.fullWrite,
+			}
+			if test.cancelOnWrite {
+				writer.cancel = cancel
+			}
+			request := httptest.NewRequest(http.MethodGet, "http://product/products", nil).
+				WithContext(ctx)
+			handler.ServeHTTP(writer, request)
+			if strings.Contains(logs.String(), privateWriteError) {
+				t.Fatalf("raw write error in completion log: %s", logs.String())
+			}
+			if writer.Code != http.StatusOK || writer.writes != 1 ||
+				writer.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("response status=%d writes=%d headers=%v", writer.Code,
+					writer.writes, writer.Header())
+			}
+			var record map[string]any
+			if err := json.Unmarshal([]byte(logs.String()), &record); err != nil {
+				t.Fatalf("one completion record: %v; logs=%s", err, logs.String())
+			}
+			if record["msg"] != "Product request completed" ||
+				record["outcome"] != test.wantOutcome ||
+				record["error_type"] != test.wantOutcome ||
+				record["level"] != test.wantLevel ||
+				record["http_status_code"] != float64(http.StatusOK) {
+				t.Fatalf("completion record: %v", record)
+			}
+			var metrics metricdata.ResourceMetrics
+			if err := reader.Collect(context.Background(), &metrics); err != nil {
+				t.Fatal(err)
+			}
+			counter, duration := 0, 0
+			for _, scope := range metrics.ScopeMetrics {
+				for _, instrument := range scope.Metrics {
+					var attrs attribute.Set
+					switch instrument.Name {
+					case "insurance_hub.product.requests":
+						points := instrument.Data.(metricdata.Sum[int64]).DataPoints
+						if len(points) != 1 {
+							t.Fatalf(
+								"request points = %d, want 1",
+								len(points),
+							)
+						}
+						counter += int(points[0].Value)
+						attrs = points[0].Attributes
+					case "insurance_hub.product.request.duration":
+						points := instrument.Data.(metricdata.Histogram[float64]).DataPoints
+						if len(points) != 1 {
+							t.Fatalf(
+								"duration points = %d, want 1",
+								len(points),
+							)
+						}
+						duration += int(points[0].Count)
+						attrs = points[0].Attributes
+					default:
+						t.Fatalf(
+							"unexpected request metric %s",
+							instrument.Name,
+						)
+					}
+					if value, ok := attrs.Value(
+						"insurance_hub.product.outcome",
+					); !ok ||
+						value.AsString() != test.wantOutcome {
+						t.Fatalf("metric outcome attributes: %v", attrs)
+					}
+					if value, ok := attrs.Value(
+						"http.response.status_code",
+					); !ok ||
+						value.AsInt64() != http.StatusOK {
+						t.Fatalf("metric status attributes: %v", attrs)
+					}
+				}
+			}
+			if counter != 1 || duration != 1 {
+				t.Fatalf("counter=%d duration=%d, want 1 each", counter, duration)
+			}
+			ended := spans.Ended()
+			if len(ended) != 1 {
+				t.Fatalf("server spans = %d, want 1", len(ended))
+			}
+			attrs := attribute.NewSet(ended[0].Attributes()...)
+			if value, ok := attrs.Value("insurance_hub.product.outcome"); !ok ||
+				value.AsString() != test.wantOutcome {
+				t.Fatalf("server span outcome attributes: %v", attrs)
+			}
+			if record["trace_id"] != ended[0].SpanContext().TraceID().String() ||
+				record["span_id"] != ended[0].SpanContext().SpanID().String() {
+				t.Fatalf(
+					"completion log is not correlated with server span: %v",
+					record,
+				)
+			}
+		})
+	}
+}
+
+type failingHTTPResponseWriter struct {
+	*httptest.ResponseRecorder
+	cancel     context.CancelFunc
+	writeErr   error
+	shortWrite bool
+	fullWrite  bool
+	writes     int
+}
+
+func (writer *failingHTTPResponseWriter) Write(body []byte) (int, error) {
+	writer.writes++
+	if writer.cancel != nil {
+		writer.cancel()
+	}
+	if writer.shortWrite {
+		return len(body) / 2, nil
+	}
+	if writer.fullWrite {
+		return writer.ResponseRecorder.Write(body)
+	}
+	return 0, writer.writeErr
 }
 
 type completionLog struct {
