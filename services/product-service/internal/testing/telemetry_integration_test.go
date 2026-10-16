@@ -4,6 +4,7 @@ package integrationtest
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"strings"
@@ -213,36 +214,68 @@ func TestProductTelemetry(t *testing.T) {
 	})
 
 	t.Run("disabled mode makes no exporter connection", func(t *testing.T) {
-		listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
-		if listenErr != nil {
-			t.Fatalf("listen for connection probe: %v", listenErr)
-		}
-		defer func() { _ = listener.Close() }()
-		accepted := make(chan struct{}, 1)
-		go func() {
-			connection, acceptErr := listener.Accept()
-			if acceptErr == nil {
-				_ = connection.Close()
-				accepted <- struct{}{}
-			}
-		}()
-		process := startLifecycleProcess(t, binary, harness.RuntimeDatabaseURL(),
-			"OTEL_ENABLED=false",
-			"OTEL_EXPORTER_OTLP_ENDPOINT=http://"+listener.Addr().String(),
-		)
-		assertGracefulGRPCResult(t, process.getProduct("CAR"), "CAR")
-		started := process.signal(t)
-		process.assertCleanExit(t, started, harness)
-		if strings.Count(process.logs.String(), "Product request completed") != 1 {
-			t.Fatalf(
-				"disabled mode completion log count != one: %s",
-				process.logs.String(),
-			)
-		}
-		select {
-		case <-accepted:
-			t.Fatal("disabled Product connected to telemetry endpoint")
-		default:
+		for _, level := range []string{"info", "warn", "error"} {
+			t.Run(level, func(t *testing.T) {
+				listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+				if listenErr != nil {
+					t.Fatalf("listen for connection probe: %v", listenErr)
+				}
+				defer func() { _ = listener.Close() }()
+				accepted := make(chan struct{}, 1)
+				go func() {
+					connection, acceptErr := listener.Accept()
+					if acceptErr == nil {
+						_ = connection.Close()
+						accepted <- struct{}{}
+					}
+				}()
+				process := startLifecycleProcess(
+					t,
+					binary,
+					harness.RuntimeDatabaseURL(),
+					"OTEL_ENABLED=false",
+					"OTEL_EXPORTER_OTLP_ENDPOINT=http://"+listener.Addr().
+						String(),
+					"LOG_LEVEL="+level,
+				)
+				assertGracefulGRPCResult(t, process.getProduct("CAR"), "CAR")
+				started := process.signal(t)
+				process.assertCleanExit(t, started, harness)
+				completionCount := 0
+				for _, line := range strings.Split(strings.TrimSpace(process.logs.String()), "\n") {
+					var record map[string]any
+					if err := json.Unmarshal(
+						[]byte(line),
+						&record,
+					); err != nil {
+						t.Fatalf("decode Product log: %v", err)
+					}
+					if record["msg"] != "Product request completed" {
+						continue
+					}
+					completionCount++
+					if record["level"] != "INFO" ||
+						record["outcome"] != "success" ||
+						record["rpc_status_code"] != "OK" {
+						t.Fatalf(
+							"disabled mode completion record: %v",
+							record,
+						)
+					}
+				}
+				if completionCount != 1 {
+					t.Fatalf(
+						"disabled mode completion log count = %d, want one: %s",
+						completionCount,
+						process.logs.String(),
+					)
+				}
+				select {
+				case <-accepted:
+					t.Fatal("disabled Product connected to telemetry endpoint")
+				default:
+				}
+			})
 		}
 	})
 

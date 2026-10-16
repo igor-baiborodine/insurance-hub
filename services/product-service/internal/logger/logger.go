@@ -48,11 +48,26 @@ func newLogger(output io.Writer, level slog.Level) *slog.Logger {
 	return slog.New(&safeHandler{next: base})
 }
 
+type productCompletionKey struct{}
+
+// LogProductCompletion preserves the required completion record at its contract severity,
+// independently of the diagnostic log threshold.
+func LogProductCompletion(ctx context.Context, log *slog.Logger, level slog.Level, attrs ...any) {
+	log.Log(
+		context.WithValue(ctx, productCompletionKey{}, true),
+		level,
+		"Product request completed",
+		attrs...)
+}
+
 type safeHandler struct {
 	next slog.Handler
 }
 
 func (handler *safeHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	if ctx.Value(productCompletionKey{}) != nil {
+		return true
+	}
 	return handler.next.Enabled(ctx, level)
 }
 

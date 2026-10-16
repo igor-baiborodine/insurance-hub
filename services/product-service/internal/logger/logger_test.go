@@ -36,6 +36,73 @@ func TestNew_WritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
 	}
 }
 
+func TestLogProductCompletion_PreservesSeverityAboveDiagnosticThreshold(t *testing.T) {
+	const privateMarker = "private-completion-marker"
+	traceID := trace.TraceID{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	spanID := trace.SpanID{1, 2, 3, 4, 5, 6, 7, 8}
+	ctx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(
+		trace.SpanContextConfig{
+			TraceID:    traceID,
+			SpanID:     spanID,
+			TraceFlags: trace.FlagsSampled,
+		},
+	))
+	for _, test := range []struct {
+		name            string
+		level           slog.Level
+		wantDiagnostics int
+	}{
+		{name: "warn", level: slog.LevelWarn, wantDiagnostics: 2},
+		{name: "error", level: slog.LevelError, wantDiagnostics: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			log := logger.New(&output, "product-service", test.level)
+			log.InfoContext(ctx, "diagnostic info")
+			log.WarnContext(ctx, "diagnostic warn")
+			log.ErrorContext(ctx, "diagnostic error")
+			for _, level := range []slog.Level{slog.LevelInfo, slog.LevelWarn, slog.LevelError} {
+				logger.LogProductCompletion(ctx, log, level,
+					slog.String("operation", "list"),
+					slog.String("accessToken", privateMarker),
+				)
+			}
+			if strings.Contains(output.String(), privateMarker) {
+				t.Fatalf("private data in completion log: %s", output.String())
+			}
+			entries := decodeEntries(t, output.String())
+			if len(entries) != test.wantDiagnostics+3 {
+				t.Fatalf(
+					"entries = %d, want %d: %v",
+					len(entries),
+					test.wantDiagnostics+3,
+					entries,
+				)
+			}
+			var completionLevels []string
+			for _, entry := range entries {
+				if entry["msg"] == "diagnostic info" ||
+					(test.level == slog.LevelError && entry["msg"] == "diagnostic warn") {
+					t.Fatalf("filtered diagnostic was written: %v", entry)
+				}
+				if entry["msg"] != "Product request completed" {
+					continue
+				}
+				completionLevels = append(completionLevels, entry["level"].(string))
+				if entry["service"] != "product-service" ||
+					entry["accessToken"] != "[REDACTED]" ||
+					entry["trace_id"] != traceID.String() ||
+					entry["span_id"] != spanID.String() {
+					t.Fatalf("unsafe completion record: %v", entry)
+				}
+			}
+			if fmt.Sprint(completionLevels) != "[INFO WARN ERROR]" {
+				t.Fatalf("completion levels = %v", completionLevels)
+			}
+		})
+	}
+}
+
 func TestNew_AddsTraceCorrelationFromContext(t *testing.T) {
 	// given
 	traceID := trace.TraceID{

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -37,9 +38,17 @@ import (
 )
 
 func TestRequestObserver_RealTransportSignals(t *testing.T) {
+	for _, level := range []slog.Level{slog.LevelInfo, slog.LevelWarn, slog.LevelError} {
+		t.Run(level.String(), func(t *testing.T) {
+			testRequestObserverRealTransportSignals(t, level)
+		})
+	}
+}
+
+func testRequestObserverRealTransportSignals(t *testing.T, level slog.Level) {
 	const private = "postgres://reader:private@database/catalog customer-secret"
 	logs := &completionLog{written: make(chan struct{}, 1)}
-	requestLogger := logger.New(logs, "product-service", 0)
+	requestLogger := logger.New(logs, "product-service", level)
 	spans := tracetest.NewSpanRecorder()
 	traceProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
 	reader := sdkmetric.NewManualReader()
@@ -359,7 +368,23 @@ func TestRequestObserver_RealTransportSignals(t *testing.T) {
 				t.Fatalf("missing %s: %v", key, record)
 			}
 		}
-		outcomes[record["outcome"].(string)]++
+		outcome := record["outcome"].(string)
+		wantLevel := "ERROR"
+		switch outcome {
+		case "success", "not_found", "invalid_request":
+			wantLevel = "INFO"
+		case "cancelled", "deadline_exceeded":
+			wantLevel = "WARN"
+		}
+		if record["level"] != wantLevel {
+			t.Fatalf(
+				"completion level for %s = %v, want %s",
+				outcome,
+				record["level"],
+				wantLevel,
+			)
+		}
+		outcomes[outcome]++
 		logSpans[record["span_id"].(string)] = record["trace_id"].(string)
 	}
 	for outcome, want := range map[string]int{

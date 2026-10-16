@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
+	productlogger "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
 )
 
 const (
@@ -199,14 +200,14 @@ func (state *Request) Finish(ctx context.Context, statusKey, statusValue string)
 	measurementOptions := metric.WithAttributes(metricAttrs...)
 	state.observer.requests.Add(ctx, 1, measurementOptions)
 	state.observer.duration.Record(ctx, time.Since(state.started).Seconds(), measurementOptions)
+	level := slog.LevelError
 	switch outcome {
 	case "success", "not_found", "invalid_request":
-		state.observer.logger.InfoContext(ctx, "Product request completed", logAttrs...)
+		level = slog.LevelInfo
 	case "cancelled", "deadline_exceeded":
-		state.observer.logger.WarnContext(ctx, "Product request completed", logAttrs...)
-	default:
-		state.observer.logger.ErrorContext(ctx, "Product request completed", logAttrs...)
+		level = slog.LevelWarn
 	}
+	productlogger.LogProductCompletion(ctx, state.observer.logger, level, logAttrs...)
 	if state.ownedSpan {
 		state.span.End()
 	}
