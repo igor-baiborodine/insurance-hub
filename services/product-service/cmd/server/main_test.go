@@ -52,9 +52,15 @@ func TestRun_LogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 	if decodeErr := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &entry); decodeErr != nil {
 		t.Fatalf("decode startup log: %v", decodeErr)
 	}
-	if entry["service"] != "product-service" || entry["level"] != "ERROR" ||
+	if entry["service_name"] != "product-service" ||
+		entry["service_namespace"] != "insurance-hub" ||
+		entry["deployment_environment_name"] != "development" ||
+		entry["service_implementation"] != "go" || entry["level"] != "ERROR" ||
 		entry["msg"] != "configuration failed" {
 		t.Errorf("unexpected startup log: %#v", entry)
+	}
+	if timestamp, ok := entry["time"].(string); !ok || !strings.HasSuffix(timestamp, "Z") {
+		t.Errorf("startup timestamp is not UTC: %#v", entry["time"])
 	}
 }
 
@@ -114,7 +120,18 @@ func TestRunWith_ReturnsAfterServiceStops(t *testing.T) {
 
 func TestRunWith_LogsServiceFailureUsingConfiguredIdentity(t *testing.T) {
 	// given
-	settings := config.Config{ServiceName: "configured-service", LogLevel: slog.LevelInfo}
+	settings := config.Config{
+		ServiceName: "configured-service",
+		LogLevel:    slog.LevelInfo,
+		Telemetry: config.Telemetry{Identity: config.Identity{
+			ServiceNamespace: "insurance-hub",
+			ServiceName:      "configured-service",
+			ServiceVersion:   "development",
+			ServiceInstance:  "local-test",
+			Environment:      "development",
+			Implementation:   "go",
+		}},
+	}
 	serviceErr := errors.New("service stopped unexpectedly")
 	var output bytes.Buffer
 
@@ -138,8 +155,16 @@ func TestRunWith_LogsServiceFailureUsingConfiguredIdentity(t *testing.T) {
 	if decodeErr := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &entry); decodeErr != nil {
 		t.Fatalf("decode service log: %v", decodeErr)
 	}
-	if entry["service"] != settings.ServiceName || entry["level"] != "ERROR" ||
+	if entry["service_name"] != settings.ServiceName ||
+		entry["service_namespace"] != "insurance-hub" ||
+		entry["service_version"] != "development" ||
+		entry["service_instance_id"] != "local-test" ||
+		entry["deployment_environment_name"] != "development" ||
+		entry["service_implementation"] != "go" || entry["level"] != "ERROR" ||
 		entry["msg"] != "service failed" || entry["error"] != "[REDACTED]" {
 		t.Errorf("unexpected service log: %#v", entry)
+	}
+	if _, hasLegacyAlias := entry["service"]; hasLegacyAlias {
+		t.Errorf("validated service log contains legacy identity alias: %#v", entry)
 	}
 }

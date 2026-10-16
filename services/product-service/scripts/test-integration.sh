@@ -14,7 +14,7 @@ fail() {
 }
 
 case "$integration_suite" in
-	all) test_pattern='^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductReadOnly|TestProductAccess)$' ;;
+	all) test_pattern='^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess)$' ;;
 	harness) test_pattern='^TestPostgresHarness$' ;;
 	reader) test_pattern='^TestPostgresReader$' ;;
 	grpc) test_pattern='^TestProductGRPC$' ;;
@@ -23,6 +23,7 @@ case "$integration_suite" in
 	parity) test_pattern='^TestProductParity$' ;;
 	cancellation) test_pattern='^TestProductCancellation$' ;;
 	lifecycle) test_pattern='^TestProductLifecycle$' ;;
+	telemetry) test_pattern='^TestProductTelemetry$' ;;
 	read-only) test_pattern='^TestProductReadOnly$' ;;
 	access) test_pattern='^TestProductAccess$' ;;
 	'') fail 'INTEGRATION_SUITE must not be empty' ;;
@@ -55,7 +56,7 @@ cleanup() {
 trap cleanup EXIT
 
 server_binary=
-if [[ "$integration_suite" == all || "$integration_suite" == lifecycle ]]; then
+if [[ "$integration_suite" == all || "$integration_suite" == lifecycle || "$integration_suite" == telemetry ]]; then
 	binary_dir=$(mktemp -d "${TMPDIR:-/tmp}/product-service-binary.XXXXXX")
 	server_binary="$binary_dir/product-service"
 	GOWORK=off "$go_command" build -mod=readonly -race -o "$server_binary" ./cmd/server
@@ -69,12 +70,25 @@ PRODUCT_TEST_POSTGRES_IMAGE="$postgres_image" \
 
 executed_count=$(
 	awk '
-		/"Action":"run"/ && /"Test":"(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductReadOnly|TestProductAccess)/ { count++ }
+		/"Action":"run"/ && /"Test":"(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess)/ { count++ }
 		END { print count + 0 }
 	' "$result_file"
 )
 if [[ "$executed_count" -eq 0 ]]; then
 	fail "suite $integration_suite selected zero tests"
+fi
+if [[ "$integration_suite" == all || "$integration_suite" == telemetry ]]; then
+	for scenario in \
+		'disabled_mode_makes_no_exporter_connection' \
+		'refused_collector_does_not_affect_reads_or_probes' \
+		'collector_recovery_exports_without_a_Product_restart' \
+		'SIGTERM_bounds_an_in-flight_export'; do
+		if ! awk -v expected="TestProductTelemetry/$scenario" \
+			'index($0, "\"Action\":\"pass\"") && index($0, "\"Test\":\"" expected "\"") { found=1 } END { exit !found }' \
+			"$result_file"; then
+			fail "suite $integration_suite did not pass telemetry case $scenario"
+		fi
+	done
 fi
 if [[ "$integration_suite" == all || "$integration_suite" == access ]]; then
 	python3 ./scripts/check-access-results.py "$result_file"

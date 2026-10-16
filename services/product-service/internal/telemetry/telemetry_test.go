@@ -1,15 +1,22 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
@@ -37,6 +44,9 @@ func TestNew_DisabledDoesNotCreateExporter(t *testing.T) {
 	// then
 	if span.IsRecording() {
 		t.Error("disabled span is recording")
+	}
+	if provider.MeterProvider() == nil {
+		t.Error("disabled meter provider is nil")
 	}
 
 	// when
@@ -76,14 +86,20 @@ func TestProvider_ExportsSpansWithServiceIdentity(t *testing.T) {
 	if len(exported) != 1 || exported[0].Name() != "exported" {
 		t.Fatalf("unexpected exported spans: %#v", exported)
 	}
-	serviceName := ""
+	attributes := map[string]string{}
 	for _, attribute := range exported[0].Resource().Attributes() {
-		if string(attribute.Key) == "service.name" {
-			serviceName = attribute.Value.AsString()
-		}
+		attributes[string(attribute.Key)] = attribute.Value.AsString()
 	}
-	if serviceName != "product-service" {
-		t.Errorf("service.name = %q, want product-service", serviceName)
+	wantAttributes := map[string]string{
+		"service.namespace":                    "insurance-hub",
+		"service.name":                         "product-service",
+		"service.version":                      "test-telemetry",
+		"service.instance.id":                  "123e4567-e89b-42d3-a456-426614174000",
+		"deployment.environment.name":          "test",
+		"insurance_hub.service.implementation": "go",
+	}
+	if !reflect.DeepEqual(attributes, wantAttributes) {
+		t.Errorf("trace resource = %#v, want %#v", attributes, wantAttributes)
 	}
 
 	// when
@@ -100,6 +116,184 @@ func TestProvider_ExportsSpansWithServiceIdentity(t *testing.T) {
 	}
 }
 
+func TestProvider_CollectsCumulativeMetricsWithExactResourceAndBuckets(t *testing.T) {
+	// given
+	reader := sdkmetric.NewManualReader()
+	provider, err := newProvider(
+		context.Background(),
+		"product-service",
+		testTelemetrySettings(time.Second),
+		func(context.Context, config.Telemetry) (sdktrace.SpanExporter, error) {
+			return newRecordingExporter(), nil
+		},
+		func(context.Context, config.Telemetry) (sdkmetric.Reader, error) { return reader, nil },
+	)
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	meter := provider.MeterProvider().Meter("product-test")
+	counter, err := meter.Int64Counter("insurance_hub.product.requests")
+	if err != nil {
+		t.Fatalf("create counter: %v", err)
+	}
+	histograms := []struct {
+		name    string
+		buckets []float64
+	}{
+		{name: "insurance_hub.product.request.duration", buckets: requestBuckets},
+		{name: "db.client.operation.duration", buckets: databaseBuckets},
+		{name: "db.client.connection.wait_time", buckets: databaseBuckets},
+	}
+	for _, item := range histograms {
+		histogram, createErr := meter.Float64Histogram(item.name, metric.WithUnit("s"))
+		if createErr != nil {
+			t.Fatalf("create %s: %v", item.name, createErr)
+		}
+		histogram.Record(context.Background(), 0.05)
+	}
+
+	// when
+	counter.Add(context.Background(), 1)
+	var collected metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &collected); err != nil {
+		t.Fatalf("collect metrics: %v", err)
+	}
+
+	// then
+	resourceAttributes := map[string]string{}
+	for _, attribute := range collected.Resource.Attributes() {
+		resourceAttributes[string(attribute.Key)] = attribute.Value.AsString()
+	}
+	if len(resourceAttributes) != 6 ||
+		resourceAttributes["service.name"] != "product-service" ||
+		resourceAttributes["service.version"] != "test-telemetry" ||
+		resourceAttributes["service.instance.id"] != "123e4567-e89b-42d3-a456-426614174000" ||
+		resourceAttributes["deployment.environment.name"] != "test" ||
+		resourceAttributes["insurance_hub.service.implementation"] != "go" ||
+		resourceAttributes["service.namespace"] != "insurance-hub" {
+		t.Errorf("unexpected metric resource: %#v", resourceAttributes)
+	}
+	metrics := map[string]metricdata.Metrics{}
+	for _, scope := range collected.ScopeMetrics {
+		for _, item := range scope.Metrics {
+			metrics[item.Name] = item
+		}
+	}
+	sum, ok := metrics["insurance_hub.product.requests"].Data.(metricdata.Sum[int64])
+	if !ok || sum.Temporality != metricdata.CumulativeTemporality || !sum.IsMonotonic ||
+		len(sum.DataPoints) != 1 || sum.DataPoints[0].Value != 1 {
+		t.Errorf(
+			"unexpected request counter: %#v",
+			metrics["insurance_hub.product.requests"],
+		)
+	}
+	for _, item := range histograms {
+		got, ok := metrics[item.name].Data.(metricdata.Histogram[float64])
+		if !ok || got.Temporality != metricdata.CumulativeTemporality ||
+			len(
+				got.DataPoints,
+			) != 1 || !reflect.DeepEqual(got.DataPoints[0].Bounds, item.buckets) {
+			t.Errorf("unexpected %s histogram: %#v", item.name, metrics[item.name])
+		}
+	}
+}
+
+func TestProvider_HonorsRemoteSamplingAndSamplesRoots(t *testing.T) {
+	// given
+	provider := enabledProvider(t, newRecordingExporter(), time.Second)
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	remote := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: trace.TraceID{1}, SpanID: trace.SpanID{2}, Remote: true,
+	})
+
+	// when
+	_, root := provider.TracerProvider().Tracer("test").Start(context.Background(), "root")
+	_, unsampled := provider.TracerProvider().Tracer("test").Start(
+		trace.ContextWithRemoteSpanContext(context.Background(), remote),
+		"remote-unsampled",
+	)
+	_, sampled := provider.TracerProvider().Tracer("test").Start(
+		trace.ContextWithRemoteSpanContext(context.Background(), remote.WithTraceFlags(trace.FlagsSampled)),
+		"remote-sampled",
+	)
+
+	// then
+	if !root.IsRecording() || unsampled.IsRecording() || !sampled.IsRecording() {
+		t.Errorf("sampling decisions: root=%v unsampled=%v sampled=%v",
+			root.IsRecording(), unsampled.IsRecording(), sampled.IsRecording())
+	}
+	root.End()
+	unsampled.End()
+	sampled.End()
+}
+
+func TestProvider_BatchesSpansAtContractSize(t *testing.T) {
+	// given
+	const wantBatchSize = 256
+	exporter := newRecordingExporter()
+	provider := enabledProvider(t, exporter, time.Second)
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	tracer := provider.TracerProvider().Tracer("test")
+
+	// when
+	for range 300 {
+		_, span := tracer.Start(context.Background(), "batched")
+		span.End()
+	}
+	if err := provider.ForceFlush(context.Background()); err != nil {
+		t.Fatalf("flush spans: %v", err)
+	}
+
+	// then
+	total := 0
+	fullBatch := false
+	for len(exporter.exported) > 0 {
+		batch := <-exporter.exported
+		if len(batch) > wantBatchSize {
+			t.Errorf(
+				"export batch size = %d, want at most %d",
+				len(batch),
+				wantBatchSize,
+			)
+		}
+		fullBatch = fullBatch || len(batch) == wantBatchSize
+		total += len(batch)
+	}
+	if total != 300 || !fullBatch {
+		t.Errorf(
+			"exported %d spans with full contract batch=%v, want 300 and true",
+			total,
+			fullBatch,
+		)
+	}
+}
+
+func TestProvider_ClosesTraceExporterWhenMetricStartupFails(t *testing.T) {
+	// given
+	exporter := newRecordingExporter()
+	cause := errors.New("private metric startup detail")
+
+	// when
+	_, err := newProvider(
+		context.Background(),
+		"product-service",
+		testTelemetrySettings(time.Second),
+		func(context.Context, config.Telemetry) (sdktrace.SpanExporter, error) { return exporter, nil },
+		func(context.Context, config.Telemetry) (sdkmetric.Reader, error) { return nil, cause },
+	)
+
+	// then
+	if !errors.Is(err, cause) || strings.Contains(err.Error(), cause.Error()) {
+		t.Errorf("unsafe or unwrapped startup error: %v", err)
+	}
+	select {
+	case <-exporter.shutdown:
+	default:
+		t.Error("trace exporter was not closed after metric startup failure")
+	}
+}
+
 func TestProvider_PropagatesW3CTraceContext(t *testing.T) {
 	// given
 	provider, err := newProvider(
@@ -109,6 +303,7 @@ func TestProvider_PropagatesW3CTraceContext(t *testing.T) {
 		func(context.Context, config.Telemetry) (sdktrace.SpanExporter, error) {
 			return nil, errors.New("unexpected exporter call")
 		},
+		testMetricReader,
 	)
 	if err != nil {
 		t.Fatalf("new provider: %v", err)
@@ -125,17 +320,26 @@ func TestProvider_PropagatesW3CTraceContext(t *testing.T) {
 	})
 	ctx := trace.ContextWithSpanContext(context.Background(), spanContext)
 	carrier := propagation.MapCarrier{}
+	httpCarrier := propagation.MapCarrier{}
 
 	// when
-	provider.Propagator().Inject(ctx, carrier)
+	provider.GRPCPropagator().Inject(ctx, carrier)
+	provider.HTTPPropagator().Inject(ctx, httpCarrier)
 	extracted := trace.SpanContextFromContext(
-		provider.Propagator().Extract(context.Background(), carrier),
+		provider.GRPCPropagator().Extract(context.Background(), carrier),
 	)
 
 	// then
 	wantHeader := "00-" + traceID.String() + "-" + spanID.String() + "-01"
 	if carrier.Get("traceparent") != wantHeader {
 		t.Fatalf("traceparent = %q, want %q", carrier.Get("traceparent"), wantHeader)
+	}
+	if httpCarrier.Get("traceparent") != wantHeader {
+		t.Errorf(
+			"HTTP traceparent = %q, want %q",
+			httpCarrier.Get("traceparent"),
+			wantHeader,
+		)
 	}
 	if extracted.TraceID() != traceID || extracted.SpanID() != spanID || !extracted.IsRemote() {
 		t.Errorf("unexpected extracted span context: %v", extracted)
@@ -160,6 +364,7 @@ func TestProvider_BoundsExporterInitializationAndHidesCauseDetails(t *testing.T)
 			<-ctx.Done()
 			return nil, cause
 		},
+		testMetricReader,
 	)
 	elapsed := time.Since(start)
 
@@ -292,6 +497,107 @@ func TestProvider_DoesNotBlockSpanCompletionDuringExporterOutage(t *testing.T) {
 	}
 }
 
+func TestProvider_SaturatedQueueDropsWithoutBlockingAndRecovers(t *testing.T) {
+	exporter := &pausingExporter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	defer func() {
+		select {
+		case <-exporter.release:
+		default:
+			close(exporter.release)
+		}
+	}()
+	provider := enabledProvider(t, exporter, 2*time.Second)
+	var warnings bytes.Buffer
+	diagnostics := &exportDiagnostics{
+		logger: slog.New(slog.NewJSONHandler(&warnings, nil)),
+	}
+	warningStarted := make(chan struct{})
+	releaseWarning := make(chan struct{})
+	defer func() {
+		select {
+		case <-releaseWarning:
+		default:
+			close(releaseWarning)
+		}
+	}()
+	provider.queueObserver.errorHandler = errorHandlerFunc(func(err error) {
+		close(warningStarted)
+		<-releaseWarning
+		diagnostics.Handle(err)
+	})
+	tracer := provider.TracerProvider().Tracer("test")
+	for range traceBatchSize {
+		_, span := tracer.Start(context.Background(), "first-batch")
+		span.End()
+	}
+	select {
+	case <-exporter.started:
+	case <-time.After(time.Second):
+		t.Fatal("first export did not start")
+	}
+
+	const excess = 500
+	started := time.Now()
+	for range traceQueueSize + excess {
+		_, span := tracer.Start(context.Background(), "overflow")
+		span.End()
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("span completion blocked under saturation: %s", elapsed)
+	}
+	select {
+	case <-warningStarted:
+	case <-time.After(time.Second):
+		t.Fatal("queue saturation warning did not start")
+	}
+	close(exporter.release)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := provider.ForceFlush(ctx); err != nil {
+		t.Fatalf("flush after recovery: %v", err)
+	}
+	shutdownResult := make(chan error, 1)
+	go func() { shutdownResult <- provider.Shutdown(ctx) }()
+	select {
+	case err := <-shutdownResult:
+		t.Fatalf("shutdown returned before the warning was emitted: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseWarning)
+	select {
+	case err := <-shutdownResult:
+		if err != nil {
+			t.Fatalf("shutdown after recovery: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("shutdown did not finish after releasing the warning")
+	}
+	wantProduced := int64(traceBatchSize + traceQueueSize + excess)
+	gotExported := exporter.exported.Load()
+	if gotExported >= wantProduced || gotExported > traceBatchSize+traceQueueSize {
+		t.Fatalf(
+			"exported %d of %d spans; expected bounded queue loss",
+			gotExported,
+			wantProduced,
+		)
+	}
+	if !provider.queueObserver.saturated.Load() {
+		t.Fatal("queue saturation was not reported")
+	}
+	if got := strings.Count(warnings.String(), "telemetry span queue saturated"); got != 1 {
+		t.Fatalf("queue saturation warnings after shutdown = %d, want one", got)
+	}
+}
+
+type errorHandlerFunc func(error)
+
+func (handler errorHandlerFunc) Handle(err error) {
+	handler(err)
+}
+
 func TestNew_RejectsInvalidEnabledSettings(t *testing.T) {
 	// given
 	tests := []struct {
@@ -334,6 +640,7 @@ func TestNew_RejectsInvalidEnabledSettings(t *testing.T) {
 				test.serviceName,
 				test.settings,
 				newExporter,
+				testMetricReader,
 			)
 
 			// then
@@ -341,6 +648,39 @@ func TestNew_RejectsInvalidEnabledSettings(t *testing.T) {
 				t.Fatal("new provider returned nil error")
 			}
 		})
+	}
+}
+
+func TestNew_RejectsInvalidResourceIdentityBeforeExporterStartup(t *testing.T) {
+	// given
+	settings := testTelemetrySettings(time.Second)
+	settings.Identity.ServiceVersion = "latest"
+	traceCalled := false
+	metricCalled := false
+
+	// when
+	_, err := newProvider(
+		context.Background(), "product-service", settings,
+		func(context.Context, config.Telemetry) (sdktrace.SpanExporter, error) {
+			traceCalled = true
+			return nil, nil
+		},
+		func(context.Context, config.Telemetry) (sdkmetric.Reader, error) {
+			metricCalled = true
+			return nil, nil
+		},
+	)
+
+	// then
+	if err == nil || !strings.Contains(err.Error(), "invalid resource identity") {
+		t.Errorf("invalid identity error = %v", err)
+	}
+	if traceCalled || metricCalled {
+		t.Errorf(
+			"invalid identity started exporters: trace=%v metric=%v",
+			traceCalled,
+			metricCalled,
+		)
 	}
 }
 
@@ -352,7 +692,7 @@ type recordingExporter struct {
 
 func newRecordingExporter() *recordingExporter {
 	return &recordingExporter{
-		exported: make(chan []sdktrace.ReadOnlySpan, 1),
+		exported: make(chan []sdktrace.ReadOnlySpan, 4),
 		shutdown: make(chan struct{}),
 	}
 }
@@ -382,6 +722,37 @@ type blockingExporter struct {
 	shutdownOnce sync.Once
 }
 
+type pausingExporter struct {
+	started  chan struct{}
+	release  chan struct{}
+	once     sync.Once
+	exported atomic.Int64
+	shutdown atomic.Bool
+}
+
+func (exporter *pausingExporter) ExportSpans(
+	ctx context.Context,
+	spans []sdktrace.ReadOnlySpan,
+) error {
+	exporter.once.Do(func() {
+		close(exporter.started)
+		select {
+		case <-exporter.release:
+		case <-ctx.Done():
+		}
+	})
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	exporter.exported.Add(int64(len(spans)))
+	return nil
+}
+
+func (exporter *pausingExporter) Shutdown(context.Context) error {
+	exporter.shutdown.Store(true)
+	return nil
+}
+
 func (exporter *blockingExporter) ExportSpans(
 	ctx context.Context,
 	_ []sdktrace.ReadOnlySpan,
@@ -409,6 +780,7 @@ func enabledProvider(
 		func(context.Context, config.Telemetry) (sdktrace.SpanExporter, error) {
 			return exporter, nil
 		},
+		testMetricReader,
 	)
 	if err != nil {
 		t.Fatalf("new provider: %v", err)
@@ -421,7 +793,19 @@ func testTelemetrySettings(timeout time.Duration) config.Telemetry {
 		Enabled:          true,
 		ExporterEndpoint: mustURL("http://127.0.0.1:4317"),
 		ExporterTimeout:  timeout,
+		Identity: config.Identity{
+			ServiceNamespace: "insurance-hub",
+			ServiceName:      "product-service",
+			ServiceVersion:   "test-telemetry",
+			ServiceInstance:  "123e4567-e89b-42d3-a456-426614174000",
+			Environment:      "test",
+			Implementation:   "go",
+		},
 	}
+}
+
+func testMetricReader(context.Context, config.Telemetry) (sdkmetric.Reader, error) {
+	return sdkmetric.NewManualReader(), nil
 }
 
 func mustURL(value string) *url.URL {

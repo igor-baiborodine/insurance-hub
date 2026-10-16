@@ -11,6 +11,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/service"
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/telemetry"
 )
 
 func main() {
@@ -36,7 +37,9 @@ func runWith(
 	loadConfig func() (config.Config, error),
 	runService func(context.Context, config.Config, *slog.Logger) error,
 ) error {
-	bootstrapLogger := logger.New(output, config.DefaultServiceName, slog.LevelInfo)
+	bootstrapLogger := logger.NewIdentity(
+		output, config.DevelopmentIdentity(config.DefaultServiceName), slog.LevelInfo,
+	)
 	settings, err := loadConfig()
 	if err != nil {
 		bootstrapLogger.ErrorContext(
@@ -46,7 +49,10 @@ func runWith(
 		)
 		return err
 	}
-	serviceLogger := logger.New(output, settings.ServiceName, settings.LogLevel)
+	serviceLogger := logger.NewIdentity(output, settings.Telemetry.Identity, settings.LogLevel)
+	if settings.Telemetry.Enabled {
+		telemetry.InstallDiagnostics(serviceLogger)
+	}
 	if err := runService(ctx, settings, serviceLogger); err != nil {
 		serviceLogger.ErrorContext(
 			context.Background(),
