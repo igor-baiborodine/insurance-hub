@@ -5,14 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/domain"
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/telemetry"
 )
 
 type (
@@ -22,6 +25,7 @@ type (
 
 type Settings struct {
 	RequestTimeout time.Duration
+	Observer       *telemetry.RequestObserver
 }
 
 // NewHandler constructs the direct Product HTTP routes.
@@ -44,29 +48,56 @@ func NewHandler(
 	}
 
 	handler := &catalogHandler{
-		logger:         logger,
 		requestTimeout: settings.RequestTimeout,
 		listProducts:   listProducts,
 		getProduct:     getProduct,
+		observer:       settings.Observer,
 	}
 	return http.HandlerFunc(handler.serveHTTP), nil
 }
 
 type catalogHandler struct {
-	logger         *slog.Logger
 	requestTimeout time.Duration
 	listProducts   ListProducts
 	getProduct     GetProduct
+	observer       *telemetry.RequestObserver
 }
 
 func (handler *catalogHandler) serveHTTP(writer http.ResponseWriter, request *http.Request) {
+	path := request.URL.EscapedPath()
+	var operation, route string
+	if path == "/products" || path == "/products/" {
+		operation, route = telemetry.OperationList, "/products"
+	} else if strings.HasPrefix(path, "/products/") {
+		rawCode := strings.TrimPrefix(path, "/products/")
+		if rawCode != "" && !strings.Contains(rawCode, "/") {
+			operation, route = telemetry.OperationGet, "/products/{productCode}"
+		}
+	}
+	if operation != "" && handler.observer != nil {
+		var state *telemetry.Request
+		request, state = handler.observer.StartHTTP(request, operation, route)
+		statusWriter := &statusResponseWriter{ResponseWriter: writer}
+		defer func() {
+			if err := request.Context().Err(); err != nil {
+				state.SetError(err)
+			} else if statusWriter.writeErr != nil {
+				state.SetError(statusWriter.writeErr)
+			}
+			status := ""
+			if statusWriter.status != 0 {
+				status = strconv.Itoa(statusWriter.status)
+			}
+			state.Finish(request.Context(), "http.response.status_code", status)
+		}()
+		writer = statusWriter
+	}
 	if request.Method != http.MethodGet {
 		writer.Header().Set("Allow", http.MethodGet)
 		http.Error(writer, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	path := request.URL.EscapedPath()
 	if path == "/products" || path == "/products/" {
 		handler.list(writer, request)
 		return
@@ -162,17 +193,18 @@ func (handler *catalogHandler) writeApplicationError(
 	err error,
 ) {
 	if errors.Is(err, application.ErrProductNotFound) {
+		telemetry.MarkError(request.Context(), err)
 		WriteNotFound(writer, request)
 		return
+	}
+	if errors.Is(err, errInvalidDomainProduct) {
+		telemetry.MarkError(request.Context(), application.ErrInvalidDefinition)
+	} else {
+		telemetry.MarkError(request.Context(), err)
 	}
 	if errors.Is(err, context.Canceled) && request.Context().Err() != nil {
 		return
 	}
-	handler.logger.ErrorContext(
-		request.Context(),
-		"Product HTTP request failed",
-		slog.String("route", routeName(request.URL.EscapedPath())),
-	)
 	writeJSON(
 		writer,
 		http.StatusInternalServerError,
@@ -180,11 +212,31 @@ func (handler *catalogHandler) writeApplicationError(
 	)
 }
 
-func routeName(path string) string {
-	if path == "/products" || path == "/products/" {
-		return "list-products"
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status   int
+	writeErr error
+}
+
+func (writer *statusResponseWriter) WriteHeader(status int) {
+	writer.status = status
+	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *statusResponseWriter) Write(body []byte) (int, error) {
+	if writer.status == 0 {
+		writer.status = http.StatusOK
 	}
-	return "get-product"
+	written, err := writer.ResponseWriter.Write(body)
+	if writer.writeErr == nil {
+		switch {
+		case err != nil:
+			writer.writeErr = err
+		case written < len(body):
+			writer.writeErr = io.ErrShortWrite
+		}
+	}
+	return written, err
 }
 
 // WriteNotFound preserves the incoming encoded path in the legacy self link.

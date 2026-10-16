@@ -79,6 +79,7 @@ if [[ "$executed_count" -eq 0 ]]; then
 fi
 if [[ "$integration_suite" == all || "$integration_suite" == telemetry ]]; then
 	for scenario in \
+		'real_HTTP_and_gRPC_reads_export_one_request_observation_each' \
 		'disabled_mode_makes_no_exporter_connection' \
 		'refused_collector_does_not_affect_reads_or_probes' \
 		'collector_recovery_exports_without_a_Product_restart' \

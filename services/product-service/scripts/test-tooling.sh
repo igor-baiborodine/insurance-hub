@@ -76,6 +76,7 @@ test)
 	printf '%s\n' \
 		'{"Action":"run","Test":"TestProductTelemetry"}' \
 		'{"Action":"pass","Test":"TestProductTelemetry"}' \
+		'{"Action":"pass","Test":"TestProductTelemetry/real_HTTP_and_gRPC_reads_export_one_request_observation_each"}' \
 		'{"Action":"pass","Test":"TestProductTelemetry/disabled_mode_makes_no_exporter_connection"}' \
 		'{"Action":"pass","Test":"TestProductTelemetry/refused_collector_does_not_affect_reads_or_probes"}' \
 		'{"Action":"pass","Test":"TestProductTelemetry/collector_recovery_exports_without_a_Product_restart"}'
