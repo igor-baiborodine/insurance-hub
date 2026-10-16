@@ -53,12 +53,21 @@ func TestLoad_Defaults(t *testing.T) {
 		settings.Telemetry.ExporterTimeout != 2*time.Second {
 		t.Errorf("unexpected telemetry defaults: %#v", settings.Telemetry)
 	}
+	identity := settings.Telemetry.Identity
+	if identity.ServiceNamespace != "insurance-hub" ||
+		identity.ServiceName != "product-service" ||
+		identity.ServiceVersion != "development" ||
+		identity.Environment != "development" ||
+		identity.Implementation != "go" ||
+		!strings.HasPrefix(identity.ServiceInstance, "local-") {
+		t.Errorf("unexpected disabled identity: %#v", identity)
+	}
 }
 
 func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 	// given
 	values := map[string]string{
-		serviceNameSetting:           "product-reader",
+		serviceNameSetting:           "product-service",
 		httpAddressSetting:           "[::1]:8081",
 		grpcAddressSetting:           "[::1]:9090",
 		healthAddressSetting:         "[::1]:8080",
@@ -80,7 +89,9 @@ func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 		logLevelSetting:              "debug",
 		otelEnabledSetting:           "true",
 		otelEndpointSetting:          "https://collector.internal:4317",
-		otelTimeoutSetting:           "3s",
+		otelTimeoutSetting:           "2s",
+		environmentSetting:           "test",
+		serviceVersionSetting:        "test-config-overrides",
 	}
 
 	// when
@@ -89,7 +100,7 @@ func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load overrides: %v", err)
 	}
-	if settings.ServiceName != "product-reader" ||
+	if settings.ServiceName != "product-service" ||
 		settings.HTTPAddress.String() != "[::1]:8081" ||
 		settings.GRPCAddress.String() != "[::1]:9090" ||
 		settings.HealthAddress.String() != "[::1]:8080" {
@@ -118,8 +129,14 @@ func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 	}
 	if !settings.Telemetry.Enabled ||
 		settings.Telemetry.ExporterEndpoint.String() != "https://collector.internal:4317" ||
-		settings.Telemetry.ExporterTimeout != 3*time.Second {
+		settings.Telemetry.ExporterTimeout != 2*time.Second {
 		t.Errorf("unexpected telemetry overrides: %#v", settings.Telemetry)
+	}
+	if identity := settings.Telemetry.Identity; identity.ServiceNamespace != "insurance-hub" ||
+		identity.ServiceName != "product-service" || identity.ServiceVersion != "test-config-overrides" ||
+		identity.Environment != "test" || identity.Implementation != "go" ||
+		!validUUID(identity.ServiceInstance) {
+		t.Errorf("unexpected test telemetry identity: %#v", identity)
 	}
 }
 
@@ -374,6 +391,132 @@ func TestLoad_RequiresEndpointForEnabledTelemetry(t *testing.T) {
 
 	// then
 	assertSettingError(t, err, otelEndpointSetting)
+}
+
+func TestLoad_AcceptsQAIdentityAndGeneratesDistinctTestInstances(t *testing.T) {
+	// given
+	qaValues := map[string]string{
+		databaseURLSetting:     testDatabaseURL,
+		otelEnabledSetting:     "true",
+		otelEndpointSetting:    "http://collector.internal:4317",
+		environmentSetting:     "qa",
+		serviceVersionSetting:  "sha-6c4669c81d3a",
+		serviceInstanceSetting: "123e4567-e89b-42d3-a456-426614174000",
+	}
+	testValues := map[string]string{
+		databaseURLSetting:    testDatabaseURL,
+		otelEnabledSetting:    "true",
+		otelEndpointSetting:   "http://127.0.0.1:4317",
+		environmentSetting:    "test",
+		serviceVersionSetting: "test-6c4669c",
+	}
+
+	// when
+	qa, qaErr := load(mapLookup(qaValues))
+	first, firstErr := load(mapLookup(testValues))
+	second, secondErr := load(mapLookup(testValues))
+
+	// then
+	if qaErr != nil || firstErr != nil || secondErr != nil {
+		t.Fatalf("load identities: qa=%v first=%v second=%v", qaErr, firstErr, secondErr)
+	}
+	if qa.Telemetry.Identity.ServiceInstance != qaValues[serviceInstanceSetting] ||
+		qa.Telemetry.Identity.Environment != "qa" ||
+		qa.Telemetry.Identity.ServiceVersion != qaValues[serviceVersionSetting] {
+		t.Errorf("unexpected QA identity: %#v", qa.Telemetry.Identity)
+	}
+	firstID := first.Telemetry.Identity.ServiceInstance
+	secondID := second.Telemetry.Identity.ServiceInstance
+	if !validUUID(firstID) || !validUUID(secondID) || firstID == secondID ||
+		firstID[14] != '4' || secondID[14] != '4' {
+		t.Errorf("test instances are not distinct UUIDv4 values: %q, %q", firstID, secondID)
+	}
+}
+
+func TestLoad_RejectsSuppliedTestInstance(t *testing.T) {
+	// given
+	values := map[string]string{
+		databaseURLSetting:     testDatabaseURL,
+		otelEnabledSetting:     "true",
+		otelEndpointSetting:    "http://127.0.0.1:4317",
+		environmentSetting:     "test",
+		serviceVersionSetting:  "test-local-run",
+		serviceInstanceSetting: "123e4567-e89b-42d3-a456-426614174000",
+	}
+
+	// when
+	_, err := load(mapLookup(values))
+
+	// then
+	assertSettingError(t, err, serviceInstanceSetting)
+}
+
+func TestLoad_RejectsInvalidEnabledIdentityWithoutEchoingValues(t *testing.T) {
+	// given
+	const privateMarker = "private-identity-marker"
+	tests := []struct {
+		name    string
+		setting string
+		value   string
+		want    string
+	}{
+		{name: "missing environment", want: environmentSetting},
+		{
+			name:    "mutable QA version",
+			setting: serviceVersionSetting,
+			value:   "latest",
+			want:    serviceVersionSetting,
+		},
+		{name: "missing QA Pod UID", want: serviceInstanceSetting},
+		{
+			name:    "invalid QA Pod UID",
+			setting: serviceInstanceSetting,
+			value:   privateMarker,
+			want:    serviceInstanceSetting,
+		},
+		{
+			name:    "wrong logical name",
+			setting: serviceNameSetting,
+			value:   "other-service",
+			want:    serviceNameSetting,
+		},
+		{
+			name:    "non-contract exporter timeout",
+			setting: otelTimeoutSetting,
+			value:   "3s",
+			want:    otelTimeoutSetting,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			values := map[string]string{
+				databaseURLSetting:     testDatabaseURL,
+				otelEnabledSetting:     "true",
+				otelEndpointSetting:    "http://collector.internal:4317",
+				environmentSetting:     "qa",
+				serviceVersionSetting:  "sha-6c4669c81d3a",
+				serviceInstanceSetting: "123e4567-e89b-42d3-a456-426614174000",
+			}
+			switch test.name {
+			case "missing environment":
+				delete(values, environmentSetting)
+			case "missing QA Pod UID":
+				delete(values, serviceInstanceSetting)
+			default:
+				values[test.setting] = test.value
+			}
+
+			// when
+			_, err := load(mapLookup(values))
+
+			// then
+			assertSettingError(t, err, test.want)
+			if strings.Contains(err.Error(), privateMarker) {
+				t.Errorf("identity error exposes rejected value: %v", err)
+			}
+		})
+	}
 }
 
 func TestDatabaseURLAndErrors_RedactCredentialValues(t *testing.T) {

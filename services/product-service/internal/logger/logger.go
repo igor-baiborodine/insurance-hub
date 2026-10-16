@@ -11,6 +11,8 @@ import (
 	"unicode"
 
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
 )
 
 const redactedValue = "[REDACTED]"
@@ -18,8 +20,32 @@ const redactedValue = "[REDACTED]"
 // New constructs a JSON logger with stable service identity, sensitive-field redaction, and trace
 // correlation derived from the logging context.
 func New(output io.Writer, serviceName string, level slog.Level) *slog.Logger {
-	base := slog.NewJSONHandler(output, &slog.HandlerOptions{Level: level})
-	return slog.New(&safeHandler{next: base}).With(slog.String("service", serviceName))
+	return newLogger(output, level).With(slog.String("service", serviceName))
+}
+
+// NewIdentity adds the six application-owned identity fields to every validated service log.
+func NewIdentity(output io.Writer, identity config.Identity, level slog.Level) *slog.Logger {
+	return newLogger(output, level).With(
+		slog.String("service_namespace", identity.ServiceNamespace),
+		slog.String("service_name", identity.ServiceName),
+		slog.String("service_version", identity.ServiceVersion),
+		slog.String("service_instance_id", identity.ServiceInstance),
+		slog.String("deployment_environment_name", identity.Environment),
+		slog.String("service_implementation", identity.Implementation),
+	)
+}
+
+func newLogger(output io.Writer, level slog.Level) *slog.Logger {
+	base := slog.NewJSONHandler(output, &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(_ []string, attr slog.Attr) slog.Attr {
+			if attr.Key == slog.TimeKey {
+				return slog.Time(slog.TimeKey, attr.Value.Time().UTC())
+			}
+			return attr
+		},
+	})
+	return slog.New(&safeHandler{next: base})
 }
 
 type safeHandler struct {

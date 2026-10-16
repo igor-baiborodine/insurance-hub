@@ -178,7 +178,9 @@ update-deps:
 		buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go@$(PROTOVALIDATE_SCHEMA_GO_VERSION) \
 		go.opentelemetry.io/otel@$(OTEL_VERSION) \
 		go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@$(OTEL_VERSION) \
+		go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc@$(OTEL_VERSION) \
 		go.opentelemetry.io/otel/sdk@$(OTEL_VERSION) \
+		go.opentelemetry.io/otel/sdk/metric@$(OTEL_VERSION) \
 		go.opentelemetry.io/otel/trace@$(OTEL_VERSION) \
 		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
 		google.golang.org/grpc@$(GRPC_GO_VERSION) \

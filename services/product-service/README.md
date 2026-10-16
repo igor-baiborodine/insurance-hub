@@ -167,6 +167,17 @@ parameter is rejected.
 | `OTEL_ENABLED`                | `false`           | Boolean; disabled mode requires no collector.                                                                           |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset             | HTTP(S) OTLP/gRPC URL, required only when telemetry is enabled.                                                         |
 | `OTEL_EXPORTER_OTLP_TIMEOUT`  | `2s`              | Positive; no greater than `SHUTDOWN_TIMEOUT`.                                                                           |
+| `DEPLOYMENT_ENVIRONMENT`      | `development`     | Enabled telemetry requires `qa` or `test`; normal local development remains disabled.                                   |
+| `SERVICE_VERSION`             | `development`     | QA requires an immutable `sha-<git-sha>`; disposable tests require `test-<revision>`.                                  |
+| `SERVICE_INSTANCE_ID`         | local process ID  | QA requires the Pod UID from the Downward API; enabled tests generate a UUIDv4 when unset.                              |
+
+Enabled telemetry fixes `SERVICE_NAME=product-service` and `OTEL_EXPORTER_OTLP_TIMEOUT=2s`.
+The application supplies the six approved non-Kubernetes identity fields on trace and metric
+resources and on validated service logs. Alloy adds Kubernetes identity later. QA telemetry and
+its version/Pod UID wiring remain disabled until the separate QA activation step. The provider
+uses parent-based root sampling, a bounded trace batch, and a ten-second cumulative metric reader
+with explicit request, database, and pool-wait histogram buckets. HTTP, database, and runtime
+instruments are added in later delivery steps.
 
 Callers with a shorter deadline keep that deadline. Acquisition and query work share the request
 budget rather than starting new clocks. Startup, readiness, and shutdown each use their one
@@ -305,7 +316,7 @@ The concrete package and file responsibilities are:
 | [`internal/grpc`](internal/grpc) | Owns generated-service registration, validation, domain-to-protobuf mapping, limits, tracing hooks, and status mapping. |
 | [`internal/config`](internal/config) | Parses and validates the bounded runtime settings and holds the database URL in a redacting type. |
 | [`internal/health`](internal/health) | Owns process liveness and bounded dependency-aware readiness. |
-| [`internal/logger`](internal/logger) / [`internal/telemetry`](internal/telemetry) | Own structured redaction/context and the optional bounded OpenTelemetry provider lifecycle. |
+| [`internal/logger`](internal/logger) / [`internal/telemetry`](internal/telemetry) | Own structured redaction/identity/context and the optional bounded trace and metric provider lifecycle. |
 | [`api/product/v1`](api/product/v1) / [`gen/product/v1`](gen/product/v1) | Own the versioned protobuf source and generated Go boundary. |
 
 For a get-product request:

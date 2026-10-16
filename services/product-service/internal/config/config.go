@@ -1,11 +1,14 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +41,14 @@ const (
 	otelEnabledSetting           = "OTEL_ENABLED"
 	otelEndpointSetting          = "OTEL_EXPORTER_OTLP_ENDPOINT"
 	otelTimeoutSetting           = "OTEL_EXPORTER_OTLP_TIMEOUT"
+	environmentSetting           = "DEPLOYMENT_ENVIRONMENT"
+	serviceVersionSetting        = "SERVICE_VERSION"
+	serviceInstanceSetting       = "SERVICE_INSTANCE_ID"
+)
+
+var (
+	qaVersionPattern   = regexp.MustCompile(`^sha-[0-9a-f]{7,40}$`)
+	testVersionPattern = regexp.MustCompile(`^test-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 )
 
 // Config contains the immutable settings parsed and validated during process startup.
@@ -55,6 +66,28 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	LogLevel        slog.Level
 	Telemetry       Telemetry
+}
+
+// Identity is the application-owned resource and log identity. Kubernetes fields are added by Alloy.
+type Identity struct {
+	ServiceNamespace string
+	ServiceName      string
+	ServiceVersion   string
+	ServiceInstance  string
+	Environment      string
+	Implementation   string
+}
+
+// DevelopmentIdentity labels startup diagnostics before configuration is validated.
+func DevelopmentIdentity(serviceName string) Identity {
+	return Identity{
+		ServiceNamespace: "insurance-hub",
+		ServiceName:      serviceName,
+		ServiceVersion:   "development",
+		ServiceInstance:  fmt.Sprintf("local-%d", os.Getpid()),
+		Environment:      "development",
+		Implementation:   "go",
+	}
 }
 
 // Address is a validated TCP listen address with a host and numeric port.
@@ -108,11 +141,12 @@ type GRPC struct {
 	MaxSendBytes    int
 }
 
-// Telemetry contains the optional OTLP trace-export configuration.
+// Telemetry contains the optional OTLP trace and metric export configuration.
 type Telemetry struct {
 	Enabled          bool
 	ExporterEndpoint *url.URL
 	ExporterTimeout  time.Duration
+	Identity         Identity
 }
 
 // Load reads configuration from the process environment.
@@ -248,7 +282,7 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	telemetrySettings, err := loadTelemetry(lookup)
+	telemetrySettings, err := loadTelemetry(lookup, serviceName)
 	if err != nil {
 		return Config{}, err
 	}
@@ -426,7 +460,7 @@ func loadLogLevel(lookup lookupEnv) (slog.Level, error) {
 	return level, nil
 }
 
-func loadTelemetry(lookup lookupEnv) (Telemetry, error) {
+func loadTelemetry(lookup lookupEnv, serviceName string) (Telemetry, error) {
 	enabledValue, err := valueOrDefault(lookup, otelEnabledSetting, "false")
 	if err != nil {
 		return Telemetry{}, err
@@ -439,7 +473,17 @@ func loadTelemetry(lookup lookupEnv) (Telemetry, error) {
 	if err != nil {
 		return Telemetry{}, err
 	}
+	if enabled && timeout != 2*time.Second {
+		return Telemetry{}, invalid(
+			otelTimeoutSetting,
+			"must be 2s when telemetry is enabled",
+		)
+	}
 	endpoint, err := parseOptionalEndpoint(lookup, enabled)
+	if err != nil {
+		return Telemetry{}, err
+	}
+	identity, err := loadIdentity(lookup, serviceName, enabled)
 	if err != nil {
 		return Telemetry{}, err
 	}
@@ -447,7 +491,130 @@ func loadTelemetry(lookup lookupEnv) (Telemetry, error) {
 		Enabled:          enabled,
 		ExporterEndpoint: endpoint,
 		ExporterTimeout:  timeout,
+		Identity:         identity,
 	}, nil
+}
+
+func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity, error) {
+	defaultEnvironment := "development"
+	if enabled {
+		defaultEnvironment = ""
+	}
+	environment, err := valueOrDefault(lookup, environmentSetting, defaultEnvironment)
+	if err != nil {
+		return Identity{}, err
+	}
+	version, err := valueOrDefault(lookup, serviceVersionSetting, "development")
+	if err != nil {
+		return Identity{}, err
+	}
+	instance, err := valueOrDefault(lookup, serviceInstanceSetting, "")
+	if err != nil {
+		return Identity{}, err
+	}
+	if environment == "test" && instance != "" {
+		return Identity{}, invalid(serviceInstanceSetting, "must be generated in test mode")
+	}
+	if environment == "test" {
+		instance, err = randomInstanceID()
+		if err != nil {
+			return Identity{}, invalid(
+				serviceInstanceSetting,
+				"could not generate test instance ID",
+			)
+		}
+	} else if environment == "development" && instance == "" {
+		instance = DevelopmentIdentity(serviceName).ServiceInstance
+	}
+	identity := Identity{
+		ServiceNamespace: "insurance-hub",
+		ServiceName:      serviceName,
+		ServiceVersion:   version,
+		ServiceInstance:  instance,
+		Environment:      environment,
+		Implementation:   "go",
+	}
+	if err := identity.Validate(enabled); err != nil {
+		return Identity{}, err
+	}
+	return identity, nil
+}
+
+// Validate rejects an incomplete or conflicting telemetry identity without echoing its values.
+func (identity Identity) Validate(enabled bool) error {
+	if identity.ServiceNamespace != "insurance-hub" || identity.Implementation != "go" {
+		return invalid(
+			"telemetry identity",
+			"must use the Product namespace and Go implementation",
+		)
+	}
+	if identity.ServiceName == "" ||
+		strings.TrimSpace(identity.ServiceName) != identity.ServiceName {
+		return invalid(serviceNameSetting, "must not be blank or padded")
+	}
+	if enabled && identity.ServiceName != DefaultServiceName {
+		return invalid(
+			serviceNameSetting,
+			"must be product-service when telemetry is enabled",
+		)
+	}
+	switch identity.Environment {
+	case "qa":
+		if !qaVersionPattern.MatchString(identity.ServiceVersion) {
+			return invalid(
+				serviceVersionSetting,
+				"must be an immutable sha version in QA",
+			)
+		}
+		if !validUUID(identity.ServiceInstance) {
+			return invalid(serviceInstanceSetting, "must be a Pod UID in QA")
+		}
+	case "test":
+		if !testVersionPattern.MatchString(identity.ServiceVersion) {
+			return invalid(serviceVersionSetting, "must be a test revision")
+		}
+		if !validUUID(identity.ServiceInstance) {
+			return invalid(serviceInstanceSetting, "must be a UUID in test mode")
+		}
+	case "development":
+		if enabled {
+			return invalid(
+				environmentSetting,
+				"must be qa or test when telemetry is enabled",
+			)
+		}
+		if identity.ServiceVersion != "development" ||
+			!strings.HasPrefix(identity.ServiceInstance, "local-") {
+			return invalid(
+				"telemetry identity",
+				"must use development identity when disabled locally",
+			)
+		}
+	default:
+		return invalid(environmentSetting, "must be qa, test, or disabled development")
+	}
+	return nil
+}
+
+func validUUID(value string) bool {
+	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' ||
+		value[23] != '-' {
+		return false
+	}
+	_, err := hex.DecodeString(strings.ReplaceAll(value, "-", ""))
+	return err == nil
+}
+
+func randomInstanceID() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
+	}
+	value[6] = value[6]&0x0f | 0x40
+	value[8] = value[8]&0x3f | 0x80
+	encoded := hex.EncodeToString(value[:])
+	return encoded[:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" +
+		encoded[16:20] + "-" + encoded[20:], nil
 }
 
 func parseOptionalEndpoint(lookup lookupEnv, enabled bool) (*url.URL, error) {

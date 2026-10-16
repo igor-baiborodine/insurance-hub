@@ -98,7 +98,7 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 	grpcServer, err := productgrpc.NewServer(
 		logger,
 		provider.TracerProvider(),
-		provider.Propagator(),
+		provider.GRPCPropagator(),
 		productgrpc.Settings{
 			RequestTimeout:  settings.RequestTimeout,
 			MaxReceiveBytes: settings.GRPC.MaxReceiveBytes,
