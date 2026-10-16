@@ -1,5 +1,8 @@
 enabled: true
 
+crds:
+  enabled: false
+
 kubeControllerManager:
   enabled: false
 
@@ -39,6 +42,8 @@ defaultRules:
 
 prometheus:
   prometheusSpec:
+    retention: 10d
+    enableRemoteWriteReceiver: false
     serviceMonitorNamespaceSelector: {}
     serviceMonitorSelector:
       matchLabels: {}
@@ -78,10 +83,11 @@ grafana:
 
 alertmanager:
   enabled: true
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 250m
-      memory: 256Mi
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
