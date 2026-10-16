@@ -14,12 +14,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	grpcgo "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	productv1 "github.com/igor-baiborodine/insurance-hub/services/product-service/gen/product/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/domain"
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/telemetry"
 )
 
 const (
@@ -37,6 +39,7 @@ type Settings struct {
 	RequestTimeout  time.Duration
 	MaxReceiveBytes int
 	MaxSendBytes    int
+	Observer        *telemetry.RequestObserver
 }
 
 // NewServer constructs the instrumented Product server and registers both unary methods.
@@ -89,11 +92,17 @@ func NewServer(
 			otelgrpc.WithTracerProvider(tracerProvider),
 			otelgrpc.WithPropagators(propagator),
 			otelgrpc.WithMeterProvider(metricnoop.NewMeterProvider()),
+			otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
+				return info.FullMethodName == productv1.ProductService_ListProducts_FullMethodName ||
+					info.FullMethodName == productv1.ProductService_GetProduct_FullMethodName
+			}),
 		)),
-		grpcgo.UnaryInterceptor(validationInterceptor(logger, validator)),
+		grpcgo.ChainUnaryInterceptor(
+			requestInterceptor(settings.Observer),
+			validationInterceptor(validator),
+		),
 	)
 	productv1.RegisterProductServiceServer(server, &productServer{
-		logger:         logger,
 		requestTimeout: settings.RequestTimeout,
 		listProducts:   listProducts,
 		getProduct:     getProduct,
@@ -103,7 +112,6 @@ func NewServer(
 
 type productServer struct {
 	productv1.UnimplementedProductServiceServer
-	logger         *slog.Logger
 	requestTimeout time.Duration
 	listProducts   ListProducts
 	getProduct     GetProduct
@@ -119,7 +127,6 @@ func (server *productServer) ListProducts(
 	if err != nil {
 		return nil, server.transportError(
 			requestCtx,
-			productv1.ProductService_ListProducts_FullMethodName,
 			err,
 		)
 	}
@@ -130,7 +137,6 @@ func (server *productServer) ListProducts(
 		if err := requestCtx.Err(); err != nil {
 			return nil, server.transportError(
 				requestCtx,
-				productv1.ProductService_ListProducts_FullMethodName,
 				err,
 			)
 		}
@@ -138,7 +144,6 @@ func (server *productServer) ListProducts(
 		if mapErr != nil {
 			return nil, server.transportError(
 				requestCtx,
-				productv1.ProductService_ListProducts_FullMethodName,
 				mapErr,
 			)
 		}
@@ -147,7 +152,6 @@ func (server *productServer) ListProducts(
 	if err := requestCtx.Err(); err != nil {
 		return nil, server.transportError(
 			requestCtx,
-			productv1.ProductService_ListProducts_FullMethodName,
 			err,
 		)
 	}
@@ -164,7 +168,6 @@ func (server *productServer) GetProduct(
 	if err != nil {
 		return nil, server.transportError(
 			requestCtx,
-			productv1.ProductService_GetProduct_FullMethodName,
 			err,
 		)
 	}
@@ -172,14 +175,12 @@ func (server *productServer) GetProduct(
 	if err != nil {
 		return nil, server.transportError(
 			requestCtx,
-			productv1.ProductService_GetProduct_FullMethodName,
 			err,
 		)
 	}
 	if err := requestCtx.Err(); err != nil {
 		return nil, server.transportError(
 			requestCtx,
-			productv1.ProductService_GetProduct_FullMethodName,
 			err,
 		)
 	}
@@ -188,9 +189,13 @@ func (server *productServer) GetProduct(
 
 func (server *productServer) transportError(
 	ctx context.Context,
-	rpc string,
 	err error,
 ) error {
+	if errors.Is(err, errInvalidDomainProduct) {
+		telemetry.MarkError(ctx, application.ErrInvalidDefinition)
+	} else {
+		telemetry.MarkError(ctx, err)
+	}
 	switch {
 	case errors.Is(err, context.Canceled):
 		return status.Error(codes.Canceled, context.Canceled.Error())
@@ -205,17 +210,11 @@ func (server *productServer) transportError(
 	case errors.Is(err, application.ErrInvalidDefinition):
 		return status.Error(codes.Internal, internalMessage)
 	default:
-		server.logger.ErrorContext(
-			ctx,
-			"Product gRPC request failed",
-			slog.String("rpc", rpc),
-		)
 		return status.Error(codes.Internal, internalMessage)
 	}
 }
 
 func validationInterceptor(
-	logger *slog.Logger,
 	validator protovalidate.Validator,
 ) grpcgo.UnaryServerInterceptor {
 	return func(
@@ -226,20 +225,58 @@ func validationInterceptor(
 	) (any, error) {
 		message, ok := request.(proto.Message)
 		if !ok {
-			logger.ErrorContext(ctx, "Product gRPC request validation failed",
-				slog.String("rpc", info.FullMethod),
-			)
 			return nil, status.Error(codes.Internal, internalMessage)
 		}
 		if err := validator.Validate(message); err != nil {
 			if _, ok := errors.AsType[*protovalidate.ValidationError](err); ok {
 				return nil, status.Error(codes.InvalidArgument, invalidMessage)
 			}
-			logger.ErrorContext(ctx, "Product gRPC request validation failed",
-				slog.String("rpc", info.FullMethod),
-			)
 			return nil, status.Error(codes.Internal, internalMessage)
 		}
 		return handler(ctx, request)
+	}
+}
+
+func requestInterceptor(observer *telemetry.RequestObserver) grpcgo.UnaryServerInterceptor {
+	return func(ctx context.Context, request any, info *grpcgo.UnaryServerInfo,
+		handler grpcgo.UnaryHandler,
+	) (any, error) {
+		if observer == nil {
+			return handler(ctx, request)
+		}
+		var operation string
+		switch info.FullMethod {
+		case productv1.ProductService_ListProducts_FullMethodName:
+			operation = telemetry.OperationList
+		case productv1.ProductService_GetProduct_FullMethodName:
+			operation = telemetry.OperationGet
+		default:
+			return handler(ctx, request)
+		}
+		ctx, state := observer.StartGRPC(ctx, operation)
+		response, err := handler(ctx, request)
+		state.Finish(ctx, "rpc.response.status_code", rpcCodeName(status.Code(err)))
+		return response, err
+	}
+}
+
+func rpcCodeName(code codes.Code) string {
+	switch code {
+	case codes.OK:
+		return "OK"
+	case codes.InvalidArgument:
+		return "INVALID_ARGUMENT"
+	case codes.NotFound:
+		return "NOT_FOUND"
+	case codes.Canceled:
+		return "CANCELLED"
+	case codes.DeadlineExceeded:
+		return "DEADLINE_EXCEEDED"
+	case codes.ResourceExhausted:
+		return "RESOURCE_EXHAUSTED"
+	case codes.Unavailable:
+		return "UNAVAILABLE"
+	default:
+		return "INTERNAL"
 	}
 }

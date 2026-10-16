@@ -16,6 +16,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	productv1 "github.com/igor-baiborodine/insurance-hub/services/product-service/gen/product/v1"
 )
 
 type telemetryTraceCollector struct {
@@ -24,6 +26,8 @@ type telemetryTraceCollector struct {
 	blocked  <-chan struct{}
 	started  chan struct{}
 	accepted chan struct{}
+	spans    chan *collectortrace.ExportTraceServiceRequest
+	metrics  chan *collectormetric.ExportMetricsServiceRequest
 }
 
 func (collector *telemetryTraceCollector) Export(
@@ -45,6 +49,9 @@ func (collector *telemetryTraceCollector) Export(
 		return nil, status.Error(codes.Unavailable, "private-collector-marker")
 	}
 	if len(request.ResourceSpans) != 0 {
+		if collector.spans != nil {
+			collector.spans <- request
+		}
 		select {
 		case collector.accepted <- struct{}{}:
 		default:
@@ -55,12 +62,16 @@ func (collector *telemetryTraceCollector) Export(
 
 type telemetryMetricCollector struct {
 	collectormetric.UnimplementedMetricsServiceServer
+	metrics chan *collectormetric.ExportMetricsServiceRequest
 }
 
-func (*telemetryMetricCollector) Export(
-	context.Context,
-	*collectormetric.ExportMetricsServiceRequest,
+func (collector *telemetryMetricCollector) Export(
+	_ context.Context,
+	request *collectormetric.ExportMetricsServiceRequest,
 ) (*collectormetric.ExportMetricsServiceResponse, error) {
+	if collector.metrics != nil {
+		collector.metrics <- request
+	}
 	return &collectormetric.ExportMetricsServiceResponse{}, nil
 }
 
@@ -72,7 +83,10 @@ func startTelemetryCollector(t *testing.T, collector *telemetryTraceCollector) s
 	}
 	server := grpc.NewServer()
 	collectortrace.RegisterTraceServiceServer(server, collector)
-	collectormetric.RegisterMetricsServiceServer(server, &telemetryMetricCollector{})
+	collectormetric.RegisterMetricsServiceServer(
+		server,
+		&telemetryMetricCollector{metrics: collector.metrics},
+	)
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
 	return "http://" + listener.Addr().String()
@@ -106,6 +120,98 @@ func TestProductTelemetry(t *testing.T) {
 		t.Fatalf("load QA catalog: %v", err)
 	}
 
+	t.Run("real HTTP and gRPC reads export one request observation each", func(t *testing.T) {
+		collector := &telemetryTraceCollector{
+			started: make(chan struct{}, 4), accepted: make(chan struct{}, 4),
+			spans:   make(chan *collectortrace.ExportTraceServiceRequest, 4),
+			metrics: make(chan *collectormetric.ExportMetricsServiceRequest, 4),
+		}
+		endpoint := startTelemetryCollector(t, collector)
+		process := startLifecycleProcess(t, binary, harness.RuntimeDatabaseURL(),
+			telemetryEnvironment(endpoint)...,
+		)
+		if got := <-process.listProducts(); got.err != nil || got.status != 200 {
+			t.Fatalf("HTTP list: %+v", got)
+		}
+		if got := httpStatus(t, process.addresses.http, "/products/CAR"); got != 200 {
+			t.Fatalf("HTTP get status = %d", got)
+		}
+		if _, err := process.grpc.ListProducts(
+			ctx,
+			&productv1.ListProductsRequest{},
+		); err != nil {
+			t.Fatalf("gRPC list: %v", err)
+		}
+		assertGracefulGRPCResult(t, process.getProduct("CAR"), "CAR")
+		if got := httpStatus(t, process.addresses.health, "/readyz"); got != 200 {
+			t.Fatalf("readiness = %d", got)
+		}
+		started := process.signal(t)
+		process.assertCleanExit(t, started, harness)
+		spanNames := map[string]int{}
+		for len(collector.spans) != 0 {
+			request := <-collector.spans
+			for _, resource := range request.ResourceSpans {
+				for _, scope := range resource.ScopeSpans {
+					for _, span := range scope.Spans {
+						spanNames[span.Name]++
+					}
+				}
+			}
+		}
+		for _, name := range []string{
+			"GET /products", "GET /products/{productCode}",
+			"product.v1.ProductService/ListProducts", "product.v1.ProductService/GetProduct",
+			"product.list", "product.get",
+		} {
+			want := 1
+			if name == "product.list" || name == "product.get" {
+				want = 2
+			}
+			if spanNames[name] != want {
+				t.Fatalf(
+					"span %q count = %d, want %d; all=%v",
+					name,
+					spanNames[name],
+					want,
+					spanNames,
+				)
+			}
+		}
+		metricCounts := map[string]uint64{}
+		for len(collector.metrics) != 0 {
+			request := <-collector.metrics
+			for _, resource := range request.ResourceMetrics {
+				for _, scope := range resource.ScopeMetrics {
+					for _, metric := range scope.Metrics {
+						switch metric.Name {
+						case "insurance_hub.product.requests":
+							for _, point := range metric.GetSum().DataPoints {
+								metricCounts[metric.Name] += uint64(
+									point.GetAsInt(),
+								)
+							}
+						case "insurance_hub.product.request.duration":
+							for _, point := range metric.GetHistogram().DataPoints {
+								metricCounts[metric.Name] += point.Count
+							}
+						}
+					}
+				}
+			}
+		}
+		if metricCounts["insurance_hub.product.requests"] != 4 ||
+			metricCounts["insurance_hub.product.request.duration"] != 4 {
+			t.Fatalf(
+				"exported request metric counts = %v, want four each",
+				metricCounts,
+			)
+		}
+		if strings.Count(process.logs.String(), "Product request completed") != 4 {
+			t.Fatalf("completion log count != four: %s", process.logs.String())
+		}
+	})
+
 	t.Run("disabled mode makes no exporter connection", func(t *testing.T) {
 		listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
 		if listenErr != nil {
@@ -127,6 +233,12 @@ func TestProductTelemetry(t *testing.T) {
 		assertGracefulGRPCResult(t, process.getProduct("CAR"), "CAR")
 		started := process.signal(t)
 		process.assertCleanExit(t, started, harness)
+		if strings.Count(process.logs.String(), "Product request completed") != 1 {
+			t.Fatalf(
+				"disabled mode completion log count != one: %s",
+				process.logs.String(),
+			)
+		}
 		select {
 		case <-accepted:
 			t.Fatal("disabled Product connected to telemetry endpoint")

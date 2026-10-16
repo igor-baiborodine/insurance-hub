@@ -924,8 +924,10 @@ func assertStructuredSafeLogs(t *testing.T, content, serviceName string) {
 		switch entry["msg"] {
 		case "product service started":
 			started = true
-		case "Product HTTP request failed", "Product gRPC request failed":
-			failedRequest = true
+		case "Product request completed":
+			failedRequest = entry["outcome"] == "storage_unavailable" ||
+				entry["outcome"] == "invalid_data" || entry["outcome"] == "internal_error" ||
+				failedRequest
 		}
 	}
 	if !started || !failedRequest {

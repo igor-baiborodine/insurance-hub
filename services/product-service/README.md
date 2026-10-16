@@ -182,8 +182,13 @@ The application supplies the six approved non-Kubernetes identity fields on trac
 resources and on validated service logs. Alloy adds Kubernetes identity later. QA telemetry and
 its version/Pod UID wiring remain disabled until the separate QA activation step. The provider
 uses parent-based root sampling, a bounded trace batch, and a ten-second cumulative metric reader
-with explicit request, database, and pool-wait histogram buckets. HTTP, database, and runtime
-instruments are added in later delivery steps.
+with explicit request, database, and pool-wait histogram buckets. Both business listeners now
+emit a bounded server span, an application child span for dispatched use cases, one request counter
+and duration observation, and one safe completion log per routed request. HTTP extracts W3C context
+after route selection; gRPC limits tracing to the two registered Product methods and disables its
+automatic meter. Probes, unmatched paths, and malformed requests rejected before dispatch have no
+Product business measurement. Request logs remain local JSON when telemetry is disabled. Database
+and runtime instruments are added in the next delivery step.
 
 Callers with a shorter deadline keep that deadline. Acquisition and query work share the request
 budget rather than starting new clocks. Startup, readiness, and shutdown each use their one
@@ -322,18 +327,20 @@ The concrete package and file responsibilities are:
 | [`internal/grpc`](internal/grpc) | Owns generated-service registration, validation, domain-to-protobuf mapping, limits, tracing hooks, and status mapping. |
 | [`internal/config`](internal/config) | Parses and validates the bounded runtime settings and holds the database URL in a redacting type. |
 | [`internal/health`](internal/health) | Owns process liveness and bounded dependency-aware readiness. |
-| [`internal/logger`](internal/logger) / [`internal/telemetry`](internal/telemetry) | Own structured redaction/identity/context and the optional bounded trace and metric provider lifecycle. |
+| [`internal/logger`](internal/logger) / [`internal/telemetry`](internal/telemetry) | Own structured redaction/identity/context, the optional bounded trace and metric provider lifecycle, and shared request classification/accounting. |
 | [`api/product/v1`](api/product/v1) / [`gen/product/v1`](gen/product/v1) | Own the versioned protobuf source and generated Go boundary. |
 
 For a get-product request:
 
-1. The HTTP adapter decodes the raw path, or the generated gRPC boundary validates
-   `GetProductRequest`, and calls the same injected `GetProduct.Execute` method.
+1. The HTTP adapter selects a normalized route and starts a server span, or the gRPC boundary
+   starts its registered server span before validating `GetProductRequest`. Each calls the same
+   injected use case through the composition-owned application span wrapper.
 2. `GetProduct` validates the code and calls its application-owned `ProductReader` port.
 3. Runtime interface dispatch reaches `postgres.Reader`, which uses the sqlc-generated exact
    parameterized lookup and converts the stored JSONB into domain values.
 4. The inbound adapter maps the domain Product to its own legacy HTTP DTO or protobuf message. A
-   missing product or bounded failure maps to that transport's safe contract.
+   missing product or bounded failure maps to that transport's safe contract. The request boundary
+   records a bounded outcome, response status, duration, and correlated completion log.
 
 Stored JSONB exists only at the PostgreSQL boundary, Product domain values cross the application
 port, and protobuf messages and legacy HTTP DTOs stay inside their owning adapters. Both transports

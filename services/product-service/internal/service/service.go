@@ -16,6 +16,7 @@ import (
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/domain"
 	productgrpc "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/grpc"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/health"
 	producthttp "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/http"
@@ -85,12 +86,43 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 	if err != nil {
 		return fmt.Errorf("run service: %w", err)
 	}
+	observer, err := telemetry.NewRequestObserver(
+		logger,
+		provider.TracerProvider(),
+		provider.MeterProvider(),
+		provider.HTTPPropagator(),
+	)
+	if err != nil {
+		return fmt.Errorf("run service: %w", err)
+	}
+	list := func(ctx context.Context) (products []domain.Product, err error) {
+		err = observer.Application(
+			ctx,
+			telemetry.OperationList,
+			func(ctx context.Context) error {
+				products, err = listProducts.Execute(ctx)
+				return err
+			},
+		)
+		return products, err
+	}
+	get := func(ctx context.Context, code string) (product domain.Product, err error) {
+		err = observer.Application(
+			ctx,
+			telemetry.OperationGet,
+			func(ctx context.Context) error {
+				product, err = getProduct.Execute(ctx, code)
+				return err
+			},
+		)
+		return product, err
+	}
 
 	httpHandler, err := producthttp.NewHandler(
 		logger,
-		producthttp.Settings{RequestTimeout: settings.RequestTimeout},
-		listProducts.Execute,
-		getProduct.Execute,
+		producthttp.Settings{RequestTimeout: settings.RequestTimeout, Observer: observer},
+		list,
+		get,
 	)
 	if err != nil {
 		return fmt.Errorf("run service: %w", err)
@@ -103,9 +135,10 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 			RequestTimeout:  settings.RequestTimeout,
 			MaxReceiveBytes: settings.GRPC.MaxReceiveBytes,
 			MaxSendBytes:    settings.GRPC.MaxSendBytes,
+			Observer:        observer,
 		},
-		listProducts.Execute,
-		getProduct.Execute,
+		list,
+		get,
 	)
 	if err != nil {
 		return fmt.Errorf("run service: %w", err)
