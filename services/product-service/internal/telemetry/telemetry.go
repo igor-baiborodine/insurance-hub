@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -58,6 +60,7 @@ type Provider struct {
 	sdkProvider      *sdktrace.TracerProvider
 	sdkMeterProvider *sdkmetric.MeterProvider
 	exporter         *ownedExporter
+	queueObserver    *spanQueueObserver
 	exporterTimeout  time.Duration
 }
 
@@ -181,16 +184,18 @@ func newProvider(
 		attribute.String("insurance_hub.service.implementation", identity.Implementation),
 	)
 
+	batchProcessor := sdktrace.NewBatchSpanProcessor(
+		owned,
+		sdktrace.WithMaxQueueSize(traceQueueSize),
+		sdktrace.WithMaxExportBatchSize(traceBatchSize),
+		sdktrace.WithBatchTimeout(traceBatchDelay),
+		sdktrace.WithExportTimeout(exportTimeout),
+	)
+	queueObserver := &spanQueueObserver{SpanProcessor: batchProcessor, exporter: owned}
 	tracerProvider := sdktrace.NewTracerProvider(
 		sdktrace.WithResource(resourceIdentity),
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
-		sdktrace.WithBatcher(
-			owned,
-			sdktrace.WithMaxQueueSize(traceQueueSize),
-			sdktrace.WithMaxExportBatchSize(traceBatchSize),
-			sdktrace.WithBatchTimeout(traceBatchDelay),
-			sdktrace.WithExportTimeout(exportTimeout),
-		),
+		sdktrace.WithSpanProcessor(queueObserver),
 	)
 	meterProvider := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(resourceIdentity),
@@ -209,6 +214,7 @@ func newProvider(
 		sdkProvider:      tracerProvider,
 		sdkMeterProvider: meterProvider,
 		exporter:         owned,
+		queueObserver:    queueObserver,
 		exporterTimeout:  settings.ExporterTimeout,
 	}, nil
 }
@@ -266,6 +272,33 @@ type ownedExporter struct {
 	sdktrace.SpanExporter
 	shutdownOnce sync.Once
 	shutdownErr  error
+	attempted    atomic.Uint64
+}
+
+func (exporter *ownedExporter) ExportSpans(
+	ctx context.Context,
+	spans []sdktrace.ReadOnlySpan,
+) error {
+	exporter.attempted.Add(uint64(len(spans)))
+	return exporter.SpanExporter.ExportSpans(ctx, spans)
+}
+
+// spanQueueObserver detects a definite overflow without replacing the SDK's bounded queue.
+// At most one batch and one queue of spans can be waiting before export begins.
+type spanQueueObserver struct {
+	sdktrace.SpanProcessor
+	exporter  *ownedExporter
+	ended     atomic.Uint64
+	saturated atomic.Bool
+}
+
+func (observer *spanQueueObserver) OnEnd(span sdktrace.ReadOnlySpan) {
+	observer.SpanProcessor.OnEnd(span)
+	ended := observer.ended.Add(1)
+	if ended > observer.exporter.attempted.Load()+traceQueueSize+traceBatchSize &&
+		observer.saturated.CompareAndSwap(false, true) {
+		go otel.Handle(errSpanQueueSaturated)
+	}
 }
 
 func (exporter *ownedExporter) Shutdown(ctx context.Context) error {

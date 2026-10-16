@@ -60,6 +60,34 @@ fixture=$(new_fixture integration-zero-selection)
 expect_failure integration-zero-selection test-integration \
 	'suite all selected zero tests' "$fixture" PRODUCT_TEST_FORCE_ZERO_SELECTION=1
 
+fixture=$(new_fixture telemetry-zero-selection)
+expect_failure telemetry-zero-selection test-integration \
+	'suite telemetry selected zero tests' "$fixture" INTEGRATION_SUITE=telemetry \
+	PRODUCT_TEST_FORCE_ZERO_SELECTION=1
+
+fixture=$(new_fixture telemetry-missing-case)
+mkdir -p "$fixture/.test-bin"
+cat >"$fixture/.test-bin/go" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+build) exit 0 ;;
+test)
+	printf '%s\n' \
+		'{"Action":"run","Test":"TestProductTelemetry"}' \
+		'{"Action":"pass","Test":"TestProductTelemetry"}' \
+		'{"Action":"pass","Test":"TestProductTelemetry/disabled_mode_makes_no_exporter_connection"}' \
+		'{"Action":"pass","Test":"TestProductTelemetry/refused_collector_does_not_affect_reads_or_probes"}' \
+		'{"Action":"pass","Test":"TestProductTelemetry/collector_recovery_exports_without_a_Product_restart"}'
+	;;
+*) exit 64 ;;
+esac
+EOF
+chmod +x "$fixture/.test-bin/go"
+expect_failure telemetry-missing-case test-integration \
+	'suite telemetry did not pass telemetry case SIGTERM_bounds_an_in-flight_export' \
+	"$fixture" INTEGRATION_SUITE=telemetry GO="$fixture/.test-bin/go" DOCKER=true
+
 fixture=$(new_fixture go-bootstrap)
 mkdir -p "$fixture/.test-bin"
 cat >"$fixture/.test-bin/go" <<'EOF'

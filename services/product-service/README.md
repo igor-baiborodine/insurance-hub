@@ -51,7 +51,7 @@ make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXT
 ```
 
 `INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, `parity`,
-`cancellation`, `lifecycle`, `read-only`, `access`, or `all`.
+`cancellation`, `lifecycle`, `telemetry`, `read-only`, `access`, or `all`.
 `FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
@@ -92,6 +92,12 @@ The `lifecycle` suite launches the race-built production executable and sends it
 proves bounded idle shutdown, graceful completion of accepted HTTP and gRPC work, forced
 termination of blocked work after the drain period, rejection of new work during shutdown, and
 release of listeners and PostgreSQL connections within the one configured shutdown budget.
+
+The `telemetry` suite uses the same disposable database and a loopback OTLP collector. It proves
+disabled mode makes no collector connection, refused export does not affect reads or probes,
+new spans export after collector recovery, and SIGTERM bounds an in-flight export. Export
+failures produce sanitized, rate-limited warnings. A definite trace-queue overflow emits one
+safe warning, while a failed drain does not turn normal signal termination into a service failure.
 
 The Product v1 schema is `api/product/v1/product_service.proto`; generated Go bindings are under
 `gen/product/v1`. The frozen initial compatibility baseline lives in

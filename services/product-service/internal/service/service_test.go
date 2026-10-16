@@ -187,12 +187,14 @@ func TestRuntimeResources_Shutdown_IsRepeatableAndMarksUnready(t *testing.T) {
 	}
 
 	// when
-	firstErr := resources.shutdown(20 * time.Millisecond)
-	secondErr := resources.shutdown(20 * time.Millisecond)
+	firstErr, firstTelemetryErr := resources.shutdown(20 * time.Millisecond)
+	secondErr, secondTelemetryErr := resources.shutdown(20 * time.Millisecond)
 
 	// then
-	if firstErr != nil || secondErr != nil {
-		t.Fatalf("first/second shutdown errors = %v/%v", firstErr, secondErr)
+	if firstErr != nil || secondErr != nil || firstTelemetryErr != nil ||
+		secondTelemetryErr != nil {
+		t.Fatalf("first/second shutdown errors = %v/%v; telemetry = %v/%v",
+			firstErr, secondErr, firstTelemetryErr, secondTelemetryErr)
 	}
 	if healthState.Ready() {
 		t.Error("health state remained ready after shutdown")

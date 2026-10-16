@@ -182,7 +182,10 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 	)
 
 	serveErr := waitForRunStop(ctx, serveResults)
-	shutdownErr := resources.shutdown(settings.ShutdownTimeout)
+	shutdownErr, telemetryErr := resources.shutdown(settings.ShutdownTimeout)
+	if telemetryErr != nil {
+		logger.WarnContext(context.Background(), "telemetry shutdown incomplete")
+	}
 	return errors.Join(serveErr, shutdownErr)
 }
 
@@ -233,7 +236,7 @@ func (resources *runtimeResources) closeAfterStartupFailure(timeout time.Duratio
 	return nil
 }
 
-func (resources *runtimeResources) shutdown(timeout time.Duration) error {
+func (resources *runtimeResources) shutdown(timeout time.Duration) (error, error) {
 	resources.healthState.SetReady(false)
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), timeout)
 	defer cancelShutdown()
@@ -280,10 +283,7 @@ func (resources *runtimeResources) shutdown(timeout time.Duration) error {
 		}
 	}
 	resources.pool.Close()
-	if err := resources.provider.Shutdown(shutdownCtx); err != nil {
-		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown telemetry: %w", err))
-	}
-	return shutdownErr
+	return shutdownErr, resources.provider.Shutdown(shutdownCtx)
 }
 
 func closeListener(listener net.Listener) {

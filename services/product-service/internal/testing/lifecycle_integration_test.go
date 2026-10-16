@@ -137,7 +137,11 @@ type lifecycleProcess struct {
 	stopped    bool
 }
 
-func startLifecycleProcess(t *testing.T, binary, databaseURL string) *lifecycleProcess {
+func startLifecycleProcess(
+	t *testing.T,
+	binary, databaseURL string,
+	extraEnvironment ...string,
+) *lifecycleProcess {
 	t.Helper()
 	addresses := serviceAddresses{
 		http: freeAddress(t), grpc: freeAddress(t), health: freeAddress(t),
@@ -166,6 +170,7 @@ func startLifecycleProcess(t *testing.T, binary, databaseURL string) *lifecycleP
 		"OTEL_ENABLED=false",
 		"OTEL_EXPORTER_OTLP_TIMEOUT=500ms",
 	})
+	command.Env = lifecycleEnvironment(command.Env, extraEnvironment)
 	command.Stdout = logs
 	command.Stderr = logs
 	if err := command.Start(); err != nil {

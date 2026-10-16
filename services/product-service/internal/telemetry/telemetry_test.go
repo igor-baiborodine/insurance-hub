@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -494,6 +495,55 @@ func TestProvider_DoesNotBlockSpanCompletionDuringExporterOutage(t *testing.T) {
 	}
 }
 
+func TestProvider_SaturatedQueueDropsWithoutBlockingAndRecovers(t *testing.T) {
+	exporter := &pausingExporter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	provider := enabledProvider(t, exporter, 2*time.Second)
+	tracer := provider.TracerProvider().Tracer("test")
+	for range traceBatchSize {
+		_, span := tracer.Start(context.Background(), "first-batch")
+		span.End()
+	}
+	select {
+	case <-exporter.started:
+	case <-time.After(time.Second):
+		t.Fatal("first export did not start")
+	}
+
+	const excess = 500
+	started := time.Now()
+	for range traceQueueSize + excess {
+		_, span := tracer.Start(context.Background(), "overflow")
+		span.End()
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("span completion blocked under saturation: %s", elapsed)
+	}
+	close(exporter.release)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := provider.ForceFlush(ctx); err != nil {
+		t.Fatalf("flush after recovery: %v", err)
+	}
+	if err := provider.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown after recovery: %v", err)
+	}
+	wantProduced := int64(traceBatchSize + traceQueueSize + excess)
+	gotExported := exporter.exported.Load()
+	if gotExported >= wantProduced || gotExported > traceBatchSize+traceQueueSize {
+		t.Fatalf(
+			"exported %d of %d spans; expected bounded queue loss",
+			gotExported,
+			wantProduced,
+		)
+	}
+	if !provider.queueObserver.saturated.Load() {
+		t.Fatal("queue saturation was not reported")
+	}
+}
+
 func TestNew_RejectsInvalidEnabledSettings(t *testing.T) {
 	// given
 	tests := []struct {
@@ -616,6 +666,37 @@ type blockingExporter struct {
 	shutdown     chan struct{}
 	startOnce    sync.Once
 	shutdownOnce sync.Once
+}
+
+type pausingExporter struct {
+	started  chan struct{}
+	release  chan struct{}
+	once     sync.Once
+	exported atomic.Int64
+	shutdown atomic.Bool
+}
+
+func (exporter *pausingExporter) ExportSpans(
+	ctx context.Context,
+	spans []sdktrace.ReadOnlySpan,
+) error {
+	exporter.once.Do(func() {
+		close(exporter.started)
+		select {
+		case <-exporter.release:
+		case <-ctx.Done():
+		}
+	})
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	exporter.exported.Add(int64(len(spans)))
+	return nil
+}
+
+func (exporter *pausingExporter) Shutdown(context.Context) error {
+	exporter.shutdown.Store(true)
+	return nil
 }
 
 func (exporter *blockingExporter) ExportSpans(
