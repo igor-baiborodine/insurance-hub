@@ -10,6 +10,7 @@ import http.client
 import json
 import math
 import os
+import re
 import statistics
 import subprocess
 import sys
@@ -89,6 +90,9 @@ ACCEPTED_PROFILE = {
     "cardinality.loki_streams": 8,
 }
 FRESHNESS_SAMPLES = 20
+LOKI_TRACE_QUERY_BATCH_SIZE = 100
+LOKI_TRACE_QUERY_TIMEOUT = 30
+LOKI_ERROR_DETAIL_MAX_CHARS = 500
 
 
 class AcceptanceError(Exception):
@@ -605,24 +609,49 @@ def verify_trace_delivery(
     )
 
 
-def query_loki_trace_counts(loki_port: int, instance: str) -> Mapping[str, int]:
-    query = (
-        'sum by (trace_id) (count_over_time({service_name="product-service"} '
-        '|= "Product request completed" | json | service_instance_id="' + instance
-        + '" [2h]))'
-    )
-    status, body = backend.request(
-        f"http://127.0.0.1:{loki_port}/loki/api/v1/query?"
-        + urllib.parse.urlencode({"query": query}), timeout=30,
-    )
-    if status != 200:
-        raise AcceptanceError(f"Loki trace-count query returned HTTP {status}")
-    response = json.loads(body)
-    return {
-        result.get("metric", {}).get("trace_id", ""): int(float(result["value"][1]))
-        for result in backend.query_results(response)
-        if result.get("metric", {}).get("trace_id")
-    }
+def bounded_response_detail(body: bytes) -> str:
+    decoded = body.decode("utf-8", errors="replace")
+    printable = "".join(character if character.isprintable() else " " for character in decoded)
+    detail = " ".join(printable.split())
+    return detail[:LOKI_ERROR_DETAIL_MAX_CHARS]
+
+
+def query_loki_trace_counts(
+    loki_port: int,
+    instance: str,
+    trace_ids: Sequence[str],
+    deadline: float,
+) -> Mapping[str, int]:
+    counts: Dict[str, int] = {}
+    for offset in range(0, len(trace_ids), LOKI_TRACE_QUERY_BATCH_SIZE):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        batch = trace_ids[offset:offset + LOKI_TRACE_QUERY_BATCH_SIZE]
+        trace_pattern = "^(?:" + "|".join(re.escape(trace_id) for trace_id in batch) + ")$"
+        query = (
+            'sum by (trace_id) (count_over_time({service_name="product-service"} '
+            '|= "Product request completed" | json | service_instance_id='
+            + json.dumps(instance) + ' | trace_id=~' + json.dumps(trace_pattern) + ' [2h]))'
+        )
+        status, body = backend.request(
+            f"http://127.0.0.1:{loki_port}/loki/api/v1/query?"
+            + urllib.parse.urlencode({"query": query}),
+            timeout=min(LOKI_TRACE_QUERY_TIMEOUT, remaining),
+        )
+        if status != 200:
+            detail = bounded_response_detail(body)
+            suffix = f": {detail}" if detail else ""
+            raise AcceptanceError(
+                f"Loki trace-count query returned HTTP {status}{suffix}"
+            )
+        response = json.loads(body)
+        counts.update({
+            result.get("metric", {}).get("trace_id", ""): int(float(result["value"][1]))
+            for result in backend.query_results(response)
+            if result.get("metric", {}).get("trace_id")
+        })
+    return counts
 
 
 def verify_log_delivery(
@@ -640,7 +669,7 @@ def verify_log_delivery(
     stable_since = time.monotonic()
     previous: Mapping[str, int] = {}
     while time.monotonic() < deadline:
-        counts = query_loki_trace_counts(loki_port, instance)
+        counts = query_loki_trace_counts(loki_port, instance, expected_ids, deadline)
         selected = {trace_id: counts.get(trace_id, 0) for trace_id in expected_ids}
         if selected != previous:
             stable_since = time.monotonic()

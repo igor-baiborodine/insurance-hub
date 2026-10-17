@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("test-disposable-acceptance.py")
@@ -105,6 +106,82 @@ class AcceptanceVerifierTest(unittest.TestCase):
             acceptance.evaluate_delivery_counts(
                 ["a", "b"], {"a": 4, "b": 5}, 4, 0, 0, "spans",
             )
+
+    def test_loki_trace_counts_batch_more_than_series_limit(self) -> None:
+        trace_ids = acceptance.deterministic_trace_ids("batch", 501)
+        requests = []
+
+        def request(url: str, *, timeout: float):
+            requests.append((url, timeout))
+            offset = (len(requests) - 1) * acceptance.LOKI_TRACE_QUERY_BATCH_SIZE
+            batch = trace_ids[offset:offset + acceptance.LOKI_TRACE_QUERY_BATCH_SIZE]
+            results = [
+                {"metric": {"trace_id": trace_id}, "value": [0, "1"]}
+                for trace_id in batch
+            ]
+            return 200, json.dumps({"data": {"result": results}}).encode("utf-8")
+
+        with mock.patch.object(acceptance.backend, "request", side_effect=request):
+            counts = acceptance.query_loki_trace_counts(
+                3100, "product-instance", trace_ids, acceptance.time.monotonic() + 30,
+            )
+
+        self.assertEqual({trace_id: 1 for trace_id in trace_ids}, counts)
+        self.assertEqual(6, len(requests))
+        for url, timeout in requests:
+            query = acceptance.urllib.parse.parse_qs(
+                acceptance.urllib.parse.urlparse(url).query
+            )["query"][0]
+            self.assertIn('| service_instance_id="product-instance"', query)
+            self.assertIn("| trace_id=~", query)
+            self.assertGreater(timeout, 0)
+            self.assertLessEqual(timeout, acceptance.LOKI_TRACE_QUERY_TIMEOUT)
+
+    def test_batched_loki_counts_preserve_missing_and_duplicate_detection(self) -> None:
+        trace_ids = acceptance.deterministic_trace_ids("counts", 501)
+        responses = []
+        for offset in range(0, len(trace_ids), acceptance.LOKI_TRACE_QUERY_BATCH_SIZE):
+            batch = trace_ids[offset:offset + acceptance.LOKI_TRACE_QUERY_BATCH_SIZE]
+            results = [
+                {
+                    "metric": {"trace_id": trace_id},
+                    "value": [0, "2" if trace_id == trace_ids[0] else "1"],
+                }
+                for trace_id in batch if trace_id != trace_ids[-1]
+            ]
+            responses.append(
+                (200, json.dumps({"data": {"result": results}}).encode("utf-8"))
+            )
+
+        with mock.patch.object(acceptance.backend, "request", side_effect=responses):
+            counts = acceptance.query_loki_trace_counts(
+                3100, "product-instance", trace_ids, acceptance.time.monotonic() + 30,
+            )
+
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "lost 1"):
+            acceptance.evaluate_delivery_counts(
+                trace_ids, counts, 1, 0, 1, "Loki completion logs",
+            )
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "duplicated 1"):
+            acceptance.evaluate_delivery_counts(
+                trace_ids, counts, 1, 1, 0, "Loki completion logs",
+            )
+
+    def test_loki_trace_count_failure_includes_bounded_sanitized_detail(self) -> None:
+        detail = b"maximum series reached\n\x00" + b"x" * 600
+        with mock.patch.object(acceptance.backend, "request", return_value=(400, detail)):
+            with self.assertRaises(acceptance.AcceptanceError) as raised:
+                acceptance.query_loki_trace_counts(
+                    3100, "product-instance", ["a"], acceptance.time.monotonic() + 30,
+                )
+
+        message = str(raised.exception)
+        self.assertIn("Loki trace-count query returned HTTP 400: maximum series reached", message)
+        self.assertNotIn("\n", message)
+        self.assertNotIn("\x00", message)
+        self.assertLessEqual(
+            len(message.split(": ", 1)[1]), acceptance.LOKI_ERROR_DETAIL_MAX_CHARS,
+        )
 
     def test_sentinel_verifier_rejects_unsafe_evidence(self) -> None:
         with self.assertRaises(acceptance.AcceptanceError):
