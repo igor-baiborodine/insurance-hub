@@ -270,9 +270,50 @@ class SpanPolicyTest(unittest.TestCase):
 
 
 class LogPolicyTest(unittest.TestCase):
+    def test_log_target_policy_requires_each_collection_boundary(self) -> None:
+        config = '''
+discovery.relabel "logs" {
+  targets = argument.targets.value
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+    action = "keep"
+    regex = argument.container_name.value
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_environment"]
+    action = "keep"
+    regex = "qa"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    action = "keep"
+    regex = argument.container_name.value
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_port_name"]
+    action = "keep"
+    regex = argument.port_name.value
+  }
+}
+'''
+        alloy_check.validate_log_target_policy(config)
+        for source_label in (
+            "__meta_kubernetes_pod_label_app_kubernetes_io_name",
+            "__meta_kubernetes_pod_label_environment",
+            "__meta_kubernetes_pod_container_name",
+            "__meta_kubernetes_pod_container_port_name",
+        ):
+            with self.subTest(source_label=source_label):
+                invalid = config.replace(source_label, f"{source_label}_wrong", 1)
+                with self.assertRaises(alloy_check.ValidationError):
+                    alloy_check.validate_log_target_policy(invalid)
+
     def test_duplicate_port_targets_reduce_to_one_reader(self) -> None:
         common = {
             "namespace": "qa-svc",
+            "app_name": "alpha-api",
+            "environment": "qa",
             "container": "alpha-api",
             "pod_uid": "pod-a",
         }
@@ -283,6 +324,37 @@ class LogPolicyTest(unittest.TestCase):
         )
         self.assertEqual(1, len(selected))
         self.assertEqual("http", selected[0]["port"])
+
+    def test_workload_target_mismatches_are_rejected_before_log_read(self) -> None:
+        allowed = {
+            "namespace": "qa-svc",
+            "app_name": "alpha-api",
+            "environment": "qa",
+            "container": "alpha-api",
+            "port": "http",
+            "pod_uid": "pod-a",
+        }
+        selected = alloy_check.select_service_targets(
+            [allowed], "alpha-api", "http", "alpha-service"
+        )
+        self.assertEqual(1, len(selected))
+
+        mismatches = {
+            "namespace": "qa-monitoring",
+            "app_name": "other-api",
+            "environment": "local-dev",
+            "container": "other-api",
+            "port": "management",
+        }
+        for field, value in mismatches.items():
+            with self.subTest(field=field):
+                rejected = alloy_check.select_service_targets(
+                    [dict(allowed, **{field: value})],
+                    "alpha-api",
+                    "http",
+                    "alpha-service",
+                )
+                self.assertEqual([], rejected)
 
     def test_log_identity_and_index_allowlist(self) -> None:
         record = {
@@ -347,6 +419,8 @@ service_json_logs "multi-part" {
         targets = [
             {
                 "namespace": "qa-svc",
+                "app_name": "multi-part-api",
+                "environment": "qa",
                 "container": "multi-part-api",
                 "port": port,
                 "pod_uid": "pod-search",

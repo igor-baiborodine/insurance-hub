@@ -152,6 +152,8 @@ def build_alloy_config(source: str, service_domain: str, log_path: str) -> str:
   path_targets = [{{
     \"__path__\" = \"{log_path}\",
     \"__meta_kubernetes_namespace\" = \"qa-svc\",
+    \"__meta_kubernetes_pod_label_app_kubernetes_io_name\" = \"{service_domain}-api\",
+    \"__meta_kubernetes_pod_label_environment\" = \"qa\",
     \"__meta_kubernetes_pod_container_name\" = \"{service_domain}-api\",
     \"__meta_kubernetes_pod_container_port_name\" = \"http\",
     \"__meta_kubernetes_pod_uid\" = \"{SERVICE_INSTANCE_ID}\",

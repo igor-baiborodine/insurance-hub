@@ -171,6 +171,42 @@ def validate_service_log_registrations(config: str) -> None:
             )
 
 
+def validate_log_target_policy(config: str) -> None:
+    relabel = _block(config, 'discovery.relabel "logs"')
+    keep_rules: dict[str, str] = {}
+    for match in re.finditer(r"(?ms)^\s*rule\s*\{(.*?)^\s*\}", relabel):
+        rule = match.group(1)
+        if not re.search(r'(?m)^\s*action\s*=\s*"keep"\s*$', rule):
+            continue
+        source_match = re.search(
+            r'(?m)^\s*source_labels\s*=\s*\["([^"]+)"\]\s*$', rule
+        )
+        regex_match = re.search(r"(?m)^\s*regex\s*=\s*(\S+)\s*$", rule)
+        if source_match is None or regex_match is None:
+            raise ValidationError(
+                "service log target keep rules require one source label and one regex"
+            )
+        source_label = source_match.group(1)
+        if source_label in keep_rules:
+            raise ValidationError(
+                f"service log target keep rule is duplicated: {source_label}"
+            )
+        keep_rules[source_label] = regex_match.group(1)
+
+    expected = {
+        "__meta_kubernetes_pod_label_app_kubernetes_io_name": (
+            "argument.container_name.value"
+        ),
+        "__meta_kubernetes_pod_label_environment": '"qa"',
+        "__meta_kubernetes_pod_container_name": "argument.container_name.value",
+        "__meta_kubernetes_pod_container_port_name": "argument.port_name.value",
+    }
+    if keep_rules != expected:
+        raise ValidationError(
+            f"service log target keep rules are {keep_rules}, expected {expected}"
+        )
+
+
 def validate_source_policy(config: str, values: str, makefile: str) -> None:
     required_fragments = (
         'otelcol.receiver.zipkin "legacy_java"',
@@ -361,6 +397,7 @@ def validate_source_policy(config: str, values: str, makefile: str) -> None:
         raise ValidationError("values.yaml must keep chart-owned ConfigMap creation enabled")
 
     validate_service_log_registrations(config)
+    validate_log_target_policy(config)
 
     existing_loki_writer = _block(config, 'loki.write "qa_loki"')
     service_loki_writer = _block(config, 'loki.write "service"')
@@ -622,6 +659,8 @@ def select_service_targets(
     for target in targets:
         if (
             target.get("namespace") == QA_SERVICE_NAMESPACE
+            and target.get("app_name") == container_name
+            and target.get("environment") == "qa"
             and target.get("container") == container_name
             and target.get("port") == port_name
         ):

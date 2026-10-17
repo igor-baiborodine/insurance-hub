@@ -420,7 +420,19 @@ declare "service_json_logs" {
   discovery.relabel "logs" {
     targets = argument.targets.value
 
-    // Select one stable container-port target per Pod.
+    // Select one stable workload container-port target per Pod before reading logs.
+
+    rule {
+      source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+      action        = "keep"
+      regex         = argument.container_name.value
+    }
+
+    rule {
+      source_labels = ["__meta_kubernetes_pod_label_environment"]
+      action        = "keep"
+      regex         = "qa"
+    }
 
     rule {
       source_labels = ["__meta_kubernetes_pod_container_name"]
