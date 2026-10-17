@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import subprocess
@@ -42,6 +43,47 @@ SERVICE_INSTANCE_ID = "13500000-0000-4000-8000-000000000015"
 SERVICE_TRACE_ID = "13513513513513513513513513513515"
 SYNTHETIC_TRACE_ID = "51515151515151515151515151515151"
 JAVA_TRACE_ID = "42424242424242424242424242424242"
+
+METRIC_IDENTITY = {
+    "service_namespace": "insurance-hub",
+    "service_version": SERVICE_VERSION,
+    "service_instance_id": SERVICE_INSTANCE_ID,
+    "deployment_environment_name": "qa",
+    "service_implementation": "go",
+    "k8s_cluster_name": "qa-insurance-hub",
+    "k8s_namespace_name": "qa-svc",
+}
+
+DATABASE_HISTOGRAM_BOUNDS = (
+    "0.001",
+    "0.005",
+    "0.01",
+    "0.05",
+    "0.1",
+    "0.5",
+    "1",
+    "5",
+    "10",
+    "+Inf",
+)
+
+REQUEST_HISTOGRAM_BOUNDS = (
+    "0.005",
+    "0.01",
+    "0.025",
+    "0.05",
+    "0.075",
+    "0.1",
+    "0.25",
+    "0.5",
+    "0.75",
+    "1",
+    "2.5",
+    "5",
+    "7.5",
+    "10",
+    "+Inf",
+)
 
 
 class HarnessError(Exception):
@@ -575,19 +617,195 @@ def query_results(response: Mapping[str, Any]) -> List[Mapping[str, Any]]:
 
 def assert_metric_labels(result: Mapping[str, Any], service_name: str) -> None:
     labels = result.get("metric", {})
-    expected = {
-        "service_name": service_name,
-        "service_namespace": "insurance-hub",
-        "service_version": SERVICE_VERSION,
-        "service_instance_id": SERVICE_INSTANCE_ID,
-        "deployment_environment_name": "qa",
-        "service_implementation": "go",
-        "k8s_cluster_name": "qa-insurance-hub",
-        "k8s_namespace_name": "qa-svc",
-    }
+    expected = dict(METRIC_IDENTITY, service_name=service_name)
+    expected.update(
+        {
+            "job": f"insurance-hub/{service_name}",
+            "instance": SERVICE_INSTANCE_ID,
+        }
+    )
     for key, value in expected.items():
         if labels.get(key) != value:
             raise HarnessError(f"metric label {key}={labels.get(key)!r}, expected {value!r}")
+
+
+def metric_series(
+    prometheus_port: int,
+    metric_name: str,
+    service_name: str,
+    expected_dimensions: Sequence[Mapping[str, str]],
+) -> List[Mapping[str, Any]]:
+    expression = f'{metric_name}{{service_name="{service_name}"}}'
+    response = wait_json(
+        f"http://127.0.0.1:{prometheus_port}/api/v1/query?"
+        + urllib.parse.urlencode({"query": expression}),
+        lambda value: len(query_results(value)) >= len(expected_dimensions),
+        f"{len(expected_dimensions)} unique {metric_name} series",
+    )
+    results = query_results(response)
+    if len(results) != len(expected_dimensions):
+        raise HarnessError(
+            f"{metric_name} has {len(results)} series, "
+            f"expected {len(expected_dimensions)}"
+        )
+    identity_keys = set(METRIC_IDENTITY) | {
+        "service_name",
+        "job",
+        "instance",
+        "__name__",
+    }
+    actual_dimensions = []
+    for result in results:
+        assert_metric_labels(result, service_name)
+        labels = result.get("metric", {})
+        actual_dimensions.append(
+            {key: value for key, value in labels.items() if key not in identity_keys}
+        )
+        value = float(result.get("value", [0, "nan"])[1])
+        if not math.isfinite(value):
+            raise HarnessError(f"{metric_name} has a non-finite sample: {result}")
+    normalized_actual = sorted(
+        tuple(sorted(value.items())) for value in actual_dimensions
+    )
+    normalized_expected = sorted(
+        tuple(sorted(value.items())) for value in expected_dimensions
+    )
+    if normalized_actual != normalized_expected:
+        raise HarnessError(
+            f"{metric_name} dimensions are {actual_dimensions}, "
+            f"expected {list(expected_dimensions)}"
+        )
+    return results
+
+
+def validate_histogram(
+    prometheus_port: int,
+    metric_name: str,
+    service_name: str,
+    dimensions: Mapping[str, str],
+    bounds: Sequence[str],
+) -> None:
+    bucket_dimensions = [dict(dimensions, le=bound) for bound in bounds]
+    metric_series(
+        prometheus_port,
+        f"{metric_name}_bucket",
+        service_name,
+        bucket_dimensions,
+    )
+    count = metric_series(
+        prometheus_port,
+        f"{metric_name}_count",
+        service_name,
+        [dimensions],
+    )
+    metric_series(
+        prometheus_port,
+        f"{metric_name}_sum",
+        service_name,
+        [dimensions],
+    )
+    if float(count[0]["value"][1]) < 1:
+        raise HarnessError(f"{metric_name} has no real observations")
+
+
+def validate_database_pool_and_runtime_metrics(
+    service_domain: str,
+    prometheus_port: int,
+) -> None:
+    service_name = f"{service_domain}-service"
+    metric_domain = service_domain.replace("-", "_")
+    operation_label = f"insurance_hub_{metric_domain}_operation"
+    database_stage_label = f"insurance_hub_{metric_domain}_database_stage"
+    database_outcome_label = f"insurance_hub_{metric_domain}_database_outcome"
+
+    operations = metric_series(
+        prometheus_port,
+        f"insurance_hub_{metric_domain}_database_operations_total",
+        service_name,
+        [
+            {
+                operation_label: "list",
+                database_stage_label: stage,
+                database_outcome_label: "success",
+            }
+            for stage in ("acquire", "query", "decode")
+        ],
+    )
+    if any(float(result["value"][1]) != 1 for result in operations):
+        raise HarnessError(f"{service_domain} database stage counters are not exactly one each")
+
+    validate_histogram(
+        prometheus_port,
+        "db_client_operation_duration_seconds",
+        service_name,
+        {
+            operation_label: "list",
+            "db_system_name": "postgresql",
+            "db_namespace": service_domain,
+            "db_collection_name": f"public.{service_domain}",
+            "db_operation_name": "SELECT",
+        },
+        DATABASE_HISTOGRAM_BOUNDS,
+    )
+    validate_histogram(
+        prometheus_port,
+        "db_client_connection_wait_time_seconds",
+        service_name,
+        {"db_client_connection_pool_name": f"{service_domain}-reader"},
+        DATABASE_HISTOGRAM_BOUNDS,
+    )
+
+    pool_states = metric_series(
+        prometheus_port,
+        "db_client_connection_count",
+        service_name,
+        [
+            {
+                "db_client_connection_pool_name": f"{service_domain}-reader",
+                "db_client_connection_state": state,
+            }
+            for state in ("idle", "used")
+        ],
+    )
+    state_values = {
+        result["metric"]["db_client_connection_state"]: float(result["value"][1])
+        for result in pool_states
+    }
+    if state_values != {"idle": 1, "used": 0}:
+        raise HarnessError(
+            f"{service_domain} pool states are {state_values}, expected one idle and zero used"
+        )
+    pool_max = metric_series(
+        prometheus_port,
+        "db_client_connection_max",
+        service_name,
+        [{"db_client_connection_pool_name": f"{service_domain}-reader"}],
+    )
+    if float(pool_max[0]["value"][1]) != 4:
+        raise HarnessError(f"{service_domain} pool maximum is not the configured value 4")
+
+    runtime_metrics = {
+        "go_memory_used_bytes": [
+            {"go_memory_type": "stack"},
+            {"go_memory_type": "other"},
+        ],
+        "go_memory_limit_bytes": [{}],
+        "go_memory_allocated_bytes_total": [{}],
+        "go_memory_allocations_total": [{}],
+        "go_memory_gc_goal_bytes": [{}],
+        "go_memory_gc_cycles_total": [{}],
+        "go_goroutine_count": [{}],
+        "go_processor_limit": [{}],
+    }
+    for metric_name, dimensions in runtime_metrics.items():
+        results = metric_series(prometheus_port, metric_name, service_name, dimensions)
+        values = [float(result["value"][1]) for result in results]
+        if any(value < 0 for value in values):
+            raise HarnessError(f"{metric_name} contains a negative runtime value")
+        if metric_name == "go_memory_limit_bytes" and values != [256 * 1024 * 1024]:
+            raise HarnessError(
+                f"{metric_name} is {values}, expected the probe's 256MiB limit in bytes"
+            )
 
 
 def start_prometheus(harness: DockerHarness, enabled: bool) -> Tuple[str, int]:
@@ -639,31 +857,34 @@ def validate_service_backends(
 ) -> None:
     service_name = f"{service_domain}-service"
     metric_domain = service_domain.replace("-", "_")
-    metric = wait_json(
-        f"http://127.0.0.1:{prometheus_port}/api/v1/query?"
-        + urllib.parse.urlencode(
-            {
-                "query": (
-                    f'insurance_hub_{metric_domain}_requests_total'
-                    f'{{service_name="{service_name}"}}'
-                )
-            }
-        ),
-        lambda value: len(query_results(value)) == 1,
-        f"one real {service_domain} request-counter series",
-    )
-    result = query_results(metric)[0]
-    assert_metric_labels(result, service_name)
-    histogram = prom_query(
+    request_dimensions = {
+        f"insurance_hub_{metric_domain}_operation": "list",
+        f"insurance_hub_{metric_domain}_transport": "http",
+        f"insurance_hub_{metric_domain}_outcome": "success",
+        "http_response_status_code": "200",
+    }
+    request_counter = metric_series(
         prometheus_port,
-        f'insurance_hub_{metric_domain}_request_duration_seconds_bucket'
-        f'{{service_name="{service_name}"}}',
+        f"insurance_hub_{metric_domain}_requests_total",
+        service_name,
+        [request_dimensions],
     )
-    if len(query_results(histogram)) != request_histogram_buckets:
+    if float(request_counter[0]["value"][1]) != 1:
+        raise HarnessError(f"{service_domain} request counter is not exactly one")
+    if request_histogram_buckets != len(REQUEST_HISTOGRAM_BOUNDS):
         raise HarnessError(
-            f"{service_domain} request histogram has {len(query_results(histogram))} buckets, "
-            f"expected {request_histogram_buckets}"
+            f"{service_domain} request histogram contract has "
+            f"{len(REQUEST_HISTOGRAM_BOUNDS)} buckets, configured proof expects "
+            f"{request_histogram_buckets}"
         )
+    validate_histogram(
+        prometheus_port,
+        f"insurance_hub_{metric_domain}_request_duration_seconds",
+        service_name,
+        request_dimensions,
+        REQUEST_HISTOGRAM_BOUNDS,
+    )
+    validate_database_pool_and_runtime_metrics(service_domain, prometheus_port)
     target = prom_query(prometheus_port, f'target_info{{service_name="{service_name}"}}')
     if len(query_results(target)) != 1:
         raise HarnessError(f"{service_domain} target_info is missing or duplicated")

@@ -127,6 +127,7 @@ def product_environment(
         {
             "PRODUCT_DATABASE_URL": database_url,
             "DB_MAX_CONNS": "4",
+            "GOMEMLIMIT": "256MiB",
             "HTTP_ADDR": f"127.0.0.1:{http_port}",
             "GRPC_ADDR": f"127.0.0.1:{grpc_port}",
             "HEALTH_ADDR": f"127.0.0.1:{health_port}",
