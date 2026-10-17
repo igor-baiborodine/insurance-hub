@@ -68,6 +68,7 @@ COVERAGE_EXCLUDE_PATHS := gen internal/postgres/dbgen internal/testing
 INTEGRATION_SUITE ?= all
 FIXTURE_SET ?= qa
 SECURITY_HARNESS_OUTPUT ?=
+TELEMETRY_ACCEPTANCE_OUTPUT ?=
 DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md \
 	../../docs/migration/phase-4/product-service/deployment-runbook.md \
 	../../docs/migration/phase-4/product-service/observability-contract.md
@@ -82,7 +83,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage \
 	coverage-validate coverage-check test-integration test-telemetry-continuity \
-	build build-security-harness build-security-verifier build-lifecycle-client image-build image-check deploy-render deploy-check \
+	build build-security-harness build-security-verifier build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test vulncheck \
 	bootstrap-doc-tools check-docs preview-docs check-go-pr check test-tooling run
 
@@ -123,6 +124,11 @@ build-lifecycle-client: verify-tools ## Build disposable HTTP/gRPC lifecycle cli
 	@test -n "$(strip $(LIFECYCLE_CLIENT_OUTPUT))" || { echo "LIFECYCLE_CLIENT_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(LIFECYCLE_CLIENT_OUTPUT)" \
 		./internal/testing/cmd/lifecycleclient
+
+build-telemetry-acceptance: verify-tools ## Build the disposable Product telemetry acceptance helper
+	@test -n "$(strip $(TELEMETRY_ACCEPTANCE_OUTPUT))" || { echo "TELEMETRY_ACCEPTANCE_OUTPUT is required" >&2; exit 1; }
+	GOWORK=off $(GO) build -mod=readonly -o "$(TELEMETRY_ACCEPTANCE_OUTPUT)" \
+		./internal/testing/cmd/telemetryacceptance
 
 bootstrap-tools: bootstrap-doc-tools
 

@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "healthy": {
+    "requests_per_path": 1125,
+    "rate_per_second": 5,
+    "max_in_flight": 8,
+    "request_deadline_seconds": 9,
+    "warmup_seconds": 120,
+    "latency_p95_ms": 250,
+    "latency_p99_ms": 500
+  },
+  "overhead": {
+    "runs_per_mode": 3,
+    "seconds_per_run": 600,
+    "latency_delta_percent": 20,
+    "latency_delta_floor_ms": 10,
+    "cpu_p95_delta_millicores": 50,
+    "memory_max_delta_mib": 32
+  },
+  "product_resources": {
+    "cpu_p95_millicores": 200,
+    "cpu_one_minute_max_millicores": 250,
+    "memory_p95_mib": 128,
+    "memory_max_mib": 192,
+    "cpu_throttling_ratio": 0.05,
+    "pool_acquire_p95_ms": 50,
+    "pool_used_p95": 6,
+    "pool_max": 8,
+    "shutdown_seconds": 10
+  },
+  "alloy_resources": {
+    "baseline_seconds": 1800,
+    "cpu_p95_millicores": 400,
+    "cpu_p95_delta_millicores": 100,
+    "memory_max_mib": 640,
+    "memory_max_delta_mib": 128
+  },
+  "delivery": {
+    "expected_logs": 4500,
+    "expected_spans": 18000,
+    "expected_metric_intervals": 90,
+    "trace_log_p95_seconds": 10,
+    "trace_log_max_seconds": 30,
+    "metric_p95_seconds": 20,
+    "metric_max_seconds": 45
+  },
+  "fault": {
+    "seconds": 60,
+    "requests": 300,
+    "lost_logs_max": 300,
+    "lost_spans_max": 1200,
+    "duplicate_logs_max": 3,
+    "duplicate_spans_max": 12,
+    "new_trace_log_seconds": 15,
+    "new_metric_seconds": 30,
+    "queues_healthy_seconds": 120
+  },
+  "cardinality": {
+    "application_runtime_series_per_instance_max": 800,
+    "loki_index_labels": 8,
+    "loki_streams": 8
+  }
+}

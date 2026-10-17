@@ -304,6 +304,12 @@ PROMETHEUS_VALUES_PATH := overlays/qa/infra/prometheus/values.yaml
 OBSERVABILITY_BACKEND_CHECK_SCRIPT := scripts/alloy/check-backend-config.py
 OBSERVABILITY_BACKEND_CHECK_TEST := scripts/alloy/check-backend-config-test.py
 OBSERVABILITY_BACKEND_TEST_SCRIPT := scripts/alloy/test-backend-ingestion.py
+OBSERVABILITY_ACCEPTANCE_SCRIPT := scripts/alloy/test-disposable-acceptance.py
+OBSERVABILITY_ACCEPTANCE_TEST := scripts/alloy/test-disposable-acceptance-test.py
+OBSERVABILITY_ACCEPTANCE_PROFILE := observability/services/product/acceptance.json
+OBSERVABILITY_ACCEPTANCE_CATALOG := ../legacy/product-service/src/test/resources/product-read-baseline/catalog/qa.json
+OBSERVABILITY_ACCEPTANCE_IMAGE_TAG ?= git-$(shell git -C "$(OBSERVABILITY_SERVICE_ROOT)" rev-parse --short=12 HEAD)
+OBSERVABILITY_ACCEPTANCE_IMAGE ?= insurance-hub-product-api:$(OBSERVABILITY_ACCEPTANCE_IMAGE_TAG)
 MONITORING_ASSETS_ROOT := observability
 MONITORING_CHECK_SCRIPT := scripts/monitoring/check_monitoring.py
 MONITORING_CHECK_TEST := scripts/monitoring/check_monitoring_test.py
@@ -561,6 +567,10 @@ monitoring-assets-check-all: ## Validate every registered monitoring service ass
 observability-backend-test-tooling: ## Exercise receiver, fixture, query, and cleanup policy checks
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_BACKEND_CHECK_TEST)" -v
 
+.PHONY: observability-acceptance-test-tooling
+observability-acceptance-test-tooling: ## Exercise fixed-budget and controlled-defect acceptance checks
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_ACCEPTANCE_TEST)" -v
+
 .PHONY: test-observability-backends
 test-observability-backends: ## Prove synthetic and real service signals in disposable pinned backends
 	@command -v docker >/dev/null || { echo "ERROR: docker is required."; exit 1; }
@@ -571,6 +581,37 @@ test-observability-backends: ## Prove synthetic and real service signals in disp
 		--service-root "$(OBSERVABILITY_SERVICE_ROOT)" \
 		--service-probe "$(OBSERVABILITY_SERVICE_PROBE)" \
 		--request-histogram-buckets "$(OBSERVABILITY_REQUEST_HISTOGRAM_BUCKETS)"
+
+.PHONY: test-observability-acceptance
+test-observability-acceptance: observability-acceptance-test-tooling test-observability-backends ## Run the fixed disposable Product workload, overhead, outage, and recovery profile
+	@command -v docker >/dev/null || { echo "ERROR: docker is required."; exit 1; }
+	@command -v go >/dev/null || { echo "ERROR: Go is required for the Product acceptance helper."; exit 1; }
+	@$(MAKE) --no-print-directory -C "$(OBSERVABILITY_SERVICE_ROOT)" image-build \
+		IMAGE_TAG="$(OBSERVABILITY_ACCEPTANCE_IMAGE_TAG)"
+	@$(MAKE) --no-print-directory -C "$(OBSERVABILITY_SERVICE_ROOT)" test \
+		TEST_PACKAGES='./internal/telemetry ./internal/logger'
+	@$(MAKE) --no-print-directory -C "$(OBSERVABILITY_SERVICE_ROOT)" test-telemetry-continuity
+	@$(MAKE) --no-print-directory monitoring-assets-check test-monitoring \
+		ENV_NAME=qa SVC_NAME=product
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_ACCEPTANCE_SCRIPT)" \
+		--config "$(ALLOY_CONFIG_PATH)" \
+		--profile "$(OBSERVABILITY_ACCEPTANCE_PROFILE)" \
+		--service-root "$(OBSERVABILITY_SERVICE_ROOT)" \
+		--catalog-fixture "$(OBSERVABILITY_ACCEPTANCE_CATALOG)" \
+		--product-image "$(OBSERVABILITY_ACCEPTANCE_IMAGE)"
+
+.PHONY: test-observability-acceptance-smoke
+test-observability-acceptance-smoke: observability-acceptance-test-tooling ## Exercise the disposable acceptance lifecycle with reduced timing; not contract evidence
+	@command -v docker >/dev/null || { echo "ERROR: docker is required."; exit 1; }
+	@$(MAKE) --no-print-directory -C "$(OBSERVABILITY_SERVICE_ROOT)" image-build \
+		IMAGE_TAG="$(OBSERVABILITY_ACCEPTANCE_IMAGE_TAG)"
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_ACCEPTANCE_SCRIPT)" \
+		--config "$(ALLOY_CONFIG_PATH)" \
+		--profile "$(OBSERVABILITY_ACCEPTANCE_PROFILE)" \
+		--service-root "$(OBSERVABILITY_SERVICE_ROOT)" \
+		--catalog-fixture "$(OBSERVABILITY_ACCEPTANCE_CATALOG)" \
+		--product-image "$(OBSERVABILITY_ACCEPTANCE_IMAGE)" \
+		--time-scale 0.01
 
 .PHONY: prometheus-ui
 prometheus-ui: ## Access Prometheus UI via port-forward
@@ -734,7 +775,7 @@ alloy-test-tooling: ## Exercise shared Alloy identity, allowlist, target, positi
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ALLOY_CHECK_TEST)" -v
 
 .PHONY: check-observability
-check-observability: prometheus-receiver-config-check monitoring-tooling-test monitoring-assets-check-all alloy-config-check alloy-test-tooling observability-backend-test-tooling ## Run non-mutating observability configuration and policy checks
+check-observability: prometheus-receiver-config-check monitoring-tooling-test monitoring-assets-check-all alloy-config-check alloy-test-tooling observability-backend-test-tooling observability-acceptance-test-tooling ## Run non-mutating observability configuration and policy checks
 
 .PHONY: alloy-install
 alloy-install: _monitoring-ns-check ## Install Grafana Alloy in QA cluster
