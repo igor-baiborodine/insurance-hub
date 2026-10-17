@@ -1,0 +1,249 @@
+rule_files:
+  - /fixture/alerts.yaml
+
+evaluation_interval: 30s
+
+tests:
+  - name: service errors fire above five percent with minimum traffic and recover
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_product_requests_total{service_name="product-service",insurance_hub_product_outcome="success"}'
+        values: '0+9x30'
+      - series: 'insurance_hub_product_requests_total{service_name="product-service",insurance_hub_product_outcome="internal_error"}'
+        values: '0+1x16 16+0x14'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ProductServiceErrorRate",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ProductServiceErrorRate",alertstate="firing"}) or vector(0)'
+        eval_time: 14m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: error and latency alerts stay inactive below twenty requests
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_product_requests_total{service_name="product-service",insurance_hub_product_outcome="success"}'
+        values: '0+0.4x20'
+      - series: 'insurance_hub_product_requests_total{service_name="product-service",insurance_hub_product_outcome="internal_error"}'
+        values: '0+0.1x20'
+      - series: 'insurance_hub_product_request_duration_seconds_bucket{service_name="product-service",le="0.5"}'
+        values: '0+0x20'
+      - series: 'insurance_hub_product_request_duration_seconds_bucket{service_name="product-service",le="+Inf"}'
+        values: '0+0.5x20'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname=~"ProductServiceErrorRate|ProductHighLatency",alertstate="firing"}) or vector(0)'
+        eval_time: 9m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: high request latency fires with traffic and recovers
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_product_requests_total{service_name="product-service",insurance_hub_product_outcome="success"}'
+        values: '0+10x34'
+      - series: 'insurance_hub_product_request_duration_seconds_bucket{service_name="product-service",le="0.5"}'
+        values: '0+1x16 16+10x18'
+      - series: 'insurance_hub_product_request_duration_seconds_bucket{service_name="product-service",le="1"}'
+        values: '0+10x34'
+      - series: 'insurance_hub_product_request_duration_seconds_bucket{service_name="product-service",le="+Inf"}'
+        values: '0+10x34'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ProductHighLatency",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ProductHighLatency",alertstate="firing"}) or vector(0)'
+        eval_time: 16m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: database pool pressure fires and recovers
+    interval: 30s
+    input_series:
+      - series: 'db_client_connection_count{service_name="product-service",db_client_connection_state="used"}'
+        values: '7x14 2x10'
+      - series: 'db_client_connection_max{service_name="product-service"}'
+        values: '8x24'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ProductDatabasePoolPressure",alertstate="firing"}) or vector(0)'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ProductDatabasePoolPressure",alertstate="firing"}) or vector(0)'
+        eval_time: 8m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: database pool timeout increase fires and ages out
+    interval: 30s
+    input_series:
+      - series: 'db_client_connection_timeouts_total{service_name="product-service"}'
+        values: '0+1x12 12+0x26'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ProductDatabasePoolTimeouts",alertstate="firing"}) or vector(0)'
+        eval_time: 5m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ProductDatabasePoolTimeouts",alertstate="firing"}) or vector(0)'
+        eval_time: 12m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: memory pressure fires and recovers
+    interval: 30s
+    input_series:
+      - series: 'container_memory_working_set_bytes{namespace="qa-svc",pod="qa-product-api-fixture",container="product-api"}'
+        values: '220000000x14 100000000x10'
+      - series: 'container_cpu_usage_seconds_total{namespace="qa-svc",pod="qa-product-api-fixture",container="product-api"}'
+        values: '0+0.01x24'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ProductResourcePressure",alertstate="firing"}) or vector(0)'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ProductResourcePressure",alertstate="firing"}) or vector(0)'
+        eval_time: 8m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: unavailable deployment fires independently of telemetry absence and recovers
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_spec_replicas{namespace="qa-svc",deployment="qa-product-api"}'
+        values: '1x14 1x10'
+      - series: 'kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-product-api"}'
+        values: '0x14 1x10'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ProductUnavailable",alertstate="firing"}) or vector(0)'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ProductTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+      - expr: 'count(ALERTS{alertname="ProductUnavailable",alertstate="firing"}) or vector(0)'
+        eval_time: 8m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: available deployment with missing runtime data fires and recovers
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-product-api"}'
+        values: '1x20'
+      - series: 'go_goroutine_count{service_name="product-service",deployment_environment_name="qa",service_implementation="go"}'
+        values: '_x10 12x10'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ProductTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 4m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ProductTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: genuine idle traffic with runtime data is healthy
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-product-api"}'
+        values: '1x20'
+      - series: 'go_goroutine_count{service_name="product-service",deployment_environment_name="qa",service_implementation="go"}'
+        values: '12x20'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname=~"ProductServiceErrorRate|ProductHighLatency|ProductTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 9m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: telemetry delivery failure fires and recovers
+    interval: 30s
+    input_series:
+      - series: 'prometheus_remote_storage_samples_failed_total{job="qa-alloy"}'
+        values: '0+1x10 10+0x24'
+      - series: 'loki_write_dropped_entries_total{job="qa-alloy"}'
+        values: '0+0x34'
+      - series: 'prometheus_remote_storage_samples_dropped_total{job="qa-alloy"}'
+        values: '0+0x34'
+      - series: 'otelcol_exporter_send_failed_spans_total{job="qa-alloy"}'
+        values: '0+0x34'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ProductTelemetryDeliveryFailure",alertstate="firing"}) or vector(0)'
+        eval_time: 4m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ProductTelemetryDeliveryFailure",alertstate="firing"}) or vector(0)'
+        eval_time: 10m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: absent exporter series do not fabricate delivery failure or backlog
+    interval: 30s
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname=~"ProductTelemetryDeliveryFailure|ProductTelemetryBacklog",alertstate="firing"}) or vector(0)'
+        eval_time: 9m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: telemetry backlog fires on lag and recovers
+    interval: 30s
+    input_series:
+      - series: 'prometheus_remote_storage_samples_pending{job="qa-alloy"}'
+        values: '1x10 0x12'
+      - series: 'prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job="qa-alloy"}'
+        values: '0x22'
+      - series: 'otelcol_exporter_queue_size{job="qa-alloy"}'
+        values: '0x22'
+      - series: 'otelcol_exporter_queue_capacity{job="qa-alloy"}'
+        values: '2048x22'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ProductTelemetryBacklog",alertstate="firing"}) or vector(0)'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ProductTelemetryBacklog",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: unexpected restart fires and ages out
+    interval: 30s
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="qa-svc",pod="qa-product-api-fixture",container="product-api"}'
+        values: '0+1x4 4+0x42'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ProductUnexpectedRestart",alertstate="firing"}) or vector(0)'
+        eval_time: 2m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ProductUnexpectedRestart",alertstate="firing"}) or vector(0)'
+        eval_time: 20m
+        exp_samples:
+          - labels: '{}'
+            value: 0

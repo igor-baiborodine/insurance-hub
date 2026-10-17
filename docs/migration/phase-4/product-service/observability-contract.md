@@ -977,34 +977,52 @@ enables QA telemetry, revalidate all of the following against current canonical 
 | Go QA desired state and telemetry enablement | `k8s/apps/svc/product/base/`, `k8s/overlays/qa/svc/product/`, and the QA service aggregate | Flux `GitRepository/insurance-hub` and `Kustomization/qa-svc`, reading `main`; `make -C k8s flux-reconcile` may only accelerate that owner | Source/applied revisions match the reviewed merge; Deployment generation, ConfigMap hash, Pod UID/image ID, endpoints, and effective non-secret settings match |
 | Product image advancement | `.github/workflows/go-release-svc.yml` and `scripts/go/service/release.py` | Generic Go service release on canonical `main`; its bot commit owns the QA semantic image tag | Successful run; scoped source tag and GitHub Release; semantic and short-SHA images; QA bot commit; registry and live Pod digest match |
 | Alloy chart, RBAC, and pipelines | `k8s/Makefile`, chart settings in `k8s/overlays/qa/infra/alloy/values.yaml`, and the Alloy program in `k8s/overlays/qa/infra/alloy/config.alloy` | Maintainer with QA Helm access through `make -C k8s alloy-install`; Helm release `qa-alloy` | Chart `1.13.1`, image `v1.20.1`, expected manifest/RBAC/config checksum, ready Deployment, and all old/new routes verified |
-| Prometheus receiver, Product rules, and Grafana dashboard | `k8s/Makefile` and `k8s/overlays/qa/infra/prometheus/values.yaml`: receiver under `prometheus.prometheusSpec`, ten rules under `additionalPrometheusRulesMap.product-service` in group `insurance-hub-product-service`, and dashboard under `grafana.dashboards.default.product-service` | Maintainer with QA Helm access through `make -C k8s prometheus-stack-install`; Helm release `qa-prometheus` | Pinned chart/effective flags, accepted PrometheusRule, provisioned dashboard UID, ready Prometheus/Grafana, queries, and alert state match |
+| Prometheus/Grafana base stack and remote-write receiver | `k8s/Makefile` and `k8s/overlays/qa/infra/prometheus/values.yaml`; the values file owns chart settings, persistent Grafana storage, and the receiver under `prometheus.prometheusSpec`, without service dashboards or rules | Maintainer with QA Helm access through `make -C k8s prometheus-stack-install`; Helm release `qa-prometheus` | Pinned chart/effective flags, ready Prometheus/Grafana, 1 GiB Grafana claim, default dashboards/rules, receiver, and scrape health match |
+| Product alert rules | `k8s/observability/services/product/alerts.yaml`, its `monitoring.json` contract and behavior fixture, the selected environment file under `k8s/observability/environments/`, and generic tooling in `k8s/Makefile` and `k8s/scripts/monitoring/` | Maintainer with QA Kubernetes access through `make -C k8s prometheus-rules-apply ENV_NAME=qa SVC_NAME=product`; Prometheus Operator consumes the repository-owned `PrometheusRule` | Source passes generic contract validation, `promtool` syntax/behavior checks, server-side dry-run, exact `insurance-hub-product-service` group and ten alerts, and active rule/alert inspection |
+| Product Grafana dashboard | `k8s/observability/services/product/dashboard.json`, its `monitoring.json` contract and metric fixture, the selected environment file, and generic tooling in `k8s/Makefile` and `k8s/scripts/monitoring/` | Maintainer with QA Kubernetes access through `make -C k8s grafana-dashboard-apply ENV_NAME=qa SVC_NAME=product`; Grafana's dashboard sidecar consumes the repository-owned `ConfigMap` | Source contract, labeled `ConfigMap`, immutable rendered provider, fetched provisioned dashboard, all 26 Prometheus queries, Loki/Tempo panels, and unrelated-dashboard preservation match |
 | Monitoring CRDs | #154's exact chart `32.0.1` pin in `k8s/Makefile` | Existing `prometheus-operator-crds` Helm release | #154 handoff is accepted; no version drift or CRD mutation beyond that reviewed baseline; release remains deployed |
 | Reader role and Secret | #134's `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader` procedure | Maintainer with Kubernetes/CNPG administrative access, outside application startup, Flux, and monitoring Helm | Fresh restricted-login verification and Secret/Pod consistency; no credential material in issue #135 evidence |
 | Operational procedure | New committed `docs/migration/phase-4/product-service/observability-runbook.md` | Issue #135 implementation and reviewer | Commands, prerequisites, normal apply, verification, failure decisions, rollback, and evidence checklist match delivered targets |
 | Acceptance evidence | Ignored `ai/artifacts/epic-4.2/issue-135/` records | Issue #135 implementer gathers; reviewer audits | UTC time, context, Git/image/Flux/Helm revisions, sanitized commands/results, signal queries, budgets, failure/recovery, and residual blockers are mapped to AC135-01–07 |
 
-The Helm values own chart settings and `config.alloy` owns the Alloy program. Every owning Helm
-render and install injects that file through `--set-file alloy.configMap.content=...`; validation
-rejects an embedded copy in `values.yaml`, any owning command that omits the injection, and any
-rendered ConfigMap content that differs from the source. Do not edit the live Alloy ConfigMap,
-Prometheus custom resource, PrometheusRule, or Grafana dashboard by hand. A successful live edit
-would be unowned drift and would not satisfy configuration-as-code acceptance.
+The Prometheus Helm values own base chart settings only; validation rejects embedded service
+dashboards and alert rules. Service assets live under `k8s/observability/services/<service>/` and
+are selected together with `k8s/observability/environments/<environment>.json`. `config.alloy`
+owns the Alloy program. Every owning Alloy Helm render and install injects that file through
+`--set-file alloy.configMap.content=...`; validation rejects an embedded copy in `values.yaml`, any
+owning command that omits the injection, and any rendered ConfigMap content that differs from the
+source. Do not edit the live Alloy ConfigMap, Prometheus custom resource, PrometheusRule, or Grafana
+dashboard by hand. Use the guarded generic Make targets so the external files remain the durable
+source. A successful manual live edit would be unowned drift and would not satisfy
+configuration-as-code acceptance.
+
+Grafana's sidecar discovers repository dashboard `ConfigMap` resources and presents their JSON
+through its file provider. The rendered provider must set `disableDeletion: true` and
+`allowUiUpdates: false`; the dashboard JSON must also set `editable: false`. Together these make
+the provisioned dashboard inspectable but prevent UI modification and deletion. The base values
+retain a 1 GiB `ReadWriteOnce` Grafana PVC for other Grafana state, while the repository asset and
+`ConfigMap` can reconstruct the dashboard after replacement. Step 20 must prove the accepted
+storage class/binding, sidecar provisioning, read-only UI/API behavior, and dashboard survival
+across a Grafana pod replacement; an unbound claim blocks the apply rather than justifying
+ephemeral storage. Product rules remain Prometheus data-source-managed rules, which Grafana exposes
+read-only; updates and deletion go only through the guarded `PrometheusRule` apply path.
 
 Issue #154 pins the Prometheus Operator CRD chart at `32.0.1` and kube-prometheus-stack at
 `92.6.0`. Before issue #135 uses `prometheus-stack-install`, verify those exact accepted versions
 and the #154 handoff; stop on drift rather than changing either application chart here. This ticket
-changes Prometheus/Grafana values on that baseline. Retain #154's bounded
-`--atomic --wait --timeout` behavior and its non-mutating render/config checks, and extend the
-validation for Product rules and the dashboard so a Make result has a finite, reviewable outcome.
+keeps base Prometheus/Grafana settings on that baseline and owns Product monitoring in external
+service assets. Retain #154's bounded `--atomic --wait --timeout` behavior and its non-mutating
+render/config checks. The generic asset checks must give Product rules and dashboard validation a
+finite, reviewable outcome before either Kubernetes API write target runs.
 
 ### Staged delivery and reconciliation
 
 Use this order. Each stage requires its evidence before the next stage starts:
 
 1. **Implement and validate with telemetry disabled.** Add the Product instrumentation and tests,
-   Alloy/Prometheus values, dashboard, rules, runbook, and guarded Make validation. Keep the base
-   and local-dev normal mode at `OTEL_ENABLED=false`; do not combine QA enablement with the first
-   instrumented image release.
+   Alloy/Prometheus base values, external dashboard/rules, runbook, and guarded generic Make
+   validation. Keep the base and local-dev normal mode at `OTEL_ENABLED=false`; do not combine QA
+   enablement with the first instrumented image release.
 2. **Merge and release the instrumented image.** Require all Product and deployment checks, then
    require the canonical-main generic Go service release to publish the exact merged source under
    semantic and short-SHA image tags, create the scoped source tag/GitHub Release, and update the
@@ -1012,9 +1030,11 @@ Use this order. Each stage requires its evidence before the next stage starts:
    A failed or unavailable release blocks later QA stages.
 3. **Apply Prometheus/Grafana.** From a clean checkout of the recorded reviewed `main` revision,
    capture Helm revision/values/manifest, Prometheus flags, active rules/alerts, dashboard state,
-   readiness, and scrape health. Run the guarded `prometheus-stack-install` owner first so the
-   remote-write receiver, Product rules, and dashboard exist before Alloy sends Product metrics.
-   Prove normal scrape ingestion and that unrelated dashboards/rules remain present.
+   readiness, and scrape health. Run the guarded `prometheus-stack-install` base owner, then
+   `prometheus-rules-apply ENV_NAME=qa SVC_NAME=product`, then
+   `grafana-dashboard-apply ENV_NAME=qa SVC_NAME=product`. Require the remote-write receiver,
+   Product rules, and immutable sidecar-provisioned dashboard before Alloy sends
+   Product metrics. Prove normal scrape ingestion and that unrelated dashboards/rules remain.
 4. **Apply Alloy.** Capture the same before-state plus route counters and a sanitized route sample,
    then run the guarded `alloy-install` owner. Require exact chart/image/config/RBAC identity and
    prove Java Zipkin input, Tempo and transitional Zipkin outputs, existing Loki delivery, the
@@ -1030,13 +1050,15 @@ Use this order. Each stage requires its evidence before the next stage starts:
    alert checks, restart/replacement exercises, field/cardinality audit, and Java/Go continuity
    matrix. Issue #136 may consume this evidence but does not complete missing #135 gates.
 
-The pre-#154 kube-prometheus-stack `79.3.0` render was checked with the ten validated Product rules under
-`additionalPrometheusRulesMap.product-service` and a dashboard under
-`grafana.dashboards.default.product-service`. It produced a
-Helm-owned `PrometheusRule` containing ten rules and a mounted Grafana dashboard ConfigMap; all
-6,369 rendered lines passed Kubernetes client-side dry-run. This historical evidence proves the
-chosen ownership path only. Re-render and validate the rules and dashboard on #154's accepted
-`92.6.0` baseline; the earlier result does not prove final content or a live installation.
+The pre-#154 kube-prometheus-stack `79.3.0` render was checked with the ten validated Product rules
+embedded under `additionalPrometheusRulesMap.product-service` and a dashboard under
+`grafana.dashboards.default.product-service`. It produced a Helm-owned `PrometheusRule` and mounted
+Grafana dashboard ConfigMap; all 6,369 rendered lines passed Kubernetes client-side dry-run. That
+historical evidence describes the superseded embedded-asset approach only. The final `92.6.0`
+implementation keeps service assets out of Helm values, validates them against the base render,
+applies the generated `PrometheusRule` and labeled dashboard `ConfigMap` through Kubernetes, and
+lets Grafana's immutable file provider load the fixed dashboard UID. Historical rendering does not
+prove either final API result or live use.
 
 ### Rollback and abort ownership
 
@@ -1049,9 +1071,12 @@ chosen ownership path only. Re-render and validate the rules and dashboard on #1
   Direct `kubectl apply`, manual scaling, or Flux suspension is not a durable rollback.
 - For an Alloy regression, use `helm rollback qa-alloy <captured-revision> --namespace
   qa-monitoring --wait --timeout 5m`, then verify the prior image/config and every pre-existing
-  route. For a Prometheus/Grafana regression, use the equivalent rollback for `qa-prometheus` and
-  verify flags, scrapes, rules, dashboards, and readiness. Revision `1` was historical discovery
-  evidence before #154; capture the actual rollback revision immediately before each change.
+  route. For a Prometheus/Grafana base regression, use the equivalent rollback for `qa-prometheus`.
+  A Helm rollback does not restore the separately managed Product rules or dashboard; restore their
+  last accepted repository revisions with the guarded rule and dashboard apply targets,
+  then verify flags, scrapes, rules, dashboards, and readiness. Revision `1` was historical
+  discovery evidence before #154; capture the actual rollback revision and asset state immediately
+  before each change.
 - A Helm rollback restores live state but not repository intent. Follow it with a reviewed revert
   of the failed chart/values/assets before another install. Do not roll back or delete shared
   Loki, Tempo, Zipkin, databases, PVCs, Java resources, or the reader Secret to recover Product
