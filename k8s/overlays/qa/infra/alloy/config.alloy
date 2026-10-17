@@ -1,8 +1,10 @@
+// Shared QA Alloy configuration. Go services follow one identity, safe-field, metric,
+// and log schema; per-service log registrations provide workload names and stream budgets.
 otelcol.receiver.zipkin "legacy_java" {
   endpoint = "0.0.0.0:9411"
 
   output {
-    traces = [otelcol.processor.attributes.traces.input]
+    traces = [otelcol.processor.memory_limiter.legacy_java.input]
   }
 }
 
@@ -16,24 +18,225 @@ otelcol.receiver.otlp "otlp_ingress" {
   }
 
   output {
-    traces  = [otelcol.processor.attributes.traces.input]
-    logs    = [otelcol.processor.attributes.logs.input]
-    metrics = [otelcol.processor.attributes.metrics.input]
+    traces  = [otelcol.processor.memory_limiter.otlp_ingress.input]
+    logs    = [otelcol.processor.memory_limiter.otlp_ingress.input]
+    metrics = [otelcol.processor.memory_limiter.otlp_ingress.input]
   }
 }
 
-// Add common QA/cluster attributes across all telemetry signals.
-otelcol.processor.attributes "traces" {
-  action {
-    key    = "deployment.environment"
-    action = "upsert"
-    value  = "qa"
+// Bound receiver memory before enrichment, filtering, and batching.
+otelcol.processor.memory_limiter "legacy_java" {
+  check_interval = "1s"
+  limit          = "800MiB"
+  spike_limit    = "160MiB"
+
+  output {
+    traces = [otelcol.processor.k8sattributes.legacy_java.input]
+  }
+}
+
+otelcol.processor.memory_limiter "otlp_ingress" {
+  check_interval = "1s"
+  limit          = "800MiB"
+  spike_limit    = "160MiB"
+
+  output {
+    traces  = [otelcol.processor.k8sattributes.qa_services.input]
+    logs    = [otelcol.processor.batch.otlp_logs.input]
+    metrics = [otelcol.processor.k8sattributes.qa_services.input]
+  }
+}
+
+// Associate legacy Zipkin traffic by its receiver connection. Missing association
+// intentionally preserves the trace without fabricating Kubernetes identity.
+otelcol.processor.k8sattributes "legacy_java" {
+  auth_type = "serviceAccount"
+
+  filter {
+    namespace = "qa-svc"
   }
 
-  action {
-    key    = "cluster.name"
-    action = "upsert"
-    value  = "qa-insurance-hub"
+  extract {
+    metadata = [
+      "k8s.namespace.name",
+      "k8s.pod.uid",
+      "k8s.container.name",
+    ]
+
+    label {
+      from     = "pod"
+      key      = "app.kubernetes.io/version"
+      tag_name = "insurance_hub.k8s.service.version"
+    }
+  }
+
+  pod_association {
+    source {
+      from = "connection"
+    }
+  }
+
+  output {
+    traces = [otelcol.processor.transform.legacy_java_identity.input]
+  }
+}
+
+// Associate OTLP traces and metrics from qa-svc workloads by receiver connection.
+// The shared Go service policy consumes the Kubernetes identity added here.
+otelcol.processor.k8sattributes "qa_services" {
+  auth_type = "serviceAccount"
+
+  filter {
+    namespace = "qa-svc"
+  }
+
+  extract {
+    metadata = [
+      "k8s.namespace.name",
+      "k8s.pod.uid",
+      "k8s.container.name",
+    ]
+
+    label {
+      from     = "pod"
+      key      = "app.kubernetes.io/version"
+      tag_name = "insurance_hub.k8s.service.version"
+    }
+  }
+
+  pod_association {
+    source {
+      from = "connection"
+    }
+  }
+
+  output {
+    traces  = [otelcol.processor.transform.qa_resource_identity.input]
+    metrics = [otelcol.processor.transform.qa_resource_identity.input]
+  }
+}
+
+// Product service policy: fill only absent Java identity. Existing conflicting identity is
+// preserved so acceptance can detect it instead of Alloy silently replacing it.
+otelcol.processor.transform "legacy_java_identity" {
+  error_mode = "propagate"
+
+  trace_statements {
+    context    = "resource"
+    statements = [
+      `set(attributes["insurance_hub.pipeline.source"], "legacy_java") where attributes["service.name"] == "product-service" or attributes["k8s.container.name"] == "product-api-legacy"`,
+      `set(attributes["service.namespace"], "insurance-hub") where attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["service.namespace"] == nil`,
+      `set(attributes["service.version"], attributes["insurance_hub.k8s.service.version"]) where attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["service.version"] == nil and attributes["insurance_hub.k8s.service.version"] != nil`,
+      `set(attributes["service.instance.id"], attributes["k8s.pod.uid"]) where attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["service.instance.id"] == nil and attributes["k8s.pod.uid"] != nil`,
+      `set(attributes["insurance_hub.service.implementation"], "java") where attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["insurance_hub.service.implementation"] == nil`,
+      `set(attributes["deployment.environment.name"], "qa") where attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
+      `set(attributes["k8s.cluster.name"], "qa-insurance-hub") where attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
+      `delete_key(attributes, "insurance_hub.k8s.service.version")`,
+    ]
+  }
+
+  output {
+    traces = [otelcol.processor.transform.service_trace_policies.input]
+  }
+}
+
+// Assert the Alloy-owned QA fields for associated Go services without replacing
+// application-owned service identity.
+otelcol.processor.transform "qa_resource_identity" {
+  error_mode = "propagate"
+
+  trace_statements {
+    context    = "resource"
+    statements = [
+      `set(attributes["deployment.environment.name"], "qa") where attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(attributes["k8s.cluster.name"], "qa-insurance-hub") where attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(attributes["insurance_hub.expected.service.name"], attributes["k8s.container.name"]) where attributes["k8s.namespace.name"] == "qa-svc" and IsMatch(attributes["k8s.container.name"], "^[a-z0-9-]+-api$")`,
+      `replace_pattern(attributes["insurance_hub.expected.service.name"], "-api$", "-service") where attributes["insurance_hub.expected.service.name"] != nil`,
+      `set(attributes["insurance_hub.expected.service.domain"], attributes["k8s.container.name"]) where attributes["k8s.namespace.name"] == "qa-svc" and IsMatch(attributes["k8s.container.name"], "^[a-z0-9-]+-api$")`,
+      `replace_pattern(attributes["insurance_hub.expected.service.domain"], "-api$", "") where attributes["insurance_hub.expected.service.domain"] != nil`,
+      `replace_pattern(attributes["insurance_hub.expected.service.domain"], "-", "_") where attributes["insurance_hub.expected.service.domain"] != nil`,
+    ]
+  }
+
+  metric_statements {
+    context    = "resource"
+    statements = [
+      `set(attributes["deployment.environment.name"], "qa") where attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(attributes["k8s.cluster.name"], "qa-insurance-hub") where attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(attributes["insurance_hub.expected.service.name"], attributes["k8s.container.name"]) where attributes["k8s.namespace.name"] == "qa-svc" and IsMatch(attributes["k8s.container.name"], "^[a-z0-9-]+-api$")`,
+      `replace_pattern(attributes["insurance_hub.expected.service.name"], "-api$", "-service") where attributes["insurance_hub.expected.service.name"] != nil`,
+      `set(attributes["insurance_hub.expected.service.domain"], attributes["k8s.container.name"]) where attributes["k8s.namespace.name"] == "qa-svc" and IsMatch(attributes["k8s.container.name"], "^[a-z0-9-]+-api$")`,
+      `replace_pattern(attributes["insurance_hub.expected.service.domain"], "-api$", "") where attributes["insurance_hub.expected.service.domain"] != nil`,
+      `replace_pattern(attributes["insurance_hub.expected.service.domain"], "-", "_") where attributes["insurance_hub.expected.service.domain"] != nil`,
+    ]
+  }
+
+  output {
+    traces  = [otelcol.processor.filter.service_identity_policies.input]
+    metrics = [otelcol.processor.filter.service_identity_policies.input]
+  }
+}
+
+// Enforce the shared Go service identity convention. A <service>-api container must emit
+// <service>-service identity and use underscores for a hyphenated application metric domain;
+// filter counters expose conflicts and enrichment misses.
+otelcol.processor.filter "service_identity_policies" {
+  error_mode = "propagate"
+
+  trace_conditions {
+    context    = "resource"
+    conditions = [
+      `((attributes["service.namespace"] == "insurance-hub" and attributes["insurance_hub.service.implementation"] == "go") or (attributes["k8s.namespace.name"] == "qa-svc" and IsMatch(attributes["k8s.container.name"], "^[a-z0-9-]+-api$"))) and (attributes["service.name"] == nil or attributes["service.name"] != attributes["insurance_hub.expected.service.name"] or attributes["service.version"] == nil or attributes["service.version"] == "" or attributes["service.version"] == "latest" or attributes["service.version"] == "unconfigured" or attributes["service.version"] == "sha-unpublished" or attributes["service.version"] != attributes["insurance_hub.k8s.service.version"] or attributes["service.instance.id"] == nil or attributes["service.instance.id"] != attributes["k8s.pod.uid"] or attributes["insurance_hub.service.implementation"] != "go" or attributes["k8s.namespace.name"] != "qa-svc" or not IsMatch(attributes["k8s.container.name"], "^[a-z0-9-]+-api$"))`,
+    ]
+  }
+
+  metric_conditions {
+    context    = "resource"
+    conditions = [
+      `((attributes["service.namespace"] == "insurance-hub" and attributes["insurance_hub.service.implementation"] == "go") or (attributes["k8s.namespace.name"] == "qa-svc" and IsMatch(attributes["k8s.container.name"], "^[a-z0-9-]+-api$"))) and (attributes["service.name"] == nil or attributes["service.name"] != attributes["insurance_hub.expected.service.name"] or attributes["service.version"] == nil or attributes["service.version"] == "" or attributes["service.version"] == "latest" or attributes["service.version"] == "unconfigured" or attributes["service.version"] == "sha-unpublished" or attributes["service.version"] != attributes["insurance_hub.k8s.service.version"] or attributes["service.instance.id"] == nil or attributes["service.instance.id"] != attributes["k8s.pod.uid"] or attributes["insurance_hub.service.implementation"] != "go" or attributes["k8s.namespace.name"] != "qa-svc" or not IsMatch(attributes["k8s.container.name"], "^[a-z0-9-]+-api$"))`,
+    ]
+  }
+
+  output {
+    traces  = [otelcol.processor.transform.service_trace_policies.input]
+    metrics = [otelcol.processor.filter.service_metric_policies.input]
+  }
+}
+
+// Normalize legacy Product HTTP spans, then enforce the shared Go service safe-field contract.
+otelcol.processor.transform "service_trace_policies" {
+  error_mode = "propagate"
+
+  trace_statements {
+    context    = "span"
+    statements = [
+      `set(attributes["http.request.method"], "GET") where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["http.method"] == "GET"`,
+      `set(attributes["http.request.method"], "_OTHER") where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["http.method"] != nil and attributes["http.method"] != "GET"`,
+      `set(attributes["http.response.status_code"], attributes["http.status_code"]) where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["http.status_code"] != nil`,
+      `set(attributes["http.route"], "/products") where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java" and (attributes["http.path"] == "/products" or IsMatch(name, "(?i)^get /products/?$"))`,
+      `set(attributes["http.route"], "/products/{productCode}") where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java" and (IsMatch(attributes["http.path"], "^/products/[^/]+$") or IsMatch(name, "(?i)^get /products/([^/]+|\\{productCode\\})$"))`,
+      `set(name, "GET /products") where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["http.route"] == "/products"`,
+      `set(name, "GET /products/{productCode}") where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["http.route"] == "/products/{productCode}"`,
+      `set(name, "HTTP _OTHER") where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java" and attributes["http.route"] == nil`,
+      `set(status.message, "") where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
+      `set(events, nil) where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
+      `set(links, nil) where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
+      `keep_keys(attributes, ["insurance_hub.product.operation", "insurance_hub.product.transport", "insurance_hub.product.outcome", "http.request.method", "http.route", "http.response.status_code", "url.scheme", "network.protocol.version", "rpc.system.name", "rpc.method", "rpc.response.status_code", "db.system.name", "db.namespace", "db.collection.name", "db.operation.name", "db.query.summary", "insurance_hub.product.database.stage", "error.type"]) where resource.attributes["insurance_hub.pipeline.source"] == "legacy_java"`,
+      `set(status.message, "") where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(events, nil) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(links, nil) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `keep_matching_keys(attributes, Concat(["^(insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(operation|transport|outcome|database\\.stage)|http\\.(request\\.method|route|response\\.status_code)|url\\.scheme|network\\.protocol\\.version|rpc\\.(system\\.name|method|response\\.status_code)|db\\.(system\\.name|namespace|collection\\.name|operation\\.name|query\\.summary)|error\\.type)$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+    ]
+  }
+
+  trace_statements {
+    context    = "resource"
+    statements = [
+      `keep_keys(attributes, ["service.namespace", "service.name", "service.version", "service.instance.id", "deployment.environment.name", "insurance_hub.service.implementation", "k8s.cluster.name", "k8s.namespace.name", "k8s.pod.uid", "k8s.container.name"]) where attributes["insurance_hub.pipeline.source"] == "legacy_java" or (attributes["insurance_hub.service.implementation"] == "go" and attributes["k8s.namespace.name"] == "qa-svc")`,
+      `delete_key(attributes, "insurance_hub.k8s.service.version")`,
+      `delete_key(attributes, "insurance_hub.expected.service.name")`,
+      `delete_key(attributes, "insurance_hub.expected.service.domain")`,
+    ]
   }
 
   output {
@@ -41,35 +244,56 @@ otelcol.processor.attributes "traces" {
   }
 }
 
-otelcol.processor.attributes "logs" {
-  action {
-    key    = "deployment.environment"
-    action = "upsert"
-    value  = "qa"
-  }
+// Retain the shared application, database, pool, and runtime instruments for every Go service.
+otelcol.processor.filter "service_metric_policies" {
+  error_mode = "propagate"
 
-  action {
-    key    = "cluster.name"
-    action = "upsert"
-    value  = "qa-insurance-hub"
+  metric_conditions {
+    context    = "metric"
+    conditions = [
+      `resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc" and not (IsMatch(name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(requests|request\\.duration|database\\.operations)$"], "")) or IsMatch(name, "^(db\\.client\\.(operation\\.duration|connection\\.(count|max|timeouts|wait_time))|go\\.(memory\\.(used|limit|allocated|allocations|gc\\.(goal|cycles))|goroutine\\.count|processor\\.limit))$"))`,
+    ]
   }
 
   output {
-    logs = [otelcol.processor.batch.logs.input]
+    metrics = [otelcol.processor.transform.service_metric_policies.input]
   }
 }
 
-otelcol.processor.attributes "metrics" {
-  action {
-    key    = "deployment.environment"
-    action = "upsert"
-    value  = "qa"
+// Copy exactly eight shared resource fields to each Go datapoint, then apply the standard
+// per-instrument dimension patterns. Pod/container identity remains resource-only.
+otelcol.processor.transform "service_metric_policies" {
+  error_mode = "propagate"
+
+  metric_statements {
+    context    = "datapoint"
+    statements = [
+      `set(attributes["service_name"], resource.attributes["service.name"]) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(attributes["service_namespace"], resource.attributes["service.namespace"]) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(attributes["service_version"], resource.attributes["service.version"]) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(attributes["service_instance_id"], resource.attributes["service.instance.id"]) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(attributes["deployment_environment_name"], resource.attributes["deployment.environment.name"]) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(attributes["service_implementation"], resource.attributes["insurance_hub.service.implementation"]) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(attributes["k8s_cluster_name"], resource.attributes["k8s.cluster.name"]) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `set(attributes["k8s_namespace_name"], resource.attributes["k8s.namespace.name"]) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `keep_matching_keys(attributes, Concat(["^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(operation|transport|outcome)|http\\.response\\.status_code|rpc\\.response\\.status_code)$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(requests|request\\.duration)$"], ""))`,
+      `keep_matching_keys(attributes, Concat(["^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(operation|database\\.(stage|outcome)))$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.database\\.operations$"], ""))`,
+      `keep_matching_keys(attributes, Concat(["^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.operation|db\\.(system\\.name|namespace|collection\\.name|operation\\.name)|error\\.type)$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and metric.name == "db.client.operation.duration"`,
+      `keep_matching_keys(attributes, "^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|db\\.client\\.connection\\.(pool\\.name|state))$") where resource.attributes["insurance_hub.service.implementation"] == "go" and metric.name == "db.client.connection.count"`,
+      `keep_matching_keys(attributes, "^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|db\\.client\\.connection\\.pool\\.name)$") where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, "^db\\.client\\.connection\\.(max|timeouts|wait_time)$")`,
+      `keep_matching_keys(attributes, "^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|go\\.memory\\.type)$") where resource.attributes["insurance_hub.service.implementation"] == "go" and metric.name == "go.memory.used"`,
+      `keep_matching_keys(attributes, "^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name)$") where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, "^go\\.(memory\\.(limit|allocated|allocations|gc\\.(goal|cycles))|goroutine\\.count|processor\\.limit)$")`,
+    ]
   }
 
-  action {
-    key    = "cluster.name"
-    action = "upsert"
-    value  = "qa-insurance-hub"
+  metric_statements {
+    context    = "resource"
+    statements = [
+      `delete_key(attributes, "insurance_hub.k8s.service.version")`,
+      `delete_key(attributes, "insurance_hub.expected.service.name")`,
+      `delete_key(attributes, "insurance_hub.expected.service.domain")`,
+      `keep_keys(attributes, ["service.namespace", "service.name", "service.version", "service.instance.id", "deployment.environment.name", "insurance_hub.service.implementation", "k8s.cluster.name", "k8s.namespace.name", "k8s.pod.uid", "k8s.container.name"]) where attributes["insurance_hub.service.implementation"] == "go" and attributes["k8s.namespace.name"] == "qa-svc"`,
+    ]
   }
 
   output {
@@ -78,8 +302,9 @@ otelcol.processor.attributes "metrics" {
 }
 
 otelcol.processor.batch "traces" {
-  timeout         = "5s"
-  send_batch_size = 1024
+  timeout             = "1s"
+  send_batch_size     = 256
+  send_batch_max_size = 512
 
   output {
     traces = [
@@ -89,9 +314,10 @@ otelcol.processor.batch "traces" {
   }
 }
 
-otelcol.processor.batch "logs" {
-  timeout         = "5s"
-  send_batch_size = 1024
+otelcol.processor.batch "otlp_logs" {
+  timeout             = "1s"
+  send_batch_size     = 256
+  send_batch_max_size = 512
 
   output {
     logs = [otelcol.exporter.loki.to_loki.input]
@@ -99,52 +325,375 @@ otelcol.processor.batch "logs" {
 }
 
 otelcol.processor.batch "metrics" {
-  timeout         = "5s"
-  send_batch_size = 1024
+  timeout             = "1s"
+  send_batch_size     = 256
+  send_batch_max_size = 512
 
   output {
     metrics = [otelcol.exporter.prometheus.to_prom.input]
   }
 }
 
-// Tempo traces export (primary target-state backend).
+// Preserve both existing Java trace destinations with bounded retries and queues.
 otelcol.exporter.otlp "tempo" {
+  timeout = "2s"
+
+  retry_on_failure {
+    enabled          = true
+    initial_interval = "1s"
+    max_interval     = "5s"
+    max_elapsed_time = "1m"
+  }
+
+  sending_queue {
+    enabled           = true
+    sizer             = "items"
+    queue_size        = 2048
+    num_consumers     = 2
+    block_on_overflow = false
+  }
+
   client {
     endpoint = "qa-tempo.qa-monitoring.svc.cluster.local:4317"
+
     tls {
       insecure = true
     }
   }
 }
 
-// Transitional Zipkin export path via OTLP->Zipkin bridge collector.
 otelcol.exporter.otlp "zipkin_bridge" {
+  timeout = "2s"
+
+  retry_on_failure {
+    enabled          = true
+    initial_interval = "1s"
+    max_interval     = "5s"
+    max_elapsed_time = "1m"
+  }
+
+  sending_queue {
+    enabled           = true
+    sizer             = "items"
+    queue_size        = 2048
+    num_consumers     = 2
+    block_on_overflow = false
+  }
+
   client {
     endpoint = "qa-zipkin-bridge.qa-monitoring.svc.cluster.local:4317"
+
     tls {
       insecure = true
     }
   }
 }
 
-// OTLP logs -> Loki conversion and write.
+// Preserve the shared OTLP-log conversion path for configured producers.
+otelcol.exporter.loki "to_loki" {
+  forward_to = [loki.write.qa_loki.receiver]
+}
+
+// Discover qa-svc Pods once. Each service log registration supplies its workload identity
+// and stream budget to the shared processing component below.
+discovery.kubernetes "qa_service_pods" {
+  role = "pod"
+
+  namespaces {
+    names = ["qa-svc"]
+  }
+}
+
+// Reuse the common JSON log identity, parsing, label, and delivery policy for each
+// registered Go service. Service-specific fields remain in the original JSON body.
+declare "service_json_logs" {
+  argument "targets" { }
+
+  argument "container_name" { }
+
+  argument "port_name" { }
+
+  argument "service_name" { }
+
+  argument "max_streams" { }
+
+  discovery.relabel "logs" {
+    targets = argument.targets.value
+
+    // Select one stable workload container-port target per Pod before reading logs.
+
+    rule {
+      source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+      action        = "keep"
+      regex         = argument.container_name.value
+    }
+
+    rule {
+      source_labels = ["__meta_kubernetes_pod_label_environment"]
+      action        = "keep"
+      regex         = "qa"
+    }
+
+    rule {
+      source_labels = ["__meta_kubernetes_pod_container_name"]
+      action        = "keep"
+      regex         = argument.container_name.value
+    }
+
+    rule {
+      source_labels = ["__meta_kubernetes_pod_container_port_name"]
+      action        = "keep"
+      regex         = argument.port_name.value
+    }
+
+    rule {
+      source_labels = ["__meta_kubernetes_namespace"]
+      target_label  = "k8s_namespace_name"
+    }
+
+    rule {
+      source_labels = ["__meta_kubernetes_pod_container_name"]
+      target_label  = "k8s_container_name"
+    }
+
+    rule {
+      source_labels = ["__meta_kubernetes_pod_uid"]
+      target_label  = "k8s_pod_uid"
+    }
+
+    rule {
+      source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_version"]
+      target_label  = "service_version"
+    }
+
+    rule {
+      target_label = "service_namespace"
+      replacement  = "insurance-hub"
+    }
+
+    rule {
+      target_label = "service_name"
+      replacement  = argument.service_name.value
+    }
+
+    rule {
+      target_label = "deployment_environment_name"
+      replacement  = "qa"
+    }
+
+    rule {
+      target_label = "service_implementation"
+      replacement  = "go"
+    }
+
+    rule {
+      target_label = "k8s_cluster_name"
+      replacement  = "qa-insurance-hub"
+    }
+  }
+
+  loki.source.kubernetes "logs" {
+    targets    = discovery.relabel.logs.output
+    forward_to = [loki.process.logs.receiver]
+  }
+
+  loki.process "logs" {
+    // Pack controlled discovery labels only long enough to copy them into the
+    // extracted map, then restore the original JSON body before parsing it.
+    stage.pack {
+      labels = [
+        "service_namespace",
+        "service_name",
+        "service_version",
+        "deployment_environment_name",
+        "service_implementation",
+        "k8s_cluster_name",
+        "k8s_namespace_name",
+        "k8s_container_name",
+        "k8s_pod_uid",
+      ]
+      ingest_timestamp = false
+    }
+
+    stage.json {
+      expressions = {
+        original_entry                     = "_entry",
+        target_service_namespace           = "service_namespace",
+        target_service_name                = "service_name",
+        target_service_version             = "service_version",
+        target_deployment_environment_name = "deployment_environment_name",
+        target_service_implementation      = "service_implementation",
+        target_k8s_cluster_name            = "k8s_cluster_name",
+        target_k8s_namespace_name          = "k8s_namespace_name",
+        target_k8s_container_name          = "k8s_container_name",
+        target_k8s_pod_uid                 = "k8s_pod_uid",
+      }
+    }
+
+    stage.output {
+      source = "original_entry"
+    }
+
+    stage.json {
+      drop_malformed = true
+      expressions    = {
+        record_time                        = "time",
+        record_level                       = "level",
+        record_msg                         = "msg",
+        record_service_namespace           = "service_namespace",
+        record_service_name                = "service_name",
+        record_service_version             = "service_version",
+        record_service_instance_id         = "service_instance_id",
+        record_deployment_environment_name = "deployment_environment_name",
+        record_service_implementation      = "service_implementation",
+        record_operation                   = "operation",
+        record_transport                   = "transport",
+        record_outcome                     = "outcome",
+        record_duration_ms                 = "duration_ms",
+        record_http_status_code            = "http_status_code",
+        record_rpc_status_code             = "rpc_status_code",
+        record_error_type                  = "error_type",
+        record_trace_id                    = "trace_id",
+        record_span_id                     = "span_id",
+      }
+    }
+
+    stage.timestamp {
+      source            = "record_time"
+      format            = "RFC3339Nano"
+      action_on_failure = "skip"
+    }
+
+    stage.labels {
+      values = {
+        level = "record_level",
+      }
+    }
+
+    stage.match {
+      selector = `{level!~"INFO|WARN|ERROR"}`
+      action   = "drop"
+    }
+
+    stage.template {
+      source   = "identity_valid"
+      template = "\u007b\u007b if and (eq .record_service_namespace \"insurance-hub\") (eq .record_service_name .target_service_name) (eq .record_deployment_environment_name \"qa\") (eq .record_service_implementation \"go\") (ne .target_service_version \"\") (ne .target_service_version \"latest\") (ne .target_service_version \"unconfigured\") (ne .target_service_version \"sha-unpublished\") (eq .record_service_version .target_service_version) (eq .record_service_instance_id .target_k8s_pod_uid) \u007d\u007dtrue\u007b\u007b else \u007d\u007dfalse\u007b\u007b end \u007d\u007d"
+    }
+
+    stage.labels {
+      values = {
+        identity_valid = "identity_valid",
+      }
+    }
+
+    stage.match {
+      selector = `{identity_valid!="true"}`
+      action   = "drop"
+    }
+
+    // stage.pack removes packed labels from the entry. Restore only the
+    // controlled discovery values after the record identity has been checked.
+    stage.labels {
+      values = {
+        service_namespace           = "target_service_namespace",
+        service_name                = "target_service_name",
+        deployment_environment_name = "target_deployment_environment_name",
+        service_implementation      = "target_service_implementation",
+        service_version             = "target_service_version",
+        k8s_namespace_name          = "target_k8s_namespace_name",
+        k8s_container_name          = "target_k8s_container_name",
+      }
+    }
+
+    stage.structured_metadata {
+      values = {
+        service_instance_id = "record_service_instance_id",
+        k8s_cluster_name    = "target_k8s_cluster_name",
+        k8s_pod_uid         = "target_k8s_pod_uid",
+        trace_id            = "record_trace_id",
+        span_id             = "record_span_id",
+      }
+    }
+
+    stage.label_keep {
+      values = [
+        "service_namespace",
+        "service_name",
+        "deployment_environment_name",
+        "service_implementation",
+        "service_version",
+        "k8s_namespace_name",
+        "k8s_container_name",
+        "level",
+      ]
+    }
+
+    forward_to = [loki.write.service.receiver]
+  }
+
+  loki.write "service" {
+    max_streams = argument.max_streams.value
+
+    endpoint {
+      url                 = "http://qa-loki.qa-monitoring.svc.cluster.local:3100/loki/api/v1/push"
+      batch_size          = "256KiB"
+      batch_wait          = "1s"
+      remote_timeout      = "2s"
+      min_backoff_period  = "500ms"
+      max_backoff_period  = "5s"
+      max_backoff_retries = 5
+      retry_on_http_429   = true
+    }
+  }
+}
+
+// Product service log policy registration.
+service_json_logs "product" {
+  targets        = discovery.kubernetes.qa_service_pods.targets
+  container_name = "product-api"
+  port_name      = "http"
+  service_name   = "product-service"
+  max_streams    = 8
+}
+
+// Preserve the shared OTLP log destination independently of service-specific
+// container-log stream budgets.
 loki.write "qa_loki" {
   endpoint {
     url = "http://qa-loki.qa-monitoring.svc.cluster.local:3100/loki/api/v1/push"
   }
 }
 
-otelcol.exporter.loki "to_loki" {
-  forward_to = [loki.write.qa_loki.receiver]
-}
-
-// OTLP metrics -> Prometheus remote_write.
 prometheus.remote_write "qa_prometheus" {
   endpoint {
     url = "http://qa-prometheus-kube-prometh-prometheus.qa-monitoring.svc.cluster.local:9090/api/v1/write"
+
+    queue_config {
+      capacity             = 1000
+      min_shards           = 1
+      max_shards           = 2
+      max_samples_per_send = 500
+      batch_send_deadline  = "1s"
+      min_backoff          = "100ms"
+      max_backoff          = "2s"
+      retry_on_http_429    = true
+      sample_age_limit     = "5m"
+    }
+  }
+
+  wal {
+    truncate_frequency = "5m"
+    min_keepalive_time = "5m"
+    max_keepalive_time = "15m"
   }
 }
 
 otelcol.exporter.prometheus "to_prom" {
-  forward_to = [prometheus.remote_write.qa_prometheus.receiver]
+  forward_to                           = [prometheus.remote_write.qa_prometheus.receiver]
+  resource_to_telemetry_conversion     = false
+  include_scope_info                   = false
+  include_scope_labels                 = false
+  include_target_info                  = true
+  keep_identifying_resource_attributes = true
+  add_metric_suffixes                  = true
 }
