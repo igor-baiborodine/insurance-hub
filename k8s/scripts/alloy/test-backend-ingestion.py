@@ -38,6 +38,7 @@ CHECK_SPEC.loader.exec_module(backend_check)
 
 
 TIMEOUT = 90
+CLEANUP_TIMEOUT = 15
 SERVICE_VERSION = "sha-135beef"
 SERVICE_INSTANCE_ID = "13500000-0000-4000-8000-000000000015"
 SERVICE_TRACE_ID = "13513513513513513513513513513515"
@@ -422,6 +423,7 @@ class DockerHarness:
     root: Path
     network: str = field(init=False)
     containers: List[str] = field(default_factory=list)
+    network_owned: bool = False
 
     def __post_init__(self) -> None:
         self.network = f"{self.prefix}-network"
@@ -450,6 +452,9 @@ class DockerHarness:
         return result.stdout.strip()
 
     def create(self) -> None:
+        # Creation can time out after Docker has mutated state. Claim the unique
+        # name first so the failure path still verifies and removes it.
+        self.network_owned = True
         self.command(["docker", "network", "create", self.network])
 
     def pull(self, image: str) -> None:
@@ -476,42 +481,114 @@ class DockerHarness:
             command.extend(["-p", f"127.0.0.1::{port}"])
         command.append(image)
         command.extend(arguments)
-        self.command(command)
+        # docker run can time out after creating the named container. Retain the
+        # name before execution so cleanup covers that uncertain partial setup.
         self.containers.append(name)
+        self.command(command)
         return name
 
     def remove(self, name: str) -> None:
-        subprocess.run(
+        self.command(
             ["docker", "rm", "-f", name],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
+            timeout=CLEANUP_TIMEOUT,
         )
+        if self.container_exists(name):
+            raise HarnessError(f"container remains after removal: {name}")
         if name in self.containers:
             self.containers.remove(name)
+
+    def container_exists(self, name: str) -> bool:
+        output = self.command(
+            [
+                "docker",
+                "container",
+                "ls",
+                "--all",
+                "--filter",
+                f"name=^/{name}$",
+                "--format",
+                "{{.Names}}",
+            ],
+            timeout=CLEANUP_TIMEOUT,
+        )
+        return name in output.splitlines()
+
+    def network_exists(self) -> bool:
+        output = self.command(
+            [
+                "docker",
+                "network",
+                "ls",
+                "--filter",
+                f"name=^{self.network}$",
+                "--format",
+                "{{.Name}}",
+            ],
+            timeout=CLEANUP_TIMEOUT,
+        )
+        return self.network in output.splitlines()
 
     def host_port(self, name: str, port: int) -> int:
         output = self.command(["docker", "port", name, f"{port}/tcp"])
         return int(output.rsplit(":", 1)[1])
 
     def logs(self, name: str) -> str:
-        return subprocess.run(
-            ["docker", "logs", name],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        ).stdout
+        return self.command(["docker", "logs", name], timeout=CLEANUP_TIMEOUT)
 
     def cleanup(self) -> None:
-        for container in reversed(self.containers[:]):
-            self.remove(container)
-        subprocess.run(
-            ["docker", "network", "rm", self.network],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        errors = []
+        owned_containers = self.containers[:]
+        for container in reversed(owned_containers):
+            try:
+                exists = self.container_exists(container)
+            except Exception as error:
+                errors.append(f"could not inspect container {container}: {error}")
+                exists = True
+            if not exists:
+                self.containers.remove(container)
+                continue
+            try:
+                self.remove(container)
+            except Exception as error:
+                errors.append(f"could not remove container {container}: {error}")
+
+        for container in owned_containers:
+            try:
+                remains = self.container_exists(container)
+            except Exception as error:
+                errors.append(f"could not verify container {container}: {error}")
+                continue
+            if remains:
+                errors.append(f"container remains after cleanup: {container}")
+            elif container in self.containers:
+                self.containers.remove(container)
+
+        if self.network_owned:
+            try:
+                network_exists = self.network_exists()
+            except Exception as error:
+                errors.append(f"could not inspect network {self.network}: {error}")
+                network_exists = True
+            if network_exists:
+                try:
+                    self.command(
+                        ["docker", "network", "rm", self.network],
+                        timeout=CLEANUP_TIMEOUT,
+                    )
+                except Exception as error:
+                    errors.append(f"could not remove network {self.network}: {error}")
+            try:
+                network_remains = self.network_exists()
+            except Exception as error:
+                errors.append(f"could not verify network {self.network}: {error}")
+            else:
+                if network_remains:
+                    errors.append(f"network remains after cleanup: {self.network}")
+                else:
+                    self.network_owned = False
+
+        if errors:
+            raise HarnessError("cleanup failed: " + "; ".join(errors))
 
 
 def write_configs(root: Path, alloy_source: str, service_domain: str) -> None:
@@ -1093,8 +1170,8 @@ def execute(args: argparse.Namespace) -> None:
         root.chmod(0o755)
         write_configs(root, source, args.service_domain)
         harness = DockerHarness(prefix, root)
-        harness.create()
         try:
+            harness.create()
             for image in backend_check.DISPOSABLE_IMAGES.values():
                 if image == backend_check.DISPOSABLE_IMAGES["postgres"]:
                     continue
@@ -1299,12 +1376,37 @@ def execute(args: argparse.Namespace) -> None:
                 tempo_port,
                 zipkin_port,
             )
-        except Exception as error:
-            diagnostics = []
-            for name in harness.containers:
-                diagnostics.append(f"\n--- {name} ---\n{harness.logs(name)[-4000:]}")
-            raise HarnessError(f"{error}{''.join(diagnostics)}") from error
-        finally:
+        except BaseException as error:
+            if isinstance(error, Exception):
+                diagnostics = []
+                for name in harness.containers:
+                    try:
+                        output = harness.logs(name)[-4000:]
+                    except Exception as log_error:
+                        output = f"logs unavailable: {log_error}"
+                    diagnostics.append(f"\n--- {name} ---\n{output}")
+                primary_error: BaseException = HarnessError(
+                    f"{error}{''.join(diagnostics)}"
+                )
+            else:
+                primary_error = error
+
+            cleanup_error: Optional[Exception] = None
+            try:
+                harness.cleanup()
+            except Exception as candidate:
+                cleanup_error = candidate
+
+            if cleanup_error is not None:
+                if isinstance(primary_error, Exception):
+                    raise HarnessError(
+                        f"{primary_error}\ncleanup also failed: {cleanup_error}"
+                    ) from error
+                primary_error.add_note(f"cleanup also failed: {cleanup_error}")
+            if primary_error is error:
+                raise
+            raise primary_error from error
+        else:
             harness.cleanup()
 
 

@@ -7,6 +7,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 CHECK_PATH = Path(__file__).with_name("check-backend-config.py")
@@ -27,6 +28,126 @@ HARNESS_SPEC.loader.exec_module(backend_harness)
 
 
 class BackendConfigTest(unittest.TestCase):
+    def test_cleanup_retains_and_reports_container_removal_failure(self) -> None:
+        harness = backend_harness.DockerHarness("fixture", Path("/tmp/fixture"))
+        container = "fixture-alloy"
+        harness.containers.append(container)
+        calls = []
+
+        def run(arguments, **kwargs):
+            calls.append((arguments, kwargs))
+            if arguments[1:4] == ["rm", "-f", container]:
+                raise backend_harness.subprocess.TimeoutExpired(
+                    arguments, timeout=kwargs["timeout"]
+                )
+            if arguments[1:3] == ["container", "ls"]:
+                return backend_harness.subprocess.CompletedProcess(
+                    arguments, 0, stdout=f"{container}\n", stderr=""
+                )
+            self.fail(f"unexpected Docker command: {arguments}")
+
+        with mock.patch.object(backend_harness.subprocess, "run", side_effect=run):
+            with self.assertRaisesRegex(
+                backend_harness.HarnessError,
+                rf"could not remove container {container}.*container remains after cleanup",
+            ):
+                harness.cleanup()
+
+        self.assertEqual([container], harness.containers)
+        self.assertTrue(calls)
+        self.assertTrue(
+            all(call[1]["timeout"] == backend_harness.CLEANUP_TIMEOUT for call in calls)
+        )
+
+    def test_cleanup_retains_and_reports_network_removal_failure(self) -> None:
+        harness = backend_harness.DockerHarness("fixture", Path("/tmp/fixture"))
+        harness.network_owned = True
+        calls = []
+
+        def run(arguments, **kwargs):
+            calls.append((arguments, kwargs))
+            if arguments[1:3] == ["network", "ls"]:
+                return backend_harness.subprocess.CompletedProcess(
+                    arguments, 0, stdout=f"{harness.network}\n", stderr=""
+                )
+            if arguments[1:3] == ["network", "rm"]:
+                return backend_harness.subprocess.CompletedProcess(
+                    arguments, 1, stdout="", stderr="network is in use"
+                )
+            self.fail(f"unexpected Docker command: {arguments}")
+
+        with mock.patch.object(backend_harness.subprocess, "run", side_effect=run):
+            with self.assertRaisesRegex(
+                backend_harness.HarnessError,
+                rf"could not remove network {harness.network}.*network remains after cleanup",
+            ):
+                harness.cleanup()
+
+        self.assertTrue(harness.network_owned)
+        self.assertTrue(calls)
+        self.assertTrue(
+            all(call[1]["timeout"] == backend_harness.CLEANUP_TIMEOUT for call in calls)
+        )
+
+    def test_cleanup_clears_absent_partial_setup_ownership(self) -> None:
+        harness = backend_harness.DockerHarness("fixture", Path("/tmp/fixture"))
+        harness.containers.append("fixture-alloy")
+        harness.network_owned = True
+        calls = []
+
+        def run(arguments, **kwargs):
+            calls.append((arguments, kwargs))
+            if arguments[1:3] in (["container", "ls"], ["network", "ls"]):
+                return backend_harness.subprocess.CompletedProcess(
+                    arguments, 0, stdout="", stderr=""
+                )
+            self.fail(f"unexpected Docker command: {arguments}")
+
+        with mock.patch.object(backend_harness.subprocess, "run", side_effect=run):
+            harness.cleanup()
+
+        self.assertEqual([], harness.containers)
+        self.assertFalse(harness.network_owned)
+        self.assertTrue(calls)
+        self.assertTrue(
+            all(call[1]["timeout"] == backend_harness.CLEANUP_TIMEOUT for call in calls)
+        )
+
+    def test_cleanup_failure_preserves_primary_failure(self) -> None:
+        with backend_harness.tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config.alloy"
+            service_root = root / "service"
+            probe = root / "probe.py"
+            config.write_text("", encoding="utf-8")
+            service_root.mkdir()
+            probe.touch()
+            args = backend_harness.argparse.Namespace(
+                config=config,
+                service_root=service_root,
+                service_probe=probe,
+                service_domain="product",
+                request_histogram_buckets=15,
+            )
+            primary = backend_harness.HarnessError("primary execution failure")
+            harness = mock.Mock()
+            harness.containers = []
+            harness.create.side_effect = primary
+            harness.cleanup.side_effect = backend_harness.HarnessError(
+                "network remains after cleanup"
+            )
+
+            with mock.patch.object(backend_harness, "write_configs"), mock.patch.object(
+                backend_harness, "DockerHarness", return_value=harness
+            ):
+                with self.assertRaisesRegex(
+                    backend_harness.HarnessError,
+                    "(?s)primary execution failure.*cleanup also failed:.*network remains",
+                ) as raised:
+                    backend_harness.execute(args)
+
+        self.assertIs(primary, raised.exception.__cause__)
+
     def test_remote_write_samples_ignore_metadata_and_select_endpoint(self) -> None:
         exposition = '''
 # HELP prometheus_remote_storage_samples_failed_total Total number of failed samples.
