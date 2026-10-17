@@ -140,6 +140,7 @@ func runServer(arguments []string) (runErr error) {
 		return err
 	}
 	serviceCtx, cancelService := context.WithCancel(context.Background())
+	defer cancelService()
 	done := make(chan error, 1)
 	go func() {
 		done <- service.Run(
@@ -174,7 +175,7 @@ func runServer(arguments []string) (runErr error) {
 	select {
 	case err := <-done:
 		cancelService()
-		return fmt.Errorf("Product stopped unexpectedly: %w", err)
+		return fmt.Errorf("product stopped unexpectedly: %w", err)
 	case <-signalCtx.Done():
 	}
 	started := time.Now()
@@ -182,11 +183,11 @@ func runServer(arguments []string) (runErr error) {
 	select {
 	case err := <-done:
 		if elapsed := time.Since(started); elapsed > 10*time.Second {
-			return fmt.Errorf("Product shutdown exceeded ten seconds: %s", elapsed)
+			return fmt.Errorf("product shutdown exceeded ten seconds: %s", elapsed)
 		}
 		return err
 	case <-time.After(stopTimeout):
-		return errors.New("Product did not stop inside the shared shutdown budget")
+		return errors.New("product did not stop inside the shared shutdown budget")
 	}
 }
 
@@ -269,7 +270,7 @@ func executeLoad(
 	for index := range results {
 		results[index] = make([]observation, 0, requestsPerPath)
 	}
-	var resultLocks []sync.Mutex = make([]sync.Mutex, len(operations))
+	resultLocks := make([]sync.Mutex, len(operations))
 	semaphore := make(chan struct{}, maxInFlight)
 	var active atomic.Int64
 	var peak atomic.Int64
@@ -490,7 +491,7 @@ func waitReady(selected addresses, done <-chan error) error {
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-done:
-			return fmt.Errorf("Product stopped before readiness: %w", err)
+			return fmt.Errorf("product stopped before readiness: %w", err)
 		default:
 		}
 		response, err := http.Get("http://" + selected.Health + "/readyz")
@@ -502,7 +503,7 @@ func waitReady(selected addresses, done <-chan error) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return errors.New("Product readiness deadline exceeded")
+	return errors.New("product readiness deadline exceeded")
 }
 
 func fatal(message string) {
