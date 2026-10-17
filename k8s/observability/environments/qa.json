@@ -1,0 +1,8 @@
+{
+  "environment": "qa",
+  "kube_context": "qa-insurance-hub",
+  "monitoring_namespace": "qa-monitoring",
+  "prometheus_release": "qa-prometheus",
+  "prometheus_values_path": "overlays/qa/infra/prometheus/values.yaml",
+  "schema_version": 1
+}

@@ -76,6 +76,21 @@ grafana:
   sidecar:
     dashboards:
       enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      provider:
+        # Repository-owned dashboards are immutable in Grafana. The sidecar
+        # replaces them only when their labeled ConfigMaps change.
+        disableDelete: true
+        allowUiUpdates: false
+  # Persist Grafana state across pod replacements. Repository dashboards are
+  # also reconstructed from their sidecar ConfigMaps after a replacement.
+  persistence:
+    enabled: true
+    type: pvc
+    accessModes:
+      - ReadWriteOnce
+    size: 1Gi
   resources:
     requests:
       cpu: 200m

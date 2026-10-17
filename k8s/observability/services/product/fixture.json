@@ -1,0 +1,394 @@
+{
+  "common_labels": {
+    "deployment_environment_name": "qa",
+    "service_implementation": "go",
+    "service_instance_id": "fixture-pod",
+    "service_name": "product-service",
+    "service_version": "fixture"
+  },
+  "dashboard_variables": {
+    "environment": "qa",
+    "implementation": "go"
+  },
+  "schema_version": 1,
+  "series": [
+    {
+      "labels": {
+        "insurance_hub_product_operation": "list",
+        "insurance_hub_product_outcome": "success",
+        "insurance_hub_product_transport": "http"
+      },
+      "name": "insurance_hub_product_requests_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_product_operation": "list",
+        "insurance_hub_product_outcome": "internal_error",
+        "insurance_hub_product_transport": "http"
+      },
+      "name": "insurance_hub_product_requests_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_product_operation": "list",
+        "insurance_hub_product_transport": "http",
+        "le": "0.1"
+      },
+      "name": "insurance_hub_product_request_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_product_operation": "list",
+        "insurance_hub_product_transport": "http",
+        "le": "0.5"
+      },
+      "name": "insurance_hub_product_request_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_product_operation": "list",
+        "insurance_hub_product_transport": "http",
+        "le": "+Inf"
+      },
+      "name": "insurance_hub_product_request_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_product_operation": "list",
+        "insurance_hub_product_transport": "http"
+      },
+      "name": "insurance_hub_product_request_duration_seconds_sum",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 0.5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_product_operation": "list",
+        "insurance_hub_product_transport": "http"
+      },
+      "name": "insurance_hub_product_request_duration_seconds_count",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_product_operation": "list",
+        "le": "0.05"
+      },
+      "name": "db_client_operation_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_product_operation": "list",
+        "le": "+Inf"
+      },
+      "name": "db_client_operation_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_product_operation": "list"
+      },
+      "name": "db_client_operation_duration_seconds_sum",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 0.1
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_product_operation": "list"
+      },
+      "name": "db_client_operation_duration_seconds_count",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "db_client_connection_pool_name": "product-reader",
+        "le": "0.01"
+      },
+      "name": "db_client_connection_wait_time_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "db_client_connection_pool_name": "product-reader",
+        "le": "+Inf"
+      },
+      "name": "db_client_connection_wait_time_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "db_client_connection_pool_name": "product-reader"
+      },
+      "name": "db_client_connection_wait_time_seconds_sum",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 0.01
+      }
+    },
+    {
+      "labels": {
+        "db_client_connection_pool_name": "product-reader"
+      },
+      "name": "db_client_connection_wait_time_seconds_count",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "db_client_connection_pool_name": "product-reader",
+        "db_client_connection_state": "used"
+      },
+      "name": "db_client_connection_count",
+      "use_common_labels": true,
+      "value": 1
+    },
+    {
+      "labels": {
+        "db_client_connection_pool_name": "product-reader",
+        "db_client_connection_state": "idle"
+      },
+      "name": "db_client_connection_count",
+      "use_common_labels": true,
+      "value": 1
+    },
+    {
+      "labels": {
+        "db_client_connection_pool_name": "product-reader"
+      },
+      "name": "db_client_connection_max",
+      "use_common_labels": true,
+      "value": 8
+    },
+    {
+      "labels": {
+        "db_client_connection_pool_name": "product-reader"
+      },
+      "name": "db_client_connection_timeouts_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {},
+      "name": "go_goroutine_count",
+      "use_common_labels": true,
+      "value": 12
+    },
+    {
+      "labels": {
+        "go_memory_type": "heap"
+      },
+      "name": "go_memory_used_bytes",
+      "use_common_labels": true,
+      "value": 67108864
+    },
+    {
+      "labels": {},
+      "name": "go_memory_gc_cycles_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 1
+      }
+    },
+    {
+      "labels": {
+        "container": "product-api",
+        "namespace": "qa-svc",
+        "pod": "qa-product-api-fixture"
+      },
+      "name": "container_cpu_usage_seconds_total",
+      "use_common_labels": false,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 0.02
+      }
+    },
+    {
+      "labels": {
+        "container": "product-api",
+        "namespace": "qa-svc",
+        "pod": "qa-product-api-fixture"
+      },
+      "name": "container_memory_working_set_bytes",
+      "use_common_labels": false,
+      "value": 104857600
+    },
+    {
+      "labels": {
+        "deployment": "qa-product-api",
+        "namespace": "qa-svc"
+      },
+      "name": "kube_deployment_spec_replicas",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "deployment": "qa-product-api",
+        "namespace": "qa-svc"
+      },
+      "name": "kube_deployment_status_replicas_available",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "condition": "true",
+        "namespace": "qa-svc",
+        "pod": "qa-product-api-fixture"
+      },
+      "name": "kube_pod_status_ready",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "container": "product-api",
+        "namespace": "qa-svc",
+        "pod": "qa-product-api-fixture"
+      },
+      "name": "kube_pod_container_status_restarts_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "loki_write_dropped_entries_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_failed_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_dropped_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_pending",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_send_failed_spans_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_queue_size",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_queue_highest_sent_timestamp_seconds",
+      "use_common_labels": false,
+      "value": {
+        "kind": "unix_time"
+      }
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_queue_capacity",
+      "use_common_labels": false,
+      "value": 2048
+    }
+  ]
+}
