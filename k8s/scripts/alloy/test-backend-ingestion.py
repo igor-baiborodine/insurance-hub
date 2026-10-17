@@ -23,7 +23,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from importlib import util as importlib_util
 
@@ -85,9 +85,88 @@ REQUEST_HISTOGRAM_BOUNDS = (
     "+Inf",
 )
 
+DISPOSABLE_REMOTE_WRITE_ENDPOINT = "http://prometheus:9090/api/v1/write"
+REMOTE_WRITE_FAILED_METRIC = "prometheus_remote_storage_samples_failed_total"
+REMOTE_WRITE_PENDING_METRIC = "prometheus_remote_storage_samples_pending"
+
+PROMETHEUS_SAMPLE_PATTERN = re.compile(
+    r"^(?P<name>[A-Za-z_:][A-Za-z0-9_:]*)"
+    r"(?:\{(?P<labels>.*)\})?\s+"
+    r"(?P<value>[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?|"
+    r"NaN|[+-]Inf)(?:\s+[0-9]+)?$"
+)
+PROMETHEUS_LABEL_PATTERN = re.compile(
+    r'(?P<name>[A-Za-z_][A-Za-z0-9_]*)="(?P<value>(?:\\.|[^"\\])*)"'
+)
+
 
 class HarnessError(Exception):
     """A bounded disposable-backend validation failure."""
+
+
+@dataclass(frozen=True)
+class PrometheusSample:
+    name: str
+    labels: Dict[str, str]
+    value: float
+
+
+def parse_prometheus_labels(text: str) -> Dict[str, str]:
+    labels: Dict[str, str] = {}
+    position = 0
+    while position < len(text):
+        match = PROMETHEUS_LABEL_PATTERN.match(text, position)
+        if match is None:
+            raise HarnessError(f"invalid Prometheus label set: {text!r}")
+        name = match.group("name")
+        if name in labels:
+            raise HarnessError(f"duplicate Prometheus label: {name}")
+        labels[name] = json.loads(f'"{match.group("value")}"')
+        position = match.end()
+        if position == len(text):
+            break
+        if text[position] != ",":
+            raise HarnessError(f"invalid Prometheus label separator: {text!r}")
+        position += 1
+    return labels
+
+
+def parse_prometheus_exposition(text: str) -> List[PrometheusSample]:
+    samples = []
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = PROMETHEUS_SAMPLE_PATTERN.fullmatch(line)
+        if match is None:
+            raise HarnessError(
+                f"invalid Prometheus sample on line {line_number}: {raw_line!r}"
+            )
+        samples.append(
+            PrometheusSample(
+                name=match.group("name"),
+                labels=parse_prometheus_labels(match.group("labels") or ""),
+                value=float(match.group("value")),
+            )
+        )
+    return samples
+
+
+def remote_write_sample_value(text: str, metric_name: str, endpoint: str) -> float:
+    matches = [
+        sample
+        for sample in parse_prometheus_exposition(text)
+        if sample.name == metric_name and sample.labels.get("url") == endpoint
+    ]
+    if len(matches) != 1:
+        raise HarnessError(
+            f"{metric_name} has {len(matches)} series for remote-write endpoint {endpoint}"
+        )
+    if not math.isfinite(matches[0].value):
+        raise HarnessError(
+            f"{metric_name} has a non-finite value for remote-write endpoint {endpoint}"
+        )
+    return matches[0].value
 
 
 def block_range(config: str, marker: str) -> Tuple[int, int]:
@@ -566,6 +645,37 @@ def wait_json(url: str, predicate: Any, description: str, timeout: float = TIMEO
     raise HarnessError(f"timed out waiting for {description}; last response={last!r}")
 
 
+def read_alloy_metrics(port: int) -> str:
+    status, body = request(f"http://127.0.0.1:{port}/metrics")
+    if status != 200:
+        raise HarnessError(f"Alloy metrics returned HTTP {status}")
+    return body.decode("utf-8", errors="strict")
+
+
+def wait_remote_write_value(
+    port: int,
+    metric_name: str,
+    predicate: Callable[[float], bool],
+    description: str,
+    timeout: float = 30,
+) -> float:
+    deadline = time.monotonic() + timeout
+    last: Any = "not observed"
+    while time.monotonic() < deadline:
+        try:
+            last = remote_write_sample_value(
+                read_alloy_metrics(port),
+                metric_name,
+                DISPOSABLE_REMOTE_WRITE_ENDPOINT,
+            )
+            if predicate(last):
+                return last
+        except (HarnessError, UnicodeDecodeError) as error:
+            last = str(error)
+        time.sleep(0.25)
+    raise HarnessError(f"timed out waiting for {description}; last observation={last!r}")
+
+
 def post_otlp(port: int, signal: str, payload: Mapping[str, Any]) -> None:
     status, body = request(
         f"http://127.0.0.1:{port}/v1/{signal}",
@@ -1034,17 +1144,26 @@ def execute(args: argparse.Namespace) -> None:
                 )
             alloy, alloy_otlp_port, alloy_metrics_port = start_alloy(harness)
             alloy_zipkin_port = harness.host_port(alloy, 9411)
+            failed_baseline = wait_remote_write_value(
+                alloy_metrics_port,
+                REMOTE_WRITE_FAILED_METRIC,
+                lambda value: value == 0,
+                "zero failed-sample baseline before receiver rejection",
+            )
             now = time.time_ns()
             post_otlp(alloy_otlp_port, "metrics", synthetic_metric_payload(7, now))
             post_otlp(alloy_otlp_port, "traces", synthetic_trace_payload(now))
             post_zipkin(alloy_zipkin_port)
-            time.sleep(3)
-            status, metrics_body = request(f"http://127.0.0.1:{alloy_metrics_port}/metrics")
-            metrics_text = metrics_body.decode("utf-8", errors="replace")
-            if status != 200 or not re.search(
-                r"prometheus_remote_storage_samples_(failed|pending)", metrics_text
-            ):
-                raise HarnessError("Alloy did not expose remote-write rejection/pending evidence")
+            failed_fault = wait_remote_write_value(
+                alloy_metrics_port,
+                REMOTE_WRITE_FAILED_METRIC,
+                lambda value: value > failed_baseline,
+                "positive failed-sample delta after receiver rejection",
+            )
+            print(
+                "remote-write rejection evidence: "
+                f"failed samples {failed_baseline:g}->{failed_fault:g}"
+            )
 
             harness.remove(prometheus)
             prometheus, prometheus_port = start_prometheus(harness, enabled=True)
@@ -1099,15 +1218,24 @@ def execute(args: argparse.Namespace) -> None:
 
             # Connection refusal is retryable. Keep Alloy alive while Prometheus is absent,
             # then prove its WAL forwards the later cumulative point to a fresh backend.
+            pending_baseline = wait_remote_write_value(
+                alloy_metrics_port,
+                REMOTE_WRITE_PENDING_METRIC,
+                lambda value: value == 0,
+                "zero pending-sample baseline before backend outage",
+            )
             harness.remove(prometheus)
             post_otlp(alloy_otlp_port, "metrics", synthetic_metric_payload(9, time.time_ns()))
-            time.sleep(3)
-            status, metrics_body = request(f"http://127.0.0.1:{alloy_metrics_port}/metrics")
-            metrics_text = metrics_body.decode("utf-8", errors="replace")
-            if status != 200 or not re.search(
-                r"prometheus_remote_storage_samples_pending", metrics_text
-            ):
-                raise HarnessError("Alloy did not expose pending samples during backend outage")
+            pending_fault = wait_remote_write_value(
+                alloy_metrics_port,
+                REMOTE_WRITE_PENDING_METRIC,
+                lambda value: value > pending_baseline,
+                "positive pending-sample gauge during backend outage",
+            )
+            print(
+                "remote-write outage evidence: "
+                f"pending samples {pending_baseline:g}->{pending_fault:g}"
+            )
             prometheus, prometheus_port = start_prometheus(harness, enabled=True)
             wait_json(
                 f"http://127.0.0.1:{prometheus_port}/api/v1/query?"

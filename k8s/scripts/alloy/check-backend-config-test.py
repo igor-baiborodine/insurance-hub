@@ -27,6 +27,49 @@ HARNESS_SPEC.loader.exec_module(backend_harness)
 
 
 class BackendConfigTest(unittest.TestCase):
+    def test_remote_write_samples_ignore_metadata_and_select_endpoint(self) -> None:
+        exposition = '''
+# HELP prometheus_remote_storage_samples_failed_total Total number of failed samples.
+# TYPE prometheus_remote_storage_samples_failed_total counter
+prometheus_remote_storage_samples_failed_total{remote_name="primary",url="http://prometheus:9090/api/v1/write"} 0
+prometheus_remote_storage_samples_failed_total{remote_name="other",url="http://other:9090/api/v1/write"} 7
+prometheus_remote_storage_samples_pending{remote_name="primary",url="http://prometheus:9090/api/v1/write"} 3
+'''
+        self.assertEqual(
+            0,
+            backend_harness.remote_write_sample_value(
+                exposition,
+                backend_harness.REMOTE_WRITE_FAILED_METRIC,
+                backend_harness.DISPOSABLE_REMOTE_WRITE_ENDPOINT,
+            ),
+        )
+        self.assertEqual(
+            3,
+            backend_harness.remote_write_sample_value(
+                exposition,
+                backend_harness.REMOTE_WRITE_PENDING_METRIC,
+                backend_harness.DISPOSABLE_REMOTE_WRITE_ENDPOINT,
+            ),
+        )
+
+    def test_remote_write_sample_requires_one_endpoint_series(self) -> None:
+        sample = (
+            'prometheus_remote_storage_samples_pending{remote_name="primary",'
+            'url="http://prometheus:9090/api/v1/write"} 1\n'
+        )
+        with self.assertRaises(backend_harness.HarnessError):
+            backend_harness.remote_write_sample_value(
+                "# HELP prometheus_remote_storage_samples_pending Pending samples.\n",
+                backend_harness.REMOTE_WRITE_PENDING_METRIC,
+                backend_harness.DISPOSABLE_REMOTE_WRITE_ENDPOINT,
+            )
+        with self.assertRaises(backend_harness.HarnessError):
+            backend_harness.remote_write_sample_value(
+                sample + sample,
+                backend_harness.REMOTE_WRITE_PENDING_METRIC,
+                backend_harness.DISPOSABLE_REMOTE_WRITE_ENDPOINT,
+            )
+
     def test_values_require_remote_write_and_reject_native_otlp(self) -> None:
         valid = """prometheusSpec:
   retention: 10d
