@@ -92,6 +92,8 @@ ACCEPTED_PROFILE = {
 FRESHNESS_SAMPLES = 20
 LOKI_TRACE_QUERY_BATCH_SIZE = 100
 LOKI_TRACE_QUERY_TIMEOUT = 30
+LOKI_TRACE_QUERY_RESULT_LIMIT = 1000
+LOKI_TRACE_QUERY_WINDOW_NS = 2 * 60 * 60 * 1_000_000_000
 LOKI_ERROR_DETAIL_MAX_CHARS = 500
 
 
@@ -623,6 +625,8 @@ def query_loki_trace_counts(
     deadline: float,
 ) -> Mapping[str, int]:
     counts: Dict[str, int] = {}
+    query_end = time.time_ns() + 30_000_000_000
+    query_start = query_end - LOKI_TRACE_QUERY_WINDOW_NS
     for offset in range(0, len(trace_ids), LOKI_TRACE_QUERY_BATCH_SIZE):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -630,27 +634,39 @@ def query_loki_trace_counts(
         batch = trace_ids[offset:offset + LOKI_TRACE_QUERY_BATCH_SIZE]
         trace_pattern = "^(?:" + "|".join(re.escape(trace_id) for trace_id in batch) + ")$"
         query = (
-            'sum by (trace_id) (count_over_time({service_name="product-service"} '
+            '{service_name="product-service"} '
             '|= "Product request completed" | json | service_instance_id='
-            + json.dumps(instance) + ' | trace_id=~' + json.dumps(trace_pattern) + ' [2h]))'
+            + json.dumps(instance) + ' | trace_id=~' + json.dumps(trace_pattern)
         )
         status, body = backend.request(
-            f"http://127.0.0.1:{loki_port}/loki/api/v1/query?"
-            + urllib.parse.urlencode({"query": query}),
+            f"http://127.0.0.1:{loki_port}/loki/api/v1/query_range?"
+            + urllib.parse.urlencode({
+                "query": query,
+                "start": query_start,
+                "end": query_end,
+                "limit": LOKI_TRACE_QUERY_RESULT_LIMIT,
+            }),
             timeout=min(LOKI_TRACE_QUERY_TIMEOUT, remaining),
         )
         if status != 200:
             detail = bounded_response_detail(body)
             suffix = f": {detail}" if detail else ""
             raise AcceptanceError(
-                f"Loki trace-count query returned HTTP {status}{suffix}"
+                f"Loki trace-log query returned HTTP {status}{suffix}"
             )
         response = json.loads(body)
-        counts.update({
-            result.get("metric", {}).get("trace_id", ""): int(float(result["value"][1]))
-            for result in backend.query_results(response)
-            if result.get("metric", {}).get("trace_id")
-        })
+        returned = 0
+        for result in backend.query_results(response):
+            trace_id = result.get("stream", {}).get("trace_id", "")
+            values = result.get("values", [])
+            if not trace_id or not isinstance(values, list):
+                raise AcceptanceError("Loki trace-log query returned an invalid stream")
+            counts[trace_id] = counts.get(trace_id, 0) + len(values)
+            returned += len(values)
+        if returned >= LOKI_TRACE_QUERY_RESULT_LIMIT:
+            raise AcceptanceError(
+                "Loki trace-log query reached its per-batch result limit"
+            )
     return counts
 
 
@@ -680,7 +696,8 @@ def verify_log_delivery(
         time.sleep(1)
     selected = {trace_id: counts[trace_id] for trace_id in expected_ids if trace_id in counts}
     return evaluate_delivery_counts(
-        expected_ids, selected, 1, lost_max, duplicate_max, "Loki completion logs",
+        expected_ids, selected, 1, lost_max, duplicate_max,
+        f"Loki {trace_prefix} completion logs",
     )
 
 

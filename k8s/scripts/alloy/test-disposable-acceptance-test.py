@@ -116,7 +116,7 @@ class AcceptanceVerifierTest(unittest.TestCase):
             offset = (len(requests) - 1) * acceptance.LOKI_TRACE_QUERY_BATCH_SIZE
             batch = trace_ids[offset:offset + acceptance.LOKI_TRACE_QUERY_BATCH_SIZE]
             results = [
-                {"metric": {"trace_id": trace_id}, "value": [0, "1"]}
+                {"stream": {"trace_id": trace_id}, "values": [["0", "{}"]]}
                 for trace_id in batch
             ]
             return 200, json.dumps({"data": {"result": results}}).encode("utf-8")
@@ -134,6 +134,15 @@ class AcceptanceVerifierTest(unittest.TestCase):
             )["query"][0]
             self.assertIn('| service_instance_id="product-instance"', query)
             self.assertIn("| trace_id=~", query)
+            self.assertIn("/loki/api/v1/query_range?", url)
+            parameters = acceptance.urllib.parse.parse_qs(
+                acceptance.urllib.parse.urlparse(url).query
+            )
+            self.assertEqual(
+                [str(acceptance.LOKI_TRACE_QUERY_RESULT_LIMIT)], parameters["limit"]
+            )
+            self.assertIn("start", parameters)
+            self.assertIn("end", parameters)
             self.assertGreater(timeout, 0)
             self.assertLessEqual(timeout, acceptance.LOKI_TRACE_QUERY_TIMEOUT)
 
@@ -144,8 +153,11 @@ class AcceptanceVerifierTest(unittest.TestCase):
             batch = trace_ids[offset:offset + acceptance.LOKI_TRACE_QUERY_BATCH_SIZE]
             results = [
                 {
-                    "metric": {"trace_id": trace_id},
-                    "value": [0, "2" if trace_id == trace_ids[0] else "1"],
+                    "stream": {"trace_id": trace_id},
+                    "values": (
+                        [["0", "{}"], ["1", "{}"]]
+                        if trace_id == trace_ids[0] else [["0", "{}"]]
+                    ),
                 }
                 for trace_id in batch if trace_id != trace_ids[-1]
             ]
@@ -176,12 +188,39 @@ class AcceptanceVerifierTest(unittest.TestCase):
                 )
 
         message = str(raised.exception)
-        self.assertIn("Loki trace-count query returned HTTP 400: maximum series reached", message)
+        self.assertIn("Loki trace-log query returned HTTP 400: maximum series reached", message)
         self.assertNotIn("\n", message)
         self.assertNotIn("\x00", message)
         self.assertLessEqual(
             len(message.split(": ", 1)[1]), acceptance.LOKI_ERROR_DETAIL_MAX_CHARS,
         )
+
+    def test_loki_trace_query_rejects_truncated_batch(self) -> None:
+        results = [{
+            "stream": {"trace_id": "a"},
+            "values": [
+                [str(index), "{}"]
+                for index in range(acceptance.LOKI_TRACE_QUERY_RESULT_LIMIT)
+            ],
+        }]
+        response = (200, json.dumps({"data": {"result": results}}).encode("utf-8"))
+        with mock.patch.object(acceptance.backend, "request", return_value=response):
+            with self.assertRaisesRegex(acceptance.AcceptanceError, "result limit"):
+                acceptance.query_loki_trace_counts(
+                    3100, "product-instance", ["a"], acceptance.time.monotonic() + 30,
+                )
+
+    def test_log_delivery_failure_identifies_workload_phase(self) -> None:
+        trace_id = acceptance.deterministic_trace_ids("healthy", 1)[0]
+        with mock.patch.object(
+            acceptance, "query_loki_trace_counts", return_value={trace_id: 2},
+        ):
+            with self.assertRaisesRegex(
+                acceptance.AcceptanceError, "Loki healthy completion logs duplicated 1",
+            ):
+                acceptance.verify_log_delivery(
+                    3100, "product-instance", "healthy", 1, 0, 0, 1,
+                )
 
     def test_sentinel_verifier_rejects_unsafe_evidence(self) -> None:
         with self.assertRaises(acceptance.AcceptanceError):
