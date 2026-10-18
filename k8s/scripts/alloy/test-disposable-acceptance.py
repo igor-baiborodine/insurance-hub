@@ -443,23 +443,29 @@ class Sampler:
             raise AcceptanceError(f"resource sampler failed for {self.container}: {self.failure}")
 
 
-def accepted_metric_points(metrics_port: int) -> float:
-    samples = backend.parse_prometheus_exposition(backend.read_alloy_metrics(metrics_port))
-    return sum(sample.value for sample in samples
-               if sample.name == "otelcol_receiver_accepted_metric_points_total"
-               and sample.labels.get("transport") == "grpc")
+def accepted_metric_points(prometheus_port: int) -> float:
+    response = backend.prom_query(
+        prometheus_port,
+        'sum(otelcol_receiver_accepted_metric_points_total{transport="grpc"})',
+    )
+    results = backend.query_results(response)
+    if not results:
+        return 0
+    if len(results) != 1:
+        raise AcceptanceError("Prometheus did not return Alloy accepted metric points")
+    return float(results[0]["value"][1])
 
 
 class MetricIntervalSampler:
-    def __init__(self, metrics_port: int) -> None:
-        self.metrics_port = metrics_port
+    def __init__(self, prometheus_port: int) -> None:
+        self.prometheus_port = prometheus_port
         self.values: List[float] = []
         self.stop_event = threading.Event()
         self.failure: Optional[BaseException] = None
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def _sample(self) -> None:
-        self.values.append(accepted_metric_points(self.metrics_port))
+        self.values.append(accepted_metric_points(self.prometheus_port))
 
     def _run(self) -> None:
         while not self.stop_event.wait(1):
@@ -481,6 +487,7 @@ class MetricIntervalSampler:
             raise AcceptanceError("metric interval sampler did not stop")
         if self.failure is not None:
             raise AcceptanceError(f"metric interval sampler failed: {self.failure}")
+        time.sleep(2)
         self._sample()
 
 
@@ -1103,7 +1110,12 @@ def verify_freshness(
     }
     if max(evidence["trace_p95_seconds"], evidence["log_p95_seconds"]) > \
             profile["delivery"]["trace_log_p95_seconds"]:
-        raise AcceptanceError("trace or log freshness p95 exceeded its budget")
+        raise AcceptanceError(
+            f"trace/log freshness p95 exceeds "
+            f"{profile['delivery']['trace_log_p95_seconds']:.3f}s "
+            f"(trace {evidence['trace_p95_seconds']:.3f}s, "
+            f"log {evidence['log_p95_seconds']:.3f}s)"
+        )
     if max(evidence["trace_max_seconds"], evidence["log_max_seconds"]) > \
             profile["delivery"]["trace_log_max_seconds"]:
         raise AcceptanceError("trace or log freshness maximum exceeded its budget")
@@ -1331,7 +1343,7 @@ def execute(args: argparse.Namespace) -> None:
             ))
             with Sampler(product.container) as product_sampler, \
                     Sampler(ports["alloy_container"]) as alloy_sampler, \
-                    MetricIntervalSampler(ports["alloy_metrics"]) as metric_interval_sampler:
+                    MetricIntervalSampler(ports["prometheus"]) as metric_interval_sampler:
                 healthy = run_load(
                     helper, product, healthy_requests,
                     profile["healthy"]["rate_per_second"], profile["healthy"]["max_in_flight"],

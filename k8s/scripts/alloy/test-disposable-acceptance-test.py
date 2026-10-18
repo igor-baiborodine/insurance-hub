@@ -135,6 +135,32 @@ class AcceptanceVerifierTest(unittest.TestCase):
         self.assertEqual(80, evidence["alloy_cpu_p95_delta_millicores"])
         self.assertEqual(20, evidence["alloy_memory_max_delta_mib"])
 
+    def test_accepted_metric_points_uses_prometheus_scrape(self) -> None:
+        response = {
+            "data": {
+                "result": [
+                    {"value": [1234, "145"]},
+                ],
+            },
+        }
+
+        with mock.patch.object(acceptance.backend, "prom_query", return_value=response) as query:
+            value = acceptance.accepted_metric_points(9090)
+
+        self.assertEqual(145, value)
+        query.assert_called_once_with(
+            9090,
+            'sum(otelcol_receiver_accepted_metric_points_total{transport="grpc"})',
+        )
+
+    def test_accepted_metric_points_is_zero_before_first_export(self) -> None:
+        with mock.patch.object(
+            acceptance.backend, "prom_query", return_value={"data": {"result": []}}
+        ):
+            value = acceptance.accepted_metric_points(9090)
+
+        self.assertEqual(0, value)
+
     def test_delivery_counts_reject_missing_and_duplicate_units(self) -> None:
         with self.assertRaises(acceptance.AcceptanceError):
             acceptance.evaluate_delivery_counts(["a", "b"], {"a": 4}, 4, 3, 0, "spans")
