@@ -261,6 +261,39 @@ def verify_resources(
         raise AcceptanceError(f"{label} one-minute CPU maximum exceeds its budget")
 
 
+def verify_alloy_resource_delta(
+    baseline: Sequence[ResourceSample],
+    loaded: Sequence[ResourceSample],
+    limits: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    baseline_summary = resource_summary(baseline)
+    loaded_summary = resource_summary(loaded)
+    baseline_cpu = baseline_summary["cpu_p95_millicores"]
+    loaded_cpu = loaded_summary["cpu_p95_millicores"]
+    baseline_memory = baseline_summary["memory_max_mib"]
+    loaded_memory = loaded_summary["memory_max_mib"]
+    cpu_delta = loaded_cpu - baseline_cpu
+    memory_delta = loaded_memory - baseline_memory
+    cpu_limit = limits["cpu_p95_delta_millicores"]
+    memory_limit = limits["memory_max_delta_mib"]
+    if cpu_delta > cpu_limit:
+        raise AcceptanceError(
+            f"Alloy CPU p95 delta {cpu_delta:.3f}m exceeds {cpu_limit:.3f}m "
+            f"(baseline {baseline_cpu:.3f}m, loaded {loaded_cpu:.3f}m)"
+        )
+    if memory_delta > memory_limit:
+        raise AcceptanceError(
+            f"Alloy memory maximum delta {memory_delta:.3f}MiB exceeds {memory_limit:.3f}MiB "
+            f"(baseline {baseline_memory:.3f}MiB, loaded {loaded_memory:.3f}MiB)"
+        )
+    return {
+        "alloy_baseline": baseline_summary,
+        "alloy_loaded": loaded_summary,
+        "alloy_cpu_p95_delta_millicores": cpu_delta,
+        "alloy_memory_max_delta_mib": memory_delta,
+    }
+
+
 def verify_resource_overhead(
     disabled: Sequence[Sequence[ResourceSample]],
     enabled: Sequence[Sequence[ResourceSample]],
@@ -1223,14 +1256,6 @@ def execute(args: argparse.Namespace) -> None:
             seed_postgres(harness, postgres, args.catalog_fixture)
             ports = start_backends(harness, root)
 
-            # A full preceding collector baseline is part of the accepted profile.
-            alloy_baseline: List[ResourceSample] = []
-            baseline_seconds = max(2, profile["alloy_resources"]["baseline_seconds"] * args.time_scale)
-            baseline_deadline = time.monotonic() + baseline_seconds
-            while time.monotonic() < baseline_deadline:
-                alloy_baseline.append(container_stats(ports["alloy_container"]))
-                time.sleep(1)
-
             disabled_results: List[Mapping[str, Any]] = []
             enabled_results: List[Mapping[str, Any]] = []
             overhead_resources: Dict[str, List[List[ResourceSample]]] = {"disabled": [], "enabled": []}
@@ -1289,6 +1314,15 @@ def execute(args: argparse.Namespace) -> None:
             (root / "service.log").write_text("", encoding="utf-8")
             ports = start_backends(harness, root)
 
+            # Measure the collector that will handle the healthy workload immediately before
+            # loading it, so the delta excludes startup and cross-container variation.
+            alloy_baseline: List[ResourceSample] = []
+            baseline_seconds = max(2, profile["alloy_resources"]["baseline_seconds"] * args.time_scale)
+            baseline_deadline = time.monotonic() + baseline_seconds
+            while time.monotonic() < baseline_deadline:
+                alloy_baseline.append(container_stats(ports["alloy_container"]))
+                time.sleep(1)
+
             instance = backend.SERVICE_INSTANCE_ID
             product = start_product(harness, root, args.product_image, "product-healthy", True, instance)
             products.append(product)
@@ -1307,14 +1341,9 @@ def execute(args: argparse.Namespace) -> None:
             verify_load(healthy, healthy_requests, profile)
             verify_resources(product_sampler.samples, profile["product_resources"], "Product")
             verify_resources(alloy_sampler.samples, profile["alloy_resources"], "Alloy")
-            baseline_cpu = percentile([sample.cpu_millicores for sample in alloy_baseline], 0.95)
-            loaded_cpu = percentile([sample.cpu_millicores for sample in alloy_sampler.samples], 0.95)
-            baseline_memory = max(sample.memory_mib for sample in alloy_baseline)
-            loaded_memory = max(sample.memory_mib for sample in alloy_sampler.samples)
-            if loaded_cpu - baseline_cpu > profile["alloy_resources"]["cpu_p95_delta_millicores"]:
-                raise AcceptanceError("Alloy loaded CPU delta exceeds its budget")
-            if loaded_memory - baseline_memory > profile["alloy_resources"]["memory_max_delta_mib"]:
-                raise AcceptanceError("Alloy loaded memory delta exceeds its budget")
+            alloy_resource_evidence = verify_alloy_resource_delta(
+                alloy_baseline, alloy_sampler.samples, profile["alloy_resources"]
+            )
             backend_evidence = verify_backend_counts(
                 ports, instance, profile, healthy["traceIds"], healthy_requests,
                 args.time_scale, metric_interval_sampler.values,
@@ -1506,10 +1535,7 @@ def execute(args: argparse.Namespace) -> None:
                 "shutdown_seconds": shutdown_seconds,
                 "resources": {
                     "product": resource_summary(product_sampler.samples),
-                    "alloy_baseline": resource_summary(alloy_baseline),
-                    "alloy_loaded": resource_summary(alloy_sampler.samples),
-                    "alloy_cpu_p95_delta_millicores": loaded_cpu - baseline_cpu,
-                    "alloy_memory_max_delta_mib": loaded_memory - baseline_memory,
+                    **alloy_resource_evidence,
                 },
             }
             print(json.dumps(evidence, indent=2, sort_keys=True))

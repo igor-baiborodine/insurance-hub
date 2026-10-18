@@ -99,6 +99,42 @@ class AcceptanceVerifierTest(unittest.TestCase):
         self.assertEqual(0.61, summary["cpu_throttling_ratio_max"])
         self.assertIsNotNone(summary["cpu_one_minute_max_millicores"])
 
+    def test_alloy_resource_delta_reports_observed_failure_values(self) -> None:
+        baseline = [
+            acceptance.ResourceSample(1, 20, 80, 0),
+            acceptance.ResourceSample(2, 20, 80, 0),
+        ]
+        loaded = [
+            acceptance.ResourceSample(3, 121, 90, 0),
+            acceptance.ResourceSample(4, 121, 90, 0),
+        ]
+
+        with self.assertRaisesRegex(
+            acceptance.AcceptanceError,
+            r"Alloy CPU p95 delta 101\.000m exceeds 100\.000m "
+            r"\(baseline 20\.000m, loaded 121\.000m\)",
+        ):
+            acceptance.verify_alloy_resource_delta(
+                baseline, loaded, self.profile["alloy_resources"]
+            )
+
+    def test_alloy_resource_delta_returns_paired_evidence(self) -> None:
+        baseline = [
+            acceptance.ResourceSample(1, 20, 80, 0),
+            acceptance.ResourceSample(2, 20, 80, 0),
+        ]
+        loaded = [
+            acceptance.ResourceSample(3, 100, 100, 0),
+            acceptance.ResourceSample(4, 100, 100, 0),
+        ]
+
+        evidence = acceptance.verify_alloy_resource_delta(
+            baseline, loaded, self.profile["alloy_resources"]
+        )
+
+        self.assertEqual(80, evidence["alloy_cpu_p95_delta_millicores"])
+        self.assertEqual(20, evidence["alloy_memory_max_delta_mib"])
+
     def test_delivery_counts_reject_missing_and_duplicate_units(self) -> None:
         with self.assertRaises(acceptance.AcceptanceError):
             acceptance.evaluate_delivery_counts(["a", "b"], {"a": 4}, 4, 3, 0, "spans")
