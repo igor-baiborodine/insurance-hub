@@ -304,12 +304,15 @@ PROMETHEUS_VALUES_PATH := overlays/qa/infra/prometheus/values.yaml
 OBSERVABILITY_BACKEND_CHECK_SCRIPT := scripts/alloy/check-backend-config.py
 OBSERVABILITY_BACKEND_CHECK_TEST := scripts/alloy/check-backend-config-test.py
 OBSERVABILITY_BACKEND_TEST_SCRIPT := scripts/alloy/test-backend-ingestion.py
-OBSERVABILITY_ACCEPTANCE_SCRIPT := scripts/alloy/test-disposable-acceptance.py
 OBSERVABILITY_ACCEPTANCE_TEST := scripts/alloy/test-disposable-acceptance-test.py
+OBSERVABILITY_ACCEPTANCE_PHASE_SCRIPT := scripts/alloy/test-disposable-acceptance-phase.py
+OBSERVABILITY_ACCEPTANCE_PHASE_TEST := scripts/alloy/test-disposable-acceptance-phase-test.py
 OBSERVABILITY_ACCEPTANCE_PROFILE := observability/services/product/acceptance.json
 OBSERVABILITY_ACCEPTANCE_CATALOG := ../legacy/product-service/src/test/resources/product-read-baseline/catalog/qa.json
 OBSERVABILITY_ACCEPTANCE_IMAGE_TAG ?= git-$(shell git -C "$(OBSERVABILITY_SERVICE_ROOT)" rev-parse --short=12 HEAD)
 OBSERVABILITY_ACCEPTANCE_IMAGE ?= insurance-hub-product-api:$(OBSERVABILITY_ACCEPTANCE_IMAGE_TAG)
+OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR ?= tmp/observability-acceptance
+OBSERVABILITY_ACCEPTANCE_SMOKE_EVIDENCE_DIR ?= tmp/observability-acceptance-smoke
 MONITORING_ASSETS_ROOT := observability
 MONITORING_CHECK_SCRIPT := scripts/monitoring/check_monitoring.py
 MONITORING_CHECK_TEST := scripts/monitoring/check_monitoring_test.py
@@ -570,6 +573,7 @@ observability-backend-test-tooling: ## Exercise receiver, fixture, query, and cl
 .PHONY: observability-acceptance-test-tooling
 observability-acceptance-test-tooling: ## Exercise fixed-budget and controlled-defect acceptance checks
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_ACCEPTANCE_TEST)" -v
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_ACCEPTANCE_PHASE_TEST)" -v
 
 .PHONY: test-observability-backends
 test-observability-backends: ## Prove synthetic and real service signals in disposable pinned backends
@@ -582,8 +586,16 @@ test-observability-backends: ## Prove synthetic and real service signals in disp
 		--service-probe "$(OBSERVABILITY_SERVICE_PROBE)" \
 		--request-histogram-buckets "$(OBSERVABILITY_REQUEST_HISTOGRAM_BUCKETS)"
 
-.PHONY: test-observability-acceptance
-test-observability-acceptance: observability-acceptance-test-tooling test-observability-backends ## Run the fixed disposable Product workload, overhead, outage, and recovery profile
+define run-observability-acceptance-phase
+PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_ACCEPTANCE_PHASE_SCRIPT)" --phase "$(1)" --config "$(ALLOY_CONFIG_PATH)" --profile "$(OBSERVABILITY_ACCEPTANCE_PROFILE)" --service-root "$(OBSERVABILITY_SERVICE_ROOT)" --catalog-fixture "$(OBSERVABILITY_ACCEPTANCE_CATALOG)" --product-image "$(OBSERVABILITY_ACCEPTANCE_IMAGE)" --time-scale "$(2)" --evidence-output "$(3)/$(1).json"
+endef
+
+define aggregate-observability-acceptance-phases
+PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_ACCEPTANCE_PHASE_SCRIPT)" --phase aggregate --config "$(ALLOY_CONFIG_PATH)" --profile "$(OBSERVABILITY_ACCEPTANCE_PROFILE)" --service-root "$(OBSERVABILITY_SERVICE_ROOT)" --catalog-fixture "$(OBSERVABILITY_ACCEPTANCE_CATALOG)" --product-image "$(OBSERVABILITY_ACCEPTANCE_IMAGE)" --time-scale "$(1)" --evidence-input "$(2)/overhead-1.json" --evidence-input "$(2)/overhead-2.json" --evidence-input "$(2)/overhead-3.json" --evidence-input "$(2)/healthy.json" --evidence-input "$(2)/recovery.json" --evidence-output "$(2)/aggregate.json"
+endef
+
+.PHONY: test-observability-acceptance-preflight
+test-observability-acceptance-preflight: observability-acceptance-test-tooling test-observability-backends ## Build and validate the fixed acceptance candidate before phased execution
 	@command -v docker >/dev/null || { echo "ERROR: docker is required."; exit 1; }
 	@command -v go >/dev/null || { echo "ERROR: Go is required for the Product acceptance helper."; exit 1; }
 	@$(MAKE) --no-print-directory -C "$(OBSERVABILITY_SERVICE_ROOT)" image-build \
@@ -593,25 +605,53 @@ test-observability-acceptance: observability-acceptance-test-tooling test-observ
 	@$(MAKE) --no-print-directory -C "$(OBSERVABILITY_SERVICE_ROOT)" test-telemetry-continuity
 	@$(MAKE) --no-print-directory monitoring-assets-check test-monitoring \
 		ENV_NAME=qa SVC_NAME=product
-	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_ACCEPTANCE_SCRIPT)" \
-		--config "$(ALLOY_CONFIG_PATH)" \
-		--profile "$(OBSERVABILITY_ACCEPTANCE_PROFILE)" \
-		--service-root "$(OBSERVABILITY_SERVICE_ROOT)" \
-		--catalog-fixture "$(OBSERVABILITY_ACCEPTANCE_CATALOG)" \
-		--product-image "$(OBSERVABILITY_ACCEPTANCE_IMAGE)"
+
+.PHONY: test-observability-acceptance-overhead-1
+test-observability-acceptance-overhead-1: test-observability-acceptance-preflight ## Run acceptance overhead pair 1 (disabled, then enabled)
+	@mkdir -p "$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR)"
+	@$(call run-observability-acceptance-phase,overhead-1,1,$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR))
+
+.PHONY: test-observability-acceptance-overhead-2
+test-observability-acceptance-overhead-2: test-observability-acceptance-preflight ## Run acceptance overhead pair 2 (enabled, then disabled)
+	@mkdir -p "$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR)"
+	@$(call run-observability-acceptance-phase,overhead-2,1,$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR))
+
+.PHONY: test-observability-acceptance-overhead-3
+test-observability-acceptance-overhead-3: test-observability-acceptance-preflight ## Run acceptance overhead pair 3 (disabled, then enabled)
+	@mkdir -p "$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR)"
+	@$(call run-observability-acceptance-phase,overhead-3,1,$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR))
+
+.PHONY: test-observability-acceptance-healthy
+test-observability-acceptance-healthy: test-observability-acceptance-preflight ## Run the paired Alloy baseline and healthy Product workload phase
+	@mkdir -p "$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR)"
+	@$(call run-observability-acceptance-phase,healthy,1,$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR))
+
+.PHONY: test-observability-acceptance-recovery
+test-observability-acceptance-recovery: test-observability-acceptance-preflight ## Run freshness, safety, outage, replacement, and recovery acceptance
+	@mkdir -p "$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR)"
+	@$(call run-observability-acceptance-phase,recovery,1,$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR))
+
+.PHONY: test-observability-acceptance-aggregate
+test-observability-acceptance-aggregate: ## Validate and combine compatible acceptance phase evidence
+	@$(call aggregate-observability-acceptance-phases,1,$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR))
+
+.NOTPARALLEL: test-observability-acceptance
+.PHONY: test-observability-acceptance
+test-observability-acceptance: test-observability-acceptance-overhead-1 test-observability-acceptance-overhead-2 test-observability-acceptance-overhead-3 test-observability-acceptance-healthy test-observability-acceptance-recovery ## Run all restartable Product acceptance phases and aggregate their evidence
+	@$(call aggregate-observability-acceptance-phases,1,$(OBSERVABILITY_ACCEPTANCE_EVIDENCE_DIR))
 
 .PHONY: test-observability-acceptance-smoke
 test-observability-acceptance-smoke: observability-acceptance-test-tooling ## Exercise the disposable acceptance lifecycle with reduced timing; not contract evidence
 	@command -v docker >/dev/null || { echo "ERROR: docker is required."; exit 1; }
 	@$(MAKE) --no-print-directory -C "$(OBSERVABILITY_SERVICE_ROOT)" image-build \
 		IMAGE_TAG="$(OBSERVABILITY_ACCEPTANCE_IMAGE_TAG)"
-	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_ACCEPTANCE_SCRIPT)" \
-		--config "$(ALLOY_CONFIG_PATH)" \
-		--profile "$(OBSERVABILITY_ACCEPTANCE_PROFILE)" \
-		--service-root "$(OBSERVABILITY_SERVICE_ROOT)" \
-		--catalog-fixture "$(OBSERVABILITY_ACCEPTANCE_CATALOG)" \
-		--product-image "$(OBSERVABILITY_ACCEPTANCE_IMAGE)" \
-		--time-scale 0.01
+	@mkdir -p "$(OBSERVABILITY_ACCEPTANCE_SMOKE_EVIDENCE_DIR)"
+	@$(call run-observability-acceptance-phase,overhead-1,0.01,$(OBSERVABILITY_ACCEPTANCE_SMOKE_EVIDENCE_DIR))
+	@$(call run-observability-acceptance-phase,overhead-2,0.01,$(OBSERVABILITY_ACCEPTANCE_SMOKE_EVIDENCE_DIR))
+	@$(call run-observability-acceptance-phase,overhead-3,0.01,$(OBSERVABILITY_ACCEPTANCE_SMOKE_EVIDENCE_DIR))
+	@$(call run-observability-acceptance-phase,healthy,0.01,$(OBSERVABILITY_ACCEPTANCE_SMOKE_EVIDENCE_DIR))
+	@$(call run-observability-acceptance-phase,recovery,0.01,$(OBSERVABILITY_ACCEPTANCE_SMOKE_EVIDENCE_DIR))
+	@$(call aggregate-observability-acceptance-phases,0.01,$(OBSERVABILITY_ACCEPTANCE_SMOKE_EVIDENCE_DIR))
 
 .PHONY: prometheus-ui
 prometheus-ui: ## Access Prometheus UI via port-forward
