@@ -172,6 +172,7 @@ public class GatewayProductSecurityIT {
     void happyPath() throws IOException {
         // given
         assertThat(gateway.isRunning()).isTrue();
+        warmProductGateway();
         forwardedRequests.set(0);
         expectedTokenMarker.set(bearerToken);
         expectedIdentityMarker.set("security-smoke");
@@ -207,6 +208,7 @@ public class GatewayProductSecurityIT {
     void rejectedCredentialsStopAtGateway() throws IOException {
         // given
         Map<String, JsonNode> cases = rejectedCasesByID();
+        warmProductGateway();
         Instant reference = Instant.now().plusSeconds(
                 Long.parseLong(System.getProperty("product.security.clock.offset.seconds", "0")));
 
@@ -263,6 +265,7 @@ public class GatewayProductSecurityIT {
     void givenAcceptedClaimVariants_thenCatalogResultsPreserved() throws IOException {
         // given
         Map<String, JsonNode> cases = acceptedCasesByID();
+        warmProductGateway();
         Instant reference = Instant.now().plusSeconds(
                 Long.parseLong(System.getProperty("product.security.clock.offset.seconds", "0")));
 
@@ -390,6 +393,10 @@ public class GatewayProductSecurityIT {
                     + " actual=" + cases.keySet());
         }
         return cases;
+    }
+
+    private void warmProductGateway() {
+        gateway.getApplicationContext().getBean(ProductGatewayController.class);
     }
 
     private Map<String, JsonNode> rejectedCasesByID() {
