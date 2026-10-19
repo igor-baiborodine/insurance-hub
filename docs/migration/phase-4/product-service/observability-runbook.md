@@ -7,6 +7,11 @@
   - [Source and local validation](#source-and-local-validation)
   - [QA preflight](#qa-preflight)
   - [Staged apply and enablement](#staged-apply-and-enablement)
+  - [Grafana UI workflow](#grafana-ui-workflow)
+    - [Open the Product dashboard](#open-the-product-dashboard)
+    - [Inspect metrics](#inspect-metrics)
+    - [Inspect logs](#inspect-logs)
+    - [Inspect traces](#inspect-traces)
   - [Investigation queries](#investigation-queries)
   - [Loss, recovery, and cardinality](#loss-recovery-and-cardinality)
   - [Rollback and cleanup](#rollback-and-cleanup)
@@ -217,6 +222,89 @@ Enabled verification performs the disabled checks, sends a traced Product list r
 for the exact Pod identity in Prometheus, a correlated completion log in Loki, the trace in Tempo,
 and zero firing Product pilot alerts. Preserve its output with the Flux revision, new Pod UID and
 image ID, effective safe settings, and rollout state.
+
+## Grafana UI workflow
+
+### Open the Product dashboard
+
+Confirm that the active context is QA, then start the repository-owned foreground port-forward:
+
+```sh
+kubectl config current-context
+make -C k8s grafana-ui
+```
+
+Require `qa-insurance-hub` from the context check. Keep that terminal open, visit
+`http://localhost:3000`, and authenticate with the current QA Grafana credentials. Stop the
+port-forward with `Ctrl+C` when the investigation is complete. Do not copy credentials into an
+evidence record.
+
+In Grafana, open **Dashboards**, search for **Insurance Hub / Product service**, and select the
+dashboard with UID `insurance-hub-product-service`. Set **Environment** to `qa` and
+**Implementation** to `go`. The dashboard defaults to the last hour in the browser's timezone and
+refreshes every 30 seconds. For an incident or acceptance record, choose a time range that covers
+the request or alert window plus telemetry delivery time; use an absolute UTC range when another
+operator must reproduce the view.
+
+The dashboard is provisioned with UI updates and deletion disabled. Use **Explore** for temporary
+queries. Make durable query or panel changes in
+`k8s/observability/services/product/dashboard.json`, validate them with
+`make monitoring-assets-check ENV_NAME=qa SVC_NAME=product`, and apply the reviewed source through
+the guarded dashboard target.
+
+### Inspect metrics
+
+Use the Prometheus-backed panels in this order:
+
+1. Start with **Request rate**, **Service error rate**, and **Request latency percentiles** to
+   establish traffic, bounded outcomes, and the affected interval.
+2. Compare **Database and pool latency** with **Database pool pressure** to distinguish query time
+   from connection acquisition and saturation.
+3. Check **Go runtime** and **Pod CPU and memory** for process or container pressure.
+4. Check **Readiness and restarts** and **Telemetry delivery health** before attributing missing
+   data to the Product service.
+
+Open a panel's menu and select **Explore** when the aggregate view needs refinement. Keep the
+Prometheus data source and dashboard time range, then add an operation, transport, outcome, Pod, or
+instance filter supported by the existing series. Use the canonical PromQL selector below as a
+freshness and identity check. Zero request rate with a current Go runtime sample is legitimate idle
+time. An available Product deployment without a current runtime sample is missing telemetry.
+
+### Inspect logs
+
+Open **Explore**, select the Loki data source, set the same time range, and run the canonical LogQL
+selector below. The dashboard's **Failed and slow-request investigation logs** panel focuses on
+unexpected and deadline outcomes; remove its outcome filter in Explore when successful,
+not-found, or invalid-request completion records are also relevant.
+
+Expand a log row and inspect `operation`, `transport`, `outcome`, `duration_ms`, the applicable
+HTTP or gRPC status, and `trace_id`. A slow-request search can append
+`| duration_ms >= 250` after `| json`. Copy the exact `trace_id` from the parsed fields for trace
+correlation. Trace and span IDs remain fields rather than Loki index labels.
+
+### Inspect traces
+
+Open **Explore**, select the Tempo data source, and either look up the copied trace ID or run the
+canonical TraceQL selector below. A successful Product read contains one transport server span,
+one `product.list` or `product.get` application span, one `product.db.acquire` span, and one
+`SELECT products` or `SELECT product` client span.
+
+Check the service, environment, implementation, version, and instance identity before comparing
+span durations. For a slow read, compare the server and application duration with pool acquisition
+and query time. For a failed read, inspect the bounded Product outcome and safe error type. The
+trace must not contain product codes, raw request paths, SQL text or parameters, credentials, or
+payload data.
+
+Use one investigation window and move through the signals in this order:
+
+```text
+alert or unusual metric
+  -> narrow the dashboard time range
+  -> inspect matching completion logs
+  -> copy trace_id
+  -> inspect the Tempo trace
+  -> compare request, pool, database, runtime, and pod timing
+```
 
 ## Investigation queries
 
