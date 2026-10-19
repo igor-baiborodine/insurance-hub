@@ -20,6 +20,8 @@ Use [Go development](go-development.md#scope-and-makefile-interface) for the man
 interface, [Go formatting](go-formatting.md) for formatting, and
 [Go validation](go-validation.md) for execution scope and evidence. Adapt the
 [testing examples](../examples/go-testing/README.md) to actual module APIs and ticket requirements.
+Apply the repository-wide [testability assessment](repo-rules.md#testability) when fixture wiring or
+test implementation becomes complicated.
 
 ## Files and discovery
 
