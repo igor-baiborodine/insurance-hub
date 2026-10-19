@@ -78,8 +78,12 @@ def validate_makefile(makefile: str) -> None:
         "prometheus-receiver-config-check:",
         "test-observability-backends:",
         "OBSERVABILITY_SERVICE_DOMAIN ?= product",
-        "OBSERVABILITY_SERVICE_ROOT ?= ../services/$(OBSERVABILITY_SERVICE_DOMAIN)-service",
-        "OBSERVABILITY_SERVICE_PROBE ?= scripts/alloy/probe-$(OBSERVABILITY_SERVICE_DOMAIN).py",
+        "OBSERVABILITY_SERVICE_ROOT ?= "
+        "$(K8S_VALIDATION_REPOSITORY_ROOT)/services/"
+        "$(OBSERVABILITY_SERVICE_DOMAIN)-service",
+        "OBSERVABILITY_SERVICE_PROBE ?= "
+        "$(K8S_VALIDATION_ROOT)/scripts/alloy/"
+        "probe-$(OBSERVABILITY_SERVICE_DOMAIN).py",
         '--values "$(PROMETHEUS_VALUES_PATH)"',
     )
     for fragment in required:
@@ -90,7 +94,7 @@ def validate_makefile(makefile: str) -> None:
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--values", type=Path, required=True)
-    parser.add_argument("--makefile", type=Path, required=True)
+    parser.add_argument("--makefile", type=Path, required=True, action="append")
     parser.add_argument("--rendered-prometheus", required=True)
     return parser.parse_args(argv)
 
@@ -103,7 +107,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     try:
         validate_values(args.values.read_text(encoding="utf-8"))
-        validate_makefile(args.makefile.read_text(encoding="utf-8"))
+        makefiles = "\n".join(path.read_text(encoding="utf-8") for path in args.makefile)
+        validate_makefile(makefiles)
         validate_rendered_prometheus(read_input(args.rendered_prometheus))
     except (OSError, ValidationError) as error:
         print(f"backend config check failed: {error}", file=sys.stderr)

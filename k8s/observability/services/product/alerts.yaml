@@ -1,0 +1,147 @@
+groups:
+  - interval: 30s
+    name: insurance-hub-product-service
+    rules:
+    - alert: ProductServiceErrorRate
+      annotations:
+        description: More than 5% of at least 20 Product requests failed unexpectedly
+          in five minutes.
+        runbook_action: Check failed operations in the Product dashboard, correlate
+          logs and traces, and verify PostgreSQL health before rollback.
+        summary: Product service error rate exceeds the pilot threshold
+      expr: sum(rate(insurance_hub_product_requests_total{service_name="product-service",insurance_hub_product_outcome=~"storage_unavailable|invalid_data|internal_error"}[5m]))
+        / sum(rate(insurance_hub_product_requests_total{service_name="product-service"}[5m]))
+        > 0.05 and sum(increase(insurance_hub_product_requests_total{service_name="product-service"}[5m]))
+        >= 20
+      for: 2m
+      labels:
+        service: product-service
+        severity: warning
+    - alert: ProductHighLatency
+      annotations:
+        description: Aggregate Product request p95 exceeded 500ms with at least 20 requests
+          in five minutes.
+        runbook_action: Split latency by operation and transport, then inspect database
+          wait/query time and a representative slow trace.
+        summary: Product request latency exceeds the pilot threshold
+      expr: |-
+        histogram_quantile(0.95,
+          sum by (le) (rate(insurance_hub_product_request_duration_seconds_bucket{service_name="product-service"}[5m]))) > 0.5
+        and sum(increase(insurance_hub_product_requests_total{service_name="product-service"}[5m])) >= 20
+      for: 5m
+      labels:
+        service: product-service
+        severity: warning
+    - alert: ProductDatabasePoolPressure
+      annotations:
+        description: Used Product database connections exceeded 80% of the configured
+          maximum.
+        runbook_action: Check pool wait time, timeouts, slow database operations, and
+          PostgreSQL capacity; do not raise the pool limit without review.
+        summary: Product database pool usage exceeds 80 percent
+      expr: sum(db_client_connection_count{service_name="product-service",db_client_connection_state="used"})
+        / clamp_min(sum(db_client_connection_max{service_name="product-service"}), 1)
+        > 0.8
+      for: 5m
+      labels:
+        service: product-service
+        severity: warning
+    - alert: ProductDatabasePoolTimeouts
+      annotations:
+        description: At least one Product database connection timeout occurred in five
+          minutes.
+        runbook_action: Correlate the timeout with pool pressure and database latency,
+          then verify reads and PostgreSQL availability.
+        summary: Product database pool acquisition timed out
+      expr: sum(increase(db_client_connection_timeouts_total{service_name="product-service"}[5m]))
+        > 0
+      labels:
+        service: product-service
+        severity: warning
+    - alert: ProductResourcePressure
+      annotations:
+        description: Product memory exceeded 204.8MiB or CPU exceeded 240 millicores.
+        runbook_action: Inspect request load, runtime memory, throttling, pod events,
+          and recent rollout changes before restarting or rolling back.
+        summary: Product pod resource use exceeds 80 percent of its limit
+      expr: sum(container_memory_working_set_bytes{namespace="qa-svc",pod=~"qa-product-api-.*",container="product-api"})
+        > 214748364.8 or sum(rate(container_cpu_usage_seconds_total{namespace="qa-svc",pod=~"qa-product-api-.*",container="product-api"}[5m]))
+        > 0.24
+      for: 5m
+      labels:
+        service: product-service
+        severity: warning
+    - alert: ProductUnavailable
+      annotations:
+        description: The QA Product Deployment has been unavailable or under-replicated
+          for two minutes.
+        runbook_action: Check Deployment rollout, pod readiness, events, image pull,
+          configuration, and database connectivity; use the reviewed rollback owner
+          if needed.
+        summary: Product has fewer available replicas than desired
+      expr: sum(kube_deployment_spec_replicas{namespace="qa-svc",deployment="qa-product-api"})
+        > sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-product-api"})
+      for: 2m
+      labels:
+        service: product-service
+        severity: warning
+    - alert: ProductTelemetryMissing
+      annotations:
+        description: A Product replica is available, but no Go runtime sample has arrived
+          for two minutes.
+        runbook_action: Verify Product telemetry configuration, Alloy receiver and remote-write
+          health, then inspect the active series identity before changing the rule.
+        summary: Product is available but runtime telemetry is missing
+      expr: sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-product-api"})
+        > 0 and on() absent_over_time(go_goroutine_count{service_name="product-service",deployment_environment_name="qa",service_implementation="go"}[2m])
+      for: 1m
+      labels:
+        service: product-service
+        severity: warning
+    - alert: ProductTelemetryDeliveryFailure
+      annotations:
+        description: Alloy reported a Loki drop, Prometheus remote-write failure, or
+          OTLP span export failure in five minutes.
+        runbook_action: Identify the failing signal and backend, inspect bounded retry/drop
+          counters, preserve Product availability, and follow the monitoring rollback
+          procedure if configuration regressed.
+        summary: The shared Product telemetry path dropped or failed data
+      expr: sum(increase(loki_write_dropped_entries_total{job=~".*alloy.*"}[5m])) >
+        0 or sum(increase(prometheus_remote_storage_samples_failed_total{job=~".*alloy.*"}[5m]))
+        > 0 or sum(increase(prometheus_remote_storage_samples_dropped_total{job=~".*alloy.*"}[5m]))
+        > 0 or sum(increase(otelcol_exporter_send_failed_spans_total{job=~".*alloy.*"}[5m]))
+        > 0
+      labels:
+        service: product-service
+        severity: warning
+    - alert: ProductTelemetryBacklog
+      annotations:
+        description: Remote-write lag exceeded 30 seconds while samples were pending,
+          or an OTLP exporter queue exceeded 80%.
+        runbook_action: Check backend reachability and Alloy queue/WAL metrics, keep
+          the service serving reads, and verify recovery within the accepted 120-second
+          budget.
+        summary: The shared Product telemetry path has a sustained backlog
+      expr: |-
+        (sum(prometheus_remote_storage_samples_pending{job=~".*alloy.*"}) > 0
+          and
+          time() - (max(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job=~".*alloy.*"}) or vector(0)) > 30)
+        or sum(otelcol_exporter_queue_size{job=~".*alloy.*"})
+          /
+          clamp_min(sum(otelcol_exporter_queue_capacity{job=~".*alloy.*"}), 1) > 0.8
+      for: 2m
+      labels:
+        service: product-service
+        severity: warning
+    - alert: ProductUnexpectedRestart
+      annotations:
+        description: A Product container restarted during the last 15 minutes.
+        runbook_action: Inspect the prior container state, safe application logs, pod
+          events, resource pressure, and rollout identity before deciding whether to
+          roll back.
+        summary: Product restarted unexpectedly
+      expr: sum(increase(kube_pod_container_status_restarts_total{namespace="qa-svc",pod=~"qa-product-api-.*",container="product-api"}[15m]))
+        > 0
+      labels:
+        service: product-service
+        severity: warning

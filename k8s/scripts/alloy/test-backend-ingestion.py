@@ -468,10 +468,12 @@ class DockerHarness:
         *,
         mounts: Iterable[Tuple[Path, str, bool]] = (),
         ports: Iterable[int] = (),
+        docker_arguments: Iterable[str] = (),
     ) -> str:
         name = f"{self.prefix}-{role}"
         command = ["docker", "run", "-d", "--name", name, "--network", self.network]
         command.extend(["--network-alias", role])
+        command.extend(docker_arguments)
         for source, target, read_only in mounts:
             mount = f"type=bind,src={source},dst={target}"
             if read_only:

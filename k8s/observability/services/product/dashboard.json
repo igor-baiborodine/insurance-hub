@@ -1,0 +1,490 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Pilot operations for the Go Product service. Thresholds are acceptance settings, not production SLOs.",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (insurance_hub_product_operation, insurance_hub_product_transport, service_implementation) (rate(insurance_hub_product_requests_total{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))",
+          "legendFormat": "{{insurance_hub_product_operation}} {{insurance_hub_product_transport}} {{service_implementation}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Request rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum(rate(insurance_hub_product_requests_total{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_product_outcome=~\"storage_unavailable|invalid_data|internal_error\"}[$__rate_interval])) / clamp_min(sum(rate(insurance_hub_product_requests_total{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])), 0.000001)",
+          "legendFormat": "unexpected error ratio",
+          "refId": "A"
+        }
+      ],
+      "title": "Service error rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(insurance_hub_product_request_duration_seconds_bucket{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(insurance_hub_product_request_duration_seconds_bucket{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(insurance_hub_product_request_duration_seconds_bucket{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "title": "Request latency percentiles",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, insurance_hub_product_operation) (rate(db_client_operation_duration_seconds_bucket{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "legendFormat": "query {{insurance_hub_product_operation}} p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(db_client_connection_wait_time_seconds_bucket{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "legendFormat": "pool wait p95",
+          "refId": "B"
+        }
+      ],
+      "title": "Database and pool latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum(db_client_connection_count{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",db_client_connection_state=\"used\"})",
+          "legendFormat": "used",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(db_client_connection_count{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",db_client_connection_state=\"idle\"})",
+          "legendFormat": "idle",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(db_client_connection_max{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"})",
+          "legendFormat": "maximum",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(increase(db_client_connection_timeouts_total{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))",
+          "legendFormat": "timeouts",
+          "refId": "D"
+        }
+      ],
+      "title": "Database pool pressure",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "sum(go_goroutine_count{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"})",
+          "legendFormat": "goroutines",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(go_memory_used_bytes{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"})",
+          "legendFormat": "runtime memory bytes",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(go_memory_gc_cycles_total{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))",
+          "legendFormat": "GC cycles",
+          "refId": "C"
+        }
+      ],
+      "title": "Go runtime",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"qa-svc\",pod=~\"qa-product-api-.*\",container=\"product-api\"}[$__rate_interval]))",
+          "legendFormat": "CPU cores",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(container_memory_working_set_bytes{namespace=\"qa-svc\",pod=~\"qa-product-api-.*\",container=\"product-api\"})",
+          "legendFormat": "working set bytes",
+          "refId": "B"
+        }
+      ],
+      "title": "Pod CPU and memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "sum(kube_deployment_spec_replicas{namespace=\"qa-svc\",deployment=\"qa-product-api\"})",
+          "legendFormat": "desired",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(kube_deployment_status_replicas_available{namespace=\"qa-svc\",deployment=\"qa-product-api\"})",
+          "legendFormat": "available",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(kube_pod_status_ready{namespace=\"qa-svc\",pod=~\"qa-product-api-.*\",condition=\"true\"})",
+          "legendFormat": "ready",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"qa-svc\",pod=~\"qa-product-api-.*\",container=\"product-api\"}[$__rate_interval]))",
+          "legendFormat": "restarts",
+          "refId": "D"
+        }
+      ],
+      "title": "Readiness and restarts",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 16
+      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "sum(increase(loki_write_dropped_entries_total{job=~\".*alloy.*\"}[$__rate_interval]))",
+          "legendFormat": "Loki dropped entries",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(prometheus_remote_storage_samples_failed_total{job=~\".*alloy.*\"}[$__rate_interval]))",
+          "legendFormat": "remote-write failures",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(prometheus_remote_storage_samples_dropped_total{job=~\".*alloy.*\"}[$__rate_interval]))",
+          "legendFormat": "remote-write dropped",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(prometheus_remote_storage_samples_pending{job=~\".*alloy.*\"})",
+          "legendFormat": "remote-write pending",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(otelcol_exporter_queue_size{job=~\".*alloy.*\"}) / clamp_min(sum(otelcol_exporter_queue_capacity{job=~\".*alloy.*\"}), 1)",
+          "legendFormat": "OTLP queue ratio",
+          "refId": "E"
+        },
+        {
+          "expr": "time() - max(timestamp(go_goroutine_count{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}))",
+          "legendFormat": "Product metric age seconds",
+          "refId": "F"
+        }
+      ],
+      "title": "Telemetry delivery health",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 10,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"product-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"} | json | outcome=~\"storage_unavailable|invalid_data|internal_error|deadline_exceeded\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Failed and slow-request investigation logs",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 11,
+      "targets": [
+        {
+          "query": "{ resource.service.name = \"product-service\" && resource.deployment.environment.name =~ \"$environment\" && resource.insurance_hub.service.implementation =~ \"$implementation\" }",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ],
+      "title": "Product traces",
+      "type": "traces"
+    },
+    {
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "id": 12,
+      "options": {
+        "content": "Use `trace_id` from a Product completion log to open the matching Tempo trace. For slow reads, compare request latency with database query and pool-wait panels. Legitimate idle time has zero request rate with a present Go runtime sample; an available deployment without that sample is missing telemetry.",
+        "mode": "markdown"
+      },
+      "title": "Investigation workflow",
+      "type": "text"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 42,
+  "tags": [
+    "insurance-hub",
+    "product",
+    "pilot"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(insurance_hub_product_requests_total{service_name=\"product-service\"}, deployment_environment_name)",
+        "includeAll": true,
+        "label": "Environment",
+        "name": "environment",
+        "query": {
+          "query": "label_values(insurance_hub_product_requests_total{service_name=\"product-service\"}, deployment_environment_name)",
+          "refId": "PrometheusVariableQueryEditor-Environment"
+        },
+        "refresh": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(insurance_hub_product_requests_total{service_name=\"product-service\"}, service_implementation)",
+        "includeAll": true,
+        "label": "Implementation",
+        "name": "implementation",
+        "query": {
+          "query": "label_values(insurance_hub_product_requests_total{service_name=\"product-service\"}, service_implementation)",
+          "refId": "PrometheusVariableQueryEditor-Implementation"
+        },
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Insurance Hub / Product service",
+  "uid": "insurance-hub-product-service",
+  "version": 1
+}

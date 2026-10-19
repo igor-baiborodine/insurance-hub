@@ -213,7 +213,7 @@ for name in ("http", "grpc", "health"):
             raise SystemExit(f"{name} listener still accepts connections")
 PY
 
-if run_java 90s GatewayProductSecurityIT#happyPath "$cases_file"; then
+if run_java "${PRODUCT_SECURITY_TEST_JAVA_TIMEOUT:-150s}" GatewayProductSecurityIT#happyPath "$cases_file"; then
   fail 'healthy gateway assertion passed after Go stopped'
 fi
 grep -q 'PRODUCT_SECURITY_SMOKE_LIST_START' "$java_log" || \

@@ -98,6 +98,9 @@ disabled mode makes no collector connection, refused export does not affect read
 new spans export after collector recovery, and SIGTERM bounds an in-flight export. Export
 failures produce sanitized, rate-limited warnings. A definite trace-queue overflow emits one
 safe warning, while a failed drain does not turn normal signal termination into a service failure.
+The [Product observability runbook](../../docs/migration/phase-4/product-service/observability-runbook.md)
+records the complete disabled-mode proof, disposable acceptance phases, guarded QA verification,
+signal queries, alert response, staged enablement, recovery, rollback, and evidence requirements.
 
 The Product v1 schema is `api/product/v1/product_service.proto`; generated Go bindings are under
 `gen/product/v1`. The frozen initial compatibility baseline lives in

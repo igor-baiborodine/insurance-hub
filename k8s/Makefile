@@ -2,6 +2,9 @@
 # Child Makefile common for local dev and QA insurance-hub cluster
 ################################################################################
 
+K8S_MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+K8S_REPOSITORY_ROOT := $(abspath $(K8S_MAKEFILE_DIR)..)
+
 .PHONY: kubeconfig-clear
 kubeconfig-clear: ## Empty the ~/.kube/config file
 	@echo "Clearing the ~/.kube/config file..."
@@ -299,15 +302,11 @@ flux-suspend: _env-check ## Suspend QA Flux reconciliation
 
 PROMETHEUS_OPERATOR_CRDS_VERSION := 32.0.1
 KUBE_PROMETHEUS_STACK_VERSION := 92.6.0
-PROMETHEUS_IMAGE := quay.io/prometheus/prometheus:v3.15.0-distroless
-PROMETHEUS_VALUES_PATH := overlays/qa/infra/prometheus/values.yaml
-OBSERVABILITY_BACKEND_CHECK_SCRIPT := scripts/alloy/check-backend-config.py
-OBSERVABILITY_BACKEND_CHECK_TEST := scripts/alloy/check-backend-config-test.py
-OBSERVABILITY_BACKEND_TEST_SCRIPT := scripts/alloy/test-backend-ingestion.py
-OBSERVABILITY_SERVICE_DOMAIN ?= product
-OBSERVABILITY_SERVICE_ROOT ?= ../services/$(OBSERVABILITY_SERVICE_DOMAIN)-service
-OBSERVABILITY_SERVICE_PROBE ?= scripts/alloy/probe-$(OBSERVABILITY_SERVICE_DOMAIN).py
-OBSERVABILITY_REQUEST_HISTOGRAM_BUCKETS ?= 15
+PROMETHEUS_VALUES_PATH := $(K8S_MAKEFILE_DIR)overlays/qa/infra/prometheus/values.yaml
+MONITORING_ASSETS_ROOT := $(K8S_MAKEFILE_DIR)observability
+MONITORING_RENDER_RULE_SCRIPT := $(K8S_MAKEFILE_DIR)scripts/monitoring/render_prometheus_rule.py
+MONITORING_RENDER_DASHBOARD_SCRIPT := $(K8S_MAKEFILE_DIR)scripts/monitoring/render_grafana_dashboard.py
+MONITORING_RESOLVE_SCRIPT := $(K8S_MAKEFILE_DIR)scripts/monitoring/resolve_monitoring.py
 
 .PHONY: prometheus-operator-crds-install
 prometheus-operator-crds-install: _monitoring-ns-check
@@ -376,42 +375,98 @@ prometheus-stack-status: _monitoring-ns-check ## Show Kube Prometheus Stack depl
 	@echo "\nGrafana Service:"
 	@kubectl get svc -n $(MONITORING_NS) -l app.kubernetes.io/name=grafana || true
 
-.PHONY: prometheus-receiver-config-check
-prometheus-receiver-config-check: ## Validate the pinned remote-write receiver and disabled native OTLP route without applying
-	@command -v helm >/dev/null || { echo "ERROR: helm is required."; exit 1; }
+.PHONY: _monitoring-assets-args-check
+_monitoring-assets-args-check: ## Require an explicit environment and service for a monitoring asset operation
 	@command -v python3 >/dev/null || { echo "ERROR: Python 3.9 or newer is required."; exit 1; }
 	@python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' || { \
 		echo "ERROR: Python 3.9 or newer is required."; exit 1; \
 	}
-	@helm template qa-prometheus prometheus-community/kube-prometheus-stack \
-		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
-		--namespace qa-monitoring \
-		--values "$(PROMETHEUS_VALUES_PATH)" \
-		--show-only templates/prometheus/prometheus.yaml | \
-		PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_BACKEND_CHECK_SCRIPT)" \
-			--values "$(PROMETHEUS_VALUES_PATH)" \
-			--makefile Makefile \
-			--rendered-prometheus -
-	@helm template qa-prometheus prometheus-community/kube-prometheus-stack \
-		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
-		--namespace qa-monitoring \
-		--values "$(PROMETHEUS_VALUES_PATH)" >/dev/null
-	@echo "✅ Prometheus chart $(KUBE_PROMETHEUS_STACK_VERSION) receiver configuration passed."
+	@if [ "$(origin ENV_NAME)" != "command line" ] || [ -z "$(ENV_NAME)" ]; then \
+		echo "ERROR: ENV_NAME is required on the make command line."; \
+		exit 1; \
+	fi
+	@if [ "$(origin SVC_NAME)" != "command line" ] || [ -z "$(SVC_NAME)" ]; then \
+		echo "ERROR: SVC_NAME is required on the make command line."; \
+		exit 1; \
+	fi
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RESOLVE_SCRIPT)" \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" \
+		--environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)" >/dev/null
 
-.PHONY: observability-backend-test-tooling
-observability-backend-test-tooling: ## Exercise receiver, fixture, query, and cleanup policy checks
-	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_BACKEND_CHECK_TEST)" -v
+.PHONY: prometheus-rules-render
+prometheus-rules-render: _monitoring-assets-args-check ## Render one service PrometheusRule to stdout (ENV_NAME, SVC_NAME)
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_RULE_SCRIPT)" \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" \
+		--environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)"
 
-.PHONY: test-observability-backends
-test-observability-backends: ## Prove synthetic and real service signals in disposable pinned backends
-	@command -v docker >/dev/null || { echo "ERROR: docker is required."; exit 1; }
-	@command -v go >/dev/null || { echo "ERROR: Go is required for the real service probe."; exit 1; }
-	@PYTHONDONTWRITEBYTECODE=1 python3 "$(OBSERVABILITY_BACKEND_TEST_SCRIPT)" \
-		--config "$(ALLOY_CONFIG_PATH)" \
-		--service-domain "$(OBSERVABILITY_SERVICE_DOMAIN)" \
-		--service-root "$(OBSERVABILITY_SERVICE_ROOT)" \
-		--service-probe "$(OBSERVABILITY_SERVICE_PROBE)" \
-		--request-histogram-buckets "$(OBSERVABILITY_REQUEST_HISTOGRAM_BUCKETS)"
+.PHONY: prometheus-rules-apply
+prometheus-rules-apply: _monitoring-assets-args-check ## Validate and apply one service PrometheusRule through Kubernetes (ENV_NAME, SVC_NAME)
+	@$(MAKE) --no-print-directory -C "$(K8S_REPOSITORY_ROOT)" monitoring-assets-check \
+		ENV_NAME="$(ENV_NAME)" SVC_NAME="$(SVC_NAME)"
+	@command -v kubectl >/dev/null || { echo "ERROR: kubectl is required."; exit 1; }
+	@set -eu; \
+	eval "$$(PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RESOLVE_SCRIPT)" \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" \
+		--environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)")"; \
+	actual_context=$$(kubectl config current-context); \
+	if [ "$$actual_context" != "$$MONITORING_KUBE_CONTEXT" ]; then \
+		echo "ERROR: Current context is '$$actual_context' (expected '$$MONITORING_KUBE_CONTEXT')."; \
+		exit 1; \
+	fi; \
+	tmp_file=$$(mktemp); \
+	trap 'rm -f "$$tmp_file"' EXIT INT TERM; \
+	PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_RULE_SCRIPT)" \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" \
+		--environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)" \
+		--output "$$tmp_file"; \
+	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
+		apply --dry-run=server -f "$$tmp_file" >/dev/null; \
+	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
+		apply -f "$$tmp_file"; \
+	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
+		get prometheusrule "$$MONITORING_PROMETHEUS_RULE" >/dev/null
+	@echo "✅ Applied $(SVC_NAME) alert rules to $(ENV_NAME)."
+
+.PHONY: grafana-dashboard-render
+grafana-dashboard-render: _monitoring-assets-args-check ## Render one service dashboard sidecar ConfigMap to stdout (ENV_NAME, SVC_NAME)
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_DASHBOARD_SCRIPT)" \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" \
+		--environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)"
+
+.PHONY: grafana-dashboard-apply
+grafana-dashboard-apply: _monitoring-assets-args-check ## Validate and apply one immutable service dashboard through Kubernetes (ENV_NAME, SVC_NAME)
+	@$(MAKE) --no-print-directory -C "$(K8S_REPOSITORY_ROOT)" monitoring-assets-check \
+		ENV_NAME="$(ENV_NAME)" SVC_NAME="$(SVC_NAME)"
+	@command -v kubectl >/dev/null || { echo "ERROR: kubectl is required."; exit 1; }
+	@set -eu; \
+	eval "$$(PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RESOLVE_SCRIPT)" \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" \
+		--environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)")"; \
+	actual_context=$$(kubectl config current-context); \
+	if [ "$$actual_context" != "$$MONITORING_KUBE_CONTEXT" ]; then \
+		echo "ERROR: Current context is '$$actual_context' (expected '$$MONITORING_KUBE_CONTEXT')."; \
+		exit 1; \
+	fi; \
+	tmp_file=$$(mktemp); \
+	trap 'rm -f "$$tmp_file"' EXIT INT TERM; \
+	PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_DASHBOARD_SCRIPT)" \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" \
+		--environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)" \
+		--output "$$tmp_file"; \
+	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
+		apply --dry-run=server -f "$$tmp_file" >/dev/null; \
+	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
+		apply -f "$$tmp_file"; \
+	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
+		get configmap "$$MONITORING_GRAFANA_DASHBOARD_CONFIG_MAP" >/dev/null
+	@echo "✅ Applied immutable $(SVC_NAME) dashboard to $(ENV_NAME)."
 
 .PHONY: prometheus-ui
 prometheus-ui: ## Access Prometheus UI via port-forward
@@ -522,60 +577,8 @@ tempo-ui: _monitoring-ns-check ## Access Tempo HTTP API via port-forward
 #########################################
 
 ALLOY_HELM_CHART_VERSION := 1.13.1
-ALLOY_IMAGE := grafana/alloy:v1.20.1
-ALLOY_CONFIG_PATH := overlays/qa/infra/alloy/config.alloy
-ALLOY_VALUES_PATH := overlays/qa/infra/alloy/values.yaml
-ALLOY_CHECK_SCRIPT := scripts/alloy/check-config.py
-ALLOY_CHECK_TEST := scripts/alloy/check-config-test.py
-
-.PHONY: alloy-config-check
-alloy-config-check: ## Validate Alloy source injection, pinned config, render, and scoped RBAC without applying
-	@command -v helm >/dev/null || { echo "ERROR: helm is required."; exit 1; }
-	@command -v docker >/dev/null || { echo "ERROR: docker is required."; exit 1; }
-	@command -v python3 >/dev/null || { echo "ERROR: Python 3.9 or newer is required."; exit 1; }
-	@python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' || { \
-		echo "ERROR: Python 3.9 or newer is required."; exit 1; \
-	}
-	@docker image inspect "$(ALLOY_IMAGE)" >/dev/null 2>&1 || { \
-		echo "ERROR: Missing pinned image $(ALLOY_IMAGE). Pull it explicitly before validation."; \
-		exit 1; \
-	}
-	@helm template qa-alloy grafana/alloy \
-		--version "$(ALLOY_HELM_CHART_VERSION)" \
-		--namespace qa-monitoring \
-		--values "$(ALLOY_VALUES_PATH)" \
-		--set-file alloy.configMap.content="$(ALLOY_CONFIG_PATH)" \
-		--show-only templates/rbac.yaml | \
-		PYTHONDONTWRITEBYTECODE=1 python3 "$(ALLOY_CHECK_SCRIPT)" \
-			--values "$(ALLOY_VALUES_PATH)" \
-			--config "$(ALLOY_CONFIG_PATH)" \
-			--makefile Makefile \
-			--rendered-rbac -
-	@helm template qa-alloy grafana/alloy \
-		--version "$(ALLOY_HELM_CHART_VERSION)" \
-		--namespace qa-monitoring \
-		--values "$(ALLOY_VALUES_PATH)" \
-		--set-file alloy.configMap.content="$(ALLOY_CONFIG_PATH)" \
-		--show-only templates/configmap.yaml | \
-		awk 'copy { sub(/^    /, ""); print } /^  config\.alloy: \|-$$/ { copy = 1 }' | \
-		cmp -s - "$(ALLOY_CONFIG_PATH)" || { \
-			echo "ERROR: Rendered Alloy ConfigMap differs from $(ALLOY_CONFIG_PATH)."; \
-			exit 1; \
-		}
-	@docker run --rm -i "$(ALLOY_IMAGE)" validate /dev/stdin < "$(ALLOY_CONFIG_PATH)"
-	@helm template qa-alloy grafana/alloy \
-		--version "$(ALLOY_HELM_CHART_VERSION)" \
-		--namespace qa-monitoring \
-		--values "$(ALLOY_VALUES_PATH)" \
-		--set-file alloy.configMap.content="$(ALLOY_CONFIG_PATH)" >/dev/null
-	@echo "✅ Alloy chart $(ALLOY_HELM_CHART_VERSION) and $(ALLOY_IMAGE) configuration passed."
-
-.PHONY: alloy-test-tooling
-alloy-test-tooling: ## Exercise shared Alloy identity, allowlist, target, position, and RBAC fixtures
-	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ALLOY_CHECK_TEST)" -v
-
-.PHONY: check-observability
-check-observability: prometheus-receiver-config-check alloy-config-check alloy-test-tooling observability-backend-test-tooling ## Run non-mutating observability configuration and policy checks
+ALLOY_CONFIG_PATH := $(K8S_MAKEFILE_DIR)overlays/qa/infra/alloy/config.alloy
+ALLOY_VALUES_PATH := $(K8S_MAKEFILE_DIR)overlays/qa/infra/alloy/values.yaml
 
 .PHONY: alloy-install
 alloy-install: _monitoring-ns-check ## Install Grafana Alloy in QA cluster
@@ -667,20 +670,16 @@ postgres-svc-secret-create: _env-check _data-ns-check _svc-ns-check _svc-name-ch
 
 # Service-owned database role profiles are administered inside an existing cluster.
 # These targets never depend on postgres-svc-deploy or namespace-changing legacy prerequisites.
-.PHONY: postgres-svc-role-inventory postgres-svc-role-snapshot postgres-svc-role-provision postgres-svc-role-verify \
-	postgres-svc-role-rotate postgres-svc-role-revoke postgres-svc-role-test
+.PHONY: postgres-svc-role-inventory postgres-svc-role-snapshot postgres-svc-role-provision \
+	postgres-svc-role-rotate postgres-svc-role-revoke
 postgres-svc-role-inventory: ## Inspect a selected service-owned database role profile. Requires SVC_NAME, ROLE_PROFILE, and explicit target coordinates.
 postgres-svc-role-snapshot: ## Capture sanitized catalog/schema identity for a selected service-owned profile. Requires explicit target coordinates.
 postgres-svc-role-provision: ## Provision/reapply a selected service-owned database role profile. Requires explicit target coordinates.
-postgres-svc-role-verify: ## Verify a selected service-owned database role profile. Requires explicit target coordinates.
 postgres-svc-role-rotate: ## Rotate credentials for a selected role profile. Requires explicit target coordinates.
 postgres-svc-role-revoke: ## Revoke a selected role profile. Requires explicit target coordinates and profile-specific confirmation.
-postgres-svc-role-inventory postgres-svc-role-snapshot postgres-svc-role-provision postgres-svc-role-verify \
-postgres-svc-role-rotate postgres-svc-role-revoke:
+postgres-svc-role-inventory postgres-svc-role-snapshot postgres-svc-role-provision \
+	postgres-svc-role-rotate postgres-svc-role-revoke:
 	@PYTHONDONTWRITEBYTECODE=1 python3 scripts/postgres/service/dispatch.py '$(@:postgres-svc-role-%=%)'
-
-postgres-svc-role-test: ## Exercise role dispatch and Product reader lifecycle against disposable PostgreSQL
-	@PYTHONDONTWRITEBYTECODE=1 python3 scripts/postgres/service/test_reader.py
 
 .PHONY: postgres-svc-deploy
 postgres-svc-deploy: _env-check _data-ns-check _svc-name-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>

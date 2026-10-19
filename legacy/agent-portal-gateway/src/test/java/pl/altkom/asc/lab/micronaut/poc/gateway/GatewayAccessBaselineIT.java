@@ -78,6 +78,7 @@ public class GatewayAccessBaselineIT {
         properties.put("micronaut.security.token.jwt.signatures.secret.generator.secret", testSecret);
 
         gatewayServer = ApplicationContext.run(EmbeddedServer.class, properties);
+        gatewayServer.getApplicationContext().getBean(ProductGatewayController.class);
         tokenGenerator = gatewayServer.getApplicationContext().getBean(JwtTokenGenerator.class);
     }
 
