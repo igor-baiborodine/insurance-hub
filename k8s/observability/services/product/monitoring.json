@@ -86,7 +86,8 @@
       "\"type\": \"tempo\"",
       "trace_id",
       "Legitimate idle time",
-      "missing telemetry"
+      "missing telemetry",
+      "pod!~\\\"qa-product-api-legacy-.*\\\""
     ],
     "required_panel_titles": [
       "Request rate",

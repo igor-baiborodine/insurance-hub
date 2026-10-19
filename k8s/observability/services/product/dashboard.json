@@ -290,7 +290,7 @@
           "refId": "B"
         },
         {
-          "expr": "sum(kube_pod_status_ready{namespace=\"qa-svc\",pod=~\"qa-product-api-.*\",condition=\"true\"})",
+          "expr": "sum(kube_pod_status_ready{namespace=\"qa-svc\",pod=~\"qa-product-api-.*\",pod!~\"qa-product-api-legacy-.*\",condition=\"true\"})",
           "legendFormat": "ready",
           "refId": "C"
         },
