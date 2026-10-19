@@ -20,6 +20,8 @@ Use [Go development](go-development.md#scope-and-makefile-interface) for the man
 interface, [Go formatting](go-formatting.md) for formatting, and
 [Go validation](go-validation.md) for execution scope and evidence. Adapt the
 [testing examples](../examples/go-testing/README.md) to actual module APIs and ticket requirements.
+Apply the repository-wide [testability assessment](repo-rules.md#testability) when fixture wiring or
+test implementation becomes complicated.
 
 ## Files and discovery
 
@@ -92,10 +94,11 @@ Examples of applying the convention to existing Product Service names (illustrat
   and the module's established assertion conventions. Structure each applicable scenario with the
   exact lowercase comments `// given`, `// when`, and `// then`: put scenario setup, test data, and
   mock expectations under `given`; the behavior-triggering operation under `when`; and observations
-  plus mock/call verification under `then`. Shared immutable fixtures for table-driven tests may use
-  an outer `given`; keep per-case setup and the `when`/`then` phases in the subtest. Omit the markers
-  from shared setup helpers and trivial tests where a phase would be empty or misleading; do not add
-  placeholder blocks.
+  plus mock/call verification under `then`. Ideally, the `when` phase contains only a single line of
+  code: the invocation of the method under test. Shared immutable fixtures for table-driven tests
+  may use an outer `given`; keep per-case setup and the `when`/`then` phases in the subtest. Omit the
+  markers from shared setup helpers and trivial tests where a phase would be empty or misleading;
+  do not add placeholder blocks.
 - Follow the example's unit-test separation, generated Mockery/Testify mocks, and tagged
   integration tests where those tools are adopted. Mock dependency boundaries, not implementation
   details; regenerate mocks through Make when interfaces change.

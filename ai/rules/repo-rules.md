@@ -3,6 +3,7 @@
 
 - [Repository Rules](#repository-rules)
   - [General](#general)
+  - [Testability](#testability)
   - [GitHub Actions](#github-actions)
   - [Markdown Tables Of Contents](#markdown-tables-of-contents)
   - [Git And Artifacts](#git-and-artifacts)
@@ -21,6 +22,21 @@
 - Preserve behavior unless the spec explicitly changes it.
 - Avoid unrelated formatting, metadata churn, or refactors.
 - Update documentation when behavior, setup, workflow, or contracts change.
+- Follow [Naming rules](naming-rules.md) whenever creating or renaming repository-owned files or
+  directories.
+
+## Testability
+
+- When implementing unit or integration tests, assess the effort required to construct fixtures,
+  wire dependencies, and express the test scenarios. Treat disproportionate setup, mocking, or
+  test-method complexity as feedback about the production design.
+- If that complexity comes from tightly coupled dependencies, broad responsibilities, hidden state,
+  or difficult control flow in the method or function under test, revise the production design
+  before adding test-only indirection or increasingly elaborate fixtures. Keep the revision within
+  the ticket's behavioral and compatibility requirements.
+- Complexity inherent in exercising a real integration boundary, such as starting a disposable
+  database or transport, does not by itself require a production redesign. Keep that environment
+  setup in reusable test infrastructure while preserving realistic boundary coverage.
 
 ## GitHub Actions
 

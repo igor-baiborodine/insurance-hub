@@ -126,11 +126,18 @@ Copilot to their canonical workflows under `ai/skills/`.
 
 ## Repository Conventions
 
+- Follow [the naming rules](ai/rules/naming-rules.md) whenever creating or renaming files or
+  directories.
+- Follow [the Makefile rules](ai/rules/makefile-rules.md) whenever creating or changing a
+  `Makefile`, included `.mk` fragment, target, variable, or recipe.
+- Follow [the Git rules](ai/rules/git-rules.md) when working with branches, preparing or reviewing
+  commits, or managing the Git working tree and history.
 - Use Python as an auxiliary language for administrative and repository tooling when structured
   data, validation, or orchestration makes Bash unwieldy. Keep simple shell tasks in Bash and
   preserve the existing service languages and migration direction. For Python work, load
   [the Python rules](ai/rules/python-rules.md) and their linked development and validation rules.
-- Use `CONTRIBUTING.md` as the source of truth for branch naming, commit message conventions, prerequisites, and developer workflow expectations.
+- Use `CONTRIBUTING.md` as the source of truth for prerequisites and developer workflow
+  expectations.
 - Prefer existing Make targets and module-local build tooling over inventing ad hoc commands.
 - After creating or updating any Markdown file, run
   `./scripts/markdown-toc.sh format <file>...` for every Markdown file changed by the current task,
@@ -225,7 +232,8 @@ Do not claim validation was performed unless it was actually run.
 Use these repository documents when deeper context is needed:
 
 - `README.md` for the migration goal and high-level project framing.
-- `CONTRIBUTING.md` for prerequisites, branch naming, commit message conventions, and developer workflow.
+- `ai/rules/git-rules.md` for Git working practices, branch naming, and commit conventions.
+- `CONTRIBUTING.md` for prerequisites and developer workflow.
 - `docs/system-overview-and-migration-analysis.md` for architecture and migration context.
 - `docs/business-flows/` for business process understanding.
 - `docs/local-dev-setup/` for local tooling and editor setup.

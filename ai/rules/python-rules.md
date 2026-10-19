@@ -21,4 +21,6 @@ For Python tooling implementation or review, read both canonical rules:
 
 For mixed-language work, also load the rules for the code being changed. A Python helper for a Go
 service does not replace the [Go rules](go-rules.md) when Go implementation or tooling is affected.
-These rules supplement root policy and add no separate instruction precedence.
+Apply [Naming rules](naming-rules.md) when creating or renaming Python files, importable packages,
+or surrounding repository paths. These rules supplement root policy and add no separate
+instruction precedence.

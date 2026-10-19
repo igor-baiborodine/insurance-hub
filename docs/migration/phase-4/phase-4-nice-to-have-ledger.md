@@ -26,6 +26,9 @@
       - [issue-156-N01 Automatic added-module selection](#issue-156-n01-automatic-added-module-selection)
       - [issue-156-N02 Automatic removed-module outcome](#issue-156-n02-automatic-removed-module-outcome)
       - [issue-156-N03 Module move and identity correlation](#issue-156-n03-module-move-and-identity-correlation)
+  - [Ad hoc repository improvements](#ad-hoc-repository-improvements)
+    - [Commit-message policy enforcement](#commit-message-policy-enforcement)
+      - [adhoc-commit-msg-N01 Commit-message hook](#adhoc-commit-msg-n01-commit-message-hook)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -44,8 +47,10 @@ ticket, not in this ledger.
 
 - Add a sub-epic section and a ticket subsection when optional requirements are identified.
   Keep entries under their originating ticket even if a different ticket later implements them.
-- Use stable IDs in the form `issue-<number>-N<nn>`. Preserve IDs from the source requirements;
-  assign the next unused number to new entries and never reuse a retired ID.
+- Use stable IDs in the form `issue-<number>-N<nn>` for ticket-originated entries and
+  `adhoc-<topic>-N<nn>` for repository improvements without a ticket. Preserve IDs from the source
+  requirements; assign the next unused number within that source or topic to new entries and never
+  reuse a retired ID.
 - For each entry, record the requirement, deferral rationale, reconsideration trigger, and
   acceptance evidence. Treat triggers as planning guidance, not automatic commitments.
 - Maintain status and follow-up links in the ticket's index. When scheduling work, link the
@@ -442,3 +447,44 @@ validation during the move and its identity, consumer, import, and rollback rule
 changes, identity-preserving and identity-changing cases, stale inventory, and ambiguous ownership.
 Only the agreed lifecycle forms produce a selected outcome; other cases fail before bootstrap with
 explicit diagnostics.
+
+## Ad hoc repository improvements
+
+### Commit-message policy enforcement
+
+Origin: an ad hoc repository-maintenance review of the commit-message rules and existing
+`.githooks` installation mechanism on 2026-10-19. The repository currently relies on authors and
+reviewers to validate commit messages manually.
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [adhoc-commit-msg-N01](#adhoc-commit-msg-n01-commit-message-hook) | Commit-message hook | Deferred | Unassigned |
+
+#### adhoc-commit-msg-N01 Commit-message hook
+
+**Requirement:** Add a checked-in `.githooks/commit-msg` hook that validates the mechanically
+enforceable parts of the repository's commit-message policy: the eight allowed types, optional
+lowercase scope, breaking-change marker placement, optional literal `[issue-<number>]` reference,
+required spacing, a non-empty subject, and omission of a final period. Require a breaking-change
+body or `BREAKING CHANGE:` footer when the subject uses `!`. Define explicit handling for
+Git-generated merge and revert messages and for `fixup!` and `squash!` autosquash messages. Add a
+focused disposable-repository test harness, an owning Make target, and synchronized guidance in
+the Git rules and `CONTRIBUTING.md`. Keep imperative mood, identifier casing, scope quality, commit
+coherence, explanation adequacy, and issue-closing semantics under human review.
+
+**Why deferred:** The current written policy and review process remain usable, and the existing
+hook installation mechanism requires no immediate migration. Implementing the hook still needs an
+agreed exception policy for Git-generated and temporary commits plus tests that prevent valid Git
+workflows from being blocked.
+
+**Reconsider when:** Invalid commit messages repeatedly reach review, automated release or audit
+tooling begins to depend on parsed commit subjects, or the repository agrees on merge, revert, and
+autosquash behavior.
+
+**Acceptance evidence:** Disposable Git-repository tests prove every documented valid subject and
+agreed exceptional message is accepted, malformed types, scopes, markers, issue references,
+spacing, empty subjects, final periods, and incomplete breaking changes are rejected, and hook
+failures leave the commit message available for correction. The documented installation path
+activates both existing and new repository hooks without replacing another configured hooks path;
+the Make target runs the focused suite; the Git rules and contributor guidance match the enforced
+behavior; and the rules reserved for human review remain clearly identified.

@@ -14,6 +14,8 @@
 Apply [Python development](python-development.md) and use the owning Makefile's documented
 targets. Inspect their actual coverage and side effects before execution. No universal Python
 lint, formatting, or test target is implied by this rule.
+Apply the repository-wide [testability assessment](repo-rules.md#testability) when implementing
+unit or integration tests with complicated fixture wiring or test setup.
 
 ## Select checks from changed behavior
 

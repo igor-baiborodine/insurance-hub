@@ -1,6 +1,20 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Java Rules](#java-rules)
+  - [Tests](#tests)
+    - [Structure](#structure)
+    - [Assertions](#assertions)
+    - [Fixtures](#fixtures)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Java Rules
 
 These rules are intentionally minimal until service-specific Java conventions are formalized.
+
+Apply [Naming rules](naming-rules.md) when creating or renaming Java source files, package
+directories, or surrounding repository paths.
 
 - Follow the existing style of the target module.
 - Keep API contracts and service implementation boundaries intact.
@@ -14,7 +28,9 @@ These rules are intentionally minimal until service-specific Java conventions ar
 ### Structure
 
 When writing or updating JUnit 5 unit or integration tests, prefer an explicit given-when-then
-structure over helper-driven BDD wrappers.
+structure over helper-driven BDD wrappers. Apply the repository-wide
+[testability assessment](repo-rules.md#testability) when fixture wiring or test implementation
+becomes complicated.
 
 - Name classes with unit tests following `<ClassName>Test` pattern.
 - Name classes with integration tests following `<ClassName>IT` pattern.
