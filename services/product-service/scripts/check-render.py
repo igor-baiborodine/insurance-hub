@@ -320,7 +320,9 @@ def validate_go_environment(
         expected_environment.append(
             {
                 "name": "SERVICE_INSTANCE_ID",
-                "valueFrom": {"fieldRef": {"fieldPath": "metadata.uid"}},
+                "valueFrom": {
+                    "fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}
+                },
             }
         )
     require(
