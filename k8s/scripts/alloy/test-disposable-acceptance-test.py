@@ -324,6 +324,146 @@ otelcol_exporter_sent_spans_total{component_id="otelcol.exporter.otlp.zipkin_bri
             ):
                 acceptance.verify_alloy_healthy_delivery(12345, 4)
 
+    def test_start_product_reaps_log_follower_when_readiness_fails(self) -> None:
+        harness = mock.Mock()
+        harness.start.return_value = "product-test"
+        harness.host_port.return_value = 18080
+        log_process = mock.Mock()
+        log_process.poll.return_value = None
+        log_process.wait.return_value = 0
+
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+            acceptance.subprocess, "Popen", return_value=log_process
+        ) as popen, mock.patch.object(
+            acceptance,
+            "wait_product",
+            side_effect=acceptance.AcceptanceError("Product did not become ready"),
+        ):
+            with self.assertRaisesRegex(
+                acceptance.AcceptanceError, "Product did not become ready"
+            ):
+                acceptance.start_product(
+                    harness,
+                    Path(temporary),
+                    "product-image",
+                    "product-test",
+                    True,
+                    "instance-test",
+                )
+
+        log_handle = popen.call_args.kwargs["stdout"]
+        log_process.terminate.assert_called_once_with()
+        log_process.wait.assert_called_once_with(timeout=5)
+        self.assertTrue(log_handle.closed)
+
+    def test_start_product_closes_log_handle_when_log_follower_fails(self) -> None:
+        harness = mock.Mock()
+        harness.start.return_value = "product-test"
+        failure = OSError("docker logs failed")
+
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+            acceptance.subprocess, "Popen", side_effect=failure
+        ) as popen:
+            with self.assertRaisesRegex(OSError, "docker logs failed") as raised:
+                acceptance.start_product(
+                    harness,
+                    Path(temporary),
+                    "product-image",
+                    "product-test",
+                    True,
+                    "instance-test",
+                )
+
+        self.assertIs(failure, raised.exception)
+        self.assertTrue(popen.call_args.kwargs["stdout"].closed)
+
+    def test_stop_product_cleans_logging_and_container_after_stop_failure(self) -> None:
+        harness = mock.Mock()
+        harness.containers = ["product-test"]
+        harness.command.side_effect = acceptance.backend.HarnessError("stop failed")
+        log_process = mock.Mock()
+        log_process.poll.return_value = None
+        log_process.wait.return_value = 0
+        log_handle = mock.Mock()
+        log_handle.closed = False
+        product = acceptance.ProductRun(
+            container="product-test",
+            http_port=18081,
+            grpc_port=19090,
+            health_port=18080,
+            instance="instance-test",
+            log_process=log_process,
+            log_handle=log_handle,
+        )
+
+        with self.assertRaisesRegex(acceptance.backend.HarnessError, "stop failed"):
+            acceptance.stop_product(harness, product, 10)
+
+        log_process.terminate.assert_called_once_with()
+        log_process.wait.assert_called_once_with(timeout=5)
+        log_handle.close.assert_called_once_with()
+        harness.remove.assert_called_once_with("product-test")
+
+    def test_stop_product_reports_primary_and_cleanup_failures(self) -> None:
+        harness = mock.Mock()
+        harness.containers = ["product-test"]
+        primary = acceptance.backend.HarnessError("stop failed")
+        harness.command.side_effect = primary
+        harness.remove.side_effect = acceptance.backend.HarnessError("remove failed")
+        log_process = mock.Mock()
+        log_process.poll.return_value = None
+        log_process.wait.return_value = 0
+        log_handle = mock.Mock()
+        log_handle.closed = False
+        log_handle.close.side_effect = OSError("close failed")
+        product = acceptance.ProductRun(
+            container="product-test",
+            http_port=18081,
+            grpc_port=19090,
+            health_port=18080,
+            instance="instance-test",
+            log_process=log_process,
+            log_handle=log_handle,
+        )
+
+        with self.assertRaisesRegex(
+            acceptance.AcceptanceError,
+            "stop failed.*close failed.*remove failed",
+        ) as raised:
+            acceptance.stop_product(harness, product, 10)
+
+        self.assertIs(primary, raised.exception.__cause__)
+        log_process.terminate.assert_called_once_with()
+        log_process.wait.assert_called_once_with(timeout=5)
+        log_handle.close.assert_called_once_with()
+        harness.remove.assert_called_once_with("product-test")
+
+    def test_stop_product_retries_logging_after_container_was_removed(self) -> None:
+        harness = mock.Mock()
+        harness.containers = []
+        log_process = mock.Mock()
+        log_process.poll.return_value = 0
+        log_process.wait.return_value = 0
+        log_handle = mock.Mock()
+        log_handle.closed = False
+        product = acceptance.ProductRun(
+            container="product-test",
+            http_port=18081,
+            grpc_port=19090,
+            health_port=18080,
+            instance="instance-test",
+            log_process=log_process,
+            log_handle=log_handle,
+        )
+
+        acceptance.stop_product(harness, product, 10)
+
+        harness.command.assert_not_called()
+        harness.remove.assert_not_called()
+        log_process.terminate.assert_not_called()
+        log_process.wait.assert_called_once_with(timeout=5)
+        log_handle.close.assert_called_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()

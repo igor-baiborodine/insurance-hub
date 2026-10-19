@@ -495,6 +495,53 @@ def wait_product(port: int) -> None:
     backend.wait_http(f"http://127.0.0.1:{port}/readyz", timeout=60)
 
 
+def cleanup_log_follower(log_process: subprocess.Popen, log_handle: Any) -> List[Exception]:
+    errors: List[Exception] = []
+    try:
+        if log_process.poll() is None:
+            log_process.terminate()
+    except Exception as error:
+        errors.append(error)
+    try:
+        log_process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            log_process.kill()
+        except Exception as error:
+            errors.append(error)
+        try:
+            log_process.wait(timeout=5)
+        except Exception as error:
+            errors.append(error)
+    except Exception as error:
+        errors.append(error)
+    try:
+        if not log_handle.closed:
+            log_handle.close()
+    except Exception as error:
+        errors.append(error)
+    return errors
+
+
+def raise_with_cleanup(
+    primary: Optional[BaseException], cleanup_errors: Sequence[Exception], label: str
+) -> None:
+    if cleanup_errors:
+        details = "; ".join(
+            f"{type(error).__name__}: {error}" for error in cleanup_errors
+        )
+        cleanup_error = AcceptanceError(f"{label}: {details}")
+        if primary is None:
+            raise cleanup_error from cleanup_errors[0]
+        if isinstance(primary, Exception):
+            raise AcceptanceError(
+                f"{primary}; cleanup also failed: {cleanup_error}"
+            ) from primary
+        raise primary from cleanup_error
+    if primary is not None:
+        raise primary.with_traceback(primary.__traceback__)
+
+
 def start_product(
     harness: Any,
     root: Path,
@@ -521,34 +568,76 @@ def start_product(
         role, image, [], ports=[8080, 8081, 9090], docker_arguments=docker_arguments,
     )
     log_handle = log_path.open("ab", buffering=0)
-    log_process = subprocess.Popen(
-        ["docker", "logs", "--follow", container], stdout=log_handle, stderr=subprocess.STDOUT,
-    )
-    health_port = harness.host_port(container, 8080)
-    wait_product(health_port)
-    return ProductRun(
-        container=container, http_port=harness.host_port(container, 8081),
-        grpc_port=harness.host_port(container, 9090), health_port=health_port,
-        instance=instance, log_process=log_process, log_handle=log_handle,
-    )
+    try:
+        log_process = subprocess.Popen(
+            ["docker", "logs", "--follow", container],
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+        )
+    except BaseException as error:
+        cleanup_errors = []
+        try:
+            log_handle.close()
+        except Exception as cleanup_error:
+            cleanup_errors.append(cleanup_error)
+        raise_with_cleanup(error, cleanup_errors, "Product startup cleanup failed")
+        raise AssertionError("unreachable")
+    try:
+        health_port = harness.host_port(container, 8080)
+        wait_product(health_port)
+        return ProductRun(
+            container=container, http_port=harness.host_port(container, 8081),
+            grpc_port=harness.host_port(container, 9090), health_port=health_port,
+            instance=instance, log_process=log_process, log_handle=log_handle,
+        )
+    except BaseException as error:
+        raise_with_cleanup(
+            error,
+            cleanup_log_follower(log_process, log_handle),
+            "Product startup cleanup failed",
+        )
+        raise AssertionError("unreachable")
 
 
 def stop_product(harness: Any, product: ProductRun, expect_shutdown_seconds: float) -> float:
     started = time.monotonic()
-    harness.command(["docker", "stop", "--time", str(math.ceil(expect_shutdown_seconds)), product.container],
-                    timeout=math.ceil(expect_shutdown_seconds) + 5)
+    primary: Optional[BaseException] = None
+    containers = getattr(harness, "containers", None)
+    container_owned = containers is None or product.container in containers
+    if container_owned:
+        try:
+            harness.command(
+                ["docker", "stop", "--time", str(math.ceil(expect_shutdown_seconds)), product.container],
+                timeout=math.ceil(expect_shutdown_seconds) + 5,
+            )
+        except BaseException as error:
+            primary = error
     elapsed = time.monotonic() - started
-    product.log_process.terminate()
-    try:
-        product.log_process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        product.log_process.kill()
-        product.log_process.wait(timeout=5)
-    product.log_handle.close()
-    harness.remove(product.container)
-    if elapsed > expect_shutdown_seconds:
-        raise AcceptanceError(f"Product shutdown took {elapsed:.3f}s")
+    cleanup_errors = cleanup_log_follower(product.log_process, product.log_handle)
+    if container_owned:
+        try:
+            harness.remove(product.container)
+        except Exception as error:
+            cleanup_errors.append(error)
+    if primary is None and elapsed > expect_shutdown_seconds:
+        primary = AcceptanceError(f"Product shutdown took {elapsed:.3f}s")
+    raise_with_cleanup(primary, cleanup_errors, "Product shutdown cleanup failed")
     return elapsed
+
+
+def cleanup_products(
+    harness: Any, products: List[ProductRun], expect_shutdown_seconds: float
+) -> List[Exception]:
+    errors: List[Exception] = []
+    for product in products[:]:
+        try:
+            stop_product(harness, product, expect_shutdown_seconds)
+        except Exception as error:
+            errors.append(error)
+        finally:
+            if product in products:
+                products.remove(product)
+    return errors
 
 
 def run_load(
@@ -1306,6 +1395,7 @@ def execute(args: argparse.Namespace) -> None:
         )
         harness = backend.DockerHarness(prefix, root)
         products: List[ProductRun] = []
+        primary: Optional[BaseException] = None
         try:
             harness.create()
             for image in set(backend.backend_check.DISPOSABLE_IMAGES.values()):
@@ -1607,13 +1697,16 @@ def execute(args: argparse.Namespace) -> None:
                 },
             }
             print(json.dumps(evidence, indent=2, sort_keys=True))
-        finally:
-            for product in products:
-                try:
-                    stop_product(harness, product, profile["product_resources"]["shutdown_seconds"])
-                except Exception:
-                    pass
+        except BaseException as error:
+            primary = error
+        cleanup_errors = cleanup_products(
+            harness, products, profile["product_resources"]["shutdown_seconds"]
+        )
+        try:
             harness.cleanup()
+        except Exception as error:
+            cleanup_errors.append(error)
+        raise_with_cleanup(primary, cleanup_errors, "disposable acceptance cleanup failed")
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:

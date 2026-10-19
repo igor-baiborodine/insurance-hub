@@ -174,6 +174,82 @@ class AcceptancePhaseTest(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertIn("requires phase evidence inputs", errors.getvalue())
 
+    def test_phase_runtime_preserves_primary_and_cleanup_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config.alloy"
+            config.write_text("test config\n", encoding="utf-8")
+            args = SimpleNamespace(
+                phase="healthy",
+                config=config,
+                service_root=root,
+                catalog_fixture=root / "catalog.json",
+                product_image="product-image",
+            )
+            harness = mock.Mock()
+            harness.start.return_value = "postgres"
+            harness.cleanup.side_effect = phase_runner.acceptance.backend.HarnessError(
+                "harness cleanup failed"
+            )
+            product = object()
+            primary = phase_runner.acceptance.AcceptanceError("phase failed")
+
+            with mock.patch.object(
+                phase_runner.acceptance.backend, "DockerHarness", return_value=harness
+            ), mock.patch.object(
+                phase_runner.acceptance.backend, "write_configs"
+            ), mock.patch.object(
+                phase_runner.acceptance.backend.backend_check,
+                "DISPOSABLE_IMAGES",
+                {"postgres": "postgres-image"},
+            ), mock.patch.object(
+                phase_runner.acceptance, "command"
+            ), mock.patch.object(
+                phase_runner.acceptance, "wait_postgres"
+            ), mock.patch.object(
+                phase_runner.acceptance, "seed_postgres"
+            ), mock.patch.object(
+                phase_runner.acceptance, "start_backends", return_value={}
+            ), mock.patch.object(
+                phase_runner.acceptance,
+                "stop_product",
+                side_effect=phase_runner.acceptance.AcceptanceError(
+                    "product cleanup failed"
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    phase_runner.acceptance.AcceptanceError,
+                    "phase failed.*product cleanup failed.*harness cleanup failed",
+                ) as raised:
+                    with phase_runner.phase_runtime(args, self.profile) as runtime:
+                        runtime.products.append(product)
+                        raise primary
+
+        self.assertIs(primary, raised.exception.__cause__)
+        self.assertEqual([], runtime.products)
+
+    def test_failed_phase_stop_retains_product_for_cleanup_retry(self) -> None:
+        product = object()
+        runtime = phase_runner.PhaseRuntime(
+            root=Path("unused"),
+            helper=Path("unused-helper"),
+            harness=mock.Mock(),
+            ports={},
+            products=[product],
+        )
+
+        with mock.patch.object(
+            phase_runner.acceptance,
+            "stop_product",
+            side_effect=phase_runner.acceptance.AcceptanceError("stop failed"),
+        ):
+            with self.assertRaisesRegex(
+                phase_runner.acceptance.AcceptanceError, "stop failed"
+            ):
+                phase_runner.stop_product(runtime, product, self.profile)
+
+        self.assertEqual([product], runtime.products)
+
 
 if __name__ == "__main__":
     unittest.main()

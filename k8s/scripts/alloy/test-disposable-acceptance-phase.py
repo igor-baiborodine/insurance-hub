@@ -130,6 +130,7 @@ def phase_runtime(
         )
         harness = acceptance.backend.DockerHarness(prefix, root)
         products: List[Any] = []
+        primary: Optional[BaseException] = None
         try:
             harness.create()
             for image in set(acceptance.backend.backend_check.DISPOSABLE_IMAGES.values()):
@@ -157,17 +158,18 @@ def phase_runtime(
                 products=products,
             )
             yield runtime
-        finally:
-            for product in products:
-                try:
-                    acceptance.stop_product(
-                        harness,
-                        product,
-                        profile["product_resources"]["shutdown_seconds"],
-                    )
-                except Exception:
-                    pass
+        except BaseException as error:
+            primary = error
+        cleanup_errors = acceptance.cleanup_products(
+            harness, products, profile["product_resources"]["shutdown_seconds"]
+        )
+        try:
             harness.cleanup()
+        except Exception as error:
+            cleanup_errors.append(error)
+        acceptance.raise_with_cleanup(
+            primary, cleanup_errors, "acceptance phase cleanup failed"
+        )
 
 
 def stop_product(
