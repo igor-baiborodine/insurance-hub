@@ -18,6 +18,8 @@ For Go work, read and apply all six canonical rules:
 
 All Go development operations must use the corresponding Makefile targets; do not invoke the
 underlying tools directly. See the development rule for target discovery and missing-target handling.
+Apply [Naming rules](naming-rules.md) when creating or renaming Go source files, package
+directories, or surrounding repository paths.
 
 This file remains the Go entry point for existing references. It adds no separate policy or
 instruction precedence.

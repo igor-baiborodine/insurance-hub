@@ -126,6 +126,8 @@ Copilot to their canonical workflows under `ai/skills/`.
 
 ## Repository Conventions
 
+- Follow [the naming rules](ai/rules/naming-rules.md) whenever creating or renaming files or
+  directories.
 - Use Python as an auxiliary language for administrative and repository tooling when structured
   data, validation, or orchestration makes Bash unwieldy. Keep simple shell tasks in Bash and
   preserve the existing service languages and migration direction. For Python work, load

@@ -21,6 +21,8 @@
 - Preserve behavior unless the spec explicitly changes it.
 - Avoid unrelated formatting, metadata churn, or refactors.
 - Update documentation when behavior, setup, workflow, or contracts change.
+- Follow [Naming rules](naming-rules.md) whenever creating or renaming repository-owned files or
+  directories.
 
 ## GitHub Actions
 

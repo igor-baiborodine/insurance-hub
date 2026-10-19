@@ -1,6 +1,20 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Java Rules](#java-rules)
+  - [Tests](#tests)
+    - [Structure](#structure)
+    - [Assertions](#assertions)
+    - [Fixtures](#fixtures)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Java Rules
 
 These rules are intentionally minimal until service-specific Java conventions are formalized.
+
+Apply [Naming rules](naming-rules.md) when creating or renaming Java source files, package
+directories, or surrounding repository paths.
 
 - Follow the existing style of the target module.
 - Keep API contracts and service implementation boundaries intact.
