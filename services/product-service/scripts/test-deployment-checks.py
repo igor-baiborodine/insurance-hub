@@ -25,6 +25,18 @@ def find(documents: list[dict[str, Any]], kind: str, name: str) -> dict[str, Any
     raise AssertionError(f"fixture does not contain {kind}/{name}")
 
 
+def find_prefix(documents: list[dict[str, Any]], kind: str, prefix: str) -> dict[str, Any]:
+    matches = [
+        document
+        for document in documents
+        if document.get("kind") == kind
+        and document.get("metadata", {}).get("name", "").startswith(prefix)
+    ]
+    if len(matches) != 1:
+        raise AssertionError(f"fixture does not contain exactly one {kind} with prefix {prefix}")
+    return matches[0]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checker", required=True, type=Path)
@@ -121,6 +133,27 @@ def main() -> int:
             "ghcr.io/igor-baiborodine/insurance-hub/product-api:latest"
         )
 
+    def disabled_qa_telemetry(values: dict[str, list[dict[str, Any]]]) -> None:
+        config = find_prefix(values["qa-go"], "ConfigMap", "qa-product-config-")
+        config["data"]["OTEL_ENABLED"] = "false"
+
+    def missing_qa_instance(values: dict[str, list[dict[str, Any]]]) -> None:
+        deployment = find(values["qa-go"], "Deployment", "qa-product-api")
+        deployment["spec"]["template"]["spec"]["containers"][0]["env"] = [
+            item
+            for item in deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+            if item.get("name") != "SERVICE_INSTANCE_ID"
+        ]
+
+    def missing_java_sampler(values: dict[str, list[dict[str, Any]]]) -> None:
+        deployment = find(values["qa-legacy"], "Deployment", "qa-product-api-legacy")
+        container = deployment["spec"]["template"]["spec"]["containers"][0]
+        container["env"] = [
+            item
+            for item in container["env"]
+            if item.get("name") != "TRACING_ZIPKIN_SAMPLER_PROBABILITY"
+        ]
+
     cases: list[tuple[str, Callable[[dict[str, list[dict[str, Any]]]], None], str]] = [
         ("bad selector", bad_selector, "selector"),
         ("wrong port", wrong_port, "named container ports"),
@@ -130,6 +163,9 @@ def main() -> int:
         ("stopped marker with Go objects", stopped_with_go, "still contains Go Product objects"),
         ("unreleased QA image tag", unreleased_qa_tag, "qa image reference is invalid"),
         ("invalid QA image tag", invalid_qa_tag, "qa image reference is invalid"),
+        ("disabled QA telemetry", disabled_qa_telemetry, "qa Product ConfigMap"),
+        ("missing QA Pod identity", missing_qa_instance, "PRODUCT_DATABASE_URL"),
+        ("missing Java sampler", missing_java_sampler, "bind the QA Zipkin sampler"),
     ]
 
     with tempfile.TemporaryDirectory(prefix="product-deployment-checks.") as directory:
@@ -203,7 +239,7 @@ def main() -> int:
 
     print(
         "product-deploy-check-test: passed semantic QA tag plus selector, port, Secret, "
-        "exposure, active/stopped-state, unreleased-tag, and invalid-tag scenarios"
+        "exposure, active/stopped-state, image-tag, telemetry identity, and Java sampler scenarios"
     )
     return 0
 

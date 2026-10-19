@@ -2,9 +2,13 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: product-api
+  labels:
+    app.kubernetes.io/version: "sha-be510cc"
 spec:
   template:
     metadata:
+      labels:
+        app.kubernetes.io/version: "sha-be510cc"
       annotations:
         insurance-hub.io/product-configuration-revision: "step15-reader-rotation-20261014T210228Z"
     spec:
@@ -17,6 +21,10 @@ spec:
                 secretKeyRef:
                   name: qa-postgres-product-reader-creds
                   key: database-url
+            - name: SERVICE_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
       volumes:
         - name: postgres-ca
           secret:

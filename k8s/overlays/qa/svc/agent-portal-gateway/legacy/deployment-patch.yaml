@@ -4,11 +4,13 @@ metadata:
   name: agent-portal-gateway-legacy
   labels:
     environment: qa
+    app.kubernetes.io/version: "1.3.0"
 spec:
   template:
     metadata:
       labels:
         environment: qa
+        app.kubernetes.io/version: "1.3.0"
     spec:
       containers:
         - name: agent-portal-gateway-legacy
@@ -26,3 +28,5 @@ spec:
               value: "qa"
             - name: TRACING_ZIPKIN_HTTP_URL
               value: "http://qa-alloy.qa-monitoring.svc.cluster.local:9411"
+            - name: TRACING_ZIPKIN_SAMPLER_PROBABILITY
+              value: "1.0"

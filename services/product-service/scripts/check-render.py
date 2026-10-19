@@ -83,6 +83,16 @@ EXPECTED_CONFIG = {
     "OTEL_ENABLED": "false",
 }
 
+QA_SERVICE_VERSION = "sha-be510cc"
+QA_CONFIG = {
+    **EXPECTED_CONFIG,
+    "OTEL_ENABLED": "true",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://qa-alloy.qa-monitoring.svc.cluster.local:4317",
+    "OTEL_EXPORTER_OTLP_TIMEOUT": "2s",
+    "DEPLOYMENT_ENVIRONMENT": "qa",
+    "SERVICE_VERSION": QA_SERVICE_VERSION,
+}
+
 
 def validate_service(
     service: dict[str, Any],
@@ -164,8 +174,9 @@ def validate_go_environment(
         "ConfigMap",
         re.compile(rf"{re.escape(prefix)}product-config-[a-z0-9]{{10}}"),
     )
+    expected_config = QA_CONFIG if environment == "qa" else EXPECTED_CONFIG
     require(
-        config.get("data") == EXPECTED_CONFIG,
+        config.get("data") == expected_config,
         f"{environment} Product ConfigMap is incomplete or unexpected",
     )
 
@@ -188,6 +199,16 @@ def validate_go_environment(
         selected(selector, pod_labels),
         f"{environment} Deployment selector does not select its pod template",
     )
+    if environment == "qa":
+        require(
+            deployment.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/version")
+            == QA_SERVICE_VERSION,
+            "qa Deployment version label must match the immutable Product source revision",
+        )
+        require(
+            pod_labels.get("app.kubernetes.io/version") == QA_SERVICE_VERSION,
+            "qa Pod version label must match the immutable Product source revision",
+        )
     require(deployment_spec.get("replicas") == 1, f"{environment} replicas must be 1")
     require(deployment_spec.get("minReadySeconds") == 5, f"{environment} minReadySeconds must be 5")
     require(deployment_spec.get("progressDeadlineSeconds") == 180, f"{environment} progress deadline must be 180s")
@@ -289,14 +310,21 @@ def validate_go_environment(
         container.get("envFrom") == [{"configMapRef": {"name": config["metadata"]["name"]}}],
         f"{environment} Deployment must reference the transformed Product ConfigMap",
     )
-    require(
-        container.get("env")
-        == [
+    expected_environment = [
+        {
+            "name": "PRODUCT_DATABASE_URL",
+            "valueFrom": {"secretKeyRef": {"name": secret_name, "key": "database-url"}},
+        }
+    ]
+    if environment == "qa":
+        expected_environment.append(
             {
-                "name": "PRODUCT_DATABASE_URL",
-                "valueFrom": {"secretKeyRef": {"name": secret_name, "key": "database-url"}},
+                "name": "SERVICE_INSTANCE_ID",
+                "valueFrom": {"fieldRef": {"fieldPath": "metadata.uid"}},
             }
-        ],
+        )
+    require(
+        container.get("env") == expected_environment,
         f"{environment} PRODUCT_DATABASE_URL reader Secret reference is incorrect",
     )
     require(
@@ -348,6 +376,68 @@ def contains_qa_go(documents: list[dict[str, Any]]) -> bool:
     return ("Deployment", "qa-svc", "qa-product-api") in names
 
 
+def validate_qa_java(deployment: dict[str, Any], container_name: str, version: str) -> None:
+    metadata = deployment.get("metadata", {})
+    pod = deployment.get("spec", {}).get("template", {})
+    require(
+        metadata.get("labels", {}).get("app.kubernetes.io/version") == version,
+        f"{container_name} Deployment version label must match its QA image",
+    )
+    require(
+        pod.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/version") == version,
+        f"{container_name} Pod version label must match its QA image",
+    )
+    containers = pod.get("spec", {}).get("containers", [])
+    matches = [container for container in containers if container.get("name") == container_name]
+    require(len(matches) == 1, f"expected exactly one {container_name} container")
+    container = matches[0]
+    require(
+        container.get("image")
+        == f"ghcr.io/igor-baiborodine/insurance-hub/{container_name}:{version}",
+        f"{container_name} image and version label must match",
+    )
+    environment = container.get("env", [])
+    require(
+        len({item.get("name") for item in environment}) == len(environment),
+        f"{container_name} environment must not contain duplicate names",
+    )
+    values = {item.get("name"): item.get("value") for item in environment}
+    require(
+        values.get("TRACING_ZIPKIN_SAMPLER_PROBABILITY") == "1.0",
+        f"{container_name} must bind the QA Zipkin sampler to 1.0",
+    )
+
+
+def validate_qa_java_observability(
+    qa_legacy: list[dict[str, Any]], aggregate: list[dict[str, Any]]
+) -> None:
+    product = one(qa_legacy, "Deployment", "qa-product-api-legacy")
+    validate_qa_java(product, "product-api-legacy", "1.6.0")
+    product_config = one(
+        qa_legacy,
+        "ConfigMap",
+        re.compile(r"qa-product-config-legacy-[a-z0-9]{10}"),
+    )
+    require(
+        product_config.get("data", {}).get("TRACING_ZIPKIN_ENABLED") == "true"
+        and product_config.get("data", {}).get("ZIPKIN_HOST")
+        == "qa-alloy.qa-monitoring.svc.cluster.local",
+        "product-api-legacy must preserve the Alloy Zipkin destination",
+    )
+
+    gateway = one(aggregate, "Deployment", "qa-agent-portal-gateway-legacy")
+    validate_qa_java(gateway, "agent-portal-gateway-legacy", "1.3.0")
+    gateway_container = gateway["spec"]["template"]["spec"]["containers"][0]
+    gateway_values = {
+        item.get("name"): item.get("value") for item in gateway_container.get("env", [])
+    }
+    require(
+        gateway_values.get("TRACING_ZIPKIN_HTTP_URL")
+        == "http://qa-alloy.qa-monitoring.svc.cluster.local:9411",
+        "agent-portal-gateway-legacy must preserve the Alloy Zipkin destination",
+    )
+
+
 def validate_aggregates(
     qa_go_index: dict[tuple[str, str, str], dict[str, Any]],
     aggregate: list[dict[str, Any]],
@@ -397,6 +487,7 @@ def main() -> int:
         qa_go_index = validate_go_environment(qa_go, "qa")
         validate_disjoint(local_go, local_legacy, "local-dev")
         validate_disjoint(qa_go, qa_legacy, "qa")
+        validate_qa_java_observability(qa_legacy, qa_aggregate)
         validate_aggregates(qa_go_index, qa_aggregate)
     except ValidationError as error:
         print(f"product-deploy-check: {error}", file=sys.stderr)
