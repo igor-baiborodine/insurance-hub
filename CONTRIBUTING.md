@@ -259,116 +259,20 @@ limits of fake-adapter and disposable tests separately from live-environment evi
 
 ### Branch Names
 
-All branch names **must** follow a consistent structure based on
-the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) types.  
-This ensures clarity, easier traceability to issues, and automation support.
+Follow the canonical [Git branch rules](ai/rules/git-rules.md#branch-names). Branch names use an
+allowed Conventional Commit type, an optional `issue-<number>-` prefix, and a concise lowercase
+hyphen-separated description.
 
-1. Branch Name Format
-
-    ```text
-    <type>/[issue-<number>]<very-short-description>
-    ```
-
-    - `type` — one of the allowed conventional commit types (`feat`, `fix`, `docs`, `chore`,
-      `refactor`, `perf`, `test`, `style`, etc.).
-    - `[issue-<number>]` — the related GitHub issue number in the form `issue-7`. This part is *
-      *optional**
-      but strongly recommended when the branch corresponds to a specific ticket.
-    - `<very-short-description>` — a short, lowercase, dash-separated description of the work being
-      done.
-    - **Use `-` (dash)** to separate words inside the description.
-    - **Do not** use spaces, underscores, or uppercase letters.
-
-2. Examples
-
-    - With the issue number:
-        - `feat/issue-6-provision-kind-and-microk8s-clusters`
-        - `fix/issue-14-handle-null-pointer-in-payment-service`
-        - `docs/issue-22-update-api-specification`
-
-    - Without the issue number:
-        - `feat/add-basic-authentication`
-        - `refactor/cleanup-database-migrations`
-        - `chore/update-dependencies`
-
-3. Rules & Best Practices
-
-    * **Match your branch type to your commit type**: for example, a branch starting with `feat/`
-      should
-      contain commits whose main type is `feat`.
-    * **Keep description short and clear**: maximum ~5 words helps avoid overly long branch names.
-    * **Lowercase only**: use lowercase letters and dashes to separate words.
-    * **Avoid generic words**: be specific (`feat/add-jwt-auth` instead of `feat/add-auth`).
-    * **One purpose per branch**: Avoid mixing unrelated changes in the same branch.
-
-4. Enforcing Branch Names
-
-   A Git [pre-push hook](.githooks/pre-push) is used to validate branch names to ensure they follow
-   the above convention. Configure the repository hooks as described in
-   [Configure Repository Hooks](#configure-repository-hooks). If the branch name does not comply
-   with the convention, the **push will be blocked** until it's renamed.
+The Git [pre-push hook](.githooks/pre-push) validates branch names and blocks a push when the name
+does not comply. Enable it as described in
+[Configure Repository Hooks](#configure-repository-hooks).
 
 ### Commit Messages
 
-To keep our commit history clear, consistent, and automatable, all commit messages **must** follow
-the [Conventional Commits specification (v1.0.0)](https://www.conventionalcommits.org/en/v1.0.0/).
-
-1. Commit Message Format
-
-   Your commit message **must** use the following structure:
-
-    ```text
-    <type>: [issue-<number>] <very short description>
-    ```
-
-    - `<type>` is a lowercase conventional commit type (e.g., `feat`, `fix`, `docs`, `chore`,
-      `refactor`,
-      etc.).
-    - The **GitHub issue reference** (for example, `issue-6`) is optional but recommended when the
-      commit relates to a specific issue or task.
-    - The **description** should be very short, concise, and in lowercase without a period at the
-      end. A commit that records completion of a tracked delivery step may use sentence case and
-      end with a period.
-    - Use imperative mood (like a command) for the description, e.g., "add logging support" not "
-      added
-      logging support."
-
-2. Examples
-
-    - `feat: issue-12 add new user login endpoint`
-    - `fix: handle null pointer on empty request`
-    - `docs: update README with installation steps`
-    - `chore: update dependencies to latest versions`
-    - `refactor: issue-6 cleanup old authentication code`
-
-3. Details
-
-    - Always write the commit type and optional issue reference in **lowercase**. Write the
-      description in lowercase except when recording completion of a tracked delivery step; that
-      description may use sentence case and end with a period. All other format and imperative-mood
-      requirements still apply.
-    - Commit types commonly used include:
-        - `feat`: a new feature
-        - `fix`: a bug fix
-        - `docs`: documentation only changes
-        - `style`: changes that do not affect the meaning of the code (white-space, formatting)
-        - `refactor`: code change that neither fixes a bug nor adds a feature
-        - `perf`: a code change that improves performance
-        - `test`: adding missing tests or correcting existing tests
-        - `chore`: changes to the build process or auxiliary tools
-    - For **breaking changes**, include `!` after the type, and provide details in the commit body
-      or
-      footer as per the official spec.
-
-4. Why Follow This Convention?
-
-    - Enables automatic generation of changelogs.
-    - Supports semantic versioning automation.
-    - Provides a clearer commit history and task traceability.
-    - Facilitates review and collaboration.
-
-For full details and examples, see
-the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).
+Follow the canonical [Git commit-message rules](ai/rules/git-rules.md#commit-messages). Commit
+messages use the repository's allowed Conventional Commit types, an optional bracketed issue
+reference such as `[issue-123]`, and a concise imperative description. Authors and reviewers check
+this policy because the repository does not provide a `commit-msg` hook.
 
 ### Makefile
 
