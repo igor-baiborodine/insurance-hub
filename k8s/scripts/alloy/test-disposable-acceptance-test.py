@@ -290,6 +290,40 @@ class AcceptanceVerifierTest(unittest.TestCase):
                 [{"authorization": "acceptance-secret"}], ["acceptance-secret"],
             )
 
+    def test_metric_series_identity_rejects_varied_input_cardinality(self) -> None:
+        baseline = acceptance.metric_series_identity(
+            [{"__name__": "requests_total", "outcome": "success"}]
+        )
+        varied = acceptance.metric_series_identity(
+            [
+                {"__name__": "requests_total", "outcome": "success"},
+                {
+                    "__name__": "requests_total",
+                    "outcome": "success",
+                    "product_code": "unsafe-variable-label",
+                },
+            ]
+        )
+
+        with self.assertRaisesRegex(
+            acceptance.AcceptanceError, "changed Product metric cardinality"
+        ):
+            acceptance.verify_metric_series_stability(baseline, varied, 800)
+
+    def test_alloy_healthy_delivery_rejects_exporter_failure(self) -> None:
+        exposition = """
+otelcol_exporter_send_failed_spans_total{component_id="otelcol.exporter.otlp.tempo"} 1
+otelcol_exporter_sent_spans_total{component_id="otelcol.exporter.otlp.tempo"} 4
+otelcol_exporter_sent_spans_total{component_id="otelcol.exporter.otlp.zipkin_bridge"} 4
+"""
+        with mock.patch.object(
+            acceptance.backend, "read_alloy_metrics", return_value=exposition
+        ):
+            with self.assertRaisesRegex(
+                acceptance.AcceptanceError, "healthy Alloy delivery reported"
+            ):
+                acceptance.verify_alloy_healthy_delivery(12345, 4)
+
 
 if __name__ == "__main__":
     unittest.main()

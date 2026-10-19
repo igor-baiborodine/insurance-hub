@@ -800,11 +800,15 @@ def verify_alloy_healthy_delivery(
 ) -> Mapping[str, Any]:
     samples = backend.parse_prometheus_exposition(backend.read_alloy_metrics(metrics_port))
     zero_names = {
+        "loki_write_dropped_entries_total",
+        "otelcol_exporter_enqueue_failed_spans_total",
         "otelcol_receiver_failed_metric_points_total",
         "otelcol_receiver_refused_metric_points_total",
         "otelcol_receiver_failed_spans_total",
         "otelcol_receiver_refused_spans_total",
         "otelcol_exporter_loki_entries_failed",
+        "otelcol_exporter_send_failed_spans_total",
+        "prometheus_remote_storage_samples_dropped_total",
         "prometheus_remote_storage_samples_failed_total",
         "prometheus_remote_storage_samples_pending",
     }
@@ -1065,6 +1069,35 @@ def verify_sentinels_absent(inspected: Sequence[Any], sentinels: Sequence[str]) 
     return len(sentinels)
 
 
+def metric_series_identity(series: Sequence[Mapping[str, Any]]) -> set[tuple[tuple[str, str], ...]]:
+    identity: set[tuple[tuple[str, str], ...]] = set()
+    for labels in series:
+        if not isinstance(labels, Mapping) or not all(
+            isinstance(name, str) and isinstance(value, str)
+            for name, value in labels.items()
+        ):
+            raise AcceptanceError("Product metric series response is malformed")
+        identity.add(tuple(sorted(labels.items())))
+    return identity
+
+
+def verify_metric_series_stability(
+    baseline: set[tuple[tuple[str, str], ...]],
+    observed: set[tuple[tuple[str, str], ...]],
+    ceiling: int,
+) -> int:
+    if len(observed) > ceiling:
+        raise AcceptanceError("varied inputs exceeded the Product series ceiling")
+    if observed != baseline:
+        added = len(observed - baseline)
+        removed = len(baseline - observed)
+        raise AcceptanceError(
+            "varied product codes or trace IDs changed Product metric cardinality "
+            f"(added {added}, removed {removed})"
+        )
+    return len(observed)
+
+
 def verify_freshness(
     helper: Path,
     product: ProductRun,
@@ -1179,7 +1212,9 @@ def verify_varied_input_safety(
         lambda value: len(value.get("data", [])) > 0,
         "baseline Product metric series",
     )
-    baseline_count = len(baseline_series["data"])
+    initial_count = len(metric_series_identity(baseline_series["data"]))
+    baseline_identity: Optional[set[tuple[tuple[str, str], ...]]] = None
+    baseline_count = 0
     sentinels = [
         "acceptance-authorization-secret", "acceptance-cookie-secret",
         "acceptance-baggage-secret", "acceptance-customer-policy-secret",
@@ -1205,6 +1240,24 @@ def verify_varied_input_safety(
                 raise AcceptanceError(f"varied missing read returned HTTP {error.code}") from error
         else:
             raise AcceptanceError("varied missing read unexpectedly succeeded")
+        if index == 0:
+            wait_metric_request_total(
+                ports["prometheus"], product.instance, baseline_total + 1,
+                profile["delivery"]["metric_max_seconds"],
+            )
+            first_series = backend.wait_json(
+                f"http://127.0.0.1:{ports['prometheus']}/api/v1/series?" +
+                urllib.parse.urlencode({
+                    "match[]": (f'{{service_name="product-service",'
+                                f'service_instance_id="{product.instance}"}}')
+                }),
+                lambda value: len(value.get("data", [])) >= initial_count,
+                "first varied-input Product metric series",
+            )
+            baseline_identity = metric_series_identity(first_series["data"])
+            baseline_count = len(baseline_identity)
+    if baseline_identity is None:
+        raise AcceptanceError("varied-input metric baseline was not captured")
     wait_metric_request_total(
         ports["prometheus"], product.instance, baseline_total + 32,
         profile["delivery"]["metric_max_seconds"],
@@ -1217,9 +1270,12 @@ def verify_varied_input_safety(
         lambda value: len(value.get("data", [])) >= baseline_count,
         "varied-input Product metric series",
     )
-    series_count = len(series["data"])
-    if series_count > profile["cardinality"]["application_runtime_series_per_instance_max"]:
-        raise AcceptanceError("varied inputs exceeded the Product series ceiling")
+    series_identity = metric_series_identity(series["data"])
+    series_count = verify_metric_series_stability(
+        baseline_identity,
+        series_identity,
+        profile["cardinality"]["application_runtime_series_per_instance_max"],
+    )
     inspected: List[Any] = [series, (root / "service.log").read_text(encoding="utf-8")]
     for trace_id in (trace_ids[0], trace_ids[-1]):
         trace = backend.wait_json(
@@ -1230,7 +1286,7 @@ def verify_varied_input_safety(
         inspected.extend((trace, loki_trace_logs(ports["loki"], trace_id, 30)))
     absent = verify_sentinels_absent(inspected, sentinels)
     return {"inputs": 32, "series_before": baseline_count, "series_after": series_count,
-            "sentinels_absent": absent}
+            "series_delta": 0, "sentinels_absent": absent}
 
 
 def execute(args: argparse.Namespace) -> None:

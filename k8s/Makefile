@@ -320,6 +320,8 @@ MONITORING_RENDER_RULE_SCRIPT := scripts/monitoring/render_prometheus_rule.py
 MONITORING_RENDER_DASHBOARD_SCRIPT := scripts/monitoring/render_grafana_dashboard.py
 MONITORING_RESOLVE_SCRIPT := scripts/monitoring/resolve_monitoring.py
 MONITORING_TEST_SCRIPT := scripts/monitoring/test_monitoring.py
+MONITORING_VERIFY_PRODUCT_SCRIPT := scripts/monitoring/verify_product_observability.py
+MONITORING_VERIFY_PRODUCT_TEST := scripts/monitoring/verify_product_observability_test.py
 MONITORING_CHECK_ENV ?= qa
 MONITORING_SERVICES ?= $(notdir $(wildcard $(MONITORING_ASSETS_ROOT)/services/*))
 OBSERVABILITY_SERVICE_DOMAIN ?= product
@@ -475,6 +477,30 @@ monitoring-assets-check: _monitoring-assets-args-check ## Validate one service d
 .PHONY: monitoring-tooling-test
 monitoring-tooling-test: ## Exercise generic dashboard/rule rendering, fixture, and cleanup policies
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_CHECK_TEST)" -v
+
+.PHONY: observability-verify-test-tooling
+observability-verify-test-tooling: ## Exercise Product live-verification guards and owned-forward cleanup
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_VERIFY_PRODUCT_TEST)" -v
+
+.PHONY: verify-product-observability
+verify-product-observability: _monitoring-assets-args-check ## Read-only Product QA verification (ENV_NAME, SVC_NAME, VERIFY_MODE, VERIFY_SOURCE_REVISION)
+	@if [ "$(origin VERIFY_MODE)" != "command line" ] || \
+		{ [ "$(VERIFY_MODE)" != "disabled" ] && [ "$(VERIFY_MODE)" != "enabled" ]; }; then \
+		echo "ERROR: VERIFY_MODE=disabled|enabled is required on the make command line."; \
+		exit 1; \
+	fi
+	@if [ "$(origin VERIFY_SOURCE_REVISION)" != "command line" ] || \
+		! printf '%s' "$(VERIFY_SOURCE_REVISION)" | grep -Eq '^[0-9a-f]{40}$$'; then \
+		echo "ERROR: VERIFY_SOURCE_REVISION=<40-lowercase-hex> is required on the make command line."; \
+		exit 1; \
+	fi
+	@command -v kubectl >/dev/null || { echo "ERROR: kubectl is required."; exit 1; }
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_VERIFY_PRODUCT_SCRIPT)" \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" \
+		--environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)" \
+		--mode "$(VERIFY_MODE)" \
+		--source-revision "$(VERIFY_SOURCE_REVISION)"
 
 .PHONY: test-monitoring
 test-monitoring: _monitoring-assets-args-check ## Query one service dashboard against collected disposable Prometheus data (ENV_NAME, SVC_NAME)
@@ -815,7 +841,7 @@ alloy-test-tooling: ## Exercise shared Alloy identity, allowlist, target, positi
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ALLOY_CHECK_TEST)" -v
 
 .PHONY: check-observability
-check-observability: prometheus-receiver-config-check monitoring-tooling-test monitoring-assets-check-all alloy-config-check alloy-test-tooling observability-backend-test-tooling observability-acceptance-test-tooling ## Run non-mutating observability configuration and policy checks
+check-observability: prometheus-receiver-config-check monitoring-tooling-test observability-verify-test-tooling monitoring-assets-check-all alloy-config-check alloy-test-tooling observability-backend-test-tooling observability-acceptance-test-tooling ## Run non-mutating observability configuration and policy checks
 
 .PHONY: alloy-install
 alloy-install: _monitoring-ns-check ## Install Grafana Alloy in QA cluster

@@ -312,8 +312,9 @@ require fresh source, reconciliation, and image-pull evidence; do not bypass Flu
 
 Kustomize's generated ConfigMap hash causes a pod-template change for non-secret configuration.
 Change only the intended Go configuration, render/check, and apply locally or merge its reviewed
-QA change. Prove a newly ready Pod received the value and still serves reads. `OTEL_ENABLED=false`
-remains explicit until #135 owns telemetry ingestion.
+QA change. Prove a newly ready Pod received the value and still serves reads. Follow the separate
+[Product observability runbook](observability-runbook.md) for the guarded telemetry activation and
+verification sequence; `OTEL_ENABLED=false` remains explicit outside that sequence.
 
 A mutable Secret update does not change an environment variable in an existing process.
 Prepare a non-secret pod-template annotation in the selected environment's deployment patch:
