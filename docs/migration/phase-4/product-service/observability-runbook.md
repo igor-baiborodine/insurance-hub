@@ -24,8 +24,11 @@ preflight, staged delivery, verification, investigation, rollback, and evidence 
 The Go Product service remains an internal migration candidate. Product code and QA configuration
 are reconciled from canonical `main` by Flux. Prometheus/Grafana and Alloy are maintained through
 their pinned Helm owners in [`k8s/Makefile`](../../../../k8s/Makefile). Product rules and the
-dashboard are separate repository assets applied through guarded Make targets. Do not edit live
-ConfigMaps, Prometheus resources, dashboards, or Product workloads by hand.
+dashboard are separate repository assets applied through guarded Make targets. Test and
+verification targets and their exclusive variables live in
+[`k8s/tests/validation.mk`](../../../../k8s/tests/validation.mk), which the repository root Makefile
+includes explicitly. Do not edit live ConfigMaps, Prometheus resources, dashboards, or Product
+workloads by hand.
 
 ## Signal paths and ownership
 
@@ -52,6 +55,7 @@ flowchart LR
 | Product alerts | `k8s/observability/services/product/alerts.yaml` | Guarded `prometheus-rules-apply` target |
 | Product dashboard | `k8s/observability/services/product/dashboard.json` | Guarded `grafana-dashboard-apply` target and Grafana sidecar |
 | QA target coordinates | `k8s/observability/environments/qa.json` | Flux and the named Kubernetes resources |
+| Kubernetes tests and verification | `k8s/tests/validation.mk` | Included explicitly by the repository root `Makefile`; invoke its public targets from the repository root |
 
 Application reads, management probes, and shutdown do not depend on a collector. Export is
 bounded and asynchronous. When Alloy or a backend is unavailable, preserve Product availability,
@@ -95,7 +99,7 @@ make product-security-test-tooling
 make product-security-check
 make go-svc-deploy-check SVC_NAME=product
 make go-svc-deploy-test-tooling SVC_NAME=product
-make -C k8s check-observability
+make check-observability
 make -C services/product-service check-docs
 ```
 
@@ -112,7 +116,7 @@ The enabled disposable backend suite runs a real Product process against pinned 
 Tempo, and Alloy components without using QA:
 
 ```sh
-make -C k8s test-observability-backends
+make test-observability-backends
 ```
 
 Run the fixed acceptance profile in restartable phases. Each phase validates its candidate
@@ -120,12 +124,12 @@ identity and replaces only its own evidence file. The aggregate rejects missing,
 candidate evidence:
 
 ```sh
-make -C k8s test-observability-acceptance-overhead-1
-make -C k8s test-observability-acceptance-overhead-2
-make -C k8s test-observability-acceptance-overhead-3
-make -C k8s test-observability-acceptance-healthy
-make -C k8s test-observability-acceptance-recovery
-make -C k8s test-observability-acceptance-aggregate
+make test-observability-acceptance-overhead-1
+make test-observability-acceptance-overhead-2
+make test-observability-acceptance-overhead-3
+make test-observability-acceptance-healthy
+make test-observability-acceptance-recovery
+make test-observability-acceptance-aggregate
 ```
 
 `test-observability-acceptance-smoke` exercises the lifecycle with reduced timings. Its output is
@@ -153,7 +157,7 @@ rollback points.
 Before telemetry is enabled, run the read-only verifier against the exact disabled revision:
 
 ```sh
-make -C k8s verify-product-observability \
+make verify-product-observability \
   ENV_NAME=qa SVC_NAME=product VERIFY_MODE=disabled \
   VERIFY_SOURCE_REVISION=<full-40-character-revision>
 ```
@@ -204,7 +208,7 @@ After Flux reports the reviewed revision applied, return the active namespace to
 
 ```sh
 kubectl config set-context --current --namespace=qa-svc
-make -C k8s verify-product-observability \
+make verify-product-observability \
   ENV_NAME=qa SVC_NAME=product VERIFY_MODE=enabled \
   VERIFY_SOURCE_REVISION=<full-40-character-revision>
 ```

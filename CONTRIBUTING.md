@@ -379,12 +379,26 @@ recommendations ensures automation is consistent, maintainable, and easy to exte
 
     - Split complex automation into multiple Makefile fragments by domain (e.g., Docker, Kubernetes,
       testing).
-    - Use conditional includes with `-include` to keep the root Makefile clean and composable.
-    - Example:
+    - Prefer explicit includes in the repository root `Makefile`. This keeps the effective target
+      inventory and include order visible in one place.
+    - Use a shallow transitive include only when the included fragment belongs to a genuinely owned
+      subsystem and is not part of the repository-wide interface.
+    - Name reusable include fragments with a `.mk` extension. A fragment may depend on variables or
+      helper targets supplied by its documented parent and is not expected to run independently.
+    - Treat a child file named `Makefile` as an independently runnable entry point. Invoke it with
+      recursive Make, such as `$(MAKE) -C <directory> <target>`; do not include it merely to expose
+      its targets through the root.
+    - Use `include` for required fragments. Reserve `-include` for genuinely optional local or
+      generated fragments whose absence is expected.
+    - Root-level fragment example:
       ```makefile
-      -include docker/Makefile
-      -include k8s/Makefile
-      -include tests/Makefile
+      include make/docker.mk
+      include k8s/tests/validation.mk
+      ```
+    - Independently runnable child example:
+      ```makefile
+      deploy-local:
+	$(MAKE) -C k8s deploy-local
       ```
 
 2. Declare `.PHONY` for Non-File Targets

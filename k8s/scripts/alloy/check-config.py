@@ -698,7 +698,7 @@ def position_key(target: Mapping[str, str]) -> tuple[Optional[str], Optional[str
 def run_check(args: argparse.Namespace) -> None:
     values = args.values.read_text(encoding="utf-8")
     config = args.config.read_text(encoding="utf-8")
-    makefile = args.makefile.read_text(encoding="utf-8")
+    makefile = "\n".join(path.read_text(encoding="utf-8") for path in args.makefile)
     validate_source_policy(config, values, makefile)
     rendered = (
         sys.stdin.read()
@@ -712,7 +712,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--values", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--makefile", type=Path, required=True)
+    parser.add_argument("--makefile", type=Path, required=True, action="append")
     parser.add_argument("--rendered-rbac", type=Path, required=True)
     return parser.parse_args(argv)
 

@@ -233,7 +233,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--environment", required=True)
     parser.add_argument("--service", required=True)
     parser.add_argument("--values", type=Path, required=True)
-    parser.add_argument("--makefile", type=Path, required=True)
+    parser.add_argument("--makefile", type=Path, required=True, action="append")
     parser.add_argument("--rendered-stack", type=Path, required=True)
     return parser.parse_args(argv)
 
@@ -246,7 +246,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         validate_alerts(assets)
         validate_fixture(assets)
         validate_values(args.values.read_text(encoding="utf-8"))
-        validate_makefile(args.makefile.read_text(encoding="utf-8"))
+        makefiles = "\n".join(path.read_text(encoding="utf-8") for path in args.makefile)
+        validate_makefile(makefiles)
         validate_rendered_stack(args.rendered_stack.read_text(encoding="utf-8"))
     except (AssetError, OSError, ValidationError) as error:
         print(f"Monitoring asset check failed: {error}", file=sys.stderr)

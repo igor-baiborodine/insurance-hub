@@ -4,9 +4,10 @@
 ################################################################################
 
 ################################################################################
-# Includes - child domain-specific Makefiles
+# Explicit root-level domain includes
 ################################################################################
 include k8s/Makefile
+include k8s/tests/validation.mk
 include k8s/bootstrap/Makefile
 include scripts/product-baseline/Makefile
 include scripts/product-security/Makefile
