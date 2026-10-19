@@ -26,6 +26,8 @@
       - [issue-156-N01 Automatic added-module selection](#issue-156-n01-automatic-added-module-selection)
       - [issue-156-N02 Automatic removed-module outcome](#issue-156-n02-automatic-removed-module-outcome)
       - [issue-156-N03 Module move and identity correlation](#issue-156-n03-module-move-and-identity-correlation)
+    - [Issue 174 Standardize auxiliary tooling on Python](#issue-174-standardize-auxiliary-tooling-on-python)
+      - [issue-174-N01 Python static-check CI workflow](#issue-174-n01-python-static-check-ci-workflow)
   - [Ad hoc repository improvements](#ad-hoc-repository-improvements)
     - [Commit-message policy enforcement](#commit-message-policy-enforcement)
       - [adhoc-commit-msg-N01 Commit-message hook](#adhoc-commit-msg-n01-commit-message-hook)
@@ -447,6 +449,53 @@ validation during the move and its identity, consumer, import, and rollback rule
 changes, identity-preserving and identity-changing cases, stale inventory, and ambiguous ownership.
 Only the agreed lifecycle forms produce a selected outcome; other cases fail before bootstrap with
 explicit diagnostics.
+
+### Issue 174 Standardize auxiliary tooling on Python
+
+Origin: issue-174 requirements refinement on 2026-10-19. Hosted enforcement of mechanically
+checkable Python rules is retained as a separate follow-up to the ticket's local tooling and
+policy work.
+
+Source ticket: [issue 174](https://github.com/igor-baiborodine/insurance-hub/issues/174).
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-174-N01](#issue-174-n01-python-static-check-ci-workflow) | Python static-check CI workflow | Deferred | Unassigned |
+
+#### issue-174-N01 Python static-check CI workflow
+
+**Requirement:** Add a dedicated CI workflow that enforces the mechanically checkable Python
+rules established by issue 174 through non-mutating static checks, including Ruff formatting
+verification and linting. Reuse the canonical configuration, pinned tooling, and owning Make
+targets, with a dedicated static-only target where existing targets also execute repository code.
+Define triggers for relevant Python source, tooling configuration, dependency pins, Make targets,
+and workflow changes. Document checked paths and justified exclusions so new auxiliary Python
+files cannot silently escape validation.
+
+The workflow may execute the installed formatter/linter and necessary setup tools, but must not
+execute or import repository Python scripts or modules, collect or run pytest tests, or invoke
+operational, integration, or acceptance runners. It must not start application infrastructure or
+perform deployment or administrative mutations. Formatting checks must not rewrite source, and
+linting must not apply fixes. Keep behavioral rules and conventions that static tools cannot
+establish, including meaningful Given/When/Then separation, under local validation and review.
+
+**Why deferred:** Issue 174 establishes local Python checks and explicitly excludes a new Python
+CI workflow while preserving issue 156's CI boundaries. Hosted static enforcement requires a
+separately accepted follow-up scope; this ledger entry does not expand issue 174 or change
+existing workflow triggers.
+
+**Reconsider when:** Issue 174's canonical Python rules, pinned tools, and static Make targets
+are available, and hosted enforcement is selected for a follow-up ticket.
+
+**Acceptance evidence:** Hosted runs accept compliant files and reject representative formatting
+and lint violations with actionable diagnostics using the same configuration and pins as local
+checks. Trigger and scope evidence covers relevant source/configuration changes, newly added
+Python files, and documented exclusions. Workflow and invoked-target inspection, supported by
+run logs and a harmless execution sentinel, proves repository Python code is neither imported
+nor executed, including through setup or transitive Make dependencies; no test collection or
+infrastructure startup occurs. Checks leave source files unchanged. Document enforced rules,
+rules reserved for review or runtime tests, and measured workflow duration; existing Go, legacy,
+and release workflow behavior remains unchanged.
 
 ## Ad hoc repository improvements
 
