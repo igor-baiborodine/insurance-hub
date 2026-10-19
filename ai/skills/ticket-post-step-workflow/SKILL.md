@@ -3,6 +3,18 @@ name: ticket-post-step-workflow
 description: Use after a concrete ticket delivery step has been completed. This workflow updates the delivery tracker, creates a per-step summary, and refreshes the ticket git diff artifact.
 ---
 
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Ticket Post-Step Workflow](#ticket-post-step-workflow)
+  - [Required Inputs](#required-inputs)
+  - [Required Post-Step Actions](#required-post-step-actions)
+  - [Constraints](#constraints)
+    - [Validation evidence record](#validation-evidence-record)
+  - [Output Checklist](#output-checklist)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Ticket Post-Step Workflow
 
 Use this skill only after a concrete delivery step has been completed.
@@ -22,8 +34,10 @@ artifact preflight before writing. Perform these actions in order:
 
 1. Update `<ticket-dir>/<ticket>-delivery-steps.md`
    - mark the completed step as done
-   - add concise findings or decisions for that step
    - record the step artifact filename
+   - keep the `Progress` section limited to status, step title, planned pull request when applicable,
+     and the step summary artifact reference; record implementation details, findings, decisions,
+     and validation results in the per-step summary instead
 
 2. Create the per-step markdown summary:
    - `<ticket-dir>/<ticket>-step-<nn>-<summary>.md`

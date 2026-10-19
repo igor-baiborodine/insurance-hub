@@ -78,8 +78,14 @@ Once the ticket is implementation-ready:
 
 - create the delivery steps artifact at `<ticket-dir>/<ticket>-delivery-steps.md`
 - use `ai/templates/delivery-steps-template.md` and reference the ticket-content file as the specification
+- assess whether the ticket should be delivered in one pull request or split across multiple pull
+  requests, and record the decision and rationale in the plan
+- when multiple pull requests are appropriate, mark every delivery step clearly with its planned
+  pull request as `PR1`, `PR2`, and so on, and identify ordering or dependency constraints
 - make the steps granular enough to track progress and validate behavior incrementally
-- include a progress section
+- include a progress section containing only step status, step title, planned pull request when
+  applicable, and the step summary artifact reference; keep implementation details, findings,
+  decisions, and validation results in the dedicated step execution summary document
 - identify module boundaries, tests, and validation checkpoints
 
 For Python tooling, distinguish pure logic/fake-adapter tests, disposable integration tests, and
