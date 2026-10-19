@@ -94,6 +94,10 @@ and both linked rules: [development](rules/python-development.md) and
 to implement and verify administrative tooling. Load other language rules when the affected
 code or tooling requires them; Python does not introduce a new service implementation stack.
 
+For `Makefile`, `.mk` fragment, target, variable, or recipe changes, load
+[the Makefile rules](rules/makefile-rules.md). They define composition, entry-point and fragment
+ownership, target interfaces, variable and path handling, recipe behavior, and validation.
+
 - Keep rules stable and concise.
 - Keep skills procedural and task-specific.
 - Keep the `AGENTS.md` Skills catalog synchronized with canonical directories under `ai/skills/`.

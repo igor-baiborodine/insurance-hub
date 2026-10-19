@@ -44,7 +44,7 @@ instructions using [AGENTS.md](../../AGENTS.md) before editing.
 - Use the owning Makefile targets for repeatable development, validation, and administrative
   operations. Inspect recipes, prerequisites, working directory, and supported variables first.
   Shell/Python scripts can implement recipes; developer and CI entry points should use the same
-  targets. Follow [CONTRIBUTING.md](../../CONTRIBUTING.md#makefile).
+  targets. Follow [Makefile rules](makefile-rules.md).
 - If a required target is missing, add or extend the smallest suitable target within task scope;
   otherwise report the missing capability. Do not bypass a target's guards by invoking its script
   directly. Read-only source inspection does not require a Make target.

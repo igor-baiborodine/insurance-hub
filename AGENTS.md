@@ -128,6 +128,8 @@ Copilot to their canonical workflows under `ai/skills/`.
 
 - Follow [the naming rules](ai/rules/naming-rules.md) whenever creating or renaming files or
   directories.
+- Follow [the Makefile rules](ai/rules/makefile-rules.md) whenever creating or changing a
+  `Makefile`, included `.mk` fragment, target, variable, or recipe.
 - Use Python as an auxiliary language for administrative and repository tooling when structured
   data, validation, or orchestration makes Bash unwieldy. Keep simple shell tasks in Bash and
   preserve the existing service languages and migration direction. For Python work, load

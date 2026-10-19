@@ -1,6 +1,6 @@
 ################################################################################
 # Insurance Hub - Root Makefile
-# Follows conventions from CONTRIBUTING.md (Section Makefile Style Guide)
+# Canonical conventions: ai/rules/makefile-rules.md
 ################################################################################
 
 ################################################################################

@@ -34,7 +34,7 @@ override canonical repository requirements. Stop and surface conflicts for resol
   working directory and supported variables; do not assume a root target covers nested modules.
   Read-only file inspection and Git review remain part of normal repository discovery.
 - If a needed target is missing or insufficient, add or extend the smallest appropriate target
-  when within the ticket's scope, following [CONTRIBUTING.md](../../CONTRIBUTING.md#makefile).
+  when within the ticket's scope, following [Makefile rules](makefile-rules.md).
   Otherwise report the missing capability and affected validation as blocked. Never fall back to
   direct tooling, invent a target, or claim a check passed because no target exists.
 - Keep versions, flags, exclusions, module selection, and tool order in Makefiles and checked-in
