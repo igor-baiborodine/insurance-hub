@@ -2,82 +2,77 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
 - [Python Validation](#python-validation)
-  - [Select checks from changed behavior](#select-checks-from-changed-behavior)
-  - [Behavioral and failure coverage](#behavioral-and-failure-coverage)
-  - [Integration and permission checks](#integration-and-permission-checks)
-  - [Current examples and evidence](#current-examples-and-evidence)
+  - [Selection and order](#selection-and-order)
+  - [Changed-boundary evidence](#changed-boundary-evidence)
+  - [Requirement verification](#requirement-verification)
+  - [Evidence limits](#evidence-limits)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 # Python Validation
 
-Apply [Python development](python-development.md) and use the owning Makefile's documented
-targets. Inspect their actual coverage and side effects before execution. No universal Python
-lint, formatting, or test target is implied by this rule.
-Apply the repository-wide [testability assessment](repo-rules.md#testability) when implementing
-unit or integration tests with complicated fixture wiring or test setup.
+Apply [development](python-development.md), [testing](python-test.md), and
+[formatting](python-formatting.md). Use owning Make targets after inspecting recipes,
+prerequisites, selected interpreter, file selection, and side effects. Exact targets and
+toolchain arrive in issue-174 Steps 4–5; missing targets are blocked checks, not passes.
 
-## Select checks from changed behavior
+## Selection and order
 
-- Identify the scripts, callers, supported interpreter, configuration inputs, external tools,
-  Make recipes, and CI jobs affected by the change. A Python helper may be exercised through a
-  shell harness or service target rather than a standalone Python test suite.
-- Run the narrowest meaningful checks for the changed behavior, then applicable existing gates.
-  Reuse configured syntax, format, lint, and type checks when available. Syntax checks alone do
-  not establish runtime compatibility or behavioral correctness; avoid leaving bytecode caches
-  and generated files in the checkout.
-- Prefer standard-library testing facilities for standalone tools unless their owner already
-  uses another framework. Test behavior at stable interfaces rather than mirroring implementation.
-  Documentation-only edits need documentation checks, not unrelated database lifecycle tests.
-- If required coverage or a Make target is missing, add it within scope or record it as unresolved.
-  Do not claim unavailable tools or unexecuted checks passed. Do not add new dependencies just to
-  satisfy an assumed repository-wide Python toolchain.
+1. Identify changed Python, tests, wrappers, Make callers, configuration, and contracts. Record
+   selected CPython executable/version. Check import safety and interpreter selection at root,
+   owner-local, recursive, and supported override paths when affected.
+2. Run the owning format target on changed handwritten Python, review its diff, then run
+   non-mutating format-check and lint. Follow [formatting](python-formatting.md) for scope and
+   exclusions. Syntax or lint success does not prove behavior.
+3. Run the smallest owning fast pytest target that covers behavior and failure paths. Check
+   collection separately when discovery/markers change; verify default no-path discovery excludes
+   full acceptance. Run disposable integration when a real external boundary changed.
+4. Run affected full acceptance only through explicit targets when harness behavior or measurements
+   change; preserve workload, observation window, thresholds, and final-code evidence. Rerun
+   affected evidence after a material late fix.
+5. Run changed Markdown's TOC format/check and applicable Make/module checks. Review artifact
+   ignore/index state for ticket work. Record unrun prerequisites and limits.
 
-## Behavioral and failure coverage
+Do not execute an administrative mutation merely to validate code. Validate guards and dry-run
+with fakes and use disposable resources for integration. Follow the
+[testability assessment](repo-rules.md#testability) when fixture wiring becomes complicated.
 
-Use the relevant cases below, proportional to the tool's behavior and risk:
+## Changed-boundary evidence
 
-| Changed boundary | Evidence to obtain |
+| Changed boundary | Required evidence when applicable |
 | --- | --- |
-| Parsing and dispatch | Valid inputs work; malformed/missing inputs, unsupported actions/profiles, unsafe paths, and wrong targets fail before mutation. |
-| Structured data | Compare meaningful fields and types; cover invalid schemas, missing fields, encoding, and precision where the contract depends on them. |
-| CLI and subprocesses | Check exit status and output contracts, command failure, timeout, and safe diagnostics; verify the child receives the intended arguments/environment. |
-| State changes | Verify the postcondition, idempotent reruns where promised, pre-existing state, partial failure, recovery, and safe retry behavior. |
-| Resource lifetime | Check temporary-file and background-process cleanup after success, failure, and interruption; include setup failures. |
-| Credentials | Use synthetic secrets to prove they do not leak through argv, output, exceptions, or artifacts; check sensitive-file permissions and retention policy. |
+| Pure decisions and CLI | Valid/invalid arguments, output/status contracts, malformed data, wrong target before mutation. |
+| Subprocesses and workflows | Arguments/environment, nonzero exit, timeout, remaining deadline, heartbeat, interruption, process-group cleanup. |
+| State and resources | Partial setup, postconditions, safe rerun/retry, reverse cleanup, cleanup failure, dry-run writes. |
+| Secrets and permissions | Synthetic sentinel absent from output/diagnostics/artifacts, approved input channel, file modes, role-specific allowed/denied operations. |
+| Real integration | Disposable target, actual parser/SQL/transport/permissions as applicable, owned cleanup, bounded waits. |
+| Acceptance harness | Original workload/budgets, measurement overhead, final-code full run, evidence limits. |
 
-Mocks or fake adapters help test orchestration and failure paths. They do not prove that SQL,
-Kubernetes permissions, or a remote system behaves as assumed; verify those contracts at the
-appropriate real boundary when they change.
+Fake-adapter tests do not prove remote contracts, privileges, deployed TLS, Secret delivery, or
+full-duration acceptance. Authentication or read-only rejection does not prove a database
+privilege denial; inspect the intended error (PostgreSQL SQLSTATE `42501`) at a disposable
+boundary. Historical results are baseline only.
 
-## Integration and permission checks
+## Requirement verification
 
-- Use disposable databases, containers, namespaces, and synthetic credentials for automated
-  mutation tests. Declare prerequisites and pinned images where applicable, bound waits, and
-  clean up only resources owned by that run. Never default tests to a shared environment.
-- Test allowed and denied operations for the selected role profile using its actual credential.
-  Inspect effective privileges, including memberships, ownership, and inherited/default grants
-  when relevant. Authentication failure, syntax error, or a read-only transaction rejection does
-  not prove privilege denial; assert the intended error, such as PostgreSQL SQLSTATE `42501`.
-- Use rollback-safe probes for transactional operations and verify preserved state afterward.
-  Operations that cannot be rolled back need disposable resources or a separately authorized
-  procedure; do not use destructive live probes as a routine validation shortcut.
-- Distinguish disposable results, fake-adapter checks, and live-environment evidence. Passing a
-  local harness does not establish deployed TLS, Secret delivery, RBAC, or consumer compatibility.
-
-## Current examples and evidence
-
-Run from the repository root after inspecting the owning recipes:
-
-| Existing target | Scope and limit |
+| ID and policy section | Verification method |
 | --- | --- |
-| `make postgres-svc-role-test` | Shared dispatch guards and Product reader lifecycle/permissions using fake Kubernetes interactions and disposable PostgreSQL; requires Docker. It does not test future role profiles or a live Kubernetes environment. |
-| `make product-baseline-test BASELINE_SUITE=comparator` | HTTP baseline comparator fixtures through the existing shell harness; does not prove a deployed service's parity. |
+| PY-DEV-01 [Language and ownership](python-development.md#language-and-ownership) | Changed-file/caller review; inspect owner, Make boundary, shell exception, and compatibility decision. |
+| PY-DEV-02 [Runtime and program boundary](python-development.md#runtime-and-program-boundary) | Import/CLI tests and review of phases, parsing, data validation, stdout/stderr, statuses, and dependencies. |
+| PY-DEV-03 [Subprocesses, deadlines, and progress](python-development.md#subprocesses-deadlines-and-progress) | Budget/command review; fake-command and disposable process tests for failure, deadline, heartbeat, retry. |
+| PY-DEV-04 [Resource lifetime and security](python-development.md#resource-lifetime-and-security) | Ownership/exposure review; interruption, cleanup, redaction, file-mode, and partial-setup tests. |
+| PY-DEV-05 [Administrative operations](python-development.md#administrative-operations) | Target, side-effect, and recovery review; guard/dry-run tests and disposable permission checks where needed. |
+| PY-TEST-01 [Files and discovery](python-test.md#files-and-discovery) | Strict-marker configuration, default no-path collection, and separate explicit fast/integration/acceptance targets. |
+| PY-TEST-02 [Scenarios and assertions](python-test.md#scenarios-and-assertions) | Scenario and Given/When/Then review plus meaningful pytest results; comment count alone is insufficient. |
+| PY-TEST-03 [Isolation and boundaries](python-test.md#isolation-and-boundaries) | Fixture/teardown review, fake-adapter tests, disposable integration, and acceptance evidence as applicable. |
+| PY-FMT-01 [Policy and scope](python-formatting.md#policy-and-scope) | Pin/configuration and selected-file review; format, non-mutating format-check, and lint targets. |
+| PY-RUN-01 [Runtime and program boundary](python-development.md#runtime-and-program-boundary) | CPython 3.14.8 setup/identity, lock/resolution, and representative root/owner/recursive/override checks. |
 
-These are examples, not a mandatory pair for every Python edit. Extend the owning tests when
-adding another profile or workflow; do not reuse a reader-only result as evidence for a writer
-or migrator.
+## Evidence limits
 
-Record the working directory, exact target and supported variables, interpreter/tool versions
-when relevant, tested scope, result, and limitations. Follow the existing ticket post-step evidence
-format for ticket work; redact secrets and report blocked or unrun checks separately from passes.
+Record exact command, working directory, relevant variables, interpreter/tool identities, source
+(local, CI, or manual), covered files/modules, result, and limitations. Mark unavailable, failed,
+blocked, or unrun checks honestly; do not infer a local pass from CI or a live pass from fakes.
+The [ticket post-step workflow](../skills/ticket-post-step-workflow/SKILL.md) defines the ticket
+evidence table. Formatting, syntax, collection, and mock-only results are not behavioral
+integration evidence.
