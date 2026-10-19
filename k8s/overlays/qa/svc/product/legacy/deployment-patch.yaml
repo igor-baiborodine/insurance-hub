@@ -2,8 +2,13 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: product-api-legacy
+  labels:
+    app.kubernetes.io/version: "1.6.0"
 spec:
   template:
+    metadata:
+      labels:
+        app.kubernetes.io/version: "1.6.0"
     spec:
       containers:
         - name: product-api-legacy
@@ -28,3 +33,5 @@ spec:
                 secretKeyRef:
                   name: qa-postgres-product-user-creds
                   key: password
+            - name: TRACING_ZIPKIN_SAMPLER_PROBABILITY
+              value: "1.0"

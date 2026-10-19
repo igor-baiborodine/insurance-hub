@@ -12,6 +12,15 @@ images:
   - name: insurance-hub-product-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/product-api
     newTag: 1.7.0
+configMapGenerator:
+  - name: product-config
+    behavior: merge
+    literals:
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
+      - OTEL_EXPORTER_OTLP_TIMEOUT=2s
+      - DEPLOYMENT_ENVIRONMENT=qa
+      - SERVICE_VERSION=sha-be510cc
 patches:
   - path: deployment-patch.yaml
     target:
