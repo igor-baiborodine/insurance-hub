@@ -48,12 +48,12 @@ contradictory execution record is unverified, not a pass. Do not report an unrel
 issue as a regression unless it directly blocks acceptance, and label it as pre-existing when it
 must be reported.
 
-For auxiliary Python changes, load [the Python rules](../../rules/python-rules.md) and both linked
-rules. Check the language/ownership boundary, Make recipes and their side effects, target guards,
-subprocess and secret handling, cleanup, and recovery for the behavior changed. Assess permissions
-against the selected profile's contract, and distinguish fake-adapter or disposable test results
-from live evidence. Apply the same review-only boundary; do not execute mutating administrative
-targets to reproduce a finding.
+For auxiliary Python changes, load [the Python entry point](../../rules/python-rules.md) and all
+four linked rules. Check the language/ownership boundary, Make recipes and their side effects,
+target guards, subprocess and secret handling, cleanup, and recovery for the behavior changed.
+Assess permissions against the selected profile's contract, and distinguish fake-adapter or
+disposable test results from live evidence. Apply the same review-only boundary; do not execute
+mutating administrative targets to reproduce a finding.
 
 ## Findings
 

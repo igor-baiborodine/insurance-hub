@@ -59,11 +59,11 @@ Check for:
 - permissions and security requirements
 - acceptance criteria that can be tested
 
-For auxiliary Python work, load [the Python rules](../../rules/python-rules.md) and their linked
-development and validation rules. Establish why Python fits better than a simple shell workflow,
-identify the script owner and Make interface, and define target selection, mutation boundaries,
-rerun/recovery behavior, and secret handling where applicable. Do not turn a tooling request into
-a Python service or a wholesale shell rewrite.
+For auxiliary Python work, load [the Python entry point](../../rules/python-rules.md) and all four
+linked rules. Establish why Python fits better than a simple shell workflow, identify the script
+owner and Make interface, and define target selection, mutation boundaries, rerun/recovery
+behavior, and secret handling where applicable. Do not turn a tooling request into a Python
+service or a wholesale shell rewrite.
 
 If information is missing or ambiguous:
 
