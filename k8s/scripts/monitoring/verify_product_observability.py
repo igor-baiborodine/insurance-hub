@@ -231,7 +231,9 @@ class KubernetesTarget:
             for item in group.get("rules", [])
             if item.get("alert")
         }
-        expected_alerts = set(self.assets.contract["alerts"]["names"])
+        expected_alert_durations = self.assets.contract["alerts"].get("for")
+        require(isinstance(expected_alert_durations, dict), "reviewed alert inventory is malformed")
+        expected_alerts = set(expected_alert_durations)
         require(alerts == expected_alerts, "live Product alert inventory differs from reviewed assets")
         dashboard_name = grafana_dashboard_resource(self.assets)["metadata"]["name"]
         dashboard = self.json(self.monitoring_namespace, "get", "configmap", dashboard_name)

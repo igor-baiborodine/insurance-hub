@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import dataclasses
+import json
 import sys
 import unittest
 from contextlib import nullcontext
@@ -50,6 +51,56 @@ class ProductObservabilityVerificationTest(unittest.TestCase):
             with self.assertRaisesRegex(verifier.VerificationError, "active Kubernetes context"):
                 target.coordinates()
             kubernetes.assert_not_called()
+
+    def test_monitoring_assets_accept_reviewed_alert_inventory(self) -> None:
+        target = verifier.KubernetesTarget(self.assets, "a" * 40)
+        expected_alerts = set(self.assets.contract["alerts"]["for"])
+        rule = {
+            "spec": {
+                "groups": [
+                    {"rules": [{"alert": name} for name in sorted(expected_alerts)]},
+                ]
+            }
+        }
+        dashboard = {
+            "data": {
+                "product-dashboard.json": json.dumps(
+                    {
+                        "uid": self.assets.contract["dashboard"]["uid"],
+                        "editable": False,
+                    }
+                )
+            }
+        }
+
+        with mock.patch.object(target, "json", side_effect=[rule, dashboard]):
+            observed = target.monitoring_assets()
+
+        self.assertEqual(
+            {
+                "prometheus_rule": "qa-product-service",
+                "dashboard_config_map": "qa-product-dashboard",
+            },
+            observed,
+        )
+
+    def test_monitoring_assets_reject_alert_inventory_mismatch(self) -> None:
+        target = verifier.KubernetesTarget(self.assets, "a" * 40)
+        expected_alerts = sorted(self.assets.contract["alerts"]["for"])
+        rule = {
+            "spec": {
+                "groups": [
+                    {"rules": [{"alert": name} for name in expected_alerts[1:]]},
+                ]
+            }
+        }
+
+        with mock.patch.object(target, "json", return_value=rule):
+            with self.assertRaisesRegex(
+                verifier.VerificationError,
+                "live Product alert inventory differs from reviewed assets",
+            ):
+                target.monitoring_assets()
 
     def test_forwards_close_every_started_child_after_partial_failure(self) -> None:
         target = verifier.KubernetesTarget(self.assets, "a" * 40)
