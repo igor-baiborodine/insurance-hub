@@ -10,7 +10,7 @@
     - [Root scaffold delegates](#root-scaffold-delegates)
     - [Continuous integration](#continuous-integration)
     - [Repository topology](#repository-topology)
-  - [Create an independently owned service](#create-an-independently-owned-service)
+  - [Create a repository-owned service](#create-a-repository-owned-service)
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
   - [Example RPC](#example-rpc)
@@ -31,6 +31,9 @@ signal-driven shutdown.
 ## Prerequisites
 
 - Go 1.27.2 exactly
+- uv 0.13.1 for the repository CPython environment
+- managed CPython 3.14.8; repository-level `make python-toolchain-setup` provisions it without
+  changing system Python
 - GNU Make 4.3 or newer
 - Git for the default changed-file formatting scope; `FORMAT_SCOPE=all` also works outside Git
 - GCC on Linux for `test-race`
@@ -41,9 +44,14 @@ All Go and tooling operations use this module's Makefile. Run module targets fro
 `templates/go-service/`, or use `make -C templates/go-service <target>` from the repository root.
 Tool installation, dependency maintenance, formatting, linting, tests, builds, vulnerability
 analysis, and execution set `GOWORK=off`; normal validation uses readonly module resolution and
-never depends on a root workspace or filesystem replacement. `GO` may override the Go executable.
+never depends on a root workspace or filesystem replacement. `GO` may override the Go executable,
+and `UV` may override uv. `test-tooling` and `check-copy` preserve both selections across nested
+Make boundaries; they also prefer the selected Go executable's directory when child tools invoke
+`go` by name.
 
-`bootstrap-tools` installs these exact binaries under ignored `.tools/bin/`:
+`bootstrap-tools` verifies or provisions the repository's ignored `.venv/` from the root
+`.python-version`, `pyproject.toml`, and `uv.lock`, then installs these exact binaries under the
+module's ignored `.tools/bin/`:
 
 - Buf 1.73.0
 - protoc-gen-go 1.36.12
@@ -57,7 +65,8 @@ These operations are explicit and are never hidden inside `check`:
 
 | Target                   | Mutation or side effect                                                                                                    | Prerequisite and network behavior                                                              |
 |--------------------------|----------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
-| `make bootstrap-tools`   | Installs or replaces only binaries under ignored `.tools/bin/`; it does not change source, generated output, or manifests. | Go 1.27.2 and source/module download access unless cached; finishes by running `verify-tools`. |
+| `make python-toolchain-setup` | Installs managed CPython 3.14.8 when needed and creates or synchronizes the repository's ignored `.venv/` from the root lock. | uv 0.13.1 and Python package/index access unless cached; rejects a conflicting existing root environment. |
+| `make bootstrap-tools`   | Runs the repository Python setup, then installs or replaces only binaries under the module's ignored `.tools/bin/`; it does not change source, generated output, or manifests. | uv 0.13.1, Go 1.27.2, and source/module download access unless cached; finishes by running `verify-tools`. |
 | `make update-deps`       | Updates only `go.mod` and `go.sum` to the Makefile's pinned runtime/generated-code dependencies, then tidies.              | Go proxy and checksum access unless cached.                                                    |
 | `make update-proto-deps` | Updates only `buf.lock` for the schema dependency declared in `buf.yaml`.                                                  | Verified pinned Buf binary and BSR access unless cached.                                       |
 | `make format`            | Rewrites only the selected eligible handwritten Go files through gofumpt, goimports, then golines at 100 columns.          | Verified pinned tools; file selection is described below.                                      |
@@ -80,6 +89,8 @@ require `bootstrap-tools` to have been run explicitly.
 | Target                      | Coverage                                                                                                                                                                                                                                                                   | Network or other prerequisite                                                                                                                                                      |
 |-----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `make verify-tools`         | Exact Go/tool versions, golangci-lint schema and formatter order, module/import prefix, 100-column settings, readonly loading, all-test lint scope, and vet-equivalent coverage.                                                                                           | All five pinned binaries already installed; no installation.                                                                                                                       |
+| `make python-toolchain-check` | Exact CPython, pytest, Ruff, and root locked-environment identity without installing or changing packages. | uv 0.13.1 and the provisioned repository environment, or a verified `PYTHON` override containing the root-locked tools. |
+| `make python-check`         | Ruff format/lint plus fast lifecycle and copy-decision pytest coverage for scaffold-owned Python. | Passing `python-toolchain-check`; no Go tools or network mutation. |
 | `make format-check`         | The same ordered formatter pipeline and selected handwritten files as `format`, reported without rewriting them.                                                                                                                                                           | Verified tools; file selection below.                                                                                                                                              |
 | `make check-deps`           | Reproduces `update-deps` in a temporary standalone module and compares `go.mod` and `go.sum`.                                                                                                                                                                              | Go proxy/checksum access unless cached.                                                                                                                                            |
 | `make format-proto-check`   | Buf formatting for the one owned schema.                                                                                                                                                                                                                                   | Verified tools.                                                                                                                                                                    |
@@ -92,8 +103,14 @@ require `bootstrap-tools` to have been run explicitly.
 | `make build`                | Every package under `./...` and an executable `server`, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.2; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
 | `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts services, or deploys. |
-| `make test-tooling`         | Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation.                                                                       | Verified tools; temporary storage and the network/cache prerequisites of nested checks.                                                                                            |
-| `make check-copy`           | Source-scaffold maintainer proof that creates a Git-free `services/example-copy`, validates its renamed identities and Make checks, removes scaffold-only copy tooling from the result, compares inventories, and cleans up.                              | Verified source tools, temporary storage, and all public network endpoints listed above. The target is removed from produced service copies.                                       |
+| `make test-tooling`         | Pytest-managed Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation. Child commands have 20-minute phase deadlines inside a 60-minute suite deadline, 30-second activity heartbeats, and bounded process-group cleanup. | Verified Python and Go tools; temporary storage and the network/cache prerequisites of nested checks. |
+| `make check-copy`           | Source-scaffold maintainer proof that creates a Git-free `services/example-copy`, validates its renamed identities, repository Python and Go tooling references, and Make checks, removes scaffold-only copy tooling, compares inventories, and cleans up. The workflow has a 40-minute overall deadline, bounded phase deadlines, 30-second activity heartbeats, and a 15-second teardown budget. | Verified repository tools, temporary storage, and all public network endpoints listed above. The target is removed from produced service copies. |
+
+The `test-tooling` runner handles SIGINT and SIGTERM, unwinds the active child process group, and
+returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make reports an interrupted
+`test-tooling` recipe with its own nonzero Make status after the runner exits; it does not preserve
+the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
+tooling fixtures are removed after successful, failed, and interrupted sessions.
 
 Database/broker integration, mock generation, migrations, containers, deployment, workspace
 validation, and live infrastructure are not applicable to this standalone scaffold. It has no such
@@ -190,18 +207,20 @@ approved workspace. Future modules are unsupported until their inventory, owning
 consumers, and controlled fixtures are reviewed together, even though standard service paths are
 selected automatically by the workflow.
 
-The scaffold itself includes the repository's shared `scripts/go/module/common.mk`. During
-`check-copy`, that helper is copied into the renamed service and its Makefile is redirected to the
-private copy. The resulting service can run its Make targets outside this checkout and has no
-runtime dependency on this scaffold or a shared Go module.
+The source scaffold and every generated service use the repository's shared
+`scripts/go/module/common.mk`, root Python declarations, and root `.venv/`. Generated services stay
+in this repository, so their Makefiles resolve those resources through `INSURANCE_HUB_ROOT` and do
+not duplicate `.python-version`, `pyproject.toml`, `uv.lock`, or a virtual environment.
 
-## Create an independently owned service
+## Create a repository-owned service
 
 Follow [COPYING.md](COPYING.md) to produce a renamed service without importing this scaffold's
 runtime packages or relying on a workspace or filesystem replacement. The procedure updates module,
 runtime, schema, generated-code, and documentation identities together and regenerates protobuf
-bindings rather than editing them. It also removes the source-scaffold-only `check-copy` target and
-script and replaces root-delegate/CI claims with the copied module's actual onboarding status.
+bindings rather than editing them. It also removes the source-scaffold-only `check-copy` target,
+module, and tests and replaces root-delegate/CI claims with the copied module's actual onboarding
+status. Keep the generated service in this repository so its shared tooling references remain
+valid.
 
 Repository maintainers own this reference. A copied service owns its code and dependencies and
 adopts later scaffold fixes through normal review; copies do not update automatically.

@@ -48,9 +48,10 @@ git archive --format=tar "${source_revision}:templates/go-service" |
 cd "$destination"
 ```
 
-`git archive` copies tracked template content only. It excludes the ignored `.tools/` directory,
-local binaries and caches, and repository-local ticket artifacts. The copied `/.tools/` ignore rule
-protects the tools installed later.
+`git archive` copies tracked template content only. It excludes ignored `.tools/`, local binaries,
+caches, and repository-local ticket artifacts. The copied ignore rule protects Go tools installed
+later. Keep the generated service in this repository: its Makefile resolves the root Python
+environment and shared Go tooling through `INSURANCE_HUB_ROOT` instead of copying those resources.
 
 ## 2. Replace every active identity
 
@@ -115,9 +116,14 @@ validation capability. Remove that target and script from the copy, and replace 
 root-delegate and CI sections with the copied module's actual onboarding boundary:
 
 ```sh
-sed -i 's/^\([[:space:]]*\)check-copy run$/\1run/' Makefile
-sed -i '/^check-copy: verify-tools$/,+1d' Makefile
-rm scripts/check-copy.sh
+sed -i 's/ check-copy//g' Makefile
+awk '
+  /^check-copy:/ { skipping = 1; next }
+  skipping && /^\t/ { next }
+  { skipping = 0; print }
+' Makefile > Makefile.copy
+mv Makefile.copy Makefile
+rm scripts/check_copy.py scripts/test_check_copy.py
 
 sed -i \
   -e '/^| `make check-copy`/d' \
@@ -134,7 +140,7 @@ awk '
     skipping = 1
     next
   }
-  skipping && /^## Create an independently owned service$/ { skipping = 0 }
+  skipping && /^## Create a repository-owned service$/ { skipping = 0 }
   !skipping { print }
 ' README.md > README.md.copy
 mv README.md.copy README.md
@@ -172,8 +178,11 @@ gen/examplecopy/v1/example_service.pb.go
 gen/examplecopy/v1/example_service_grpc.pb.go
 ```
 
-Commit the regenerated files, changed schema, manifests, lock file, configuration, tests, and
-documentation together. Do not add `.tools/`.
+`bootstrap-tools` uses the repository's root `.python-version`, `pyproject.toml`, `uv.lock`, and
+ignored `.venv/`, then installs the module's pinned Go tools. A caller may set `PYTHON` to an
+already provisioned CPython 3.14.8 environment that satisfies the same root lock checks. Commit the
+regenerated files, changed schema, manifests, lock files, configuration, tests, and documentation
+together. Do not add `.tools/`.
 
 ## 4. Reject stale active identities
 
@@ -229,18 +238,20 @@ find . -type f ! -path './.tools/*' -print0 |
 cmp "$inventory_before" "$inventory_after"
 ```
 
-The copy remains standalone: it must have no `go.work`, filesystem `replace` directive, import of
-the source scaffold, or dependency on its private implementation. This procedure does not add the
-copy to the canonical inventory or CI; complete the repository onboarding process before claiming
-root aggregate or hosted coverage.
+The copy remains a standalone Go module: it must have no `go.work`, filesystem `replace` directive,
+import of the source scaffold, or dependency on its private implementation. Its development tools
+remain repository-owned. This procedure does not add the copy to the canonical inventory or CI;
+complete repository onboarding before claiming root aggregate or hosted coverage.
 
 ## 6. Run the automated copy proof for scaffold changes
 
 When changing the source scaffold or this procedure, run the owning proof from the original module.
-It creates a temporary `services/example-copy`, applies every identity replacement above,
-bootstraps that copy's own pinned tools, regenerates its bindings, runs `test` and the complete
-non-mutating `check`, verifies that scaffold-only copy tooling and coverage claims were removed,
-compares inventories, and removes the temporary tree.
+It creates a temporary `services/example-copy`, applies every identity replacement above, verifies
+that the copy uses the repository Python environment and shared Go tooling, bootstraps its pinned Go
+tools, regenerates its bindings, runs `test` and the complete non-mutating `check`, verifies that
+scaffold-only copy tooling and coverage claims were removed, compares inventories, and removes the
+temporary tree. Its finite phases report 30-second heartbeats, share a 40-minute work deadline, and
+use a separate 15-second process-group teardown budget.
 
 ```sh
 make check-copy

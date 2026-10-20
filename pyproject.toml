@@ -32,6 +32,7 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
 [tool.ruff.lint.isort]
 known-first-party = [
     "check_upstream_sync",
+    "check_copy",
     "check_monitoring",
     "deployment",
     "example_cli",
@@ -43,8 +44,11 @@ known-first-party = [
     "report_card",
     "release",
     "resolve",
+    "scaffold_process",
     "select_pr_module",
     "test_monitoring",
+    "test_tooling",
+    "tooling_runner",
     "topology",
     "validate_selection",
 ]

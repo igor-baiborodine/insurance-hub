@@ -62,7 +62,7 @@ def command_environment(**values: str) -> dict[str, str]:
 
 def module_child_environment(**values: str) -> dict[str, str]:
     environment = command_environment(**values)
-    for name in ("PRODUCT_TOOLING_REPOSITORY_ROOT", "PYTHON"):
+    for name in ("INSURANCE_HUB_ROOT", "PRODUCT_TOOLING_REPOSITORY_ROOT", "PYTHON"):
         if value := os.environ.get(name):
             environment[name] = value
     return environment

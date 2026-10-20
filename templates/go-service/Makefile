@@ -1,6 +1,16 @@
 .DEFAULT_GOAL := bootstrap-tools
 
 GO ?= go
+INSURANCE_HUB_ROOT ?= ../..
+INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
+export INSURANCE_HUB_ROOT
+PYTHON_TOOLING_FILES := $(wildcard scripts/check_copy.py scripts/scaffold_process.py \
+	scripts/test_check_copy.py scripts/test_scaffold_process.py scripts/test_tooling.py \
+	scripts/tooling_runner.py scripts/test_tooling_runner.py)
+PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_copy.py scripts/test_scaffold_process.py \
+	scripts/test_tooling_runner.py)
+
+include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
 TOOLS_DIR := $(CURDIR)/.tools
 TOOLS_BIN := $(TOOLS_DIR)/bin
@@ -33,14 +43,34 @@ OTEL_GRPC_VERSION := v0.71.0
 X_NET_VERSION := v0.60.0
 TEST_PACKAGES ?= ./...
 
-COMMON_GO_TOOLING_DIR ?= ../../scripts/go/module
+COMMON_GO_TOOLING_DIR ?= $(INSURANCE_HUB_ROOT)/scripts/go/module
 COMMON_GO_TOOLING_DIR := $(abspath $(COMMON_GO_TOOLING_DIR))
 include $(COMMON_GO_TOOLING_DIR)/common.mk
 
-.PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
+.PHONY: python-tooling-format-check python-tooling-lint python-tooling-test-fast python-check \
+	bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-copy run
+
+python-tooling-format-check: python-toolchain-check
+	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m ruff format --check \
+		--config "$(PYTHON_REPOSITORY_ROOT)/pyproject.toml" -- $(PYTHON_TOOLING_FILES)
+
+python-tooling-lint: python-toolchain-check
+	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m ruff check \
+		--config "$(PYTHON_REPOSITORY_ROOT)/pyproject.toml" -- $(PYTHON_TOOLING_FILES)
+
+python-tooling-test-fast: python-toolchain-check
+	@cd "$(CURDIR)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
+		-c "$(PYTHON_REPOSITORY_ROOT)/pyproject.toml" --rootdir "$(CURDIR)" \
+		-m 'not integration and not acceptance' $(PYTHON_FAST_TEST_FILES)
+
+python-check: python-tooling-format-check python-tooling-lint python-tooling-test-fast
+
+bootstrap-go-tools bootstrap-tools: python-toolchain-setup
 
 update-deps:
 	GOWORK=off $(GO) get \
@@ -56,21 +86,25 @@ update-deps:
 	GOWORK=off $(GO) mod tidy
 
 check-go-pr: verify-tools format-check format-proto-check lint lint-proto test-race build \
-	check-deps check-proto-drift check-proto-breaking vulncheck
+	check-deps check-proto-drift check-proto-breaking vulncheck python-check
 
 check: check-go-pr
 
-test-tooling: verify-tools
-	@MODULE_ROOT="$(CURDIR)" COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
+test-tooling: verify-tools python-toolchain-check
+	@MODULE_ROOT="$(CURDIR)" INSURANCE_HUB_ROOT="$(INSURANCE_HUB_ROOT)" \
+		COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
 		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" \
+		GO="$(GO)" UV="$(UV)" \
 		COMMON_GO_TOOLING_PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
-		./scripts/test-tooling.sh
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" ./scripts/tooling_runner.py
 	@$(MAKE) --no-print-directory test-coverage-tooling
 
-check-copy: verify-tools
-	@COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
+check-copy: verify-tools python-toolchain-check
+	@INSURANCE_HUB_ROOT="$(INSURANCE_HUB_ROOT)" \
+		COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
 		COMMON_GO_TOOLING_PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
-		MAKE_COMMAND="$(MAKE)" ./scripts/check-copy.sh
+		GO="$(GO)" MAKE_COMMAND="$(MAKE)" UV="$(UV)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" ./scripts/check_copy.py
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
