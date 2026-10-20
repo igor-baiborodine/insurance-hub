@@ -33,13 +33,13 @@ export BASELINE_GATEWAY_TOKEN_FILE
 	_product-baseline-test-access _product-baseline-test-db-permissions \
 	_product-baseline-test-comparator _product-baseline-test-all
 
-product-baseline-preflight: ## Check read-only Product baseline prerequisites for one explicit environment
+product-baseline-preflight: python-runtime-check ## Check read-only Product baseline prerequisites for one explicit environment
 	@./scripts/product-baseline/preflight.sh
 
-product-baseline-capture: ## Capture a Product baseline part with BASELINE_ENV=<environment> BASELINE_PART=<part>
+product-baseline-capture: python-runtime-check ## Capture a Product baseline part with BASELINE_ENV=<environment> BASELINE_PART=<part>
 	@./scripts/product-baseline/capture.sh
 
-product-baseline-test: ## Run a named disposable Product baseline suite with BASELINE_SUITE=<suite>
+product-baseline-test: python-toolchain-check ## Run a named disposable Product baseline suite with BASELINE_SUITE=<suite>
 	@./scripts/product-baseline/validate-suite.sh
 ifeq ($(BASELINE_SUITE),smoke)
 	+@$(MAKE) --no-print-directory _product-baseline-test-smoke
@@ -61,16 +61,16 @@ else
 	@./scripts/product-baseline/not-implemented.sh test-suite BASELINE_SUITE
 endif
 
-product-baseline-fixtures-check: ## Check Product fixtures, optionally filtered with BASELINE_ENV and BASELINE_PART
+product-baseline-fixtures-check: python-runtime-check ## Check Product fixtures, optionally filtered with BASELINE_ENV and BASELINE_PART
 	@./scripts/product-baseline/check-fixtures.sh
 
-product-baseline-replay: ## Replay an accepted Product fixture set with BASELINE_FIXTURE_SET=<environment>
+product-baseline-replay: python-runtime-check ## Replay an accepted Product fixture set with BASELINE_FIXTURE_SET=<environment>
 	@./scripts/product-baseline/replay.sh
 
-product-baseline-verify: ## Compare one read-only live Product environment with its accepted baseline
+product-baseline-verify: python-runtime-check ## Compare one read-only live Product environment with its accepted baseline
 	@./scripts/product-baseline/verify.sh
 
-product-baseline-check: ## Run the complete offline Product baseline gate
+product-baseline-check: python-toolchain-check ## Run the complete offline Product baseline gate
 	@./scripts/product-baseline/check.sh
 
 _product-baseline-resolve-java:

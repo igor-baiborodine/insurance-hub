@@ -5,20 +5,22 @@ import argparse
 import difflib
 import json
 import sys
+from collections.abc import Sequence
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 
 class ComparisonError(Exception):
     pass
 
 
-def load_json(path):
+def load_json(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as source:
         return json.load(source, parse_float=Decimal, parse_int=Decimal)
 
 
-def canonical(value, top_level=False):
+def canonical(value: Any, top_level: bool = False) -> tuple[Any, ...]:
     if isinstance(value, dict):
         return ("object", tuple((key, canonical(value[key])) for key in sorted(value)))
     if isinstance(value, list):
@@ -35,7 +37,7 @@ def canonical(value, top_level=False):
     return ("string", value)
 
 
-def body_value(raw_body, scenario_id):
+def body_value(raw_body: str, scenario_id: str) -> tuple[Any, ...]:
     try:
         value = json.loads(raw_body, parse_float=Decimal, parse_int=Decimal)
     except json.JSONDecodeError as error:
@@ -43,7 +45,7 @@ def body_value(raw_body, scenario_id):
     return canonical(value, top_level=isinstance(value, list))
 
 
-def observations_by_id(document, label):
+def observations_by_id(document: dict[str, Any], label: str) -> dict[str, dict[str, Any]]:
     observations = document.get("observations")
     if not isinstance(observations, list):
         raise ComparisonError(f"{label}: observations must be an array")
@@ -56,18 +58,22 @@ def observations_by_id(document, label):
     return result
 
 
-def difference(expected, actual):
+def difference(expected: object, actual: object) -> str:
     expected_lines = repr(expected).splitlines()
     actual_lines = repr(actual).splitlines()
-    return "\n".join(difflib.unified_diff(
-        expected_lines, actual_lines, fromfile="accepted", tofile="observed", lineterm=""))
+    return "\n".join(
+        difflib.unified_diff(
+            expected_lines, actual_lines, fromfile="accepted", tofile="observed", lineterm=""
+        )
+    )
 
 
-def compare_documents(expected, actual):
+def compare_documents(expected: dict[str, Any], actual: dict[str, Any]) -> None:
     if expected.get("environment") != actual.get("environment"):
         raise ComparisonError(
             f"environment differs: accepted={expected.get('environment')!r}, "
-            f"observed={actual.get('environment')!r}")
+            f"observed={actual.get('environment')!r}"
+        )
 
     expected_observations = observations_by_id(expected, "accepted")
     actual_observations = observations_by_id(actual, "observed")
@@ -83,29 +89,51 @@ def compare_documents(expected, actual):
         observed = actual_observations[scenario_id]
         fields = (
             ("boundary", accepted.get("boundary"), observed.get("boundary")),
-            ("method", accepted.get("request", {}).get("method"), observed.get("request", {}).get("method")),
-            ("path", accepted.get("request", {}).get("path"), observed.get("request", {}).get("path")),
-            ("query", accepted.get("request", {}).get("query"), observed.get("request", {}).get("query")),
-            ("status", accepted.get("response", {}).get("status"), observed.get("response", {}).get("status")),
-            ("contentType", accepted.get("response", {}).get("headers", {}).get("contentType"),
-             observed.get("response", {}).get("headers", {}).get("contentType")),
+            (
+                "method",
+                accepted.get("request", {}).get("method"),
+                observed.get("request", {}).get("method"),
+            ),
+            (
+                "path",
+                accepted.get("request", {}).get("path"),
+                observed.get("request", {}).get("path"),
+            ),
+            (
+                "query",
+                accepted.get("request", {}).get("query"),
+                observed.get("request", {}).get("query"),
+            ),
+            (
+                "status",
+                accepted.get("response", {}).get("status"),
+                observed.get("response", {}).get("status"),
+            ),
+            (
+                "contentType",
+                accepted.get("response", {}).get("headers", {}).get("contentType"),
+                observed.get("response", {}).get("headers", {}).get("contentType"),
+            ),
         )
         for field, expected_value, actual_value in fields:
             if expected_value != actual_value:
                 raise ComparisonError(
-                    f"{scenario_id}: {field} differs: accepted={expected_value!r}, observed={actual_value!r}")
+                    f"{scenario_id}: {field} differs: accepted={expected_value!r}, observed={actual_value!r}"
+                )
 
         accepted_body = body_value(accepted["response"]["rawBody"], scenario_id)
         observed_body = body_value(observed["response"]["rawBody"], scenario_id)
         if accepted_body != observed_body:
-            raise ComparisonError(f"{scenario_id}: response JSON differs\n{difference(accepted_body, observed_body)}")
+            raise ComparisonError(
+                f"{scenario_id}: response JSON differs\n{difference(accepted_body, observed_body)}"
+            )
 
 
-def main():
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("expected", type=Path)
     parser.add_argument("actual", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         compare_documents(load_json(args.expected), load_json(args.actual))
     except (ComparisonError, KeyError) as error:

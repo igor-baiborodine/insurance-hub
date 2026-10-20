@@ -71,9 +71,9 @@ make product-baseline-fixtures-check
 make product-baseline-test BASELINE_SUITE=db-permissions
 ```
 
-`bootstrap-ci-tools` explicitly installs PyYAML 6.0.3 in `.tools/ci-venv` using Python's venv and
-pip, and checksum-verifies Kind 0.30.0, kubectl 1.34.1, and actionlint 1.7.7 into `.tools/bin`. It
-requires Python pip >=22.3 and Linux amd64. Check targets do not install tools. Local operators may
+The root uv lock supplies PyYAML 6.0.3 to the managed CPython 3.14.8 environment.
+`bootstrap-ci-tools` checksum-verifies Kind 0.30.0, kubectl 1.34.1, and actionlint 1.7.7 into
+`.tools/bin`; it requires Linux amd64. Check targets do not install tools. Local operators may
 continue using their existing compatible clients where the owning scripts permit them.
 
 `make go-svc-deploy-test SVC_NAME=product` requires the active local Kind cluster and a ready CNPG

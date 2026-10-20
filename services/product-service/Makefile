@@ -97,26 +97,27 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
-image-build: ## Build the pinned linux/amd64 Product runtime image
+image-build: python-runtime-check ## Build the pinned linux/amd64 Product runtime image
 	@./scripts/build-image.sh
 
-image-check: image-build ## Build and validate Product image identity, contents, startup, reads, and SIGTERM
+image-check: python-runtime-check image-build ## Build and validate Product image identity, contents, startup, reads, and SIGTERM
 	@./scripts/check-image.sh
 
 deploy-render: ## Render Product Go overlays without applying them. Usage: make deploy-render [DEPLOY_ENV=local-dev|qa]
 	@KUBECTL="$(KUBECTL)" DEPLOY_ENV="$(DEPLOY_ENV)" ./scripts/render-deployment.sh
 
 deploy-check: python-runtime-check ## Validate Product Go overlays, Java isolation, and active QA inclusion
-	@KUBECTL="$(KUBECTL)" JQ="$(JQ)" PYTHON="$(PYTHON)" ./scripts/check-deployment.sh
+	@KUBECTL="$(KUBECTL)" PYTHON="$(PYTHON)" ./scripts/check-deployment.sh
 
 deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runtime-check ## Guarded Product deployment operation; requires exact DEPLOY_* target coordinates
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/deployment.py '$@'
 
-deploy-test-tooling: python-runtime-check ## Exercise guarded Product deployment operations with fake cluster adapters
-	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test-deployment-operations.py
+deploy-test-tooling: python-toolchain-check ## Exercise guarded Product deployment operations with fake cluster adapters
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q scripts/test_deployment_operations.py
 
-deploy-test: python-runtime-check image-build ## Exercise the image and rendered pod in an owned disposable Kind namespace
-	@PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" $(PYTHON) scripts/test-deployment-lifecycle.py
+deploy-test: python-toolchain-check image-build ## Exercise the image and rendered pod in an owned disposable Kind namespace
+	@PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" $(PYTHON) -m pytest -q \
+		-m integration scripts/test_deployment_lifecycle.py
 
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
 	@test -n "$(strip $(SECURITY_HARNESS_OUTPUT))" || { echo "SECURITY_HARNESS_OUTPUT is required" >&2; exit 1; }
@@ -140,42 +141,15 @@ build-telemetry-acceptance: verify-tools ## Build the disposable Product telemet
 
 bootstrap-tools: bootstrap-doc-tools
 
-bootstrap-doc-tools:
-	@major="$$($(NODE) -p 'process.versions.node.split(".")[0]')"; \
-		if test "$$major" -lt 20; then \
-			echo "Node.js >= 20 is required for Mermaid CLI" >&2; \
-			exit 1; \
-		fi
-	@set -eu; \
-		installed="$$($(MMDC) --version 2>/dev/null || true)"; \
-		installed_puppeteer="$$($(NODE) -p \
-			"require('$(TOOLS_DIR)/node_modules/puppeteer/package.json').version" \
-			2>/dev/null || true)"; \
-		if test "$$installed" != "$(MERMAID_CLI_VERSION)" || \
-			test "$$installed_puppeteer" != "$(PUPPETEER_VERSION)"; then \
-			mkdir -p "$(TOOLS_DIR)" "$(TOOLS_BIN)" "$(TOOLS_DIR)/puppeteer"; \
-			PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(NPM) install \
-				--prefix "$(TOOLS_DIR)" --no-save --no-package-lock \
-				"@mermaid-js/mermaid-cli@$(MERMAID_CLI_VERSION)" \
-				"puppeteer@$(PUPPETEER_VERSION)"; \
-			ln -sfn ../node_modules/.bin/mmdc "$(MMDC)"; \
-		fi; \
-		if ! find "$(TOOLS_DIR)/puppeteer" -type f -name chrome-headless-shell \
-			-perm -u+x -print -quit 2>/dev/null | grep -q .; then \
-			PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(NPM) rebuild \
-				--prefix "$(TOOLS_DIR)" puppeteer; \
-		fi
-	@test "$$($(MMDC) --version)" = "$(MERMAID_CLI_VERSION)"
-	@test "$$($(NODE) -p \
-		"require('$(TOOLS_DIR)/node_modules/puppeteer/package.json').version")" = \
-		"$(PUPPETEER_VERSION)"
+bootstrap-doc-tools: python-runtime-check
+	@NODE="$(NODE)" NPM="$(NPM)" PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/bootstrap_docs.py
 
 check-docs: python-runtime-check
 	@test "$$($(MMDC) --version 2>/dev/null)" = "$(MERMAID_CLI_VERSION)" || { \
 		echo "check-docs: Mermaid CLI $(MERMAID_CLI_VERSION) is required; run bootstrap-tools" >&2; \
 		exit 1; \
 	}
-	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(PYTHON) scripts/check-docs.py \
+	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(PYTHON) scripts/check_docs.py \
 		--renderer "$(MMDC)" --puppeteer-config "$(PUPPETEER_CONFIG)" $(DOC_FILES)
 
 preview-docs: python-runtime-check
@@ -184,7 +158,7 @@ preview-docs: python-runtime-check
 		exit 1; \
 	}
 	rm -rf "$(TOOLS_DIR)/docs-preview"
-	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(PYTHON) scripts/check-docs.py \
+	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(PYTHON) scripts/check_docs.py \
 		--renderer "$(MMDC)" --puppeteer-config "$(PUPPETEER_CONFIG)" \
 		--output-directory "$(TOOLS_DIR)/docs-preview" $(DOC_FILES)
 
@@ -228,17 +202,18 @@ check-sql-drift: verify-tools
 		GENERATED_FILES="$(GENERATED_SQL_FILES)" \
 		"$(COMMON_GO_TOOLING_DIR)/check-generated-drift.sh"
 
-test-integration:
+test-integration: python-runtime-check
 	@GO="$(GO)" \
 		DOCKER="$(DOCKER)" \
 		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" \
 		INTEGRATION_SUITE="$(INTEGRATION_SUITE)" \
 		FIXTURE_SET="$(FIXTURE_SET)" \
 		INTEGRATION_COVERAGE_FILE="$(INTEGRATION_COVERAGE_FILE)" \
+		PYTHON="$(PYTHON)" \
 		./scripts/test-integration.sh
 
-test-telemetry-continuity: ## Exercise disposable Brave Java ↔ Go HTTP trace continuity
-	@GO="$(GO)" ./scripts/test-telemetry-continuity.sh
+test-telemetry-continuity: python-runtime-check ## Exercise disposable Brave Java ↔ Go HTTP trace continuity
+	@GO="$(GO)" PYTHON="$(PYTHON)" ./scripts/test-telemetry-continuity.sh
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \
@@ -246,7 +221,7 @@ check-go-pr: verify-tools format-check format-proto-check lint lint-proto covera
 
 check: check-go-pr check-docs
 
-test-tooling: verify-tools
+test-tooling: python-toolchain-check verify-tools
 	@MODULE_ROOT="$(CURDIR)" COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
 		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" PYTHON="$(PYTHON)" \
 		COMMON_GO_TOOLING_PYTHON="$(PYTHON)" \
@@ -257,11 +232,12 @@ run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
 
 .PHONY: bootstrap-ci-tools check-ci
-bootstrap-ci-tools: ## Install pinned YAML parser and Kubernetes clients in module-local .tools
+bootstrap-ci-tools: python-runtime-check ## Install pinned Kubernetes clients in module-local .tools
 	@bash scripts/bootstrap-ci-tools.sh
 
-check-ci: ## Validate Go workflow permissions, triggers, syntax, and boundaries
-	@bash -n scripts/bootstrap-ci-tools.sh scripts/check-deployment.sh
+check-ci: python-runtime-check ## Validate Go workflow permissions, triggers, syntax, and boundaries
+	@bash -n scripts/bootstrap-ci-tools.sh
+	@sh -n scripts/check-deployment.sh
 	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/go-release-svc.yml \
 		../../.github/workflows/go-pr-mod.yml ../../.github/workflows/go-report-card.yml
-	@PYTHONDONTWRITEBYTECODE=1 .tools/ci-venv/bin/python scripts/check-ci.py
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/check_ci.py

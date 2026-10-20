@@ -10,8 +10,9 @@ import json
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 
 def load(path: Path) -> list[dict[str, Any]]:
@@ -37,7 +38,7 @@ def find_prefix(documents: list[dict[str, Any]], kind: str, prefix: str) -> dict
     return matches[0]
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checker", required=True, type=Path)
     parser.add_argument("--local-go", required=True, type=Path)
@@ -45,11 +46,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--qa-go", required=True, type=Path)
     parser.add_argument("--qa-legacy", required=True, type=Path)
     parser.add_argument("--qa-aggregate", required=True, type=Path)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    arguments = parse_args()
+def main(argv: list[str] | None = None) -> int:
+    arguments = parse_args(argv)
     baseline = {
         "local-go": load(arguments.local_go),
         "local-legacy": load(arguments.local_legacy),
@@ -60,9 +61,7 @@ def main() -> int:
 
     active = copy.deepcopy(baseline)
     java = find(active["qa-aggregate"], "Deployment", "qa-product-api-legacy")
-    java.get("metadata", {}).get("labels", {}).pop(
-        "insurance-hub.io/product-go-state", None
-    )
+    java.get("metadata", {}).get("labels", {}).pop("insurance-hub.io/product-go-state", None)
     aggregate_identities = {
         (document.get("kind"), document.get("metadata", {}).get("name"))
         for document in active["qa-aggregate"]
@@ -178,11 +177,14 @@ def main() -> int:
         semantic_command = [sys.executable, str(arguments.checker)]
         for key in ("local-go", "local-legacy", "qa-go", "qa-legacy", "qa-aggregate"):
             semantic_command.extend((f"--{key}", str(semantic_paths[key])))
-        semantic_result = subprocess.run(semantic_command, text=True, capture_output=True, check=False)
+        semantic_result = subprocess.run(
+            semantic_command, text=True, capture_output=True, check=False, timeout=30
+        )
         if semantic_result.returncode != 0:
             print(
                 "product-deploy-check-test: semantic QA tag was rejected: "
-                f"{semantic_result.stderr.strip()}", file=sys.stderr,
+                f"{semantic_result.stderr.strip()}",
+                file=sys.stderr,
             )
             return 1
         stopped = copy.deepcopy(active)
@@ -196,11 +198,14 @@ def main() -> int:
         stopped_command = [sys.executable, str(arguments.checker)]
         for key in ("local-go", "local-legacy", "qa-go", "qa-legacy", "qa-aggregate"):
             stopped_command.extend((f"--{key}", str(stopped_paths[key])))
-        stopped_result = subprocess.run(stopped_command, text=True, capture_output=True, check=False)
+        stopped_result = subprocess.run(
+            stopped_command, text=True, capture_output=True, check=False, timeout=30
+        )
         if stopped_result.returncode != 0:
             print(
                 "product-deploy-check-test: explicit stopped QA state was rejected: "
-                f"{stopped_result.stderr.strip()}", file=sys.stderr,
+                f"{stopped_result.stderr.strip()}",
+                file=sys.stderr,
             )
             return 1
         for index, (description, mutation, expected_error) in enumerate(cases):
@@ -225,9 +230,14 @@ def main() -> int:
                 "--qa-aggregate",
                 str(paths["qa-aggregate"]),
             ]
-            result = subprocess.run(command, text=True, capture_output=True, check=False)
+            result = subprocess.run(
+                command, text=True, capture_output=True, check=False, timeout=30
+            )
             if result.returncode == 0:
-                print(f"product-deploy-check-test: expected failure for {description}", file=sys.stderr)
+                print(
+                    f"product-deploy-check-test: expected failure for {description}",
+                    file=sys.stderr,
+                )
                 return 1
             if expected_error not in result.stderr:
                 print(

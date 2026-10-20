@@ -27,7 +27,9 @@ def load_documents(path: Path) -> list[dict[str, Any]]:
     except (OSError, json.JSONDecodeError) as error:
         raise ValidationError(f"cannot read rendered JSON {path}: {error}") from error
     require(isinstance(value, list), f"rendered JSON {path} must be an array")
-    require(all(isinstance(item, dict) for item in value), f"rendered JSON {path} has a non-object item")
+    require(
+        all(isinstance(item, dict) for item in value), f"rendered JSON {path} has a non-object item"
+    )
     return value
 
 
@@ -38,7 +40,10 @@ def identity(document: dict[str, Any]) -> tuple[str, str, str]:
 
 def require_unique(documents: list[dict[str, Any]], description: str) -> None:
     identities = [identity(document) for document in documents]
-    require(len(identities) == len(set(identities)), f"{description} contains duplicate object identities")
+    require(
+        len(identities) == len(set(identities)),
+        f"{description} contains duplicate object identities",
+    )
 
 
 def one(
@@ -52,7 +57,9 @@ def one(
         name_matches = object_name == name if isinstance(name, str) else name.fullmatch(object_name)
         if object_kind == kind and name_matches:
             matches.append(document)
-    require(len(matches) == 1, f"expected exactly one {kind} named {getattr(name, 'pattern', name)}")
+    require(
+        len(matches) == 1, f"expected exactly one {kind} named {getattr(name, 'pattern', name)}"
+    )
     return matches[0]
 
 
@@ -104,12 +111,23 @@ def validate_service(
     require(spec.get("type") == "ClusterIP", f"Service {name} must remain ClusterIP")
     for forbidden in ("externalIPs", "externalName", "loadBalancerClass", "loadBalancerIP"):
         require(forbidden not in spec, f"Service {name} must not set {forbidden}")
-    require(spec.get("selector") == deployment_selector, f"Service {name} selector must equal Deployment selector")
-    require(spec.get("ports") == expected_ports, f"Service {name} ports do not match the Product contract")
-    require(all("nodePort" not in port for port in spec.get("ports", [])), f"Service {name} must not use nodePort")
+    require(
+        spec.get("selector") == deployment_selector,
+        f"Service {name} selector must equal Deployment selector",
+    )
+    require(
+        spec.get("ports") == expected_ports,
+        f"Service {name} ports do not match the Product contract",
+    )
+    require(
+        all("nodePort" not in port for port in spec.get("ports", [])),
+        f"Service {name} must not use nodePort",
+    )
 
 
-def validate_probe(container: dict[str, Any], name: str, path: str, period: int, failures: int) -> None:
+def validate_probe(
+    container: dict[str, Any], name: str, path: str, period: int, failures: int
+) -> None:
     probe = container.get(name, {})
     require(
         probe.get("httpGet") == {"path": path, "port": "management", "scheme": "HTTP"},
@@ -211,7 +229,10 @@ def validate_go_environment(
         )
     require(deployment_spec.get("replicas") == 1, f"{environment} replicas must be 1")
     require(deployment_spec.get("minReadySeconds") == 5, f"{environment} minReadySeconds must be 5")
-    require(deployment_spec.get("progressDeadlineSeconds") == 180, f"{environment} progress deadline must be 180s")
+    require(
+        deployment_spec.get("progressDeadlineSeconds") == 180,
+        f"{environment} progress deadline must be 180s",
+    )
     require(
         deployment_spec.get("strategy")
         == {"type": "RollingUpdate", "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0}},
@@ -320,9 +341,7 @@ def validate_go_environment(
         expected_environment.append(
             {
                 "name": "SERVICE_INSTANCE_ID",
-                "valueFrom": {
-                    "fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}
-                },
+                "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
             }
         )
     require(
@@ -331,7 +350,9 @@ def validate_go_environment(
     )
     require(
         container.get("volumeMounts")
-        == [{"name": "postgres-ca", "mountPath": "/etc/product-service/postgres", "readOnly": True}],
+        == [
+            {"name": "postgres-ca", "mountPath": "/etc/product-service/postgres", "readOnly": True}
+        ],
         f"{environment} CA mount is incorrect",
     )
     require(
@@ -339,14 +360,19 @@ def validate_go_environment(
         == [
             {
                 "name": "postgres-ca",
-                "secret": {"secretName": secret_name, "items": [{"key": "ca.crt", "path": "ca.crt"}]},
+                "secret": {
+                    "secretName": secret_name,
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                },
             }
         ],
         f"{environment} reader Secret CA reference is incorrect",
     )
     expected_credential_revision = "rotation-20261013T1450Z" if environment == "local-dev" else "1"
     require(
-        pod_metadata.get("annotations", {}).get("insurance-hub.io/product-reader-credential-revision")
+        pod_metadata.get("annotations", {}).get(
+            "insurance-hub.io/product-reader-credential-revision"
+        )
         == expected_credential_revision,
         f"{environment} credential rollout revision is missing",
     )
@@ -369,8 +395,14 @@ def validate_disjoint(
     legacy_labels = legacy_deployment["spec"]["template"]["metadata"]["labels"]
     go_selector = go_service["spec"]["selector"]
     legacy_selector = legacy_service["spec"]["selector"]
-    require(not selected(go_selector, legacy_labels), f"{environment} Go Service selector overlaps the Java pod")
-    require(not selected(legacy_selector, go_labels), f"{environment} Java Service selector overlaps the Go pod")
+    require(
+        not selected(go_selector, legacy_labels),
+        f"{environment} Go Service selector overlaps the Java pod",
+    )
+    require(
+        not selected(legacy_selector, go_labels),
+        f"{environment} Java Service selector overlaps the Go pod",
+    )
 
 
 def contains_qa_go(documents: list[dict[str, Any]]) -> bool:
@@ -446,8 +478,10 @@ def validate_aggregates(
 ) -> None:
     require_unique(aggregate, "QA aggregate")
     java = one(aggregate, "Deployment", "qa-product-api-legacy")
-    state = java.get("metadata", {}).get("labels", {}).get(
-        "insurance-hub.io/product-go-state", "active"
+    state = (
+        java.get("metadata", {})
+        .get("labels", {})
+        .get("insurance-hub.io/product-go-state", "active")
     )
     require(state in {"active", "stopped"}, "QA aggregate has an invalid Product Go state")
     aggregate_index = {identity(document): document for document in aggregate}
@@ -467,18 +501,18 @@ def validate_aggregates(
         )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--local-go", required=True, type=Path)
     parser.add_argument("--local-legacy", required=True, type=Path)
     parser.add_argument("--qa-go", required=True, type=Path)
     parser.add_argument("--qa-legacy", required=True, type=Path)
     parser.add_argument("--qa-aggregate", required=True, type=Path)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    arguments = parse_args()
+def main(argv: list[str] | None = None) -> int:
+    arguments = parse_args(argv)
     try:
         local_go = load_documents(arguments.local_go)
         local_legacy = load_documents(arguments.local_legacy)

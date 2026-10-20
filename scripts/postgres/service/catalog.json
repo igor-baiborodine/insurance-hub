@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "profiles": {
     "product": {
-      "reader": "scripts/product-deployment/reader.py"
+      "reader": "scripts/product_deployment/reader.py"
     }
   }
 }

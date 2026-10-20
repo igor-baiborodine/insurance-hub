@@ -80,7 +80,7 @@ def test_release_input_classifies_image_build_inputs(relative: str) -> None:
         "internal/postgres/sql/queries.sql",
         "internal/testing/fixture.go",
         "puppeteer-config.json",
-        "scripts/check-ci.py",
+        "scripts/check_ci.py",
         "sqlc.yaml",
         "testdata/contract-baseline/buf.yaml",
     ],
@@ -99,7 +99,7 @@ def test_selection_ignores_non_release_changes_in_other_services(tmp_path: Path)
         [
             "services/product-service/internal/application/catalog.go",
             "services/claims-service/README.md",
-            "services/claims-service/scripts/check-ci.py",
+            "services/claims-service/scripts/check_ci.py",
         ],
         tmp_path,
         REPOSITORY,

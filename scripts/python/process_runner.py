@@ -67,6 +67,7 @@ def run_command(
     env: Mapping[str, str],
     timeout_seconds: float,
     activity: str,
+    input_text: str | None = None,
     heartbeat_seconds: float = 30,
     teardown_seconds: float = 5,
 ) -> subprocess.CompletedProcess[str]:
@@ -81,11 +82,13 @@ def run_command(
         cwd=cwd,
         env=dict(env),
         text=True,
+        stdin=subprocess.PIPE if input_text is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,
     )
     try:
+        pending_input = input_text
         while True:
             now = time.monotonic()
             remaining = deadline - now
@@ -93,10 +96,11 @@ def run_command(
                 raise CommandError(f"{activity} exceeded its {timeout_seconds:g}-second deadline")
             try:
                 stdout, stderr = process.communicate(
-                    timeout=min(remaining, max(0.1, heartbeat - now))
+                    input=pending_input, timeout=min(remaining, max(0.1, heartbeat - now))
                 )
                 break
             except subprocess.TimeoutExpired:
+                pending_input = None
                 if time.monotonic() >= heartbeat:
                     elapsed = time.monotonic() - started
                     print(f"{activity}: still running after {elapsed:.0f}s", file=sys.stderr)
