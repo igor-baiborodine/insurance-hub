@@ -2,26 +2,58 @@
 """Dispatch guards and the Product role contract in disposable PostgreSQL."""
 
 import base64
-from contextlib import contextmanager, redirect_stdout
-import importlib.util
 import io
 import json
 import os
-from pathlib import Path
 import re
-import socket
+import signal
 import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager, redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+from scripts.product_deployment import reader
+
 ROOT = Path(__file__).resolve().parents[3]
-MODULE = ROOT / "scripts/product-deployment/reader.py"
-spec = importlib.util.spec_from_file_location("product_reader", MODULE)
-reader = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(reader)
-IMAGE = "postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
+MODULE = ROOT / "scripts/product_deployment/reader.py"
+IMAGE = (
+    "postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
+)
+
+
+@pytest.mark.parametrize(
+    ("requested_signal", "expected_status"),
+    [(signal.SIGINT, 130), (signal.SIGTERM, 143)],
+)
+def test_reader_cli_signal_boundary_preserves_status_and_unwinds(
+    monkeypatch: pytest.MonkeyPatch,
+    requested_signal: signal.Signals,
+    expected_status: int,
+) -> None:
+    # given
+    cleaned = False
+
+    def interrupted(_argv=None):
+        nonlocal cleaned
+        try:
+            os.kill(os.getpid(), requested_signal)
+        finally:
+            cleaned = True
+        return 0
+
+    monkeypatch.setattr(reader, "main", interrupted)
+
+    # when
+    status = reader.cli([])
+
+    # then
+    assert status == expected_status
+    assert cleaned
 
 
 def check(condition, message):
@@ -30,42 +62,53 @@ def check(condition, message):
 
 
 def run(argv, *, input_text=None, env=None, timeout=45):
-    result = subprocess.run(argv, input=input_text, text=True, capture_output=True,
-                            timeout=timeout, env=env)
+    result = subprocess.run(
+        argv, input=input_text, text=True, capture_output=True, timeout=timeout, env=env
+    )
     if result.returncode:
         raise AssertionError(f"test command failed: {argv[0]} (exit {result.returncode})")
     return result.stdout.strip()
 
 
-def dispatch_guards():
+def test_dispatch_guards() -> None:
     dispatch = ROOT / "scripts/postgres/service/dispatch.py"
-    for service, profile, action in (("", "reader", "inventory"), ("product", "", "inventory"),
-                                     ("../product", "reader", "inventory"),
-                                     ("unknown", "reader", "inventory"),
-                                     ("product", "admin", "inventory"),
-                                     ("product", "reader", "deploy")):
+    for service, profile, action in (
+        ("", "reader", "inventory"),
+        ("product", "", "inventory"),
+        ("../product", "reader", "inventory"),
+        ("unknown", "reader", "inventory"),
+        ("product", "admin", "inventory"),
+        ("product", "reader", "deploy"),
+    ):
         env = dict(os.environ, SVC_NAME=service, ROLE_PROFILE=profile)
-        result = subprocess.run([sys.executable, str(dispatch), action], env=env,
-                                capture_output=True, text=True, timeout=5)
+        result = subprocess.run(
+            [sys.executable, str(dispatch), action],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
         check(result.returncode != 0, f"dispatch accepted invalid {service}/{profile}/{action}")
-        check("password" not in result.stderr.lower(), "dispatch diagnostic exposed credential text")
+        check(
+            "password" not in result.stderr.lower(), "dispatch diagnostic exposed credential text"
+        )
     selected = reader_path("product", "reader")
     check(selected == MODULE, "Product reader did not resolve to its service-owned script")
-    spec = importlib.util.spec_from_file_location("dispatch", dispatch)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    check(module.resolve("snapshot", "product", "reader") == MODULE,
-          "Product snapshot did not resolve to its service-owned script")
+    from scripts.postgres.service import dispatch as module
+
+    check(
+        module.resolve("snapshot", "product", "reader") == MODULE,
+        "Product snapshot did not resolve to its service-owned script",
+    )
 
 
-def reader_path(service, profile):
-    spec = importlib.util.spec_from_file_location("dispatch", ROOT / "scripts/postgres/service/dispatch.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+def reader_path(service: str, profile: str) -> Path:
+    from scripts.postgres.service import dispatch as module
+
     return module.resolve("inventory", service, profile)
 
 
-def secret_adapter_test():
+def test_secret_adapter() -> None:
     manager = object.__new__(reader.Kubernetes)
     manager.context = "kind-local-dev-insurance-hub"
     manager.data_ns = "local-dev-all"
@@ -76,41 +119,60 @@ def secret_adapter_test():
 
     def kubectl(*args, input_text=None):
         if "apply" in args:
-            check(args == ("-n", "local-dev-all", "apply", "-f", "-"),
-                  "Secret apply used unexpected arguments")
+            check(
+                args == ("-n", "local-dev-all", "apply", "-f", "-"),
+                "Secret apply used unexpected arguments",
+            )
             sent.update(json.loads(input_text))
             return ""
         if "get" in args and "secret" in args:
             name = args[args.index("secret") + 1]
             if name == manager.ca_name:
-                return json.dumps({"metadata": {"name": name}, "data": {
-                    "ca.crt": base64.b64encode(b"-----BEGIN CERTIFICATE-----\ntest\n").decode(),
-                    "ca.key": base64.b64encode(b"not-copied").decode()}})
+                return json.dumps(
+                    {
+                        "metadata": {"name": name},
+                        "data": {
+                            "ca.crt": base64.b64encode(
+                                b"-----BEGIN CERTIFICATE-----\ntest\n"
+                            ).decode(),
+                            "ca.key": base64.b64encode(b"not-copied").decode(),
+                        },
+                    }
+                )
             return json.dumps(sent)
         raise AssertionError("unexpected Secret adapter operation")
 
     manager.kubectl = kubectl
     password = "a" * 64
-    values = reader.secret_values(password, "local-dev-postgres-product-rw.local-dev-all.svc.cluster.local",
-                                  manager.ca())
+    values = reader.secret_values(
+        password, "local-dev-postgres-product-rw.local-dev-all.svc.cluster.local", manager.ca()
+    )
     manager.put_secret(values)
-    check(sent["metadata"] == {"name": manager.secret_name, "namespace": manager.svc_ns},
-          "Secret identity/namespace mismatch")
-    check(set(sent["data"]) == {"database-url", "ca.crt"} and "ca.key" not in sent["data"],
-          "Secret contains an unexpected key")
-    check(manager.get_secret(manager.secret_name, manager.svc_ns) == values,
-          "Secret roundtrip changed protected data")
+    check(
+        sent["metadata"] == {"name": manager.secret_name, "namespace": manager.svc_ns},
+        "Secret identity/namespace mismatch",
+    )
+    check(
+        set(sent["data"]) == {"database-url", "ca.crt"} and "ca.key" not in sent["data"],
+        "Secret contains an unexpected key",
+    )
+    check(
+        manager.get_secret(manager.secret_name, manager.svc_ns) == values,
+        "Secret roundtrip changed protected data",
+    )
 
 
-def deployment_ca_contract_test():
+def test_deployment_ca_contract() -> None:
     deployment = (ROOT / "k8s/apps/svc/product/base/deployment.yaml").read_text()
     match = re.search(r"- name: postgres-ca\n\s+mountPath: (\S+)", deployment)
     check(match is not None, "Product Deployment has no postgres-ca mount")
-    check(reader.CA_MOUNT == f"{match.group(1)}/ca.crt",
-          "reader URL CA path differs from the Product Deployment mount")
+    check(
+        reader.CA_MOUNT == f"{match.group(1)}/ca.crt",
+        "reader URL CA path differs from the Product Deployment mount",
+    )
 
 
-def forward_cleanup_test():
+def test_forward_cleanup() -> None:
     manager = object.__new__(reader.Kubernetes)
     manager.context = "kind-local-dev-insurance-hub"
     manager.data_ns = "local-dev-all"
@@ -153,8 +215,26 @@ class DisposableProduct:
         self.fail_put = False
 
     def admin(self, sql):
-        return run(["docker", "exec", "-i", self.container, "psql", "-X", "-q", "-A", "-t",
-                    "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "product"], input_text=sql)
+        return run(
+            [
+                "docker",
+                "exec",
+                "-i",
+                self.container,
+                "psql",
+                "-X",
+                "-q",
+                "-A",
+                "-t",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-d",
+                "product",
+            ],
+            input_text=sql,
+        )
 
     def get_secret(self, name, namespace):
         check(name == self.secret_name and namespace == self.svc_ns, "wrong Secret target")
@@ -188,32 +268,72 @@ class DisposableProduct:
             options = f"host=127.0.0.1 port={self.port} dbname=product user=go_product_reader sslmode=disable"
 
             def execute(sql):
-                result = subprocess.run(["psql", "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1",
-                                         "-d", options], input=sql, text=True, capture_output=True,
-                                        timeout=15, env=env)
+                result = subprocess.run(
+                    ["psql", "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-d", options],
+                    input=sql,
+                    text=True,
+                    capture_output=True,
+                    timeout=15,
+                    env=env,
+                )
                 if result.returncode:
                     raise reader.RoleError("disposable reader SQL rejected")
                 probe = re.search(r"reader-probe-state:([0-9A-Z]{5})", result.stderr)
-                return result.stdout.strip() + ("\nreader-probe-state:" + probe.group(1)
-                                                if probe else "")
+                return result.stdout.strip() + (
+                    "\nreader-probe-state:" + probe.group(1) if probe else ""
+                )
 
             yield execute
 
 
-def disposable_test():
+@pytest.mark.integration
+def test_disposable_reader_role() -> None:
     print("product-reader-test: pulling pinned disposable PostgreSQL image", flush=True)
     run(["docker", "pull", IMAGE], timeout=180)
     run(["docker", "image", "inspect", IMAGE])
     print("product-reader-test: starting disposable PostgreSQL", flush=True)
     name = "issue134-reader-" + os.urandom(5).hex()
-    run(["docker", "run", "-d", "--rm", "--name", name, "-e", "POSTGRES_PASSWORD",
-         "-e", "POSTGRES_DB=product", "-p", "127.0.0.1::5432", IMAGE],
-        env=dict(os.environ, POSTGRES_PASSWORD="disposable-admin"))
+    run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            name,
+            "-e",
+            "POSTGRES_PASSWORD",
+            "-e",
+            "POSTGRES_DB=product",
+            "-p",
+            "127.0.0.1::5432",
+            IMAGE,
+        ],
+        env=dict(os.environ, POSTGRES_PASSWORD="disposable-admin"),
+    )
     try:
         for _ in range(60):
-            ready = subprocess.run(["docker", "exec", name, "psql", "-X", "-q", "-A", "-t",
-                                    "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "product",
-                                    "-c", "SELECT 1"], capture_output=True)
+            ready = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    "psql",
+                    "-X",
+                    "-q",
+                    "-A",
+                    "-t",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-U",
+                    "postgres",
+                    "-d",
+                    "product",
+                    "-c",
+                    "SELECT 1",
+                ],
+                capture_output=True,
+            )
             if ready.returncode == 0:
                 break
             time.sleep(0.25)
@@ -268,13 +388,20 @@ RESET ROLE;
             "ALTER TABLE public.product ADD COLUMN permission_probe text",
             "DROP TABLE public.product",
         )
-        with manager.connection(reader.password_from_url(manager.secret["database-url"].decode(),
-                                                     manager.hostname), manager.ca()) as runtime:
+        with manager.connection(
+            reader.password_from_url(manager.secret["database-url"].decode(), manager.hostname),
+            manager.ca(),
+        ) as runtime:
             for statement in full_matrix:
                 result = runtime(reader.safe_probe_sql(statement))
-                check("reader-probe-state:42501" in result, f"mutation not denied: {statement.split()[0]}")
+                check(
+                    "reader-probe-state:42501" in result,
+                    f"mutation not denied: {statement.split()[0]}",
+                )
             try:
-                reader.verify_reader(lambda sql: runtime("SET default_transaction_read_only=on;\n" + sql))
+                reader.verify_reader(
+                    lambda sql: runtime("SET default_transaction_read_only=on;\n" + sql)
+                )
             except reader.RoleError:
                 pass
             else:
@@ -282,8 +409,10 @@ RESET ROLE;
 
         # Unexpected privilege must fail the safe probe and still leave data unchanged.
         manager.admin("GRANT INSERT ON public.product TO go_product_reader;")
-        with manager.connection(reader.password_from_url(manager.secret["database-url"].decode(),
-                                                     manager.hostname), manager.ca()) as runtime:
+        with manager.connection(
+            reader.password_from_url(manager.secret["database-url"].decode(), manager.hostname),
+            manager.ca(),
+        ) as runtime:
             try:
                 reader.verify_reader(runtime)
             except reader.RoleError:
@@ -291,7 +420,10 @@ RESET ROLE;
             else:
                 raise AssertionError("privileged safe probe was accepted")
         manager.admin("REVOKE INSERT ON public.product FROM go_product_reader;")
-        check(reader.snapshot(manager.admin) == before, "catalog/schema changed during permission tests")
+        check(
+            reader.snapshot(manager.admin) == before,
+            "catalog/schema changed during permission tests",
+        )
 
         # Secret update failure after DB password change restores the prior credential.
         old = reader.password_from_url(manager.secret["database-url"].decode(), manager.hostname)
@@ -304,8 +436,10 @@ RESET ROLE;
             except reader.RoleError as error:
                 check(old not in str(error), "rotation failure diagnostic exposed credential")
             reader.verify(manager)
-            check(Path(os.environ["POSTGRES_ROLE_RECOVERY_FILE"]).stat().st_mode & 0o777 == 0o600,
-                  "rotation recovery file is not private")
+            check(
+                Path(os.environ["POSTGRES_ROLE_RECOVERY_FILE"]).stat().st_mode & 0o777 == 0o600,
+                "rotation recovery file is not private",
+            )
             os.environ["POSTGRES_ROLE_RECOVERY_FILE"] = str(Path(directory) / "recovery-next")
             # An established session finishes while the password changes; the old password
             # must fail on a new connection after rotation.
@@ -313,16 +447,31 @@ RESET ROLE;
             passfile.write_text(f"127.0.0.1:{port}:product:go_product_reader:{old}\n")
             passfile.chmod(0o600)
             old_session = subprocess.Popen(
-                ["psql", "-X", "-q", "-A", "-t", "-d",
-                 f"host=127.0.0.1 port={port} dbname=product user=go_product_reader sslmode=disable",
-                 "-c", "SELECT pg_sleep(5), current_user"],
-                env={**{key: value for key, value in os.environ.items() if not key.startswith("PG")},
-                     "PGPASSFILE": str(passfile)}, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, text=True)
+                [
+                    "psql",
+                    "-X",
+                    "-q",
+                    "-A",
+                    "-t",
+                    "-d",
+                    f"host=127.0.0.1 port={port} dbname=product user=go_product_reader sslmode=disable",
+                    "-c",
+                    "SELECT pg_sleep(5), current_user",
+                ],
+                env={
+                    **{key: value for key, value in os.environ.items() if not key.startswith("PG")},
+                    "PGPASSFILE": str(passfile),
+                },
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
             try:
                 for _ in range(30):
-                    active = manager.admin("SELECT count(*) FROM pg_stat_activity WHERE usename='go_product_reader' "
-                                           "AND query LIKE 'SELECT pg_sleep%';")
+                    active = manager.admin(
+                        "SELECT count(*) FROM pg_stat_activity WHERE usename='go_product_reader' "
+                        "AND query LIKE 'SELECT pg_sleep%';"
+                    )
                     if int(active) > 0:
                         break
                     time.sleep(0.1)
@@ -330,13 +479,17 @@ RESET ROLE;
                     raise AssertionError("old reader session never became active")
                 reader.rotate(manager)
                 output, _ = old_session.communicate(timeout=10)
-                check(old_session.returncode == 0 and "go_product_reader" in output,
-                      "pre-existing reader session did not finish after rotation")
+                check(
+                    old_session.returncode == 0 and "go_product_reader" in output,
+                    "pre-existing reader session did not finish after rotation",
+                )
             finally:
                 if old_session.poll() is None:
                     old_session.terminate()
                     old_session.wait(timeout=5)
-            new = reader.password_from_url(manager.secret["database-url"].decode(), manager.hostname)
+            new = reader.password_from_url(
+                manager.secret["database-url"].decode(), manager.hostname
+            )
             check(new != old, "explicit rotation preserved old credential")
             with manager.connection(old, manager.ca()) as runtime:
                 try:
@@ -347,7 +500,9 @@ RESET ROLE;
             os.environ["POSTGRES_ROLE_RESTORE_FILE"] = str(Path(directory) / "recovery")
             os.environ["POSTGRES_ROLE_RECOVERY_FILE"] = str(Path(directory) / "recovery-of-new")
             reader.rotate(manager)
-            restored = reader.password_from_url(manager.secret["database-url"].decode(), manager.hostname)
+            restored = reader.password_from_url(
+                manager.secret["database-url"].decode(), manager.hostname
+            )
             check(restored == old, "protected rollback input did not restore old credential")
             with manager.connection(new, manager.ca()) as runtime:
                 try:
@@ -358,23 +513,29 @@ RESET ROLE;
             os.environ.pop("POSTGRES_ROLE_RESTORE_FILE")
 
         # Unknown effective consumer blocks PUBLIC revocation before database changes.
-        manager.admin("CREATE ROLE other_consumer LOGIN PASSWORD 'disposable-other'; "
-                      "GRANT CONNECT ON DATABASE product TO other_consumer;")
+        manager.admin(
+            "CREATE ROLE other_consumer LOGIN PASSWORD 'disposable-other'; "
+            "GRANT CONNECT ON DATABASE product TO other_consumer;"
+        )
         try:
             reader.provision(manager)
             raise AssertionError("unknown consumer was accepted")
         except reader.RoleError:
             pass
-        manager.admin("REVOKE CONNECT ON DATABASE product FROM other_consumer; DROP ROLE other_consumer;")
+        manager.admin(
+            "REVOKE CONNECT ON DATABASE product FROM other_consumer; DROP ROLE other_consumer;"
+        )
         check(reader.snapshot(manager.admin) == before, "catalog/schema changed during lifecycle")
 
         # A failed initial Secret write compensates the newly created role. A retained
         # Secret can then recover a one-sided role failure without changing its password.
         prior_secret = dict(manager.secret)
-        manager.admin("REVOKE ALL ON DATABASE product FROM go_product_reader; "
-                      "REVOKE ALL ON SCHEMA public FROM go_product_reader; "
-                      "REVOKE ALL ON ALL TABLES IN SCHEMA public FROM go_product_reader; "
-                      "DROP ROLE go_product_reader;")
+        manager.admin(
+            "REVOKE ALL ON DATABASE product FROM go_product_reader; "
+            "REVOKE ALL ON SCHEMA public FROM go_product_reader; "
+            "REVOKE ALL ON ALL TABLES IN SCHEMA public FROM go_product_reader; "
+            "DROP ROLE go_product_reader;"
+        )
         manager.secret = None
         manager.fail_put = True
         try:
@@ -382,8 +543,10 @@ RESET ROLE;
             raise AssertionError("initial Secret failure was accepted")
         except reader.RoleError:
             pass
-        check(reader.inventory(manager.admin)["reader"] is None and manager.secret is None,
-              "initial failure left an ambiguous role or Secret")
+        check(
+            reader.inventory(manager.admin)["reader"] is None and manager.secret is None,
+            "initial failure left an ambiguous role or Secret",
+        )
         manager.secret = prior_secret
         reader.provision(manager)
         check(manager.secret == prior_secret, "one-sided role recovery changed credential")
@@ -398,9 +561,13 @@ RESET ROLE;
 
         os.environ["POSTGRES_ROLE_CONFIRM_REVOKE"] = "product/reader/disposable"
         reader.revoke(manager)
-        check(reader.inventory(manager.admin)["reader"] is None and manager.secret is None,
-              "revocation left role or workload Secret")
-        print("product-reader-test: disposable grants, denials, drift, idempotency, rotation and recovery passed")
+        check(
+            reader.inventory(manager.admin)["reader"] is None and manager.secret is None,
+            "revocation left role or workload Secret",
+        )
+        print(
+            "product-reader-test: disposable grants, denials, drift, idempotency, rotation and recovery passed"
+        )
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
@@ -408,11 +575,11 @@ RESET ROLE;
 if __name__ == "__main__":
     try:
         print("product-reader-test: checking dispatch and Kubernetes adapters", flush=True)
-        dispatch_guards()
-        secret_adapter_test()
-        deployment_ca_contract_test()
-        forward_cleanup_test()
-        disposable_test()
+        test_dispatch_guards()
+        test_secret_adapter()
+        test_deployment_ca_contract()
+        test_forward_cleanup()
+        test_disposable_reader_role()
     except (AssertionError, OSError, subprocess.SubprocessError) as error:
         print(f"product-reader-test: {error}", file=sys.stderr, flush=True)
         raise SystemExit(1) from None

@@ -9,12 +9,14 @@ import contextlib
 import hashlib
 import html
 import json
+import os
 import re
-import subprocess
 import tempfile
 import urllib.parse
+from collections.abc import Sequence
 from pathlib import Path
 
+from product_process import ProductCommandError, run, run_cli
 
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 MERMAID_PATTERN = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
@@ -107,23 +109,26 @@ def render_mermaid(
             suffix = ".svg" if output_directory is None else ".png"
             output = temporary_root / f"diagram-{document_id}-{index}{suffix}"
             source.write_text(diagram.strip() + "\n", encoding="utf-8")
-            result = subprocess.run(
-                [
-                    str(renderer),
-                    "--puppeteerConfigFile",
-                    str(puppeteer_config),
-                    "--input",
-                    str(source),
-                    "--output",
-                    str(output),
-                ],
-                capture_output=True,
-                check=False,
-                text=True,
-            )
-            if result.returncode != 0:
-                details = (result.stderr or result.stdout).strip()
-                fail(f"Mermaid render failed for {document} block {index}: {details}")
+            try:
+                run(
+                    [
+                        str(renderer),
+                        "--puppeteerConfigFile",
+                        str(puppeteer_config),
+                        "--input",
+                        str(source),
+                        "--output",
+                        str(output),
+                    ],
+                    cwd=document.parent,
+                    env=os.environ,
+                    timeout_seconds=120,
+                    teardown_seconds=10,
+                    activity=f"render Mermaid block {index} from {document.name}",
+                    capture=True,
+                )
+            except ProductCommandError as error:
+                fail(f"Mermaid render failed for {document} block {index}: {error}")
             if not output.is_file() or output.stat().st_size == 0:
                 fail(f"Mermaid renderer produced no output for {document} block {index}")
             if suffix == ".svg" and "<svg" not in output.read_text(encoding="utf-8"):
@@ -131,13 +136,13 @@ def render_mermaid(
     return len(diagrams)
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--renderer", required=True, type=Path)
     parser.add_argument("--puppeteer-config", required=True, type=Path)
     parser.add_argument("--output-directory", type=Path)
     parser.add_argument("documents", nargs="+", type=Path)
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
 
     renderer = arguments.renderer.resolve()
     if not renderer.is_file():
@@ -169,7 +174,8 @@ def main() -> None:
         f"check-docs: validated {len(arguments.documents)} document(s), "
         f"{link_count} local link(s), and rendered {diagram_count} Mermaid diagram(s)"
     )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(run_cli(main, name="check-docs"))

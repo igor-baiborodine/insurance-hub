@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Separate explicit setup; validation targets never install dependencies.
+# Separate explicit setup for Product-specific external clients. The repository
+# Python environment and PyYAML dependency are owned by the root uv lock.
 mkdir -p .tools/bin
-python3 -m venv --without-pip .tools/ci-venv
-python3 -m pip --python .tools/ci-venv install --disable-pip-version-check 'PyYAML==6.0.3'
 temporary_root="$(mktemp -d)"
 trap 'rm -rf -- "${temporary_root}"' EXIT
 curl --fail --location --retry 3 --max-time 120 \

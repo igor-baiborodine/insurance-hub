@@ -678,8 +678,8 @@ postgres-svc-role-provision: ## Provision/reapply a selected service-owned datab
 postgres-svc-role-rotate: ## Rotate credentials for a selected role profile. Requires explicit target coordinates.
 postgres-svc-role-revoke: ## Revoke a selected role profile. Requires explicit target coordinates and profile-specific confirmation.
 postgres-svc-role-inventory postgres-svc-role-snapshot postgres-svc-role-provision \
-	postgres-svc-role-rotate postgres-svc-role-revoke:
-	@PYTHONDONTWRITEBYTECODE=1 python3 scripts/postgres/service/dispatch.py '$(@:postgres-svc-role-%=%)'
+	postgres-svc-role-rotate postgres-svc-role-revoke: python-runtime-check
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) "$(K8S_REPOSITORY_ROOT)/scripts/postgres/service/dispatch.py" '$(@:postgres-svc-role-%=%)'
 
 .PHONY: postgres-svc-deploy
 postgres-svc-deploy: _env-check _data-ns-check _svc-name-check ## Deploy PostgresSQL cluster for service. Usage: make postgres-svc-deploy SVC_NAME=<svc-name>
