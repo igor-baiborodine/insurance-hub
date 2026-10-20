@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -92,6 +94,52 @@ def test_bootstrap_docs_provisions_missing_install(
     # then
     assert status == 0
     assert any("install" in command for command in commands)
+
+
+def test_bootstrap_docs_provisions_when_renderer_executable_is_absent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # given
+    mmdc = configure_doc_paths(monkeypatch, tmp_path / "tools")
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    node = fake_bin / "node"
+    npm = fake_bin / "npm"
+    renderer_program = f"#!{sys.executable}\nprint({bootstrap_docs.MERMAID_VERSION!r})\n"
+    node.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        f"print('20' if 'process.versions.node' in ' '.join(sys.argv) else {bootstrap_docs.PUPPETEER_VERSION!r})\n",
+        encoding="utf-8",
+    )
+    npm.write_text(
+        f"#!{sys.executable}\n"
+        "import os, pathlib, sys\n"
+        "root = pathlib.Path(os.environ['DOC_FAKE_ROOT'])\n"
+        "if 'install' in sys.argv:\n"
+        "    renderer = root / 'node_modules/.bin/mmdc'\n"
+        "    renderer.parent.mkdir(parents=True, exist_ok=True)\n"
+        f"    renderer.write_text({renderer_program!r})\n"
+        "    renderer.chmod(0o755)\n"
+        "    browser = root / 'puppeteer/chrome-headless-shell'\n"
+        "    browser.parent.mkdir(parents=True, exist_ok=True)\n"
+        "    browser.write_text('controlled browser')\n"
+        "    browser.chmod(0o755)\n",
+        encoding="utf-8",
+    )
+    node.chmod(0o755)
+    npm.chmod(0o755)
+    monkeypatch.setenv("NODE", str(node))
+    monkeypatch.setenv("NPM", str(npm))
+    monkeypatch.setenv("DOC_FAKE_ROOT", str(tmp_path / "tools"))
+    assert not mmdc.exists()
+
+    # when
+    status = bootstrap_docs.main([])
+
+    # then
+    assert status == 0
+    assert mmdc.is_symlink()
 
 
 def test_bootstrap_docs_rejects_wrong_node_before_provisioning(
@@ -459,3 +507,80 @@ def test_product_process_bounds_timeout_and_descendant_cleanup(tmp_path: Path) -
 
     # then
     assert time.monotonic() - started < 3
+
+
+def process_is_running(pid: int) -> bool:
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split()[2]
+    except FileNotFoundError, ProcessLookupError:
+        return False
+    return state != "Z"
+
+
+def wait_for_process_exit(pid: int, timeout: float = 3) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and process_is_running(pid):
+        time.sleep(0.02)
+    assert not process_is_running(pid), f"process {pid} remained alive"
+
+
+@pytest.mark.parametrize(
+    ("requested_signal", "expected_status"),
+    [(signal.SIGINT, 130), (signal.SIGTERM, 143)],
+)
+def test_integration_runner_signal_reaps_active_process_group(
+    tmp_path: Path, requested_signal: signal.Signals, expected_status: int
+) -> None:
+    # given
+    fake_docker = tmp_path / "docker"
+    ready = tmp_path / "ready"
+    pids = tmp_path / "pids.json"
+    fake_docker.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "pathlib.Path(os.environ['PRODUCT_SIGNAL_PIDS']).write_text(json.dumps([os.getpid(), child.pid]))\n"
+        "pathlib.Path(os.environ['PRODUCT_SIGNAL_READY']).write_text('ready')\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o755)
+    environment = dict(os.environ)
+    environment.pop("PRODUCT_DATABASE_URL", None)
+    environment.update(
+        GO=sys.executable,
+        DOCKER=str(fake_docker),
+        POSTGRES_IMAGE="controlled-postgres",
+        INTEGRATION_SUITE="reader",
+        FIXTURE_SET="qa",
+        PRODUCT_SIGNAL_PIDS=str(pids),
+        PRODUCT_SIGNAL_READY=str(ready),
+    )
+    process = subprocess.Popen(
+        [sys.executable, str(Path(integration_test.__file__).resolve())],
+        cwd=integration_test.MODULE_ROOT,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not ready.is_file():
+            assert process.poll() is None
+            time.sleep(0.02)
+        assert ready.is_file()
+
+        # when
+        os.kill(process.pid, requested_signal)
+        _stdout, stderr = process.communicate(timeout=15)
+
+        # then
+        assert process.returncode == expected_status
+        assert requested_signal.name in stderr
+        for pid in json.loads(pids.read_text(encoding="utf-8")):
+            wait_for_process_exit(pid)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)

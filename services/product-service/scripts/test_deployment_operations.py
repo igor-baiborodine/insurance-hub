@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import sys
 import unittest
 from contextlib import nullcontext
@@ -12,9 +13,30 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deployment  # noqa: E402
+import deployment_lifecycle  # noqa: E402
 
 
 class DeploymentGuardTests(unittest.TestCase):
+    def test_cli_signal_boundaries_preserve_status_and_unwind(self) -> None:
+        for owner in (deployment, deployment_lifecycle):
+            for requested_signal, expected_status in (
+                (signal.SIGINT, 130),
+                (signal.SIGTERM, 143),
+            ):
+                cleaned = False
+
+                def interrupted(_argv=None, selected_signal=requested_signal):
+                    nonlocal cleaned
+                    try:
+                        os.kill(os.getpid(), selected_signal)
+                    finally:
+                        cleaned = True
+                    return 0
+
+                with patch.object(owner, "main", interrupted):
+                    self.assertEqual(owner.cli([]), expected_status)
+                self.assertTrue(cleaned)
+
     def test_probe_comparison_accepts_only_the_known_server_default(self) -> None:
         declared = {"httpGet": {"path": "/livez", "port": "management"}, "failureThreshold": 30}
         self.assertTrue(deployment.matching_probe(declared, declared))

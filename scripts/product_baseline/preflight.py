@@ -67,6 +67,11 @@ def require(condition: bool, message: str) -> None:
         raise PreflightError(message)
 
 
+def optional_environment(name: str, default: str) -> str:
+    """Apply shell-style ${NAME:-default} semantics to optional Make exports."""
+    return os.environ.get(name) or default
+
+
 def command(
     arguments: Sequence[str],
     *,
@@ -162,14 +167,14 @@ def main(_argv: Sequence[str] | None = None) -> int:
             f"Unsupported BASELINE_ENV '{environment}'; use local-dev or qa.",
         )
         target = TARGETS[environment]
-        requested_context = os.environ.get("BASELINE_KUBE_CONTEXT", target.context)
+        requested_context = optional_environment("BASELINE_KUBE_CONTEXT", target.context)
         require(
             requested_context == target.context,
             f"BASELINE_KUBE_CONTEXT '{requested_context}' does not match {environment} context '{target.context}'.",
         )
-        host = os.environ.get("BASELINE_PRODUCT_DB_HOST", "127.0.0.1")
-        port = os.environ.get("BASELINE_PRODUCT_DB_PORT", "5492")
-        transport = os.environ.get("BASELINE_PRODUCT_DB_TRANSPORT", "port-forward")
+        host = optional_environment("BASELINE_PRODUCT_DB_HOST", "127.0.0.1")
+        port = optional_environment("BASELINE_PRODUCT_DB_PORT", "5492")
+        transport = optional_environment("BASELINE_PRODUCT_DB_TRANSPORT", "port-forward")
         require(port.isdigit(), "BASELINE_PRODUCT_DB_PORT must be numeric.")
         require(
             transport in {"port-forward", "kubectl-exec"},

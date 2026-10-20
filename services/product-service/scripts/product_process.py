@@ -7,12 +7,46 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 
 class ProductCommandError(RuntimeError):
     """A Product tooling child failed, timed out, or could not be cleaned up."""
+
+
+class ProductSignal(BaseException):
+    """A handled POSIX signal requested controlled Product tooling teardown."""
+
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(signal.Signals(signum).name)
+
+
+def run_cli(main: Callable[[], int], *, name: str) -> int:
+    """Run a CLI with SIGINT/SIGTERM converted into protected teardown unwinding."""
+    handled = (signal.SIGINT, signal.SIGTERM)
+    previous = {signum: signal.getsignal(signum) for signum in handled}
+
+    def interrupt(signum: int, _frame: object) -> None:
+        for protected in handled:
+            signal.signal(protected, signal.SIG_IGN)
+        raise ProductSignal(signum)
+
+    try:
+        for signum in handled:
+            signal.signal(signum, interrupt)
+        try:
+            return main()
+        except ProductSignal as interruption:
+            print(
+                f"{name}: interrupted by {signal.Signals(interruption.signum).name}",
+                file=sys.stderr,
+            )
+            return 128 + interruption.signum
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 def _group_exists(pid: int) -> bool:

@@ -122,7 +122,9 @@ def capture_catalog(selected_environment: str, temporary: Path) -> Path:
     )
     inventory_path, _ = identity_file("inventory", selected_environment)
     captured_at = str(database["observedAt"])
-    endpoint = f"{os.environ.get('BASELINE_PRODUCT_DB_HOST', '127.0.0.1')}:{os.environ.get('BASELINE_PRODUCT_DB_PORT', '5492')}"
+    host = preflight.optional_environment("BASELINE_PRODUCT_DB_HOST", "127.0.0.1")
+    port = preflight.optional_environment("BASELINE_PRODUCT_DB_PORT", "5492")
+    endpoint = f"{host}:{port}"
     document = {
         "schemaVersion": 1,
         "scenarioId": "DATA-LOCAL-001" if selected_environment == "local-dev" else "DATA-QA-001",
@@ -201,9 +203,9 @@ def observation(
     require_success: bool,
 ) -> dict[str, object]:
     base = (
-        os.environ.get("BASELINE_PRODUCT_URL", "http://127.0.0.1:19081")
+        preflight.optional_environment("BASELINE_PRODUCT_URL", "http://127.0.0.1:19081")
         if boundary == "direct"
-        else os.environ.get("BASELINE_GATEWAY_URL", "http://127.0.0.1:19082")
+        else preflight.optional_environment("BASELINE_GATEWAY_URL", "http://127.0.0.1:19082")
     )
     status, body, content_type, content_length = request_json(base, path, token)
     if require_success:
@@ -283,9 +285,8 @@ def identities(
 
 def preflight_pair(temporary: Path, catalog: dict[str, object]) -> tuple[dict[str, object], str]:
     before = run_preflight(temporary / "before.json", catalog=True)
-    after_port = os.environ.get(
-        "BASELINE_PRODUCT_DB_AFTER_PORT", os.environ.get("BASELINE_PRODUCT_DB_PORT", "5492")
-    )
+    port = preflight.optional_environment("BASELINE_PRODUCT_DB_PORT", "5492")
+    after_port = preflight.optional_environment("BASELINE_PRODUCT_DB_AFTER_PORT", port)
     return before, after_port
 
 

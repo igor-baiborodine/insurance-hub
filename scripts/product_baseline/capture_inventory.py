@@ -502,7 +502,10 @@ def main(_argv: Sequence[str] | None = None) -> int:
             },
             "postgres": postgres,
             "connection": {
-                "endpoint": f"{os.environ.get('BASELINE_PRODUCT_DB_HOST', '127.0.0.1')}:{os.environ.get('BASELINE_PRODUCT_DB_PORT', '5492')}",
+                "endpoint": (
+                    f"{preflight.optional_environment('BASELINE_PRODUCT_DB_HOST', '127.0.0.1')}:"
+                    f"{preflight.optional_environment('BASELINE_PRODUCT_DB_PORT', '5492')}"
+                ),
                 "forwardVerified": True,
                 "transactionReadOnly": postgres["sessionReadOnly"],
             },

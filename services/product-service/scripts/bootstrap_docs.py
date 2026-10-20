@@ -8,7 +8,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from product_process import ProductCommandError, run
+from product_process import ProductCommandError, run, run_cli
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 TOOLS_ROOT = MODULE_ROOT / ".tools"
@@ -52,7 +52,7 @@ def main(_argv: Sequence[str] | None = None) -> int:
                 ],
                 "inspect Puppeteer",
             )
-        except ProductCommandError:
+        except FileNotFoundError, ProductCommandError:
             pass
         environment = dict(os.environ, PUPPETEER_CACHE_DIR=str(TOOLS_ROOT / "puppeteer"))
         if installed_mermaid != MERMAID_VERSION or installed_puppeteer != PUPPETEER_VERSION:
@@ -115,4 +115,4 @@ def main(_argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_cli(main, name="bootstrap-doc-tools"))

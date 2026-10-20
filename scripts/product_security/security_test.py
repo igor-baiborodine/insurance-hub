@@ -25,7 +25,7 @@ SERVICE_SCRIPTS = SERVICE_ROOT / "scripts"
 if str(SERVICE_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SERVICE_SCRIPTS))
 
-from product_process import ProductCommandError, run  # noqa: E402
+from product_process import ProductCommandError, run, run_cli  # noqa: E402
 
 
 class SecurityTestError(RuntimeError):
@@ -421,4 +421,4 @@ def main(_argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_cli(main, name="product-security-test"))

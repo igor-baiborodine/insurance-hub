@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,36 @@ MODULE = ROOT / "scripts/product_deployment/reader.py"
 IMAGE = (
     "postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
 )
+
+
+@pytest.mark.parametrize(
+    ("requested_signal", "expected_status"),
+    [(signal.SIGINT, 130), (signal.SIGTERM, 143)],
+)
+def test_reader_cli_signal_boundary_preserves_status_and_unwinds(
+    monkeypatch: pytest.MonkeyPatch,
+    requested_signal: signal.Signals,
+    expected_status: int,
+) -> None:
+    # given
+    cleaned = False
+
+    def interrupted(_argv=None):
+        nonlocal cleaned
+        try:
+            os.kill(os.getpid(), requested_signal)
+        finally:
+            cleaned = True
+        return 0
+
+    monkeypatch.setattr(reader, "main", interrupted)
+
+    # when
+    status = reader.cli([])
+
+    # then
+    assert status == expected_status
+    assert cleaned
 
 
 def check(condition, message):

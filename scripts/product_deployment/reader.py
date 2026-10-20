@@ -19,6 +19,13 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+SERVICE_SCRIPTS = REPOSITORY_ROOT / "services/product-service/scripts"
+if str(SERVICE_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SERVICE_SCRIPTS))
+
+from product_process import run_cli  # noqa: E402
+
 ROLE = "go_product_reader"
 DATABASE = "product"
 CA_MOUNT = "/etc/product-service/postgres/ca.crt"
@@ -721,12 +728,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def cli(argv: Sequence[str] | None = None) -> int:
+    def execute() -> int:
+        try:
+            return main(argv)
+        except (RoleError, ValueError, KeyError, UnicodeError) as error:
+            print(f"product-reader: {error}", file=sys.stderr)
+            return 2
+        except OSError:
+            print(
+                "product-reader: protected local file or process operation failed", file=sys.stderr
+            )
+            return 2
+
+    return run_cli(execute, name="product-reader")
+
+
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except (RoleError, ValueError, KeyError, UnicodeError) as error:
-        print(f"product-reader: {error}", file=sys.stderr)
-        raise SystemExit(2) from None
-    except OSError:
-        print("product-reader: protected local file or process operation failed", file=sys.stderr)
-        raise SystemExit(2) from None
+    raise SystemExit(cli())

@@ -16,7 +16,7 @@ import urllib.parse
 from collections.abc import Sequence
 from pathlib import Path
 
-from product_process import ProductCommandError, run
+from product_process import ProductCommandError, run, run_cli
 
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 MERMAID_PATTERN = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
@@ -178,4 +178,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_cli(main, name="check-docs"))

@@ -21,7 +21,7 @@ HEX_32 = re.compile(r"[0-9a-f]{32}")
 HEX_40 = re.compile(r"[0-9a-f]{40}")
 HEX_64 = re.compile(r"[0-9a-f]{64}")
 TIMESTAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
-BEARER = re.compile(r"Bearer\s+[A-Za-z0-9._-]+")
+BEARER = re.compile(r"Bearer\s+(?:<redacted>|[A-Za-z0-9._-]+)")
 MANIFEST = FIXTURE_ROOT / "manifest.json"
 EXPECTED_CASE_IDS = {
     "data-edges": {
@@ -114,6 +114,9 @@ def strings(value: Any) -> Iterable[str]:
         for key, item in value.items():
             yield str(key)
             yield from strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from strings(item)
 
 
 def string_values(value: Any) -> Iterable[str]:
@@ -125,9 +128,14 @@ def string_values(value: Any) -> Iterable[str]:
     elif isinstance(value, list):
         for item in value:
             yield from string_values(item)
-    elif isinstance(value, list):
-        for item in value:
-            yield from strings(item)
+
+
+def require_no_bearer_tokens(document: dict[str, Any], path: Path, label: str) -> None:
+    matches = (match.group(0) for value in strings(document) for match in BEARER.finditer(value))
+    require(
+        all(value == "Bearer <redacted>" for value in matches),
+        f"{label} contains bearer token-shaped data in {path}",
+    )
 
 
 def fixture_files(part: str, environment: str | None, explicit_file: str | None) -> list[Path]:
@@ -306,10 +314,7 @@ def validate_inventory(document: dict[str, Any], path: Path) -> str:
                     variable["value"] == "<redacted>",
                     f"inventory contains an unredacted sensitive environment value in {path}",
                 )
-    require(
-        not any(BEARER.search(value) for value in strings(document)),
-        f"inventory contains bearer token-shaped data in {path}",
-    )
+    require_no_bearer_tokens(document, path, "inventory")
     return str(environment)
 
 
@@ -394,10 +399,7 @@ def validate_catalog(document: dict[str, Any], path: Path) -> str:
         and sanitization.get("bearerTokensCaptured") is False,
         f"catalog sanitization record is invalid in {path}",
     )
-    require(
-        not any(BEARER.search(value) for value in strings(document)),
-        f"catalog contains bearer token-shaped data in {path}",
-    )
+    require_no_bearer_tokens(document, path, "catalog")
     return environment
 
 
@@ -459,6 +461,7 @@ def validate_http(document: dict[str, Any], path: Path) -> str:
         document.get("sanitizationRecord", {}).get("bearerTokensCaptured") is False,
         f"HTTP fixture retained a bearer token in {path}",
     )
+    require_no_bearer_tokens(document, path, "HTTP fixture")
     return environment
 
 
@@ -500,6 +503,7 @@ def validate_access(document: dict[str, Any], path: Path) -> str:
         document.get("sanitizationRecord", {}).get("bearerTokensCaptured") is False,
         f"access fixture retained a bearer token in {path}",
     )
+    require_no_bearer_tokens(document, path, "access fixture")
     return environment
 
 
@@ -774,10 +778,7 @@ def validate_case_fixture(document: dict[str, Any], part: str, path: Path) -> st
             ),
             f"permission fixture contains credential-shaped metadata in {path}",
         )
-    require(
-        not any(BEARER.search(value) for value in strings(document)),
-        f"fixture contains bearer token-shaped data in {path}",
-    )
+    require_no_bearer_tokens(document, path, "fixture")
     return "isolated"
 
 

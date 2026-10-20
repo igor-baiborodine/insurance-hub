@@ -21,6 +21,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
+from product_process import run_cli
+
 from deployment import Target, forwards
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -899,9 +901,16 @@ def failure_pod(
     cluster.kubectl("delete", "pod", name, "--wait=true", timeout=60)
 
 
+def cli(argv: list[str] | None = None) -> int:
+    def execute() -> int:
+        try:
+            return main(argv)
+        except CheckFailed as error:
+            print(f"FAIL {error}", file=sys.stderr)
+            return 1
+
+    return run_cli(execute, name="product-deployment-lifecycle")
+
+
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except CheckFailed as error:
-        print(f"FAIL {error}", file=sys.stderr)
-        raise SystemExit(1) from error
+    raise SystemExit(cli())

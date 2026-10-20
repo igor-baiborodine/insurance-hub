@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from product_process import run_cli
 
 ROOT = Path(__file__).resolve().parents[3]
 TARGETS = {
@@ -866,9 +867,16 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def cli(argv: list[str] | None = None) -> int:
+    def execute() -> int:
+        try:
+            return main(argv)
+        except (DeploymentError, KeyError, TypeError, ValueError) as error:
+            print(f"product-deployment: {error}", file=sys.stderr)
+            return 1
+
+    return run_cli(execute, name="product-deployment")
+
+
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except (DeploymentError, KeyError, TypeError, ValueError) as error:
-        print(f"product-deployment: {error}", file=sys.stderr)
-        raise SystemExit(1) from None
+    raise SystemExit(cli())

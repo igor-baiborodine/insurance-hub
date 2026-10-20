@@ -9,7 +9,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from product_process import ProductCommandError, run
+from product_process import ProductCommandError, run, run_cli
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 REPOSITORY_ROOT = MODULE_ROOT.parents[1]
@@ -122,4 +122,4 @@ def main(_argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_cli(main, name="product-image-build"))

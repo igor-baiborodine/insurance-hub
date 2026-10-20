@@ -10,7 +10,7 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from product_process import ProductCommandError, run
+from product_process import ProductCommandError, run, run_cli
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 
@@ -75,4 +75,4 @@ def main(_argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_cli(main, name="test-telemetry-continuity"))
