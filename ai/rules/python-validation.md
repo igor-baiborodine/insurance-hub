@@ -13,8 +13,11 @@
 
 Apply [development](python-development.md), [testing](python-test.md), and
 [formatting](python-formatting.md). Use owning Make targets after inspecting recipes,
-prerequisites, selected interpreter, file selection, and side effects. Exact targets and
-toolchain arrive in issue-174 Steps 4–5; missing targets are blocked checks, not passes.
+prerequisites, selected interpreter, file selection, and side effects. Use
+`python-runtime-check` to verify CPython 3.14.8 without requiring development packages and
+`python-toolchain-check` to verify uv 0.13.1, pytest 9.1.1, Ruff 0.17.1, and the locked
+environment. The format, lint, collection, and pytest targets arrive in issue-174 Step 5;
+missing targets are blocked checks, not passes.
 
 ## Selection and order
 

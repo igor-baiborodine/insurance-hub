@@ -19,9 +19,10 @@ behavioral testing.
   `E4`, `E7`, `E9`, `F`, `I`, `UP`, and `B`. Use a **100-character line length** and
   Ruff's Python 3.14 target. `I` owns import sorting; configure known first-party imports
   for each owner so local modules are grouped correctly. Owned configuration MUST declare these
-  selections, exclusions, and the exact pinned version. Do not hand-sort imports or substitute
-  an IDE-only formatter. Issue-174 Step 4 selects and verifies the exact Ruff pin and
-  configuration; Step 5 implements the Make targets. These bindings remain unresolved until then.
+  selections, exclusions, and Ruff 0.17.1 as the exact pinned version. The root `pyproject.toml`
+  owns the shared configuration and direct pin; `uv.lock` owns its resolved artifacts. Do not
+  hand-sort imports or substitute an IDE-only formatter. Issue-174 Step 5 implements the owning
+  format and lint targets; those executable bindings remain unresolved until then.
 - Owning Make targets MUST apply the same configuration to explicitly selected changed
   handwritten files, including new untracked files and intentional test changes. Exclude
   generated/vendor/third-party code and data fixtures from incidental formatting. Do not sweep

@@ -1558,3 +1558,7 @@ cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or 
 	@echo "✅ Service apps deployed to '$(ENV_NAME)' cluster!"
 	@kubectl get pods | grep -E "web|agent|auth|api"
 	@kubectl top pods | grep -E "web|agent|auth|api"
+
+ifndef INSURANCE_HUB_PYTHON_TOOLCHAIN_INCLUDED
+include $(K8S_REPOSITORY_ROOT)/scripts/python/toolchain.mk
+endif

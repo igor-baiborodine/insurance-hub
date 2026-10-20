@@ -3,6 +3,13 @@
 # Canonical conventions: ai/rules/makefile-rules.md
 ################################################################################
 
+.DEFAULT_GOAL := all
+
+ROOT_MAKEFILE := $(abspath $(lastword $(MAKEFILE_LIST)))
+ROOT_DIR := $(dir $(ROOT_MAKEFILE))
+
+include $(ROOT_DIR)scripts/python/toolchain.mk
+
 ################################################################################
 # Explicit root-level domain includes
 ################################################################################

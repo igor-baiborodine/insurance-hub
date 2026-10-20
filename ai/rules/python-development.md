@@ -46,9 +46,11 @@ interfaces. Also load [testing](python-test.md), [formatting](python-formatting.
 - Declare runtime dependencies with an owner and reproducible resolution. Prefer the standard
   library; justify packages such as YAML parsers. Keep pytest and Ruff in development/test
   dependencies, not operational imports. Record the interpreter path, implementation, version,
-  and managed-build identity in setup evidence. Exact uv/pytest/Ruff pins and dependency workflow
-  are finalized in issue-174 Step 4. Provision with uv from declared inputs on documented
-  supported OS/architecture combinations; record exact resolved transitive dependencies. A
+  and managed-build identity in setup evidence. The selected development tools are uv 0.13.1,
+  pytest 9.1.1, and Ruff 0.17.1. `pyproject.toml` owns their direct declarations and `uv.lock`
+  owns the resolved transitive dependencies and artifact hashes. Provision only through the
+  explicit `python-toolchain-setup` target on the documented Ubuntu 24.04 x86_64 platform; normal
+  checks MUST use `python-runtime-check` or `python-toolchain-check` and MUST NOT install. A
   security update MUST deliberately revise pins/resolution, recreate or update the environment,
   rerun affected checks, and record results. Claim bit-for-bit reproducibility only when artifact
   hashes and platform inputs are controlled.

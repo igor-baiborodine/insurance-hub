@@ -14,6 +14,7 @@
     - [Go](#go)
       - [Change-Based Local Validation](#change-based-local-validation)
     - [Python Auxiliary Tooling](#python-auxiliary-tooling)
+      - [Python Toolchain Setup](#python-toolchain-setup)
     - [Branch Names](#branch-names)
     - [Commit Messages](#commit-messages)
     - [Makefile](#makefile)
@@ -260,6 +261,61 @@ Test changed behavior and failure paths through the relevant Make targets, using
 resources for mutation tests. For database administration, derive allowed and denied operations
 from each role profile's contract, including reader, writer, or migrator profiles. Record the
 limits of fake-adapter and disposable tests separately from live-environment evidence.
+
+#### Python Toolchain Setup
+
+The supported auxiliary Python setup is Ubuntu 24.04 on x86_64. It uses user-local uv 0.13.1 to
+install managed CPython 3.14.8 alongside Ubuntu's system interpreter and creates the repository
+environment at ignored `.venv/`. The tracked `.python-version`, `pyproject.toml`, and `uv.lock`
+declare the interpreter, direct development dependencies, and resolved transitive artifacts.
+Shell activation is not required.
+
+Install the pinned uv release as your user; this requires `curl`, TLS certificates, and standard
+archive utilities:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://astral.sh/uv/0.13.1/install.sh |
+  env UV_INSTALL_DIR="$HOME/.local/bin" INSTALLER_NO_MODIFY_PATH=1 sh
+export PATH="$HOME/.local/bin:$PATH"
+uv --version  # uv 0.13.1
+```
+
+Provisioning is an explicit, networked setup operation. It installs the managed interpreter,
+creates `.venv/` only when absent, and synchronizes the frozen lock:
+
+```bash
+make python-toolchain-setup
+make python-toolchain-info
+```
+
+Setup does not delete or replace an existing environment. If `.venv/` uses another interpreter,
+inspect and preserve its dependency declarations first, then deliberately move or remove that
+environment and rerun setup. Never use `sudo pip`, change `/usr/bin/python3`, or install these
+packages into Ubuntu's Python.
+
+Normal checks never provision or install. The runtime check verifies only the selected CPython,
+so operational tools do not require pytest or Ruff. The toolchain check also verifies the frozen
+environment and exact development-tool versions:
+
+```bash
+make python-runtime-check
+make python-toolchain-check
+make -C k8s python-toolchain-check
+make -C services/product-service python-toolchain-check
+```
+
+The `PYTHON` and `UV` variables support explicit executable overrides without activation. Every
+override is version-checked before use:
+
+```bash
+make python-toolchain-check PYTHON=/absolute/path/to/python UV=/absolute/path/to/uv
+```
+
+For a security or maintenance update, change the direct version declarations and Make constants
+together, regenerate `uv.lock` with the selected uv release, deliberately recreate or synchronize
+the environment, and rerun the affected static, fast, integration, and acceptance checks. Record
+the interpreter build, platform, tool versions, lock change, and results. CPython 3.14.8 remains
+the baseline until an explicitly approved update.
 
 ### Branch Names
 
