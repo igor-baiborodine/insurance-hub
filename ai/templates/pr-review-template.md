@@ -1,3 +1,15 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Pull Request Review — <ticket-id>](#pull-request-review--ticket-id)
+  - [Review Summary](#review-summary)
+  - [Findings](#findings)
+  - [Open Questions](#open-questions)
+  - [Review Coverage and Evidence](#review-coverage-and-evidence)
+    - [Repository-Rule Compliance](#repository-rule-compliance)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Pull Request Review — <ticket-id>
 
 ## Review Summary
@@ -46,3 +58,6 @@ deviations to their finding IDs, and do not claim blanket compliance when any ar
   Status: <Satisfied / Finding identified / Unverified / Not applicable>
   Evidence, finding, or reason: <inspected evidence, finding ID, missing evidence, or concrete
   not-applicable reason>
+
+For language-specific changes, use stable policy IDs from the applicable validation rule as the
+rule areas and map each one to evidence or a finding.

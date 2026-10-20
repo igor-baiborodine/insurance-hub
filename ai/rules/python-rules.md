@@ -7,20 +7,28 @@
 
 # Python Rules
 
-Python is an auxiliary language in Insurance Hub: use it for administrative automation,
-deployment helpers, structured-data validation, test harnesses, and repository maintenance when
-shell scripting is no longer a clear, reliable fit. It is not a new business-service language;
-preserve the Java-to-Go migration direction and existing service boundaries.
+Python is an auxiliary language for repository maintenance, deployment and administrative
+helpers, structured-data validation, and test harnesses. It does not change the Java-to-Go
+business-service migration or module ownership.
 
-For Python tooling implementation or review, read both canonical rules:
+For auxiliary Python implementation or review, read and apply **all four** linked rules:
 
-- [Python development](python-development.md): language selection, ownership, Make interface,
-  implementation, and administrative operations.
-- [Python validation](python-validation.md): behavior tests, isolated integration checks, tooling,
-  and evidence.
+- [Python development](python-development.md): language choice, ownership, program and CLI
+  contracts, process lifetime, security, and administration.
+- [Python testing](python-test.md): pytest design, discovery, scenario structure, isolation, and
+  unit/integration/acceptance boundaries.
+- [Python formatting](python-formatting.md): mandatory Ruff format and lint policy and scope.
+- [Python validation](python-validation.md): changed-boundary checks, execution order, and evidence.
 
-For mixed-language work, also load the rules for the code being changed. A Python helper for a Go
-service does not replace the [Go rules](go-rules.md) when Go implementation or tooling is affected.
-Apply [Naming rules](naming-rules.md) when creating or renaming Python files, importable packages,
-or surrounding repository paths. These rules supplement root policy and add no separate
-instruction precedence.
+Use the owning Make targets for repeatable Python development and validation. A missing target or
+toolchain is an unresolved prerequisite, never evidence of a pass. The repository selects uv
+0.13.1, pytest 9.1.1, Ruff 0.17.1, and CPython 3.14.8 through `pyproject.toml`, `uv.lock`, and
+`.python-version`. Use `python-toolchain-setup` only for explicit provisioning,
+`python-runtime-check` for operational-runtime selection, and `python-toolchain-check` for the
+locked development environment. Use `python-format`, `python-format-check`, and `python-lint` with
+an explicit `PYTHON_FILES` selection; use the example, repository-wide, collection, integration,
+and guarded acceptance targets described by the linked rules for their declared scopes.
+
+Apply [Naming rules](naming-rules.md) to new or renamed paths, and applicable language and
+[Makefile rules](makefile-rules.md) when those boundaries change. This entry point creates no
+separate instruction precedence; follow [AGENTS.md](../../AGENTS.md).

@@ -4,10 +4,13 @@ GO ?= go
 DOCKER ?= docker
 NODE ?= node
 NPM ?= npm
-PYTHON ?= python3
 KUBECTL ?= kubectl
 JQ ?= jq
 DEPLOY_ENV ?=
+
+PRODUCT_SERVICE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+PRODUCT_REPOSITORY_ROOT := $(abspath $(PRODUCT_SERVICE_DIR)../..)
+include $(PRODUCT_REPOSITORY_ROOT)/scripts/python/toolchain.mk
 
 TOOLS_DIR := $(CURDIR)/.tools
 TOOLS_BIN := $(TOOLS_DIR)/bin
@@ -99,16 +102,16 @@ image-check: image-build ## Build and validate Product image identity, contents,
 deploy-render: ## Render Product Go overlays without applying them. Usage: make deploy-render [DEPLOY_ENV=local-dev|qa]
 	@KUBECTL="$(KUBECTL)" DEPLOY_ENV="$(DEPLOY_ENV)" ./scripts/render-deployment.sh
 
-deploy-check: ## Validate Product Go overlays, Java isolation, and active QA inclusion
+deploy-check: python-runtime-check ## Validate Product Go overlays, Java isolation, and active QA inclusion
 	@KUBECTL="$(KUBECTL)" JQ="$(JQ)" PYTHON="$(PYTHON)" ./scripts/check-deployment.sh
 
-deploy-preflight deploy-status image-load deploy deploy-verify stop: ## Guarded Product deployment operation; requires exact DEPLOY_* target coordinates
+deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runtime-check ## Guarded Product deployment operation; requires exact DEPLOY_* target coordinates
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/deployment.py '$@'
 
-deploy-test-tooling: ## Exercise guarded Product deployment operations with fake cluster adapters
+deploy-test-tooling: python-runtime-check ## Exercise guarded Product deployment operations with fake cluster adapters
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test-deployment-operations.py
 
-deploy-test: image-build ## Exercise the image and rendered pod in an owned disposable Kind namespace
+deploy-test: python-runtime-check image-build ## Exercise the image and rendered pod in an owned disposable Kind namespace
 	@PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" $(PYTHON) scripts/test-deployment-lifecycle.py
 
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
@@ -163,7 +166,7 @@ bootstrap-doc-tools:
 		"require('$(TOOLS_DIR)/node_modules/puppeteer/package.json').version")" = \
 		"$(PUPPETEER_VERSION)"
 
-check-docs:
+check-docs: python-runtime-check
 	@test "$$($(MMDC) --version 2>/dev/null)" = "$(MERMAID_CLI_VERSION)" || { \
 		echo "check-docs: Mermaid CLI $(MERMAID_CLI_VERSION) is required; run bootstrap-tools" >&2; \
 		exit 1; \
@@ -171,7 +174,7 @@ check-docs:
 	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(PYTHON) scripts/check-docs.py \
 		--renderer "$(MMDC)" --puppeteer-config "$(PUPPETEER_CONFIG)" $(DOC_FILES)
 
-preview-docs:
+preview-docs: python-runtime-check
 	@test "$$($(MMDC) --version 2>/dev/null)" = "$(MERMAID_CLI_VERSION)" || { \
 		echo "preview-docs: Mermaid CLI $(MERMAID_CLI_VERSION) is required; run bootstrap-tools" >&2; \
 		exit 1; \

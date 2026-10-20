@@ -1,0 +1,52 @@
+[project]
+name = "insurance-hub-tooling"
+version = "0.0.0"
+description = "Development dependencies for Insurance Hub auxiliary Python tooling"
+requires-python = "==3.14.8"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.17.1",
+]
+
+[tool.uv]
+package = false
+required-version = "==0.13.1"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+force-exclude = true
+extend-exclude = [
+    "**/.tools/**",
+    "**/.venv/**",
+    "**/node_modules/**",
+    "**/testdata/**",
+]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "check_monitoring",
+    "deployment",
+    "example_cli",
+    "monitoring_assets",
+    "release",
+    "test_monitoring",
+    "validate_selection",
+]
+
+[tool.pytest.ini_options]
+addopts = ["--strict-config", "--strict-markers"]
+testpaths = ["ai/examples/python-testing/tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+pythonpath = ["ai/examples/python-testing"]
+markers = [
+    "integration: explicitly selected tests using disposable external boundaries",
+    "acceptance: explicitly selected full acceptance workflows",
+]

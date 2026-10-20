@@ -132,10 +132,17 @@ Copilot to their canonical workflows under `ai/skills/`.
   `Makefile`, included `.mk` fragment, target, variable, or recipe.
 - Follow [the Git rules](ai/rules/git-rules.md) when working with branches, preparing or reviewing
   commits, or managing the Git working tree and history.
+- For Go implementation, migration, or tooling work, load
+  [the Go entry point](ai/rules/go-rules.md) and all six linked rules: architecture, API and
+  transport, development, testing, formatting, and validation.
 - Use Python as an auxiliary language for administrative and repository tooling when structured
   data, validation, or orchestration makes Bash unwieldy. Keep simple shell tasks in Bash and
-  preserve the existing service languages and migration direction. For Python work, load
-  [the Python rules](ai/rules/python-rules.md) and their linked development and validation rules.
+  preserve the existing service languages and migration direction. Before implementing or
+  reviewing auxiliary Python or its tests, configuration, Make callers, or administrative
+  interfaces, load [the Python entry point](ai/rules/python-rules.md) and all four linked rules:
+  development, testing, formatting, and validation. Record the applicable policy IDs and required
+  checks from the validation rule; missing mandatory evidence or an unapproved violation blocks a
+  completion claim.
 - Use `CONTRIBUTING.md` as the source of truth for prerequisites and developer workflow
   expectations.
 - Prefer existing Make targets and module-local build tooling over inventing ad hoc commands.

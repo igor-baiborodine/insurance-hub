@@ -14,6 +14,8 @@
     - [Go](#go)
       - [Change-Based Local Validation](#change-based-local-validation)
     - [Python Auxiliary Tooling](#python-auxiliary-tooling)
+      - [Python Toolchain Setup](#python-toolchain-setup)
+      - [Python Checks and Test Suites](#python-checks-and-test-suites)
     - [Branch Names](#branch-names)
     - [Commit Messages](#commit-messages)
     - [Makefile](#makefile)
@@ -36,8 +38,9 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
 * **Git** `>=2.43.0`,
   see [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
 * **Go** `1.27.2` for the Go modules, see [Install Go](https://go.dev/doc/install).
-* **Python 3** for auxiliary tooling; use the minimum version documented by the affected tool
-  and its owning Make/CI configuration. See [Python Auxiliary Tooling](#python-auxiliary-tooling).
+* **CPython 3.14.8** for auxiliary tooling governed by the current Python policy; use the owning
+  isolated environment and Make targets described in
+  [Python Auxiliary Tooling](#python-auxiliary-tooling).
 * **Node.js** `12.22.12`, see [Install Node.js](https://nodejs.org/en/download/).
 * **Yarn** `1.22.22`, see [Install Yarn](https://classic.yarnpkg.com/en/docs/install).
 * **jq** `>=1.6`, see [Install jq](https://stedolan.github.io/jq/download/).
@@ -240,11 +243,14 @@ test harnesses when substantial parsing, branching, state management, or recover
 difficult to maintain. Keep short, straightforward CLI sequences in Bash. Python supports the
 repository's tooling; service implementation follows the existing Java-to-Go migration.
 
-Follow the [Python rules](ai/rules/python-rules.md),
-[development guidance](ai/rules/python-development.md), and
-[validation guidance](ai/rules/python-validation.md). Keep scripts with their existing owner,
-prefer the standard library, and document interpreter requirements. Additional packages need a
-concrete purpose and reproducible, isolated setup; do not install them into system Python.
+Before implementing or reviewing auxiliary Python or its tests, configuration, Make callers, or
+administrative interfaces, read the [Python entry point](ai/rules/python-rules.md) and all four
+linked rules: [development](ai/rules/python-development.md),
+[testing](ai/rules/python-test.md), [formatting](ai/rules/python-formatting.md), and
+[validation](ai/rules/python-validation.md). Keep scripts with their existing owner. Prefer the
+standard library for operational dependencies where it meets the contract; pytest and Ruff are
+required development tools under the canonical rules. Install declared dependencies only through
+reproducible, isolated setup; do not install them into system Python.
 
 Use the owning Makefile targets for repeatable development, validation, and administrative
 operations. Read their prerequisites, supported variables, and side effects before running them.
@@ -256,6 +262,105 @@ Test changed behavior and failure paths through the relevant Make targets, using
 resources for mutation tests. For database administration, derive allowed and denied operations
 from each role profile's contract, including reader, writer, or migrator profiles. Record the
 limits of fake-adapter and disposable tests separately from live-environment evidence.
+
+#### Python Toolchain Setup
+
+The supported auxiliary Python setup is Ubuntu 24.04 on x86_64. It uses user-local uv 0.13.1 to
+install managed CPython 3.14.8 alongside Ubuntu's system interpreter and creates the repository
+environment at ignored `.venv/`. The tracked `.python-version`, `pyproject.toml`, and `uv.lock`
+declare the interpreter, direct development dependencies, and resolved transitive artifacts.
+Shell activation is not required.
+
+Install the pinned uv release as your user; this requires `curl`, TLS certificates, and standard
+archive utilities:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://astral.sh/uv/0.13.1/install.sh |
+  env UV_INSTALL_DIR="$HOME/.local/bin" INSTALLER_NO_MODIFY_PATH=1 sh
+export PATH="$HOME/.local/bin:$PATH"
+uv --version  # uv 0.13.1
+```
+
+Provisioning is an explicit, networked setup operation. It installs the managed interpreter,
+creates `.venv/` only when absent, and synchronizes the frozen lock:
+
+```bash
+make python-toolchain-setup
+make python-toolchain-info
+```
+
+Setup does not delete or replace an existing environment. If `.venv/` uses another interpreter,
+inspect and preserve its dependency declarations first, then deliberately move or remove that
+environment and rerun setup. Never use `sudo pip`, change `/usr/bin/python3`, or install these
+packages into Ubuntu's Python.
+
+Normal checks never provision or install. The runtime check verifies only the selected CPython,
+so operational tools do not require pytest or Ruff. The toolchain check also verifies the frozen
+environment and exact development-tool versions:
+
+```bash
+make python-runtime-check
+make python-toolchain-check
+make -C k8s python-toolchain-check
+make -C services/product-service python-toolchain-check
+```
+
+The `PYTHON` and `UV` variables support explicit executable overrides without activation. Every
+override is version-checked before use:
+
+```bash
+make python-toolchain-check PYTHON=/absolute/path/to/python UV=/absolute/path/to/uv
+```
+
+For a security or maintenance update, change the direct version declarations and Make constants
+together, regenerate `uv.lock` with the selected uv release, deliberately recreate or synchronize
+the environment, and rerun the affected static, fast, integration, and acceptance checks. Record
+the interpreter build, platform, tool versions, lock change, and results. CPython 3.14.8 remains
+the baseline until an explicitly approved update.
+
+#### Python Checks and Test Suites
+
+Run the mutating formatter only with an explicit repository-relative file selection. The paired
+format and lint checks inspect the same selection without changing source:
+
+```bash
+make python-format PYTHON_FILES='path/to/tool.py path/to/test_tool.py'
+make python-format-check PYTHON_FILES='path/to/tool.py path/to/test_tool.py'
+make python-lint PYTHON_FILES='path/to/tool.py path/to/test_tool.py'
+make python-selection-check
+```
+
+Selections accept portable repository-relative paths. Absolute paths, `.` or `..` components,
+empty components, unsupported characters, missing paths, and paths that resolve outside the
+repository through symlinks are rejected before Ruff or pytest starts.
+
+Use `make python-scope-list` to inspect the tracked and unignored untracked `*.py` files selected
+by `python-repository-format-check` and `python-repository-lint`. These repository-wide checks keep
+existing violations visible while owner batches migrate; a failure must be recorded rather than
+reported as a passing foundation check.
+
+The committed examples provide a bounded local gate and separate test-suite entry points:
+
+```bash
+make python-examples-check
+make python-examples-test-integration
+```
+
+`python-examples-check` performs non-mutating example format/lint checks, no-path default
+collection, and the fast example tests. Default collection is restricted to the configured fast
+test path. Disposable integration requires its explicit target. Full owner acceptance requires an
+explicit existing repository-relative path and confirmation:
+
+```bash
+make python-test-acceptance \
+  PYTHON_ACCEPTANCE_CONFIRM=yes \
+  PYTHON_ACCEPTANCE_PATH=path/to/owner/acceptance
+```
+
+Inspect the owning recipe and prerequisites before an acceptance run. The confirmation selects
+the interface; it does not authorize a live mutation or replace owner-specific environment and
+credential safeguards. The [Python testing examples](ai/examples/python-testing/README.md) show
+the executable CLI, fake boundary, scenario structure, and disposable integration pattern.
 
 ### Branch Names
 
