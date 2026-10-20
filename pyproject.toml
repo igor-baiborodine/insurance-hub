@@ -24,7 +24,6 @@ extend-exclude = [
     "**/.venv/**",
     "**/node_modules/**",
     "**/testdata/**",
-    "legacy/**",
 ]
 
 [tool.ruff.lint]
