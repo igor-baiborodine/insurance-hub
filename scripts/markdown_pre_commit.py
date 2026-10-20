@@ -33,7 +33,7 @@ def run_git(
         cwd=root,
         check=True,
         timeout=30,
-        env={"PATH": os.environ.get("PATH", "")},
+        env=dict(os.environ),
         **kwargs,
     )
 

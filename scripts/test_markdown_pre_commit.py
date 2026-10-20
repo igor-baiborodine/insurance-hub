@@ -42,6 +42,14 @@ def hook(repository: Path, *, path: str | None = None) -> subprocess.CompletedPr
     return run([repository / ".githooks" / "pre-commit"], cwd=repository, env=environment)
 
 
+def commit(repository: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    return run(
+        ["git", "commit", *arguments],
+        cwd=repository,
+        env={**os.environ, "PYTHON": sys.executable},
+    )
+
+
 def assert_no_hook_temporary_files(repository: Path) -> None:
     names = [item.name for item in repository.iterdir()]
     assert not any(name.startswith(".markdown-toc-index.") for name in names)
@@ -254,6 +262,51 @@ def test_stale_staged_content_fails_when_worktree_is_valid(
         git(repository, "hash-object", "partial.md"),
     )
     assert after == before
+    assert_no_hook_temporary_files(repository)
+
+
+def test_commit_all_rejects_stale_markdown_from_temporary_index(
+    fixture_repository: tuple[Path, Path],
+) -> None:
+    # given
+    repository, _ = fixture_repository
+    partial = repository / "partial.md"
+    with partial.open("a", encoding="utf-8") as stream:
+        stream.write("\n## Commit-all section\n")
+    before_head = git(repository, "rev-parse", "HEAD")
+    assert git(repository, "diff", "--cached", "--name-only") == ""
+
+    # when
+    result = commit(repository, "-a", "-m", "stale commit-all fixture")
+
+    # then
+    assert result.returncode == 1
+    assert "stale or missing table of contents" in result.stderr
+    assert "partial.md" in result.stderr
+    assert git(repository, "rev-parse", "HEAD") == before_head
+    assert_no_hook_temporary_files(repository)
+
+
+def test_path_limited_commit_ignores_unrelated_markdown_in_ordinary_index(
+    fixture_repository: tuple[Path, Path],
+) -> None:
+    # given
+    repository, _ = fixture_repository
+    partial = repository / "partial.md"
+    with partial.open("a", encoding="utf-8") as stream:
+        stream.write("\n## Unrelated staged section\n")
+    git(repository, "add", "partial.md")
+    (repository / "notes.txt").write_text("path-limited content\n", encoding="utf-8")
+    before_head = git(repository, "rev-parse", "HEAD")
+
+    # when
+    result = commit(repository, "--only", "-m", "path-limited fixture", "notes.txt")
+
+    # then
+    assert result.returncode == 0, result.stderr
+    assert git(repository, "rev-parse", "HEAD") != before_head
+    assert git(repository, "show", "HEAD:notes.txt") == "path-limited content"
+    assert git(repository, "diff", "--cached", "--name-only") == "partial.md"
     assert_no_hook_temporary_files(repository)
 
 
