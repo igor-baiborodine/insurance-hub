@@ -27,6 +27,7 @@ def write_inspector(path: Path, *, fail: bool) -> None:
     body = textwrap.dedent("""\
         import argparse
         import json
+        import os
         import sys
         from pathlib import Path
 
@@ -34,6 +35,12 @@ def write_inspector(path: Path, *, fail: bool) -> None:
         parser.add_argument("--source", required=True, type=Path)
         arguments = parser.parse_args()
         token = sys.stdin.readline().strip()
+        if "EXAMPLE_API_TOKEN" in os.environ:
+            print("protected environment variable leaked", file=sys.stderr)
+            raise SystemExit(8)
+        if os.environ.get("PYTHONDONTWRITEBYTECODE") != "1":
+            print("required non-sensitive environment variable missing", file=sys.stderr)
+            raise SystemExit(9)
         """)
     if fail:
         body += textwrap.dedent("""\
@@ -109,6 +116,10 @@ def write_blocking_inspector(path: Path) -> Path:
         import sys
         from pathlib import Path
 
+        if "EXAMPLE_API_TOKEN" in os.environ:
+            raise SystemExit("protected environment variable leaked")
+        if os.environ.get("PYTHONDONTWRITEBYTECODE") != "1":
+            raise SystemExit("required non-sensitive environment variable missing")
         descendant = subprocess.Popen(
             [sys.executable, "-c", "import signal; signal.pause()"],
         )

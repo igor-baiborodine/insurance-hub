@@ -20,7 +20,7 @@ Insurance Hub business contract. Read the canonical [development](../../rules/py
 
 | Path | Boundary demonstrated | Evidence limit |
 | --- | --- | --- |
-| `example_cli.py` | Import-safe CLI, validated configuration, owned process group, timeout, interruption, redaction, atomic output, and cleanup | Example policy only; no real service or administrative target |
+| `example_cli.py` | Import-safe CLI, validated configuration, controlled child environment, owned process group, timeout, interruption, redaction, atomic output, and cleanup | Example policy only; no real service or administrative target |
 | `tests/conftest.py` | Focused pytest fixtures and a recording fake command boundary | Fake calls do not prove subprocess or operating-system behavior |
 | `tests/test_example_cli.py` | Parametrization, `tmp_path`, `monkeypatch`, exception assertions, failure cleanup, and Given/When/Then phases | Fast in-process behavior only |
 | `integration/test_disposable_cli.py` | Explicitly selected real subprocess and filesystem boundary using disposable paths | No network, database, cluster, or full acceptance evidence |
@@ -62,10 +62,12 @@ failure.
 
 The fast suite uses a recording fake at the command boundary. The integration suite invokes the
 CLI and its disposable helper with the selected CPython interpreter, protected stdin, bounded
-timeouts, isolated files, redacted diagnostics, and cleanup checks. Its interruption cases send
-SIGINT and SIGTERM while the helper is active, then verify status 130 or 143, process-group
-shutdown, reaping, and partial-file cleanup. Neither import nor collection starts a subprocess or
-creates infrastructure.
+timeouts, isolated files, redacted diagnostics, and cleanup checks. The helper receives the token
+only through stdin. Its explicit environment may retain `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`, and
+`PYTHONDONTWRITEBYTECODE` when the parent defines them, except that the configured token variable
+is always removed. Its interruption cases send SIGINT and SIGTERM while the helper is active, then
+verify status 130 or 143, process-group shutdown, reaping, and partial-file cleanup. Neither import
+nor collection starts a subprocess or creates infrastructure.
 
 ## Adaptation boundaries
 

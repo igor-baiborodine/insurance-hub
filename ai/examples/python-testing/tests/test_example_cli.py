@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -57,17 +57,29 @@ def test_execute_uses_selected_python_and_writes_atomic_report(
     cli_paths: tuple[Path, Path, Path],
     fake_runner: FakeRunner,
 ) -> None:
+    # given
     source, output, inspector = cli_paths
-    config = Config(source, output, inspector, "TOKEN", 1.5)
+    config = Config(source, output, inspector, "LANG", 1.5)
+    environment = {
+        "LANG": "synthetic-secret",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "UNDECLARED_TARGET": "must-not-be-inherited",
+    }
 
     # when
-    report = execute(config, "synthetic-secret", fake_runner)
+    report = execute(config, "synthetic-secret", environment, fake_runner)
 
     # then
     assert report == {"records": 2, "status": "ok"}
     assert output.read_text(encoding="utf-8") == '{"records": 2, "status": "ok"}\n'
     assert fake_runner.calls == [
-        ([sys.executable, str(inspector), "--source", str(source)], "synthetic-secret\n", 1.5)
+        (
+            [sys.executable, str(inspector), "--source", str(source)],
+            "synthetic-secret\n",
+            1.5,
+            {"LC_ALL": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"},
+        )
     ]
     assert list(output.parent.glob(f".{output.name}.*")) == []
 
@@ -86,7 +98,9 @@ def test_run_redacts_secret_and_cleans_partial_output(
         _arguments: list[str],
         _input_text: str,
         _timeout: float,
+        environment: Mapping[str, str],
     ) -> CommandResult:
+        assert "EXAMPLE_API_TOKEN" not in environment
         return CommandResult(7, "", f"remote rejected {secret}")
 
     # when
@@ -127,7 +141,7 @@ def test_run_subprocess_reports_timeout_without_input_disclosure(
 
     # when / then
     with pytest.raises(ToolError, match="timed out") as captured:
-        run_subprocess(["helper"], secret, 0.1)
+        run_subprocess(["helper"], secret, 0.1, {})
 
     # then
     assert secret not in str(captured.value)

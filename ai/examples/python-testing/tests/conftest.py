@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -12,10 +13,16 @@ from example_cli import CommandResult
 @dataclass
 class FakeRunner:
     result: CommandResult = CommandResult(0, '{"records": 2, "status": "ok"}', "")
-    calls: list[tuple[list[str], str, float]] = field(default_factory=list)
+    calls: list[tuple[list[str], str, float, dict[str, str]]] = field(default_factory=list)
 
-    def __call__(self, arguments: list[str], input_text: str, timeout: float) -> CommandResult:
-        self.calls.append((list(arguments), input_text, timeout))
+    def __call__(
+        self,
+        arguments: list[str],
+        input_text: str,
+        timeout: float,
+        environment: Mapping[str, str],
+    ) -> CommandResult:
+        self.calls.append((list(arguments), input_text, timeout, dict(environment)))
         return self.result
 
 

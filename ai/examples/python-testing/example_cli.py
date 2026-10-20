@@ -22,6 +22,7 @@ INTERRUPTED = 130
 TERMINATED = 143
 DEFAULT_TOKEN_ENV = "EXAMPLE_API_TOKEN"
 PROCESS_TEARDOWN_SECONDS = 1.0
+CHILD_ENV_ALLOWLIST = ("LANG", "LC_ALL", "LC_CTYPE", "PYTHONDONTWRITEBYTECODE", "TZ")
 
 
 class ToolError(Exception):
@@ -52,7 +53,7 @@ class CommandResult:
     stderr: str
 
 
-CommandRunner = Callable[[Sequence[str], str, float], CommandResult]
+CommandRunner = Callable[[Sequence[str], str, float, Mapping[str, str]], CommandResult]
 
 
 @contextmanager
@@ -130,9 +131,15 @@ def terminate_and_reap(process: subprocess.Popen[str]) -> None:
         process.communicate(timeout=PROCESS_TEARDOWN_SECONDS)
 
 
-def run_subprocess(arguments: Sequence[str], input_text: str, timeout: float) -> CommandResult:
+def run_subprocess(
+    arguments: Sequence[str],
+    input_text: str,
+    timeout: float,
+    environment: Mapping[str, str],
+) -> CommandResult:
     process = subprocess.Popen(
         list(arguments),
+        env=dict(environment),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -173,7 +180,18 @@ def redact(message: str, secret: str) -> str:
     return message.replace(secret, "[REDACTED]") if secret else message
 
 
-def execute(config: Config, token: str, runner: CommandRunner) -> dict[str, object]:
+def child_environment(environ: Mapping[str, str], token_env: str) -> dict[str, str]:
+    return {
+        name: environ[name] for name in CHILD_ENV_ALLOWLIST if name != token_env and name in environ
+    }
+
+
+def execute(
+    config: Config,
+    token: str,
+    environ: Mapping[str, str],
+    runner: CommandRunner,
+) -> dict[str, object]:
     descriptor, temporary_name = tempfile.mkstemp(
         dir=config.output.parent,
         prefix=f".{config.output.name}.",
@@ -182,7 +200,12 @@ def execute(config: Config, token: str, runner: CommandRunner) -> dict[str, obje
     temporary_output = Path(temporary_name)
     try:
         command = [sys.executable, str(config.inspector), "--source", str(config.source)]
-        result = runner(command, f"{token}\n", config.timeout_seconds)
+        result = runner(
+            command,
+            f"{token}\n",
+            config.timeout_seconds,
+            child_environment(environ, config.token_env),
+        )
         if result.returncode != 0:
             detail = redact(result.stderr.strip(), token) or "no diagnostic"
             raise ToolError(f"inspector failed with status {result.returncode}: {detail}")
@@ -210,7 +233,7 @@ def run(
         with controlled_interrupts():
             arguments = parse_args(argv)
             config, token = validate_config(arguments, environment)
-            report = execute(config, token, runner)
+            report = execute(config, token, environment, runner)
     except SignalInterruption as exc:
         print(f"interrupted by {signal.Signals(exc.signum).name}", file=stderr)
         return INTERRUPTED if exc.signum == signal.SIGINT else TERMINATED
