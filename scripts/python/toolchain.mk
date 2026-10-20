@@ -63,6 +63,7 @@ PYTHON_PRODUCT_TOOLING_FILES := \
 	scripts/product_baseline/fixtures.py \
 	scripts/product_baseline/preflight.py \
 	scripts/product_baseline/replay.py \
+	scripts/product_baseline/test_catalog_roundtrip.py \
 	scripts/product_baseline/test_compare_http.py \
 	scripts/product_baseline/test_fixtures.py \
 	scripts/product_baseline/verify.py \
@@ -91,7 +92,8 @@ PYTHON_PRODUCT_TOOLING_FILES := \
 	services/product-service/scripts/test_deployment_checks.py \
 	services/product-service/scripts/test_deployment_lifecycle.py \
 	services/product-service/scripts/test_deployment_operations.py \
-	services/product-service/scripts/test_product_tooling.py
+	services/product-service/scripts/test_product_tooling.py \
+	services/product-service/scripts/test_product_tooling_integration.py
 PYTHON_SCOPE_FILES = $(shell git -C "$(PYTHON_REPOSITORY_ROOT)" ls-files \
 	--cached --others --exclude-standard -- '*.py' | LC_ALL=C sort)
 PYTHON_FILES ?=
@@ -109,7 +111,8 @@ export PYTHON_FILES PYTHON_ACCEPTANCE_PATH PYTHON_ACCEPTANCE_CONFIRM
 	python-scaffold-tooling-format-check python-scaffold-tooling-lint \
 	python-scaffold-tooling-test-fast python-scaffold-tooling-check \
 	python-product-tooling-format-check python-product-tooling-lint \
-	python-product-tooling-test-fast python-product-tooling-check \
+	python-product-tooling-test-fast python-product-tooling-test-integration \
+	python-product-tooling-check \
 	python-repository-format-check python-repository-lint python-test-collect \
 	python-examples-test-fast python-examples-test-integration _python-acceptance-check \
 	python-test-acceptance python-examples-check
@@ -261,16 +264,24 @@ python-product-tooling-lint: python-lint ## Lint Product Python tooling
 python-product-tooling-test-fast: python-toolchain-check ## Run fast Product tooling tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
 		-m 'not integration and not acceptance' \
+		scripts/product_baseline/test_catalog_roundtrip.py \
 		scripts/product_baseline/test_compare_http.py \
 		scripts/product_baseline/test_fixtures.py \
 		scripts/product_security/test_validators.py \
 		scripts/postgres/service/test_reader.py \
 		services/product-service/scripts/test_check_access_results.py \
+		services/product-service/scripts/test_deployment_checks.py \
 		services/product-service/scripts/test_deployment_operations.py \
 		services/product-service/scripts/test_product_tooling.py
 
+python-product-tooling-test-integration: python-toolchain-check ## Run disposable Product tooling integration tests
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
+		-m integration \
+		services/product-service/scripts/test_deployment_checks.py \
+		services/product-service/scripts/test_product_tooling_integration.py
+
 python-product-tooling-check: python-product-tooling-format-check python-product-tooling-lint \
-	python-product-tooling-test-fast ## Run non-mutating Product Python tooling checks
+	python-product-tooling-test-fast python-product-tooling-test-integration ## Run all Product tooling checks
 
 python-repository-format-check: PYTHON_FILES = $(PYTHON_SCOPE_FILES)
 python-repository-format-check: python-format-check ## Check all visible handwritten Python without mutation

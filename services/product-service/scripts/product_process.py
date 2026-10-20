@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -21,6 +22,9 @@ class ProductSignal(BaseException):
     def __init__(self, signum: int) -> None:
         self.signum = signum
         super().__init__(signal.Signals(signum).name)
+
+
+CAPTURE_LIMIT = 4 * 1024 * 1024
 
 
 def run_cli(main: Callable[[], int], *, name: str) -> int:
@@ -101,8 +105,20 @@ def run(
     if capture and log_path is not None:
         raise ValueError("capture and log_path are mutually exclusive")
     log = None
-    stdout: int | object | None = subprocess.PIPE if capture else None
-    stderr: int | object | None = subprocess.PIPE if capture else None
+    captured_output = None
+    captured_error = None
+    command_input = None
+    stdout: int | object | None = None
+    stderr: int | object | None = None
+    if capture:
+        captured_output = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+        captured_error = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+        stdout = captured_output
+        stderr = captured_error
+    if input_text is not None:
+        command_input = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+        command_input.write(input_text)
+        command_input.seek(0)
     if log_path is not None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log = log_path.open("w", encoding="utf-8")
@@ -118,15 +134,11 @@ def run(
             cwd=cwd,
             env=dict(env),
             text=True,
-            stdin=subprocess.PIPE if input_text is not None else None,
+            stdin=command_input,
             stdout=stdout,
             stderr=stderr,
             start_new_session=True,
         )
-        if input_text is not None and process.stdin is not None:
-            process.stdin.write(input_text)
-            process.stdin.close()
-            process.stdin = None
         while process.poll() is None:
             now = time.monotonic()
             if now >= deadline:
@@ -137,7 +149,24 @@ def run(
                 print(f"{activity}: still running after {now - started:.0f}s", file=sys.stderr)
                 heartbeat = now + 30
             time.sleep(min(0.1, deadline - now))
-        captured_stdout, captured_stderr = process.communicate() if capture else ("", "")
+        captured_stdout = ""
+        captured_stderr = ""
+        for stream, label in (
+            (captured_output, "stdout"),
+            (captured_error, "stderr"),
+        ):
+            if stream is None:
+                continue
+            stream.seek(0)
+            value = stream.read(CAPTURE_LIMIT + 1)
+            if len(value) > CAPTURE_LIMIT:
+                raise ProductCommandError(
+                    f"{activity} {label} exceeded the {CAPTURE_LIMIT}-character capture limit"
+                )
+            if label == "stdout":
+                captured_stdout = value
+            else:
+                captured_stderr = value
     except BaseException:
         if "process" in locals() and not _terminate(process, teardown_seconds):
             print(f"{activity}: cleanup exceeded {teardown_seconds:g}s", file=sys.stderr)
@@ -145,6 +174,12 @@ def run(
     finally:
         if log is not None:
             log.close()
+        if captured_output is not None:
+            captured_output.close()
+        if captured_error is not None:
+            captured_error.close()
+        if command_input is not None:
+            command_input.close()
     if _group_exists(process.pid) and not _terminate(process, teardown_seconds):
         raise ProductCommandError(
             f"{activity} cleanup exceeded its {teardown_seconds:g}-second deadline"

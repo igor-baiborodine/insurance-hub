@@ -10,7 +10,6 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-import test_deployment_checks
 import yaml
 
 import check_render
@@ -77,9 +76,6 @@ def main(_argv: Sequence[str] | None = None) -> int:
                 str(paths["qa-aggregate"]),
             ]
             if check_render.main(arguments) != 0:
-                return 1
-            test_arguments = ["--checker", str(Path(check_render.__file__).resolve()), *arguments]
-            if test_deployment_checks.main(test_arguments) != 0:
                 return 1
     except (DeploymentCheckError, OSError, TypeError, ValueError) as error:
         print(f"product-deploy-check: {error}", file=sys.stderr)

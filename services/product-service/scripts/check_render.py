@@ -21,6 +21,88 @@ def require(condition: bool, message: str) -> None:
         raise ValidationError(message)
 
 
+def mapping(value: Any, context: str) -> dict[str, Any]:
+    require(isinstance(value, dict), f"{context} must be an object")
+    return value
+
+
+def object_list(value: Any, context: str) -> list[dict[str, Any]]:
+    require(isinstance(value, list), f"{context} must be an array")
+    require(all(isinstance(item, dict) for item in value), f"{context} has a non-object item")
+    return value
+
+
+def string_mapping(value: Any, context: str) -> dict[str, str]:
+    result = mapping(value, context)
+    require(
+        all(isinstance(key, str) and isinstance(item, str) for key, item in result.items()),
+        f"{context} must contain only string values",
+    )
+    return result
+
+
+def validate_document_shape(document: dict[str, Any], context: str) -> None:
+    kind = document.get("kind")
+    require(isinstance(kind, str), f"{context}.kind must be a string")
+    metadata = mapping(document.get("metadata"), f"{context}.metadata")
+    for field in ("name", "namespace"):
+        if field in metadata:
+            require(
+                isinstance(metadata[field], str),
+                f"{context}.metadata.{field} must be a string",
+            )
+    for field in ("labels", "annotations"):
+        if field in metadata:
+            string_mapping(metadata[field], f"{context}.metadata.{field}")
+    if "data" in document:
+        string_mapping(document["data"], f"{context}.data")
+    if "spec" not in document:
+        require(kind not in {"Deployment", "Service"}, f"{context}.spec must be an object")
+        return
+    spec = mapping(document["spec"], f"{context}.spec")
+    if kind == "Service":
+        if "selector" in spec:
+            string_mapping(spec["selector"], f"{context}.spec.selector")
+        if "ports" in spec:
+            object_list(spec["ports"], f"{context}.spec.ports")
+    if kind != "Deployment":
+        return
+    if "selector" in spec:
+        selector = mapping(spec["selector"], f"{context}.spec.selector")
+        if "matchLabels" in selector:
+            string_mapping(
+                selector["matchLabels"],
+                f"{context}.spec.selector.matchLabels",
+            )
+    template = mapping(spec.get("template"), f"{context}.spec.template")
+    pod_metadata = mapping(template.get("metadata"), f"{context}.spec.template.metadata")
+    for field in ("labels", "annotations"):
+        if field in pod_metadata:
+            string_mapping(
+                pod_metadata[field],
+                f"{context}.spec.template.metadata.{field}",
+            )
+    pod_spec = mapping(template.get("spec"), f"{context}.spec.template.spec")
+    for field in ("containers", "initContainers"):
+        if field not in pod_spec:
+            continue
+        containers = object_list(
+            pod_spec[field],
+            f"{context}.spec.template.spec.{field}",
+        )
+        for index, container in enumerate(containers):
+            container_context = f"{context}.spec.template.spec.{field}[{index}]"
+            for list_field in ("ports", "env", "envFrom", "volumeMounts"):
+                if list_field in container:
+                    object_list(container[list_field], f"{container_context}.{list_field}")
+            for probe_field in ("startupProbe", "livenessProbe", "readinessProbe"):
+                if probe_field not in container:
+                    continue
+                probe = mapping(container[probe_field], f"{container_context}.{probe_field}")
+                if "httpGet" in probe:
+                    mapping(probe["httpGet"], f"{container_context}.{probe_field}.httpGet")
+
+
 def load_documents(path: Path) -> list[dict[str, Any]]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -30,6 +112,8 @@ def load_documents(path: Path) -> list[dict[str, Any]]:
     require(
         all(isinstance(item, dict) for item in value), f"rendered JSON {path} has a non-object item"
     )
+    for index, document in enumerate(value):
+        validate_document_shape(document, f"rendered JSON {path} document {index}")
     return value
 
 

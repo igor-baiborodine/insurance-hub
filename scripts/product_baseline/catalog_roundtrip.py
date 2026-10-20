@@ -16,6 +16,7 @@ from scripts.python.process_runner import CommandError, run_command
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 IMAGE = "postgres:16.4-alpine"
+OWNER_LABEL = "insurance-hub.io/product-baseline-roundtrip"
 
 
 def command(arguments: list[str], *, timeout: float, activity: str) -> str:
@@ -31,8 +32,10 @@ def command(arguments: list[str], *, timeout: float, activity: str) -> str:
 
 def main(_argv: Sequence[str] | None = None) -> int:
     environment = os.environ.get("BASELINE_ENV", "")
-    container = f"product-baseline-roundtrip-{environment}-{secrets.token_hex(4)}"
-    created = False
+    owner = secrets.token_hex(8)
+    container = f"product-baseline-roundtrip-{environment}-{owner}"
+    registered = False
+    status = 0
     try:
         if environment not in fixtures.ENVIRONMENTS:
             raise fixtures.FixtureError("BASELINE_ENV is required; use local-dev or qa.")
@@ -51,6 +54,7 @@ def main(_argv: Sequence[str] | None = None) -> int:
             )
             os.chmod(temporary, 0o755)
             os.chmod(catalog, 0o644)
+            registered = True
             command(
                 [
                     "docker",
@@ -58,6 +62,8 @@ def main(_argv: Sequence[str] | None = None) -> int:
                     "--detach",
                     "--name",
                     container,
+                    "--label",
+                    f"{OWNER_LABEL}={owner}",
                     "-e",
                     "POSTGRES_PASSWORD=baseline_roundtrip",
                     "-e",
@@ -69,7 +75,6 @@ def main(_argv: Sequence[str] | None = None) -> int:
                 timeout=60,
                 activity="start disposable Product catalog PostgreSQL",
             )
-            created = True
             started = time.monotonic()
             print("catalog roundtrip: waiting for disposable PostgreSQL", file=sys.stderr)
             while time.monotonic() - started < 60:
@@ -144,17 +149,37 @@ def main(_argv: Sequence[str] | None = None) -> int:
                 )
     except (fixtures.FixtureError, CommandError, OSError, KeyError, TypeError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
-        return 2
+        status = 2
     finally:
-        if created:
+        if registered:
             try:
+                observed_owner = command(
+                    [
+                        "docker",
+                        "inspect",
+                        "--format",
+                        f'{{{{ index .Config.Labels "{OWNER_LABEL}" }}}}',
+                        container,
+                    ],
+                    timeout=10,
+                    activity="inspect disposable Product catalog PostgreSQL ownership",
+                ).strip()
+                if observed_owner != owner:
+                    raise fixtures.FixtureError(
+                        f"refusing to remove container {container}: ownership label does not match"
+                    )
                 command(
                     ["docker", "rm", "-f", container],
                     timeout=30,
                     activity="remove disposable Product catalog PostgreSQL",
                 )
-            except CommandError, OSError:
-                pass
+            except (fixtures.FixtureError, CommandError, OSError) as error:
+                print(
+                    f"ERROR: could not remove owned container {container}: {error}", file=sys.stderr
+                )
+                status = 2
+    if status != 0:
+        return status
     print(f"Validated {environment} catalog restore/read round trip in disposable PostgreSQL.")
     return 0
 

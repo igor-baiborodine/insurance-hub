@@ -14,7 +14,7 @@ import bootstrap_docs
 import build_image
 import integration_test
 import pytest
-from product_process import ProductCommandError, run
+from product_process import CAPTURE_LIMIT, ProductCommandError, run
 
 import check_docs
 
@@ -481,6 +481,76 @@ def test_product_process_reports_nonzero_without_argument_values(tmp_path: Path)
             activity="controlled command",
             capture=False,
         )
+
+
+def test_product_process_captures_output_larger_than_pipe_capacity(tmp_path: Path) -> None:
+    # given
+    payload = "x" * (1024 * 1024)
+
+    # when
+    output = run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; value = sys.stdin.read(); sys.stdout.write('x' * (1024 * 1024) + value)",
+        ],
+        cwd=tmp_path,
+        env=os.environ,
+        timeout_seconds=5,
+        activity="controlled large capture",
+        input_text="complete",
+        capture=True,
+    )
+
+    # then
+    assert output == payload + "complete"
+
+
+def test_product_process_rejects_output_beyond_capture_limit(tmp_path: Path) -> None:
+    # when / then
+    with pytest.raises(ProductCommandError, match="stdout exceeded.*capture limit"):
+        run(
+            [sys.executable, "-c", f"print('x' * {CAPTURE_LIMIT})"],
+            cwd=tmp_path,
+            env=os.environ,
+            timeout_seconds=5,
+            activity="controlled capture limit",
+            capture=True,
+        )
+
+
+def test_product_process_does_not_wait_for_descendant_capture_eof(tmp_path: Path) -> None:
+    # given
+    descendant_pid = tmp_path / "descendant.pid"
+    command = (
+        "import pathlib, subprocess, sys, time\n"
+        f"pid_file = pathlib.Path({str(descendant_pid)!r})\n"
+        "subprocess.Popen([sys.executable, '-c', "
+        "'import os, pathlib, time; pathlib.Path(os.environ[\"PID_FILE\"]).write_text(str(os.getpid())); time.sleep(60)'"
+        "])\n"
+        "deadline = time.monotonic() + 2\n"
+        "while not pid_file.exists() and time.monotonic() < deadline:\n"
+        "    time.sleep(0.01)\n"
+        "print('leader complete')\n"
+    )
+    environment = {**os.environ, "PID_FILE": str(descendant_pid)}
+
+    # when
+    started = time.monotonic()
+    output = run(
+        [sys.executable, "-c", command],
+        cwd=tmp_path,
+        env=environment,
+        timeout_seconds=5,
+        teardown_seconds=2,
+        activity="controlled inherited capture",
+        capture=True,
+    )
+
+    # then
+    assert output == "leader complete\n"
+    assert time.monotonic() - started < 3
+    wait_for_process_exit(int(descendant_pid.read_text(encoding="utf-8")))
 
 
 def test_product_process_bounds_timeout_and_descendant_cleanup(tmp_path: Path) -> None:
