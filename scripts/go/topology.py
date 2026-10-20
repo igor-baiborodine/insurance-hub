@@ -19,6 +19,7 @@ from typing import Any
 COMMAND_TIMEOUT_SECONDS = 600
 TEARDOWN_TIMEOUT_SECONDS = 10
 HEARTBEAT_SECONDS = 30
+MODULE_TOOLING_VARIABLES = ("PYTHON",)
 ROLES = frozenset(
     {"service-scaffold", "business-service", "public-contract", "public-shared", "tool"}
 )
@@ -778,12 +779,21 @@ def modules_check(root: Path, inventory: dict[str, Any]) -> None:
     )
     caller_variables = os.environ.get("GO_MODULE_CALLER_VARIABLES", "").split()
     for variable in caller_variables:
-        if variable != "GOWORK" and variable not in declared:
+        if (
+            variable != "GOWORK"
+            and variable not in MODULE_TOOLING_VARIABLES
+            and variable not in declared
+        ):
             raise TopologyError(f"unsupported caller variable: {variable}")
     selected = {"FORMAT_SCOPE": "all"}
     selected.update(
         {name: os.environ.get(name, "") for name in caller_variables if name in declared}
     )
+    tooling = {
+        name: os.environ.get(name, "")
+        for name in MODULE_TOOLING_VARIABLES
+        if name in caller_variables
+    }
     before = manifest_snapshot(root)
     failures: list[str] = []
     make = os.environ.get("MAKE_COMMAND", "make")
@@ -805,6 +815,7 @@ def modules_check(root: Path, inventory: dict[str, Any]) -> None:
             directory,
             module["validationTarget"],
             *(f"{name}={value}" for name, value in forwarded.items()),
+            *(f"{name}={value}" for name, value in tooling.items()),
         ]
         environment = dict(os.environ)
         environment.pop("MAKEFLAGS", None)
@@ -814,6 +825,7 @@ def modules_check(root: Path, inventory: dict[str, Any]) -> None:
             environment.pop(name, None)
         environment["GOWORK"] = "off"
         environment.update(forwarded)
+        environment.update(tooling)
         result = run_command(
             arguments,
             cwd=root,

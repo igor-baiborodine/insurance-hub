@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -12,6 +13,8 @@ from pathlib import Path
 import pytest
 
 import topology
+
+REPOSITORY_ROOT = Path(topology.__file__).resolve().parents[2]
 
 
 def test_run_command_kills_term_resistant_descendant_after_leader_exits(
@@ -410,6 +413,76 @@ def test_aggregate_module_failures(
     with pytest.raises(topology.TopologyError):
         topology.modules_check(tmp_path, value)
     assert topology.manifest_snapshot(tmp_path) == before
+
+
+def test_aggregate_propagates_python_tooling_input_to_each_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given
+    modules = [
+        module_record(directory="scaffold", module_path="example.test/scaffold"),
+        module_record(directory="product", module_path="example.test/product"),
+    ]
+    for record in modules:
+        record["validationVariables"] = ["FORMAT_SCOPE"]
+        observed = tmp_path / str(record["directory"]) / "observed.txt"
+        target = f'@printf "%s\\n%s\\n" "$(PYTHON)" "$(FORMAT_SCOPE)" > "{observed}"'
+        write_module(tmp_path, record, target_body=target)
+    value = inventory(modules)
+    monkeypatch.setenv("GO_MODULE_CALLER_VARIABLES", "FORMAT_SCOPE PYTHON")
+    monkeypatch.setenv("FORMAT_SCOPE", "changed")
+    monkeypatch.setenv("PYTHON", sys.executable)
+    monkeypatch.setenv("MAKE_COMMAND", "make")
+
+    # when
+    topology.modules_check(tmp_path, value)
+
+    # then
+    for record in modules:
+        observed = tmp_path / str(record["directory"]) / "observed.txt"
+        assert observed.read_text(encoding="utf-8").splitlines() == [
+            sys.executable,
+            "changed",
+        ]
+
+
+def test_root_aggregate_accepts_explicit_python_override(tmp_path: Path) -> None:
+    # given
+    value = inventory()
+    value["modules"][0]["validationVariables"] = ["FORMAT_SCOPE"]
+    observed = tmp_path / "module" / "observed.txt"
+    target = f'@printf "%s\\n%s\\n" "$(PYTHON)" "$(FORMAT_SCOPE)" > "{observed}"'
+    write_module(tmp_path, value["modules"][0], target_body=target)
+    write_workflow(tmp_path)
+    inventory_path = write_inventory(tmp_path, value)
+    (tmp_path / ".go-topology-test-fixture").touch()
+    environment = {
+        **os.environ,
+        "GO_TOPOLOGY_FIXTURE_INVENTORY": str(inventory_path),
+        "GO_TOPOLOGY_FIXTURE_ROOT": str(tmp_path),
+        "GO_TOPOLOGY_TEST_MODE": "1",
+    }
+
+    # when
+    result = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "go-modules-check",
+            f"PYTHON={sys.executable}",
+            "FORMAT_SCOPE=all",
+        ],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+
+    # then
+    assert result.returncode == 0, result.stderr
+    assert observed.read_text(encoding="utf-8").splitlines() == [sys.executable, "all"]
 
 
 def test_current_repository_topology_is_read_only() -> None:
