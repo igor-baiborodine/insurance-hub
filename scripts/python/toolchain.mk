@@ -12,9 +12,24 @@ PYTHON_VENV_PYTHON := $(PYTHON_VENV)/bin/python
 PYTHON ?= $(PYTHON_VENV_PYTHON)
 UV ?= uv
 PYTHON_SELECTED_ENVIRONMENT = $(abspath $(dir $(PYTHON))/..)
+PYTHON_EXAMPLE_ROOT := ai/examples/python-testing
+PYTHON_EXAMPLE_FILES := \
+	$(PYTHON_EXAMPLE_ROOT)/example_cli.py \
+	$(PYTHON_EXAMPLE_ROOT)/tests/conftest.py \
+	$(PYTHON_EXAMPLE_ROOT)/tests/test_example_cli.py \
+	$(PYTHON_EXAMPLE_ROOT)/integration/test_disposable_cli.py
+PYTHON_SCOPE_FILES = $(shell git -C "$(PYTHON_REPOSITORY_ROOT)" ls-files \
+	--cached --others --exclude-standard -- '*.py' | LC_ALL=C sort)
+PYTHON_FILES ?=
+PYTHON_ACCEPTANCE_PATH ?=
+PYTHON_ACCEPTANCE_CONFIRM ?=
 
 .PHONY: python-uv-check python-runtime-check python-toolchain-setup python-toolchain-check \
-	python-toolchain-info
+	python-toolchain-info _python-files-check python-scope-list python-format \
+	python-format-check python-lint python-examples-format-check python-examples-lint \
+	python-repository-format-check python-repository-lint python-test-collect \
+	python-examples-test-fast python-examples-test-integration _python-acceptance-check \
+	python-test-acceptance python-examples-check
 
 python-uv-check: ## Verify the pinned uv executable without installing anything
 	@command -v "$(UV)" >/dev/null 2>&1 || { \
@@ -75,5 +90,84 @@ python-toolchain-info: python-toolchain-check ## Print selected interpreter, man
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -c 'import importlib.metadata as metadata, platform, sys; print(f"implementation={platform.python_implementation()}"); print(f"version={platform.python_version()}"); print(f"executable={sys.executable}"); print(f"build={platform.python_build()[0]} {platform.python_build()[1]}"); print("pytest=%s" % metadata.version("pytest")); print("ruff=%s" % metadata.version("ruff"))'
 	@"$(UV)" --version
 	@"$(UV)" python list "$(PYTHON_VERSION)" --only-installed
+
+python-scope-list: ## List tracked and new untracked handwritten Python selected for repository checks
+	@printf '%s\n' $(PYTHON_SCOPE_FILES)
+
+_python-files-check:
+	@test -n "$(strip $(PYTHON_FILES))" || { \
+		echo "ERROR: PYTHON_FILES must name the handwritten Python files to format or check." >&2; \
+		exit 1; \
+	}
+	@for path in $(PYTHON_FILES); do \
+		case "$$path" in \
+			*.py) ;; \
+			*) echo "ERROR: selected Python path must end in .py: $$path" >&2; exit 1 ;; \
+		esac; \
+		test -f "$(PYTHON_REPOSITORY_ROOT)/$$path" || { \
+			echo "ERROR: selected Python file does not exist: $$path" >&2; \
+			exit 1; \
+		}; \
+	done
+
+python-format: python-toolchain-check _python-files-check ## Format explicitly selected handwritten Python files
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m ruff format $(PYTHON_FILES)
+
+python-format-check: python-toolchain-check _python-files-check ## Check formatting of explicitly selected Python without mutation
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m ruff format --check $(PYTHON_FILES)
+
+python-lint: python-toolchain-check _python-files-check ## Lint explicitly selected handwritten Python files
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m ruff check $(PYTHON_FILES)
+
+python-examples-format-check: PYTHON_FILES := $(PYTHON_EXAMPLE_FILES)
+python-examples-format-check: python-format-check ## Check formatting for executable Python examples
+
+python-examples-lint: PYTHON_FILES := $(PYTHON_EXAMPLE_FILES)
+python-examples-lint: python-lint ## Lint executable Python examples
+
+python-repository-format-check: PYTHON_FILES = $(PYTHON_SCOPE_FILES)
+python-repository-format-check: python-format-check ## Check all visible handwritten Python without mutation
+
+python-repository-lint: PYTHON_FILES = $(PYTHON_SCOPE_FILES)
+python-repository-lint: python-lint ## Lint all visible handwritten Python without mutation
+
+python-test-collect: python-toolchain-check ## Collect default fast pytest scope without running tests
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest --collect-only -q
+
+python-examples-test-fast: python-toolchain-check ## Run fast executable Python example tests
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
+		-m 'not integration and not acceptance' "$(PYTHON_EXAMPLE_ROOT)/tests"
+
+python-examples-test-integration: python-toolchain-check ## Run disposable Python example integration tests explicitly
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
+		PYTHONDONTWRITEBYTECODE=1 PYTHON_EXAMPLE_INTEGRATION=1 \
+		"$(PYTHON)" -m pytest -q -m integration "$(PYTHON_EXAMPLE_ROOT)/integration"
+
+_python-acceptance-check:
+	@test "$(PYTHON_ACCEPTANCE_CONFIRM)" = "yes" || { \
+		echo "ERROR: full acceptance requires PYTHON_ACCEPTANCE_CONFIRM=yes." >&2; \
+		exit 1; \
+	}
+	@test -n "$(strip $(PYTHON_ACCEPTANCE_PATH))" || { \
+		echo "ERROR: full acceptance requires an explicit repository-relative PYTHON_ACCEPTANCE_PATH." >&2; \
+		exit 1; \
+	}
+	@test -e "$(PYTHON_REPOSITORY_ROOT)/$(PYTHON_ACCEPTANCE_PATH)" || { \
+		echo "ERROR: acceptance selection does not exist: $(PYTHON_ACCEPTANCE_PATH)" >&2; \
+		exit 1; \
+	}
+
+python-test-acceptance: python-toolchain-check _python-acceptance-check ## Run an explicitly selected full acceptance path
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -m acceptance \
+		"$(PYTHON_ACCEPTANCE_PATH)"
+
+python-examples-check: python-examples-format-check python-examples-lint python-test-collect \
+	python-examples-test-fast ## Run all non-mutating Python example checks
 
 endif

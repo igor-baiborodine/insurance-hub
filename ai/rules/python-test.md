@@ -28,7 +28,10 @@ installed. Start with pinned pytest alone; add a plugin only for a documented co
 - Fast, disposable integration, and full acceptance suites MUST have separate owning Make
   targets. Fast targets MUST select their scope explicitly. Slow suites require explicit selection
   and documented prerequisites. A long-running acceptance runner may remain an ordinary CLI;
-  test its constituent behavior with pytest.
+  test its constituent behavior with pytest. The shared interfaces are `python-test-collect` for
+  no-path default collection, owner-specific fast targets such as `python-examples-test-fast`,
+  explicit disposable integration targets such as `python-examples-test-integration`, and the
+  guarded `python-test-acceptance` interface with an owner path and confirmation.
 
 ## Scenarios and assertions
 
@@ -47,7 +50,7 @@ installed. Start with pinned pytest alone; add a plugin only for a documented co
 - Keep cleanup in fixture teardown, context managers, or `try/finally` so it runs when an
   assertion fails. Review MUST confirm meaningful phases and justified omissions; comment counts
   or lint success cannot establish this. The [Python testing examples](../examples/python-testing/README.md)
-  arrive in issue-174 Step 5 and illustrate this rule without adding policy.
+  illustrate this rule without adding policy.
 
 ## Isolation and boundaries
 

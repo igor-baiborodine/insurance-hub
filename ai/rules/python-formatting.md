@@ -21,8 +21,7 @@ behavioral testing.
   for each owner so local modules are grouped correctly. Owned configuration MUST declare these
   selections, exclusions, and Ruff 0.17.1 as the exact pinned version. The root `pyproject.toml`
   owns the shared configuration and direct pin; `uv.lock` owns its resolved artifacts. Do not
-  hand-sort imports or substitute an IDE-only formatter. Issue-174 Step 5 implements the owning
-  format and lint targets; those executable bindings remain unresolved until then.
+  hand-sort imports or substitute an IDE-only formatter.
 - Owning Make targets MUST apply the same configuration to explicitly selected changed
   handwritten files, including new untracked files and intentional test changes. Exclude
   generated/vendor/third-party code and data fixtures from incidental formatting. Do not sweep
@@ -37,3 +36,9 @@ Use owning Make targets and the declared environment's Ruff executable. A missin
 configuration, or tool is a blocked check; do not substitute an arbitrary executable on `PATH`.
 Ruff success proves source conformance only. Record the exact file set and tool identity in
 [validation evidence](python-validation.md#evidence-limits).
+
+The shared `python-format`, `python-format-check`, and `python-lint` targets require an explicit
+repository-relative `PYTHON_FILES` list. `python-examples-format-check` and
+`python-examples-lint` bind the executable example set. `python-repository-format-check` and
+`python-repository-lint` dynamically include tracked and unignored untracked `*.py` files; inspect
+that selection with `python-scope-list`. Only `python-format` mutates source.

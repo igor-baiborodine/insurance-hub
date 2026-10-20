@@ -25,8 +25,9 @@ toolchain is an unresolved prerequisite, never evidence of a pass. The repositor
 0.13.1, pytest 9.1.1, Ruff 0.17.1, and CPython 3.14.8 through `pyproject.toml`, `uv.lock`, and
 `.python-version`. Use `python-toolchain-setup` only for explicit provisioning,
 `python-runtime-check` for operational-runtime selection, and `python-toolchain-check` for the
-locked development environment. Issue-174 Step 5 adds the owning format, lint, collection, and
-test targets; do not claim those checks exist or pass before that step is delivered.
+locked development environment. Use `python-format`, `python-format-check`, and `python-lint` with
+an explicit `PYTHON_FILES` selection; use the example, repository-wide, collection, integration,
+and guarded acceptance targets described by the linked rules for their declared scopes.
 
 Apply [Naming rules](naming-rules.md) to new or renamed paths, and applicable language and
 [Makefile rules](makefile-rules.md) when those boundaries change. This entry point creates no

@@ -15,6 +15,7 @@
       - [Change-Based Local Validation](#change-based-local-validation)
     - [Python Auxiliary Tooling](#python-auxiliary-tooling)
       - [Python Toolchain Setup](#python-toolchain-setup)
+      - [Python Checks and Test Suites](#python-checks-and-test-suites)
     - [Branch Names](#branch-names)
     - [Commit Messages](#commit-messages)
     - [Makefile](#makefile)
@@ -316,6 +317,45 @@ together, regenerate `uv.lock` with the selected uv release, deliberately recrea
 the environment, and rerun the affected static, fast, integration, and acceptance checks. Record
 the interpreter build, platform, tool versions, lock change, and results. CPython 3.14.8 remains
 the baseline until an explicitly approved update.
+
+#### Python Checks and Test Suites
+
+Run the mutating formatter only with an explicit repository-relative file selection. The paired
+format and lint checks inspect the same selection without changing source:
+
+```bash
+make python-format PYTHON_FILES='path/to/tool.py path/to/test_tool.py'
+make python-format-check PYTHON_FILES='path/to/tool.py path/to/test_tool.py'
+make python-lint PYTHON_FILES='path/to/tool.py path/to/test_tool.py'
+```
+
+Use `make python-scope-list` to inspect the tracked and unignored untracked `*.py` files selected
+by `python-repository-format-check` and `python-repository-lint`. These repository-wide checks keep
+existing violations visible while owner batches migrate; a failure must be recorded rather than
+reported as a passing foundation check.
+
+The committed examples provide a bounded local gate and separate test-suite entry points:
+
+```bash
+make python-examples-check
+make python-examples-test-integration
+```
+
+`python-examples-check` performs non-mutating example format/lint checks, no-path default
+collection, and the fast example tests. Default collection is restricted to the configured fast
+test path. Disposable integration requires its explicit target. Full owner acceptance requires an
+explicit existing repository-relative path and confirmation:
+
+```bash
+make python-test-acceptance \
+  PYTHON_ACCEPTANCE_CONFIRM=yes \
+  PYTHON_ACCEPTANCE_PATH=path/to/owner/acceptance
+```
+
+Inspect the owning recipe and prerequisites before an acceptance run. The confirmation selects
+the interface; it does not authorize a live mutation or replace owner-specific environment and
+credential safeguards. The [Python testing examples](ai/examples/python-testing/README.md) show
+the executable CLI, fake boundary, scenario structure, and disposable integration pattern.
 
 ### Branch Names
 

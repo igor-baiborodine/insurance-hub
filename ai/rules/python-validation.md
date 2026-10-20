@@ -16,8 +16,9 @@ Apply [development](python-development.md), [testing](python-test.md), and
 prerequisites, selected interpreter, file selection, and side effects. Use
 `python-runtime-check` to verify CPython 3.14.8 without requiring development packages and
 `python-toolchain-check` to verify uv 0.13.1, pytest 9.1.1, Ruff 0.17.1, and the locked
-environment. The format, lint, collection, and pytest targets arrive in issue-174 Step 5;
-missing targets are blocked checks, not passes.
+environment. Use `python-scope-list` to inspect repository static-check scope; the shared format,
+lint, default collection, example, and guarded acceptance interfaces are named in the linked
+formatting and testing rules. Missing owning targets are blocked checks, not passes.
 
 ## Selection and order
 

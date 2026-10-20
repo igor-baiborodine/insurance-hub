@@ -18,6 +18,7 @@ required-version = "==0.13.1"
 [tool.ruff]
 target-version = "py314"
 line-length = 100
+force-exclude = true
 extend-exclude = [
     "**/.tools/**",
     "**/.venv/**",
@@ -33,7 +34,19 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
 known-first-party = [
     "check_monitoring",
     "deployment",
+    "example_cli",
     "monitoring_assets",
     "release",
     "test_monitoring",
+]
+
+[tool.pytest.ini_options]
+addopts = ["--strict-config", "--strict-markers"]
+testpaths = ["ai/examples/python-testing/tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+pythonpath = ["ai/examples/python-testing"]
+markers = [
+    "integration: explicitly selected tests using disposable external boundaries",
+    "acceptance: explicitly selected full acceptance workflows",
 ]
