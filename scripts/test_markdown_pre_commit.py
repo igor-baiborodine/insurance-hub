@@ -56,6 +56,115 @@ def assert_no_hook_temporary_files(repository: Path) -> None:
     assert not any(name.startswith(".markdown-toc-staged-paths.") for name in names)
 
 
+def install_blocking_npx(
+    repository: Path, *, ignore_termination: bool = False
+) -> tuple[Path, Path]:
+    fake_bin = repository / "fake-bin"
+    fake_bin.mkdir()
+    state = repository / ".fake-doctoc-state"
+    if ignore_termination:
+        (repository / ".fake-doctoc-ignore-termination").touch()
+    executable = fake_bin / "npx"
+    executable.write_text(
+        """#!/usr/bin/env python3
+import os
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
+ignore_termination = Path(".fake-doctoc-ignore-termination").is_file()
+child_program = "import signal; signal.pause()"
+if ignore_termination:
+    child_program = (
+        "import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN); signal.pause()"
+    )
+child = subprocess.Popen([sys.executable, "-c", child_program])
+
+
+def terminate(signum, _frame):
+    child.send_signal(signum)
+    child.wait(timeout=2)
+    raise SystemExit(128 + signum)
+
+
+if ignore_termination:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+else:
+    signal.signal(signal.SIGHUP, terminate)
+    signal.signal(signal.SIGINT, terminate)
+    signal.signal(signal.SIGTERM, terminate)
+Path(".fake-doctoc-state").write_text(
+    f"{os.getpid()}\\n{child.pid}\\n{sys.argv[-1]}\\n", encoding="utf-8"
+)
+signal.pause()
+""",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    return fake_bin, state
+
+
+def wait_for_active_doctoc(repository: Path, state: Path) -> tuple[list[int], Path]:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        snapshots = list(repository.glob(".markdown-toc-index.*"))
+        checker_directories = list(repository.glob(".markdown-toc-staged-paths.*"))
+        if state.is_file() and snapshots and checker_directories:
+            lines = state.read_text(encoding="utf-8").splitlines()
+            candidate_directory = Path(lines[2]).parent
+            if candidate_directory.is_dir():
+                return [int(lines[0]), int(lines[1])], candidate_directory
+        time.sleep(0.02)
+    raise AssertionError("fake doctoc did not become active before the test deadline")
+
+
+def process_is_running(process_id: int) -> bool:
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return False
+    status = Path(f"/proc/{process_id}/stat")
+    if status.is_file() and status.read_text(encoding="utf-8").split()[2] == "Z":
+        return False
+    return True
+
+
+def assert_processes_stopped(process_ids: list[int]) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and any(process_is_running(pid) for pid in process_ids):
+        time.sleep(0.02)
+    assert not any(process_is_running(pid) for pid in process_ids)
+
+
+def start_hook_with_active_doctoc(
+    repository: Path,
+    *,
+    checker_timeout: float | None = None,
+    ignore_doctoc_termination: bool = False,
+) -> tuple[subprocess.Popen[str], list[int], Path]:
+    fake_bin, state = install_blocking_npx(repository, ignore_termination=ignore_doctoc_termination)
+    (repository / "interrupt.md").write_text("# Interrupt\n\n## Section\n", encoding="utf-8")
+    git(repository, "add", "interrupt.md")
+    environment = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "PYTHON": sys.executable,
+    }
+    if checker_timeout is not None:
+        environment["MARKDOWN_HOOK_TEST_CHECKER_TIMEOUT_SECONDS"] = str(checker_timeout)
+    process = subprocess.Popen(
+        [str(repository / ".githooks" / "pre-commit")],
+        cwd=repository,
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    process_ids, candidate_directory = wait_for_active_doctoc(repository, state)
+    return process, process_ids, candidate_directory
+
+
 @pytest.fixture
 def fixture_repository(tmp_path: Path) -> tuple[Path, Path]:
     # given
@@ -368,4 +477,44 @@ def test_sigterm_cleans_staged_snapshot(fixture_repository: tuple[Path, Path]) -
 
     # then
     assert process.returncode == 143, stderr
+    assert_no_hook_temporary_files(repository)
+
+
+def test_sigterm_cleans_active_doctoc_and_both_temporary_families(
+    fixture_repository: tuple[Path, Path],
+) -> None:
+    # given
+    repository, _ = fixture_repository
+    process, process_ids, candidate_directory = start_hook_with_active_doctoc(repository)
+
+    # when
+    process.send_signal(signal.SIGTERM)
+    _, stderr = process.communicate(timeout=20)
+
+    # then
+    assert process.returncode == 143, stderr
+    assert "cleanup exceeded" not in stderr
+    assert_processes_stopped(process_ids)
+    assert not candidate_directory.exists()
+    assert_no_hook_temporary_files(repository)
+
+
+def test_timeout_cleans_active_doctoc_and_both_temporary_families(
+    fixture_repository: tuple[Path, Path],
+) -> None:
+    # given
+    repository, _ = fixture_repository
+    process, process_ids, candidate_directory = start_hook_with_active_doctoc(
+        repository, checker_timeout=0.5, ignore_doctoc_termination=True
+    )
+
+    # when
+    _, stderr = process.communicate(timeout=20)
+
+    # then
+    assert process.returncode == 1
+    assert "validation deadline exceeded" in stderr
+    assert "cleanup exceeded" not in stderr
+    assert_processes_stopped(process_ids)
+    assert not candidate_directory.exists()
     assert_no_hook_temporary_files(repository)

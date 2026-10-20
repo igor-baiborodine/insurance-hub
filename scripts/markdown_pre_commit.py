@@ -10,7 +10,14 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
+
+from markdown_toc import DOCTOC_TIMEOUT_SECONDS, MANAGED_PROCESS_GROUP_ENV
+
+CHECKER_OVERHEAD_SECONDS = 30
+CHECKER_TEARDOWN_SECONDS = 10
+TEST_CHECKER_TIMEOUT_ENV = "MARKDOWN_HOOK_TEST_CHECKER_TIMEOUT_SECONDS"
 
 
 class HookError(RuntimeError):
@@ -23,6 +30,102 @@ class HookTerminated(Exception):
 
 def handle_signal(signum: int, _frame: object) -> None:
     raise HookTerminated(signum)
+
+
+def _process_group_exists(process: subprocess.Popen[bytes]) -> bool:
+    try:
+        os.killpg(process.pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _wait_for_checker_group(process: subprocess.Popen[bytes], deadline: float) -> bool:
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        group_exists = _process_group_exists(process)
+        try:
+            process.wait(timeout=min(remaining, 0.05))
+        except subprocess.TimeoutExpired:
+            continue
+        if not group_exists or not _process_group_exists(process):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(remaining, 0.01))
+
+
+def _terminate_checker(process: subprocess.Popen[bytes], termination_signal: int) -> bool:
+    deadline = time.monotonic() + CHECKER_TEARDOWN_SECONDS
+    term_deadline = time.monotonic() + CHECKER_TEARDOWN_SECONDS / 2
+    if process.poll() is None:
+        try:
+            process.send_signal(termination_signal)
+        except OSError:
+            pass
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except OSError:
+            pass
+    if _wait_for_checker_group(process, term_deadline):
+        return True
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    return _wait_for_checker_group(process, deadline)
+
+
+def _checker_timeout(root: Path, path_count: int) -> float:
+    test_timeout = os.environ.get(TEST_CHECKER_TIMEOUT_ENV)
+    if test_timeout is None:
+        return CHECKER_OVERHEAD_SECONDS + DOCTOC_TIMEOUT_SECONDS * path_count
+    if not (root / ".markdown-hook-test-fixture").is_file():
+        raise HookError("controlled checker timeout requires a marked disposable fixture")
+    try:
+        timeout = float(test_timeout)
+    except ValueError as error:
+        raise HookError("controlled checker timeout must be a number") from error
+    if timeout <= 0:
+        raise HookError("controlled checker timeout must be positive")
+    return timeout
+
+
+def _cancellation_signal(error: BaseException) -> int:
+    if isinstance(error, HookTerminated):
+        return int(error.args[0])
+    if isinstance(error, KeyboardInterrupt):
+        return signal.SIGINT
+    return signal.SIGTERM
+
+
+def _run_checker(
+    root: Path, command: list[str], environment: dict[str, str], timeout: float
+) -> int:
+    process = subprocess.Popen(
+        command,
+        cwd=root,
+        env=environment,
+        start_new_session=True,
+    )
+    try:
+        return_code = process.wait(timeout=timeout)
+    except BaseException as error:
+        if not _terminate_checker(process, _cancellation_signal(error)):
+            print(
+                "markdown-toc-pre-commit: checker cleanup exceeded its 10-second deadline",
+                file=sys.stderr,
+            )
+        raise
+    if _process_group_exists(process) and not _terminate_checker(process, signal.SIGTERM):
+        raise HookError("checker cleanup exceeded its 10-second deadline")
+    return return_code
 
 
 def run_git(
@@ -60,6 +163,7 @@ def validate_staged(root: Path, paths: list[str]) -> int:
     if not paths:
         return 0
     snapshot = Path(tempfile.mkdtemp(prefix=".markdown-toc-index.", dir=root))
+    checker_temporary = Path(tempfile.mkdtemp(prefix=".markdown-toc-staged-paths.", dir=root))
     try:
         run_git(root, ["checkout-index", f"--prefix={snapshot}/", "--", *paths])
         if os.environ.get("MARKDOWN_HOOK_TEST_PAUSE_AFTER_SNAPSHOT") == "1":
@@ -69,14 +173,19 @@ def validate_staged(root: Path, paths: list[str]) -> int:
                 signal.pause()
         command = [str(root / "scripts" / "markdown-toc.sh"), "check"]
         command.extend(str(snapshot / path) for path in paths)
-        result = subprocess.run(
+        environment = {
+            **os.environ,
+            "PYTHON": sys.executable,
+            "TMPDIR": str(checker_temporary),
+            MANAGED_PROCESS_GROUP_ENV: "1",
+        }
+        return_code = _run_checker(
+            root,
             command,
-            cwd=root,
-            check=False,
-            timeout=240,
-            env={**os.environ, "PYTHON": sys.executable},
+            environment,
+            _checker_timeout(root, len(paths)),
         )
-        if result.returncode == 0:
+        if return_code == 0:
             return 0
         print("markdown-toc-pre-commit: staged Markdown validation failed for:", file=sys.stderr)
         for path in paths:
@@ -89,7 +198,10 @@ def validate_staged(root: Path, paths: list[str]) -> int:
         )
         return 1
     finally:
-        shutil.rmtree(snapshot)
+        try:
+            shutil.rmtree(checker_temporary)
+        finally:
+            shutil.rmtree(snapshot)
 
 
 def main(argv: list[str] | None = None) -> int:
