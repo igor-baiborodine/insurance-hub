@@ -102,7 +102,9 @@ def main(
     runner: Callable[..., Any] = run_command,
 ) -> int:
     arguments = parser().parse_args(argv)
-    environment = {"PATH": f"{arguments.go_bin}:{os.environ.get('PATH', '')}", "GOWORK": "off"}
+    environment = dict(os.environ)
+    environment["PATH"] = f"{arguments.go_bin}:{environment.get('PATH', '')}"
+    environment["GOWORK"] = "off"
     failed = False
     with arguments.summary.open("a", encoding="utf-8") as summary:
         summary.write("| Module | Grade | Score | Issues |\n| --- | --- | ---: | ---: |\n")

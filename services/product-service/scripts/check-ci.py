@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check generic Go release and selected-module PR validation contracts."""
+"""Check generic Go release, report-card, and selected-module PR validation contracts."""
 
 from copy import deepcopy
 import os
@@ -295,6 +295,18 @@ def validate_trigger_examples(patterns: list[str]) -> None:
         require(path_matches(path, patterns), f"Go PR trigger excludes qualifying path: {path}")
     for path in excluded:
         require(not path_matches(path, patterns), f"Go PR trigger includes excluded path: {path}")
+
+
+def validate_report_card(workflow: dict) -> None:
+    require(set(workflow["on"]) == {"push", "pull_request", "workflow_dispatch"},
+            "Go Report Card trigger types differ")
+    for event in ("push", "pull_request"):
+        trigger = workflow["on"][event]
+        require(trigger["branches"] == ["main"],
+                f"Go Report Card {event} trigger must target main")
+        require(trigger["paths"] == QUALIFYING_PATHS,
+                f"Go Report Card {event} qualifying path matrix differs from Go PR validation")
+        validate_trigger_examples(trigger["paths"])
 
 
 def parse_outputs(path: Path) -> dict[str, str]:
@@ -609,8 +621,10 @@ def main() -> None:
 
     release = read("go-release-svc.yml")
     modules = read("go-pr-mod.yml")
+    report_card = read("go-report-card.yml")
     validate_release(release)
     validate_modules(modules, run_execution_cases=True)
+    validate_report_card(report_card)
     require(not (ROOT / ".github/workflows/go-modules.yml").exists(),
             "retired all-module Go workflow still exists")
     require(not (ROOT / ".github/workflows/product-image-release.yml").exists() and
@@ -683,8 +697,22 @@ def main() -> None:
             continue
         raise ValueError("controlled Go PR workflow corruption was accepted")
 
-    print("check-ci: generic release with thirty trigger cases, selected-module PR validation, "
-          "eleven selection cases, one coverage path execution case, and twenty-one controlled "
+    report_card_corruptions = [
+        lambda item: item["on"]["push"]["paths"].pop(),
+        lambda item: item["on"]["pull_request"]["paths"].append("services/*-service/**"),
+    ]
+    for corrupt in report_card_corruptions:
+        bad_report_card = deepcopy(report_card)
+        corrupt(bad_report_card)
+        try:
+            validate_report_card(bad_report_card)
+        except (KeyError, ValueError):
+            continue
+        raise ValueError("controlled Go Report Card workflow corruption was accepted")
+
+    print("check-ci: generic release with thirty trigger cases, Go Report Card path parity, "
+          "selected-module PR validation, eleven selection cases, one coverage path execution "
+          "case, and twenty-three controlled "
           "corruptions passed")
 
 

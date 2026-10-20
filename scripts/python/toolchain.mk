@@ -177,7 +177,7 @@ python-shared-tooling-test-fast: python-toolchain-check ## Run fast shared repos
 
 python-shared-tooling-test-integration: python-toolchain-check ## Run disposable shared tooling integration tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
-		-m integration scripts/go/module/test_module_tooling.py
+		-m integration scripts/go/test_report_card.py scripts/go/module/test_module_tooling.py
 
 python-shared-tooling-check: python-shared-tooling-format-check python-shared-tooling-lint \
 	python-shared-tooling-test-fast ## Run non-mutating shared Python tooling checks
