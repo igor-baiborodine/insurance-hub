@@ -96,6 +96,11 @@ def test_created_copy_uses_repository_tooling_without_scaffold_only_surface(
     assert not (copy_root / "pyproject.toml").exists()
     assert not (copy_root / "uv.lock").exists()
     assert not (copy_root / "scripts" / "test_check_copy.py").exists()
+    copied_tooling = (copy_root / "scripts" / "test_tooling.py").read_text(encoding="utf-8")
+    assert "api/examplecopy/v1/example_service.proto" in copied_tooling
+    assert "gen/examplecopy/v1" in copied_tooling
+    assert "api/scaffold/v1/example_service.proto" not in copied_tooling
+    assert "gen/scaffold/v1" not in copied_tooling
 
 
 @pytest.mark.parametrize(

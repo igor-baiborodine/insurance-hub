@@ -400,6 +400,14 @@ def execute(config: Configuration) -> None:
             "FORMAT_SCOPE=all",
             maximum_seconds=1_200,
         )
+        run_copy_make(
+            config,
+            copy_root,
+            deadline,
+            "check-copy running copied tooling fixtures",
+            "test-tooling",
+            maximum_seconds=1_200,
+        )
         require(copy_before == inventory(copy_root), "normal validation changed copied content")
 
     require(

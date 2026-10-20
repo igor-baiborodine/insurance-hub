@@ -17,6 +17,8 @@ from scaffold_process import CommandError, child_environment, run_command
 pytestmark = pytest.mark.integration
 TOOL_NAMES = ("buf", "protoc-gen-go", "protoc-gen-go-grpc", "golangci-lint", "govulncheck")
 IGNORED_DIRECTORIES = {".git", ".tools", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+PROTO_SCHEMA = Path("api/scaffold/v1/example_service.proto")
+GENERATED_PACKAGE = Path("gen/scaffold/v1")
 
 
 @dataclass(frozen=True)
@@ -169,21 +171,21 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
         )
         return "check-deps", "go.mod is not synchronized with update-deps", ()
     if case == "proto-format":
-        path = fixture / "api" / "scaffold" / "v1" / "example_service.proto"
+        path = fixture / PROTO_SCHEMA
         path.write_text(
             path.read_text(encoding="utf-8").replace("  rpc Echo", "rpc Echo"),
             encoding="utf-8",
         )
         return "format-proto-check", "rpc Echo", ()
     if case == "proto-lint":
-        path = fixture / "api" / "scaffold" / "v1" / "example_service.proto"
+        path = fixture / PROTO_SCHEMA
         path.write_text(
             path.read_text(encoding="utf-8").replace("string message = 1", "string BadName = 1", 1),
             encoding="utf-8",
         )
         return "lint-proto", "should be lower_snake_case", ()
     if case == "proto-breaking":
-        path = fixture / "api" / "scaffold" / "v1" / "example_service.proto"
+        path = fixture / PROTO_SCHEMA
         content = path.read_text(encoding="utf-8")
         start = content.index("message EchoResponse {")
         path.write_text(
@@ -192,7 +194,7 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
             encoding="utf-8",
         )
         return "check-proto-breaking", 'Previously present field "1"', ()
-    generated = fixture / "gen" / "scaffold" / "v1"
+    generated = fixture / GENERATED_PACKAGE
     if case == "generated-modified":
         path = generated / "example_service.pb.go"
         path.write_text(
