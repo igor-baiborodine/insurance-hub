@@ -45,6 +45,15 @@ jobs:
         with:
           node-version: '24.13.0'
 
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+          enable-cache: true
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
       - name: Select exactly one standard Go service
         id: service
         env:

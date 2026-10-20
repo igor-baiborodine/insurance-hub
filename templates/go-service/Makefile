@@ -62,11 +62,14 @@ check: check-go-pr
 
 test-tooling: verify-tools
 	@MODULE_ROOT="$(CURDIR)" COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
-		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" ./scripts/test-tooling.sh
+		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" \
+		COMMON_GO_TOOLING_PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
+		./scripts/test-tooling.sh
 	@$(MAKE) --no-print-directory test-coverage-tooling
 
 check-copy: verify-tools
 	@COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
+		COMMON_GO_TOOLING_PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
 		MAKE_COMMAND="$(MAKE)" ./scripts/check-copy.sh
 
 run:

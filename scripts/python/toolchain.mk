@@ -22,6 +22,26 @@ PYTHON_SELECTION_ROOT := scripts/python
 PYTHON_SELECTION_FILES := \
 	$(PYTHON_SELECTION_ROOT)/validate_selection.py \
 	$(PYTHON_SELECTION_ROOT)/test_validate_selection.py
+PYTHON_SHARED_TOOLING_FILES := \
+	ai/skills/code-review/scripts/check_upstream_sync.py \
+	ai/skills/code-review/scripts/test_check_upstream_sync.py \
+	scripts/markdown_pre_commit.py \
+	scripts/markdown_toc.py \
+	scripts/test_markdown_pre_commit.py \
+	scripts/python/process_runner.py \
+	scripts/python/test_process_runner.py \
+	scripts/go/report_card.py \
+	scripts/go/select_pr_module.py \
+	scripts/go/test_report_card.py \
+	scripts/go/test_select_pr_module.py \
+	scripts/go/topology.py \
+	scripts/go/test_topology.py \
+	scripts/go/module/module_tooling.py \
+	scripts/go/module/test_module_tooling.py \
+	scripts/go/service/release.py \
+	scripts/go/service/resolve.py \
+	scripts/go/service/test_dispatch.py \
+	scripts/go/service/test_release.py
 PYTHON_SCOPE_FILES = $(shell git -C "$(PYTHON_REPOSITORY_ROOT)" ls-files \
 	--cached --others --exclude-standard -- '*.py' | LC_ALL=C sort)
 PYTHON_FILES ?=
@@ -33,6 +53,9 @@ export PYTHON_FILES PYTHON_ACCEPTANCE_PATH PYTHON_ACCEPTANCE_CONFIRM
 	python-toolchain-info _python-files-check python-scope-list python-format \
 	python-format-check python-lint python-examples-format-check python-examples-lint \
 	python-selection-format-check python-selection-lint python-selection-test python-selection-check \
+	python-shared-tooling-format-check python-shared-tooling-lint \
+	python-shared-tooling-test-fast python-shared-tooling-test-integration \
+	python-shared-tooling-check \
 	python-repository-format-check python-repository-lint python-test-collect \
 	python-examples-test-fast python-examples-test-integration _python-acceptance-check \
 	python-test-acceptance python-examples-check
@@ -135,6 +158,29 @@ python-selection-test: python-toolchain-check ## Test repository-relative Python
 		"$(PYTHON)" -m pytest -q "$(PYTHON_SELECTION_ROOT)/test_validate_selection.py"
 
 python-selection-check: python-selection-format-check python-selection-lint python-selection-test ## Run all non-mutating Python selection-tool checks
+
+python-shared-tooling-format-check: PYTHON_FILES := $(PYTHON_SHARED_TOOLING_FILES)
+python-shared-tooling-format-check: python-format-check ## Check shared Python tooling formatting
+
+python-shared-tooling-lint: PYTHON_FILES := $(PYTHON_SHARED_TOOLING_FILES)
+python-shared-tooling-lint: python-lint ## Lint shared Python tooling
+
+python-shared-tooling-test-fast: python-toolchain-check ## Run fast shared repository tooling tests
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
+		-m 'not integration and not acceptance' \
+		ai/skills/code-review/scripts/test_check_upstream_sync.py \
+		scripts/test_markdown_pre_commit.py \
+		scripts/python/test_process_runner.py \
+		scripts/go/test_report_card.py scripts/go/test_select_pr_module.py \
+		scripts/go/test_topology.py scripts/go/module/test_module_tooling.py \
+		scripts/go/service/test_dispatch.py scripts/go/service/test_release.py
+
+python-shared-tooling-test-integration: python-toolchain-check ## Run disposable shared tooling integration tests
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
+		-m integration scripts/go/module/test_module_tooling.py
+
+python-shared-tooling-check: python-shared-tooling-format-check python-shared-tooling-lint \
+	python-shared-tooling-test-fast ## Run non-mutating shared Python tooling checks
 
 python-repository-format-check: PYTHON_FILES = $(PYTHON_SCOPE_FILES)
 python-repository-format-check: python-format-check ## Check all visible handwritten Python without mutation

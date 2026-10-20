@@ -44,80 +44,24 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+          enable-cache: true
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
       - name: Select Go module
         id: select
         shell: bash
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-
-          git cat-file -e "${PR_BASE}^{commit}"
-          git cat-file -e "${PR_HEAD}^{commit}"
-          merge_base=$(git merge-base "$PR_BASE" "$PR_HEAD")
-
-          declare -A selected=()
-          while IFS= read -r -d '' changed_path; do
-            case "$changed_path" in
-              templates/go-service/*)
-                selected[templates/go-service]=1
-                ;;
-              services/*)
-                service_path=${changed_path#services/}
-                service_name=${service_path%%/*}
-                if [[ "$service_name" == *-service && "$service_path" == */* ]]; then
-                  selected["services/$service_name"]=1
-                fi
-                ;;
-            esac
-          done < <(git diff --name-only --diff-filter=ACDMRT -z "$merge_base" "$PR_HEAD")
-
-          mapfile -t modules < <(printf '%s\n' "${!selected[@]}" | sed '/^$/d' | sort)
-          if (( ${#modules[@]} == 0 )); then
-            echo 'No supported Go module is present in the complete pull request diff; validation is a no-op.'
-            echo 'module_dir=' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if (( ${#modules[@]} > 1 )); then
-            printf 'Multiple Go modules changed; split the pull request:' >&2
-            printf ' %s' "${modules[@]}" >&2
-            printf '\n' >&2
-            exit 1
-          fi
-
-          module_dir=${modules[0]}
-          case "$module_dir" in
-            templates/go-service)
-              module_role='service-scaffold'
-              ;;
-            services/*-service)
-              module_role='business-service'
-              ;;
-            *)
-              echo "Unsupported Go module: $module_dir" >&2
-              exit 1
-              ;;
-          esac
-
-          module_key=${module_dir//\//-}
-          coverage_file="$module_dir/coverage.txt"
-          coverage_files="$coverage_file"
-          if [[ "$module_role" == 'business-service' ]]; then
-            coverage_files+=",$module_dir/integration-coverage.txt"
-          fi
-          coverage_flag=${module_dir##*/}
-          {
-            echo "module_dir=$module_dir"
-            echo "module_key=$module_key"
-            echo "module_role=$module_role"
-            echo "go_sum=$module_dir/go.sum"
-            echo 'validation_target=check-go-pr'
-            echo "format_base=$merge_base"
-            echo "coverage_file=$coverage_file"
-            echo "coverage_files=$coverage_files"
-            echo "coverage_flag=$coverage_flag"
-          } >> "$GITHUB_OUTPUT"
+        run: >-
+          ./.venv/bin/python scripts/go/select_pr_module.py
+          --base "$PR_BASE" --head "$PR_HEAD" --output "$GITHUB_OUTPUT"
 
       - name: Set up Go 1.27.2
         if: steps.select.outputs.module_dir != ''

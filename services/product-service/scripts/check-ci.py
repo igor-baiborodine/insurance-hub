@@ -5,7 +5,9 @@ from copy import deepcopy
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 
 import yaml
@@ -97,6 +99,13 @@ def validate_release(workflow: dict) -> None:
         "ref": "${{ github.sha }}", "fetch-depth": "0",
     }, "release must check out complete history at the triggering source revision")
     commands = runs(job)
+    setup_uv = step_named(job, "Set up uv 0.13.1")
+    require(setup_uv.get("uses") == "astral-sh/setup-uv@v7" and setup_uv.get("with") == {
+        "version": "0.13.1", "enable-cache": "true",
+    }, "release must install the pinned uv runtime")
+    setup_python = step_named(job, "Set up managed Python 3.14.8")
+    require(setup_python.get("run") == "make python-toolchain-setup",
+            "release must provision the managed Python runtime in its own job")
     require("make go-svc-release-select" in commands and
             "RELEASE_OUTPUT=\"$GITHUB_OUTPUT\"" in commands,
             "release must use the shared exact-service selector")
@@ -331,6 +340,12 @@ def exercise_selection(selector: dict) -> None:
     ]
     with tempfile.TemporaryDirectory(prefix="insurance-hub-go-pr-select-") as temporary:
         fixture = Path(temporary)
+        selector_path = fixture / "scripts" / "go" / "select_pr_module.py"
+        selector_path.parent.mkdir(parents=True)
+        shutil.copy2(ROOT / "scripts" / "go" / "select_pr_module.py", selector_path)
+        fixture_python = fixture / ".venv" / "bin" / "python"
+        fixture_python.parent.mkdir(parents=True)
+        fixture_python.symlink_to(sys.executable)
         subprocess.run(["git", "init", "-q"], cwd=fixture, check=True, timeout=10)
         subprocess.run(["git", "config", "user.name", "CI Contract"], cwd=fixture, check=True,
                        timeout=10)
@@ -501,34 +516,23 @@ def validate_modules(workflow: dict, *, run_execution_cases: bool = False) -> No
         "PR_HEAD": "${{ github.event.pull_request.head.sha }}",
     }, "Go PR module selection must use explicit pull request base and head revisions")
     selector_contract = [
-        "set -euo pipefail",
-        'merge_base=$(git merge-base "$PR_BASE" "$PR_HEAD")',
-        'git diff --name-only --diff-filter=ACDMRT -z "$merge_base" "$PR_HEAD"',
-        "templates/go-service/*)",
-        "services/*)",
-        'service_path=${changed_path#services/}',
-        'service_name=${service_path%%/*}',
-        '[[ "$service_name" == *-service && "$service_path" == */* ]]',
-        'selected["services/$service_name"]=1',
-        "if (( ${#modules[@]} == 0 ))",
-        "if (( ${#modules[@]} > 1 ))",
-        "Multiple Go modules changed; split the pull request",
-        "module_role='service-scaffold'",
-        "services/*-service)",
-        "module_role='business-service'",
-        'echo "go_sum=$module_dir/go.sum"',
-        "echo 'validation_target=check-go-pr'",
-        'echo "format_base=$merge_base"',
-        'echo "coverage_file=$coverage_file"',
-        'coverage_files="$coverage_file"',
-        'coverage_files+=",$module_dir/integration-coverage.txt"',
-        'echo "coverage_files=$coverage_files"',
-        'echo "coverage_flag=$coverage_flag"',
+        "./.venv/bin/python scripts/go/select_pr_module.py",
+        '--base "$PR_BASE"',
+        '--head "$PR_HEAD"',
+        '--output "$GITHUB_OUTPUT"',
     ]
     for fragment in selector_contract:
         require(fragment in selector["run"], f"Go PR module selector is missing: {fragment}")
     if run_execution_cases:
         exercise_selection(selector)
+
+    setup_uv = step_named(job, "Set up uv 0.13.1")
+    require(setup_uv.get("uses") == "astral-sh/setup-uv@v7" and setup_uv.get("with") == {
+        "version": "0.13.1", "enable-cache": "true",
+    }, "Go PR validation must install the pinned uv runtime")
+    setup_python = step_named(job, "Set up managed Python 3.14.8")
+    require(setup_python.get("run") == "make python-toolchain-setup",
+            "Go PR validation must provision the managed Python runtime")
 
     setup_go = step_named(job, "Set up Go 1.27.2")
     require(setup_go.get("if") == "steps.select.outputs.module_dir != ''" and
@@ -657,12 +661,10 @@ def main() -> None:
         ["env"].update({"COVERAGE_FILE": "${{ steps.select.outputs.coverage_file }}"}),
         lambda item: step_named(item["jobs"]["validate"], "Select Go module")
         .update(run=step_named(item["jobs"]["validate"], "Select Go module")["run"]
-                .replace('merge_base=$(git merge-base "$PR_BASE" "$PR_HEAD")',
-                         'merge_base=$PR_BASE')),
+                .replace('--base "$PR_BASE"', '--base "$PR_HEAD"')),
         lambda item: step_named(item["jobs"]["validate"], "Select Go module")
         .update(run=step_named(item["jobs"]["validate"], "Select Go module")["run"]
-                .replace('git diff --name-only --diff-filter=ACDMRT -z "$merge_base" "$PR_HEAD"',
-                         'git diff --name-only --diff-filter=ACDMRT -z "$PR_BASE" "$PR_HEAD"')),
+                .replace('--head "$PR_HEAD"', '--head "$PR_BASE"')),
         lambda item: step_named(item["jobs"]["validate"], "Run selected module validation")
         ["env"].update({"FORMAT_BASE": "${{ github.event.pull_request.base.sha }}"}),
         lambda item: step_named(item["jobs"]["validate"],
