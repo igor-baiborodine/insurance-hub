@@ -5,22 +5,35 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 from typing import TextIO
 
 SUCCESS = 0
 OPERATIONAL_FAILURE = 1
 INTERRUPTED = 130
+TERMINATED = 143
 DEFAULT_TOKEN_ENV = "EXAMPLE_API_TOKEN"
+PROCESS_TEARDOWN_SECONDS = 1.0
 
 
 class ToolError(Exception):
     """Expected, sanitized operational failure."""
+
+
+class SignalInterruption(Exception):
+    """POSIX interruption converted into controlled stack unwinding."""
+
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(signal.Signals(signum).name)
 
 
 @dataclass(frozen=True)
@@ -40,6 +53,23 @@ class CommandResult:
 
 
 CommandRunner = Callable[[Sequence[str], str, float], CommandResult]
+
+
+@contextmanager
+def controlled_interrupts() -> Iterator[None]:
+    handled_signals = (signal.SIGINT, signal.SIGTERM)
+    previous_handlers = {signum: signal.getsignal(signum) for signum in handled_signals}
+
+    def interrupt(signum: int, _frame: FrameType | None) -> None:
+        raise SignalInterruption(signum)
+
+    try:
+        for signum in handled_signals:
+            signal.signal(signum, interrupt)
+        yield
+    finally:
+        for signum, previous_handler in previous_handlers.items():
+            signal.signal(signum, previous_handler)
 
 
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -84,20 +114,44 @@ def validate_config(
     )
 
 
-def run_subprocess(arguments: Sequence[str], input_text: str, timeout: float) -> CommandResult:
+def terminate_and_reap(process: subprocess.Popen[str]) -> None:
     try:
-        completed = subprocess.run(
-            list(arguments),
-            check=False,
-            capture_output=True,
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+    try:
+        process.communicate(timeout=PROCESS_TEARDOWN_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate(timeout=PROCESS_TEARDOWN_SECONDS)
+
+
+def run_subprocess(arguments: Sequence[str], input_text: str, timeout: float) -> CommandResult:
+    process = subprocess.Popen(
+        list(arguments),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        shell=False,
+        text=True,
+    )
+    try:
+        stdout, stderr = process.communicate(
             input=input_text,
-            shell=False,
-            text=True,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
+        terminate_and_reap(process)
         raise ToolError(f"inspector timed out after {timeout:g} seconds") from exc
-    return CommandResult(completed.returncode, completed.stdout, completed.stderr)
+    except BaseException:
+        terminate_and_reap(process)
+        raise
+    return CommandResult(process.returncode, stdout, stderr)
 
 
 def parse_report(raw_report: str) -> dict[str, object]:
@@ -153,9 +207,13 @@ def run(
     environment = os.environ if environ is None else environ
     token = ""
     try:
-        arguments = parse_args(argv)
-        config, token = validate_config(arguments, environment)
-        report = execute(config, token, runner)
+        with controlled_interrupts():
+            arguments = parse_args(argv)
+            config, token = validate_config(arguments, environment)
+            report = execute(config, token, runner)
+    except SignalInterruption as exc:
+        print(f"interrupted by {signal.Signals(exc.signum).name}", file=stderr)
+        return INTERRUPTED if exc.signum == signal.SIGINT else TERMINATED
     except KeyboardInterrupt:
         print("interrupted", file=stderr)
         return INTERRUPTED

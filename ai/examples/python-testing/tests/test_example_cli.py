@@ -110,10 +110,20 @@ def test_run_subprocess_reports_timeout_without_input_disclosure(
     # given
     secret = "synthetic-secret"
 
-    def time_out(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        raise subprocess.TimeoutExpired(["helper"], 0.1, output=secret)
+    class TimedOutProcess:
+        returncode = 1
 
-    monkeypatch.setattr(subprocess, "run", time_out)
+        def communicate(
+            self,
+            input: str | None = None,
+            timeout: float | None = None,
+        ) -> tuple[str, str]:
+            raise subprocess.TimeoutExpired(["helper"], timeout or 0.1, output=input)
+
+    process = TimedOutProcess()
+    reaped: list[TimedOutProcess] = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr("example_cli.terminate_and_reap", reaped.append)
 
     # when / then
     with pytest.raises(ToolError, match="timed out") as captured:
@@ -121,6 +131,7 @@ def test_run_subprocess_reports_timeout_without_input_disclosure(
 
     # then
     assert secret not in str(captured.value)
+    assert reaped == [process]
 
 
 @contextmanager
