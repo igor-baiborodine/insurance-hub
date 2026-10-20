@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -12,9 +14,90 @@ from pathlib import Path
 
 import pytest
 
+import select_pr_module
 import topology
 
 REPOSITORY_ROOT = Path(topology.__file__).resolve().parents[2]
+
+
+def file_snapshot(root: Path) -> dict[str, str]:
+    return {
+        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and ".git" not in path.relative_to(root).parts
+    }
+
+
+def topology_source_snapshot(root: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        if any(
+            part in {".git", ".tools", "node_modules", "third_party", "vendor"}
+            for part in relative.parts
+        ):
+            continue
+        selected = (
+            path.suffix in {".go", ".mk"}
+            or path.name in {"go.mod", "go.sum", "go.work", "go.work.sum", "Makefile"}
+            or relative.as_posix() == "go-module-topology.json"
+            or (relative.parts[:2] == ("scripts", "go") and path.suffix in {".py", ".sh"})
+        )
+        if selected:
+            result[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return result
+
+
+def fixture_environment(root: Path, inventory_path: Path) -> dict[str, str]:
+    (root / ".go-topology-test-fixture").touch()
+    return {
+        **os.environ,
+        "GO_TOPOLOGY_FIXTURE_INVENTORY": str(inventory_path),
+        "GO_TOPOLOGY_FIXTURE_ROOT": str(root),
+        "GO_TOPOLOGY_TEST_MODE": "1",
+        "PYTHON": sys.executable,
+    }
+
+
+def run_root_make_fixture(
+    root: Path, inventory_path: Path, target: str
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["make", "--no-print-directory", target, f"PYTHON={sys.executable}"],
+        cwd=REPOSITORY_ROOT,
+        env=fixture_environment(root, inventory_path),
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+
+
+def run_topology_launcher(
+    root: Path, inventory_path: Path, launcher: str
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(REPOSITORY_ROOT / "scripts" / "go" / launcher)],
+        cwd=REPOSITORY_ROOT,
+        env=fixture_environment(root, inventory_path),
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+
+
+def git(root: Path, *arguments: str) -> str:
+    return subprocess.run(
+        ["git", *arguments],
+        cwd=root,
+        check=True,
+        text=True,
+        capture_output=True,
+        timeout=10,
+    ).stdout.strip()
 
 
 def test_run_command_kills_term_resistant_descendant_after_leader_exits(
@@ -220,6 +303,45 @@ def test_inventory_schema_rejects_invalid_contracts(tmp_path: Path, case: str) -
         topology.load_inventory(path)
 
 
+@pytest.mark.parametrize("target", ["go-topology-check", "go-modules-check"])
+def test_approved_workspace_fails_closed_at_public_make_targets(
+    tmp_path: Path, target: str
+) -> None:
+    # given
+    value = inventory()
+    value["workspaces"] = [
+        {
+            "directory": ".",
+            "owner": "fixture owner",
+            "use": ["module"],
+            "replacements": [],
+            "validationTarget": "check",
+            "ciWorkflow": ".github/workflows/test.yml",
+        }
+    ]
+    write_module(tmp_path, value["modules"][0])
+    write_workflow(tmp_path)
+    inventory_path = write_inventory(tmp_path, value)
+    environment = fixture_environment(tmp_path, inventory_path)
+    before = file_snapshot(tmp_path)
+
+    # when
+    result = subprocess.run(
+        ["make", "--no-print-directory", target, f"PYTHON={sys.executable}"],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+
+    # then
+    assert result.returncode != 0
+    assert "approved workspaces are not supported" in result.stderr
+    assert file_snapshot(tmp_path) == before
+
+
 @pytest.mark.parametrize(
     ("case", "message"),
     [
@@ -228,6 +350,7 @@ def test_inventory_schema_rejects_invalid_contracts(tmp_path: Path, case: str) -
         ("identity", "module identity mismatch"),
         ("missing-target", "missing validation target"),
         ("unexpected", "unlisted developer-local manifest"),
+        ("workspace", "unlisted developer-local manifest: go.work"),
         ("replacement", "unapproved filesystem replacement"),
     ],
 )
@@ -250,6 +373,8 @@ def test_topology_reports_controlled_manifest_failures(
         unexpected = tmp_path / "unexpected"
         unexpected.mkdir()
         (unexpected / "go.mod").write_text("module example.test/unexpected\n", encoding="utf-8")
+    elif case == "workspace":
+        (tmp_path / "go.work").write_text("go 1.23\n\nuse ./module\n", encoding="utf-8")
     else:
         with (module / "go.mod").open("a", encoding="utf-8") as stream:
             stream.write(
@@ -268,7 +393,9 @@ def test_topology_reports_controlled_manifest_failures(
     ("old", "new", "message"),
     [
         ("on:\n", "on:\n  push:\n", "must not run on push"),
+        ("      - 'module/**/*.go'\n", "", "missing pull_request path trigger"),
         ("      - 'module/go.mod'\n", "", "missing pull_request path trigger"),
+        ("      - 'module/**/testdata/**'\n", "", "missing pull_request path trigger"),
         (
             "      - 'module/go.sum'\n",
             "      - 'module/**'\n",
@@ -281,6 +408,27 @@ def test_topology_reports_controlled_manifest_failures(
         (
             'make -C "$MODULE_DIR" "$VALIDATION_TARGET"',
             "make check",
+            "selected-module validation contract",
+        ),
+        (
+            'make -C "$MODULE_DIR" bootstrap-go-tools',
+            'make -C "$MODULE_DIR" verify-tools',
+            "selected-module validation contract",
+        ),
+        (
+            "COVERAGE_FILE: ${{ github.workspace }}/${{ steps.select.outputs.coverage_file }}",
+            "COVERAGE_FILE: ${{ steps.select.outputs.coverage_file }}",
+            "selected-module validation contract",
+        ),
+        (
+            "FORMAT_BASE: ${{ steps.select.outputs.format_base }}",
+            "FORMAT_BASE: ${{ github.event.pull_request.base.sha }}",
+            "selected-module validation contract",
+        ),
+        ('rm -f -- "$COVERAGE_FILE"\n', "", "selected-module validation contract"),
+        (
+            "steps.select.outputs.module_role != 'service-scaffold'",
+            "steps.select.outputs.module_dir != ''",
             "selected-module validation contract",
         ),
         (
@@ -329,18 +477,57 @@ def test_ci_coverage_preserves_historical_path_arguments(
     assert "go-ci-coverage-check: passed" in capsys.readouterr().out
 
 
+def test_selector_uses_merge_base_to_head_and_reports_it_for_formatting(tmp_path: Path) -> None:
+    # given
+    git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    git(tmp_path, "config", "user.name", "Topology Test")
+    git(tmp_path, "config", "user.email", "topology@example.invalid")
+    (tmp_path / "README.md").write_text("base\n", encoding="utf-8")
+    git(tmp_path, "add", "README.md")
+    git(tmp_path, "commit", "--quiet", "-m", "base")
+    merge_base = git(tmp_path, "rev-parse", "HEAD")
+    git(tmp_path, "checkout", "--quiet", "-b", "feature")
+    changed = tmp_path / "services" / "product-service" / "internal" / "change.go"
+    changed.parent.mkdir(parents=True)
+    changed.write_text("package internal\n", encoding="utf-8")
+    git(tmp_path, "add", changed.relative_to(tmp_path).as_posix())
+    git(tmp_path, "commit", "--quiet", "-m", "feature")
+    head = git(tmp_path, "rev-parse", "HEAD")
+    git(tmp_path, "checkout", "--quiet", "main")
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("package internal\n", encoding="utf-8")
+    git(tmp_path, "add", changed.relative_to(tmp_path).as_posix())
+    git(tmp_path, "commit", "--quiet", "-m", "base tip")
+    base = git(tmp_path, "rev-parse", "HEAD")
+    before = file_snapshot(tmp_path)
+
+    # when
+    actual_merge_base, paths = select_pr_module.changed_paths(tmp_path, base, head)
+    outputs = select_pr_module.selection_outputs(paths, actual_merge_base)
+
+    # then
+    assert actual_merge_base == merge_base
+    assert paths == ["services/product-service/internal/change.go"]
+    assert outputs["module_dir"] == "services/product-service"
+    assert outputs["format_base"] == merge_base
+    assert file_snapshot(tmp_path) == before
+
+
 def boundary_fixture(tmp_path: Path, case: str) -> tuple[Path, dict[str, object]]:
     consumer = module_record("consumer", "example.test/insurance-hub/consumer")
     modules = [consumer]
     write_module(tmp_path, consumer)
     if case != "own":
         role = {
+            "approved": "public-contract",
             "private": "business-service",
             "scaffold": "service-scaffold",
             "unapproved": "public-shared",
         }.get(case, "public-shared")
         owner = module_record("owner", "example.test/insurance-hub/owner", role)
-        if case == "unapproved":
+        if case == "approved":
+            owner["consumers"] = [str(consumer["modulePath"])]
+        elif case == "unapproved":
             owner["consumers"] = [str(owner["modulePath"])]
         modules.append(owner)
         owner_dir = write_module(tmp_path, owner)
@@ -373,6 +560,7 @@ def boundary_fixture(tmp_path: Path, case: str) -> tuple[Path, dict[str, object]
     ("case", "message"),
     [
         ("own", "passed"),
+        ("approved", "passed"),
         ("private", "sibling-internal-import"),
         ("scaffold", "scaffold-runtime-dependency"),
         ("unapproved", "unapproved-consumer"),
@@ -387,12 +575,137 @@ def test_boundary_cases(
     root, value = boundary_fixture(tmp_path, case)
 
     # when / then
-    if case == "own":
+    if case in {"own", "approved"}:
         topology.boundary_check(root, value)
         assert message in capsys.readouterr().out
     else:
         with pytest.raises(topology.TopologyError, match=message):
             topology.boundary_check(root, value)
+
+
+def test_approved_public_contract_passes_real_boundary_launcher(tmp_path: Path) -> None:
+    # given
+    root, value = boundary_fixture(tmp_path, "approved")
+    inventory_path = write_inventory(root, value)
+    environment = fixture_environment(root, inventory_path)
+    before = file_snapshot(root)
+
+    # when
+    result = subprocess.run(
+        [str(REPOSITORY_ROOT / "scripts" / "go" / "check-boundaries.sh")],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+
+    # then
+    assert result.returncode == 0, result.stderr
+    assert "go-boundary-check: passed 2 module graph" in result.stdout
+    assert file_snapshot(root) == before
+
+
+def test_local_replacement_control_and_public_checks_preserve_rejection(tmp_path: Path) -> None:
+    # given
+    consumer = module_record("consumer", "example.test/insurance-hub/consumer")
+    owner = module_record(
+        "dependency",
+        "example.test/insurance-hub/dependency",
+        "public-contract",
+        consumers=[str(consumer["modulePath"])],
+    )
+    consumer_dir = write_module(tmp_path, consumer)
+    write_module(tmp_path, owner)
+    with (consumer_dir / "go.mod").open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\nrequire example.test/insurance-hub/dependency v0.0.0\n"
+            "replace example.test/insurance-hub/dependency => ../dependency\n"
+        )
+    (consumer_dir / "module.go").write_text(
+        'package module\n\nimport dependency "example.test/insurance-hub/dependency"\n\n'
+        "var Value = dependency.Value\n",
+        encoding="utf-8",
+    )
+    inventory_path = write_inventory(tmp_path, inventory([consumer, owner]))
+    write_workflow(tmp_path)
+    fixture_environment(tmp_path, inventory_path)
+    before = file_snapshot(tmp_path)
+
+    # when
+    resolution = subprocess.run(
+        ["go", "list", "-mod=readonly", "./..."],
+        cwd=consumer_dir,
+        env={**os.environ, "GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"},
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+    topology_result = run_root_make_fixture(tmp_path, inventory_path, "go-topology-check")
+    aggregate_result = run_root_make_fixture(tmp_path, inventory_path, "go-modules-check")
+
+    # then
+    assert resolution.returncode == 0, resolution.stderr
+    for result in (topology_result, aggregate_result):
+        assert result.returncode != 0
+        assert "unapproved filesystem replacement ../dependency" in result.stderr
+    assert file_snapshot(tmp_path) == before
+
+
+def test_ambient_workspace_control_cannot_mask_standalone_failure(tmp_path: Path) -> None:
+    # given
+    ambient_root = tmp_path / "ambient"
+    root = ambient_root / "repo"
+    root.mkdir(parents=True)
+    consumer = module_record("consumer", "example.test/insurance-hub/consumer")
+    owner = module_record(
+        "dependency",
+        "example.test/insurance-hub/dependency",
+        "public-contract",
+        consumers=[str(consumer["modulePath"])],
+    )
+    consumer_dir = write_module(root, consumer)
+    write_module(root, owner)
+    with (consumer_dir / "go.mod").open("a", encoding="utf-8") as stream:
+        stream.write("\nrequire example.test/insurance-hub/dependency v0.0.0\n")
+    (consumer_dir / "module.go").write_text(
+        'package module\n\nimport dependency "example.test/insurance-hub/dependency"\n\n'
+        "var Value = dependency.Value\n",
+        encoding="utf-8",
+    )
+    workspace = ambient_root / "go.work"
+    workspace.write_text(
+        "go 1.23\n\nuse (\n\t./repo/consumer\n\t./repo/dependency\n)\n",
+        encoding="utf-8",
+    )
+    inventory_path = write_inventory(root, inventory([consumer, owner]))
+    fixture_environment(root, inventory_path)
+    before = file_snapshot(ambient_root)
+
+    # when
+    resolution = subprocess.run(
+        ["go", "list", "-mod=readonly", "./..."],
+        cwd=consumer_dir,
+        env={
+            **os.environ,
+            "GOWORK": str(workspace),
+            "GOPROXY": "off",
+            "GOSUMDB": "off",
+        },
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+    standalone = run_topology_launcher(root, inventory_path, "check-boundaries.sh")
+
+    # then
+    assert resolution.returncode == 0, resolution.stderr
+    assert standalone.returncode != 0
+    assert "rule=incomplete-package-graph" in standalone.stderr
+    assert file_snapshot(ambient_root) == before
 
 
 @pytest.mark.parametrize("case", ["unsupported-variable", "failed-target"])
@@ -485,11 +798,62 @@ def test_root_aggregate_accepts_explicit_python_override(tmp_path: Path) -> None
     assert observed.read_text(encoding="utf-8").splitlines() == [sys.executable, "all"]
 
 
+def test_topology_launcher_propagates_signal_and_preserves_fixture(tmp_path: Path) -> None:
+    # given
+    root = tmp_path / "fixture"
+    root.mkdir()
+    value = inventory()
+    write_module(root, value["modules"][0])
+    write_workflow(root)
+    inventory_path = write_inventory(root, value)
+    environment = fixture_environment(root, inventory_path)
+    control = tmp_path / "control"
+    fake_bin = control / "bin"
+    fake_bin.mkdir(parents=True)
+    ready = control / "go-ready"
+    child_pid = control / "go.pid"
+    fake_go = fake_bin / "go"
+    fake_go.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s" "$$" > "{child_pid}"\n'
+        f': > "{ready}"\n'
+        "trap 'exit 143' HUP INT TERM\n"
+        "while :; do sleep 1; done\n",
+        encoding="utf-8",
+    )
+    fake_go.chmod(0o755)
+    environment["PATH"] = f"{fake_bin}{os.pathsep}{environment['PATH']}"
+    before = file_snapshot(root)
+    process = subprocess.Popen(
+        [str(REPOSITORY_ROOT / "scripts" / "go" / "check-topology.sh")],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    deadline = time.monotonic() + 5
+    while not ready.is_file() and process.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert ready.is_file(), process.communicate(timeout=5)
+
+    # when
+    process.send_signal(signal.SIGTERM)
+    _, stderr = process.communicate(timeout=5)
+
+    # then
+    assert process.returncode == 143, stderr
+    assert file_snapshot(root) == before
+    pid = int(child_pid.read_text(encoding="utf-8"))
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
 def test_current_repository_topology_is_read_only() -> None:
     # given
     root = Path(topology.__file__).resolve().parents[2]
     loaded = topology.load_inventory(root / "go-module-topology.json")
-    before = topology.manifest_snapshot(root)
+    before = topology_source_snapshot(root)
 
     # when
     errors, _ = topology.topology_errors(root, loaded)
@@ -498,4 +862,4 @@ def test_current_repository_topology_is_read_only() -> None:
 
     # then
     assert errors == []
-    assert topology.manifest_snapshot(root) == before
+    assert topology_source_snapshot(root) == before
