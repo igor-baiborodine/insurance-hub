@@ -5,16 +5,50 @@ on:
     branches:
       - main
     paths:
-      - 'services/product-service/**'
-      - 'templates/go-service/**'
-      - '.github/workflows/go-report-card.yml'
+      - 'templates/go-service/**/*.go'
+      - 'templates/go-service/go.mod'
+      - 'templates/go-service/go.sum'
+      - 'templates/go-service/.golangci.yml'
+      - 'templates/go-service/buf.yaml'
+      - 'templates/go-service/buf.lock'
+      - 'templates/go-service/buf.gen.yaml'
+      - 'templates/go-service/api/**/*.proto'
+      - 'templates/go-service/**/testdata/**'
+      - 'services/*-service/**/*.go'
+      - 'services/*-service/go.mod'
+      - 'services/*-service/go.sum'
+      - 'services/*-service/.golangci.yml'
+      - 'services/*-service/buf.yaml'
+      - 'services/*-service/buf.lock'
+      - 'services/*-service/buf.gen.yaml'
+      - 'services/*-service/sqlc.yaml'
+      - 'services/*-service/api/**/*.proto'
+      - 'services/*-service/internal/postgres/sql/*.sql'
+      - 'services/*-service/**/testdata/**'
   pull_request:
     branches:
       - main
     paths:
-      - 'services/product-service/**'
-      - 'templates/go-service/**'
-      - '.github/workflows/go-report-card.yml'
+      - 'templates/go-service/**/*.go'
+      - 'templates/go-service/go.mod'
+      - 'templates/go-service/go.sum'
+      - 'templates/go-service/.golangci.yml'
+      - 'templates/go-service/buf.yaml'
+      - 'templates/go-service/buf.lock'
+      - 'templates/go-service/buf.gen.yaml'
+      - 'templates/go-service/api/**/*.proto'
+      - 'templates/go-service/**/testdata/**'
+      - 'services/*-service/**/*.go'
+      - 'services/*-service/go.mod'
+      - 'services/*-service/go.sum'
+      - 'services/*-service/.golangci.yml'
+      - 'services/*-service/buf.yaml'
+      - 'services/*-service/buf.lock'
+      - 'services/*-service/buf.gen.yaml'
+      - 'services/*-service/sqlc.yaml'
+      - 'services/*-service/api/**/*.proto'
+      - 'services/*-service/internal/postgres/sql/*.sql'
+      - 'services/*-service/**/testdata/**'
   workflow_dispatch:
 
 permissions:
@@ -39,55 +73,29 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go 1.27.2
-        id: setup-go
         uses: actions/setup-go@v7
         with:
           go-version: '1.27.2'
           cache: false
 
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+          enable-cache: true
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
       - name: Install archived report checks
         run: make -C .tools/goreportcard install
 
       - name: Check Product Service and service scaffold
-        working-directory: .tools/goreportcard
-        shell: bash
-        env:
-          REPORT_CARD_BIN: ${{ steps.setup-go.outputs.go-bin-path }}
         run: |
-          set -euo pipefail
-          export PATH="$REPORT_CARD_BIN:$PATH"
-
-          printf '| Module | Grade | Score | Issues |\n| --- | --- | ---: | ---: |\n' >> "$GITHUB_STEP_SUMMARY"
-          failed=0
-          for module in services/product-service templates/go-service; do
-            result=$(GOWORK=off go run ./cmd/goreportcard-cli -d "$GITHUB_WORKSPACE/$module" -j)
-            grade=$(jq -r '.GradeFromPercentage' <<< "$result")
-            score=$(jq -r '.average * 100' <<< "$result")
-            issues=$(jq -r '.issues' <<< "$result")
-            printf '| %s | %s | %.1f%% | %s |\n' "$module" "$grade" "$score" "$issues" >> "$GITHUB_STEP_SUMMARY"
-            printf '%s: grade %s, score %.1f%%, issues %s\n' "$module" "$grade" "$score" "$issues"
-            jq -r '.checks[] | "  \(.name): \(.percentage * 100 | floor)% \(if .error == "" then "" else "(error: \(.error))" end)"' <<< "$result"
-            printf '%s issue details:\n' "$module"
-            jq -r --arg root "$GITHUB_WORKSPACE/" --arg module "$module" '
-              .checks[] as $check
-              | $check.file_summaries[]
-              | if .filename == "" then
-                  "  \($check.name): no recognized license file in \($module) directory"
-                else
-                  .filename as $file
-                  | if (.errors | length) == 0 then
-                      "  \($check.name): \($file | ltrimstr($root))"
-                    else
-                      .errors[]
-                      | "  \($check.name): \($file | ltrimstr($root)):\(.line_number): \(.error_string)"
-                    end
-                end
-            ' <<< "$result"
-
-            if ! jq -e '.did_error == false and .average >= 0.75' <<< "$result" > /dev/null; then
-              printf '%s: report checks failed or score is below 75%%\n' "$module" >&2
-              failed=1
-            fi
-          done
-
-          exit "$failed"
+          report_card_bin="$(dirname "$(command -v go)")"
+          ./.venv/bin/python scripts/go/report_card.py \
+            --workspace "$GITHUB_WORKSPACE" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --report-card-root "$GITHUB_WORKSPACE/.tools/goreportcard" \
+            --go-bin "$report_card_bin" \
+            services/product-service templates/go-service

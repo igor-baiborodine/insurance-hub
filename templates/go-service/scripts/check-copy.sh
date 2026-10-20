@@ -8,6 +8,7 @@ module_root=$(
 )
 make_command=${MAKE_COMMAND:-make}
 common_tooling_dir=${COMMON_GO_TOOLING_DIR:?COMMON_GO_TOOLING_DIR is required}
+common_tooling_python=${COMMON_GO_TOOLING_PYTHON:?COMMON_GO_TOOLING_PYTHON is required}
 
 source_module_pattern=github\.com/igor-baiborodine/insurance-hub/templates/go-service
 copy_module=github.com/igor-baiborodine/insurance-hub/services/example-copy
@@ -47,6 +48,7 @@ generated_inventory=$temporary_root/generated-files.txt
 
 run_copy_make() {
 	COMMON_GO_TOOLING_DIR="$copy_root/scripts/go-module" \
+		COMMON_GO_TOOLING_PYTHON="$common_tooling_python" \
 		"$make_command" -C "$copy_root" "$@"
 }
 
@@ -73,7 +75,7 @@ replace_identity() {
 
 remove_scaffold_only_copy_surface() {
 	sed -i 's/\([[:space:]]\)check-copy\([[:space:]]\)/\1\2/' "$copy_root/Makefile"
-	sed -i '/^check-copy: verify-tools$/,+2d' "$copy_root/Makefile"
+	sed -i '/^check-copy: verify-tools$/,+3d' "$copy_root/Makefile"
 	rm -- "$copy_root/scripts/check-copy.sh"
 
 	sed -i \

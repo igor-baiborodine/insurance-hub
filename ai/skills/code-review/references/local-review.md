@@ -1,3 +1,14 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Local code review](#local-code-review)
+  - [Required inputs](#required-inputs)
+  - [Upstream synchronization gate](#upstream-synchronization-gate)
+  - [Collect the proposed change](#collect-the-proposed-change)
+  - [Evidence and output](#evidence-and-output)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Local code review
 
 Use this mode from a local checkout when the requested output is the repository's ticket review
@@ -23,6 +34,9 @@ review:
 ```sh
 ai/skills/code-review/scripts/check-upstream-sync.sh <repository-root>
 ```
+
+The launcher uses the repository's managed CPython 3.14.8 runtime by default; `PYTHON` may select
+another verified CPython 3.14.8 executable.
 
 The script resolves the current branch's configured upstream, fetches that exact remote branch, and
 requires local `HEAD` to equal the fetched commit. If the branch has no remote upstream, the fetch

@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+import os
 import re
 import subprocess
-
+import sys
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[3]
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -17,6 +18,7 @@ VERSION = re.compile(r"1\.[0-9]+\.[0-9]+")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 RELEASE_ROOT_FILES = frozenset({".dockerignore", "Dockerfile", "go.mod", "go.sum"})
 RELEASE_DIRECTORIES = frozenset({"cmd", "gen", "internal"})
+GIT_TIMEOUT_SECONDS = 30
 
 
 class ReleaseSelectionError(RuntimeError):
@@ -80,10 +82,14 @@ def image_entry(lines: list[str], service: str, repository: str) -> int:
         entries.append((match.group(1), new_name, new_tag_index))
 
     matches = [entry for entry in entries if entry[0] == expected_name]
-    require(len(matches) == 1, f"QA Kustomization must contain exactly one {expected_name} image entry")
+    require(
+        len(matches) == 1, f"QA Kustomization must contain exactly one {expected_name} image entry"
+    )
     name, new_name, tag_index = matches[0]
-    require(name == expected_name and new_name == expected_new_name,
-            f"QA image entry must publish {expected_new_name}")
+    require(
+        name == expected_name and new_name == expected_new_name,
+        f"QA image entry must publish {expected_new_name}",
+    )
     require(tag_index >= 0, "QA image entry must contain exactly one newTag")
     return tag_index
 
@@ -91,8 +97,10 @@ def image_entry(lines: list[str], service: str, repository: str) -> int:
 def select_service(paths: list[str], root: Path, repository: str) -> Selection:
     require(bool(REPOSITORY.fullmatch(repository)), "repository must use owner/name format")
     modules = {module for value in paths if (module := release_module(value)) is not None}
-    require(len(modules) == 1,
-            "release push must change build inputs for exactly one services/<service>-service module")
+    require(
+        len(modules) == 1,
+        "release push must change build inputs for exactly one services/<service>-service module",
+    )
 
     module = next(iter(modules))
     service = module.removesuffix("-service")
@@ -100,25 +108,42 @@ def select_service(paths: list[str], root: Path, repository: str) -> Selection:
     module_path = f"services/{module}"
     qa_path = f"k8s/overlays/qa/svc/{service}/kustomization.yaml"
     require((root / module_path).is_dir(), f"module directory is missing: {module_path}")
-    require((root / module_path / "Dockerfile").is_file(), f"module Dockerfile is missing: {module_path}/Dockerfile")
+    require(
+        (root / module_path / "Dockerfile").is_file(),
+        f"module Dockerfile is missing: {module_path}/Dockerfile",
+    )
     require((root / qa_path).is_file(), f"QA Kustomization is missing: {qa_path}")
-    image_entry((root / qa_path).read_text(encoding="utf-8").splitlines(keepends=True), service, repository)
+    image_entry(
+        (root / qa_path).read_text(encoding="utf-8").splitlines(keepends=True), service, repository
+    )
     return Selection(module, module_path, service, qa_path)
 
 
 def changed_paths(root: Path, before: str, after: str) -> list[str]:
-    require(bool(SHA.fullmatch(before)) and set(before) != {"0"},
-            "release before revision must be a nonzero full SHA")
+    require(
+        bool(SHA.fullmatch(before)) and set(before) != {"0"},
+        "release before revision must be a nonzero full SHA",
+    )
     require(bool(SHA.fullmatch(after)), "release after revision must be a full SHA")
     for revision in (before, after):
         result = subprocess.run(
-            ["git", "cat-file", "-e", f"{revision}^{{commit}}"], cwd=root, check=False,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
+            cwd=root,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=GIT_TIMEOUT_SECONDS,
+            env={"PATH": os.environ.get("PATH", ""), "GIT_CONFIG_NOSYSTEM": "1"},
         )
         require(result.returncode == 0, f"release revision is unavailable: {revision}")
     result = subprocess.run(
-        ["git", "diff", "--name-only", before, after], cwd=root, check=True,
-        text=True, capture_output=True,
+        ["git", "diff", "--name-only", before, after],
+        cwd=root,
+        check=True,
+        text=True,
+        capture_output=True,
+        timeout=GIT_TIMEOUT_SECONDS,
+        env={"PATH": os.environ.get("PATH", ""), "GIT_CONFIG_NOSYSTEM": "1"},
     )
     return result.stdout.splitlines()
 
@@ -152,11 +177,12 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
-def main() -> None:
-    arguments = parser().parse_args()
+def main(argv: list[str] | None = None) -> int:
+    arguments = parser().parse_args(argv)
     if arguments.command == "select":
-        selected = select_service(changed_paths(ROOT, arguments.before, arguments.after),
-                                  ROOT, arguments.repository)
+        selected = select_service(
+            changed_paths(ROOT, arguments.before, arguments.after), ROOT, arguments.repository
+        )
         with arguments.output.open("a", encoding="utf-8") as output:
             for name, value in selected.__dict__.items():
                 output.write(f"{name}={value}\n")
@@ -164,10 +190,15 @@ def main() -> None:
     else:
         path = update_qa_tag(ROOT, arguments.service, arguments.repository, arguments.version)
         print(f"go-service-release: updated {path.relative_to(ROOT)} to {arguments.version}")
+    return 0
 
 
 if __name__ == "__main__":
     try:
-        main()
+        raise SystemExit(main())
+    except subprocess.TimeoutExpired:
+        print("go-service-release: Git command exceeded its 30-second deadline", file=sys.stderr)
+        raise SystemExit(1) from None
     except (OSError, subprocess.SubprocessError, ReleaseSelectionError) as error:
-        raise SystemExit(f"go-service-release: {error}") from None
+        print(f"go-service-release: {error}", file=sys.stderr)
+        raise SystemExit(1) from None

@@ -7,6 +7,9 @@ COVERAGE_FILE ?= coverage.txt
 COVERAGE_MINIMUM ?= 75
 COVERAGE_PACKAGES ?= ./...
 COVERAGE_EXCLUDE_PATHS ?=
+PYTHON ?= $(abspath $(COMMON_GO_TOOLING_DIR)/../../../.venv/bin/python)
+COMMON_GO_TOOLING_PYTHON ?= $(PYTHON)
+COMMON_PYTHON_VERSION := 3.14.8
 
 COMMON_TOOL_PACKAGES := \
 	github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION) \
@@ -18,7 +21,14 @@ COMMON_TOOL_PACKAGES := \
 .PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check check-deps update-proto-deps \
 	format-proto format-proto-check lint-proto check-proto-breaking gen-proto \
 	check-proto-drift lint test test-race coverage coverage-validate coverage-check \
-	test-coverage-tooling build vulncheck
+	test-coverage-tooling build vulncheck _common-python-check
+
+_common-python-check:
+	@test -x "$(COMMON_GO_TOOLING_PYTHON)" || { \
+		echo "shared Go tooling requires managed CPython $(COMMON_PYTHON_VERSION); set COMMON_GO_TOOLING_PYTHON to its executable" >&2; \
+		exit 1; \
+	}
+	@PYTHONDONTWRITEBYTECODE=1 "$(COMMON_GO_TOOLING_PYTHON)" -c 'import platform; expected = ("CPython", "$(COMMON_PYTHON_VERSION)"); actual = (platform.python_implementation(), platform.python_version()); raise SystemExit(0 if actual == expected else "shared Go tooling requires %s %s; got %s %s" % (*expected, *actual))'
 
 bootstrap-go-tools:
 	mkdir -p "$(TOOLS_BIN)"
@@ -30,7 +40,7 @@ bootstrap-go-tools:
 
 bootstrap-tools: bootstrap-go-tools
 
-verify-tools:
+verify-tools: _common-python-check
 	@MODULE_ROOT="$(CURDIR)" \
 		GO="$(GO)" \
 		BUF="$(BUF)" \
@@ -46,6 +56,7 @@ verify-tools:
 		GOLANGCI_LINT_VERSION="$(GOLANGCI_LINT_VERSION)" \
 		GOVULNCHECK_VERSION="$(GOVULNCHECK_VERSION)" \
 		EXTRA_TOOL_SPECS="$(VERIFY_EXTRA_TOOL_SPECS)" \
+		PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
 		"$(COMMON_GO_TOOLING_DIR)/verify-tools.sh"
 
 format: verify-tools
@@ -54,6 +65,7 @@ format: verify-tools
 		GOLANGCI_LINT="$(GOLANGCI_LINT)" \
 		GOLANGCI_CONFIG="$(GOLANGCI_CONFIG)" \
 		FORMAT_FILES_SET="$(if $(filter undefined,$(origin FORMAT_FILES)),0,1)" \
+		PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
 		"$(COMMON_GO_TOOLING_DIR)/format-go.sh" format
 
 format-check: verify-tools
@@ -62,6 +74,7 @@ format-check: verify-tools
 		GOLANGCI_LINT="$(GOLANGCI_LINT)" \
 		GOLANGCI_CONFIG="$(GOLANGCI_CONFIG)" \
 		FORMAT_FILES_SET="$(if $(filter undefined,$(origin FORMAT_FILES)),0,1)" \
+		PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
 		"$(COMMON_GO_TOOLING_DIR)/format-go.sh" check
 
 check-deps: verify-tools
@@ -69,6 +82,7 @@ check-deps: verify-tools
 		COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
 		GO="$(GO)" \
 		MAKE_COMMAND="$(MAKE)" \
+		PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
 		"$(COMMON_GO_TOOLING_DIR)/check-deps.sh"
 
 update-proto-deps:
@@ -118,6 +132,7 @@ check-proto-drift: verify-tools
 		GENERATED_PATTERN="gen/*.go" \
 		GENERATED_FILES="$(GENERATED_PROTO_FILES)" \
 		STALE_GENERATED_PATTERN='^// Code generated .* DO NOT EDIT\.$$' \
+		PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
 		"$(COMMON_GO_TOOLING_DIR)/check-generated-drift.sh"
 
 lint: verify-tools
@@ -136,24 +151,21 @@ coverage:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race \
 		-covermode=atomic -coverprofile="$(COVERAGE_FILE)" $(COVERAGE_PACKAGES)
 
-coverage-validate:
+coverage-validate: _common-python-check
 	@module_path="$$(GOWORK=off $(GO) list -mod=readonly -m -f '{{.Path}}')"; \
-		"$(COMMON_GO_TOOLING_DIR)/check-coverage.sh" \
+		PYTHON="$(COMMON_GO_TOOLING_PYTHON)" "$(COMMON_GO_TOOLING_DIR)/check-coverage.sh" \
 		"$(COVERAGE_FILE)" "$(COVERAGE_MINIMUM)" "$$module_path" $(COVERAGE_EXCLUDE_PATHS)
 
 coverage-check: coverage
 	@$(MAKE) --no-print-directory coverage-validate
 
-test-coverage-tooling:
+test-coverage-tooling: _common-python-check
 	@COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" GO="$(GO)" \
-		MAKE_COMMAND="$(MAKE)" "$(COMMON_GO_TOOLING_DIR)/test-coverage.sh"
+		MAKE_COMMAND="$(MAKE)" PYTHON="$(COMMON_GO_TOOLING_PYTHON)" "$(COMMON_GO_TOOLING_DIR)/test-coverage.sh"
 
-build:
-	@set -eu; \
-	output_dir=$$(mktemp -d); \
-	trap 'rm -rf "$$output_dir"' EXIT HUP INT TERM; \
-	GOWORK=off $(GO) build -mod=readonly -o "$$output_dir/" ./...; \
-	test -x "$$output_dir/server"
+build: _common-python-check
+	@MODULE_ROOT="$(CURDIR)" GO="$(GO)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(COMMON_GO_TOOLING_PYTHON)" "$(COMMON_GO_TOOLING_DIR)/module_tooling.py" build
 
 vulncheck: verify-tools
 	GOWORK=off GOFLAGS=-mod=readonly $(GOVULNCHECK) ./...

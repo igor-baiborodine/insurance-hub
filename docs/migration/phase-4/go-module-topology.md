@@ -117,6 +117,10 @@ inputs, contract baselines, and module lint/generator configuration. Scripts, Ma
 documentation, workflow YAML, topology metadata, Codecov configuration, legacy baseline fixtures,
 Dockerfiles, and deployment assets do not independently trigger hosted Go validation.
 
+`.github/workflows/go-report-card.yml` uses the same qualifying path matrix for pushes to `main`
+and pull requests targeting `main`. Its manual dispatch remains available for workflow-only
+validation without making workflow YAML an independent hosted Go trigger.
+
 Once triggered, the workflow compares the explicit pull-request base and head revisions and maps
 the complete diff to the scaffold or conventionally named service roots. Zero supported modules is
 an explicit successful no-op. One module runs its `bootstrap-go-tools` and `check-go-pr` targets.

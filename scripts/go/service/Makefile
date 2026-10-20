@@ -3,6 +3,8 @@
 ################################################################################
 
 GO_SERVICE_DISPATCH_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+GO_SERVICE_REPOSITORY_ROOT := $(abspath $(GO_SERVICE_DISPATCH_DIR)../../..)
+include $(GO_SERVICE_REPOSITORY_ROOT)/scripts/python/toolchain.mk
 GO_SERVICE_RESOLVER := $(GO_SERVICE_DISPATCH_DIR)resolve.sh
 DEPLOY_ENV ?=
 RELEASE_AFTER ?=
@@ -19,24 +21,24 @@ export SVC_NAME
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test \
 	go-svc-dispatch-test go-svc-release-select go-svc-release-update-qa go-svc-release-test
 
-go-svc-image-build: ## Build one cataloged Go service image. Usage: make go-svc-image-build SVC_NAME=<svc-name>
+go-svc-image-build: python-runtime-check ## Build one cataloged Go service image. Usage: make go-svc-image-build SVC_NAME=<svc-name>
 	+@set -eu; \
-		module_path="$$($(GO_SERVICE_RESOLVER) image-build)"; \
+		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) image-build)"; \
 		$(MAKE) -C "$$module_path" image-build
 
-go-svc-image-check: ## Build and validate one cataloged Go service image. Usage: make go-svc-image-check SVC_NAME=<svc-name>
+go-svc-image-check: python-runtime-check ## Build and validate one cataloged Go service image. Usage: make go-svc-image-check SVC_NAME=<svc-name>
 	+@set -eu; \
-		module_path="$$($(GO_SERVICE_RESOLVER) image-check)"; \
+		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) image-check)"; \
 		$(MAKE) -C "$$module_path" image-check
 
-go-svc-deploy-render: ## Render one cataloged Go service's deployment overlays. Usage: make go-svc-deploy-render SVC_NAME=<svc-name> [DEPLOY_ENV=local-dev|qa]
+go-svc-deploy-render: python-runtime-check ## Render one cataloged Go service's deployment overlays. Usage: make go-svc-deploy-render SVC_NAME=<svc-name> [DEPLOY_ENV=local-dev|qa]
 	+@set -eu; \
-		module_path="$$($(GO_SERVICE_RESOLVER) deploy-render)"; \
+		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) deploy-render)"; \
 		$(MAKE) --no-print-directory -C "$$module_path" deploy-render DEPLOY_ENV="$(DEPLOY_ENV)"
 
-go-svc-deploy-check: ## Validate one cataloged Go service's isolated deployment overlays. Usage: make go-svc-deploy-check SVC_NAME=<svc-name>
+go-svc-deploy-check: python-runtime-check ## Validate one cataloged Go service's isolated deployment overlays. Usage: make go-svc-deploy-check SVC_NAME=<svc-name>
 	+@set -eu; \
-		module_path="$$($(GO_SERVICE_RESOLVER) deploy-check)"; \
+		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) deploy-check)"; \
 		$(MAKE) --no-print-directory -C "$$module_path" deploy-check
 
 # The service Makefile owns resource identity and environment policy. Resolve the
@@ -50,24 +52,25 @@ go-svc-stop: ## Stop only the selected local-dev Go Deployment
 go-svc-deploy-test-tooling: ## Test selected-service deployment guards and cleanup
 go-svc-deploy-test: ## Exercise one service in an owned disposable Kind namespace
 go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
-	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test:
+	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test: python-runtime-check
 	+@set -eu; \
 		capability='$(@:go-svc-%=%)'; \
-		module_path="$$($(GO_SERVICE_RESOLVER) "$$capability")"; \
+		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) "$$capability")"; \
 		$(MAKE) --no-print-directory -C "$$module_path" "$$capability"
 
-go-svc-dispatch-test: ## Test fail-closed Go service selection and capability dispatch
-	@$(GO_SERVICE_DISPATCH_DIR)test-dispatch.sh
+go-svc-dispatch-test: python-toolchain-check ## Test fail-closed Go service selection and capability dispatch
+	@PYTHON="$(PYTHON)" $(GO_SERVICE_DISPATCH_DIR)test-dispatch.sh
 
-go-svc-release-select: ## Select exactly one changed conventional Go service for release
-	@PYTHONDONTWRITEBYTECODE=1 python3 $(GO_SERVICE_DISPATCH_DIR)release.py select \
+go-svc-release-select: python-runtime-check ## Select exactly one changed conventional Go service for release
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" $(GO_SERVICE_DISPATCH_DIR)release.py select \
 		--before "$(RELEASE_BEFORE)" --after "$(RELEASE_AFTER)" \
 		--repository "$(RELEASE_REPOSITORY)" --output "$(RELEASE_OUTPUT)"
 
-go-svc-release-update-qa: ## Update the selected Go service QA overlay to a semantic release tag
-	@PYTHONDONTWRITEBYTECODE=1 python3 $(GO_SERVICE_DISPATCH_DIR)release.py update-qa \
+go-svc-release-update-qa: python-runtime-check ## Update the selected Go service QA overlay to a semantic release tag
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" $(GO_SERVICE_DISPATCH_DIR)release.py update-qa \
 		--service "$(RELEASE_SERVICE)" --repository "$(RELEASE_REPOSITORY)" \
 		--version "$(RELEASE_VERSION)"
 
-go-svc-release-test: ## Test generic Go service selection and QA semantic-tag updates
-	@PYTHONDONTWRITEBYTECODE=1 python3 $(GO_SERVICE_DISPATCH_DIR)test-release.py
+go-svc-release-test: python-toolchain-check ## Test generic Go service selection and QA semantic-tag updates
+	@cd "$(GO_SERVICE_DISPATCH_DIR)" && PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" -m pytest -q test_release.py

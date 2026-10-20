@@ -44,8 +44,8 @@ help:
 # Markdown Targets
 ################################################################################
 .PHONY: markdown-toc-test
-markdown-toc-test: ## Test staged Markdown TOC validation in a disposable repository
-	@./scripts/test-markdown-pre-commit.sh
+markdown-toc-test: python-toolchain-check ## Test staged Markdown TOC validation in a disposable repository
+	@PYTHON="$(PYTHON)" ./scripts/test-markdown-pre-commit.sh
 
 ################################################################################
 # Go Targets
@@ -59,15 +59,15 @@ endif
 override GO_MODULE_CALLER_VARIABLES = $(sort $(foreach variable,$(.VARIABLES),\
 	$(if $(filter command line,$(origin $(variable))),$(variable))))
 
-go-topology-check: ## Validate the canonical Go module and workspace inventory
-	@./scripts/go/check-topology.sh
+go-topology-check: python-runtime-check ## Validate the canonical Go module and workspace inventory
+	@PYTHON="$(PYTHON)" ./scripts/go/check-topology.sh
 
-go-topology-test: ## Test controlled Go topology and resolution failures in disposable fixtures
-	@./scripts/go/test-topology.sh
+go-topology-test: python-toolchain-check ## Test controlled Go topology and resolution failures in disposable fixtures
+	@PYTHON="$(PYTHON)" ./scripts/go/test-topology.sh
 
 go-modules-check: go-topology-check ## Validate every inventory Go module in standalone mode
 	@GO_MODULE_CALLER_VARIABLES="$(GO_MODULE_CALLER_VARIABLES)" \
-		MAKE_COMMAND="$(MAKE)" ./scripts/go/check-modules.sh
+		MAKE_COMMAND="$(MAKE)" PYTHON="$(PYTHON)" ./scripts/go/check-modules.sh
 
 go-scaffold-bootstrap-tools: ## Install and verify pinned tools for the Go service scaffold only
 	$(MAKE) -C templates/go-service bootstrap-tools

@@ -10,6 +10,10 @@ DEPLOY_ENV ?=
 
 PRODUCT_SERVICE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 PRODUCT_REPOSITORY_ROOT := $(abspath $(PRODUCT_SERVICE_DIR)../..)
+ifneq ($(origin PRODUCT_TOOLING_REPOSITORY_ROOT), undefined)
+PRODUCT_REPOSITORY_ROOT := $(abspath $(PRODUCT_TOOLING_REPOSITORY_ROOT))
+endif
+export PRODUCT_TOOLING_REPOSITORY_ROOT := $(PRODUCT_REPOSITORY_ROOT)
 include $(PRODUCT_REPOSITORY_ROOT)/scripts/python/toolchain.mk
 
 TOOLS_DIR := $(CURDIR)/.tools
@@ -244,7 +248,10 @@ check: check-go-pr check-docs
 
 test-tooling: verify-tools
 	@MODULE_ROOT="$(CURDIR)" COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
-		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" ./scripts/test-tooling.sh
+		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" PYTHON="$(PYTHON)" \
+		COMMON_GO_TOOLING_PYTHON="$(PYTHON)" \
+		PRODUCT_TOOLING_REPOSITORY_ROOT="$(PRODUCT_REPOSITORY_ROOT)" \
+		./scripts/test-tooling.sh
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
@@ -253,7 +260,8 @@ run:
 bootstrap-ci-tools: ## Install pinned YAML parser and Kubernetes clients in module-local .tools
 	@bash scripts/bootstrap-ci-tools.sh
 
-check-ci: ## Validate generic release and Go CI permissions, triggers, and boundaries
+check-ci: ## Validate Go workflow permissions, triggers, syntax, and boundaries
 	@bash -n scripts/bootstrap-ci-tools.sh scripts/check-deployment.sh
-	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/go-release-svc.yml ../../.github/workflows/go-pr-mod.yml
+	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/go-release-svc.yml \
+		../../.github/workflows/go-pr-mod.yml ../../.github/workflows/go-report-card.yml
 	@PYTHONDONTWRITEBYTECODE=1 .tools/ci-venv/bin/python scripts/check-ci.py

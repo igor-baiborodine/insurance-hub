@@ -89,9 +89,10 @@ missing table of contents, format the affected working-tree files and stage the 
 git add path/to/file.md
 ```
 
-The hook requires `npx` only when staged Markdown needs validation. Run `make markdown-toc-test` to
-exercise the hook, including partial staging and controlled failure cases, in a disposable Git
-repository.
+The hook uses the repository's managed CPython 3.14.8 runtime and requires `npx` only when staged
+Markdown needs validation. Complete [Python Toolchain Setup](#python-toolchain-setup) before using
+the hook. Run `make markdown-toc-test` to exercise partial staging, cleanup, and controlled failure
+cases in a disposable Git repository.
 
 ### Install Dependencies
 
@@ -193,12 +194,18 @@ install tools, reformat source, tidy manifests, regenerate real output, update c
 baselines, run shared infrastructure, or deploy.
 
 The root [`go-module-topology.json`](go-module-topology.json) records every supported Go module and
-approved workspace. Run `make go-topology-check` with `jq >= 1.6` to verify inventory, ownership,
-imports, replacements, and CI coverage. Run `make go-modules-check` after bootstrapping the owning
-module tools to execute every recorded non-mutating validation target in its required resolution
-mode. `make go-topology-test` proves controlled inventory, workspace, replacement, and import
-failures in disposable local fixtures. These targets do not install tools, update dependencies,
-format source, regenerate output, create a workspace, or deploy.
+approved workspace. Run `make go-topology-check` with the managed Python runtime and Go toolchain to
+verify inventory, ownership, imports, replacements, and CI coverage. Run `make go-modules-check`
+after bootstrapping the owning module tools to execute every recorded non-mutating validation target
+in its required resolution mode. `make go-topology-test` proves 34 controlled inventory, workflow,
+workspace, replacement, and import cases in disposable local fixtures. These targets do not install
+tools, update dependencies, format source, regenerate output, create a workspace, or deploy.
+
+Shared module commands select CPython through `COMMON_GO_TOOLING_PYTHON`; it defaults to the
+including Makefile's verified `PYTHON` value. A copied module must pass an explicit verified
+interpreter until its standalone scaffold setup has provisioned one. The shared tooling directory
+contains its Python implementation and remains self-contained when `COMMON_GO_TOOLING_DIR` is
+copied or overridden.
 
 The current inventory contains `templates/go-service` and
 [`services/product-service`](services/product-service/README.md), both supported standalone with
@@ -219,16 +226,16 @@ request or treat a local result as hosted evidence.
 
 | Changed behavior | Local commands from the repository root | Prerequisites and review evidence |
 | --- | --- | --- |
-| Go topology, inventory, ownership, resolution, or shared module tooling | `make go-topology-check`; `make go-topology-test`; bootstrap affected module tools, then `make go-modules-check FORMAT_SCOPE=all` when the aggregate is applicable | `jq >= 1.6`, exact module Go/tool pins, and Docker for Product integration. Record affected modules, standalone resolution, and controlled failures. |
+| Go topology, inventory, ownership, resolution, or shared module tooling | `make python-shared-tooling-check`; `make python-shared-tooling-test-integration`; `make go-topology-check`; `make go-topology-test`; bootstrap affected module tools, then `make go-modules-check FORMAT_SCOPE=all` when the aggregate is applicable | Managed CPython 3.14.8, exact module Go/tool pins, and Docker for Product integration. Record affected modules, standalone resolution, and controlled failures. |
 | Scaffold or Product validation tooling | `make go-scaffold-test-tooling`; `make go-product-test-tooling` | Bootstrap the corresponding module's pinned tools. Record the controlled defects rejected and confirm fixture/source cleanup. |
 | Scaffold reuse or copy behavior | `make go-scaffold-check-copy` | Bootstrap scaffold tools. Record renamed-copy identity, generation, validation, and cleanup results. |
-| Go PR, release, or service-dispatch workflow tooling | `make -C services/product-service bootstrap-ci-tools`; `make -C services/product-service check-ci`; `make go-svc-release-test`; `make go-svc-dispatch-test` | Python 3 with venv/pip, pinned local workflow clients, and any documented public downloads. Record configuration validation separately from any actual hosted run. |
+| Go PR, release, report-card, or service-dispatch workflow tooling | `make -C services/product-service bootstrap-ci-tools`; `make -C services/product-service check-ci`; `make go-svc-release-test`; `make go-svc-dispatch-test`; `make python-shared-tooling-check` | Managed CPython 3.14.8, pinned local workflow clients, and any documented public downloads. Record configuration validation separately from any actual hosted run. |
 | Product deployment assets or tooling | `make go-svc-deploy-check SVC_NAME=product`; `make go-svc-deploy-test-tooling SVC_NAME=product` | Pinned Product CI/deployment tools. These checks use rendered or fake-adapter inputs and do not prove a live environment. |
 | Product reader role, permission fixtures, or baseline behavior | `make postgres-svc-role-test`; `make product-baseline-fixtures-check`; `make product-baseline-test BASELINE_SUITE=db-permissions` | Python 3, Java 14/Maven where selected, Docker, and disposable PostgreSQL as documented by the owning target. Record the selected suite and fixture scope. |
 | Product runtime image or container lifecycle | `make go-svc-image-check SVC_NAME=product` | Docker/Buildx and bootstrapped Product Go tools. Record image identity, contents, startup/read behavior, and cleanup. |
 | Gateway/Product access behavior, access fixtures, or combined security tooling | `make product-security-test-tooling`; `make product-security-check`; retain `make -C services/product-service check-go-pr FORMAT_SCOPE=all` for direct Go access and vulnerability coverage when Product Go inputs are affected | Java 14, Maven, Go 1.27.2, Docker, `jq`, Python 3, `timeout`, `setsid`, and bootstrapped Product Go tools. Record controlled failures, exact access cases/reports, and disposable cleanup; never supply a live database URL. |
 | Product documentation renderer or covered links | `make -C services/product-service bootstrap-doc-tools`; `make -C services/product-service check-docs` | Node.js 20 or newer, npm, Python 3, and the pinned module-local Mermaid tools. Record link and render counts. |
-| Markdown content | `./scripts/markdown-toc.sh format <file>...`; stage the result; the pre-commit hook runs `check` on the staged snapshot | `npx` is needed only when Markdown is selected. Record the exact task-owned files checked. |
+| Markdown content | `./scripts/markdown-toc.sh format <file>...`; stage the result; the pre-commit hook runs `check` on the staged snapshot | Managed CPython 3.14.8; `npx` is needed only when Markdown is selected. Record the exact task-owned files checked. |
 
 Review evidence identifies the revision, exact command and working directory, changed scope,
 prerequisites, execution source (`local`, `CI`, or `manual`), result, and any blocked or unexecuted

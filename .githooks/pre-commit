@@ -1,60 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/sh
+set -eu
 
-set -euo pipefail
-
-fail() {
-	printf 'markdown-toc-pre-commit: %s\n' "$*" >&2
+hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+repository_root=$(git -C "$hook_dir" rev-parse --show-toplevel 2>/dev/null) || {
+	printf '%s\n' 'markdown-toc-pre-commit: cannot resolve the repository root' >&2
 	exit 1
 }
-
-hook_directory=$(cd "${BASH_SOURCE[0]%/*}" && pwd)
-repository_root=$(git -C "$hook_directory" rev-parse --show-toplevel 2>/dev/null) ||
-	fail 'cannot resolve the repository root'
-cd "$repository_root"
-
-snapshot_root=
-staged_paths_file=
-cleanup() {
-	if [[ -n "$snapshot_root" && -d "$snapshot_root" ]]; then
-		rm -rf -- "$snapshot_root"
-	fi
-	if [[ -n "$staged_paths_file" && -f "$staged_paths_file" ]]; then
-		rm -f -- "$staged_paths_file"
-	fi
-}
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-staged_paths_file=$(mktemp "$repository_root/.markdown-toc-staged-paths.XXXXXX") ||
-	fail 'cannot create the staged-path list'
-git diff --cached --name-only --diff-filter=ACMR --find-renames -z -- '*.md' \
-	>"$staged_paths_file" || fail 'cannot inspect staged Markdown files'
-
-mapfile -d '' staged_markdown <"$staged_paths_file"
-if (( ${#staged_markdown[@]} == 0 )); then
-	exit 0
-fi
-
-snapshot_root=$(mktemp -d "$repository_root/.markdown-toc-index.XXXXXX") ||
-	fail 'cannot create the staged Markdown snapshot'
-git checkout-index --prefix="$snapshot_root/" -- "${staged_markdown[@]}" ||
-	fail 'cannot capture staged Markdown content'
-
-snapshot_files=()
-for markdown_file in "${staged_markdown[@]}"; do
-	snapshot_files+=("$snapshot_root/$markdown_file")
-done
-
-if ! ./scripts/markdown-toc.sh check "${snapshot_files[@]}"; then
-	printf '%s\n' \
-		'markdown-toc-pre-commit: staged Markdown validation failed for:' >&2
-	for markdown_file in "${staged_markdown[@]}"; do
-		printf '  %q\n' "$markdown_file" >&2
-	done
-	printf '%s\n' \
-		'markdown-toc-pre-commit: format the working-tree files with:' \
-		'  ./scripts/markdown-toc.sh format <file>...' \
-		'markdown-toc-pre-commit: then stage the formatted content and commit again.' >&2
-	exit 1
-fi
+python=${PYTHON:-$repository_root/.venv/bin/python}
+exec "$python" "$repository_root/scripts/markdown_pre_commit.py" "$@"
