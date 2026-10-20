@@ -18,15 +18,21 @@ PYTHON_EXAMPLE_FILES := \
 	$(PYTHON_EXAMPLE_ROOT)/tests/conftest.py \
 	$(PYTHON_EXAMPLE_ROOT)/tests/test_example_cli.py \
 	$(PYTHON_EXAMPLE_ROOT)/integration/test_disposable_cli.py
+PYTHON_SELECTION_ROOT := scripts/python
+PYTHON_SELECTION_FILES := \
+	$(PYTHON_SELECTION_ROOT)/validate_selection.py \
+	$(PYTHON_SELECTION_ROOT)/test_validate_selection.py
 PYTHON_SCOPE_FILES = $(shell git -C "$(PYTHON_REPOSITORY_ROOT)" ls-files \
 	--cached --others --exclude-standard -- '*.py' | LC_ALL=C sort)
 PYTHON_FILES ?=
 PYTHON_ACCEPTANCE_PATH ?=
 PYTHON_ACCEPTANCE_CONFIRM ?=
+export PYTHON_FILES PYTHON_ACCEPTANCE_PATH PYTHON_ACCEPTANCE_CONFIRM
 
 .PHONY: python-uv-check python-runtime-check python-toolchain-setup python-toolchain-check \
 	python-toolchain-info _python-files-check python-scope-list python-format \
 	python-format-check python-lint python-examples-format-check python-examples-lint \
+	python-selection-format-check python-selection-lint python-selection-test python-selection-check \
 	python-repository-format-check python-repository-lint python-test-collect \
 	python-examples-test-fast python-examples-test-integration _python-acceptance-check \
 	python-test-acceptance python-examples-check
@@ -94,39 +100,41 @@ python-toolchain-info: python-toolchain-check ## Print selected interpreter, man
 python-scope-list: ## List tracked and new untracked handwritten Python selected for repository checks
 	@printf '%s\n' $(PYTHON_SCOPE_FILES)
 
-_python-files-check:
-	@test -n "$(strip $(PYTHON_FILES))" || { \
-		echo "ERROR: PYTHON_FILES must name the handwritten Python files to format or check." >&2; \
-		exit 1; \
-	}
-	@for path in $(PYTHON_FILES); do \
-		case "$$path" in \
-			*.py) ;; \
-			*) echo "ERROR: selected Python path must end in .py: $$path" >&2; exit 1 ;; \
-		esac; \
-		test -f "$(PYTHON_REPOSITORY_ROOT)/$$path" || { \
-			echo "ERROR: selected Python file does not exist: $$path" >&2; \
-			exit 1; \
-		}; \
-	done
+_python-files-check: python-toolchain-check
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" \
+		"$(PYTHON_REPOSITORY_ROOT)/$(PYTHON_SELECTION_ROOT)/validate_selection.py" \
+		--root "$(PYTHON_REPOSITORY_ROOT)" --kind files --selection-variable PYTHON_FILES
 
-python-format: python-toolchain-check _python-files-check ## Format explicitly selected handwritten Python files
-	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m ruff format $(PYTHON_FILES)
+python-format: _python-files-check ## Format explicitly selected handwritten Python files
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && set -f; \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m ruff format -- $${PYTHON_FILES}
 
-python-format-check: python-toolchain-check _python-files-check ## Check formatting of explicitly selected Python without mutation
-	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m ruff format --check $(PYTHON_FILES)
+python-format-check: _python-files-check ## Check formatting of explicitly selected Python without mutation
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && set -f; \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m ruff format --check -- $${PYTHON_FILES}
 
-python-lint: python-toolchain-check _python-files-check ## Lint explicitly selected handwritten Python files
-	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m ruff check $(PYTHON_FILES)
+python-lint: _python-files-check ## Lint explicitly selected handwritten Python files
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && set -f; \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m ruff check -- $${PYTHON_FILES}
 
 python-examples-format-check: PYTHON_FILES := $(PYTHON_EXAMPLE_FILES)
 python-examples-format-check: python-format-check ## Check formatting for executable Python examples
 
 python-examples-lint: PYTHON_FILES := $(PYTHON_EXAMPLE_FILES)
 python-examples-lint: python-lint ## Lint executable Python examples
+
+python-selection-format-check: PYTHON_FILES := $(PYTHON_SELECTION_FILES)
+python-selection-format-check: python-format-check ## Check Python selection tooling formatting
+
+python-selection-lint: PYTHON_FILES := $(PYTHON_SELECTION_FILES)
+python-selection-lint: python-lint ## Lint Python selection tooling
+
+python-selection-test: python-toolchain-check ## Test repository-relative Python selection guards
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
+		PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$(PYTHON_REPOSITORY_ROOT)/$(PYTHON_SELECTION_ROOT)" \
+		"$(PYTHON)" -m pytest -q "$(PYTHON_SELECTION_ROOT)/test_validate_selection.py"
+
+python-selection-check: python-selection-format-check python-selection-lint python-selection-test ## Run all non-mutating Python selection-tool checks
 
 python-repository-format-check: PYTHON_FILES = $(PYTHON_SCOPE_FILES)
 python-repository-format-check: python-format-check ## Check all visible handwritten Python without mutation
@@ -148,24 +156,20 @@ python-examples-test-integration: python-toolchain-check ## Run disposable Pytho
 		PYTHONDONTWRITEBYTECODE=1 PYTHON_EXAMPLE_INTEGRATION=1 \
 		"$(PYTHON)" -m pytest -q -m integration "$(PYTHON_EXAMPLE_ROOT)/integration"
 
-_python-acceptance-check:
-	@test "$(PYTHON_ACCEPTANCE_CONFIRM)" = "yes" || { \
+_python-acceptance-check: python-toolchain-check
+	@test "$${PYTHON_ACCEPTANCE_CONFIRM}" = "yes" || { \
 		echo "ERROR: full acceptance requires PYTHON_ACCEPTANCE_CONFIRM=yes." >&2; \
 		exit 1; \
 	}
-	@test -n "$(strip $(PYTHON_ACCEPTANCE_PATH))" || { \
-		echo "ERROR: full acceptance requires an explicit repository-relative PYTHON_ACCEPTANCE_PATH." >&2; \
-		exit 1; \
-	}
-	@test -e "$(PYTHON_REPOSITORY_ROOT)/$(PYTHON_ACCEPTANCE_PATH)" || { \
-		echo "ERROR: acceptance selection does not exist: $(PYTHON_ACCEPTANCE_PATH)" >&2; \
-		exit 1; \
-	}
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" \
+		"$(PYTHON_REPOSITORY_ROOT)/$(PYTHON_SELECTION_ROOT)/validate_selection.py" \
+		--root "$(PYTHON_REPOSITORY_ROOT)" --kind acceptance \
+		--selection-variable PYTHON_ACCEPTANCE_PATH
 
-python-test-acceptance: python-toolchain-check _python-acceptance-check ## Run an explicitly selected full acceptance path
+python-test-acceptance: _python-acceptance-check ## Run an explicitly selected full acceptance path
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && \
 		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -m acceptance \
-		"$(PYTHON_ACCEPTANCE_PATH)"
+		"$${PYTHON_ACCEPTANCE_PATH}"
 
 python-examples-check: python-examples-format-check python-examples-lint python-test-collect \
 	python-examples-test-fast ## Run all non-mutating Python example checks

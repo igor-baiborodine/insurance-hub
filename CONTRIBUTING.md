@@ -327,7 +327,12 @@ format and lint checks inspect the same selection without changing source:
 make python-format PYTHON_FILES='path/to/tool.py path/to/test_tool.py'
 make python-format-check PYTHON_FILES='path/to/tool.py path/to/test_tool.py'
 make python-lint PYTHON_FILES='path/to/tool.py path/to/test_tool.py'
+make python-selection-check
 ```
+
+Selections accept portable repository-relative paths. Absolute paths, `.` or `..` components,
+empty components, unsupported characters, missing paths, and paths that resolve outside the
+repository through symlinks are rejected before Ruff or pytest starts.
 
 Use `make python-scope-list` to inspect the tracked and unignored untracked `*.py` files selected
 by `python-repository-format-check` and `python-repository-lint`. These repository-wide checks keep

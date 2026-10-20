@@ -37,6 +37,7 @@ known-first-party = [
     "monitoring_assets",
     "release",
     "test_monitoring",
+    "validate_selection",
 ]
 
 [tool.pytest.ini_options]
