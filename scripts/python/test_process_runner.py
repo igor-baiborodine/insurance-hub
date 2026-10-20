@@ -57,3 +57,38 @@ def test_timeout_terminates_and_reaps_owned_process_group(tmp_path: Path) -> Non
         time.sleep(0.02)
     else:
         raise AssertionError("owned descendant was not reaped")
+
+
+def test_timeout_kills_term_resistant_descendant_after_leader_exits(tmp_path: Path) -> None:
+    # given
+    descendant_pid = tmp_path / "descendant.pid"
+    descendant = (
+        "import os, pathlib, signal, time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        f"pathlib.Path({str(descendant_pid)!r}).write_text(str(os.getpid())); "
+        "time.sleep(60)"
+    )
+    leader = (
+        "import pathlib, subprocess, sys, time; "
+        f"ready=pathlib.Path({str(descendant_pid)!r}); "
+        f"subprocess.Popen([sys.executable, '-c', {descendant!r}]); "
+        "deadline=time.monotonic()+5; "
+        "\nwhile not ready.is_file() and time.monotonic() < deadline: time.sleep(0.01)"
+    )
+    started = time.monotonic()
+
+    # when / then
+    with pytest.raises(process_runner.CommandError, match="deadline"):
+        process_runner.run_command(
+            [sys.executable, "-c", leader],
+            cwd=tmp_path,
+            env={"PATH": os.environ.get("PATH", "")},
+            timeout_seconds=0.2,
+            teardown_seconds=1,
+            activity="exited leader",
+            heartbeat_seconds=0.1,
+        )
+    assert time.monotonic() - started < 2
+    pid = int(descendant_pid.read_text(encoding="utf-8"))
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)

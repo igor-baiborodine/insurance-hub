@@ -4,11 +4,50 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
 import topology
+
+
+def test_run_command_kills_term_resistant_descendant_after_leader_exits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given
+    descendant_pid = tmp_path / "descendant.pid"
+    descendant = (
+        "import os, pathlib, signal, time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        f"pathlib.Path({str(descendant_pid)!r}).write_text(str(os.getpid())); "
+        "time.sleep(60)"
+    )
+    leader = (
+        "import pathlib, subprocess, sys, time; "
+        f"ready=pathlib.Path({str(descendant_pid)!r}); "
+        f"subprocess.Popen([sys.executable, '-c', {descendant!r}]); "
+        "deadline=time.monotonic()+5; "
+        "\nwhile not ready.is_file() and time.monotonic() < deadline: time.sleep(0.01)"
+    )
+    monkeypatch.setattr(topology, "TEARDOWN_TIMEOUT_SECONDS", 1, raising=False)
+    started = time.monotonic()
+
+    # when / then
+    with pytest.raises(topology.TopologyError, match="deadline"):
+        topology.run_command(
+            [sys.executable, "-c", leader],
+            cwd=tmp_path,
+            activity="exited leader",
+            env={"PATH": os.environ.get("PATH", "")},
+            timeout_seconds=0.2,
+        )
+    assert time.monotonic() - started < 2
+    pid = int(descendant_pid.read_text(encoding="utf-8"))
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
 
 
 def module_record(

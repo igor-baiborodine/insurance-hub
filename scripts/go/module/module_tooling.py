@@ -68,23 +68,50 @@ def module_child_environment(**values: str) -> dict[str, str]:
     return environment
 
 
-def _terminate(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        process.communicate()
-        return
+def _process_group_exists(process: subprocess.Popen[str]) -> bool:
+    try:
+        os.killpg(process.pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _wait_for_process_group(process: subprocess.Popen[str], deadline: float) -> bool:
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        group_exists = _process_group_exists(process)
+        try:
+            process.communicate(timeout=min(remaining, 0.05))
+        except subprocess.TimeoutExpired:
+            continue
+        except OSError, ValueError:
+            return False
+        if not group_exists or not _process_group_exists(process):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(remaining, 0.01))
+
+
+def _terminate(process: subprocess.Popen[str]) -> bool:
+    deadline = time.monotonic() + TEARDOWN_TIMEOUT_SECONDS
+    term_deadline = time.monotonic() + TEARDOWN_TIMEOUT_SECONDS / 2
     try:
         os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
+    except OSError:
         pass
+    if _wait_for_process_group(process, term_deadline):
+        return True
     try:
-        process.communicate(timeout=TEARDOWN_TIMEOUT_SECONDS)
-        return
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.communicate(timeout=TEARDOWN_TIMEOUT_SECONDS)
+        os.killpg(process.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    return _wait_for_process_group(process, deadline)
 
 
 def run_command(
@@ -115,7 +142,6 @@ def run_command(
             now = time.monotonic()
             remaining = deadline - now
             if remaining <= 0:
-                _terminate(process)
                 raise ToolingError(f"{activity} exceeded its {timeout_seconds:g}-second deadline")
             try:
                 stdout, stderr = process.communicate(
@@ -130,6 +156,10 @@ def run_command(
     except BaseException:
         _terminate(process)
         raise
+    if _process_group_exists(process) and not _terminate(process):
+        raise ToolingError(
+            f"{activity} cleanup exceeded its {TEARDOWN_TIMEOUT_SECONDS:g}-second deadline"
+        )
     result = subprocess.CompletedProcess(list(arguments), process.returncode, stdout, stderr)
     if result.returncode != 0:
         if capture and result.stdout:

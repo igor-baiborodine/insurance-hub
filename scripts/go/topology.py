@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 COMMAND_TIMEOUT_SECONDS = 600
+TEARDOWN_TIMEOUT_SECONDS = 10
 HEARTBEAT_SECONDS = 30
 ROLES = frozenset(
     {"service-scaffold", "business-service", "public-contract", "public-shared", "tool"}
@@ -45,22 +46,50 @@ def handle_signal(signum: int, _frame: object) -> None:
     raise TopologyTerminated(signum)
 
 
-def terminate_process(process: subprocess.Popen[Any]) -> None:
-    if process.poll() is not None:
-        process.communicate()
-        return
+def process_group_exists(process: subprocess.Popen[Any]) -> bool:
+    try:
+        os.killpg(process.pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def wait_for_process_group(process: subprocess.Popen[Any], deadline: float) -> bool:
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        group_exists = process_group_exists(process)
+        try:
+            process.communicate(timeout=min(remaining, 0.05))
+        except subprocess.TimeoutExpired:
+            continue
+        except OSError, ValueError:
+            return False
+        if not group_exists or not process_group_exists(process):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(remaining, 0.01))
+
+
+def terminate_process(process: subprocess.Popen[Any]) -> bool:
+    deadline = time.monotonic() + TEARDOWN_TIMEOUT_SECONDS
+    term_deadline = time.monotonic() + TEARDOWN_TIMEOUT_SECONDS / 2
     try:
         os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
+    except OSError:
         pass
+    if wait_for_process_group(process, term_deadline):
+        return True
     try:
-        process.communicate(timeout=10)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.communicate(timeout=10)
+        os.killpg(process.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    return wait_for_process_group(process, deadline)
 
 
 def require(condition: bool, message: str) -> None:
@@ -103,7 +132,6 @@ def run_command(
             elapsed = time.monotonic() - started
             remaining = timeout_seconds - elapsed
             if remaining <= 0:
-                terminate_process(process)
                 raise TopologyError(f"{activity} exceeded its {timeout_seconds:g}-second deadline")
             try:
                 stdout, stderr = process.communicate(timeout=min(remaining, HEARTBEAT_SECONDS))
@@ -113,6 +141,10 @@ def run_command(
     except BaseException:
         terminate_process(process)
         raise
+    if process_group_exists(process) and not terminate_process(process):
+        raise TopologyError(
+            f"{activity} cleanup exceeded its {TEARDOWN_TIMEOUT_SECONDS:g}-second deadline"
+        )
     result = subprocess.CompletedProcess(list(arguments), process.returncode, stdout, stderr)
     if check and result.returncode != 0:
         raise TopologyError(f"{activity} failed with status {result.returncode}")
