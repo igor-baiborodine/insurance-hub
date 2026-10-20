@@ -29,6 +29,7 @@ PYTHON_SHARED_TOOLING_FILES := \
 	scripts/markdown_toc.py \
 	scripts/test_markdown_pre_commit.py \
 	scripts/python/process_runner.py \
+	scripts/python/test_runtime_check.py \
 	scripts/python/test_process_runner.py \
 	scripts/go/report_card.py \
 	scripts/go/select_pr_module.py \
@@ -170,6 +171,7 @@ python-shared-tooling-test-fast: python-toolchain-check ## Run fast shared repos
 		-m 'not integration and not acceptance' \
 		ai/skills/code-review/scripts/test_check_upstream_sync.py \
 		scripts/test_markdown_pre_commit.py \
+		scripts/python/test_runtime_check.py \
 		scripts/python/test_process_runner.py \
 		scripts/go/test_report_card.py scripts/go/test_select_pr_module.py \
 		scripts/go/test_topology.py scripts/go/module/test_module_tooling.py \

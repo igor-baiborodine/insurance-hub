@@ -151,7 +151,7 @@ coverage:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race \
 		-covermode=atomic -coverprofile="$(COVERAGE_FILE)" $(COVERAGE_PACKAGES)
 
-coverage-validate:
+coverage-validate: _common-python-check
 	@module_path="$$(GOWORK=off $(GO) list -mod=readonly -m -f '{{.Path}}')"; \
 		PYTHON="$(COMMON_GO_TOOLING_PYTHON)" "$(COMMON_GO_TOOLING_DIR)/check-coverage.sh" \
 		"$(COVERAGE_FILE)" "$(COVERAGE_MINIMUM)" "$$module_path" $(COVERAGE_EXCLUDE_PATHS)
@@ -159,7 +159,7 @@ coverage-validate:
 coverage-check: coverage
 	@$(MAKE) --no-print-directory coverage-validate
 
-test-coverage-tooling:
+test-coverage-tooling: _common-python-check
 	@COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" GO="$(GO)" \
 		MAKE_COMMAND="$(MAKE)" PYTHON="$(COMMON_GO_TOOLING_PYTHON)" "$(COMMON_GO_TOOLING_DIR)/test-coverage.sh"
 

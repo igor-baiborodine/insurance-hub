@@ -150,6 +150,74 @@ def make_fixture(tmp_path: Path, tooling: Path) -> Path:
     return fixture
 
 
+@pytest.mark.parametrize("target", ["coverage-validate", "test-coverage-tooling"])
+@pytest.mark.parametrize("runtime", ["missing", "wrong"])
+def test_direct_python_targets_reject_invalid_runtime_before_work(
+    tmp_path: Path, target: str, runtime: str
+) -> None:
+    # given
+    tooling = Path(module_tooling.__file__).resolve().parent
+    fixture = make_fixture(tmp_path, tooling)
+    go_started = tmp_path / "go-started"
+    fake_go = tmp_path / "go"
+    fake_go.write_text(f'#!/bin/sh\n: > "{go_started}"\nexit 0\n', encoding="utf-8")
+    fake_go.chmod(0o755)
+    python_work_started = tmp_path / "python-work-started"
+    if runtime == "missing":
+        selected_python = tmp_path / "missing-python"
+    else:
+        wrong_python = Path("/usr/bin/python3")
+        if not wrong_python.is_file():
+            pytest.skip("supported Ubuntu system Python is unavailable")
+        identity = subprocess.run(
+            [
+                str(wrong_python),
+                "-I",
+                "-c",
+                "import platform; print(platform.python_implementation(), platform.python_version())",
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=10,
+        ).stdout.strip()
+        if identity == "CPython 3.14.8":
+            pytest.skip("system Python matches the managed runtime")
+        selected_python = tmp_path / "wrong-python"
+        selected_python.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = -c ]; then exec "' + str(wrong_python) + '" "$@"; fi\n'
+            f': > "{python_work_started}"\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        selected_python.chmod(0o755)
+
+    # when
+    result = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "-C",
+            str(fixture),
+            target,
+            f"GO={fake_go}",
+            f"COMMON_GO_TOOLING_PYTHON={selected_python}",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    # then
+    assert result.returncode != 0
+    assert "shared Go tooling requires" in result.stderr
+    assert "CPython 3.14.8" in result.stderr
+    assert not go_started.exists()
+    assert not python_work_started.exists()
+
+
 @pytest.mark.integration
 def test_real_make_coverage_interface(tmp_path: Path) -> None:
     # given

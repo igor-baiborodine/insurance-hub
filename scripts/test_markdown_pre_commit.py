@@ -172,8 +172,10 @@ def fixture_repository(tmp_path: Path) -> tuple[Path, Path]:
     restricted = tmp_path / "restricted-bin"
     (repository / ".githooks").mkdir(parents=True)
     (repository / "scripts").mkdir()
+    (repository / "scripts" / "python").mkdir()
     restricted.mkdir()
     for source, destination in (
+        (REPOSITORY_ROOT / ".python-version", repository / ".python-version"),
         (REPOSITORY_ROOT / ".githooks" / "pre-commit", repository / ".githooks" / "pre-commit"),
         (REPOSITORY_ROOT / ".githooks" / "pre-push", repository / ".githooks" / "pre-push"),
         (
@@ -187,6 +189,10 @@ def fixture_repository(tmp_path: Path) -> tuple[Path, Path]:
         (
             REPOSITORY_ROOT / "scripts" / "markdown_pre_commit.py",
             repository / "scripts" / "markdown_pre_commit.py",
+        ),
+        (
+            REPOSITORY_ROOT / "scripts" / "python" / "runtime_check.sh",
+            repository / "scripts" / "python" / "runtime_check.sh",
         ),
     ):
         shutil.copy2(source, destination)
