@@ -48,7 +48,9 @@ PYTHON_SCAFFOLD_TOOLING_FILES := \
 	templates/go-service/scripts/scaffold_process.py \
 	templates/go-service/scripts/test_check_copy.py \
 	templates/go-service/scripts/test_scaffold_process.py \
-	templates/go-service/scripts/test_tooling.py
+	templates/go-service/scripts/test_tooling.py \
+	templates/go-service/scripts/tooling_runner.py \
+	templates/go-service/scripts/test_tooling_runner.py
 PYTHON_SCOPE_FILES = $(shell git -C "$(PYTHON_REPOSITORY_ROOT)" ls-files \
 	--cached --others --exclude-standard -- '*.py' | LC_ALL=C sort)
 PYTHON_FILES ?=
@@ -202,7 +204,7 @@ python-scaffold-tooling-test-fast: python-toolchain-check ## Run fast Go scaffol
 	@cd "$(PYTHON_REPOSITORY_ROOT)/templates/go-service" && \
 		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
 		-m 'not integration and not acceptance' scripts/test_check_copy.py \
-		scripts/test_scaffold_process.py
+		scripts/test_scaffold_process.py scripts/test_tooling_runner.py
 
 python-scaffold-tooling-check: python-scaffold-tooling-format-check \
 	python-scaffold-tooling-lint python-scaffold-tooling-test-fast ## Check Go scaffold Python tooling

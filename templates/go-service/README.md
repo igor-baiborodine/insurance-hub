@@ -103,6 +103,12 @@ require `bootstrap-tools` to have been run explicitly.
 | `make test-tooling`         | Pytest-managed Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation. Child commands have 20-minute phase deadlines inside a 60-minute suite deadline, 30-second activity heartbeats, and bounded process-group cleanup. | Verified Python and Go tools; temporary storage and the network/cache prerequisites of nested checks. |
 | `make check-copy`           | Source-scaffold maintainer proof that creates a Git-free `services/example-copy`, validates its renamed identities, repository Python and Go tooling references, and Make checks, removes scaffold-only copy tooling, compares inventories, and cleans up. The workflow has a 40-minute overall deadline, bounded phase deadlines, 30-second activity heartbeats, and a 15-second teardown budget. | Verified repository tools, temporary storage, and all public network endpoints listed above. The target is removed from produced service copies. |
 
+The `test-tooling` runner handles SIGINT and SIGTERM, unwinds the active child process group, and
+returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make reports an interrupted
+`test-tooling` recipe with its own nonzero Make status after the runner exits; it does not preserve
+the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
+tooling fixtures are removed after successful, failed, and interrupted sessions.
+
 Database/broker integration, mock generation, migrations, containers, deployment, workspace
 validation, and live infrastructure are not applicable to this standalone scaffold. It has no such
 dependencies or placeholder targets.

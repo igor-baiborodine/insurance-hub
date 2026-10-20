@@ -5,8 +5,10 @@ INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/check_copy.py scripts/scaffold_process.py \
-	scripts/test_check_copy.py scripts/test_scaffold_process.py scripts/test_tooling.py)
-PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_copy.py) scripts/test_scaffold_process.py
+	scripts/test_check_copy.py scripts/test_scaffold_process.py scripts/test_tooling.py \
+	scripts/tooling_runner.py scripts/test_tooling_runner.py)
+PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_copy.py scripts/test_scaffold_process.py \
+	scripts/test_tooling_runner.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -93,9 +95,7 @@ test-tooling: verify-tools python-toolchain-check
 		COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
 		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" \
 		COMMON_GO_TOOLING_PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
-		-c "$(PYTHON_REPOSITORY_ROOT)/pyproject.toml" --rootdir "$(CURDIR)" \
-		-m integration scripts/test_tooling.py
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" ./scripts/tooling_runner.py
 	@$(MAKE) --no-print-directory test-coverage-tooling
 
 check-copy: verify-tools python-toolchain-check
