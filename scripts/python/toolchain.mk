@@ -43,6 +43,12 @@ PYTHON_SHARED_TOOLING_FILES := \
 	scripts/go/service/resolve.py \
 	scripts/go/service/test_dispatch.py \
 	scripts/go/service/test_release.py
+PYTHON_SCAFFOLD_TOOLING_FILES := \
+	templates/go-service/scripts/check_copy.py \
+	templates/go-service/scripts/scaffold_process.py \
+	templates/go-service/scripts/test_check_copy.py \
+	templates/go-service/scripts/test_scaffold_process.py \
+	templates/go-service/scripts/test_tooling.py
 PYTHON_SCOPE_FILES = $(shell git -C "$(PYTHON_REPOSITORY_ROOT)" ls-files \
 	--cached --others --exclude-standard -- '*.py' | LC_ALL=C sort)
 PYTHON_FILES ?=
@@ -57,6 +63,8 @@ export PYTHON_FILES PYTHON_ACCEPTANCE_PATH PYTHON_ACCEPTANCE_CONFIRM
 	python-shared-tooling-format-check python-shared-tooling-lint \
 	python-shared-tooling-test-fast python-shared-tooling-test-integration \
 	python-shared-tooling-check \
+	python-scaffold-tooling-format-check python-scaffold-tooling-lint \
+	python-scaffold-tooling-test-fast python-scaffold-tooling-check \
 	python-repository-format-check python-repository-lint python-test-collect \
 	python-examples-test-fast python-examples-test-integration _python-acceptance-check \
 	python-test-acceptance python-examples-check
@@ -183,6 +191,21 @@ python-shared-tooling-test-integration: python-toolchain-check ## Run disposable
 
 python-shared-tooling-check: python-shared-tooling-format-check python-shared-tooling-lint \
 	python-shared-tooling-test-fast ## Run non-mutating shared Python tooling checks
+
+python-scaffold-tooling-format-check: PYTHON_FILES := $(PYTHON_SCAFFOLD_TOOLING_FILES)
+python-scaffold-tooling-format-check: python-format-check ## Check Go scaffold Python formatting
+
+python-scaffold-tooling-lint: PYTHON_FILES := $(PYTHON_SCAFFOLD_TOOLING_FILES)
+python-scaffold-tooling-lint: python-lint ## Lint Go scaffold Python tooling
+
+python-scaffold-tooling-test-fast: python-toolchain-check ## Run fast Go scaffold Python tests
+	@cd "$(PYTHON_REPOSITORY_ROOT)/templates/go-service" && \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
+		-m 'not integration and not acceptance' scripts/test_check_copy.py \
+		scripts/test_scaffold_process.py
+
+python-scaffold-tooling-check: python-scaffold-tooling-format-check \
+	python-scaffold-tooling-lint python-scaffold-tooling-test-fast ## Check Go scaffold Python tooling
 
 python-repository-format-check: PYTHON_FILES = $(PYTHON_SCOPE_FILES)
 python-repository-format-check: python-format-check ## Check all visible handwritten Python without mutation

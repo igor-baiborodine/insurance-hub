@@ -186,12 +186,13 @@ Use the owning Makefile targets for every Go operation, including tool installat
 maintenance, formatting, linting, tests, builds, execution, and generation. Do not replace them
 with direct Go or tool commands. Read the owning Makefile for supported targets and module scope.
 
-The current [Go service scaffold](templates/go-service/README.md) requires exact Go 1.27.2 and pins
-its tools under ignored `templates/go-service/.tools/`. Run `bootstrap-tools`, `update-deps`,
-`update-proto-deps`, `format`, `format-proto`, and `gen-proto` only when their documented mutations
-are intended. `check`, `test-tooling`, and `check-copy` preserve the source module; `check` does not
-install tools, reformat source, tidy manifests, regenerate real output, update compatibility
-baselines, run shared infrastructure, or deploy.
+The current [Go service scaffold](templates/go-service/README.md) requires exact Go 1.27.2 and
+managed CPython 3.14.8. It pins Go tools under ignored `templates/go-service/.tools/` and uses the
+repository's root Python declarations, lock, and ignored `.venv/`. Run `bootstrap-tools`,
+`update-deps`, `update-proto-deps`, `format`, `format-proto`, and `gen-proto` only when their
+documented mutations are intended. `check`, `test-tooling`, and `check-copy` preserve the source
+module; `check` does not install tools, reformat source, tidy manifests, regenerate real output,
+update compatibility baselines, run shared infrastructure, or deploy.
 
 The root [`go-module-topology.json`](go-module-topology.json) records every supported Go module and
 approved workspace. Run `make go-topology-check` with the managed Python runtime and Go toolchain to
@@ -202,10 +203,10 @@ workspace, replacement, and import cases in disposable local fixtures. These tar
 tools, update dependencies, format source, regenerate output, create a workspace, or deploy.
 
 Shared module commands select CPython through `COMMON_GO_TOOLING_PYTHON`; it defaults to the
-including Makefile's verified `PYTHON` value. A copied module must pass an explicit verified
-interpreter until its standalone scaffold setup has provisioned one. The shared tooling directory
-contains its Python implementation and remains self-contained when `COMMON_GO_TOOLING_DIR` is
-copied or overridden.
+including Makefile's verified `PYTHON` value. The scaffold and generated services remain in this
+repository and share its root `.python-version`, `pyproject.toml`, `uv.lock`, `.venv/`, and
+`scripts/go/module` helpers. Their Makefiles resolve the root without shell activation and preserve
+an explicit interpreter override that satisfies the root runtime and lock checks.
 
 The current inventory contains `templates/go-service` and
 [`services/product-service`](services/product-service/README.md), both supported standalone with
@@ -227,8 +228,8 @@ request or treat a local result as hosted evidence.
 | Changed behavior | Local commands from the repository root | Prerequisites and review evidence |
 | --- | --- | --- |
 | Go topology, inventory, ownership, resolution, or shared module tooling | `make python-shared-tooling-check`; `make python-shared-tooling-test-integration`; `make go-topology-check`; `make go-topology-test`; bootstrap affected module tools, then `make go-modules-check FORMAT_SCOPE=all` when the aggregate is applicable | Managed CPython 3.14.8, exact module Go/tool pins, and Docker for Product integration. Record affected modules, standalone resolution, and controlled failures. |
-| Scaffold or Product validation tooling | `make go-scaffold-test-tooling`; `make go-product-test-tooling` | Bootstrap the corresponding module's pinned tools. Record the controlled defects rejected and confirm fixture/source cleanup. |
-| Scaffold reuse or copy behavior | `make go-scaffold-check-copy` | Bootstrap scaffold tools. Record renamed-copy identity, generation, validation, and cleanup results. |
+| Scaffold or Product validation tooling | `make python-scaffold-tooling-check`; `make go-scaffold-test-tooling`; `make go-product-test-tooling` | Provision the scaffold Python environment and bootstrap the corresponding Go tools. Record fast Python behavior, controlled defects, bounded child handling, and fixture/source cleanup. |
+| Scaffold reuse or copy behavior | `make go-scaffold-check-copy` | Provision and bootstrap scaffold tools. Record renamed-copy identity, repository Python/Go tooling resolution, generation, validation, deadlines, and cleanup. |
 | Go PR, release, report-card, or service-dispatch workflow tooling | `make -C services/product-service bootstrap-ci-tools`; `make -C services/product-service check-ci`; `make go-svc-release-test`; `make go-svc-dispatch-test`; `make python-shared-tooling-check` | Managed CPython 3.14.8, pinned local workflow clients, and any documented public downloads. Record configuration validation separately from any actual hosted run. |
 | Product deployment assets or tooling | `make go-svc-deploy-check SVC_NAME=product`; `make go-svc-deploy-test-tooling SVC_NAME=product` | Pinned Product CI/deployment tools. These checks use rendered or fake-adapter inputs and do not prove a live environment. |
 | Product reader role, permission fixtures, or baseline behavior | `make postgres-svc-role-test`; `make product-baseline-fixtures-check`; `make product-baseline-test BASELINE_SUITE=db-permissions` | Python 3, Java 14/Maven where selected, Docker, and disposable PostgreSQL as documented by the owning target. Record the selected suite and fixture scope. |

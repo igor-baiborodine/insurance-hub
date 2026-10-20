@@ -91,9 +91,12 @@ the service README and versioned Product migration handoff, including a real Mer
 Both modules include the root-owned `scripts/go/module/common.mk`. The shared scripts implement
 tool verification, formatting, dependency reproduction, and exact generated-output drift checks;
 module Makefiles retain their pins and explicit Protobuf, SQL, integration, and run targets. The
-scaffold copy proof installs a private copy of the helper inside the disposable service, so the
-renamed service remains runnable after it leaves this checkout. No runtime package imports or Go
-module dependency point at the scaffold or shared tooling directory.
+scaffold copy proof points its disposable service at the repository helper, so the renamed service
+uses the same checked-in implementation as other repository modules. Generated services remain in
+this repository and resolve the root Python declarations, root `.venv/`, and shared Go helper
+through their Makefiles. The copy proof transfers no environment, lock, or helper duplicate; it
+verifies those repository references and bounds every child phase and cleanup. No runtime package
+import or Go module dependency points at the scaffold or shared tooling directory.
 
 `go-topology-test` creates local temporary repositories with no network requirement. It proves
 malformed and drifted inventory failures, workspace and replacement masking, allowed contract
