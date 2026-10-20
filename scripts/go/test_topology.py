@@ -179,6 +179,18 @@ def inventory(modules: list[dict[str, object]] | None = None) -> dict[str, objec
     }
 
 
+def selector_inventory() -> dict[str, object]:
+    return inventory(
+        [
+            module_record(
+                "templates/go-service",
+                "example.test/insurance-hub/templates/go-service",
+                "service-scaffold",
+            )
+        ]
+    )
+
+
 def write_inventory(root: Path, value: dict[str, object]) -> Path:
     path = root / "go-module-topology.json"
     path.write_text(json.dumps(value), encoding="utf-8")
@@ -199,7 +211,7 @@ def write_module(root: Path, record: dict[str, object], *, target_body: str = "@
     return directory
 
 
-def workflow_text(directory: str = "module") -> str:
+def workflow_text(directory: str = "templates/go-service") -> str:
     return f"""name: Fixture
 on:
   pull_request:
@@ -393,12 +405,16 @@ def test_topology_reports_controlled_manifest_failures(
     ("old", "new", "message"),
     [
         ("on:\n", "on:\n  push:\n", "must not run on push"),
-        ("      - 'module/**/*.go'\n", "", "missing pull_request path trigger"),
-        ("      - 'module/go.mod'\n", "", "missing pull_request path trigger"),
-        ("      - 'module/**/testdata/**'\n", "", "missing pull_request path trigger"),
+        ("      - 'templates/go-service/**/*.go'\n", "", "missing pull_request path trigger"),
+        ("      - 'templates/go-service/go.mod'\n", "", "missing pull_request path trigger"),
         (
-            "      - 'module/go.sum'\n",
-            "      - 'module/**'\n",
+            "      - 'templates/go-service/**/testdata/**'\n",
+            "",
+            "missing pull_request path trigger",
+        ),
+        (
+            "      - 'templates/go-service/go.sum'\n",
+            "      - 'templates/go-service/**'\n",
             "forbidden pull_request path trigger",
         ),
         ("uses: astral-sh/setup-uv@v7", "uses: missing/setup@v1", "managed Python setup"),
@@ -447,13 +463,80 @@ def test_ci_coverage_rejects_contract_drift(
     tmp_path: Path, old: str, new: str, message: str
 ) -> None:
     # given
-    value = inventory()
+    value = selector_inventory()
     text = workflow_text().replace(old, new, 1)
     write_workflow(tmp_path, text)
     loaded = topology.load_inventory(write_inventory(tmp_path, value))
 
     # when / then
     with pytest.raises(topology.TopologyError, match=message):
+        topology.ci_check(tmp_path, loaded)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "mismatched_output"),
+    [
+        ("role", "business-service", "module_role"),
+        ("validationTarget", "test-tooling", "validation_target"),
+    ],
+)
+def test_ci_coverage_rejects_inventory_selector_output_mismatch(
+    tmp_path: Path, field: str, value: str, mismatched_output: str
+) -> None:
+    # given
+    fixture = selector_inventory()
+    fixture["modules"][0][field] = value
+    write_workflow(tmp_path)
+    loaded = topology.load_inventory(write_inventory(tmp_path, fixture))
+
+    # when / then
+    with pytest.raises(
+        topology.TopologyError,
+        match=rf"selector output mismatch.*{mismatched_output}",
+    ):
+        topology.ci_check(tmp_path, loaded)
+
+
+def test_ci_coverage_rejects_inventory_directory_missing_from_selector(tmp_path: Path) -> None:
+    # given
+    record = module_record(
+        "libraries/public-contract",
+        "example.test/insurance-hub/libraries/public-contract",
+        "public-contract",
+    )
+    fixture = inventory([record])
+    write_workflow(tmp_path, workflow_text(str(record["directory"])))
+    loaded = topology.load_inventory(write_inventory(tmp_path, fixture))
+
+    # when / then
+    with pytest.raises(
+        topology.TopologyError,
+        match="selector does not support inventory module directory libraries/public-contract",
+    ):
+        topology.ci_check(tmp_path, loaded)
+
+
+def test_ci_coverage_rejects_selector_coverage_output_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given
+    fixture = selector_inventory()
+    write_workflow(tmp_path)
+    loaded = topology.load_inventory(write_inventory(tmp_path, fixture))
+    selection_outputs = select_pr_module.selection_outputs
+
+    def mismatched_outputs(paths: list[str], merge_base: str) -> dict[str, str]:
+        outputs = selection_outputs(paths, merge_base)
+        outputs["coverage_files"] = "unexpected-coverage.txt"
+        return outputs
+
+    monkeypatch.setattr(select_pr_module, "selection_outputs", mismatched_outputs)
+
+    # when / then
+    with pytest.raises(
+        topology.TopologyError,
+        match=r"selector output mismatch.*coverage_files",
+    ):
         topology.ci_check(tmp_path, loaded)
 
 
@@ -761,9 +844,9 @@ def test_aggregate_propagates_python_tooling_input_to_each_module(
 
 def test_root_aggregate_accepts_explicit_python_override(tmp_path: Path) -> None:
     # given
-    value = inventory()
+    value = selector_inventory()
     value["modules"][0]["validationVariables"] = ["FORMAT_SCOPE"]
-    observed = tmp_path / "module" / "observed.txt"
+    observed = tmp_path / "templates" / "go-service" / "observed.txt"
     target = f'@printf "%s\\n%s\\n" "$(PYTHON)" "$(FORMAT_SCOPE)" > "{observed}"'
     write_module(tmp_path, value["modules"][0], target_body=target)
     write_workflow(tmp_path)

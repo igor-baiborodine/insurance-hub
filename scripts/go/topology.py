@@ -16,6 +16,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+import select_pr_module
+
 COMMAND_TIMEOUT_SECONDS = 600
 TEARDOWN_TIMEOUT_SECONDS = 10
 HEARTBEAT_SECONDS = 30
@@ -526,6 +528,47 @@ def require_literal(text: str, workflow: str, literal: str, description: str) ->
     require(literal in text, f"workflow {workflow} is missing {description}: {literal}")
 
 
+def expected_selector_outputs(module: dict[str, Any], merge_base: str) -> dict[str, str]:
+    directory = module["directory"]
+    coverage_file = f"{directory}/coverage.txt"
+    coverage_files = coverage_file
+    if module["role"] == "business-service":
+        coverage_files += f",{directory}/integration-coverage.txt"
+    return {
+        "module_dir": directory,
+        "module_key": directory.replace("/", "-"),
+        "module_role": module["role"],
+        "go_sum": f"{directory}/go.sum",
+        "validation_target": module["validationTarget"],
+        "format_base": merge_base,
+        "coverage_file": coverage_file,
+        "coverage_files": coverage_files,
+        "coverage_flag": directory.rsplit("/", 1)[-1],
+    }
+
+
+def validate_selector_contract(module: dict[str, Any], workflow: str) -> None:
+    merge_base = "0" * 40
+    directory = module["directory"]
+    actual = select_pr_module.selection_outputs(
+        [f"{directory}/.go-ci-selector-probe.go"], merge_base
+    )
+    require(
+        actual.get("module_dir") == directory,
+        f"workflow {workflow} selector does not support inventory module directory {directory}",
+    )
+    expected = expected_selector_outputs(module, merge_base)
+    mismatches = [
+        name
+        for name in sorted(set(expected) | set(actual))
+        if expected.get(name) != actual.get(name)
+    ]
+    require(
+        not mismatches,
+        f"workflow {workflow} selector output mismatch for inventory module {directory}: {', '.join(mismatches)}",
+    )
+
+
 def ci_check(root: Path, inventory: dict[str, Any]) -> None:
     workflows = sorted({module["ciWorkflow"] for module in inventory["modules"]})
     for workflow in workflows:
@@ -595,6 +638,7 @@ def ci_check(root: Path, inventory: dict[str, Any]) -> None:
         triggers = pull_request_paths(text)
         for module in (item for item in inventory["modules"] if item["ciWorkflow"] == workflow):
             directory = module["directory"]
+            validate_selector_contract(module, workflow)
             if directory.startswith("services/") and directory.endswith("-service"):
                 expected = {
                     "services/*-service/**/*.go",
