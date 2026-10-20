@@ -1,5 +1,7 @@
 """Fast tests for renamed scaffold copy decisions."""
 
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -82,6 +84,7 @@ def test_created_copy_uses_repository_tooling_without_scaffold_only_surface(
         common_tooling_dir=common_tooling,
         make_arguments=("make",),
         selected_python=Path(__file__).absolute(),
+        go="go",
         uv="uv",
     )
 
@@ -101,6 +104,69 @@ def test_created_copy_uses_repository_tooling_without_scaffold_only_surface(
     assert "gen/examplecopy/v1" in copied_tooling
     assert "api/scaffold/v1/example_service.proto" not in copied_tooling
     assert "gen/scaffold/v1" not in copied_tooling
+
+
+def test_run_copy_make_forwards_selected_tool_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    config = check_copy.Configuration(
+        module_root=tmp_path,
+        repository_root=tmp_path,
+        common_tooling_dir=tmp_path,
+        make_arguments=("make",),
+        selected_python=Path(__file__).absolute(),
+        go="/controlled/go",
+        uv="/controlled/uv",
+    )
+    captured: dict[str, object] = {}
+
+    def capture(arguments: list[str], **options: object) -> None:
+        captured["arguments"] = arguments
+        captured["options"] = options
+
+    monkeypatch.setattr(check_copy, "run_command", capture)
+
+    # when
+    check_copy.run_copy_make(
+        config,
+        tmp_path,
+        time.monotonic() + 10,
+        "controlled Make",
+        "check",
+    )
+
+    # then
+    assert "GO=/controlled/go" in captured["arguments"]
+    assert "UV=/controlled/uv" in captured["arguments"]
+
+
+def test_documented_copy_removes_complete_check_copy_target(tmp_path: Path) -> None:
+    # given
+    module_root = Path(check_copy.__file__).resolve().parent.parent
+    copying = (module_root / "COPYING.md").read_text(encoding="utf-8")
+    start = copying.index("sed -i 's/ check-copy//g' Makefile")
+    end = copying.index("\nrm scripts/check_copy.py", start)
+    documented_commands = copying[start:end]
+    makefile = tmp_path / "Makefile"
+    makefile.write_text((module_root / "Makefile").read_text(encoding="utf-8"), encoding="utf-8")
+
+    # when
+    subprocess.run(
+        ["sh", "-eu", "-c", documented_commands],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
+
+    # then
+    result = makefile.read_text(encoding="utf-8")
+    assert "check-copy" not in result
+    assert '"$(PYTHON)" ./scripts/check_copy.py' not in result
+    assert '"$(PYTHON)" ./scripts/tooling_runner.py' in result
 
 
 @pytest.mark.parametrize(

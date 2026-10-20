@@ -44,7 +44,10 @@ All Go and tooling operations use this module's Makefile. Run module targets fro
 `templates/go-service/`, or use `make -C templates/go-service <target>` from the repository root.
 Tool installation, dependency maintenance, formatting, linting, tests, builds, vulnerability
 analysis, and execution set `GOWORK=off`; normal validation uses readonly module resolution and
-never depends on a root workspace or filesystem replacement. `GO` may override the Go executable.
+never depends on a root workspace or filesystem replacement. `GO` may override the Go executable,
+and `UV` may override uv. `test-tooling` and `check-copy` preserve both selections across nested
+Make boundaries; they also prefer the selected Go executable's directory when child tools invoke
+`go` by name.
 
 `bootstrap-tools` verifies or provisions the repository's ignored `.venv/` from the root
 `.python-version`, `pyproject.toml`, and `uv.lock`, then installs these exact binaries under the

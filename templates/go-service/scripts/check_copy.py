@@ -50,6 +50,7 @@ class Configuration:
     common_tooling_dir: Path
     make_arguments: tuple[str, ...]
     selected_python: Path
+    go: str
     uv: str
 
 
@@ -86,6 +87,7 @@ def configuration() -> Configuration:
         common_tooling_dir=common_path,
         make_arguments=tuple(make_command),
         selected_python=python_path,
+        go=os.environ.get("GO", "go"),
         uv=os.environ.get("UV", "uv"),
     )
 
@@ -274,7 +276,8 @@ def command_environment(config: Configuration) -> dict[str, str]:
             "UV": config.uv,
             "PYTHON": str(config.selected_python),
             "COMMON_GO_TOOLING_PYTHON": str(config.selected_python),
-        }
+        },
+        preferred_executables=(config.go,),
     )
 
 
@@ -299,6 +302,8 @@ def run_copy_make(
             str(copy_root),
             target,
             *variables,
+            f"GO={config.go}",
+            f"UV={config.uv}",
             f"INSURANCE_HUB_ROOT={config.repository_root}",
         ],
         cwd=copy_root,

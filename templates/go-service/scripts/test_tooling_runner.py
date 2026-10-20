@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import test_tooling as tooling_suite
 import tooling_runner
 
 
@@ -115,6 +116,38 @@ def test_runner_removes_fixture_tree_after_completed_session(
     # then
     assert result.returncode == expected_status, result.stdout + result.stderr
     assert list(temporary.rglob("go-service-tooling*")) == []
+
+
+def test_tooling_target_forwards_selected_tool_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+    tooling = tooling_suite.Tooling(
+        make_arguments=("make",),
+        repository_root=tmp_path,
+        temporary_root=tmp_path,
+        base_fixture=fixture,
+        deadline=time.monotonic() + 10,
+        go="/controlled/go",
+        uv="/controlled/uv",
+    )
+    captured: dict[str, object] = {}
+
+    def capture(arguments: list[str], **options: object) -> None:
+        captured["arguments"] = arguments
+        captured["options"] = options
+
+    monkeypatch.setattr(tooling_suite, "run_command", capture)
+
+    # when
+    tooling_suite.run_target(tooling, fixture, "controlled", "check")
+
+    # then
+    assert "GO=/controlled/go" in captured["arguments"]
+    assert "UV=/controlled/uv" in captured["arguments"]
 
 
 def test_launcher_sigterm_cleans_active_command_and_resistant_descendant(

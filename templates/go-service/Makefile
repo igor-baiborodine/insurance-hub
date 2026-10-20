@@ -94,6 +94,7 @@ test-tooling: verify-tools python-toolchain-check
 	@MODULE_ROOT="$(CURDIR)" INSURANCE_HUB_ROOT="$(INSURANCE_HUB_ROOT)" \
 		COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
 		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" \
+		GO="$(GO)" UV="$(UV)" \
 		COMMON_GO_TOOLING_PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
 		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" ./scripts/tooling_runner.py
 	@$(MAKE) --no-print-directory test-coverage-tooling
@@ -102,7 +103,7 @@ check-copy: verify-tools python-toolchain-check
 	@INSURANCE_HUB_ROOT="$(INSURANCE_HUB_ROOT)" \
 		COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
 		COMMON_GO_TOOLING_PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
-		MAKE_COMMAND="$(MAKE)" UV="$(UV)" PYTHONDONTWRITEBYTECODE=1 \
+		GO="$(GO)" MAKE_COMMAND="$(MAKE)" UV="$(UV)" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" ./scripts/check_copy.py
 
 run:

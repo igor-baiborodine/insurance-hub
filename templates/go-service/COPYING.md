@@ -117,7 +117,12 @@ root-delegate and CI sections with the copied module's actual onboarding boundar
 
 ```sh
 sed -i 's/ check-copy//g' Makefile
-sed -i '/^check-copy:/,+4d' Makefile
+awk '
+  /^check-copy:/ { skipping = 1; next }
+  skipping && /^\t/ { next }
+  { skipping = 0; print }
+' Makefile > Makefile.copy
+mv Makefile.copy Makefile
 rm scripts/check_copy.py scripts/test_check_copy.py
 
 sed -i \

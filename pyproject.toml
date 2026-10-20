@@ -47,6 +47,7 @@ known-first-party = [
     "scaffold_process",
     "select_pr_module",
     "test_monitoring",
+    "test_tooling",
     "tooling_runner",
     "topology",
     "validate_selection",

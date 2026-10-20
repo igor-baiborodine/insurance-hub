@@ -28,6 +28,8 @@ class Tooling:
     temporary_root: Path
     base_fixture: Path
     deadline: float
+    go: str
+    uv: str
 
 
 def _ignore(_: str, names: list[str]) -> set[str]:
@@ -63,7 +65,15 @@ def tooling(tmp_path_factory: pytest.TempPathFactory) -> Tooling:
     private_bin.mkdir(parents=True)
     for tool in TOOL_NAMES:
         (private_bin / tool).symlink_to(tools_bin / tool)
-    return Tooling(make_arguments, repository_root, temporary_root, base, time.monotonic() + 3_600)
+    return Tooling(
+        make_arguments,
+        repository_root,
+        temporary_root,
+        base,
+        time.monotonic() + 3_600,
+        os.environ.get("GO", "go"),
+        os.environ.get("UV", "uv"),
+    )
 
 
 def new_fixture(tooling: Tooling, name: str) -> Path:
@@ -72,13 +82,14 @@ def new_fixture(tooling: Tooling, name: str) -> Path:
     return fixture
 
 
-def make_environment() -> dict[str, str]:
+def make_environment(tooling: Tooling) -> dict[str, str]:
     return child_environment(
         {
             "PYTHON": sys.executable,
             "COMMON_GO_TOOLING_PYTHON": sys.executable,
             "PYTHONDONTWRITEBYTECODE": "1",
-        }
+        },
+        preferred_executables=(tooling.go,),
     )
 
 
@@ -99,6 +110,8 @@ def run_target(
         str(fixture),
         target,
         *variables,
+        f"GO={tooling.go}",
+        f"UV={tooling.uv}",
         f"INSURANCE_HUB_ROOT={tooling.repository_root}",
         f"COMMON_GO_TOOLING_DIR={fixture / '.common-go-tooling'}",
     ]
@@ -110,7 +123,7 @@ def run_target(
             run_command(
                 arguments,
                 cwd=fixture,
-                env=make_environment(),
+                env=make_environment(tooling),
                 timeout_seconds=min(1_200, remaining),
                 teardown_seconds=15,
                 activity=f"test-tooling {name}",
@@ -126,7 +139,7 @@ def run_target(
             run_command(
                 arguments,
                 cwd=fixture,
-                env=make_environment(),
+                env=make_environment(tooling),
                 timeout_seconds=min(1_200, remaining),
                 teardown_seconds=15,
                 activity=f"test-tooling {name}",

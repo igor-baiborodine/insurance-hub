@@ -43,6 +43,19 @@ def test_child_environment_excludes_unrelated_secret(
     assert "SCAFFOLD_SECRET_SENTINEL" not in environment
 
 
+def test_child_environment_prefers_selected_executable_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    monkeypatch.setenv("PATH", "/default/bin")
+
+    # when
+    environment = scaffold_process.child_environment(preferred_executables=("/selected/go/bin/go",))
+
+    # then
+    assert environment["PATH"] == f"/selected/go/bin{os.pathsep}/default/bin"
+
+
 def test_timeout_terminates_owned_descendant(tmp_path: Path) -> None:
     # given
     child_pid = tmp_path / "child.pid"

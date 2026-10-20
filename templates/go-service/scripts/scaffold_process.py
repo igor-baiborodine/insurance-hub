@@ -46,11 +46,24 @@ class CommandError(RuntimeError):
     """A scaffold command failed or exceeded its deadline."""
 
 
-def child_environment(overrides: Mapping[str, str] | None = None) -> dict[str, str]:
+def child_environment(
+    overrides: Mapping[str, str] | None = None,
+    *,
+    preferred_executables: Sequence[str] = (),
+) -> dict[str, str]:
     """Build the allowlisted environment inherited by scaffold child commands."""
     environment = {name: os.environ[name] for name in PASSTHROUGH_ENVIRONMENT if name in os.environ}
     if overrides:
         environment.update(overrides)
+    for executable in reversed(preferred_executables):
+        path = Path(executable)
+        if path.name == executable:
+            continue
+        directory = str(path.resolve().parent)
+        current_path = environment.get("PATH", "")
+        environment["PATH"] = (
+            f"{directory}{os.pathsep}{current_path}" if current_path else directory
+        )
     return environment
 
 
