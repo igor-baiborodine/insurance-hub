@@ -11,7 +11,7 @@ resources:
 images:
   - name: insurance-hub-product-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/product-api
-    newTag: 1.7.0
+    newTag: 1.8.0
 configMapGenerator:
   - name: product-config
     behavior: merge
