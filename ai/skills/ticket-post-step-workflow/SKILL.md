@@ -86,9 +86,10 @@ step summary, record validation in a table with these columns:
 - Do not create extra documentation files beyond the tracker and per-step summary unless the user asks.
 - Do not run `git diff` in another artifact format unless the user asks.
 - Keep the per-step summary concise and factual.
-- Before any commit, the end user must review the complete proposed change in the working tree,
-  including the branch snapshot, staged and unstaged changes, untracked files, and generated files.
-  Do not commit until the end user has reviewed and explicitly authorized it; see `AGENTS.md`.
+- Before any commit, inspect the complete proposed change in the working tree, including the
+  branch snapshot, staged and unstaged changes, untracked files, and generated files. Apply the
+  default end-user review and explicit commit authorization requirement, or an applicable explicit
+  session-start permission, as defined in `AGENTS.md`. Push requires its own authorization.
 
 ## Output Checklist
 

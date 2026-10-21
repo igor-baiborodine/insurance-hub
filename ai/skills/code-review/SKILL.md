@@ -19,8 +19,8 @@ nested instructions and rules, and the precedence and conflict procedure they de
 
 Choose the execution mode before reviewing:
 
-- For a review from a local checkout that produces `<ticket-dir>/<ticket>-pr-review.md`,
-  resolve `<ticket-dir>` through root `AGENTS.md` and follow [local review](references/local-review.md).
+- For a review from a local checkout that produces a ticket PR review artifact, resolve
+  `<ticket-dir>` through root `AGENTS.md` and follow [local review](references/local-review.md).
 - For GitHub Copilot code review on a pull request, read and follow
   [GitHub review](references/github-review.md).
 
@@ -37,9 +37,11 @@ Assess only areas relevant to the ticket and proposed change:
 4. Inspect authoritative contracts, implementations, callers, and generated sources together.
    Never infer API behavior solely from generated output, a ticket title, or a PR description.
 5. Assess tests at the changed boundary and inspect the owning Makefiles or other validation entry
-   points before accepting coverage claims. For non-core functionality, apply the repository's
-   [80/20 test direction](../../rules/repo-rules.md#testability): expect focused likely-path
-   coverage and applicable contract safety checks without demanding low-value exhaustive matrices.
+   points before accepting coverage claims. For non-core functionality such as auxiliary Python
+   scripts, apply the repository's [80/20 test direction](../../rules/repo-rules.md#testability):
+   expect focused likely-path coverage without demanding low-value exhaustive matrices. Still
+   require every applicable contract safety check, including target guards, failure handling,
+   cleanup, secret protection, permissions, and dry-run boundaries.
 6. Check security, privacy, persistence, migration, deployment, telemetry, and operational impact
    when the changed paths or requirements make them applicable.
 7. Report maintainability concerns only when they violate a repository rule or create a concrete

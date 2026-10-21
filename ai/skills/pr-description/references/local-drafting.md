@@ -1,3 +1,14 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Local pull request description drafting](#local-pull-request-description-drafting)
+  - [Required inputs](#required-inputs)
+  - [Collect the proposed change](#collect-the-proposed-change)
+  - [Validation notes](#validation-notes)
+  - [Output](#output)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Local pull request description drafting
 
 Use this mode from a local checkout when the requested output is the repository's local PR
@@ -55,7 +66,10 @@ Include manual validation only when applicable:
 
 Save the finished description only to:
 
-`<ticket-dir>/<ticket>-pr-description.md`
+`<ticket-dir>/<ticket>-pr-description.md` for a single-PR ticket, or
+`<ticket-dir>/<ticket>-pr<n>-description.md` for PR`n` of a multi-PR ticket. Use the planned PR
+number from the delivery tracker and current branch; resolve a mismatch before writing. Preserve
+the separate description file for each PR.
 
 Read an existing output before changing it and preserve relevant user-authored content. Do not
 stage, commit, publish, create or modify a pull request, send messages, or execute application smoke

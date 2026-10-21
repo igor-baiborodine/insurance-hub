@@ -24,8 +24,9 @@ Use before considering a ticket complete.
   `.git/info/exclude`, and `git ls-files -- ai/artifacts/` plus
   `git diff --cached --name-only -- ai/artifacts/` report no paths.
 - [ ] Git diff artifact is refreshed when using ticket workflow.
-- [ ] Before any commit, the end user reviewed the complete proposed change, including the branch
-  diff, staged and unstaged changes, untracked files, and generated files.
+- [ ] Before any commit, the complete proposed change was inspected, including the branch diff,
+  staged and unstaged changes, untracked files, and generated files; end-user review and explicit
+  authorization occurred unless applicable session-start permission covered the operation.
 - [ ] Relevant tests, builds, formatting, or lint checks were run.
 - [ ] Documentation was updated when behavior or workflow changed.
 - [ ] Every Markdown file created or updated in the task has a current `doctoc`-generated table of

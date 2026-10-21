@@ -81,7 +81,9 @@ Once the ticket is implementation-ready:
 - assess whether the ticket should be delivered in one pull request or split across multiple pull
   requests, and record the decision and rationale in the plan
 - when multiple pull requests are appropriate, mark every delivery step clearly with its planned
-  pull request as `PR1`, `PR2`, and so on, and identify ordering or dependency constraints
+  pull request as `PR1`, `PR2`, and so on, identify ordering or dependency constraints, and use
+  the corresponding `-1`, `-2`, and later suffixes for new PR branches as required by
+  [Git branch rules](../../rules/git-rules.md#branch-names)
 - make the steps granular enough to track progress and validate behavior incrementally
 - include a progress section containing only step status, step title, planned pull request when
   applicable, and the step summary artifact reference; keep implementation details, findings,

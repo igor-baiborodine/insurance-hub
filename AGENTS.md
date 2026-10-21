@@ -197,6 +197,10 @@ Resolve the directory once and reuse it for the entire ticket workflow:
 Keep the ticket-content specification, delivery plan, step summaries, diff snapshots, reviews, and
 PR drafts together in `<ticket-dir>`. Filenames retain the ticket ID, such as
 `<ticket>-ticket-content.md` and `<ticket>-delivery-steps.md`, regardless of directory depth.
+For a ticket split into multiple PRs, name each local review and description for its planned PR:
+`<ticket>-pr<n>-review.md` and `<ticket>-pr<n>-description.md` (for example,
+`issue-174-pr6-description.md`). Single-PR tickets keep `<ticket>-pr-review.md` and
+`<ticket>-pr-description.md`.
 Shared templates use `<ticket-dir>` as a placeholder; replace it with the resolved path. Resolve
 relative links from each artifact's actual directory rather than assuming a fixed nesting depth.
 Existing flat artifacts remain valid; adding epic grouping does not require moving them.
@@ -227,9 +231,16 @@ Do not claim validation was performed unless it was actually run.
 
 - Do not overwrite or revert user changes unless explicitly asked.
 - Keep diffs scoped to the ticket or request.
-- Before committing ticket changes, present the complete proposed change for end-user review,
-  including the branch diff, staged changes, unstaged changes, untracked files, and generated files.
-  Do not commit until the end user has reviewed them and explicitly authorized the commit.
+- Before committing ticket changes, inspect the complete proposed change, including the branch
+  diff, staged changes, unstaged changes, untracked files, and generated files. By default, present
+  it for end-user review and do not commit until the end user has reviewed it and explicitly
+  authorized the commit.
+- An explicit permission given by the user at the start of the current session to commit and/or
+  push within a stated scope satisfies the corresponding authorization for that scope during this
+  session; do not ask again before each authorized operation. Check the complete change before
+  committing and report what was committed or pushed. Commit permission alone does not authorize a
+  push, and push permission alone does not authorize a commit. The permission expires at the end of
+  the session and does not authorize merge, tags, branch deletion, or history rewrite.
 - Preserve behavior unless the spec requires a change.
 - Ask for clarification when acceptance criteria, contracts, persistence expectations, security expectations, or out-of-scope boundaries are unclear.
 - Prefer existing project patterns over new abstractions.

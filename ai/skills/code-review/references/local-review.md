@@ -79,7 +79,10 @@ evidence into a pass; report the available recorded evidence and its limits.
 
 Write the review using `ai/templates/pr-review-template.md` and save it only to:
 
-`<ticket-dir>/<ticket>-pr-review.md`
+`<ticket-dir>/<ticket>-pr-review.md` for a single-PR ticket, or
+`<ticket-dir>/<ticket>-pr<n>-review.md` for PR`n` of a multi-PR ticket. Use the planned PR number
+from the delivery tracker and current branch; resolve a mismatch before writing. Preserve the
+separate review file for each PR.
 
 Assign finding IDs in order (`F-001`, `F-002`, ...). Under repository-rule compliance, list every
 applicable rule area as **Satisfied**, **Finding identified**, **Unverified**, or, with a concrete

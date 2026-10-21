@@ -34,7 +34,7 @@ directory. When copying this template, update relative links for the destination
 
 - Delivery: Single PR / Multiple PRs
 - Assessment and rationale:
-- PR sequence or dependencies:
+- PR sequence, branch suffixes, or dependencies when multiple PRs are planned:
 
 ## Progress
 
