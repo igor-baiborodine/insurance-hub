@@ -13,4 +13,5 @@ resources:
   - ./pricing/legacy
   - ./product/legacy
   - ./product
+  - ./product-preview
   - ./web-vue/legacy

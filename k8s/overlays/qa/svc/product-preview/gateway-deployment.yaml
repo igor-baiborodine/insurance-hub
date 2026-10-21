@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-portal-gateway-product-preview
+  labels:
+    app.kubernetes.io/name: agent-portal-gateway-product-preview
+    app.kubernetes.io/instance: insurance-hub-agent-portal-gateway-product-preview
+    app.kubernetes.io/version: "1.3.0"
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-portal-gateway-product-preview
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-portal-gateway-product-preview
+        app.kubernetes.io/instance: insurance-hub-agent-portal-gateway-product-preview
+        app.kubernetes.io/version: "1.3.0"
+        app.kubernetes.io/component: gateway
+    spec:
+      containers:
+        - name: agent-portal-gateway-product-preview
+          image: ghcr.io/igor-baiborodine/insurance-hub/agent-portal-gateway-legacy@sha256:12a0e030b90c0a6fa8b96be6be05fada977cf35c5db2cd94d1aaa6968506fcf8
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: MICRONAUT_ENVIRONMENTS
+              value: qa
+            - name: MICRONAUT_CONFIG_FILES
+              value: /etc/product-preview/application.yml
+            - name: TRACING_ZIPKIN_HTTP_URL
+              value: http://qa-alloy.qa-monitoring.svc.cluster.local:9411
+            - name: TRACING_ZIPKIN_SAMPLER_PROBABILITY
+              value: "1.0"
+            - name: KUBERNETES_CLIENT_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MICRONAUT_SERVER_HOST
+              value: 0.0.0.0
+          volumeMounts:
+            - name: product-preview-config
+              mountPath: /etc/product-preview/application.yml
+              subPath: application.yml
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 25
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: 300m
+              memory: 768Mi
+      volumes:
+        - name: product-preview-config
+          configMap:
+            name: gateway-product-preview-config

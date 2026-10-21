@@ -228,7 +228,7 @@ evidence in both environments. The final coordinates and rerun procedure are in 
 
 ## Reproduction
 
-For the isolated #133 proof, use Java 14, system Maven, Go 1.27.2, a working Docker daemon,
+For the isolated #133 proof, use Java 14, system Maven, Go 1.27.3, a working Docker daemon,
 `jq`, Python 3, `timeout`, and `setsid`. Bootstrap the Product module's pinned tools explicitly;
 that step needs Go module/tool and Maven package access on a fresh machine. Leave
 `PRODUCT_DATABASE_URL` unset. From the repository root:

@@ -63,11 +63,11 @@ jobs:
           ./.venv/bin/python scripts/go/select_pr_module.py
           --base "$PR_BASE" --head "$PR_HEAD" --output "$GITHUB_OUTPUT"
 
-      - name: Set up Go 1.27.2
+      - name: Set up selected Go version
         if: steps.select.outputs.module_dir != ''
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27.2'
+          go-version-file: ${{ steps.select.outputs.module_dir }}/go.mod
           cache: true
           cache-dependency-path: ${{ steps.select.outputs.go_sum }}
 
@@ -77,7 +77,7 @@ jobs:
         with:
           path: ${{ steps.select.outputs.module_dir }}/.tools
           key: >-
-            go-pr-tools-${{ runner.os }}-1.27.2-${{ steps.select.outputs.module_key }}-${{
+            go-pr-tools-${{ runner.os }}-${{ steps.select.outputs.module_key }}-${{
             hashFiles(format('{0}/Makefile', steps.select.outputs.module_dir),
             'scripts/go/module/common.mk') }}
 

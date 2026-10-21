@@ -1,4 +1,4 @@
-ARG BUILDER_IMAGE=docker.io/library/golang:1.27.2-alpine3.23@sha256:929e6c7d2f48657a580141155579281939296b952d6426846149fa40a7d090a1
+ARG BUILDER_IMAGE=docker.io/library/golang:1.27.3-alpine3.23@sha256:0208a74017e3ce41f779876f3c6e9ad5d4030904e8ac6e91b9c5d7711c48362a
 ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:2293b36c7c9082bf4115aab724b4d2cddec82c8eba39bf27ac0517e159acf150
 
 FROM ${BUILDER_IMAGE} AS build

@@ -31,7 +31,7 @@ PROTO_SCHEMA := api/product/v1/product_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := gen/product/v1/product_service.pb.go gen/product/v1/product_service_grpc.pb.go
 
-GO_VERSION := 1.27.2
+GO_VERSION := 1.27.3
 BUF_VERSION := v1.73.0
 PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
@@ -78,6 +78,7 @@ SECURITY_HARNESS_OUTPUT ?=
 TELEMETRY_ACCEPTANCE_OUTPUT ?=
 DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md \
 	../../docs/migration/phase-4/product-service/deployment-runbook.md \
+	../../docs/migration/phase-4/product-service/qualification-runbook.md \
 	../../docs/migration/phase-4/product-service/observability-contract.md \
 	../../docs/migration/phase-4/product-service/observability-runbook.md
 EXTRA_TOOL_PACKAGES := github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
@@ -91,7 +92,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage \
 	coverage-validate coverage-check test-integration test-telemetry-continuity \
-	build build-security-harness build-security-verifier build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
+	build build-security-harness build-security-verifier build-qualification-client build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test vulncheck \
 	bootstrap-doc-tools check-docs preview-docs check-go-pr check test-tooling run
 
@@ -128,6 +129,11 @@ build-security-verifier: verify-tools ## Build the read-only Product security ve
 	@test -n "$(strip $(SECURITY_VERIFIER_OUTPUT))" || { echo "SECURITY_VERIFIER_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(SECURITY_VERIFIER_OUTPUT)" \
 		./internal/testing/cmd/securityverify
+
+build-qualification-client: verify-tools ## Build the read-only QA Product gRPC client at QUALIFICATION_CLIENT_OUTPUT
+	@test -n "$(strip $(QUALIFICATION_CLIENT_OUTPUT))" || { echo "QUALIFICATION_CLIENT_OUTPUT is required" >&2; exit 1; }
+	GOWORK=off $(GO) build -mod=readonly -o "$(QUALIFICATION_CLIENT_OUTPUT)" \
+		./internal/testing/cmd/qualificationclient
 
 build-lifecycle-client: verify-tools ## Build disposable HTTP/gRPC lifecycle client at LIFECYCLE_CLIENT_OUTPUT
 	@test -n "$(strip $(LIFECYCLE_CLIENT_OUTPUT))" || { echo "LIFECYCLE_CLIENT_OUTPUT is required" >&2; exit 1; }

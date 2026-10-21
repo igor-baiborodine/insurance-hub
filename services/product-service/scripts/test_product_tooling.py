@@ -290,6 +290,45 @@ def integration_environment(monkeypatch: pytest.MonkeyPatch, suite: str) -> None
     monkeypatch.delenv("INTEGRATION_COVERAGE_FILE", raising=False)
 
 
+@pytest.mark.parametrize("exit_status", [0, 7])
+def test_stream_test_log_preserves_output_and_status(tmp_path: Path, exit_status: int) -> None:
+    # given
+    log = tmp_path / "go-test.json"
+    script = Path(integration_test.__file__).resolve().parent / "stream-test-log.sh"
+
+    # when
+    result = subprocess.run(
+        [
+            "bash",
+            str(script),
+            str(log),
+            sys.executable,
+            "-c",
+            f"print('controlled test event'); raise SystemExit({exit_status})",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    # then
+    assert result.returncode == exit_status
+    assert result.stdout == ""
+    assert log.read_text(encoding="utf-8") == "controlled test event\n"
+
+
+def integration_log_path(arguments: list[str], kwargs: dict[str, object]) -> Path | None:
+    if (
+        len(arguments) >= 3
+        and arguments[0] == "bash"
+        and arguments[1].endswith("/stream-test-log.sh")
+    ):
+        return Path(arguments[2])
+    log = kwargs.get("log_path")
+    return log if isinstance(log, Path) else None
+
+
 def test_integration_reports_zero_selected_tests(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -300,9 +339,9 @@ def test_integration_reports_zero_selected_tests(
     monkeypatch.setenv("PRODUCT_TEST_FORCE_ZERO_SELECTION", "1")
     monkeypatch.setattr(integration_test, "MODULE_ROOT", tmp_path)
 
-    def fake_run(_arguments: list[str], **kwargs: object) -> str:
-        log = kwargs.get("log_path")
-        if isinstance(log, Path):
+    def fake_run(arguments: list[str], **kwargs: object) -> str:
+        log = integration_log_path(arguments, kwargs)
+        if log is not None:
             log.write_text("", encoding="utf-8")
         return ""
 
@@ -346,9 +385,9 @@ def test_integration_reports_missing_required_case(
     integration_environment(monkeypatch, suite)
     monkeypatch.setattr(integration_test, "MODULE_ROOT", tmp_path)
 
-    def fake_run(_arguments: list[str], **kwargs: object) -> str:
-        log = kwargs.get("log_path")
-        if isinstance(log, Path):
+    def fake_run(arguments: list[str], **kwargs: object) -> str:
+        log = integration_log_path(arguments, kwargs)
+        if log is not None:
             log.write_text(
                 "".join(json.dumps({"Action": "pass", "Test": name}) + "\n" for name in records),
                 encoding="utf-8",
@@ -378,8 +417,8 @@ def test_integration_coverage_profile_contract(
     monkeypatch.setattr(integration_test, "MODULE_ROOT", tmp_path)
 
     def fake_run(arguments: list[str], **kwargs: object) -> str:
-        log = kwargs.get("log_path")
-        if isinstance(log, Path):
+        log = integration_log_path(arguments, kwargs)
+        if log is not None:
             log.write_text(
                 json.dumps(
                     {
