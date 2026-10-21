@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Emit shell-safe environment values for generic monitoring Make targets."""
+"""Resolve typed monitoring asset fields for generic Make targets."""
 
 from __future__ import annotations
 
 import argparse
-import shlex
+import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional, Sequence
 
 from monitoring_assets import (
     AssetError,
@@ -16,38 +16,56 @@ from monitoring_assets import (
     prometheus_rule_resource,
 )
 
+FIELDS = {
+    "kube-context": "kube_context",
+    "namespace": "namespace",
+    "prometheus-rule": "prometheus_rule",
+    "grafana-dashboard-config-map": "grafana_dashboard_config_map",
+    "prometheus-values-path": "prometheus_values_path",
+    "service-dir": "service_dir",
+    "alerts-path": "alerts_path",
+    "alert-tests-path": "alert_tests_path",
+}
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--assets-root", type=Path, required=True)
     parser.add_argument("--environment", required=True)
     parser.add_argument("--service", required=True)
+    parser.add_argument("--field", choices=tuple(FIELDS))
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def resolve(args: argparse.Namespace) -> dict[str, str]:
+    assets = load_assets(args.assets_root, args.environment, args.service)
+    rule = prometheus_rule_resource(assets)
+    dashboard = grafana_dashboard_resource(assets)
+    return {
+        "kube_context": assets.environment["kube_context"],
+        "namespace": assets.environment["monitoring_namespace"],
+        "prometheus_rule": rule["metadata"]["name"],
+        "grafana_dashboard_config_map": dashboard["metadata"]["name"],
+        "prometheus_values_path": str(
+            assets.assets_root.parent / assets.environment["prometheus_values_path"]
+        ),
+        "service_dir": str(assets.service_dir),
+        "alerts_path": str(assets.alerts_path),
+        "alert_tests_path": str(assets.alert_tests_path),
+    }
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        assets = load_assets(args.assets_root, args.environment, args.service)
-        rule = prometheus_rule_resource(assets)
-        dashboard = grafana_dashboard_resource(assets)
-        values = {
-            "MONITORING_KUBE_CONTEXT": assets.environment["kube_context"],
-            "MONITORING_NAMESPACE": assets.environment["monitoring_namespace"],
-            "MONITORING_PROMETHEUS_RULE": rule["metadata"]["name"],
-            "MONITORING_GRAFANA_DASHBOARD_CONFIG_MAP": dashboard["metadata"]["name"],
-            "MONITORING_PROMETHEUS_VALUES_PATH": str(
-                assets.assets_root.parent / assets.environment["prometheus_values_path"]
-            ),
-            "MONITORING_SERVICE_DIR": str(assets.service_dir),
-            "MONITORING_ALERTS_PATH": str(assets.alerts_path),
-            "MONITORING_ALERT_TESTS_PATH": str(assets.alert_tests_path),
-        }
-    except AssetError as error:
+        values = resolve(args)
+    except (AssetError, KeyError, TypeError) as error:
         print(f"Monitoring asset resolution failed: {error}", file=sys.stderr)
         return 1
-    for key, value in values.items():
-        print(f"{key}={shlex.quote(value)}")
+    if args.field:
+        print(values[FIELDS[args.field]])
+    else:
+        print(json.dumps(values, sort_keys=True))
     return 0
 
 

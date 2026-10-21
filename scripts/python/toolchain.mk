@@ -102,6 +102,29 @@ PYTHON_K8S_ADMIN_FILES := \
 	k8s/scripts/admin/runtime.py \
 	k8s/scripts/admin/test_cluster.py \
 	k8s/scripts/admin/test_qa.py
+PYTHON_OBSERVABILITY_FILES := \
+	k8s/scripts/alloy/alloy_runtime.py \
+	k8s/scripts/alloy/backend_ingestion.py \
+	k8s/scripts/alloy/check_backend_config.py \
+	k8s/scripts/alloy/check_config.py \
+	k8s/scripts/alloy/disposable_acceptance.py \
+	k8s/scripts/alloy/disposable_acceptance_phase.py \
+	k8s/scripts/alloy/probe_product.py \
+	k8s/scripts/alloy/test_check_backend_config.py \
+	k8s/scripts/alloy/test_check_config.py \
+	k8s/scripts/alloy/test_disposable_acceptance.py \
+	k8s/scripts/alloy/test_disposable_acceptance_phase.py \
+	k8s/scripts/alloy/test_observability_runtime.py \
+	k8s/scripts/monitoring/check_monitoring.py \
+	k8s/scripts/monitoring/monitoring_assets.py \
+	k8s/scripts/monitoring/monitoring_integration.py \
+	k8s/scripts/monitoring/monitoring_runtime.py \
+	k8s/scripts/monitoring/render_grafana_dashboard.py \
+	k8s/scripts/monitoring/render_prometheus_rule.py \
+	k8s/scripts/monitoring/resolve_monitoring.py \
+	k8s/scripts/monitoring/test_check_monitoring.py \
+	k8s/scripts/monitoring/test_verify_product_observability.py \
+	k8s/scripts/monitoring/verify_product_observability.py
 PYTHON_SCOPE_FILES = $(shell git -C "$(PYTHON_REPOSITORY_ROOT)" ls-files \
 	--cached --others --exclude-standard -- '*.py' | LC_ALL=C sort)
 PYTHON_FILES ?=
@@ -122,6 +145,8 @@ export PYTHON_FILES PYTHON_ACCEPTANCE_PATH PYTHON_ACCEPTANCE_CONFIRM
 	python-product-tooling-test-fast python-product-tooling-test-integration \
 	python-product-tooling-check python-k8s-admin-format-check python-k8s-admin-lint \
 	python-k8s-admin-test-fast python-k8s-admin-check \
+	python-observability-format-check python-observability-lint \
+	python-observability-test-fast python-observability-check \
 	python-repository-format-check python-repository-lint python-test-collect \
 	python-examples-test-fast python-examples-test-integration _python-acceptance-check \
 	python-test-acceptance python-examples-check
@@ -306,6 +331,27 @@ python-k8s-admin-test-fast: python-toolchain-check ## Run fake-boundary Kubernet
 
 python-k8s-admin-check: python-k8s-admin-format-check python-k8s-admin-lint \
 	python-k8s-admin-test-fast ## Run non-mutating Kubernetes administration checks
+
+python-observability-format-check: PYTHON_FILES := $(PYTHON_OBSERVABILITY_FILES)
+python-observability-format-check: python-format-check ## Check observability Python formatting
+
+python-observability-lint: PYTHON_FILES := $(PYTHON_OBSERVABILITY_FILES)
+python-observability-lint: python-lint ## Lint observability Python tooling
+
+python-observability-test-fast: python-toolchain-check ## Run fast observability policy and lifecycle tests
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 \
+		PYTHONPATH="$(PYTHON_REPOSITORY_ROOT)/k8s/scripts/alloy:$(PYTHON_REPOSITORY_ROOT)/k8s/scripts/monitoring" \
+		"$(PYTHON)" -m pytest -q -m 'not integration and not acceptance' \
+		k8s/scripts/alloy/test_check_backend_config.py \
+		k8s/scripts/alloy/test_check_config.py \
+		k8s/scripts/alloy/test_disposable_acceptance.py \
+		k8s/scripts/alloy/test_disposable_acceptance_phase.py \
+		k8s/scripts/alloy/test_observability_runtime.py \
+		k8s/scripts/monitoring/test_check_monitoring.py \
+		k8s/scripts/monitoring/test_verify_product_observability.py
+
+python-observability-check: python-observability-format-check python-observability-lint \
+	python-observability-test-fast ## Run non-mutating observability tooling checks
 
 python-repository-format-check: PYTHON_FILES = $(PYTHON_SCOPE_FILES)
 python-repository-format-check: python-format-check ## Check all visible handwritten Python without mutation

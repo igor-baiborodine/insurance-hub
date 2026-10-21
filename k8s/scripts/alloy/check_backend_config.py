@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any
 
+import yaml
 
 KUBE_PROMETHEUS_STACK_VERSION = "92.6.0"
 PROMETHEUS_IMAGE = "quay.io/prometheus/prometheus:v3.15.0-distroless"
@@ -32,42 +33,61 @@ class ValidationError(Exception):
     """A deterministic desired-state or rendered-config failure."""
 
 
-def _yaml_bool(text: str, field: str) -> bool:
-    matches = re.findall(rf"(?m)^\s*{re.escape(field)}:\s*(true|false)\s*$", text)
-    if len(matches) != 1:
-        raise ValidationError(f"{field} must be set exactly once")
-    return matches[0] == "true"
+def _yaml_documents(text: str, label: str) -> list[Mapping[str, Any]]:
+    try:
+        parsed = list(yaml.safe_load_all(text))
+    except yaml.YAMLError as error:
+        raise ValidationError(f"{label} is malformed YAML: {error}") from error
+    documents = [document for document in parsed if document is not None]
+    if not documents or not all(isinstance(document, Mapping) for document in documents):
+        raise ValidationError(f"{label} must contain YAML mapping documents")
+    return documents
 
 
-def _yaml_scalar(text: str, field: str) -> str:
-    matches = re.findall(rf'(?m)^\s*{re.escape(field)}:\s*["\']?([^\s"\']+)["\']?\s*$', text)
-    if len(matches) != 1:
-        raise ValidationError(f"{field} must be set exactly once")
-    return matches[0]
+def _mapping(value: Any, label: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValidationError(f"{label} must be a mapping")
+    return value
 
 
 def validate_values(values: str) -> None:
-    if not _yaml_bool(values, "enableRemoteWriteReceiver"):
+    document = _yaml_documents(values, "Prometheus values")[0]
+    prometheus = _mapping(document.get("prometheus"), "prometheus")
+    specification = _mapping(prometheus.get("prometheusSpec"), "prometheus.prometheusSpec")
+    if specification.get("enableRemoteWriteReceiver") is not True:
         raise ValidationError("Prometheus remote-write receiver must be enabled")
-    if _yaml_bool(values, "enableOTLPReceiver"):
+    if specification.get("enableOTLPReceiver") is not False:
         raise ValidationError("Prometheus native OTLP receiver must remain disabled")
-    if _yaml_scalar(values, "retention") != RETENTION:
+    if specification.get("retention") != RETENTION:
         raise ValidationError(f"Prometheus retention must remain {RETENTION}")
 
 
 def validate_rendered_prometheus(rendered: str) -> None:
-    required = (
-        "kind: Prometheus",
-        f'image: "{PROMETHEUS_IMAGE}"',
-        f'app.kubernetes.io/version: "{KUBE_PROMETHEUS_STACK_VERSION}"',
-        "enableRemoteWriteReceiver: true",
-        "enableOTLPReceiver: false",
-        f'retention: "{RETENTION}"',
-    )
-    for fragment in required:
-        if fragment not in rendered:
-            raise ValidationError(f"rendered Prometheus is missing: {fragment}")
-    if "web.enable-otlp-receiver" in rendered:
+    resources = [
+        document
+        for document in _yaml_documents(rendered, "rendered Prometheus")
+        if document.get("kind") == "Prometheus"
+    ]
+    if len(resources) != 1:
+        raise ValidationError(
+            f"rendered output must contain one Prometheus resource, found {len(resources)}"
+        )
+    resource = resources[0]
+    metadata = _mapping(resource.get("metadata"), "Prometheus metadata")
+    labels = _mapping(metadata.get("labels"), "Prometheus metadata.labels")
+    specification = _mapping(resource.get("spec"), "Prometheus spec")
+    expected = {
+        "image": PROMETHEUS_IMAGE,
+        "enableRemoteWriteReceiver": True,
+        "enableOTLPReceiver": False,
+        "retention": RETENTION,
+    }
+    for field, value in expected.items():
+        if specification.get(field) != value:
+            raise ValidationError(f"rendered Prometheus spec.{field} must be {value!r}")
+    if labels.get("app.kubernetes.io/version") != KUBE_PROMETHEUS_STACK_VERSION:
+        raise ValidationError("rendered Prometheus chart version label differs from the pin")
+    if "web.enable-otlp-receiver" in yaml.safe_dump(resource, sort_keys=True):
         raise ValidationError("rendered Prometheus unexpectedly enables native OTLP")
 
 
@@ -83,7 +103,7 @@ def validate_makefile(makefile: str) -> None:
         "$(OBSERVABILITY_SERVICE_DOMAIN)-service",
         "OBSERVABILITY_SERVICE_PROBE ?= "
         "$(K8S_VALIDATION_ROOT)/scripts/alloy/"
-        "probe-$(OBSERVABILITY_SERVICE_DOMAIN).py",
+        "probe_$(OBSERVABILITY_SERVICE_DOMAIN).py",
         '--values "$(PROMETHEUS_VALUES_PATH)"',
     )
     for fragment in required:
@@ -91,7 +111,7 @@ def validate_makefile(makefile: str) -> None:
             raise ValidationError(f"k8s Makefile is missing: {fragment}")
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--values", type=Path, required=True)
     parser.add_argument("--makefile", type=Path, required=True, action="append")
@@ -103,14 +123,14 @@ def read_input(path: str) -> str:
     return sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         validate_values(args.values.read_text(encoding="utf-8"))
         makefiles = "\n".join(path.read_text(encoding="utf-8") for path in args.makefile)
         validate_makefile(makefiles)
         validate_rendered_prometheus(read_input(args.rendered_prometheus))
-    except (OSError, ValidationError) as error:
+    except (OSError, TypeError, ValidationError) as error:
         print(f"backend config check failed: {error}", file=sys.stderr)
         return 1
     print("backend config check passed")

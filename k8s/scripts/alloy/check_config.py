@@ -10,9 +10,8 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Optional, Sequence
-
 
 ALLOY_CHART_VERSION = "1.13.1"
 ALLOY_IMAGE_VERSION = "v1.20.1"
@@ -123,9 +122,7 @@ def _block(config: str, marker: str) -> str:
 
 
 def _string_assignment(block: str, field: str) -> str:
-    matches = re.findall(
-        rf'(?m)^\s*{re.escape(field)}\s*=\s*"([^"]+)"\s*$', block
-    )
+    matches = re.findall(rf'(?m)^\s*{re.escape(field)}\s*=\s*"([^"]+)"\s*$', block)
     if len(matches) != 1:
         raise ValidationError(f"service log registration must set {field} exactly once")
     return matches[0]
@@ -154,21 +151,15 @@ def validate_service_log_registrations(config: str) -> None:
         port_name = _string_assignment(block, "port_name")
         service_name = _string_assignment(block, "service_name")
         if container_name != f"{name}-api":
-            raise ValidationError(
-                f"{name} log container is {container_name}, expected {name}-api"
-            )
+            raise ValidationError(f"{name} log container is {container_name}, expected {name}-api")
         if service_name != f"{name}-service":
-            raise ValidationError(
-                f"{name} log service is {service_name}, expected {name}-service"
-            )
+            raise ValidationError(f"{name} log service is {service_name}, expected {name}-service")
         if not re.fullmatch(r"[a-z][a-z0-9-]*", port_name):
             raise ValidationError(f"{name} log port name is invalid: {port_name}")
 
         stream_matches = re.findall(r"(?m)^\s*max_streams\s*=\s*([0-9]+)\s*$", block)
         if len(stream_matches) != 1 or int(stream_matches[0]) < 1:
-            raise ValidationError(
-                f"{name} log registration must set a positive max_streams once"
-            )
+            raise ValidationError(f"{name} log registration must set a positive max_streams once")
 
 
 def validate_log_target_policy(config: str) -> None:
@@ -178,9 +169,7 @@ def validate_log_target_policy(config: str) -> None:
         rule = match.group(1)
         if not re.search(r'(?m)^\s*action\s*=\s*"keep"\s*$', rule):
             continue
-        source_match = re.search(
-            r'(?m)^\s*source_labels\s*=\s*\["([^"]+)"\]\s*$', rule
-        )
+        source_match = re.search(r'(?m)^\s*source_labels\s*=\s*\["([^"]+)"\]\s*$', rule)
         regex_match = re.search(r"(?m)^\s*regex\s*=\s*(\S+)\s*$", rule)
         if source_match is None or regex_match is None:
             raise ValidationError(
@@ -188,15 +177,11 @@ def validate_log_target_policy(config: str) -> None:
             )
         source_label = source_match.group(1)
         if source_label in keep_rules:
-            raise ValidationError(
-                f"service log target keep rule is duplicated: {source_label}"
-            )
+            raise ValidationError(f"service log target keep rule is duplicated: {source_label}")
         keep_rules[source_label] = regex_match.group(1)
 
     expected = {
-        "__meta_kubernetes_pod_label_app_kubernetes_io_name": (
-            "argument.container_name.value"
-        ),
+        "__meta_kubernetes_pod_label_app_kubernetes_io_name": ("argument.container_name.value"),
         "__meta_kubernetes_pod_label_environment": '"qa"',
         "__meta_kubernetes_pod_container_name": "argument.container_name.value",
         "__meta_kubernetes_pod_container_port_name": "argument.port_name.value",
@@ -223,14 +208,14 @@ def validate_source_policy(config: str, values: str, makefile: str) -> None:
         'otelcol.processor.transform "service_trace_policies"',
         'otelcol.processor.filter "service_metric_policies"',
         r'Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"]',
-        'keep_matching_keys(attributes',
+        "keep_matching_keys(attributes",
         "set(events, nil)",
         "set(links, nil)",
         'discovery.kubernetes "qa_service_pods"',
         'declare "service_json_logs"',
         "regex = argument.container_name.value",
         "regex = argument.port_name.value",
-        '(eq .record_service_name .target_service_name)',
+        "(eq .record_service_name .target_service_name)",
         "forward_to = [loki.write.service.receiver]",
         'loki.write "service"',
         'source_labels = ["__meta_kubernetes_pod_container_port_name"]',
@@ -249,15 +234,15 @@ def validate_source_policy(config: str, values: str, makefile: str) -> None:
         '(ne .target_service_version "sha-unpublished")',
         'otelcol.exporter.otlp "tempo"',
         'otelcol.exporter.otlp "zipkin_bridge"',
-        'keep_identifying_resource_attributes = true',
-        'resource_to_telemetry_conversion     = false',
+        "keep_identifying_resource_attributes = true",
+        "resource_to_telemetry_conversion     = false",
         'limit          = "800MiB"',
         'spike_limit    = "160MiB"',
-        'queue_size        = 2048',
+        "queue_size        = 2048",
         'truncate_frequency = "5m"',
         'max_keepalive_time = "15m"',
     )
-    comparison_config = config.replace(r'\"', '"')
+    comparison_config = config.replace(r"\"", '"')
     normalized_config = re.sub(r"\s+", " ", comparison_config)
     missing = [
         fragment
@@ -306,22 +291,23 @@ def validate_source_policy(config: str, values: str, makefile: str) -> None:
     if len(metric_dimension_allowlists) != 7:
         raise ValidationError("shared Go metric policy must contain seven dimension allowlists")
     if any(
-        'resource.attributes["insurance_hub.service.implementation"] == "go"'
-        not in line
+        'resource.attributes["insurance_hub.service.implementation"] == "go"' not in line
         for line in metric_dimension_allowlists
     ):
         raise ValidationError("metric datapoint allowlists must remain Go-service scoped")
     if re.search(r"insurance_hub\\\\\.[a-z0-9_]+", metric_transform):
         raise ValidationError("shared Go metric policy must not encode one service namespace")
     if metric_transform.count('resource.attributes["insurance_hub.expected.service.domain"]') < 5:
-        raise ValidationError("metric policy must bind instruments and dimensions to service domain")
+        raise ValidationError(
+            "metric policy must bind instruments and dimensions to service domain"
+        )
 
     for marker in (
         'otelcol.processor.transform "service_trace_policies"',
         'otelcol.processor.transform "service_metric_policies"',
     ):
         allowlist_statements = re.findall(
-            r'keep_keys\(attributes, \[([^]]+)\]\)[^`]*', _block(config, marker)
+            r"keep_keys\(attributes, \[([^]]+)\]\)[^`]*", _block(config, marker)
         )
         resource_allowlists = [
             tuple(re.findall(r'"([^"]+)"', statement))
@@ -366,9 +352,7 @@ def validate_source_policy(config: str, values: str, makefile: str) -> None:
 
     label_keep = tuple(re.findall(r'"([^"]+)"', _block(config, "stage.label_keep")))
     if label_keep != LOKI_INDEX_LABELS:
-        raise ValidationError(
-            f"Loki index labels are {label_keep}, expected {LOKI_INDEX_LABELS}"
-        )
+        raise ValidationError(f"Loki index labels are {label_keep}, expected {LOKI_INDEX_LABELS}")
 
     if f"tag: {ALLOY_IMAGE_VERSION}" not in values:
         raise ValidationError(f"Alloy image must remain pinned to {ALLOY_IMAGE_VERSION}")
@@ -391,9 +375,7 @@ def validate_source_policy(config: str, values: str, makefile: str) -> None:
         )
     if "    content: |-" in values:
         raise ValidationError("values.yaml must not duplicate the Alloy configuration source")
-    if not re.search(
-        r"(?m)^  configMap:\n(?:    #.*\n)*    create: true$", values
-    ):
+    if not re.search(r"(?m)^  configMap:\n(?:    #.*\n)*    create: true$", values):
         raise ValidationError("values.yaml must keep chart-owned ConfigMap creation enabled")
 
     validate_service_log_registrations(config)
@@ -432,7 +414,7 @@ def parse_role(rendered: str) -> tuple[str, list[tuple[set[str], set[str]]]]:
         raise ValidationError("rendered Alloy Role has no namespace")
 
     rules: list[tuple[set[str], set[str]]] = []
-    current: Optional[dict[str, set[str]]] = None
+    current: dict[str, set[str]] | None = None
     field = ""
     for line in role.splitlines():
         if line.startswith("  - apiGroups:"):
@@ -519,9 +501,7 @@ def enrich_legacy_identity(
     return enriched
 
 
-def valid_go_identity(
-    resource: Mapping[str, str], kubernetes_version: Optional[str]
-) -> bool:
+def valid_go_identity(resource: Mapping[str, str], kubernetes_version: str | None) -> bool:
     version = resource.get("service.version")
     container_name = resource.get("k8s.container.name", "")
     expected_service_name = (
@@ -560,9 +540,9 @@ def sanitize_legacy_http_span(
     path = normalized.get("http.path")
     matched_route = False
     for path_pattern, name_pattern, route, span_name in route_rules:
-        if (
-            isinstance(path, str) and re.fullmatch(path_pattern, path)
-        ) or re.fullmatch(name_pattern, name):
+        if (isinstance(path, str) and re.fullmatch(path_pattern, path)) or re.fullmatch(
+            name_pattern, name
+        ):
             normalized["http.route"] = route
             name = span_name
             matched_route = True
@@ -578,16 +558,10 @@ def sanitize_legacy_http_span(
         f"insurance_hub.{service_domain}.database.stage",
     }
     allowed = set(COMMON_SPAN_ATTRIBUTES) | service_attributes
-    return name, {
-        key: value
-        for key, value in normalized.items()
-        if key in allowed
-    }
+    return name, {key: value for key, value in normalized.items() if key in allowed}
 
 
-def sanitize_go_span(
-    service_domain: str, attributes: Mapping[str, object]
-) -> dict[str, object]:
+def sanitize_go_span(service_domain: str, attributes: Mapping[str, object]) -> dict[str, object]:
     service_attributes = {
         f"insurance_hub.{service_domain}.operation",
         f"insurance_hub.{service_domain}.transport",
@@ -669,9 +643,7 @@ def select_service_targets(
     return list(selected.values())
 
 
-def log_labels(
-    record: Mapping[str, str], target: Mapping[str, str]
-) -> Optional[dict[str, str]]:
+def log_labels(record: Mapping[str, str], target: Mapping[str, str]) -> dict[str, str] | None:
     version = target.get("service_version")
     if not (
         record.get("service_namespace") == "insurance-hub"
@@ -691,7 +663,7 @@ def log_labels(
     return {key: combined[key] for key in LOKI_INDEX_LABELS if key in combined}
 
 
-def position_key(target: Mapping[str, str]) -> tuple[Optional[str], Optional[str]]:
+def position_key(target: Mapping[str, str]) -> tuple[str | None, str | None]:
     return target.get("pod_uid"), target.get("container")
 
 
@@ -717,7 +689,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     try:
         run_check(parse_args(sys.argv[1:] if argv is None else argv))
     except (OSError, ValidationError) as error:

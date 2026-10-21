@@ -7,8 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
-
+from typing import Any
 
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9-]*$")
 
@@ -25,12 +24,12 @@ class MonitoringAssets:
     service_dir: Path
     environment_name: str
     service: str
-    environment: Dict[str, Any]
-    contract: Dict[str, Any]
-    dashboard: Dict[str, Any]
+    environment: dict[str, Any]
+    contract: dict[str, Any]
+    dashboard: dict[str, Any]
     alerts_path: Path
     alert_tests_path: Path
-    fixture: Dict[str, Any]
+    fixture: dict[str, Any]
 
 
 def require_identifier(value: str, label: str) -> None:
@@ -38,7 +37,7 @@ def require_identifier(value: str, label: str) -> None:
         raise AssetError(f"{label} must match {IDENTIFIER.pattern!r}: {value!r}")
 
 
-def load_json_object(path: Path, label: str) -> Dict[str, Any]:
+def load_json_object(path: Path, label: str) -> dict[str, Any]:
     try:
         parsed = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -48,7 +47,7 @@ def load_json_object(path: Path, label: str) -> Dict[str, Any]:
     return parsed
 
 
-def require_text(mapping: Dict[str, Any], key: str, label: str) -> str:
+def require_text(mapping: dict[str, Any], key: str, label: str) -> str:
     value = mapping.get(key)
     if not isinstance(value, str) or not value:
         raise AssetError(f"{label}.{key} must be a non-empty string")
@@ -155,7 +154,7 @@ def load_assets(assets_root: Path, environment_name: str, service: str) -> Monit
     )
 
 
-def prometheus_rule_resource(assets: MonitoringAssets) -> Dict[str, Any]:
+def prometheus_rule_resource(assets: MonitoringAssets) -> dict[str, Any]:
     """Return metadata for a PrometheusRule; the YAML spec is appended by the renderer."""
     resource_name = f"{assets.environment_name}-{assets.contract['prometheus_rule_name']}"
     require_identifier(resource_name, "PrometheusRule name")
@@ -175,7 +174,7 @@ def prometheus_rule_resource(assets: MonitoringAssets) -> Dict[str, Any]:
     }
 
 
-def grafana_dashboard_resource(assets: MonitoringAssets) -> Dict[str, Any]:
+def grafana_dashboard_resource(assets: MonitoringAssets) -> dict[str, Any]:
     """Return metadata for a Grafana sidecar dashboard ConfigMap."""
     resource_name = f"{assets.environment_name}-{assets.service}-dashboard"
     require_identifier(resource_name, "Grafana dashboard ConfigMap name")

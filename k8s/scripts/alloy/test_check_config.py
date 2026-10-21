@@ -1,19 +1,11 @@
 #!/usr/bin/env python3
-"""Behavior tests for the repository-owned Alloy policy checker."""
+"""Pytest coverage for the repository-owned Alloy policy checker."""
 
 from __future__ import annotations
 
-import importlib.util
-import unittest
-from pathlib import Path
+import pytest
 
-
-CHECK_PATH = Path(__file__).with_name("check-config.py")
-CHECK_SPEC = importlib.util.spec_from_file_location("alloy_check", CHECK_PATH)
-if CHECK_SPEC is None or CHECK_SPEC.loader is None:
-    raise RuntimeError(f"cannot load Alloy checker from {CHECK_PATH}")
-alloy_check = importlib.util.module_from_spec(CHECK_SPEC)
-CHECK_SPEC.loader.exec_module(alloy_check)
+import check_config as alloy_check
 
 # Product data below is limited to the transitional legacy-Java contract. Shared Go
 # behavior uses neutral fixtures and is not extended when another service is added.
@@ -52,7 +44,7 @@ def go_resource(
     }
 
 
-class IdentityPolicyTest(unittest.TestCase):
+class TestIdentityPolicy:
     def test_java_enrichment_preserves_conflicts_and_misses(self) -> None:
         conflict = alloy_check.enrich_legacy_identity(
             {
@@ -70,9 +62,9 @@ class IdentityPolicyTest(unittest.TestCase):
             "product-service",
             "product-api-legacy",
         )
-        self.assertEqual("unexpected", conflict["service.version"])
-        self.assertEqual("existing-instance", conflict["service.instance.id"])
-        self.assertEqual("unexpected", conflict["insurance_hub.service.implementation"])
+        assert "unexpected" == conflict["service.version"]
+        assert "existing-instance" == conflict["service.instance.id"]
+        assert "unexpected" == conflict["insurance_hub.service.implementation"]
 
         missed = alloy_check.enrich_legacy_identity(
             {"service.name": "product-service"},
@@ -80,9 +72,9 @@ class IdentityPolicyTest(unittest.TestCase):
             "product-service",
             "product-api-legacy",
         )
-        self.assertNotIn("service.version", missed)
-        self.assertNotIn("service.instance.id", missed)
-        self.assertEqual("java", missed["insurance_hub.service.implementation"])
+        assert "service.version" not in missed
+        assert "service.instance.id" not in missed
+        assert "java" == missed["insurance_hub.service.implementation"]
 
         wrong_name = alloy_check.enrich_legacy_identity(
             {"service.name": "conflicting-service"},
@@ -94,12 +86,12 @@ class IdentityPolicyTest(unittest.TestCase):
             "product-service",
             "product-api-legacy",
         )
-        self.assertEqual("conflicting-service", wrong_name["service.name"])
-        self.assertEqual("java", wrong_name["insurance_hub.service.implementation"])
+        assert "conflicting-service" == wrong_name["service.name"]
+        assert "java" == wrong_name["insurance_hub.service.implementation"]
 
     def test_go_identity_rejects_conflicts_misses_and_mutable_versions(self) -> None:
         valid = go_resource("alpha")
-        self.assertTrue(alloy_check.valid_go_identity(valid, "2.0.0"))
+        assert alloy_check.valid_go_identity(valid, "2.0.0")
         for key in (
             "service.namespace",
             "service.name",
@@ -110,39 +102,32 @@ class IdentityPolicyTest(unittest.TestCase):
         ):
             invalid = dict(valid)
             invalid.pop(key)
-            self.assertFalse(alloy_check.valid_go_identity(invalid, "2.0.0"), key)
+            assert not alloy_check.valid_go_identity(invalid, "2.0.0"), key
         for version in ("latest", "unconfigured", "sha-unpublished"):
             invalid = dict(valid)
             invalid["service.version"] = version
-            self.assertFalse(alloy_check.valid_go_identity(invalid, version))
-        self.assertFalse(alloy_check.valid_go_identity(valid, "2.1.0"))
+            assert not alloy_check.valid_go_identity(invalid, version)
+        assert not alloy_check.valid_go_identity(valid, "2.1.0")
 
     def test_go_identity_uses_the_shared_container_service_convention(self) -> None:
         for service_slug, _ in GO_SERVICE_CASES:
-            with self.subTest(service_slug=service_slug):
-                resource = go_resource(service_slug, pod_uid=f"pod-{service_slug}")
-                self.assertTrue(alloy_check.valid_go_identity(resource, "2.0.0"))
-                self.assertFalse(
-                    alloy_check.valid_go_identity(
-                        dict(resource, **{"service.name": "other-service"}), "2.0.0"
-                    )
-                )
+            resource = go_resource(service_slug, pod_uid=f"pod-{service_slug}")
+            assert alloy_check.valid_go_identity(resource, "2.0.0")
+            assert not alloy_check.valid_go_identity(
+                dict(resource, **{"service.name": "other-service"}), "2.0.0"
+            )
 
     def test_resource_keeps_only_approved_attributes(self) -> None:
         resource = {
-            key: f"value-{index}"
-            for index, key in enumerate(alloy_check.RESOURCE_ATTRIBUTES)
+            key: f"value-{index}" for index, key in enumerate(alloy_check.RESOURCE_ATTRIBUTES)
         }
         resource["authorization"] = "forbidden"
         resource["enduser.id"] = "forbidden"
-        self.assertEqual(
-            set(alloy_check.RESOURCE_ATTRIBUTES),
-            set(alloy_check.sanitize_resource(resource)),
-        )
+        assert set(alloy_check.RESOURCE_ATTRIBUTES) == set(alloy_check.sanitize_resource(resource))
 
 
-class MetricPolicyTest(unittest.TestCase):
-    def setUp(self) -> None:
+class TestMetricPolicy:
+    def setup_method(self) -> None:
         self.resource = go_resource("alpha")
         self.resource["authorization"] = "forbidden"
 
@@ -160,65 +145,49 @@ class MetricPolicyTest(unittest.TestCase):
             },
             self.resource,
         )
-        self.assertEqual(
-            set(alloy_check.METRIC_RESOURCE_LABELS)
-            | {
-                "insurance_hub.alpha.operation",
-                "insurance_hub.alpha.transport",
-                "insurance_hub.alpha.outcome",
-                "http.response.status_code",
-            },
-            set(result),
-        )
-        self.assertNotIn("k8s.pod.uid", result)
-        self.assertNotIn("authorization", result)
+        assert set(alloy_check.METRIC_RESOURCE_LABELS) | {
+            "insurance_hub.alpha.operation",
+            "insurance_hub.alpha.transport",
+            "insurance_hub.alpha.outcome",
+            "http.response.status_code",
+        } == set(result)
+        assert "k8s.pod.uid" not in result
+        assert "authorization" not in result
 
     def test_unknown_service_metric_is_removed(self) -> None:
-        self.assertEqual(
-            {},
-            alloy_check.sanitize_datapoint(
-                "insurance_hub.alpha.unbounded", {"record_id": "x"}, self.resource
-            ),
+        assert {} == alloy_check.sanitize_datapoint(
+            "insurance_hub.alpha.unbounded", {"record_id": "x"}, self.resource
         )
 
     def test_services_use_the_shared_dimension_policy(self) -> None:
         for service_slug, service_domain in GO_SERVICE_CASES:
-            with self.subTest(service_slug=service_slug):
-                resource = go_resource(service_slug)
-                result = alloy_check.sanitize_datapoint(
-                    f"insurance_hub.{service_domain}.requests",
-                    {
-                        f"insurance_hub.{service_domain}.operation": "read",
-                        f"insurance_hub.{service_domain}.transport": "grpc",
-                        f"insurance_hub.{service_domain}.outcome": "success",
-                        "record_id": "forbidden",
-                    },
-                    resource,
-                )
-                self.assertIn(f"insurance_hub.{service_domain}.operation", result)
-                self.assertNotIn("record_id", result)
-                self.assertEqual(f"{service_slug}-service", result["service_name"])
-                self.assertEqual(
-                    {},
-                    alloy_check.sanitize_datapoint(
-                        "insurance_hub.other.requests",
-                        {"insurance_hub.other.operation": "read"},
-                        resource,
-                    ),
-                )
+            resource = go_resource(service_slug)
+            result = alloy_check.sanitize_datapoint(
+                f"insurance_hub.{service_domain}.requests",
+                {
+                    f"insurance_hub.{service_domain}.operation": "read",
+                    f"insurance_hub.{service_domain}.transport": "grpc",
+                    f"insurance_hub.{service_domain}.outcome": "success",
+                    "record_id": "forbidden",
+                },
+                resource,
+            )
+            assert f"insurance_hub.{service_domain}.operation" in result
+            assert "record_id" not in result
+            assert f"{service_slug}-service" == result["service_name"]
+            assert {} == alloy_check.sanitize_datapoint(
+                "insurance_hub.other.requests",
+                {"insurance_hub.other.operation": "read"},
+                resource,
+            )
 
     def test_unrelated_metric_attributes_are_preserved(self) -> None:
         attributes = {"worker": "one", "authorization": "owned-by-other-route"}
         resource = {"service.name": "another-service"}
-        self.assertEqual(
-            attributes,
-            alloy_check.sanitize_datapoint(
-                "go.memory.used", attributes, resource
-            ),
-        )
+        assert attributes == alloy_check.sanitize_datapoint("go.memory.used", attributes, resource)
 
 
-class SpanPolicyTest(unittest.TestCase):
+class TestSpanPolicy:
     def test_java_span_is_normalized_and_forbidden_fields_are_removed(self) -> None:
         name, attributes = alloy_check.sanitize_legacy_http_span(
             "get /products/PERSONAL_AUTO",
@@ -233,13 +202,13 @@ class SpanPolicyTest(unittest.TestCase):
             "product",
             PRODUCT_ROUTE_RULES,
         )
-        self.assertEqual("GET /products/{productCode}", name)
-        self.assertEqual("GET", attributes["http.request.method"])
-        self.assertEqual("/products/{productCode}", attributes["http.route"])
-        self.assertEqual(200, attributes["http.response.status_code"])
-        self.assertNotIn("http.path", attributes)
-        self.assertNotIn("authorization", attributes)
-        self.assertNotIn("error.message", attributes)
+        assert "GET /products/{productCode}" == name
+        assert "GET" == attributes["http.request.method"]
+        assert "/products/{productCode}" == attributes["http.route"]
+        assert 200 == attributes["http.response.status_code"]
+        assert "http.path" not in attributes
+        assert "authorization" not in attributes
+        assert "error.message" not in attributes
 
     def test_unknown_java_route_is_bounded(self) -> None:
         name, attributes = alloy_check.sanitize_legacy_http_span(
@@ -248,9 +217,9 @@ class SpanPolicyTest(unittest.TestCase):
             "product",
             PRODUCT_ROUTE_RULES,
         )
-        self.assertEqual("HTTP _OTHER", name)
-        self.assertEqual("_OTHER", attributes["http.request.method"])
-        self.assertNotIn("http.route", attributes)
+        assert "HTTP _OTHER" == name
+        assert "_OTHER" == attributes["http.request.method"]
+        assert "http.route" not in attributes
 
     def test_go_span_uses_the_shared_safe_field_policy(self) -> None:
         attributes = alloy_check.sanitize_go_span(
@@ -263,15 +232,15 @@ class SpanPolicyTest(unittest.TestCase):
                 "authorization": "forbidden",
             },
         )
-        self.assertEqual("read", attributes["insurance_hub.alpha.operation"])
-        self.assertEqual("/records", attributes["http.route"])
-        self.assertNotIn("record_id", attributes)
-        self.assertNotIn("authorization", attributes)
+        assert "read" == attributes["insurance_hub.alpha.operation"]
+        assert "/records" == attributes["http.route"]
+        assert "record_id" not in attributes
+        assert "authorization" not in attributes
 
 
-class LogPolicyTest(unittest.TestCase):
+class TestLogPolicy:
     def test_log_target_policy_requires_each_collection_boundary(self) -> None:
-        config = '''
+        config = """
 discovery.relabel "logs" {
   targets = argument.targets.value
 
@@ -296,7 +265,7 @@ discovery.relabel "logs" {
     regex = argument.port_name.value
   }
 }
-'''
+"""
         alloy_check.validate_log_target_policy(config)
         for source_label in (
             "__meta_kubernetes_pod_label_app_kubernetes_io_name",
@@ -304,10 +273,9 @@ discovery.relabel "logs" {
             "__meta_kubernetes_pod_container_name",
             "__meta_kubernetes_pod_container_port_name",
         ):
-            with self.subTest(source_label=source_label):
-                invalid = config.replace(source_label, f"{source_label}_wrong", 1)
-                with self.assertRaises(alloy_check.ValidationError):
-                    alloy_check.validate_log_target_policy(invalid)
+            invalid = config.replace(source_label, f"{source_label}_wrong", 1)
+            with pytest.raises(alloy_check.ValidationError):
+                alloy_check.validate_log_target_policy(invalid)
 
     def test_duplicate_port_targets_reduce_to_one_reader(self) -> None:
         common = {
@@ -319,11 +287,9 @@ discovery.relabel "logs" {
         }
         targets = [dict(common, port=port) for port in ("http", "grpc", "management")]
         targets.append(dict(common, port="http"))
-        selected = alloy_check.select_service_targets(
-            targets, "alpha-api", "http", "alpha-service"
-        )
-        self.assertEqual(1, len(selected))
-        self.assertEqual("http", selected[0]["port"])
+        selected = alloy_check.select_service_targets(targets, "alpha-api", "http", "alpha-service")
+        assert 1 == len(selected)
+        assert "http" == selected[0]["port"]
 
     def test_workload_target_mismatches_are_rejected_before_log_read(self) -> None:
         allowed = {
@@ -337,7 +303,7 @@ discovery.relabel "logs" {
         selected = alloy_check.select_service_targets(
             [allowed], "alpha-api", "http", "alpha-service"
         )
-        self.assertEqual(1, len(selected))
+        assert 1 == len(selected)
 
         mismatches = {
             "namespace": "qa-monitoring",
@@ -347,14 +313,13 @@ discovery.relabel "logs" {
             "port": "management",
         }
         for field, value in mismatches.items():
-            with self.subTest(field=field):
-                rejected = alloy_check.select_service_targets(
-                    [dict(allowed, **{field: value})],
-                    "alpha-api",
-                    "http",
-                    "alpha-service",
-                )
-                self.assertEqual([], rejected)
+            rejected = alloy_check.select_service_targets(
+                [dict(allowed, **{field: value})],
+                "alpha-api",
+                "http",
+                "alpha-service",
+            )
+            assert [] == rejected, field
 
     def test_log_identity_and_index_allowlist(self) -> None:
         record = {
@@ -376,29 +341,26 @@ discovery.relabel "logs" {
         }
         target["service_name"] = "alpha-service"
         labels = alloy_check.log_labels(record, target)
-        self.assertIsNotNone(labels)
-        self.assertEqual(set(alloy_check.LOKI_INDEX_LABELS), set(labels or {}))
-        self.assertNotIn("trace_id", labels or {})
+        assert labels is not None
+        assert set(alloy_check.LOKI_INDEX_LABELS) == set(labels or {})
+        assert "trace_id" not in (labels or {})
 
         conflict = dict(record, service_version="latest")
-        self.assertIsNone(alloy_check.log_labels(conflict, target))
+        assert alloy_check.log_labels(conflict, target) is None
         for version in ("", "latest", "unconfigured", "sha-unpublished"):
-            self.assertIsNone(
+            assert (
                 alloy_check.log_labels(
-                    dict(record, service_version=version),
-                    dict(target, service_version=version),
-                ),
-                version,
-            )
-        self.assertIsNone(
-            alloy_check.log_labels(dict(record, level="DEBUG"), target)
-        )
+                    dict(record, service_version=version), dict(target, service_version=version)
+                )
+                is None
+            ), version
+        assert alloy_check.log_labels(dict(record, level="DEBUG"), target) is None
         missing = dict(record)
         missing.pop("service_instance_id")
-        self.assertIsNone(alloy_check.log_labels(missing, target))
+        assert alloy_check.log_labels(missing, target) is None
 
     def test_log_policy_reuses_service_registrations(self) -> None:
-        registration_config = '''
+        registration_config = """
 service_json_logs "multi-part" {
   targets        = discovery.kubernetes.qa_service_pods.targets
   container_name = "multi-part-api"
@@ -406,9 +368,9 @@ service_json_logs "multi-part" {
   service_name   = "multi-part-service"
   max_streams    = 8
 }
-'''
+"""
         alloy_check.validate_service_log_registrations(registration_config)
-        with self.assertRaises(alloy_check.ValidationError):
+        with pytest.raises(alloy_check.ValidationError):
             alloy_check.validate_service_log_registrations(
                 registration_config.replace(
                     'service_name   = "multi-part-service"',
@@ -431,7 +393,7 @@ service_json_logs "multi-part" {
         selected = alloy_check.select_service_targets(
             targets, "multi-part-api", "http", "multi-part-service"
         )
-        self.assertEqual(1, len(selected))
+        assert 1 == len(selected)
 
         record = {
             "service_namespace": "insurance-hub",
@@ -443,22 +405,18 @@ service_json_logs "multi-part" {
             "level": "WARN",
         }
         labels = alloy_check.log_labels(record, selected[0])
-        self.assertIsNotNone(labels)
-        self.assertEqual("multi-part-service", (labels or {}).get("service_name"))
+        assert labels is not None
+        assert "multi-part-service" == (labels or {}).get("service_name")
 
     def test_restart_position_identity_and_ephemeral_replacement(self) -> None:
         initial = {"pod_uid": "pod-a", "container": "alpha-api", "restart": "0"}
         restarted = {"pod_uid": "pod-a", "container": "alpha-api", "restart": "1"}
         replacement = {"pod_uid": "pod-b", "container": "alpha-api", "restart": "0"}
-        self.assertEqual(
-            alloy_check.position_key(initial), alloy_check.position_key(restarted)
-        )
-        self.assertNotEqual(
-            alloy_check.position_key(initial), alloy_check.position_key(replacement)
-        )
+        assert alloy_check.position_key(initial) == alloy_check.position_key(restarted)
+        assert alloy_check.position_key(initial) != alloy_check.position_key(replacement)
 
 
-class RBACPolicyTest(unittest.TestCase):
+class TestRBACPolicy:
     def test_scoped_role_denies_unrelated_access(self) -> None:
         rendered = """
 kind: Role
@@ -496,16 +454,10 @@ subjects:
 """
         alloy_check.validate_rendered_rbac(rendered)
         namespace, rules = alloy_check.parse_role(rendered)
-        self.assertTrue(alloy_check.role_allows(namespace, rules, "qa-svc", "pods/log", "get"))
-        self.assertFalse(alloy_check.role_allows(namespace, rules, "qa-svc", "secrets", "get"))
-        self.assertFalse(
-            alloy_check.role_allows(namespace, rules, "qa-monitoring", "pods/log", "get")
-        )
+        assert alloy_check.role_allows(namespace, rules, "qa-svc", "pods/log", "get")
+        assert not alloy_check.role_allows(namespace, rules, "qa-svc", "secrets", "get")
+        assert not alloy_check.role_allows(namespace, rules, "qa-monitoring", "pods/log", "get")
 
     def test_cluster_role_is_rejected(self) -> None:
-        with self.assertRaises(alloy_check.ValidationError):
+        with pytest.raises(alloy_check.ValidationError):
             alloy_check.parse_role("kind: ClusterRole\nmetadata:\n  name: qa-alloy\n")
-
-
-if __name__ == "__main__":
-    unittest.main()

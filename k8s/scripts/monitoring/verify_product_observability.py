@@ -13,10 +13,12 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, Mapping, Optional, Sequence
+from typing import Any
 
+import monitoring_runtime
 from monitoring_assets import (
     AssetError,
     MonitoringAssets,
@@ -24,7 +26,6 @@ from monitoring_assets import (
     load_assets,
     prometheus_rule_resource,
 )
-
 
 COMMAND_TIMEOUT = 30
 FORWARD_TIMEOUT = 15
@@ -47,9 +48,7 @@ def run(arguments: Sequence[str], timeout: int = COMMAND_TIMEOUT) -> str:
             list(arguments), capture_output=True, text=True, timeout=timeout, check=False
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise VerificationError(
-            f"command unavailable or timed out: {arguments[0]}"
-        ) from error
+        raise VerificationError(f"command unavailable or timed out: {arguments[0]}") from error
     require(
         result.returncode == 0,
         f"command failed: {arguments[0]} (exit {result.returncode})",
@@ -57,10 +56,12 @@ def run(arguments: Sequence[str], timeout: int = COMMAND_TIMEOUT) -> str:
     return result.stdout
 
 
-def request_json(url: str, timeout: float = 10) -> Dict[str, Any]:
+def request_json(url: str, timeout: float = 10) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
-            require(response.status == 200, f"verification endpoint returned HTTP {response.status}")
+            require(
+                response.status == 200, f"verification endpoint returned HTTP {response.status}"
+            )
             value = json.load(response)
     except VerificationError:
         raise
@@ -70,7 +71,7 @@ def request_json(url: str, timeout: float = 10) -> Dict[str, Any]:
     return value
 
 
-def request_text(url: str, headers: Optional[Mapping[str, str]] = None) -> str:
+def request_text(url: str, headers: Mapping[str, str] | None = None) -> str:
     request = urllib.request.Request(url, headers=dict(headers or {}))
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
@@ -82,7 +83,7 @@ def request_text(url: str, headers: Optional[Mapping[str, str]] = None) -> str:
         raise VerificationError("Product endpoint was unavailable") from error
 
 
-def verification_config(assets: MonitoringAssets) -> Dict[str, str]:
+def verification_config(assets: MonitoringAssets) -> dict[str, str]:
     value = assets.environment.get("product_verification")
     require(isinstance(value, dict), "environment product_verification must be an object")
     required = {
@@ -97,7 +98,9 @@ def verification_config(assets: MonitoringAssets) -> Dict[str, str]:
         "flux_source",
         "flux_kustomization",
     }
-    require(set(value) == required, "environment product_verification fields differ from the contract")
+    require(
+        set(value) == required, "environment product_verification fields differ from the contract"
+    )
     require(
         all(isinstance(value[name], str) and value[name] for name in required),
         "environment product_verification fields must be non-empty strings",
@@ -107,9 +110,14 @@ def verification_config(assets: MonitoringAssets) -> Dict[str, str]:
 
 class KubernetesTarget:
     def __init__(self, assets: MonitoringAssets, source_revision: str) -> None:
-        require(assets.environment_name == "qa", "live Product observability verification is QA-only")
+        require(
+            assets.environment_name == "qa", "live Product observability verification is QA-only"
+        )
         require(assets.service == "product", "live verification supports Product only")
-        require(bool(REVISION.fullmatch(source_revision)), "source revision must be 40 lowercase hex characters")
+        require(
+            bool(REVISION.fullmatch(source_revision)),
+            "source revision must be 40 lowercase hex characters",
+        )
         self.assets = assets
         self.source_revision = source_revision
         self.context = assets.environment["kube_context"]
@@ -118,11 +126,9 @@ class KubernetesTarget:
         self.service_namespace = self.config["service_namespace"]
 
     def kubectl(self, namespace: str, *arguments: str) -> str:
-        return run(
-            ["kubectl", "--context", self.context, "--namespace", namespace, *arguments]
-        )
+        return run(["kubectl", "--context", self.context, "--namespace", namespace, *arguments])
 
-    def json(self, namespace: str, *arguments: str) -> Dict[str, Any]:
+    def json(self, namespace: str, *arguments: str) -> dict[str, Any]:
         try:
             value = json.loads(self.kubectl(namespace, *arguments, "-o", "json"))
         except json.JSONDecodeError as error:
@@ -132,10 +138,13 @@ class KubernetesTarget:
 
     def coordinates(self) -> None:
         active = run(["kubectl", "config", "current-context"]).strip()
-        require(active == self.context, "active Kubernetes context differs from the requested target")
-        namespace = run(
-            ["kubectl", "config", "view", "--minify", "-o", "jsonpath={..namespace}"]
-        ).strip() or "default"
+        require(
+            active == self.context, "active Kubernetes context differs from the requested target"
+        )
+        namespace = (
+            run(["kubectl", "config", "view", "--minify", "-o", "jsonpath={..namespace}"]).strip()
+            or "default"
+        )
         require(
             namespace == self.service_namespace,
             "active Kubernetes namespace differs from the Product service namespace",
@@ -146,14 +155,11 @@ class KubernetesTarget:
     def flux_revision(self) -> str:
         namespace = self.config["flux_namespace"]
         source = self.json(namespace, "get", "gitrepository", self.config["flux_source"])
-        reconciler = self.json(
-            namespace, "get", "kustomization", self.config["flux_kustomization"]
-        )
+        reconciler = self.json(namespace, "get", "kustomization", self.config["flux_kustomization"])
         for item in (source, reconciler):
             require(
                 any(
-                    condition.get("type") == "Ready"
-                    and condition.get("status") == "True"
+                    condition.get("type") == "Ready" and condition.get("status") == "True"
                     for condition in item.get("status", {}).get("conditions", [])
                 ),
                 "Flux source or Product Kustomization is not ready",
@@ -161,13 +167,12 @@ class KubernetesTarget:
         source_revision = source.get("status", {}).get("artifact", {}).get("revision", "")
         applied_revision = reconciler.get("status", {}).get("lastAppliedRevision", "")
         require(
-            source_revision.endswith(self.source_revision)
-            and applied_revision == source_revision,
+            source_revision.endswith(self.source_revision) and applied_revision == source_revision,
             "Flux source/applied revision differs from the requested source revision",
         )
         return source_revision
 
-    def deployment(self, mode: str) -> Dict[str, Any]:
+    def deployment(self, mode: str) -> dict[str, Any]:
         deployment = self.json(
             self.service_namespace,
             "get",
@@ -177,11 +182,11 @@ class KubernetesTarget:
         desired = deployment.get("spec", {}).get("replicas", 0)
         ready = deployment.get("status", {}).get("readyReplicas", 0)
         require(desired > 0 and ready == desired, "Product Deployment is not fully ready")
-        containers = deployment.get("spec", {}).get("template", {}).get("spec", {}).get(
-            "containers", []
+        containers = (
+            deployment.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
         )
         require(len(containers) == 1, "Product Deployment has an unexpected container inventory")
-        settings: Dict[str, str] = {}
+        settings: dict[str, str] = {}
         for source in containers[0].get("envFrom", []):
             name = source.get("configMapRef", {}).get("name")
             require(isinstance(name, str) and name, "Product envFrom is not a ConfigMap reference")
@@ -193,12 +198,23 @@ class KubernetesTarget:
             if isinstance(variable.get("value"), str):
                 settings[variable["name"]] = variable["value"]
         expected = "true" if mode == "enabled" else "false"
-        require(settings.get("OTEL_ENABLED") == expected, f"Product OTEL_ENABLED must be {expected}")
-        require(settings.get("SERVICE_NAME", "product-service") == "product-service", "Product service identity differs")
+        require(
+            settings.get("OTEL_ENABLED") == expected, f"Product OTEL_ENABLED must be {expected}"
+        )
+        require(
+            settings.get("SERVICE_NAME", "product-service") == "product-service",
+            "Product service identity differs",
+        )
         if mode == "enabled":
-            require(settings.get("DEPLOYMENT_ENVIRONMENT") == "qa", "enabled Product environment must be qa")
+            require(
+                settings.get("DEPLOYMENT_ENVIRONMENT") == "qa",
+                "enabled Product environment must be qa",
+            )
             endpoint = settings.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-            require(endpoint.startswith("http://qa-alloy.qa-monitoring.svc"), "enabled Product OTLP endpoint is not internal Alloy")
+            require(
+                endpoint.startswith("http://qa-alloy.qa-monitoring.svc"),
+                "enabled Product OTLP endpoint is not internal Alloy",
+            )
         pods = self.json(
             self.service_namespace,
             "get",
@@ -211,7 +227,9 @@ class KubernetesTarget:
         for pod in pods:
             statuses = pod.get("status", {}).get("containerStatuses", [])
             require(
-                len(statuses) == 1 and statuses[0].get("ready") is True and statuses[0].get("imageID"),
+                len(statuses) == 1
+                and statuses[0].get("ready") is True
+                and statuses[0].get("imageID"),
                 "Product Pod is not ready or lacks immutable image identity",
             )
             identities.append(
@@ -222,7 +240,7 @@ class KubernetesTarget:
             )
         return {"settings": settings, "pods": identities}
 
-    def monitoring_assets(self) -> Dict[str, Any]:
+    def monitoring_assets(self) -> dict[str, Any]:
         rule_name = prometheus_rule_resource(self.assets)["metadata"]["name"]
         rule = self.json(self.monitoring_namespace, "get", "prometheusrule", rule_name)
         alerts = {
@@ -234,11 +252,16 @@ class KubernetesTarget:
         expected_alert_durations = self.assets.contract["alerts"].get("for")
         require(isinstance(expected_alert_durations, dict), "reviewed alert inventory is malformed")
         expected_alerts = set(expected_alert_durations)
-        require(alerts == expected_alerts, "live Product alert inventory differs from reviewed assets")
+        require(
+            alerts == expected_alerts, "live Product alert inventory differs from reviewed assets"
+        )
         dashboard_name = grafana_dashboard_resource(self.assets)["metadata"]["name"]
         dashboard = self.json(self.monitoring_namespace, "get", "configmap", dashboard_name)
         documents = dashboard.get("data", {})
-        require(isinstance(documents, dict) and len(documents) == 1, "live dashboard ConfigMap is malformed")
+        require(
+            isinstance(documents, dict) and len(documents) == 1,
+            "live dashboard ConfigMap is malformed",
+        )
         try:
             rendered = json.loads(next(iter(documents.values())))
         except (TypeError, json.JSONDecodeError) as error:
@@ -252,9 +275,11 @@ class KubernetesTarget:
 
 
 @contextmanager
-def forwards(target: KubernetesTarget, services: Sequence[tuple[str, str, str, int]]) -> Iterator[Dict[str, int]]:
+def forwards(
+    target: KubernetesTarget, services: Sequence[tuple[str, str, str, int]]
+) -> Iterator[dict[str, int]]:
     children: list[subprocess.Popen[str]] = []
-    ports: Dict[str, int] = {}
+    ports: dict[str, int] = {}
     try:
         for label, namespace, service, remote_port in services:
             with socket.socket() as reservation:
@@ -276,6 +301,7 @@ def forwards(target: KubernetesTarget, services: Sequence[tuple[str, str, str, i
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 text=True,
+                start_new_session=True,
             )
             children.append(child)
             deadline = time.monotonic() + FORWARD_TIMEOUT
@@ -291,25 +317,21 @@ def forwards(target: KubernetesTarget, services: Sequence[tuple[str, str, str, i
         yield ports
     finally:
         for child in children:
-            if child.poll() is None:
-                child.terminate()
-        for child in children:
             try:
-                child.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait(timeout=5)
+                monitoring_runtime.terminate_process_group(
+                    child, graceful_seconds=5, teardown_seconds=10
+                )
+            except RuntimeError as error:
+                raise VerificationError(f"port-forward cleanup failed: {error}") from error
 
 
 def product_reads(ports: Mapping[str, int], trace_id: str) -> int:
     require(
-        request_text(f"http://127.0.0.1:{ports['health']}/livez").strip()
-        == "live",
+        request_text(f"http://127.0.0.1:{ports['health']}/livez").strip() == "live",
         "Product liveness failed",
     )
     require(
-        request_text(f"http://127.0.0.1:{ports['health']}/readyz").strip()
-        == "ready",
+        request_text(f"http://127.0.0.1:{ports['health']}/readyz").strip() == "ready",
         "Product readiness failed",
     )
     body = request_text(
@@ -324,7 +346,7 @@ def product_reads(ports: Mapping[str, int], trace_id: str) -> int:
     return len(products)
 
 
-def query_results(value: Mapping[str, Any]) -> list[Dict[str, Any]]:
+def query_results(value: Mapping[str, Any]) -> list[dict[str, Any]]:
     results = value.get("data", {}).get("result", [])
     require(isinstance(results, list), "backend query result is malformed")
     return results
@@ -344,7 +366,7 @@ def wait_for(description: str, probe: Any, timeout: float = QUERY_TIMEOUT) -> An
     raise VerificationError(f"timed out waiting for {description}")
 
 
-def verify_enabled_signals(ports: Mapping[str, int], trace_id: str, pod_uid: str) -> Dict[str, Any]:
+def verify_enabled_signals(ports: Mapping[str, int], trace_id: str, pod_uid: str) -> dict[str, Any]:
     metric_query = (
         'insurance_hub_product_requests_total{service_name="product-service",'
         'deployment_environment_name="qa",service_implementation="go",'
@@ -363,13 +385,16 @@ def verify_enabled_signals(ports: Mapping[str, int], trace_id: str, pod_uid: str
         '{service_name="product-service",deployment_environment_name="qa",'
         'service_implementation="go"} | json | trace_id=' + json.dumps(trace_id)
     )
-    loki_url = f"http://127.0.0.1:{ports['loki']}/loki/api/v1/query_range?" + urllib.parse.urlencode(
-        {
-            "query": loki_query,
-            "start": now - 300_000_000_000,
-            "end": now + 30_000_000_000,
-            "limit": 20,
-        }
+    loki_url = (
+        f"http://127.0.0.1:{ports['loki']}/loki/api/v1/query_range?"
+        + urllib.parse.urlencode(
+            {
+                "query": loki_query,
+                "start": now - 300_000_000_000,
+                "end": now + 30_000_000_000,
+                "limit": 20,
+            }
+        )
     )
     logs = wait_for(
         "correlated Product completion log",
@@ -397,13 +422,13 @@ def verify_enabled_signals(ports: Mapping[str, int], trace_id: str, pod_uid: str
     }
 
 
-def execute(args: argparse.Namespace) -> Dict[str, Any]:
+def execute(args: argparse.Namespace) -> dict[str, Any]:
     assets = load_assets(args.assets_root, args.environment, args.service)
     target = KubernetesTarget(assets, args.source_revision)
     target.coordinates()
     revision = target.flux_revision()
     deployment = target.deployment(args.mode)
-    monitoring: Dict[str, Any] = {}
+    monitoring: dict[str, Any] = {}
     if args.mode == "enabled":
         monitoring = target.monitoring_assets()
     services = [
@@ -413,17 +438,20 @@ def execute(args: argparse.Namespace) -> Dict[str, Any]:
     if args.mode == "enabled":
         services.extend(
             [
-                ("prometheus", target.monitoring_namespace, target.config["prometheus_service"], 9090),
+                (
+                    "prometheus",
+                    target.monitoring_namespace,
+                    target.config["prometheus_service"],
+                    9090,
+                ),
                 ("loki", target.monitoring_namespace, target.config["loki_service"], 3100),
                 ("tempo", target.monitoring_namespace, target.config["tempo_service"], 3200),
             ]
         )
-    trace_id = hashlib.sha256(
-        f"{args.source_revision}:{time.time_ns()}".encode("utf-8")
-    ).hexdigest()[:32]
+    trace_id = hashlib.sha256(f"{args.source_revision}:{time.time_ns()}".encode()).hexdigest()[:32]
     with forwards(target, services) as ports:
         rows = product_reads(ports, trace_id)
-        signals: Dict[str, Any] = {}
+        signals: dict[str, Any] = {}
         if args.mode == "enabled":
             pod_uid = deployment["pods"][0]["pod_uid"]
             require(isinstance(pod_uid, str) and pod_uid, "Product Pod UID is unavailable")
@@ -440,7 +468,7 @@ def execute(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--assets-root", type=Path, required=True)
     parser.add_argument("--environment", required=True)
@@ -450,15 +478,29 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        evidence = execute(args)
-    except (AssetError, VerificationError, KeyError, TypeError, ValueError) as error:
+        with (
+            monitoring_runtime.controlled_signals(),
+            monitoring_runtime.bounded_activity("Product observability verification", 600),
+        ):
+            evidence = execute(args)
+    except monitoring_runtime.Interrupted as error:
+        print(f"Product observability verification {error}", file=sys.stderr)
+        return error.status
+    except (
+        AssetError,
+        monitoring_runtime.DeadlineExceeded,
+        VerificationError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as error:
         print(f"Product observability verification failed: {error}", file=sys.stderr)
         return 1
     print(json.dumps(evidence, indent=2, sort_keys=True))
-    print("Product observability verification passed")
+    print("Product observability verification passed", file=sys.stderr)
     return 0
 
 

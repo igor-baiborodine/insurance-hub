@@ -7,7 +7,6 @@ import argparse
 import concurrent.futures
 import contextlib
 import hashlib
-import importlib.util
 import json
 import math
 import os
@@ -16,22 +15,15 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
+from typing import Any
 
+import alloy_runtime
+import disposable_acceptance as acceptance
 
-ACCEPTANCE_PATH = Path(__file__).with_name("test-disposable-acceptance.py")
-ACCEPTANCE_SPEC = importlib.util.spec_from_file_location(
-    "disposable_acceptance", ACCEPTANCE_PATH
-)
-if ACCEPTANCE_SPEC is None or ACCEPTANCE_SPEC.loader is None:
-    raise RuntimeError(f"cannot import {ACCEPTANCE_PATH}")
-acceptance = importlib.util.module_from_spec(ACCEPTANCE_SPEC)
-sys.modules[ACCEPTANCE_SPEC.name] = acceptance
-ACCEPTANCE_SPEC.loader.exec_module(acceptance)
-
-
+ACCEPTANCE_PATH = Path(acceptance.__file__).resolve()
 PHASES = ("overhead-1", "overhead-2", "overhead-3", "healthy", "recovery")
 PHASE_CONTRACT_VERSIONS = {
     "overhead-1": 1,
@@ -49,8 +41,8 @@ class PhaseRuntime:
     root: Path
     helper: Path
     harness: Any
-    ports: Dict[str, Any]
-    products: List[Any]
+    ports: dict[str, Any]
+    products: list[Any]
 
 
 def file_sha256(path: Path) -> str:
@@ -108,9 +100,7 @@ def phase_document(
 
 
 @contextlib.contextmanager
-def phase_runtime(
-    args: argparse.Namespace, profile: Mapping[str, Any]
-) -> Iterator[PhaseRuntime]:
+def phase_runtime(args: argparse.Namespace, profile: Mapping[str, Any]) -> Iterator[PhaseRuntime]:
     source = args.config.read_text(encoding="utf-8")
     prefix = f"ih-accept-{args.phase}-{os.getpid()}"
     with tempfile.TemporaryDirectory(prefix="insurance-hub-acceptance-") as temporary:
@@ -129,24 +119,27 @@ def phase_runtime(
             timeout=300,
         )
         harness = acceptance.backend.DockerHarness(prefix, root)
-        products: List[Any] = []
-        primary: Optional[BaseException] = None
+        products: list[Any] = []
+        primary: BaseException | None = None
         try:
             harness.create()
             for image in set(acceptance.backend.backend_check.DISPOSABLE_IMAGES.values()):
                 harness.pull(image)
             acceptance.command(["docker", "image", "inspect", args.product_image])
+            postgres_environment = root / "postgres.env"
+            acceptance.alloy_runtime.write_protected_env_file(
+                postgres_environment,
+                {
+                    "POSTGRES_PASSWORD": acceptance.POSTGRES_PASSWORD,
+                    "POSTGRES_DB": "product",
+                },
+            )
             postgres = harness.start(
                 "postgres",
                 acceptance.backend.backend_check.DISPOSABLE_IMAGES["postgres"],
                 [],
                 ports=[5432],
-                docker_arguments=[
-                    "-e",
-                    f"POSTGRES_PASSWORD={acceptance.POSTGRES_PASSWORD}",
-                    "-e",
-                    "POSTGRES_DB=product",
-                ],
+                docker_arguments=["--env-file", str(postgres_environment)],
             )
             acceptance.wait_postgres(harness, postgres)
             acceptance.seed_postgres(harness, postgres, args.catalog_fixture)
@@ -167,14 +160,10 @@ def phase_runtime(
             harness.cleanup()
         except Exception as error:
             cleanup_errors.append(error)
-        acceptance.raise_with_cleanup(
-            primary, cleanup_errors, "acceptance phase cleanup failed"
-        )
+        acceptance.raise_with_cleanup(primary, cleanup_errors, "acceptance phase cleanup failed")
 
 
-def stop_product(
-    runtime: PhaseRuntime, product: Any, profile: Mapping[str, Any]
-) -> float:
+def stop_product(runtime: PhaseRuntime, product: Any, profile: Mapping[str, Any]) -> float:
     elapsed = acceptance.stop_product(
         runtime.harness,
         product,
@@ -188,26 +177,18 @@ def run_overhead_pair(
     args: argparse.Namespace, profile: Mapping[str, Any], run_index: int
 ) -> Mapping[str, Any]:
     with phase_runtime(args, profile) as runtime:
-        overhead_seconds = max(
-            2, profile["overhead"]["seconds_per_run"] * args.time_scale
-        )
+        overhead_seconds = max(2, profile["overhead"]["seconds_per_run"] * args.time_scale)
         overhead_requests = max(
             1,
             int(overhead_seconds * profile["healthy"]["rate_per_second"] / 4),
         )
-        warmup_seconds = max(
-            1, profile["healthy"]["warmup_seconds"] * args.time_scale
-        )
+        warmup_seconds = max(1, profile["healthy"]["warmup_seconds"] * args.time_scale)
         warmup_requests = max(
             1,
             int(warmup_seconds * profile["healthy"]["rate_per_second"] / 4),
         )
-        order = (
-            ("disabled", "enabled")
-            if run_index % 2 == 0
-            else ("enabled", "disabled")
-        )
-        evidence: Dict[str, Any] = {"run_index": run_index, "order": list(order)}
+        order = ("disabled", "enabled") if run_index % 2 == 0 else ("enabled", "disabled")
+        evidence: dict[str, Any] = {"run_index": run_index, "order": list(order)}
         for mode in order:
             enabled = mode == "enabled"
             product = acceptance.start_product(
@@ -256,8 +237,8 @@ def run_overhead_pair(
 
 def sample_alloy_baseline(
     container: str, profile: Mapping[str, Any], time_scale: float
-) -> List[Any]:
-    samples: List[Any] = []
+) -> list[Any]:
+    samples: list[Any] = []
     seconds = max(2, profile["alloy_resources"]["baseline_seconds"] * time_scale)
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -266,13 +247,9 @@ def sample_alloy_baseline(
     return samples
 
 
-def run_healthy_phase(
-    args: argparse.Namespace, profile: Mapping[str, Any]
-) -> Mapping[str, Any]:
+def run_healthy_phase(args: argparse.Namespace, profile: Mapping[str, Any]) -> Mapping[str, Any]:
     with phase_runtime(args, profile) as runtime:
-        baseline = sample_alloy_baseline(
-            runtime.ports["alloy_container"], profile, args.time_scale
-        )
+        baseline = sample_alloy_baseline(runtime.ports["alloy_container"], profile, args.time_scale)
         instance = acceptance.backend.SERVICE_INSTANCE_ID
         product = acceptance.start_product(
             runtime.harness,
@@ -287,11 +264,13 @@ def run_healthy_phase(
             1,
             math.ceil(profile["healthy"]["requests_per_path"] * args.time_scale),
         )
-        with acceptance.Sampler(product.container) as product_sampler, acceptance.Sampler(
-            runtime.ports["alloy_container"]
-        ) as alloy_sampler, acceptance.MetricIntervalSampler(
-            runtime.ports["prometheus"]
-        ) as metric_interval_sampler:
+        with (
+            acceptance.Sampler(product.container) as product_sampler,
+            acceptance.Sampler(runtime.ports["alloy_container"]) as alloy_sampler,
+            acceptance.MetricIntervalSampler(
+                runtime.ports["prometheus"]
+            ) as metric_interval_sampler,
+        ):
             healthy = acceptance.run_load(
                 runtime.helper,
                 product,
@@ -300,18 +279,13 @@ def run_healthy_phase(
                 profile["healthy"]["max_in_flight"],
                 profile["healthy"]["request_deadline_seconds"],
                 "healthy",
-                math.ceil(
-                    healthy_requests * 4 / profile["healthy"]["rate_per_second"]
-                )
-                + 180,
+                math.ceil(healthy_requests * 4 / profile["healthy"]["rate_per_second"]) + 180,
             )
         acceptance.verify_load(healthy, healthy_requests, profile)
         acceptance.verify_resources(
             product_sampler.samples, profile["product_resources"], "Product"
         )
-        acceptance.verify_resources(
-            alloy_sampler.samples, profile["alloy_resources"], "Alloy"
-        )
+        acceptance.verify_resources(alloy_sampler.samples, profile["alloy_resources"], "Alloy")
         resources = acceptance.verify_alloy_resource_delta(
             baseline, alloy_sampler.samples, profile["alloy_resources"]
         )
@@ -330,9 +304,7 @@ def run_healthy_phase(
         )
         container_state = {
             "product": acceptance.verify_container_state(product.container, "Product"),
-            "alloy": acceptance.verify_container_state(
-                runtime.ports["alloy_container"], "Alloy"
-            ),
+            "alloy": acceptance.verify_container_state(runtime.ports["alloy_container"], "Alloy"),
         }
         shutdown_seconds = stop_product(runtime, product, profile)
         return {
@@ -371,9 +343,7 @@ def prime_recovery_phase(
     return primer
 
 
-def run_recovery_phase(
-    args: argparse.Namespace, profile: Mapping[str, Any]
-) -> Mapping[str, Any]:
+def run_recovery_phase(args: argparse.Namespace, profile: Mapping[str, Any]) -> Mapping[str, Any]:
     with phase_runtime(args, profile) as runtime:
         instance = acceptance.backend.SERVICE_INSTANCE_ID
         product = acceptance.start_product(
@@ -393,9 +363,7 @@ def run_recovery_phase(
             product, runtime.ports, runtime.root, profile
         )
 
-        pre_fault_counter = acceptance.metric_request_total(
-            runtime.ports["prometheus"], instance
-        )
+        pre_fault_counter = acceptance.metric_request_total(runtime.ports["prometheus"], instance)
         pre_fault_histogram = acceptance.metric_histogram_count(
             runtime.ports["prometheus"], instance
         )
@@ -428,20 +396,14 @@ def run_recovery_phase(
         if remaining > 0:
             time.sleep(remaining)
         if time.monotonic() - fault_started < fault_seconds - 0.1:
-            raise acceptance.AcceptanceError(
-                "backend outage workload did not cover sixty seconds"
-            )
+            raise acceptance.AcceptanceError("backend outage workload did not cover sixty seconds")
         for name in reversed(backend_names):
             runtime.harness.command(["docker", "unpause", name], timeout=30)
         acceptance.backend.wait_http(
             f"http://127.0.0.1:{runtime.ports['prometheus']}/-/ready", timeout=60
         )
-        acceptance.backend.wait_http(
-            f"http://127.0.0.1:{runtime.ports['loki']}/ready", timeout=60
-        )
-        acceptance.backend.wait_http(
-            f"http://127.0.0.1:{runtime.ports['tempo']}/ready", timeout=60
-        )
+        acceptance.backend.wait_http(f"http://127.0.0.1:{runtime.ports['loki']}/ready", timeout=60)
+        acceptance.backend.wait_http(f"http://127.0.0.1:{runtime.ports['tempo']}/ready", timeout=60)
 
         pending = acceptance.backend.wait_remote_write_value(
             runtime.ports["alloy_metrics"],
@@ -513,9 +475,7 @@ def run_recovery_phase(
                 math.ceil(fault_seconds) + 120,
             )
             time.sleep(max(1, min(10, fault_seconds / 2)))
-            replacement, _, replacement_metrics = acceptance.backend.start_alloy(
-                runtime.harness
-            )
+            replacement, _, replacement_metrics = acceptance.backend.start_alloy(runtime.harness)
             replacement_fault = replacement_future.result()
         runtime.ports["alloy_container"] = replacement
         runtime.ports["alloy_metrics"] = replacement_metrics
@@ -541,8 +501,7 @@ def run_recovery_phase(
         )
         if (
             post_replacement_counter - pre_replacement_counter != fault_requests
-            or post_replacement_histogram - pre_replacement_histogram
-            != fault_requests
+            or post_replacement_histogram - pre_replacement_histogram != fault_requests
         ):
             raise acceptance.AcceptanceError(
                 "Alloy replacement did not converge cumulative metric deltas"
@@ -573,9 +532,7 @@ def run_recovery_phase(
             replacement_started_epoch,
             profile["fault"]["new_metric_seconds"],
         )
-        replacement_state = acceptance.verify_container_state(
-            replacement, "replacement Alloy"
-        )
+        replacement_state = acceptance.verify_container_state(replacement, "replacement Alloy")
         shutdown_seconds = stop_product(runtime, product, profile)
         return {
             "primer": primer,
@@ -586,8 +543,7 @@ def run_recovery_phase(
                     "requests": fault_requests,
                     "pending_after_recovery": pending,
                     "counter_delta": post_fault_counter - pre_fault_counter,
-                    "histogram_count_delta": post_fault_histogram
-                    - pre_fault_histogram,
+                    "histogram_count_delta": post_fault_histogram - pre_fault_histogram,
                     "spans": backend_fault_spans,
                     "logs": backend_fault_logs,
                     "recovery": backend_recovery,
@@ -595,10 +551,8 @@ def run_recovery_phase(
                 "collector_replacement": {
                     "requests": fault_requests,
                     "pending_after_recovery": replacement_pending,
-                    "counter_delta": post_replacement_counter
-                    - pre_replacement_counter,
-                    "histogram_count_delta": post_replacement_histogram
-                    - pre_replacement_histogram,
+                    "counter_delta": post_replacement_counter - pre_replacement_counter,
+                    "histogram_count_delta": post_replacement_histogram - pre_replacement_histogram,
                     "spans": replacement_spans,
                     "logs": replacement_logs,
                     "recovery": replacement_recovery,
@@ -618,22 +572,16 @@ def verify_resource_overhead_summaries(
     expected = profile["overhead"]["runs_per_mode"]
     if len(disabled) != expected or len(enabled) != expected:
         raise acceptance.AcceptanceError("paired overhead resource evidence is incomplete")
-    disabled_cpu = statistics.median(
-        value["cpu_p95_millicores"] for value in disabled
-    )
+    disabled_cpu = statistics.median(value["cpu_p95_millicores"] for value in disabled)
     enabled_cpu = statistics.median(value["cpu_p95_millicores"] for value in enabled)
     disabled_memory = statistics.median(value["memory_max_mib"] for value in disabled)
     enabled_memory = statistics.median(value["memory_max_mib"] for value in enabled)
     cpu_delta = enabled_cpu - disabled_cpu
     memory_delta = enabled_memory - disabled_memory
     if cpu_delta > profile["overhead"]["cpu_p95_delta_millicores"]:
-        raise acceptance.AcceptanceError(
-            "telemetry CPU p95 delta exceeds its budget"
-        )
+        raise acceptance.AcceptanceError("telemetry CPU p95 delta exceeds its budget")
     if memory_delta > profile["overhead"]["memory_max_delta_mib"]:
-        raise acceptance.AcceptanceError(
-            "telemetry working-set maximum delta exceeds its budget"
-        )
+        raise acceptance.AcceptanceError("telemetry working-set maximum delta exceeds its budget")
     return {
         "disabled_cpu_p95_millicores": disabled_cpu,
         "enabled_cpu_p95_millicores": enabled_cpu,
@@ -647,7 +595,7 @@ def verify_resource_overhead_summaries(
 def load_phase_documents(
     paths: Sequence[Path], expected_candidate: Mapping[str, Any]
 ) -> Mapping[str, Mapping[str, Any]]:
-    documents: Dict[str, Mapping[str, Any]] = {}
+    documents: dict[str, Mapping[str, Any]] = {}
     for path in paths:
         document = json.loads(path.read_text(encoding="utf-8"))
         phase = document.get("phase")
@@ -662,15 +610,11 @@ def load_phase_documents(
         documents[phase] = document
     missing = sorted(set(PHASES) - set(documents))
     if missing:
-        raise acceptance.AcceptanceError(
-            "missing acceptance phase evidence: " + ", ".join(missing)
-        )
+        raise acceptance.AcceptanceError("missing acceptance phase evidence: " + ", ".join(missing))
     return documents
 
 
-def aggregate_evidence(
-    args: argparse.Namespace, profile: Mapping[str, Any]
-) -> Mapping[str, Any]:
+def aggregate_evidence(args: argparse.Namespace, profile: Mapping[str, Any]) -> Mapping[str, Any]:
     candidate = candidate_identity(args)
     documents = load_phase_documents(args.evidence_input, candidate)
     pairs = [documents[f"overhead-{index}"]["evidence"] for index in range(1, 4)]
@@ -679,9 +623,7 @@ def aggregate_evidence(
     disabled_resources = [pair["disabled"]["resources"] for pair in pairs]
     enabled_resources = [pair["enabled"]["resources"] for pair in pairs]
     overhead = {
-        "latency": acceptance.verify_overhead(
-            disabled_loads, enabled_loads, profile
-        ),
+        "latency": acceptance.verify_overhead(disabled_loads, enabled_loads, profile),
         "resources": verify_resource_overhead_summaries(
             disabled_resources, enabled_resources, profile
         ),
@@ -693,9 +635,7 @@ def aggregate_evidence(
         "tooling": tooling_identity(),
         "phase_contract_versions": PHASE_CONTRACT_VERSIONS,
         "overhead": overhead,
-        "phases": {
-            phase: documents[phase]["evidence"] for phase in PHASES
-        },
+        "phases": {phase: documents[phase]["evidence"] for phase in PHASES},
     }
 
 
@@ -712,7 +652,7 @@ def run_phase(args: argparse.Namespace, profile: Mapping[str, Any]) -> Mapping[s
     return phase_document(args, args.phase, evidence)
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", choices=(*PHASES, "aggregate"), required=True)
     parser.add_argument("--config", type=Path, required=True)
@@ -726,32 +666,41 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        profile = acceptance.load_profile(args.profile)
-        if args.time_scale <= 0 or args.time_scale > 1:
-            raise acceptance.AcceptanceError(
-                "time-scale must be greater than zero and at most one"
-            )
-        args.evidence_output.unlink(missing_ok=True)
-        if args.phase == "aggregate":
-            if not args.evidence_input:
+        deadline_seconds = 120 if args.phase == "aggregate" else 3600
+        with (
+            alloy_runtime.controlled_signals(),
+            alloy_runtime.bounded_activity(
+                f"disposable acceptance phase {args.phase}", deadline_seconds
+            ),
+        ):
+            profile = acceptance.load_profile(args.profile)
+            if args.time_scale <= 0 or args.time_scale > 1:
                 raise acceptance.AcceptanceError(
-                    "aggregate requires phase evidence inputs"
+                    "time-scale must be greater than zero and at most one"
                 )
-            document = aggregate_evidence(args, profile)
-        else:
-            if args.evidence_input:
-                raise acceptance.AcceptanceError(
-                    "phase execution does not accept evidence inputs"
-                )
-            document = run_phase(args, profile)
-        write_evidence(args.evidence_output, document)
-        print(json.dumps(document, indent=2, sort_keys=True))
+            args.evidence_output.unlink(missing_ok=True)
+            if args.phase == "aggregate":
+                if not args.evidence_input:
+                    raise acceptance.AcceptanceError("aggregate requires phase evidence inputs")
+                document = aggregate_evidence(args, profile)
+            else:
+                if args.evidence_input:
+                    raise acceptance.AcceptanceError(
+                        "phase execution does not accept evidence inputs"
+                    )
+                document = run_phase(args, profile)
+            write_evidence(args.evidence_output, document)
+            print(json.dumps(document, indent=2, sort_keys=True))
+    except alloy_runtime.Interrupted as error:
+        print(f"disposable acceptance phase {error}", file=sys.stderr)
+        return error.status
     except (
         acceptance.AcceptanceError,
         acceptance.backend.HarnessError,
+        alloy_runtime.DeadlineExceeded,
         json.JSONDecodeError,
         OSError,
         subprocess.TimeoutExpired,
@@ -759,7 +708,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ) as error:
         print(f"disposable acceptance phase failed: {error}", file=sys.stderr)
         return 1
-    print(f"disposable Product telemetry acceptance {args.phase} passed")
+    print(f"disposable Product telemetry acceptance {args.phase} passed", file=sys.stderr)
     return 0
 
 

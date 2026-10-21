@@ -364,11 +364,7 @@ prometheus-stack-status: _monitoring-ns-check ## Show Kube Prometheus Stack depl
 	@kubectl --context "$(CUR_CTX)" get svc -n $(MONITORING_NS) -l app.kubernetes.io/name=grafana || true
 
 .PHONY: _monitoring-assets-args-check
-_monitoring-assets-args-check: ## Require an explicit environment and service for a monitoring asset operation
-	@command -v python3 >/dev/null || { echo "ERROR: Python 3.9 or newer is required."; exit 1; }
-	@python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' || { \
-		echo "ERROR: Python 3.9 or newer is required."; exit 1; \
-	}
+_monitoring-assets-args-check: python-runtime-check ## Require an explicit environment and service for a monitoring asset operation
 	@if [ "$(origin ENV_NAME)" != "command line" ] || [ -z "$(ENV_NAME)" ]; then \
 		echo "ERROR: ENV_NAME is required on the make command line."; \
 		exit 1; \
@@ -377,14 +373,14 @@ _monitoring-assets-args-check: ## Require an explicit environment and service fo
 		echo "ERROR: SVC_NAME is required on the make command line."; \
 		exit 1; \
 	fi
-	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RESOLVE_SCRIPT)" \
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_RESOLVE_SCRIPT)" \
 		--assets-root "$(MONITORING_ASSETS_ROOT)" \
 		--environment "$(ENV_NAME)" \
 		--service "$(SVC_NAME)" >/dev/null
 
 .PHONY: prometheus-rules-render
 prometheus-rules-render: _monitoring-assets-args-check ## Render one service PrometheusRule to stdout (ENV_NAME, SVC_NAME)
-	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_RULE_SCRIPT)" \
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_RENDER_RULE_SCRIPT)" \
 		--assets-root "$(MONITORING_ASSETS_ROOT)" \
 		--environment "$(ENV_NAME)" \
 		--service "$(SVC_NAME)"
@@ -395,33 +391,35 @@ prometheus-rules-apply: _monitoring-assets-args-check ## Validate and apply one 
 		ENV_NAME="$(ENV_NAME)" SVC_NAME="$(SVC_NAME)"
 	@command -v kubectl >/dev/null || { echo "ERROR: kubectl is required."; exit 1; }
 	@set -eu; \
-	eval "$$(PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RESOLVE_SCRIPT)" \
-		--assets-root "$(MONITORING_ASSETS_ROOT)" \
-		--environment "$(ENV_NAME)" \
-		--service "$(SVC_NAME)")"; \
+	resolve() { PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_RESOLVE_SCRIPT)" \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" --environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)" --field "$$1"; }; \
+	monitoring_kube_context=$$(resolve kube-context); \
+	monitoring_namespace=$$(resolve namespace); \
+	monitoring_prometheus_rule=$$(resolve prometheus-rule); \
 	actual_context=$$(kubectl config current-context); \
-	if [ "$$actual_context" != "$$MONITORING_KUBE_CONTEXT" ]; then \
-		echo "ERROR: Current context is '$$actual_context' (expected '$$MONITORING_KUBE_CONTEXT')."; \
+	if [ "$$actual_context" != "$$monitoring_kube_context" ]; then \
+		echo "ERROR: Current context is '$$actual_context' (expected '$$monitoring_kube_context')."; \
 		exit 1; \
 	fi; \
 	tmp_file=$$(mktemp); \
 	trap 'rm -f "$$tmp_file"' EXIT INT TERM; \
-	PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_RULE_SCRIPT)" \
+	PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_RENDER_RULE_SCRIPT)" \
 		--assets-root "$(MONITORING_ASSETS_ROOT)" \
 		--environment "$(ENV_NAME)" \
 		--service "$(SVC_NAME)" \
 		--output "$$tmp_file"; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
+	kubectl --context "$$monitoring_kube_context" --namespace "$$monitoring_namespace" \
 		apply --dry-run=server -f "$$tmp_file" >/dev/null; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
+	kubectl --context "$$monitoring_kube_context" --namespace "$$monitoring_namespace" \
 		apply -f "$$tmp_file"; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
-		get prometheusrule "$$MONITORING_PROMETHEUS_RULE" >/dev/null
+	kubectl --context "$$monitoring_kube_context" --namespace "$$monitoring_namespace" \
+		get prometheusrule "$$monitoring_prometheus_rule" >/dev/null
 	@echo "✅ Applied $(SVC_NAME) alert rules to $(ENV_NAME)."
 
 .PHONY: grafana-dashboard-render
 grafana-dashboard-render: _monitoring-assets-args-check ## Render one service dashboard sidecar ConfigMap to stdout (ENV_NAME, SVC_NAME)
-	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_DASHBOARD_SCRIPT)" \
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_RENDER_DASHBOARD_SCRIPT)" \
 		--assets-root "$(MONITORING_ASSETS_ROOT)" \
 		--environment "$(ENV_NAME)" \
 		--service "$(SVC_NAME)"
@@ -432,28 +430,30 @@ grafana-dashboard-apply: _monitoring-assets-args-check ## Validate and apply one
 		ENV_NAME="$(ENV_NAME)" SVC_NAME="$(SVC_NAME)"
 	@command -v kubectl >/dev/null || { echo "ERROR: kubectl is required."; exit 1; }
 	@set -eu; \
-	eval "$$(PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RESOLVE_SCRIPT)" \
-		--assets-root "$(MONITORING_ASSETS_ROOT)" \
-		--environment "$(ENV_NAME)" \
-		--service "$(SVC_NAME)")"; \
+	resolve() { PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_RESOLVE_SCRIPT)" \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" --environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)" --field "$$1"; }; \
+	monitoring_kube_context=$$(resolve kube-context); \
+	monitoring_namespace=$$(resolve namespace); \
+	monitoring_dashboard=$$(resolve grafana-dashboard-config-map); \
 	actual_context=$$(kubectl config current-context); \
-	if [ "$$actual_context" != "$$MONITORING_KUBE_CONTEXT" ]; then \
-		echo "ERROR: Current context is '$$actual_context' (expected '$$MONITORING_KUBE_CONTEXT')."; \
+	if [ "$$actual_context" != "$$monitoring_kube_context" ]; then \
+		echo "ERROR: Current context is '$$actual_context' (expected '$$monitoring_kube_context')."; \
 		exit 1; \
 	fi; \
 	tmp_file=$$(mktemp); \
 	trap 'rm -f "$$tmp_file"' EXIT INT TERM; \
-	PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_DASHBOARD_SCRIPT)" \
+	PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_RENDER_DASHBOARD_SCRIPT)" \
 		--assets-root "$(MONITORING_ASSETS_ROOT)" \
 		--environment "$(ENV_NAME)" \
 		--service "$(SVC_NAME)" \
 		--output "$$tmp_file"; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
+	kubectl --context "$$monitoring_kube_context" --namespace "$$monitoring_namespace" \
 		apply --dry-run=server -f "$$tmp_file" >/dev/null; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
+	kubectl --context "$$monitoring_kube_context" --namespace "$$monitoring_namespace" \
 		apply -f "$$tmp_file"; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
-		get configmap "$$MONITORING_GRAFANA_DASHBOARD_CONFIG_MAP" >/dev/null
+	kubectl --context "$$monitoring_kube_context" --namespace "$$monitoring_namespace" \
+		get configmap "$$monitoring_dashboard" >/dev/null
 	@echo "✅ Applied immutable $(SVC_NAME) dashboard to $(ENV_NAME)."
 
 .PHONY: prometheus-ui
@@ -1213,4 +1213,8 @@ cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or 
 
 ifndef INSURANCE_HUB_PYTHON_TOOLCHAIN_INCLUDED
 include $(K8S_REPOSITORY_ROOT)/scripts/python/toolchain.mk
+endif
+
+ifeq ($(abspath $(firstword $(MAKEFILE_LIST))),$(abspath $(K8S_MAKEFILE_DIR)Makefile))
+include $(K8S_MAKEFILE_DIR)tests/validation.mk
 endif
