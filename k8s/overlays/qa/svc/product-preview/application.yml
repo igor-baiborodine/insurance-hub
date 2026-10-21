@@ -3,4 +3,4 @@ micronaut:
     services:
       product-service:
         urls:
-          - http://qa-product-api-legacy.qa-svc.svc.cluster.local:80
+          - http://qa-product-api.qa-svc.svc.cluster.local:8081
