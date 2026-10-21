@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import json
+import signal
 import stat
 from pathlib import Path
 
 import pytest
 import qa
-from runtime import AdminError
+from runtime import AdminError, AdminSignal
 
 
 class FakeCommands:
-    def __init__(self, snapshots=None, fail_snapshot=False):
+    def __init__(self, snapshots=None, fail_snapshot=False, snapshot_error=None):
         self.calls = []
         self.snapshots = {node: set(snapshots or []) for node in qa.ALL_NODES}
         self.fail_snapshot = fail_snapshot
+        self.snapshot_error = snapshot_error
         self.states = {node: "RUNNING" for node in qa.ALL_NODES}
 
     def succeeds(self, arguments, **_kwargs):
@@ -38,9 +40,11 @@ class FakeCommands:
             self.snapshots[node] = {
                 item for item in self.snapshots[node] if item.rsplit("/", 1)[-1] != snapshot
             }
-        if self.fail_snapshot and arguments[:2] == ["lxc", "snapshot"]:
-            raise AdminError("snapshot failed")
         if arguments[:2] == ["lxc", "snapshot"]:
+            if self.snapshot_error is not None:
+                raise self.snapshot_error
+            if self.fail_snapshot:
+                raise AdminError("snapshot failed")
             node, snapshot = arguments[2:4]
             self.snapshots[node].add(f"/1.0/instances/{node}/snapshots/{snapshot}")
         return ""
@@ -99,6 +103,26 @@ def test_snapshot_failure_resumes_every_paused_node():
         qa.snapshot_nodes(commands, "baseline")
     starts = [call[-1] for call in commands.calls if call[:2] == ["lxc", "start"]]
     assert starts == ["qa-worker2", "qa-worker1", "qa-master"]
+
+
+@pytest.mark.parametrize(
+    "interruption",
+    [
+        pytest.param(KeyboardInterrupt(), id="sigint"),
+        pytest.param(AdminSignal(signal.SIGTERM), id="sigterm"),
+    ],
+)
+def test_snapshot_interruption_resumes_every_paused_node_and_preserves_signal(interruption):
+    # given
+    commands = FakeCommands(snapshot_error=interruption)
+
+    # when / then
+    with pytest.raises(type(interruption)) as raised:
+        qa.snapshot_nodes(commands, "baseline")
+    assert raised.value is interruption
+    starts = [call[-1] for call in commands.calls if call[:2] == ["lxc", "start"]]
+    assert starts == ["qa-worker2", "qa-worker1", "qa-master"]
+    assert all(commands.states[node] == "RUNNING" for node in qa.ALL_NODES)
 
 
 @pytest.mark.parametrize("state", ["RUNNING", "STOPPED"])

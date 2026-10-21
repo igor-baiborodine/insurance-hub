@@ -38,6 +38,28 @@ from runtime import (  # noqa: E402
     selected_target,
 )
 
+SECRET_INPUTS_BY_PROFILE = {
+    "postgres": ("PG_SVC_USER_PWD",),
+    "elasticsearch-copy": (),
+    "minio-storage-user": ("MINIO_CONSOLE_ACCESS_KEY", "MINIO_CONSOLE_SECRET_KEY"),
+    "minio-storage-config": ("MINIO_ROOT_USER_PWD",),
+    "minio-service-user": ("MINIO_SVC_ACCESS_KEY", "MINIO_SVC_SECRET_KEY"),
+    "mongodb-root": ("MONGO_ROOT_USER_PWD",),
+    "mongodb-product": ("MONGO_PRODUCT_USER_PWD",),
+    "zipkin": ("ZIPKIN_ES_USER_PWD",),
+}
+SECRET_INPUTS_BY_AGGREGATE = {
+    "infra": (
+        "PG_SVC_USER_PWD",
+        "MINIO_CONSOLE_ACCESS_KEY",
+        "MINIO_CONSOLE_SECRET_KEY",
+        "MINIO_ROOT_USER_PWD",
+        "MONGO_ROOT_USER_PWD",
+        "MONGO_PRODUCT_USER_PWD",
+    ),
+    "services": ("MINIO_SVC_ACCESS_KEY", "MINIO_SVC_SECRET_KEY"),
+}
+
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -112,23 +134,12 @@ def _target() -> Kubernetes:
     return Kubernetes(Commands(), target)
 
 
-def _values() -> dict[str, str]:
+def _values(secret_names: tuple[str, ...] = ()) -> dict[str, str]:
     ordinary_names = (
         "SVC_NAME",
         "MINIO_ROOT_USER",
         "COPY_SECRET_NS",
         "ZIPKIN_ES_USER",
-    )
-    secret_names = (
-        "PG_SVC_USER_PWD",
-        "MINIO_CONSOLE_ACCESS_KEY",
-        "MINIO_CONSOLE_SECRET_KEY",
-        "MINIO_ROOT_USER_PWD",
-        "MINIO_SVC_ACCESS_KEY",
-        "MINIO_SVC_SECRET_KEY",
-        "MONGO_ROOT_USER_PWD",
-        "MONGO_PRODUCT_USER_PWD",
-        "ZIPKIN_ES_USER_PWD",
     )
     values = {name: os.environ.get(name, "") for name in ordinary_names}
     values.update({name: secret_input(name) for name in secret_names})
@@ -157,7 +168,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     kube = _target()
-    values = _values() if arguments.command in {"secret", "minio", "deploy"} else {}
+    if arguments.command == "secret":
+        values = _values(SECRET_INPUTS_BY_PROFILE[arguments.profile])
+    elif arguments.command == "deploy":
+        values = _values(SECRET_INPUTS_BY_AGGREGATE[arguments.kind])
+    elif arguments.command == "minio":
+        values = _values()
+    else:
+        values = {}
     if arguments.command == "guard":
         guard(kube, arguments.kind)
     elif arguments.command == "namespace":

@@ -29,6 +29,9 @@ from runtime import (
 
 OPERATOR_TIMEOUT = 600
 ZIPKIN_SETUP_IMAGE = "curlimages/curl:8.16.0"
+MINIO_POLICY_ATTACHMENT_ERROR = (
+    "MinIO policy attachment is disabled: mc requires the protected access key in child argv"
+)
 
 OPERATOR_SPECS = {
     "postgres": {
@@ -41,7 +44,7 @@ OPERATOR_SPECS = {
         ],
         "crds": ["clusters.postgresql.cnpg.io"],
         "resources": ["clusters.postgresql.cnpg.io"],
-        "rollout": ("cnpg-system", "cnpg-controller-manager"),
+        "rollout": ("deployment", "cnpg-system", "cnpg-controller-manager"),
     },
     "eck": {
         "apply": [
@@ -54,13 +57,13 @@ OPERATOR_SPECS = {
         ],
         "crds": ["elasticsearches.elasticsearch.k8s.elastic.co"],
         "resources": ["elasticsearches.elasticsearch.k8s.elastic.co"],
-        "rollout": ("elastic-system", "elastic-operator"),
+        "rollout": ("statefulset", "elastic-system", "elastic-operator"),
     },
     "minio": {
         "apply": ["kubectl", "apply", "--server-side", "-k", "{overlay}/infra/minio/operator"],
         "crds": ["tenants.minio.min.io"],
         "resources": ["tenants.minio.min.io"],
-        "rollout": ("minio-operator", "minio-operator"),
+        "rollout": ("deployment", "minio-operator", "minio-operator"),
     },
 }
 
@@ -84,6 +87,58 @@ def _single_line_secret(value: str, label: str) -> str:
         f"{label} must be non-empty and single-line",
     )
     return value
+
+
+def validate_secret_configuration(target: Target, profile: str, values: Mapping[str, str]) -> None:
+    environment = target.environment
+    service_profiles = {
+        "postgres",
+        "minio-storage-user",
+        "minio-storage-config",
+        "minio-service-user",
+    }
+    supported = {
+        *service_profiles,
+        "elasticsearch-copy",
+        "mongodb-root",
+        "mongodb-product",
+        "zipkin",
+    }
+    require(profile in supported, f"unknown Secret profile {profile}")
+    if profile in service_profiles:
+        safe_name(values.get("SVC_NAME", ""), "SVC_NAME")
+    required = {
+        "postgres": ("PG_SVC_USER_PWD",),
+        "minio-storage-user": ("MINIO_CONSOLE_ACCESS_KEY", "MINIO_CONSOLE_SECRET_KEY"),
+        "minio-storage-config": ("MINIO_ROOT_USER", "MINIO_ROOT_USER_PWD"),
+        "minio-service-user": ("MINIO_SVC_ACCESS_KEY", "MINIO_SVC_SECRET_KEY"),
+        "mongodb-root": ("MONGO_ROOT_USER_PWD",),
+        "mongodb-product": ("MONGO_PRODUCT_USER_PWD",),
+        "zipkin": ("ZIPKIN_ES_USER", "ZIPKIN_ES_USER_PWD"),
+    }
+    for name in required.get(profile, ()):
+        _single_line_secret(values.get(name, ""), name)
+    if profile in {"elasticsearch-copy", "zipkin"}:
+        require(environment == "qa", f"{profile} is only supported for qa")
+    if profile == "minio-service-user":
+        safe_name(values.get("COPY_SECRET_NS", ""), "COPY_SECRET_NS")
+
+
+def validate_aggregate_configuration(target: Target, kind: str, values: Mapping[str, str]) -> None:
+    if kind == "infra":
+        for service in ("auth", "document", "payment", "policy", "pricing", "product"):
+            validate_secret_configuration(target, "postgres", {**values, "SVC_NAME": service})
+        validate_secret_configuration(target, "mongodb-root", values)
+        validate_secret_configuration(target, "mongodb-product", values)
+        for service in ("document", "payment"):
+            selected = {**values, "SVC_NAME": service}
+            validate_secret_configuration(target, "minio-storage-user", selected)
+            validate_secret_configuration(target, "minio-storage-config", selected)
+        return
+    require(kind == "services", f"unknown aggregate {kind}")
+    for service in ("document", "payment"):
+        validate_secret_configuration(target, "minio-service-user", {**values, "SVC_NAME": service})
+    raise AdminError(MINIO_POLICY_ATTACHMENT_ERROR)
 
 
 def _copy_secret_payload(source: dict, namespace: str) -> dict:
@@ -144,13 +199,13 @@ def deploy_operator(kube: Kubernetes, operator: str) -> None:
                 timeout=150,
                 activity=f"wait for {crd}",
             )
-        namespace, deployment = spec["rollout"]
+        workload_kind, namespace, workload = spec["rollout"]
         kube.kubectl(
             "-n",
             namespace,
             "rollout",
             "status",
-            f"deployment/{deployment}",
+            f"{workload_kind}/{workload}",
             "--timeout=5m",
             timeout=330,
             activity=f"wait for {operator} operator",
@@ -205,7 +260,7 @@ def deploy_operator(kube: Kubernetes, operator: str) -> None:
             kube.kubectl("get", optional, "--all-namespaces")
         return
     if operator == "mongodb":
-        kube.require_namespace(kube.target.data_namespace)
+        kube.ensure_namespace(kube.target.data_namespace)
         kube.commands.run(
             [
                 "helm",
@@ -246,21 +301,20 @@ def deploy_operator(kube: Kubernetes, operator: str) -> None:
 
 
 def create_secret(kube: Kubernetes, profile: str, values: Mapping[str, str]) -> None:
+    validate_secret_configuration(kube.target, profile, values)
     kube.verify_context()
     service = values.get("SVC_NAME", "")
-    if service:
-        safe_name(service, "SVC_NAME")
     environment = kube.target.environment
     if profile == "postgres":
-        kube.ensure_namespace(kube.target.data_namespace)
-        if environment == "qa":
-            kube.ensure_namespace(kube.target.service_namespace)
         payload = _secret_payload(
             kube.target.data_namespace,
             f"{environment}-postgres-{service}-user-creds",
             {"username": service, "password": values["PG_SVC_USER_PWD"]},
             "kubernetes.io/basic-auth",
         )
+        kube.ensure_namespace(kube.target.data_namespace)
+        if environment == "qa":
+            kube.ensure_namespace(kube.target.service_namespace)
         kube.apply(payload)
         if environment == "qa":
             copy = dict(payload)
@@ -271,19 +325,17 @@ def create_secret(kube: Kubernetes, profile: str, values: Mapping[str, str]) -> 
             kube.apply(copy)
         return
     if profile == "elasticsearch-copy":
-        require(environment == "qa", "Elasticsearch Secret copy is only supported for qa")
-        kube.ensure_namespace(kube.target.data_namespace)
-        kube.ensure_namespace(kube.target.service_namespace)
+        kube.require_namespace(kube.target.data_namespace)
         name = f"{environment}-elasticsearch-es-elastic-user"
-        kube.apply(
-            _copy_secret_payload(
-                kube.secret(kube.target.data_namespace, name), kube.target.service_namespace
-            )
+        payload = _copy_secret_payload(
+            kube.secret(kube.target.data_namespace, name), kube.target.service_namespace
         )
+        kube.ensure_namespace(kube.target.service_namespace)
+        kube.apply(payload)
         return
     if profile.startswith("minio-"):
         namespace = f"{environment}-minio-{service}"
-        kube.ensure_namespace(namespace)
+        copy_namespace = None
         if profile == "minio-storage-user":
             payload = _secret_payload(
                 namespace,
@@ -303,6 +355,7 @@ def create_secret(kube: Kubernetes, profile: str, values: Mapping[str, str]) -> 
                 namespace, f"{namespace}-storage-config", {"config.env": config}
             )
         elif profile == "minio-service-user":
+            copy_namespace = values["COPY_SECRET_NS"]
             payload = _secret_payload(
                 namespace,
                 f"{namespace}-svc-user-creds",
@@ -311,30 +364,24 @@ def create_secret(kube: Kubernetes, profile: str, values: Mapping[str, str]) -> 
                     "MINIO_SVC_SECRET_KEY": values["MINIO_SVC_SECRET_KEY"],
                 },
             )
-        else:
-            raise AdminError(f"unknown Secret profile {profile}")
-        kube.apply(payload)
-        if profile == "minio-service-user":
-            copy_namespace = safe_name(values["COPY_SECRET_NS"], "COPY_SECRET_NS")
             kube.require_namespace(copy_namespace)
+        kube.ensure_namespace(namespace)
+        kube.apply(payload)
+        if copy_namespace is not None:
             copy = dict(payload)
             copy["metadata"] = {"name": payload["metadata"]["name"], "namespace": copy_namespace}
             kube.apply(copy)
         return
     if profile == "mongodb-root":
-        kube.ensure_namespace(kube.target.data_namespace)
-        kube.apply(
-            _secret_payload(
-                kube.target.data_namespace,
-                f"{environment}-mongodb-root-user-creds",
-                {"username": "root", "password": values["MONGO_ROOT_USER_PWD"]},
-            )
+        payload = _secret_payload(
+            kube.target.data_namespace,
+            f"{environment}-mongodb-root-user-creds",
+            {"username": "root", "password": values["MONGO_ROOT_USER_PWD"]},
         )
+        kube.ensure_namespace(kube.target.data_namespace)
+        kube.apply(payload)
         return
     if profile == "mongodb-product":
-        kube.ensure_namespace(kube.target.data_namespace)
-        if environment == "qa":
-            kube.ensure_namespace(kube.target.service_namespace)
         payload = _secret_payload(
             kube.target.data_namespace,
             f"{environment}-mongodb-product-user-creds",
@@ -344,6 +391,9 @@ def create_secret(kube: Kubernetes, profile: str, values: Mapping[str, str]) -> 
                 "database": "products-demo",
             },
         )
+        kube.ensure_namespace(kube.target.data_namespace)
+        if environment == "qa":
+            kube.ensure_namespace(kube.target.service_namespace)
         kube.apply(payload)
         if environment == "qa":
             copy = dict(payload)
@@ -354,17 +404,15 @@ def create_secret(kube: Kubernetes, profile: str, values: Mapping[str, str]) -> 
             kube.apply(copy)
         return
     if profile == "zipkin":
-        require(environment == "qa", "Zipkin administration is only supported for qa")
-        kube.ensure_namespace(kube.target.monitoring_namespace)
-        kube.apply(
-            _secret_payload(
-                kube.target.monitoring_namespace,
-                f"{environment}-zipkin-es-user-creds",
-                {"username": values["ZIPKIN_ES_USER"], "password": values["ZIPKIN_ES_USER_PWD"]},
-            )
+        payload = _secret_payload(
+            kube.target.monitoring_namespace,
+            f"{environment}-zipkin-es-user-creds",
+            {"username": values["ZIPKIN_ES_USER"], "password": values["ZIPKIN_ES_USER_PWD"]},
         )
+        kube.ensure_namespace(kube.target.monitoring_namespace)
+        kube.apply(payload)
         return
-    raise AdminError(f"unknown Secret profile {profile}")
+    raise AssertionError("validated Secret profile was not handled")
 
 
 def _decode_secret_value(secret: dict, key: str) -> str:
@@ -499,47 +547,6 @@ def _minio_buckets(
     }
 
 
-def _minio_users(kube: Kubernetes, namespace: str, pod: str, mc: list[str], alias: str) -> set[str]:
-    rows = _json_lines(
-        _minio_exec(kube, namespace, pod, [*mc, "admin", "user", "list", alias]),
-        "user list",
-    )
-    return {
-        str(row.get("accessKey", row.get("user", row.get("userName", ""))))
-        for row in rows
-        if row.get("status", "success") == "success"
-    }
-
-
-def _contains_scalar(value: object, expected: str) -> bool:
-    if isinstance(value, dict):
-        return any(_contains_scalar(item, expected) for item in value.values())
-    if isinstance(value, list):
-        return any(_contains_scalar(item, expected) for item in value)
-    return value == expected
-
-
-def _minio_policy_has_user(
-    kube: Kubernetes,
-    namespace: str,
-    pod: str,
-    mc: list[str],
-    alias: str,
-    policy: str,
-    user: str,
-) -> bool:
-    rows = _json_lines(
-        _minio_exec(
-            kube,
-            namespace,
-            pod,
-            [*mc, "admin", "policy", "entities", alias, "--policy", policy],
-        ),
-        "policy association",
-    )
-    return any(_contains_scalar(row, user) for row in rows)
-
-
 def configure_minio(
     kube: Kubernetes,
     action: str,
@@ -549,6 +556,16 @@ def configure_minio(
     policy_path: Path | None = None,
 ) -> None:
     kube.verify_context()
+    safe_name(service, "SVC_NAME")
+    if action == "user-policy":
+        require(policy_path is not None, "POLICY_FILE is required")
+        policy = json.loads(policy_path.read_text())
+        require(isinstance(policy, dict), "policy must be a JSON object")
+        require(isinstance(policy.get("Statement"), list), "policy must contain a Statement list")
+        safe_name(policy_path.stem, "policy name")
+        raise AdminError(MINIO_POLICY_ATTACHMENT_ERROR)
+    require(action == "bucket", "invalid MinIO action")
+    safe_name(bucket, "BUCKET_NAME")
     namespace, pod, directory, config = _minio_runtime(kube, service)
     mc = ["mc", "--json", "--config-dir", directory, "--insecure"]
     alias = namespace
@@ -561,63 +578,15 @@ def configure_minio(
             ["sh", "-ceu", f"umask 077; mkdir -p {directory}; cat > {directory}/config.json"],
             input_text=json.dumps(config),
         )
-        if action == "bucket":
-            safe_name(bucket, "BUCKET_NAME")
-            if bucket not in _minio_buckets(kube, namespace, pod, mc, alias):
-                _minio_mutation(
-                    kube,
-                    namespace,
-                    pod,
-                    [*mc, "mb", f"{alias}/{bucket}"],
-                    "MinIO bucket creation",
-                )
-            _minio_exec(kube, namespace, pod, [*mc, "stat", f"{alias}/{bucket}"])
-            return
-        require(action == "user-policy" and policy_path is not None, "invalid MinIO action")
-        policy = json.loads(policy_path.read_text())
-        require(isinstance(policy.get("Statement"), list), "policy must contain a Statement list")
-        credentials = kube.secret(namespace, f"{namespace}-svc-user-creds")
-        access_key = _single_line_secret(
-            _decode_secret_value(credentials, "MINIO_SVC_ACCESS_KEY"), "MINIO_SVC_ACCESS_KEY"
-        )
-        secret_key = _single_line_secret(
-            _decode_secret_value(credentials, "MINIO_SVC_SECRET_KEY"), "MINIO_SVC_SECRET_KEY"
-        )
-        safe_name(policy_path.stem, "policy name")
-        credential_input = f"{access_key}\n{secret_key}\n"
-        # MinIO's supported stdin form keeps both user credentials out of process arguments.
-        if access_key not in _minio_users(kube, namespace, pod, mc, alias):
+        if bucket not in _minio_buckets(kube, namespace, pod, mc, alias):
             _minio_mutation(
                 kube,
                 namespace,
                 pod,
-                [*mc, "admin", "user", "add", alias],
-                "MinIO user creation",
-                input_text=credential_input,
+                [*mc, "mb", f"{alias}/{bucket}"],
+                "MinIO bucket creation",
             )
-        _minio_mutation(
-            kube,
-            namespace,
-            pod,
-            [*mc, "admin", "policy", "create", alias, policy_path.stem, "/dev/stdin"],
-            "MinIO policy creation",
-            input_text=json.dumps(policy),
-        )
-        _minio_mutation(
-            kube,
-            namespace,
-            pod,
-            [*mc, "admin", "policy", "attach", alias, policy_path.stem, "--user", access_key],
-            "MinIO policy attachment",
-        )
-        require(
-            access_key in _minio_users(kube, namespace, pod, mc, alias),
-            "MinIO user postcondition failed",
-        )
-        require(
-            _minio_policy_has_user(kube, namespace, pod, mc, alias, policy_path.stem, access_key),
-            "MinIO policy association postcondition failed",
-        )
+        _minio_exec(kube, namespace, pod, [*mc, "stat", f"{alias}/{bucket}"])
     except BaseException as error:
         primary_error = error
         raise
@@ -889,9 +858,10 @@ def _make(commands: Commands, target: str, *, variables: Mapping[str, str] | Non
 
 
 def deploy_aggregate(kube: Kubernetes, kind: str, values: Mapping[str, str] | None = None) -> None:
+    values = dict(values or {})
+    validate_aggregate_configuration(kube.target, kind, values)
     kube.verify_context()
     environment = kube.target.environment
-    values = dict(values or {})
     if kind == "infra":
         if environment == "local-dev":
             _make(kube.commands, "minio-operator-deploy")
@@ -900,6 +870,8 @@ def deploy_aggregate(kube: Kubernetes, kind: str, values: Mapping[str, str] | No
             "mongodb-operator-install",
             "kafka-strimzi-operator-install",
         ):
+            if target == "mongodb-operator-install":
+                kube.ensure_namespace(kube.target.data_namespace)
             _make(kube.commands, target)
         if environment == "local-dev":
             _make(kube.commands, "es-deploy")
@@ -930,7 +902,6 @@ def deploy_aggregate(kube: Kubernetes, kind: str, values: Mapping[str, str] | No
                 activity=f"wait for {service} MinIO",
             )
         return
-    require(kind == "services", f"unknown aggregate {kind}")
     if environment == "qa":
         _make(kube.commands, "es-elastic-user-secret-copy")
     minio = (
@@ -1131,18 +1102,24 @@ def port_forward(kube: Kubernetes) -> None:
         failed = next(process for process in processes if process.poll() is not None)
         raise AdminError(f"port-forward exited unexpectedly: {failure_detail(failed)}")
     finally:
-        for sig in (signal.SIGTERM, signal.SIGKILL):
-            for process in processes:
-                if process.poll() is None:
-                    try:
-                        os.killpg(process.pid, sig)
-                    except ProcessLookupError:
-                        pass
-            deadline = time.monotonic() + 5
-            while time.monotonic() < deadline and any(p.poll() is None for p in processes):
-                time.sleep(0.05)
-            if all(p.poll() is not None for p in processes):
-                break
+        for process in processes:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and any(p.poll() is None for p in processes):
+            time.sleep(0.05)
+        # A leader can exit while a descendant in its owned group ignores SIGTERM.
+        # Address every group again rather than inferring group lifetime from the leader.
+        for process in processes:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and any(p.poll() is None for p in processes):
+            time.sleep(0.05)
         for diagnostic in diagnostics:
             diagnostic.close()
 

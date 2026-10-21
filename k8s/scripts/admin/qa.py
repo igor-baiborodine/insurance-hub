@@ -425,7 +425,8 @@ def snapshot_nodes(commands: Commands, snapshot: str) -> None:
     paused: list[str] = []
     replaced: list[str] = []
     created: list[str] = []
-    primary_error: Exception | None = None
+    primary_error: BaseException | None = None
+    cleanup_errors = []
     try:
         for node in running:
             paused.append(node)
@@ -441,16 +442,23 @@ def snapshot_nodes(commands: Commands, snapshot: str) -> None:
                 f"snapshot postcondition failed for {node}/{snapshot}",
             )
             created.append(node)
-    except Exception as error:
+    except BaseException as error:
         primary_error = error
-    cleanup_errors = []
-    for node in reversed(paused):
-        try:
-            if _node_status(commands, node) != "RUNNING":
-                commands.run(["lxc", "start", node], timeout=120)
-        except Exception as error:
-            cleanup_errors.append((node, error))
+    finally:
+        for node in reversed(paused):
+            try:
+                if _node_status(commands, node) != "RUNNING":
+                    commands.run(["lxc", "start", node], timeout=120)
+            except Exception as error:
+                cleanup_errors.append((node, error))
     if primary_error is not None:
+        if not isinstance(primary_error, Exception):
+            if cleanup_errors:
+                primary_error.add_note(
+                    "snapshot resume also failed for "
+                    + ", ".join(node for node, _ in cleanup_errors)
+                )
+            raise primary_error
         state = (
             f"; replaced previous snapshots on {', '.join(replaced) or 'none'}"
             f"; created new snapshots on {', '.join(created) or 'none'}"

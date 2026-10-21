@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import stat
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,14 @@ from process_runner import CommandError, run_command  # noqa: E402
 
 class AdminError(RuntimeError):
     """An administrative contract or operation failed."""
+
+
+class AdminSignal(BaseException):
+    """A handled POSIX signal requested protected administrative cleanup."""
+
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(signal.Signals(signum).name)
 
 
 @dataclass(frozen=True)
@@ -247,12 +256,32 @@ class Kubernetes:
         return value
 
 
-def cli_error(name: str, function) -> int:
+def cli_error(name: str, function: Callable[[], int]) -> int:
+    handled = (signal.SIGINT, signal.SIGTERM)
+    previous = {signum: signal.getsignal(signum) for signum in handled}
+
+    def interrupt(signum: int, _frame: object) -> None:
+        for protected in handled:
+            signal.signal(protected, signal.SIG_IGN)
+        raise AdminSignal(signum)
+
     try:
-        return function()
-    except KeyboardInterrupt:
-        print(f"{name}: interrupted", file=sys.stderr)
-        return 130
-    except (AdminError, CommandError, OSError, ValueError, KeyError) as error:
-        print(f"{name}: {error}", file=sys.stderr)
-        return 1
+        for signum in handled:
+            signal.signal(signum, interrupt)
+        try:
+            return function()
+        except AdminSignal as interruption:
+            print(
+                f"{name}: interrupted by {signal.Signals(interruption.signum).name}",
+                file=sys.stderr,
+            )
+            return 128 + interruption.signum
+        except KeyboardInterrupt:
+            print(f"{name}: interrupted by SIGINT", file=sys.stderr)
+            return 130
+        except (AdminError, CommandError, OSError, ValueError, KeyError) as error:
+            print(f"{name}: {error}", file=sys.stderr)
+            return 1
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)

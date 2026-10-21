@@ -5,8 +5,11 @@ from __future__ import annotations
 import base64
 import json
 import os
+import signal
 import subprocess
 import sys
+import time
+from pathlib import Path
 
 import cluster
 import pytest
@@ -44,6 +47,8 @@ class FakeKubernetes:
         self.kubectl_calls = []
         self.secrets = {}
         self.namespaces = []
+        self.required_namespaces = []
+        self.ensured_namespaces = []
         self.verified = False
 
     def verify_context(self):
@@ -51,9 +56,11 @@ class FakeKubernetes:
 
     def require_namespace(self, namespace):
         self.namespaces.append(namespace)
+        self.required_namespaces.append(namespace)
 
     def ensure_namespace(self, namespace):
         self.namespaces.append(namespace)
+        self.ensured_namespaces.append(namespace)
 
     def apply(self, payload, **_kwargs):
         self.applied.append(payload)
@@ -77,20 +84,41 @@ def encoded_secret(namespace: str, name: str, values: dict[str, str]) -> dict:
     }
 
 
+def complete_infra_values() -> dict[str, str]:
+    return {
+        "PG_SVC_USER_PWD": "postgres-secret",
+        "MINIO_CONSOLE_ACCESS_KEY": "console-user",
+        "MINIO_CONSOLE_SECRET_KEY": "console-secret",
+        "MINIO_ROOT_USER": "root-user",
+        "MINIO_ROOT_USER_PWD": "root-secret",
+        "MONGO_ROOT_USER_PWD": "mongo-root-secret",
+        "MONGO_PRODUCT_USER_PWD": "mongo-product-secret",
+    }
+
+
 @pytest.mark.parametrize(
-    ("operator", "crd", "namespace", "deployment"),
+    ("operator", "crd", "workload_kind", "namespace", "workload"),
     [
-        ("postgres", "clusters.postgresql.cnpg.io", "cnpg-system", "cnpg-controller-manager"),
+        (
+            "postgres",
+            "clusters.postgresql.cnpg.io",
+            "deployment",
+            "cnpg-system",
+            "cnpg-controller-manager",
+        ),
         (
             "eck",
             "elasticsearches.elasticsearch.k8s.elastic.co",
+            "statefulset",
             "elastic-system",
             "elastic-operator",
         ),
-        ("minio", "tenants.minio.min.io", "minio-operator", "minio-operator"),
+        ("minio", "tenants.minio.min.io", "deployment", "minio-operator", "minio-operator"),
     ],
 )
-def test_manifest_operator_waits_for_exact_crd_and_deployment(operator, crd, namespace, deployment):
+def test_manifest_operator_waits_for_authoritative_crd_and_workload(
+    operator, crd, workload_kind, namespace, workload
+):
     # given
     kube = FakeKubernetes()
 
@@ -100,7 +128,7 @@ def test_manifest_operator_waits_for_exact_crd_and_deployment(operator, crd, nam
     # then
     assert any(f"crd/{crd}" in call for call, _ in kube.kubectl_calls)
     assert any(
-        call[:2] == ["-n", namespace] and f"deployment/{deployment}" in call
+        call[:2] == ["-n", namespace] and f"{workload_kind}/{workload}" in call
         for call, _ in kube.kubectl_calls
     )
     assert any(crd in call and "--all-namespaces" in call for call, _ in kube.kubectl_calls)
@@ -131,6 +159,8 @@ def test_helm_operator_preserves_version_namespace_and_crd(operator, version, na
     assert helm[helm.index("--namespace") + 1] == namespace
     assert helm[helm.index("--kube-context") + 1] == "qa-insurance-hub"
     assert any(f"crd/{crd}" in call for call, _ in kube.kubectl_calls)
+    if operator == "mongodb":
+        assert kube.ensured_namespaces == [namespace]
 
 
 def test_postgres_secret_uses_structured_input_and_copies_only_to_qa():
@@ -204,11 +234,12 @@ def test_copy_secret_removes_controller_metadata():
     ]
 
 
-def test_minio_user_credentials_use_stdin_and_remote_config_is_removed(tmp_path, monkeypatch):
+def test_minio_policy_attachment_fails_closed_before_credentials_enter_argv(tmp_path):
     # given
     kube = FakeKubernetes()
     namespace = "qa-minio-document"
-    sentinel = "SENTINEL-minio-service-secret"
+    access_sentinel = "SENTINEL-minio-access-key"
+    secret_sentinel = "SENTINEL-minio-secret-key"
     kube.secrets[(namespace, f"{namespace}-storage-config")] = encoded_secret(
         namespace,
         f"{namespace}-storage-config",
@@ -217,87 +248,23 @@ def test_minio_user_credentials_use_stdin_and_remote_config_is_removed(tmp_path,
     kube.secrets[(namespace, f"{namespace}-svc-user-creds")] = encoded_secret(
         namespace,
         f"{namespace}-svc-user-creds",
-        {"MINIO_SVC_ACCESS_KEY": "document-user", "MINIO_SVC_SECRET_KEY": sentinel},
+        {
+            "MINIO_SVC_ACCESS_KEY": access_sentinel,
+            "MINIO_SVC_SECRET_KEY": secret_sentinel,
+        },
     )
     policy = tmp_path / "document-policy.json"
     policy.write_text('{"Version":"2012-10-17","Statement":[]}')
-    monkeypatch.setattr(cluster.os, "getpid", lambda: 42)
-    users = iter((set(), {"document-user"}))
-    monkeypatch.setattr(cluster, "_minio_users", lambda *_args: next(users))
-    monkeypatch.setattr(cluster, "_minio_policy_has_user", lambda *_args: True)
 
-    # when
-    cluster.configure_minio(kube, "user-policy", "document", policy_path=policy)
+    # when / then
+    with pytest.raises(AdminError, match="requires the protected access key in child argv"):
+        cluster.configure_minio(kube, "user-policy", "document", policy_path=policy)
 
-    # then
     all_arguments = [argument for call, _ in kube.kubectl_calls for argument in call]
-    assert sentinel not in all_arguments
-    inputs = [input_text for _, input_text in kube.kubectl_calls if input_text]
-    assert any(sentinel in input_text for input_text in inputs)
-    assert any(
-        call[-4:] == ["rm", "-rf", "--", "/tmp/insurance-hub-42"] for call, _ in kube.kubectl_calls
-    )
-
-
-def test_minio_inventory_failure_does_not_attempt_user_mutation(tmp_path, monkeypatch):
-    # given
-    kube = FakeKubernetes()
-    namespace = "qa-minio-document"
-    kube.secrets[(namespace, f"{namespace}-storage-config")] = encoded_secret(
-        namespace,
-        f"{namespace}-storage-config",
-        {"config.env": 'export MINIO_ROOT_USER="root"\nexport MINIO_ROOT_PASSWORD="secret"'},
-    )
-    kube.secrets[(namespace, f"{namespace}-svc-user-creds")] = encoded_secret(
-        namespace,
-        f"{namespace}-svc-user-creds",
-        {"MINIO_SVC_ACCESS_KEY": "document-user", "MINIO_SVC_SECRET_KEY": "secret"},
-    )
-    policy = tmp_path / "document-policy.json"
-    policy.write_text('{"Version":"2012-10-17","Statement":[]}')
-    monkeypatch.setattr(
-        cluster,
-        "_minio_users",
-        lambda *_args: (_ for _ in ()).throw(CommandError("inventory unavailable")),
-    )
-
-    # when / then
-    with pytest.raises(CommandError, match="inventory unavailable"):
-        cluster.configure_minio(kube, "user-policy", "document", policy_path=policy)
-    flattened = [argument for call, _ in kube.kubectl_calls for argument in call]
-    assert "add" not in flattened
-    assert "attach" not in flattened
-    assert "rm" in flattened
-
-
-def test_minio_mutation_failure_reports_uncertain_outcome_and_cleans(tmp_path, monkeypatch):
-    # given
-    class FailingKubernetes(FakeKubernetes):
-        def kubectl(self, *arguments, input_text=None, **kwargs):
-            if "add" in arguments:
-                raise CommandError("connection lost")
-            return super().kubectl(*arguments, input_text=input_text, **kwargs)
-
-    kube = FailingKubernetes()
-    namespace = "qa-minio-document"
-    kube.secrets[(namespace, f"{namespace}-storage-config")] = encoded_secret(
-        namespace,
-        f"{namespace}-storage-config",
-        {"config.env": 'export MINIO_ROOT_USER="root"\nexport MINIO_ROOT_PASSWORD="secret"'},
-    )
-    kube.secrets[(namespace, f"{namespace}-svc-user-creds")] = encoded_secret(
-        namespace,
-        f"{namespace}-svc-user-creds",
-        {"MINIO_SVC_ACCESS_KEY": "document-user", "MINIO_SVC_SECRET_KEY": "secret"},
-    )
-    policy = tmp_path / "document-policy.json"
-    policy.write_text('{"Version":"2012-10-17","Statement":[]}')
-    monkeypatch.setattr(cluster, "_minio_users", lambda *_args: set())
-
-    # when / then
-    with pytest.raises(AdminError, match="outcome is uncertain"):
-        cluster.configure_minio(kube, "user-policy", "document", policy_path=policy)
-    assert any("rm" in call for call, _ in kube.kubectl_calls)
+    assert access_sentinel not in all_arguments
+    assert secret_sentinel not in all_arguments
+    assert kube.kubectl_calls == []
+    assert kube.applied == []
 
 
 def test_zipkin_setup_uses_secret_volumes_and_pinned_image():
@@ -358,38 +325,60 @@ def test_wrong_service_name_is_rejected_before_mutation():
     assert kube.applied == []
 
 
-def test_aggregate_preserves_service_order(monkeypatch):
+def test_missing_secret_value_is_rejected_before_namespace_or_secret_mutation():
+    # given
+    kube = FakeKubernetes()
+
+    # when / then
+    with pytest.raises(AdminError, match="PG_SVC_USER_PWD must be non-empty"):
+        cluster.create_secret(kube, "postgres", {"SVC_NAME": "product", "PG_SVC_USER_PWD": ""})
+    assert not kube.verified
+    assert kube.namespaces == []
+    assert kube.applied == []
+
+
+def test_invalid_copy_destination_is_rejected_before_source_secret_mutation():
+    # given
+    kube = FakeKubernetes()
+
+    # when / then
+    with pytest.raises(AdminError, match="COPY_SECRET_NS must be a DNS-safe"):
+        cluster.create_secret(
+            kube,
+            "minio-service-user",
+            {
+                "SVC_NAME": "document",
+                "MINIO_SVC_ACCESS_KEY": "access-key",
+                "MINIO_SVC_SECRET_KEY": "secret-key",
+                "COPY_SECRET_NS": "../../other",
+            },
+        )
+    assert not kube.verified
+    assert kube.namespaces == []
+    assert kube.applied == []
+
+
+def test_service_aggregate_fails_closed_before_any_mutation(monkeypatch):
     # given
     kube = FakeKubernetes(target=TARGETS["local-dev"])
     calls = []
-    monkeypatch.setattr(
-        cluster,
-        "_make",
-        lambda _commands, target, variables=None: calls.append((target, variables)),
-    )
-    monkeypatch.setattr(cluster, "create_secret", lambda *_args, **_kwargs: None)
-    kube.kubectl = lambda *_args, **_kwargs: ""
+    monkeypatch.setattr(cluster, "_make", lambda *_args, **_kwargs: calls.append("make"))
 
-    # when
-    cluster.deploy_aggregate(kube, "services")
-
-    # then
-    service_calls = [
-        variables["SVC_NAME"] for target, variables in calls if target == "svc-load-delete-deploy"
-    ]
-    assert service_calls == [
-        "web-vue",
-        "agent-portal-gateway",
-        "auth",
-        "product",
-        "policy-search",
-        "dashboard",
-        "policy",
-        "pricing",
-        "document",
-        "payment",
-        "chat",
-    ]
+    # when / then
+    with pytest.raises(AdminError, match="requires the protected access key in child argv"):
+        cluster.deploy_aggregate(
+            kube,
+            "services",
+            {
+                "MINIO_SVC_ACCESS_KEY": "access-key",
+                "MINIO_SVC_SECRET_KEY": "secret-key",
+                "COPY_SECRET_NS": "local-dev-all",
+            },
+        )
+    assert not kube.verified
+    assert calls == []
+    assert kube.namespaces == []
+    assert kube.applied == []
 
 
 def test_infra_aggregate_preserves_postgres_and_minio_phase_order(monkeypatch):
@@ -410,7 +399,7 @@ def test_infra_aggregate_preserves_postgres_and_minio_phase_order(monkeypatch):
     )
 
     # when
-    cluster.deploy_aggregate(kube, "infra", {})
+    cluster.deploy_aggregate(kube, "infra", complete_infra_values())
 
     # then
     postgres = [
@@ -443,6 +432,24 @@ def test_infra_aggregate_preserves_postgres_and_minio_phase_order(monkeypatch):
     assert len(minio_secret_indexes) == 4
     assert len(minio_deploy_indexes) == 2
     assert max(minio_secret_indexes) < min(minio_deploy_indexes)
+    assert "local-dev-all" in kube.ensured_namespaces
+
+
+def test_infra_aggregate_rejects_missing_credentials_before_operator_or_namespace_mutation(
+    monkeypatch,
+):
+    # given
+    kube = FakeKubernetes(target=TARGETS["local-dev"])
+    calls = []
+    monkeypatch.setattr(cluster, "_make", lambda *_args, **_kwargs: calls.append("make"))
+
+    # when / then
+    with pytest.raises(AdminError, match="PG_SVC_USER_PWD must be non-empty"):
+        cluster.deploy_aggregate(kube, "infra", {})
+    assert not kube.verified
+    assert calls == []
+    assert kube.namespaces == []
+    assert kube.applied == []
 
 
 def test_local_cluster_failure_reports_retained_partial_state(tmp_path):
@@ -570,6 +577,53 @@ def test_retained_make_deploy_rejects_coordinate_override_before_kubectl(
     assert calls.read_text().splitlines() == ["config current-context"]
 
 
+def test_retained_make_secret_rejects_invalid_file_before_namespace_mutation(tmp_path):
+    # given
+    secret = tmp_path / "postgres-password"
+    secret.write_text("SENTINEL-invalid-permissions")
+    secret.chmod(0o640)
+    calls = tmp_path / "kubectl-calls"
+    recorder = tmp_path / "kubectl"
+    recorder.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{calls}"\n'
+        'if [ "$*" = "config current-context" ]; then printf "qa-insurance-hub\\n"; fi\n'
+    )
+    recorder.chmod(0o755)
+    environment = os.environ.copy()
+    environment["PATH"] = f"{tmp_path}:{environment['PATH']}"
+
+    # when
+    result = subprocess.run(
+        [
+            "make",
+            "-C",
+            str(REPOSITORY_ROOT / "k8s"),
+            "postgres-svc-secret-create",
+            "ENV_NAME=qa",
+            "CUR_CTX=qa-insurance-hub",
+            "DATA_NS=qa-data",
+            "SVC_NS=qa-svc",
+            "MONITORING_NS=qa-monitoring",
+            "FLUX_SYSTEM_NS=flux-system",
+            "SVC_NAME=product",
+            f"PG_SVC_USER_PWD_FILE={secret}",
+            f"PYTHON={sys.executable}",
+        ],
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    # then
+    assert result.returncode != 0
+    assert "must not be accessible by group or others" in result.stderr
+    assert set(calls.read_text().splitlines()) == {"config current-context"}
+
+
 def test_secret_file_requires_exclusive_protected_input(tmp_path):
     # given
     secret = tmp_path / "database-password"
@@ -678,7 +732,7 @@ def test_port_forward_failure_terminates_every_owned_child(monkeypatch):
     with pytest.raises(AdminError, match="before readiness"):
         cluster.port_forward(kube)
     assert len(processes) == len(cluster.PORT_FORWARDS)
-    assert {pid for pid, _ in killed} == {process.pid for process in processes[1:]}
+    assert {pid for pid, _ in killed} == {process.pid for process in processes}
 
 
 def test_port_forward_interruption_terminates_every_owned_child(monkeypatch):
@@ -713,3 +767,113 @@ def test_port_forward_interruption_terminates_every_owned_child(monkeypatch):
         cluster.port_forward(kube)
     assert len(processes) == len(cluster.PORT_FORWARDS)
     assert {pid for pid, _ in killed} == {process.pid for process in processes}
+
+
+@pytest.mark.parametrize(
+    ("requested_signal", "expected_status"),
+    [(signal.SIGINT, 130), (signal.SIGTERM, 143)],
+)
+def test_cli_signal_terminates_real_owned_port_forward_groups(
+    tmp_path, requested_signal, expected_status
+):
+    # given
+    pid_log = tmp_path / "port-forward-pids"
+    kubectl = tmp_path / "kubectl"
+    kubectl.write_text(
+        f"""#!{sys.executable}
+import os
+import signal
+import subprocess
+import sys
+import time
+
+if sys.argv[1:] == ["config", "current-context"]:
+    print("kind-local-dev-insurance-hub")
+    raise SystemExit(0)
+if "port-forward" not in sys.argv[1:]:
+    raise SystemExit(2)
+child = subprocess.Popen(
+    [
+        sys.executable,
+        "-c",
+        "import signal, time; "
+        "signal.signal(signal.SIGINT, signal.SIG_IGN); "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "time.sleep(300)",
+    ]
+)
+with open({str(pid_log)!r}, "a", encoding="utf-8") as output:
+    output.write(f"{{os.getpid()}} {{child.pid}}\\n")
+    output.flush()
+while True:
+    time.sleep(1)
+"""
+    )
+    kubectl.chmod(0o755)
+    environment = {
+        **os.environ,
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "ENV_NAME": "local-dev",
+        "CUR_CTX": "kind-local-dev-insurance-hub",
+        "DATA_NS": "local-dev-all",
+        "SVC_NS": "local-dev-all",
+        "MONITORING_NS": "INVALID",
+        "FLUX_SYSTEM_NS": "INVALID",
+    }
+    dispatcher = subprocess.Popen(
+        [
+            sys.executable,
+            str(REPOSITORY_ROOT / "k8s/scripts/admin/dispatch.py"),
+            "local",
+            "port-forward",
+        ],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    owned_pids: list[int] = []
+
+    def process_is_running(pid: int) -> bool:
+        try:
+            state = (Path(f"/proc/{pid}/stat")).read_text().split()[2]
+        except FileNotFoundError, ProcessLookupError:
+            return False
+        return state != "Z"
+
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if pid_log.exists():
+                records = pid_log.read_text().splitlines()
+                if len(records) == len(cluster.PORT_FORWARDS):
+                    owned_pids = [int(pid) for record in records for pid in record.split()]
+                    break
+            if dispatcher.poll() is not None:
+                stdout, stderr = dispatcher.communicate()
+                pytest.fail(f"dispatcher exited before signal: {stdout!r} {stderr!r}")
+            time.sleep(0.05)
+        assert len(owned_pids) == 2 * len(cluster.PORT_FORWARDS)
+
+        # when
+        dispatcher.send_signal(requested_signal)
+        stdout, stderr = dispatcher.communicate(timeout=15)
+
+        # then
+        assert dispatcher.returncode == expected_status
+        assert stdout == ""
+        assert signal.Signals(requested_signal).name in stderr
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and any(process_is_running(pid) for pid in owned_pids):
+            time.sleep(0.05)
+        assert not [pid for pid in owned_pids if process_is_running(pid)]
+    finally:
+        if dispatcher.poll() is None:
+            dispatcher.kill()
+            dispatcher.communicate()
+        for record in pid_log.read_text().splitlines() if pid_log.exists() else []:
+            process_group = int(record.split()[0])
+            try:
+                os.killpg(process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass

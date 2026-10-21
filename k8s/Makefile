@@ -625,7 +625,7 @@ postgres-operator-delete: _env-check ## Delete CloudNativePG operator with its n
 	@echo "🗑 CloudNativePG operator deleted."
 
 .PHONY: postgres-svc-secret-create
-postgres-svc-secret-create: _env-check _data-ns-ensure _svc-ns-ensure _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>
+postgres-svc-secret-create: _env-check _svc-name-check ## Create/update secret for DB service user. Usage: make postgres-svc-secret-create SVC_NAME=<svc-name> PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" secret postgres
 
 # Service-owned database role profiles are administered inside an existing cluster.
@@ -700,7 +700,7 @@ es-deploy: _env-check _data-ns-ensure es-operator-deploy ## Deploy Elasticsearch
 	@echo "✅ Elasticsearch cluster deployment initiated. Check status with: make es-status"
 
 .PHONY: es-elastic-user-secret-copy
-es-elastic-user-secret-copy: _env-check _data-ns-ensure _svc-ns-ensure ## Copy Elasticsearch elastic user creds secret from data namespace to service namespace (QA only). Usage: make es-elastic-user-secret-copy
+es-elastic-user-secret-copy: _env-check ## Copy Elasticsearch elastic user creds secret from data namespace to service namespace (QA only). Usage: make es-elastic-user-secret-copy
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" secret elasticsearch-copy
 
 .PHONY: es-status
@@ -951,11 +951,11 @@ mongodb-operator-uninstall: _env-check ## Delete MongoDB Community Operator
 	@echo "🗑 MongoDB operator uninstalled."
 
 .PHONY: mongodb-root-user-secret-create
-mongodb-root-user-secret-create: _env-check _data-ns-ensure ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD_FILE=</absolute/mode-0600-file>
+mongodb-root-user-secret-create: _env-check ## Create/update secret for MongoDB 'root' user. Usage: make mongodb-root-secret-create MONGO_ROOT_USER_PWD_FILE=</absolute/mode-0600-file>
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" secret mongodb-root
 
 .PHONY: mongodb-product-user-secret-create
-mongodb-product-user-secret-create: _env-check _data-ns-ensure _svc-ns-ensure ## Create/update secret for MongoDB product-service user. Usage: make mongodb-product-user-secret-create MONGO_PRODUCT_USER_PWD_FILE=</absolute/mode-0600-file>
+mongodb-product-user-secret-create: _env-check ## Create/update secret for MongoDB product-service user. Usage: make mongodb-product-user-secret-create MONGO_PRODUCT_USER_PWD_FILE=</absolute/mode-0600-file>
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" secret mongodb-product
 
 .PHONY: mongodb-deploy
@@ -1044,7 +1044,7 @@ ZIPKIN_ES_USER := zipkin_user
 export ZIPKIN_ES_USER
 
 .PHONY: zipkin-es-user-secret-create
-zipkin-es-user-secret-create: _env-check _monitoring-ns-ensure ## Create/update secret for Elasticsearch's Zipkin user. Requires ZIPKIN_ES_USER_PWD_FILE with an absolute mode-0600 file.
+zipkin-es-user-secret-create: _env-check ## Create/update secret for Elasticsearch's Zipkin user. Requires ZIPKIN_ES_USER_PWD_FILE with an absolute mode-0600 file.
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" secret zipkin
 
 .PHONY: zipkin-es-user-create
