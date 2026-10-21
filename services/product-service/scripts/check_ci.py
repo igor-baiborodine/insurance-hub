@@ -754,13 +754,13 @@ def validate_modules(workflow: dict, *, run_execution_cases: bool = False) -> No
         "Go PR validation must provision the managed Python runtime",
     )
 
-    setup_go = step_named(job, "Set up Go 1.27.2")
+    setup_go = step_named(job, "Set up selected Go version")
     require(
         setup_go.get("if") == "steps.select.outputs.module_dir != ''"
         and setup_go.get("uses") == "actions/setup-go@v7"
         and setup_go.get("with")
         == {
-            "go-version": "1.27.2",
+            "go-version-file": "${{ steps.select.outputs.module_dir }}/go.mod",
             "cache": "true",
             "cache-dependency-path": "${{ steps.select.outputs.go_sum }}",
         },
@@ -925,9 +925,12 @@ def main(_argv: list[str] | None = None) -> int:
         lambda item: step_named(item["jobs"]["validate"], "Run selected module validation").update(
             run="echo validation omitted"
         ),
-        lambda item: step_named(item["jobs"]["validate"], "Set up Go 1.27.2")["with"].update(
-            {"cache-dependency-path": "services/product-service/go.sum"}
-        ),
+        lambda item: step_named(item["jobs"]["validate"], "Set up selected Go version")[
+            "with"
+        ].update({"cache-dependency-path": "services/product-service/go.sum"}),
+        lambda item: step_named(item["jobs"]["validate"], "Set up selected Go version")[
+            "with"
+        ].update({"go-version-file": "services/product-service/go.mod"}),
         lambda item: step_named(item["jobs"]["validate"], "Run selected module validation").update(
             run=step_named(item["jobs"]["validate"], "Run selected module validation")[
                 "run"

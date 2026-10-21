@@ -31,7 +31,7 @@ PROTO_SCHEMA := api/product/v1/product_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := gen/product/v1/product_service.pb.go gen/product/v1/product_service_grpc.pb.go
 
-GO_VERSION := 1.27.2
+GO_VERSION := 1.27.3
 BUF_VERSION := v1.73.0
 PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2

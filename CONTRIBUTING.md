@@ -37,7 +37,8 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
 
 * **Git** `>=2.43.0`,
   see [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
-* **Go** `1.27.2` for the Go modules, see [Install Go](https://go.dev/doc/install).
+* **Go** `1.27.3` for Product and `1.27.2` for the service scaffold, see
+  [Install Go](https://go.dev/doc/install). Each module requires its exact `go.mod` version.
 * **CPython 3.14.8** for auxiliary tooling governed by the current Python policy; use the owning
   isolated environment and Make targets described in
   [Python Auxiliary Tooling](#python-auxiliary-tooling).
@@ -234,7 +235,7 @@ request or treat a local result as hosted evidence.
 | Product deployment assets or tooling | `make go-svc-deploy-check SVC_NAME=product`; `make go-svc-deploy-test-tooling SVC_NAME=product` | Pinned Product CI/deployment tools. These checks use rendered or fake-adapter inputs and do not prove a live environment. |
 | Product reader role, permission fixtures, or baseline behavior | `make postgres-svc-role-test-fast`; `make postgres-svc-role-test`; `make product-baseline-fixtures-check`; `make product-baseline-test BASELINE_SUITE=db-permissions` | Managed CPython 3.14.8, Java 14/Maven where selected, Docker, and disposable PostgreSQL as documented by the owning target. Record fast fake-adapter results separately from disposable permission evidence and the selected fixture scope. |
 | Product runtime image or container lifecycle | `make go-svc-image-check SVC_NAME=product` | Docker/Buildx and bootstrapped Product Go tools. Record image identity, contents, startup/read behavior, and cleanup. |
-| Gateway/Product access behavior, access fixtures, or combined security tooling | `make product-security-test-tooling`; `make product-security-test-tooling-integration`; `make product-security-check`; retain `make -C services/product-service check-go-pr FORMAT_SCOPE=all` for direct Go access and vulnerability coverage when Product Go inputs are affected | Managed CPython 3.14.8, Java 14, Maven, Go 1.27.2, Docker, and bootstrapped Product Go tools. Record fast validator results separately from the real Java/Go/Docker boundary, exact access cases/reports, bounded process cleanup, and disposable cleanup; never supply a live database URL. |
+| Gateway/Product access behavior, access fixtures, or combined security tooling | `make product-security-test-tooling`; `make product-security-test-tooling-integration`; `make product-security-check`; retain `make -C services/product-service check-go-pr FORMAT_SCOPE=all` for direct Go access and vulnerability coverage when Product Go inputs are affected | Managed CPython 3.14.8, Java 14, Maven, Go 1.27.3, Docker, and bootstrapped Product Go tools. Record fast validator results separately from the real Java/Go/Docker boundary, exact access cases/reports, bounded process cleanup, and disposable cleanup; never supply a live database URL. |
 | Product documentation renderer or covered links | `make -C services/product-service bootstrap-doc-tools`; `make -C services/product-service check-docs` | Managed CPython 3.14.8, Node.js 20 or newer, npm, and the pinned module-local Mermaid tools. Record link and render counts. |
 | Markdown content | `./scripts/markdown-toc.sh format <file>...`; stage the result; the pre-commit hook runs `check` on the staged snapshot | Managed CPython 3.14.8; `npx` is needed only when Markdown is selected. Record the exact task-owned files checked. |
 

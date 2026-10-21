@@ -18,7 +18,7 @@ service remains an internal migration candidate; do not route production Product
 
 The module path is
 `github.com/igor-baiborodine/insurance-hub/services/product-service`. It resolves with
-`GOWORK=off` and has no filesystem replacement or dependency on the scaffold module. Go 1.27.2 is
+`GOWORK=off` and has no filesystem replacement or dependency on the scaffold module. Go 1.27.3 is
 required. From the repository root, use its owning Makefile:
 
 ```sh
@@ -128,7 +128,7 @@ The relevant reproducibility pins are:
 
 | Capability | Pin |
 | --- | --- |
-| Go | 1.27.2 |
+| Go | 1.27.3 |
 | Buf / `protoc-gen-go` / `protoc-gen-go-grpc` | 1.73.0 / 1.36.12 / 1.6.2 |
 | sqlc / pgx | 1.31.1 / 5.11.0 |
 | gRPC Go / protobuf Go / Protovalidate | 1.83.2 / 1.36.12 / 1.4.0 |
@@ -200,7 +200,7 @@ goroutine, and processor signals. The Go memory-limit datapoint is present only 
 memory limit is configured. The database and runtime callbacks stop during the shared shutdown
 budget. Request logs remain local JSON when telemetry is disabled.
 
-The owning mixed-language continuity check requires Go 1.27.2, Java 14, system Maven, the Docker
+The owning mixed-language continuity check requires Go 1.27.3, Java 14, system Maven, the Docker
 CLI, and a running Docker daemon. It exercises disposable Brave Java-to-Go and test-only Go-to-Java
 HTTP paths without changing the production gateway route:
 

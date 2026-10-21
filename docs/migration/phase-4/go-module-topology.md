@@ -132,11 +132,12 @@ including when the second module change was not independently qualifying. A newl
 `services/<name>-service` module receives the same selection, cache, validation, and coverage
 behavior without a workflow edit. Superseded runs for the same pull request are cancelled.
 
-CI uses `ubuntu-24.04`, checkout v6 with full history, and setup-go v7 with exact Go 1.27.2. Go
-dependencies and pinned tool binaries are cached for the selected module, while every run still
-executes version-verifying bootstrap. The selected module directory supplies its Make invocation,
-`go.sum`, coverage report path, and Codecov flag. Product retains its 75% coverage gate and
-`product-service` report identity. The scaffold's `service-scaffold` selector role prevents
+CI uses `ubuntu-24.04`, checkout v6 with full history, and setup-go v7 with the exact Go version
+from the selected module's `go.mod`. Go dependencies and pinned tool binaries are cached for the
+selected module, while every run still executes version-verifying bootstrap. The selected module
+directory supplies its Make invocation, `go.sum`, coverage report path, and Codecov flag. Product
+retains its 75% coverage gate and `product-service` report identity. The scaffold's
+`service-scaffold` selector role prevents
 coverage collection and upload. The workflow does not install documentation or Java tools and does
 not run topology, tooling-fixture, copy, release, deployment, image, database-role, or combined
 security checks.

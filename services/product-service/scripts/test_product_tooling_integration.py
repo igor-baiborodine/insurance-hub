@@ -236,7 +236,7 @@ def test_go_bootstrap_does_not_invoke_non_go_tools(tooling: Tooling) -> None:
         'printf \'go %s\\n\' "$*" >>"$BOOTSTRAP_TRACE"\n'
         'case "${1:-}" in\n'
         "install) exit 0 ;;\n"
-        "env) test \"${2:-}\" = GOVERSION; printf 'go1.27.2\\n' ;;\n"
+        "env) test \"${2:-}\" = GOVERSION; printf 'go1.27.3\\n' ;;\n"
         "*) exit 64 ;;\n"
         "esac\n",
         encoding="utf-8",

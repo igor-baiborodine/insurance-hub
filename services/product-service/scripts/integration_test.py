@@ -131,13 +131,12 @@ def main(_argv: Sequence[str] | None = None) -> int:
                 ("-json", "-run", pattern, "./internal/testing", "./internal/postgres")
             )
             run(
-                arguments,
+                ["bash", str(MODULE_ROOT / "scripts/stream-test-log.sh"), str(result), *arguments],
                 cwd=MODULE_ROOT,
                 env=environment,
                 timeout_seconds=1_800,
                 teardown_seconds=20,
                 activity=f"run Product {suite} integration suite",
-                log_path=result,
             )
             sys.stdout.write(result.read_text(encoding="utf-8"))
             passed = passed_tests(result)

@@ -43,7 +43,7 @@
       ],
       "packageScope": "all Product packages under ./..., the server executable, HTTP and gRPC adapters, generated Product v1 contract, sqlc-generated Product queries and PostgreSQL reader, fixture loader and disposable PostgreSQL suites, Protobuf/SQL source and generated output, and module dependency metadata",
       "prerequisites": [
-        "Go 1.27.2",
+        "Go 1.27.3",
         "pinned Product Go tools installed by make -C services/product-service bootstrap-go-tools",
         "GCC for race-enabled tests",
         "Docker Engine with daemon access for race-enabled integration tests",

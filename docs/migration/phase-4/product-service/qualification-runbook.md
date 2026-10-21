@@ -99,15 +99,14 @@ a new output path, and
 The direct Go gRPC check is run only after Go selection:
 
 ```sh
-go_1272="$(go env GOPATH)/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.2.linux-amd64/bin/go"
 GOTOOLCHAIN=local make -C services/product-service build-qualification-client \
-  GO="$go_1272" QUALIFICATION_CLIENT_OUTPUT=/tmp/issue-136-qualification-client
+  GO=go QUALIFICATION_CLIENT_OUTPUT=/tmp/issue-136-qualification-client
 make product-qualification-grpc PRODUCT_QUALIFICATION_GRPC_CLIENT=/tmp/issue-136-qualification-client
 ```
 
 The gRPC client uses the accepted direct QA bodies and checks list, four gets, absent/case
 `NotFound`, and empty-code `InvalidArgument` over the forwarded QA Go port. It does not use
-reflection. Build it with the pinned Go 1.27.2 toolchain and remove the local binary afterward.
+reflection. Build it with the pinned Go 1.27.3 toolchain and remove the local binary afterward.
 
 ## Browser and supporting signals
 
