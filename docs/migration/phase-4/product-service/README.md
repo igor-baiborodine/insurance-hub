@@ -433,6 +433,10 @@ unchanged; the deferred dedicated Python static workflow is recorded as
 
 ## Qualification limits
 
+The [QA Product qualification runbook](qualification-runbook.md) records #136's preview route,
+focused HTTP/gRPC and Chrome checks, fixed Java/Go measurement, resource controls, restoration
+and cleanup procedure. It does not change the accepted #131 fixture or authorize #137 cutover.
+
 Issue #131's baseline covers the four agreed demo products and the observed Java list/get behavior.
 By itself it does not qualify a Go implementation, protobuf definition, deployed restricted role,
 Go endpoint exposure, browser compatibility, telemetry delivery, load capacity, route cutover, or

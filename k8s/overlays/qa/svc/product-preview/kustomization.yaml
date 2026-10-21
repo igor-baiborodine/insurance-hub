@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: qa-svc
+namePrefix: qa-
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/part-of: insurance-hub
+      app.kubernetes.io/managed-by: kustomize
+      environment: qa
+resources:
+  - gateway-deployment.yaml
+  - gateway-service.yaml
+  - web-vue-deployment.yaml
+  - web-vue-service.yaml
+configMapGenerator:
+  - name: gateway-product-preview-config
+    files:
+      - application.yml=application.yml
+  - name: web-vue-product-preview-config
+    literals:
+      - GATEWAY_URL=http://qa-agent-portal-gateway-product-preview.qa-svc.svc.cluster.local
+      - AUTH_URL=http://qa-auth-api-legacy.qa-svc.svc.cluster.local
+      - CHAT_URL=http://qa-chat-api-legacy.qa-svc.svc.cluster.local
