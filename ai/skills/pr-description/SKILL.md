@@ -3,6 +3,14 @@ name: pr-description
 description: Draft or update Insurance Hub pull request descriptions from ticket requirements, the proposed change, and verified validation evidence. Use for local description artifacts and GitHub pull request bodies; do not use to create, review, merge, or close a pull request.
 ---
 
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Insurance Hub Pull Request Description](#insurance-hub-pull-request-description)
+  - [Shared description standard](#shared-description-standard)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Insurance Hub Pull Request Description
 
 Produce a reviewer-friendly description that explains the delivered outcome, the meaningful
@@ -12,9 +20,8 @@ procedure they define.
 
 Choose the execution mode before gathering evidence:
 
-- For a local checkout that produces
-  `<ticket-dir>/<ticket>-pr-description.md`, resolve `<ticket-dir>` through root `AGENTS.md`
-  and follow [local drafting](references/local-drafting.md).
+- For a local checkout that produces a ticket PR description artifact, resolve `<ticket-dir>`
+  through root `AGENTS.md` and follow [local drafting](references/local-drafting.md).
 - For a pull request hosted on GitHub, including a request to update its body, read and follow
   [GitHub drafting and update](references/github-drafting.md).
 

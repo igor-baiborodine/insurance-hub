@@ -33,6 +33,7 @@ Use one of these formats:
 
 ```text
 <type>/issue-<number>-<description>
+<type>/issue-<number>-<description>-<pr-number>
 <type>/<description>
 ```
 
@@ -41,12 +42,17 @@ Use one of these formats:
 - Write the description with lowercase ASCII letters, digits, and hyphens. Do not use spaces,
   underscores, or uppercase letters.
 - Keep the description concise and specific, preferably about five words or fewer.
+- When a ticket is delivered through multiple PRs, suffix each PR branch with its planned PR
+  number from the delivery plan (`-1` for `PR1`, `-2` for `PR2`, and so on). Use the unsuffixed
+  ticket format for a single-PR ticket. The suffix identifies the PR's position in the ticket
+  plan, not the hosting platform's global pull request number.
 - Give each branch one purpose. Use the type that best represents its primary outcome; supporting
   commits may use other accurate commit types.
 
 Examples:
 
 - `feat/issue-6-provision-kind-and-microk8s-clusters`
+- `feat/issue-174-move-auxiliary-tooling-to-python-7` (`PR7` of a multi-PR ticket)
 - `fix/issue-14-handle-null-pointer-in-payment-service`
 - `docs/issue-22-update-api-specification`
 - `feat/add-basic-authentication`
@@ -121,11 +127,12 @@ issue's completion criteria.
 - Do not use destructive cleanup or recovery commands merely to obtain a clean working tree. Report
   conflicting changes and resolve their ownership before continuing.
 - Commit authorization does not authorize a push, merge, branch deletion, release tag, or shared
-  history rewrite. Obtain or rely on authorization for each operation as required by
-  [`AGENTS.md`](../../AGENTS.md).
+  history rewrite. Explicit session-start permission to commit and/or push applies only to the
+  named operation and scope during that session; it does not carry into another session. Follow
+  the review and authorization conditions in [`AGENTS.md`](../../AGENTS.md).
 - Do not rename an existing branch or rewrite commit history merely to apply this rule
   retroactively. Perform those operations only when the task explicitly requires them.
-- Naming compliance does not authorize creating a commit. Follow the review and explicit commit
+- Naming compliance does not authorize creating a commit. Follow the review and commit
   authorization requirements in [`AGENTS.md`](../../AGENTS.md).
 
 ## Sensitive and Generated Content
