@@ -16,6 +16,7 @@
   - [Toolchain, refresh, and reset](#toolchain-refresh-and-reset)
   - [Acceptance evidence](#acceptance-evidence)
   - [Downstream handoff](#downstream-handoff)
+  - [Issue 174 tooling handoff for issue 136](#issue-174-tooling-handoff-for-issue-136)
   - [Qualification limits](#qualification-limits)
   - [Deployment operations](#deployment-operations)
 
@@ -393,6 +394,42 @@ evidence.
 | #135 — Observability | Stable service boundaries, routes, scenario IDs, failure categories, and sanitization limits | Instrument the implemented HTTP/gRPC/database path; prove safe queryable logs, metrics, and traces without credentials, raw definitions, or unbounded product/question labels. |
 | #136 — Integrated qualification | Accepted corpora, comparator rules, replay commands, consumer inventory, and snapshot invalidation rules | Define measurable workloads and pass/abort thresholds; run Java/Go differential, gateway/frontend compatibility, failure, lifecycle, load, and rollback qualification against a matching snapshot. |
 | #137 — Separate cutover gate | Existing Java routes remain authoritative throughout #131–#136 | Specify target environments and release criteria, then switch only the approved routes after #136; measure the observation window and verify reconciler-safe rollback. Java retirement remains separate. |
+
+## Issue 174 tooling handoff for issue 136
+
+Issue #174 is the auxiliary-tooling prerequisite for #136. Start with the reproducible setup and
+owner commands in [CONTRIBUTING.md](../../../../CONTRIBUTING.md#python-auxiliary-tooling). The
+supported baseline is managed CPython 3.14.8 with uv 0.13.1, pytest 9.1.1, and Ruff 0.17.1 from the
+root `.python-version`, `pyproject.toml`, `uv.lock`, and `.venv/`. Normal operations use
+`python-runtime-check`; development checks use `python-toolchain-check`. Neither target installs
+dependencies. Security updates must deliberately revise the declarations and lock, synchronize or
+recreate the environment, and rerun every affected owner and acceptance boundary.
+
+Use the root `python-shared-tooling-check`, `python-scaffold-tooling-check`,
+`python-product-tooling-check`, `python-k8s-admin-check`, `python-observability-check`, and
+`python-legacy-check` aggregates for local owner coverage. Inspect each recipe because some
+aggregates create owned disposable resources. Default pytest collection contains only the
+executable examples. Separately named integration targets and full acceptance stay explicit;
+operational CLIs require only the runtime environment and do not import pytest. Tests and reviews
+for this non-core tooling follow the repository's 80/20 direction while retaining every applicable
+safety check.
+
+The #135 observability commands and fixed budgets remain in the
+[observability runbook](observability-runbook.md). A complete full-duration local profile last took
+about 127 minutes: three overhead pairs took roughly 24.5 minutes each, healthy operation roughly
+45.8 minutes, and recovery roughly 7 minutes, followed by a short aggregate. Allow additional time
+for setup, image availability, and host load. Run only affected phases after a tooling change and
+rerun their aggregate on the same candidate; historical #135 or #174 records do not prove a changed
+#136 candidate.
+
+Revision R2 retained short shell or Make interfaces, generated Maven wrappers, application entry
+points, and direct workflow interfaces represented by SH02, SH09–SH25, SH27, EX02–EX10, and
+MK01/MK05/MK13. Their recorded exclusions are not blanket policy-compliance claims. Local fake and
+disposable evidence does not establish shared QA state, hosted publication, live credentials, or
+operator permissions. #136 must supply its own exact source, image, environment, snapshot, workload,
+and live or disposable evidence. Issue #156's selected-module CI and trigger boundary remains
+unchanged; the deferred dedicated Python static workflow is recorded as
+[issue-174-N01](../phase-4-nice-to-have-ledger.md#issue-174-n01-python-static-check-ci-workflow).
 
 ## Qualification limits
 

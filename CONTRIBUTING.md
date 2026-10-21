@@ -347,6 +347,23 @@ by `python-repository-format-check` and `python-repository-lint`. These reposito
 existing violations visible while owner batches migrate; a failure must be recorded rather than
 reported as a passing foundation check.
 
+Use the owner aggregates for the supported auxiliary-tooling boundaries:
+
+```bash
+make python-shared-tooling-check
+make python-scaffold-tooling-check
+make python-product-tooling-check
+make python-k8s-admin-check
+make python-observability-check
+make python-legacy-check
+```
+
+These targets apply the repository's 80/20 direction to non-core tooling tests: they emphasize
+likely paths and focused contract coverage while retaining applicable target, failure, deadline,
+interruption, cleanup, redaction, permission, and dry-run safety checks. Inspect each recipe first;
+some aggregates create owned disposable resources. They do not imply live cluster,
+host-administration, release-publication, or full-duration acceptance evidence.
+
 The committed examples provide a bounded local gate and separate test-suite entry points:
 
 ```bash

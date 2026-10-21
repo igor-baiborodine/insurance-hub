@@ -35,6 +35,10 @@ installed. Start with pinned pytest alone; add a plugin only for a documented co
 
 ## Scenarios and assertions
 
+- Apply the repository [80/20 test direction](repo-rules.md#testability) to auxiliary Python:
+  prioritize focused likely-path behavior and high-value contract cases while retaining every
+  applicable safety check. Do not expand case matrices solely for exhaustive combinations that do
+  not add distinct contract evidence.
 - Test observable contracts, not internal call sequences. Use descriptive names and
   `pytest.mark.parametrize` for related case matrices. Derive expected values independently of
   the production transformation. Ordinary `assert`, `pytest.raises`, and `pytest.approx`

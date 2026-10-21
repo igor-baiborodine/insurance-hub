@@ -27,6 +27,10 @@
 
 ## Testability
 
+- For non-core functionality such as repository tooling, use an 80/20 test direction: prioritize
+  focused likely-path behavior and the smallest useful case matrix. Keep every safety check that is
+  applicable to the contract, including target guards, failure handling, deadlines, interruption,
+  cleanup, secret protection, permissions, and dry-run boundaries.
 - When implementing unit or integration tests, assess the effort required to construct fixtures,
   wire dependencies, and express the test scenarios. Treat disproportionate setup, mocking, or
   test-method complexity as feedback about the production design.

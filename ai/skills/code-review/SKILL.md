@@ -37,7 +37,9 @@ Assess only areas relevant to the ticket and proposed change:
 4. Inspect authoritative contracts, implementations, callers, and generated sources together.
    Never infer API behavior solely from generated output, a ticket title, or a PR description.
 5. Assess tests at the changed boundary and inspect the owning Makefiles or other validation entry
-   points before accepting coverage claims.
+   points before accepting coverage claims. For non-core functionality, apply the repository's
+   [80/20 test direction](../../rules/repo-rules.md#testability): expect focused likely-path
+   coverage and applicable contract safety checks without demanding low-value exhaustive matrices.
 6. Check security, privacy, persistence, migration, deployment, telemetry, and operational impact
    when the changed paths or requirements make them applicable.
 7. Report maintainability concerns only when they violate a repository rule or create a concrete
