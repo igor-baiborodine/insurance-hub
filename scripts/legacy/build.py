@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import os
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+from legacy_process import process_group_exists, terminate_process_group
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVICES = (
@@ -34,7 +35,14 @@ def image_for(service: str) -> tuple[str, str]:
     return f"legacy/{folder}", f"insurance-hub-{service}-api-legacy:latest"
 
 
-def build(folder: str, image: str, *, root: Path = ROOT, timeout_seconds: float = 1800) -> None:
+def build(
+    folder: str,
+    image: str,
+    *,
+    root: Path = ROOT,
+    timeout_seconds: float = 1800,
+    teardown_seconds: float = 5,
+) -> None:
     dockerfile = root / folder / "Dockerfile"
     if not dockerfile.is_file():
         raise ValueError(f"Dockerfile is missing: {dockerfile}")
@@ -64,7 +72,7 @@ def build(folder: str, image: str, *, root: Path = ROOT, timeout_seconds: float 
                 status = process.wait(timeout=min(30, max(0.1, deadline - time.monotonic())))
                 if status:
                     raise RuntimeError(f"Docker build failed for {image} (status {status})")
-                return
+                break
             except subprocess.TimeoutExpired:
                 if time.monotonic() >= deadline:
                     raise RuntimeError(f"Docker build timed out for {image}") from None
@@ -73,18 +81,22 @@ def build(folder: str, image: str, *, root: Path = ROOT, timeout_seconds: float 
                     f"Docker build still running for {image} after {elapsed:.0f}s", file=sys.stderr
                 )
     except BaseException:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.wait(timeout=5)
+        if process_group_exists(process) and not terminate_process_group(
+            process, teardown_seconds=teardown_seconds
+        ):
+            print(
+                f"ERROR: Docker build cleanup exceeded {teardown_seconds:g} seconds for {image}",
+                file=sys.stderr,
+            )
         raise
     finally:
         signal.signal(signal.SIGTERM, previous_term)
+    if process_group_exists(process) and not terminate_process_group(
+        process, teardown_seconds=teardown_seconds
+    ):
+        raise RuntimeError(
+            f"Docker build cleanup exceeded {teardown_seconds:g} seconds for {image}"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -131,6 +131,7 @@ PYTHON_LEGACY_FILES := \
 	legacy/scripts/prepare.py \
 	legacy/scripts/test_prepare.py \
 	scripts/legacy/build.py \
+	scripts/legacy/legacy_process.py \
 	scripts/legacy/release.py \
 	scripts/legacy/test_build.py \
 	scripts/legacy/test_release.py

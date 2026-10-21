@@ -142,6 +142,10 @@ read access. After reviewing the report, run `sudo scripts/prepare.sh --target l
 the `legacy/` directory to apply it. Install the repository's managed Python 3.14.8 environment
 first with `make python-toolchain-setup` at the repository root. If setup stops partway through,
 inspect the hosts entry, firewall rules, and jsreport template before retrying.
+Preparation has a 120-second overall work deadline, limits each firewall or HTTP operation to 10
+seconds, and reserves 5 seconds for child-process cleanup. SIGINT and SIGTERM return 130 and 143.
+A timeout or interruption does not prove that an attempted mutation failed, so inspect the same
+three postconditions before retrying.
 <p align="center">
     <img alt="Env" src="https://raw.githubusercontent.com/asc-lab/micronaut-microservices-poc/master/readme-images/env.png" />
 </p>

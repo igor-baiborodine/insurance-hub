@@ -15,6 +15,8 @@ from pathlib import Path
 
 import yaml
 
+from legacy_process import process_group_exists, terminate_process_group
+
 ROOT = Path(__file__).resolve().parents[2]
 NAME = re.compile(r"[a-z][a-z0-9-]*")
 VERSION = re.compile(r"1\.[0-9]+\.[0-9]+")
@@ -26,7 +28,12 @@ def require_name(value: str) -> str:
     return value
 
 
-def run_git(*args: str, env: dict[str, str] | None = None, deadline: float | None = None) -> str:
+def run_git(
+    *args: str,
+    env: dict[str, str] | None = None,
+    deadline: float | None = None,
+    teardown_seconds: float = 5,
+) -> str:
     started = time.monotonic()
     limit = min(started + 60, deadline) if deadline is not None else started + 60
     process = subprocess.Popen(
@@ -53,21 +60,20 @@ def run_git(*args: str, env: dict[str, str] | None = None, deadline: float | Non
                 )
         if process.returncode:
             raise RuntimeError(f"Git {args[0]} failed (status {process.returncode})")
-        return stdout
     except BaseException:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.communicate(timeout=5)
+        if process_group_exists(process) and not terminate_process_group(
+            process, teardown_seconds=teardown_seconds
+        ):
+            print(
+                f"ERROR: Git {args[0]} cleanup exceeded {teardown_seconds:g} seconds",
+                file=sys.stderr,
+            )
         raise
+    if process_group_exists(process) and not terminate_process_group(
+        process, teardown_seconds=teardown_seconds
+    ):
+        raise RuntimeError(f"Git {args[0]} cleanup exceeded {teardown_seconds:g} seconds")
+    return stdout
 
 
 def select(paths: list[str], kind: str) -> str | None:
@@ -226,15 +232,11 @@ def update_dependents(module: str, version: str, token: str) -> None:
             "GIT_ASKPASS": str(askpass),
             "GIT_TERMINAL_PROMPT": "0",
             "CI_PAT": token,
+            "GIT_AUTHOR_NAME": "github-actions[bot]",
+            "GIT_AUTHOR_EMAIL": "github-actions[bot]@users.noreply.github.com",
+            "GIT_COMMITTER_NAME": "github-actions[bot]",
+            "GIT_COMMITTER_EMAIL": "github-actions[bot]@users.noreply.github.com",
         }
-        run_git("config", "user.name", "github-actions[bot]", env=env, deadline=deadline)
-        run_git(
-            "config",
-            "user.email",
-            "github-actions[bot]@users.noreply.github.com",
-            env=env,
-            deadline=deadline,
-        )
         for pom in sorted((ROOT / "legacy").glob("*/pom.xml")):
             dependent = pom.parent.name
             if dependent == module or dependent.endswith("-api"):

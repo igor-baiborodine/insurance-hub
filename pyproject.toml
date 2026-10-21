@@ -53,6 +53,7 @@ known-first-party = [
     "check_monitoring",
     "deployment",
     "example_cli",
+    "legacy_process",
     "markdown_pre_commit",
     "markdown_toc",
     "monitoring_assets",
