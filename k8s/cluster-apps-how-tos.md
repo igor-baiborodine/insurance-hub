@@ -146,7 +146,7 @@ For verification, see [Tempo runbook](tests/infra/verify-tempo-traces/verify-tem
 
 **Prerequisites**: [Elasticsearch](#elasticsearch) 
  
-- `make zipkin-es-user-secret-create`
+- `make zipkin-es-user-secret-create ZIPKIN_ES_USER_PWD_FILE=</absolute/mode-0600-file>`
 - `make zipkin-es-user-create`
 - `make zipkin-install`
 - `make zipkin-status`
@@ -167,32 +167,39 @@ For verification, see [Alloy runbook](tests/infra/verify-alloy-traces/verify-all
 
 ### Infra
 
+Credential targets accept protected files through the documented `*_FILE` variables. Each path
+must be absolute and point to a regular file owned by the invoking user with mode `0600`; the file
+must contain exactly one non-empty line. Create and remove these files outside the Make targets.
+For compatibility, the corresponding raw variable may instead be exported in the invoking
+environment. Raw secret-bearing Make command-line assignments are rejected, and a raw variable
+cannot be combined with its `*_FILE` variable.
+
 #### Postgres
 
 - `make postgres-operator-deploy`
 
   1. **auth** service: 
-  - `make postgres-svc-secret-create SVC_NAME=auth [PG_SVC_USER_PWD=<user-pwd>]`
+  - `make postgres-svc-secret-create SVC_NAME=auth PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make postgres-svc-deploy SVC_NAME=auth`, wait at least one minute for the cluster to be ready.
   
   2. **document** service: 
-  - `make postgres-svc-secret-create SVC_NAME=document [PG_SVC_USER_PWD=<user-pwd>]`
+  - `make postgres-svc-secret-create SVC_NAME=document PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make postgres-svc-deploy SVC_NAME=document`, wait at least one minute for the cluster to be ready.
   
   3. **payment** service: 
-  - `make postgres-svc-secret-create SVC_NAME=payment [PG_SVC_USER_PWD=<user-pwd>]`
+  - `make postgres-svc-secret-create SVC_NAME=payment PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make postgres-svc-deploy SVC_NAME=payment`, wait at least one minute for the cluster to be ready.
   
   4. **policy** service: 
-  - `make postgres-svc-secret-create SVC_NAME=policy [PG_SVC_USER_PWD=<user-pwd>]`
+  - `make postgres-svc-secret-create SVC_NAME=policy PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make postgres-svc-deploy SVC_NAME=policy`
 
   5. **pricing** service:
-  - `make postgres-svc-secret-create SVC_NAME=pricing [PG_SVC_USER_PWD=<user-pwd>]`
+  - `make postgres-svc-secret-create SVC_NAME=pricing PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make postgres-svc-deploy SVC_NAME=pricing`, wait at least one minute for the cluster to be ready.
 
   6. **product** service: 
-  - `make postgres-svc-secret-create SVC_NAME=product [PG_SVC_USER_PWD=<user-pwd>]`
+  - `make postgres-svc-secret-create SVC_NAME=product PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make postgres-svc-deploy SVC_NAME=product`, wait at least one minute for the cluster to be ready.
  
 - **QA**: `make grafana-ui`
@@ -203,8 +210,8 @@ For verification, see [Alloy runbook](tests/infra/verify-alloy-traces/verify-all
 #### MongoDB (legacy)
 
 - `make mongodb-operator-install`
-- `make mongodb-root-user-secret-create [MONGO_ROOT_USER_PWD=<user-pwd>]`
-- `make mongodb-product-user-secret-create [MONGO_PRODUCT_USER_PWD=<product-pwd>]`
+- `make mongodb-root-user-secret-create MONGO_ROOT_USER_PWD_FILE=</absolute/mode-0600-file>`
+- `make mongodb-product-user-secret-create MONGO_PRODUCT_USER_PWD_FILE=</absolute/mode-0600-file>`
 - `make mongodb-deploy`
 - `make mongodb-status`  
 - **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=mongodb-deploy-<iso-date>`
@@ -224,41 +231,41 @@ For verification, see [Alloy runbook](tests/infra/verify-alloy-traces/verify-all
 - `make minio-operator-deploy`
   
   1. **document** service:
-  - `make minio-storage-user-secret-create SVC_NAME=document [MINIO_CONSOLE_ACCESS_KEY=<access-key>] [MINIO_CONSOLE_SECRET_KEY=<secret-key>]`
-  - `make minio-storage-config-secret-create SVC_NAME=document [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
+  - `make minio-storage-user-secret-create SVC_NAME=document MINIO_CONSOLE_ACCESS_KEY_FILE=</absolute/mode-0600-file> MINIO_CONSOLE_SECRET_KEY_FILE=</absolute/mode-0600-file>`
+  - `make minio-storage-config-secret-create SVC_NAME=document MINIO_ROOT_USER=<user-name> MINIO_ROOT_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make minio-tenant-deploy SVC_NAME=document`
   - `make minio-tenant-status SVC_NAME=document`
   - `make minio-svc-bucket-create SVC_NAME=document BUCKET_NAME=policies`
-  - `make minio-svc-user-secret-create SVC_NAME=document [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
+  - `make minio-svc-user-secret-create SVC_NAME=document MINIO_SVC_ACCESS_KEY_FILE=</absolute/mode-0600-file> MINIO_SVC_SECRET_KEY_FILE=</absolute/mode-0600-file>`
   - `make minio-svc-user-with-policy-create SVC_NAME=document POLICY_FILE=apps/svc/document/minio/s3-policy-policies.json`
 
   2. **payment** service:
-  - `make minio-storage-user-secret-create SVC_NAME=payment [MINIO_CONSOLE_ACCESS_KEY=<access-key>] [MINIO_CONSOLE_SECRET_KEY=<secret-key>]`
-  - `make minio-storage-config-secret-create SVC_NAME=payment [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
+  - `make minio-storage-user-secret-create SVC_NAME=payment MINIO_CONSOLE_ACCESS_KEY_FILE=</absolute/mode-0600-file> MINIO_CONSOLE_SECRET_KEY_FILE=</absolute/mode-0600-file>`
+  - `make minio-storage-config-secret-create SVC_NAME=payment MINIO_ROOT_USER=<user-name> MINIO_ROOT_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make minio-tenant-deploy SVC_NAME=payment`
   - `make minio-tenant-status SVC_NAME=payment`
   - `make minio-svc-bucket-create SVC_NAME=payment BUCKET_NAME=payments-import`
-  - `make minio-svc-user-secret-create SVC_NAME=payment [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
+  - `make minio-svc-user-secret-create SVC_NAME=payment MINIO_SVC_ACCESS_KEY_FILE=</absolute/mode-0600-file> MINIO_SVC_SECRET_KEY_FILE=</absolute/mode-0600-file>`
   - `make minio-svc-user-with-policy-create SVC_NAME=payment POLICY_FILE=apps/svc/payment/minio/s3-policy-payments-import.json`
 
   3. **QA/loki** service:
-  - `make minio-storage-user-secret-create SVC_NAME=loki [MINIO_CONSOLE_ACCESS_KEY=<access-key>] [MINIO_CONSOLE_SECRET_KEY=<secret-key>]`
-  - `make minio-storage-config-secret-create SVC_NAME=loki [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
+  - `make minio-storage-user-secret-create SVC_NAME=loki MINIO_CONSOLE_ACCESS_KEY_FILE=</absolute/mode-0600-file> MINIO_CONSOLE_SECRET_KEY_FILE=</absolute/mode-0600-file>`
+  - `make minio-storage-config-secret-create SVC_NAME=loki MINIO_ROOT_USER=<user-name> MINIO_ROOT_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make minio-tenant-deploy SVC_NAME=loki`
   - `make minio-tenant-status SVC_NAME=loki`
   - `make minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs`
-  - `make minio-svc-user-secret-create SVC_NAME=loki COPY_SECRET_NS=qa-monitoring [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
+  - `make minio-svc-user-secret-create SVC_NAME=loki COPY_SECRET_NS=qa-monitoring MINIO_SVC_ACCESS_KEY_FILE=</absolute/mode-0600-file> MINIO_SVC_SECRET_KEY_FILE=</absolute/mode-0600-file>`
   - `make minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/infra/loki/minio/s3-policy-loki-logs.json`
   - `kubectl get secret qa-minio-loki-svc-user-creds -n qa-minio-loki`
   - `kubectl get secret qa-minio-loki-svc-user-creds -n qa-monitoring`
 
   4. **QA/tempo** service:
-  - `make minio-storage-user-secret-create SVC_NAME=tempo [MINIO_CONSOLE_ACCESS_KEY=<access-key>] [MINIO_CONSOLE_SECRET_KEY=<secret-key>]`
-  - `make minio-storage-config-secret-create SVC_NAME=tempo [MINIO_ROOT_USER=<user-name>] [MINIO_ROOT_USER_PWD=<user-pwd>]`
+  - `make minio-storage-user-secret-create SVC_NAME=tempo MINIO_CONSOLE_ACCESS_KEY_FILE=</absolute/mode-0600-file> MINIO_CONSOLE_SECRET_KEY_FILE=</absolute/mode-0600-file>`
+  - `make minio-storage-config-secret-create SVC_NAME=tempo MINIO_ROOT_USER=<user-name> MINIO_ROOT_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make minio-tenant-deploy SVC_NAME=tempo`
   - `make minio-tenant-status SVC_NAME=tempo`
   - `make minio-svc-bucket-create SVC_NAME=tempo BUCKET_NAME=tempo-traces`
-  - `make minio-svc-user-secret-create SVC_NAME=tempo COPY_SECRET_NS=qa-monitoring [MINIO_SVC_ACCESS_KEY=<access-key>] [MINIO_SVC_SECRET_KEY=<secret-key>]`
+  - `make minio-svc-user-secret-create SVC_NAME=tempo COPY_SECRET_NS=qa-monitoring MINIO_SVC_ACCESS_KEY_FILE=</absolute/mode-0600-file> MINIO_SVC_SECRET_KEY_FILE=</absolute/mode-0600-file>`
   - `make minio-svc-user-with-policy-create SVC_NAME=tempo POLICY_FILE=apps/infra/tempo/minio/s3-policy-tempo-traces.json`
   - `kubectl get secret qa-minio-tempo-svc-user-creds -n qa-minio-tempo`
   - `kubectl get secret qa-minio-tempo-svc-user-creds -n qa-monitoring`
