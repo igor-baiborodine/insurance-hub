@@ -13,6 +13,7 @@ from pathlib import Path
 
 import cluster
 import pytest
+import runtime
 from runtime import (
     REPOSITORY_ROOT,
     TARGETS,
@@ -703,6 +704,33 @@ def test_recursive_make_receives_the_verified_interpreter(monkeypatch):
     assert f"PYTHON={sys.executable}" in arguments
 
 
+def test_recursive_make_inherits_and_caps_to_parent_workflow_deadline(monkeypatch):
+    # given
+    now = [100.0]
+    calls = []
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: now[0])
+    monkeypatch.setenv("MAKE", "make")
+
+    def complete(arguments, **kwargs):
+        calls.append((list(arguments), kwargs))
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(runtime, "run_command", complete)
+    commands = Commands(
+        environment={"PATH": "/usr/bin"},
+        deadline=runtime.WorkflowDeadline("deploy infra", 150.0),
+    )
+
+    # when
+    cluster._make(commands, "postgres-operator-deploy")
+
+    # then
+    assert calls[0][1]["timeout_seconds"] == 50
+    child_environment = calls[0][1]["env"]
+    child = runtime.WorkflowDeadline.start("operator postgres", 1200, child_environment)
+    assert child == runtime.WorkflowDeadline("deploy infra", 150.0)
+
+
 def test_port_forward_failure_terminates_every_owned_child(monkeypatch):
     # given
     kube = FakeKubernetes(target=TARGETS["local-dev"])
@@ -759,7 +787,7 @@ def test_port_forward_interruption_terminates_every_owned_child(monkeypatch):
     monkeypatch.setattr(
         cluster,
         "_port_ready",
-        lambda _port: (_ for _ in ()).throw(KeyboardInterrupt()),
+        lambda _port, _timeout=0.1: (_ for _ in ()).throw(KeyboardInterrupt()),
     )
 
     # when / then

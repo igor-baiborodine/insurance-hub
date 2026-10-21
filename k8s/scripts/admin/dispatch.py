@@ -31,6 +31,7 @@ from runtime import (  # noqa: E402
     AdminError,
     Commands,
     Kubernetes,
+    WorkflowDeadline,
     cli_error,
     require,
     safe_name,
@@ -58,6 +59,24 @@ SECRET_INPUTS_BY_AGGREGATE = {
         "MONGO_PRODUCT_USER_PWD",
     ),
     "services": ("MINIO_SVC_ACCESS_KEY", "MINIO_SVC_SECRET_KEY"),
+}
+
+# Overall work budgets are deliberately larger than the existing command and polling phase
+# budgets. Interactive port-forwarding is the one continuous workflow and has no work deadline;
+# its 30-second readiness phase and 10-second process-group teardown remain independently bounded.
+WORKFLOW_BUDGETS = {
+    "guard": 60,
+    "namespace": 180,
+    "operator": 1200,
+    "secret": 300,
+    "minio": 1200,
+    "zipkin-user": 1200,
+    "image": 2400,
+    "deploy": 21600,
+    "local:create": 1800,
+    "local:delete-storage": 120,
+    "qa-nodes": 5400,
+    "qa-cluster": 3600,
 }
 
 
@@ -119,7 +138,29 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _target() -> Kubernetes:
+def _workflow_deadline(arguments: argparse.Namespace) -> WorkflowDeadline | None:
+    command = arguments.command
+    if command == "local":
+        if arguments.action == "port-forward":
+            return None
+        key = f"local:{arguments.action}"
+        detail = arguments.action
+    else:
+        key = command
+        detail = next(
+            (
+                value
+                for name in ("action", "kind", "name", "profile")
+                if (value := getattr(arguments, name, ""))
+            ),
+            "",
+        )
+    budget = WORKFLOW_BUDGETS[key]
+    label = " ".join(part for part in (command, detail) if part)
+    return WorkflowDeadline.start(label, budget)
+
+
+def _target(commands: Commands) -> Kubernetes:
     environment = os.environ.get("ENV_NAME", "")
     require(environment in TARGETS, "ENV_NAME must explicitly equal local-dev or qa")
     expected = TARGETS[environment]
@@ -131,7 +172,7 @@ def _target() -> Kubernetes:
         monitoring_namespace=os.environ.get("MONITORING_NS", expected.monitoring_namespace),
         flux_namespace=os.environ.get("FLUX_SYSTEM_NS", expected.flux_namespace),
     )
-    return Kubernetes(Commands(), target)
+    return Kubernetes(commands, target)
 
 
 def _values(secret_names: tuple[str, ...] = ()) -> dict[str, str]:
@@ -148,7 +189,7 @@ def _values(secret_names: tuple[str, ...] = ()) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
-    commands = Commands()
+    commands = Commands(deadline=_workflow_deadline(arguments))
     if arguments.command == "qa-nodes":
         master_only = os.environ.get("MASTER_ONLY", "false").lower() == "true"
         if arguments.action == "create":
@@ -167,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
         safe_name(os.environ.get("SVC_NAME", ""), "SVC_NAME")
         return 0
 
-    kube = _target()
+    kube = _target(commands)
     if arguments.command == "secret":
         values = _values(SECRET_INPUTS_BY_PROFILE[arguments.profile])
     elif arguments.command == "deploy":

@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 import yaml
-from runtime import AdminError, CommandError, Commands, require, safe_name
+from runtime import AdminError, CommandError, Commands, cleanup_budget, require, safe_name
 
 MASTER = "qa-master"
 WORKERS = ("qa-worker1", "qa-worker2")
@@ -33,17 +33,19 @@ def _node_status(commands: Commands, node: str) -> str:
     )
 
 
-def _lxc_json(commands: Commands) -> list[dict]:
+def _lxc_json(commands: Commands, timeout: float = 30) -> list[dict]:
     try:
-        value = json.loads(commands.run(["lxc", "list", "--format", "json"], timeout=30))
+        value = json.loads(
+            commands.run(["lxc", "list", "--format", "json"], timeout=min(30, timeout))
+        )
     except json.JSONDecodeError as error:
         raise AdminError("LXD returned malformed node JSON") from error
     require(isinstance(value, list), "LXD node result must be a list")
     return value
 
 
-def _global_ipv4(commands: Commands, node: str) -> tuple[str, str]:
-    for item in _lxc_json(commands):
+def _global_ipv4(commands: Commands, node: str, timeout: float = 30) -> tuple[str, str]:
+    for item in _lxc_json(commands, timeout):
         if item.get("name") != node:
             continue
         networks = item.get("state", {}).get("network", {})
@@ -58,9 +60,9 @@ def _global_ipv4(commands: Commands, node: str) -> tuple[str, str]:
     raise AdminError(f"{node} has no global IPv4 address")
 
 
-def _has_global_ipv4(commands: Commands, node: str) -> bool:
+def _has_global_ipv4(commands: Commands, node: str, timeout: float = 30) -> bool:
     try:
-        _global_ipv4(commands, node)
+        _global_ipv4(commands, node, timeout)
     except AdminError, CommandError:
         return False
     return True
@@ -70,13 +72,25 @@ def _wait(commands: Commands, description: str, predicate, timeout: float = 120)
     started = time.monotonic()
     deadline = started + timeout
     heartbeat = started + 30
-    while time.monotonic() < deadline:
-        if predicate():
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        remaining_timeout = getattr(commands, "remaining_timeout", None)
+        if remaining_timeout is not None:
+            remaining = remaining_timeout(remaining, description)
+        if predicate(remaining):
             return
-        if time.monotonic() >= heartbeat:
-            print(f"{description}: still waiting after {time.monotonic() - started:.0f}s")
-            heartbeat = time.monotonic() + 30
-        time.sleep(2)
+        now = time.monotonic()
+        remaining = min(remaining, deadline - now)
+        if remaining <= 0:
+            break
+        if remaining_timeout is not None:
+            remaining = remaining_timeout(remaining, description)
+        if now >= heartbeat:
+            print(f"{description}: still waiting after {now - started:.0f}s")
+            heartbeat = now + 30
+        time.sleep(min(2, remaining))
     raise AdminError(f"{description} exceeded its {timeout:g}-second deadline")
 
 
@@ -108,15 +122,15 @@ def create_nodes(commands: Commands, master_only: bool) -> None:
             _wait(
                 commands,
                 f"wait for {node} agent",
-                lambda node=node: commands.succeeds(
-                    ["lxc", "exec", node, "--", "true"], timeout=10
+                lambda remaining, node=node: commands.succeeds(
+                    ["lxc", "exec", node, "--", "true"], timeout=min(10, remaining)
                 ),
                 timeout=300,
             )
             _wait(
                 commands,
                 f"wait for {node} network",
-                lambda node=node: _has_global_ipv4(commands, node),
+                lambda remaining, node=node: _has_global_ipv4(commands, node, remaining),
                 timeout=180,
             )
             commands.run(
@@ -140,7 +154,8 @@ def create_nodes(commands: Commands, master_only: bool) -> None:
         retained = ", ".join(created) or "none"
         changed_profiles = ", ".join(profiles) or "none"
         raise AdminError(
-            f"QA node creation failed; retained created nodes: {retained}; new profiles: {changed_profiles}"
+            f"QA node creation failed during {error}; retained created nodes: {retained}; "
+            f"new profiles: {changed_profiles}"
         ) from error
 
 
@@ -151,7 +166,7 @@ def cluster_create(commands: Commands, master_only: bool) -> None:
     _wait(
         commands,
         "wait for qa-master network",
-        lambda: _has_global_ipv4(commands, MASTER),
+        lambda remaining: _has_global_ipv4(commands, MASTER, remaining),
         timeout=120,
     )
     master_ip, interface = _global_ipv4(commands, MASTER)
@@ -177,7 +192,10 @@ def cluster_create(commands: Commands, master_only: bool) -> None:
     _wait(
         commands,
         "wait for K3s server",
-        lambda: commands.succeeds(["lxc", "exec", MASTER, "--", "systemctl", "is-active", "k3s"]),
+        lambda remaining: commands.succeeds(
+            ["lxc", "exec", MASTER, "--", "systemctl", "is-active", "k3s"],
+            timeout=min(30, remaining),
+        ),
         timeout=180,
     )
     if not master_only:
@@ -223,14 +241,15 @@ def cluster_create(commands: Commands, master_only: bool) -> None:
                 primary_error = error
                 raise
             finally:
-                try:
-                    commands.run(["lxc", "exec", worker, "--", "rm", "-f", remote], timeout=30)
-                except Exception as error:
-                    if primary_error is None:
-                        raise AdminError(
-                            f"K3s installed but token cleanup failed on {worker}"
-                        ) from error
-                    primary_error.add_note(f"protected token cleanup also failed on {worker}")
+                with cleanup_budget(commands, f"clean protected token on {worker}", 60):
+                    try:
+                        commands.run(["lxc", "exec", worker, "--", "rm", "-f", remote], timeout=30)
+                    except Exception as error:
+                        if primary_error is None:
+                            raise AdminError(
+                                f"K3s installed but token cleanup failed on {worker}"
+                            ) from error
+                        primary_error.add_note(f"protected token cleanup also failed on {worker}")
             commands.run(
                 ["lxc", "exec", worker, "--", "systemctl", "restart", "k3s-agent"],
                 timeout=120,
@@ -239,18 +258,19 @@ def cluster_create(commands: Commands, master_only: bool) -> None:
             _wait(
                 commands,
                 f"verify restarted K3s agent on {worker}",
-                lambda worker=worker: commands.succeeds(
-                    ["lxc", "exec", worker, "--", "systemctl", "is-active", "k3s-agent"]
+                lambda remaining, worker=worker: commands.succeeds(
+                    ["lxc", "exec", worker, "--", "systemctl", "is-active", "k3s-agent"],
+                    timeout=min(30, remaining),
                 ),
                 timeout=120,
             )
     expected = 1 if master_only else 3
 
-    def nodes_ready() -> bool:
+    def nodes_ready(remaining: float) -> bool:
         try:
             output = commands.run(
                 ["lxc", "exec", MASTER, "--", "kubectl", "get", "nodes", "-o", "json"],
-                timeout=20,
+                timeout=min(20, remaining),
             )
             items = json.loads(output).get("items", [])
         except AdminError, CommandError, json.JSONDecodeError:
@@ -267,7 +287,7 @@ def cluster_create(commands: Commands, master_only: bool) -> None:
     _wait(
         commands,
         "wait for CoreDNS",
-        lambda: commands.succeeds(
+        lambda remaining: commands.succeeds(
             [
                 "lxc",
                 "exec",
@@ -281,7 +301,7 @@ def cluster_create(commands: Commands, master_only: bool) -> None:
                 "deployment/coredns",
                 "--timeout=15s",
             ],
-            timeout=20,
+            timeout=min(20, remaining),
         ),
         timeout=180,
     )
@@ -332,12 +352,38 @@ def _merge_named(existing: dict, incoming: dict, key: str) -> list:
     return [*kept, *incoming.get(key, [])]
 
 
+def _atomic_protected_write(destination: Path, content: bytes) -> None:
+    temporary = destination.with_name(f".{destination.name}.insurance-hub-{os.getpid()}")
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600,
+        )
+        with os.fdopen(descriptor, "wb") as output:
+            descriptor = -1
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, destination)
+        directory = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+
+
 def pull_kubeconfig(commands: Commands, destination: Path) -> None:
     require(_exists(commands, MASTER), "qa-master does not exist")
     _wait(
         commands,
         "wait for qa-master network",
-        lambda: _has_global_ipv4(commands, MASTER),
+        lambda remaining: _has_global_ipv4(commands, MASTER, remaining),
         timeout=120,
     )
     master_ip, _ = _global_ipv4(commands, MASTER)
@@ -369,19 +415,9 @@ def pull_kubeconfig(commands: Commands, destination: Path) -> None:
         merged["current-context"] = "qa-insurance-hub"
         backup = destination.with_name("config.insurance-hub-backup")
         if destination.exists():
-            backup.write_bytes(destination.read_bytes())
-            backup.chmod(0o600)
-        temporary = destination.with_name(f".config.insurance-hub-{os.getpid()}")
-        try:
-            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w") as output:
-                yaml.safe_dump(merged, output, sort_keys=False)
-                output.flush()
-                os.fsync(output.fileno())
-            os.replace(temporary, destination)
-            destination.chmod(0o600)
-        finally:
-            temporary.unlink(missing_ok=True)
+            _atomic_protected_write(backup, destination.read_bytes())
+        serialized = yaml.safe_dump(merged, sort_keys=False).encode()
+        _atomic_protected_write(destination, serialized)
 
 
 def node_action(commands: Commands, action: str, snapshot: str = "baseline") -> None:
@@ -445,12 +481,13 @@ def snapshot_nodes(commands: Commands, snapshot: str) -> None:
     except BaseException as error:
         primary_error = error
     finally:
-        for node in reversed(paused):
-            try:
-                if _node_status(commands, node) != "RUNNING":
-                    commands.run(["lxc", "start", node], timeout=120)
-            except Exception as error:
-                cleanup_errors.append((node, error))
+        with cleanup_budget(commands, "resume nodes after snapshot", 480):
+            for node in reversed(paused):
+                try:
+                    if _node_status(commands, node) != "RUNNING":
+                        commands.run(["lxc", "start", node], timeout=120)
+                except Exception as error:
+                    cleanup_errors.append((node, error))
     if primary_error is not None:
         if not isinstance(primary_error, Exception):
             if cleanup_errors:
@@ -468,7 +505,9 @@ def snapshot_nodes(commands: Commands, snapshot: str) -> None:
             if cleanup_errors
             else ""
         )
-        raise AdminError(f"snapshot failed{state}{suffix}") from primary_error
+        raise AdminError(
+            f"snapshot failed during {primary_error}{state}{suffix}"
+        ) from primary_error
     if cleanup_errors:
         raise AdminError(
             f"snapshots completed but resume failed for {', '.join(n for n, _ in cleanup_errors)}"

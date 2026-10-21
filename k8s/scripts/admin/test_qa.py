@@ -5,11 +5,20 @@ from __future__ import annotations
 import json
 import signal
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
 import qa
-from runtime import AdminError, AdminSignal
+import runtime
+import yaml
+from runtime import (
+    AdminError,
+    AdminSignal,
+    Commands,
+    WorkflowDeadline,
+    WorkflowDeadlineError,
+)
 
 
 class FakeCommands:
@@ -64,6 +73,37 @@ def source_kubeconfig() -> dict:
         "users": [{"name": "default", "user": {"client-certificate-data": "cert"}}],
         "contexts": [{"name": "default", "context": {"cluster": "default", "user": "default"}}],
     }
+
+
+class PullCommands:
+    def succeeds(self, arguments, **_kwargs):
+        return arguments[:2] == ["lxc", "info"]
+
+    def run(self, arguments, **_kwargs):
+        if arguments[:3] == ["lxc", "list", "--format"]:
+            return json.dumps(
+                [
+                    {
+                        "name": "qa-master",
+                        "state": {
+                            "network": {
+                                "enp5s0": {
+                                    "addresses": [
+                                        {
+                                            "family": "inet",
+                                            "scope": "global",
+                                            "address": "10.0.0.10",
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                    }
+                ]
+            )
+        if arguments[:3] == ["lxc", "file", "pull"]:
+            Path(arguments[-1]).write_text(yaml.safe_dump(source_kubeconfig()))
+        return ""
 
 
 def test_kubeconfig_rewrite_is_structured_and_exact():
@@ -315,7 +355,7 @@ def test_cluster_join_token_uses_stdin_file_channel_and_never_argv():
         assert commands.remote_files[worker][qa.AGENT_TOKEN_FILE][1] == "0600:root:root"
 
 
-def test_pull_kubeconfig_writes_mode_0600_and_preserves_backup(tmp_path):
+def test_pull_kubeconfig_writes_mode_0600_from_creation_and_preserves_backup(tmp_path, monkeypatch):
     # given
     destination = tmp_path / ".kube" / "config"
     destination.parent.mkdir()
@@ -323,42 +363,157 @@ def test_pull_kubeconfig_writes_mode_0600_and_preserves_backup(tmp_path):
         "apiVersion: v1\nkind: Config\nclusters:\n- name: other\n  cluster: {}\nusers: []\ncontexts: []\n"
     )
 
-    class PullCommands:
-        def succeeds(self, arguments, **_kwargs):
-            return arguments[:2] == ["lxc", "info"]
+    created_modes = []
+    real_fdopen = qa.os.fdopen
 
-        def run(self, arguments, **_kwargs):
-            if arguments[:3] == ["lxc", "list", "--format"]:
-                return json.dumps(
-                    [
-                        {
-                            "name": "qa-master",
-                            "state": {
-                                "network": {
-                                    "enp5s0": {
-                                        "addresses": [
-                                            {
-                                                "family": "inet",
-                                                "scope": "global",
-                                                "address": "10.0.0.10",
-                                            }
-                                        ]
-                                    }
-                                }
-                            },
-                        }
-                    ]
-                )
-            if arguments[:3] == ["lxc", "file", "pull"]:
-                import yaml
+    def inspect_mode_at_open(descriptor, *args, **kwargs):
+        created_modes.append(stat.S_IMODE(qa.os.fstat(descriptor).st_mode))
+        return real_fdopen(descriptor, *args, **kwargs)
 
-                Path(arguments[-1]).write_text(yaml.safe_dump(source_kubeconfig()))
-            return ""
+    monkeypatch.setattr(qa.os, "fdopen", inspect_mode_at_open)
 
     # when
     qa.pull_kubeconfig(PullCommands(), destination)
 
     # then
+    backup = destination.with_name("config.insurance-hub-backup")
+    assert created_modes == [0o600, 0o600]
     assert stat.S_IMODE(destination.stat().st_mode) == 0o600
-    assert destination.with_name("config.insurance-hub-backup").exists()
+    assert stat.S_IMODE(backup.stat().st_mode) == 0o600
     assert "qa-insurance-hub" in destination.read_text()
+
+
+def test_pull_kubeconfig_replaces_backup_symlink_without_following_it(tmp_path):
+    # given
+    destination = tmp_path / ".kube" / "config"
+    destination.parent.mkdir()
+    original = b"apiVersion: v1\nkind: Config\nclusters: []\nusers: []\ncontexts: []\n"
+    destination.write_bytes(original)
+    symlink_target = tmp_path / "must-remain-unchanged"
+    symlink_target.write_bytes(b"SENTINEL-existing-target")
+    backup = destination.with_name("config.insurance-hub-backup")
+    backup.symlink_to(symlink_target)
+
+    # when
+    qa.pull_kubeconfig(PullCommands(), destination)
+
+    # then
+    assert not backup.is_symlink()
+    assert backup.read_bytes() == original
+    assert symlink_target.read_bytes() == b"SENTINEL-existing-target"
+    assert stat.S_IMODE(backup.stat().st_mode) == 0o600
+
+
+def test_pull_kubeconfig_backup_failure_preserves_original_destination(tmp_path, monkeypatch):
+    # given
+    destination = tmp_path / ".kube" / "config"
+    destination.parent.mkdir()
+    original = b"apiVersion: v1\nkind: Config\nclusters: []\nusers: []\ncontexts: []\n"
+    destination.write_bytes(original)
+    backup = destination.with_name("config.insurance-hub-backup")
+    backup.write_bytes(b"previous-backup")
+    real_replace = qa.os.replace
+
+    def fail_backup_replace(source, target):
+        if Path(target) == backup:
+            raise OSError("simulated backup replacement failure")
+        real_replace(source, target)
+
+    monkeypatch.setattr(qa.os, "replace", fail_backup_replace)
+
+    # when / then
+    with pytest.raises(OSError, match="simulated backup"):
+        qa.pull_kubeconfig(PullCommands(), destination)
+    assert destination.read_bytes() == original
+    assert backup.read_bytes() == b"previous-backup"
+    assert list(destination.parent.glob(".*.insurance-hub-*")) == []
+
+
+def test_wait_caps_predicate_command_to_remaining_workflow_budget(monkeypatch):
+    # given
+    now = [100.0]
+    observed_timeouts = []
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(qa.time, "monotonic", lambda: now[0])
+
+    def expire_during_command(*_args, timeout_seconds, **_kwargs):
+        observed_timeouts.append(timeout_seconds)
+        now[0] += timeout_seconds
+        raise runtime.CommandError("predicate command timed out")
+
+    monkeypatch.setattr(runtime, "run_command", expire_during_command)
+    commands = Commands(
+        environment={"PATH": "/usr/bin"},
+        deadline=WorkflowDeadline("qa-cluster create", 105.0),
+    )
+
+    # when / then
+    with pytest.raises(WorkflowDeadlineError, match="overall work deadline.*probe readiness"):
+        qa._wait(
+            commands,
+            "probe readiness",
+            lambda remaining: commands.succeeds(
+                ["probe"], timeout=min(30, remaining), activity="probe readiness"
+            ),
+            timeout=180,
+        )
+    assert observed_timeouts == [5.0]
+
+
+def test_wait_caps_predicate_command_to_remaining_phase_budget(monkeypatch):
+    # given
+    now = [100.0]
+    observed_timeouts = []
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(qa.time, "monotonic", lambda: now[0])
+
+    def expire_during_command(*_args, timeout_seconds, **_kwargs):
+        observed_timeouts.append(timeout_seconds)
+        now[0] += timeout_seconds
+        raise runtime.CommandError("predicate command timed out")
+
+    monkeypatch.setattr(runtime, "run_command", expire_during_command)
+    commands = Commands(
+        environment={"PATH": "/usr/bin"},
+        deadline=WorkflowDeadline("qa-cluster create", 1000.0),
+    )
+
+    # when / then
+    with pytest.raises(AdminError, match="probe readiness exceeded its 5-second deadline"):
+        qa._wait(
+            commands,
+            "probe readiness",
+            lambda remaining: commands.succeeds(
+                ["probe"], timeout=min(30, remaining), activity="probe readiness"
+            ),
+            timeout=5,
+        )
+    assert observed_timeouts == [5.0]
+
+
+def test_cleanup_budget_survives_expired_work_deadline(monkeypatch):
+    # given
+    now = [100.0]
+    calls = []
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: now[0])
+
+    def complete(arguments, **kwargs):
+        kwargs["env"] = dict(kwargs["env"])
+        calls.append((list(arguments), kwargs))
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(runtime, "run_command", complete)
+    commands = Commands(
+        environment={"PATH": "/usr/bin"},
+        deadline=WorkflowDeadline("qa-nodes snapshot", 99.0),
+    )
+
+    # when / then
+    with pytest.raises(WorkflowDeadlineError):
+        commands.run(["work"], timeout=30)
+    with commands.cleanup_budget("resume nodes after snapshot", 10):
+        commands.run(["cleanup"], timeout=30)
+    assert len(calls) == 1
+    assert calls[0][0] == ["cleanup"]
+    assert calls[0][1]["timeout_seconds"] == 10
+    assert calls[0][1]["env"][runtime.WORK_DEADLINE_LABEL_ENV] == "resume nodes after snapshot"

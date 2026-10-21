@@ -23,6 +23,7 @@ from runtime import (
     Commands,
     Kubernetes,
     Target,
+    cleanup_budget,
     require,
     safe_name,
 )
@@ -591,14 +592,15 @@ def configure_minio(
         primary_error = error
         raise
     finally:
-        try:
-            _minio_exec(kube, namespace, pod, ["rm", "-rf", "--", directory])
-        except Exception as error:
-            if primary_error is None:
-                raise AdminError(
-                    "MinIO operation finished but protected remote cleanup failed"
-                ) from error
-            primary_error.add_note("protected MinIO remote cleanup also failed")
+        with cleanup_budget(kube.commands, "clean protected MinIO configuration", 150):
+            try:
+                _minio_exec(kube, namespace, pod, ["rm", "-rf", "--", directory])
+            except Exception as error:
+                if primary_error is None:
+                    raise AdminError(
+                        "MinIO operation finished but protected remote cleanup failed"
+                    ) from error
+                primary_error.add_note("protected MinIO remote cleanup also failed")
 
 
 def create_zipkin_user(kube: Kubernetes, role: str, user: str) -> None:
@@ -718,22 +720,23 @@ curl --fail --silent --show-error --insecure --netrc-file /tmp/netrc "https://${
         raise
     finally:
         cleanup_errors = []
-        for kind, name in (
-            ("pod", pod_name),
-            ("configmap", "zipkin-es-setup-role"),
-            ("secret", request_secret_name),
-        ):
-            try:
-                kube.kubectl(
-                    "-n",
-                    kube.target.data_namespace,
-                    "delete",
-                    kind,
-                    name,
-                    "--ignore-not-found",
-                )
-            except Exception as error:
-                cleanup_errors.append(f"{kind}/{name}: {error}")
+        with cleanup_budget(kube.commands, "clean Zipkin setup resources", 180):
+            for kind, name in (
+                ("pod", pod_name),
+                ("configmap", "zipkin-es-setup-role"),
+                ("secret", request_secret_name),
+            ):
+                try:
+                    kube.kubectl(
+                        "-n",
+                        kube.target.data_namespace,
+                        "delete",
+                        kind,
+                        name,
+                        "--ignore-not-found",
+                    )
+                except Exception as error:
+                    cleanup_errors.append(f"{kind}/{name}: {error}")
         if cleanup_errors:
             detail = "; ".join(cleanup_errors)
             if primary_error is None:
@@ -833,19 +836,26 @@ def manage_image(kube: Kubernetes, action: str, service: str) -> None:
                     raise
                 finally:
                     if push_attempted:
-                        try:
-                            kube.commands.run(
-                                ["lxc", "exec", node, "--", "rm", "-f", remote], timeout=30
-                            )
-                        except Exception as error:
-                            if primary_error is None:
-                                raise AdminError(
-                                    f"image loaded but remote cleanup failed on {node}"
-                                ) from error
-                            primary_error.add_note(f"remote image cleanup also failed on {node}")
+                        with cleanup_budget(
+                            kube.commands, f"clean remote image archive on {node}", 60
+                        ):
+                            try:
+                                kube.commands.run(
+                                    ["lxc", "exec", node, "--", "rm", "-f", remote], timeout=30
+                                )
+                            except Exception as error:
+                                if primary_error is None:
+                                    raise AdminError(
+                                        f"image loaded but remote cleanup failed on {node}"
+                                    ) from error
+                                primary_error.add_note(
+                                    f"remote image cleanup also failed on {node}"
+                                )
         except Exception as error:
             completed = ", ".join(loaded) or "none"
-            raise AdminError(f"QA image load failed; completed nodes: {completed}") from error
+            raise AdminError(
+                f"QA image load failed during {error}; completed nodes: {completed}"
+            ) from error
 
 
 def _make(commands: Commands, target: str, *, variables: Mapping[str, str] | None = None) -> None:
@@ -854,7 +864,7 @@ def _make(commands: Commands, target: str, *, variables: Mapping[str, str] | Non
     arguments = [*make_command, "-C", str(REPOSITORY_ROOT / "k8s"), target]
     arguments.extend(f"{key}={value}" for key, value in (variables or {}).items())
     arguments.append(f"PYTHON={sys.executable}")
-    commands.run(arguments, timeout=OPERATOR_TIMEOUT, activity=f"make {target}")
+    commands.run(arguments, timeout=1200, activity=f"make {target}")
 
 
 def deploy_aggregate(kube: Kubernetes, kind: str, values: Mapping[str, str] | None = None) -> None:
@@ -1021,7 +1031,7 @@ def create_local_cluster(commands: Commands, target: Target, storage: Path, conf
             state = "creation outcome uncertain; inspect for a retained cluster before retrying"
         else:
             state = "not created"
-        raise AdminError(f"local cluster setup failed ({state})") from error
+        raise AdminError(f"local cluster setup failed during {error} ({state})") from error
 
 
 PORT_FORWARDS = (
@@ -1039,9 +1049,9 @@ PORT_FORWARDS = (
 )
 
 
-def _port_ready(port: int) -> bool:
+def _port_ready(port: int, timeout: float = 0.1) -> bool:
     with socket.socket() as connection:
-        connection.settimeout(0.1)
+        connection.settimeout(timeout)
         return connection.connect_ex(("127.0.0.1", port)) == 0
 
 
@@ -1091,9 +1101,17 @@ def port_forward(kube: Kubernetes) -> None:
                 raise AdminError(
                     f"port-forward exited before readiness: {failure_detail(failed[0])}"
                 )
-            if all(_port_ready(item[2]) for item in PORT_FORWARDS):
+            ready = True
+            for item in PORT_FORWARDS:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not _port_ready(item[2], min(0.1, remaining)):
+                    ready = False
+                    break
+            if ready:
                 break
-            time.sleep(0.2)
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(0.2, remaining))
         else:
             raise AdminError("port-forwards did not become ready within 30 seconds")
         print("All local-dev port-forwards are ready; press Ctrl+C to stop.")
@@ -1109,7 +1127,9 @@ def port_forward(kube: Kubernetes) -> None:
                 pass
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline and any(p.poll() is None for p in processes):
-            time.sleep(0.05)
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(0.05, remaining))
         # A leader can exit while a descendant in its owned group ignores SIGTERM.
         # Address every group again rather than inferring group lifetime from the leader.
         for process in processes:
@@ -1119,7 +1139,9 @@ def port_forward(kube: Kubernetes) -> None:
                 pass
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline and any(p.poll() is None for p in processes):
-            time.sleep(0.05)
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(0.05, remaining))
         for diagnostic in diagnostics:
             diagnostic.close()
 

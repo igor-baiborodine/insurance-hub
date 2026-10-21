@@ -8,7 +8,9 @@ import re
 import signal
 import stat
 import sys
-from collections.abc import Callable, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,6 +32,54 @@ class AdminSignal(BaseException):
     def __init__(self, signum: int) -> None:
         self.signum = signum
         super().__init__(signal.Signals(signum).name)
+
+
+class WorkflowDeadlineError(AdminError):
+    """A finite administrative workflow exhausted its overall work budget."""
+
+
+WORK_DEADLINE_ENV = "INSURANCE_HUB_ADMIN_WORK_DEADLINE"
+WORK_DEADLINE_LABEL_ENV = "INSURANCE_HUB_ADMIN_WORK_DEADLINE_LABEL"
+
+
+@dataclass(frozen=True)
+class WorkflowDeadline:
+    label: str
+    expires_at: float
+
+    @classmethod
+    def start(
+        cls,
+        label: str,
+        budget: float,
+        environment: Mapping[str, str] | None = None,
+    ) -> WorkflowDeadline:
+        require(budget > 0, "workflow work budget must be positive")
+        source = os.environ if environment is None else environment
+        inherited = source.get(WORK_DEADLINE_ENV, "")
+        own = cls(label, time.monotonic() + budget)
+        if not inherited:
+            return own
+        try:
+            inherited_expiry = float(inherited)
+        except ValueError as error:
+            raise AdminError(f"{WORK_DEADLINE_ENV} must be a monotonic timestamp") from error
+        require(
+            inherited_expiry > 0 and inherited_expiry != float("inf"),
+            f"{WORK_DEADLINE_ENV} must be a finite positive timestamp",
+        )
+        inherited_label = source.get(WORK_DEADLINE_LABEL_ENV, "parent administrative workflow")
+        inherited_deadline = cls(inherited_label, inherited_expiry)
+        return inherited_deadline if inherited_expiry <= own.expires_at else own
+
+    def remaining(self, phase_limit: float, activity: str) -> float:
+        require(phase_limit > 0, "phase budget must be positive")
+        remaining = self.expires_at - time.monotonic()
+        if remaining <= 0:
+            raise WorkflowDeadlineError(
+                f"{self.label} exceeded its overall work deadline during {activity}"
+            )
+        return min(phase_limit, remaining)
 
 
 @dataclass(frozen=True)
@@ -168,11 +218,41 @@ class Commands:
     """Bounded command adapter with a deliberately small test seam."""
 
     def __init__(
-        self, *, cwd: Path = REPOSITORY_ROOT, environment: Mapping[str, str] | None = None
+        self,
+        *,
+        cwd: Path = REPOSITORY_ROOT,
+        environment: Mapping[str, str] | None = None,
+        deadline: WorkflowDeadline | None = None,
     ):
         self.cwd = cwd
         source = os.environ if environment is None else environment
         self.environment = {key: value for key, value in source.items() if key in SAFE_CHILD_ENV}
+        self.deadline = deadline
+        self._export_deadline(deadline)
+
+    def _export_deadline(self, deadline: WorkflowDeadline | None) -> None:
+        self.environment.pop(WORK_DEADLINE_ENV, None)
+        self.environment.pop(WORK_DEADLINE_LABEL_ENV, None)
+        if deadline is not None:
+            self.environment[WORK_DEADLINE_ENV] = f"{deadline.expires_at:.9f}"
+            self.environment[WORK_DEADLINE_LABEL_ENV] = deadline.label
+
+    def remaining_timeout(self, phase_limit: float, activity: str) -> float:
+        if self.deadline is None:
+            return phase_limit
+        return self.deadline.remaining(phase_limit, activity)
+
+    @contextmanager
+    def cleanup_budget(self, label: str, seconds: float) -> Iterator[None]:
+        previous = self.deadline
+        cleanup = WorkflowDeadline.start(label, seconds, {})
+        self.deadline = cleanup
+        self._export_deadline(cleanup)
+        try:
+            yield
+        finally:
+            self.deadline = previous
+            self._export_deadline(previous)
 
     def run(
         self,
@@ -182,23 +262,46 @@ class Commands:
         timeout: float = 120,
         activity: str | None = None,
     ) -> str:
-        result = run_command(
-            arguments,
-            cwd=self.cwd,
-            env=self.environment,
-            timeout_seconds=timeout,
-            activity=activity or arguments[0],
-            input_text=input_text,
-            teardown_seconds=10,
-        )
+        selected_activity = activity or arguments[0]
+        selected_timeout = self.remaining_timeout(timeout, selected_activity)
+        try:
+            result = run_command(
+                arguments,
+                cwd=self.cwd,
+                env=self.environment,
+                timeout_seconds=selected_timeout,
+                activity=selected_activity,
+                input_text=input_text,
+                teardown_seconds=10,
+            )
+        except CommandError as error:
+            if self.deadline is not None and time.monotonic() >= self.deadline.expires_at:
+                raise WorkflowDeadlineError(
+                    f"{self.deadline.label} exceeded its overall work deadline during "
+                    f"{selected_activity}"
+                ) from error
+            raise
         return result.stdout
 
-    def succeeds(self, arguments: Sequence[str], *, timeout: float = 30) -> bool:
+    def succeeds(
+        self, arguments: Sequence[str], *, timeout: float = 30, activity: str | None = None
+    ) -> bool:
         try:
-            self.run(arguments, timeout=timeout)
+            self.run(arguments, timeout=timeout, activity=activity)
         except CommandError:
             return False
         return True
+
+
+@contextmanager
+def cleanup_budget(commands: object, label: str, seconds: float) -> Iterator[None]:
+    """Give production cleanup a fresh deadline while keeping lightweight fakes compatible."""
+    scope = getattr(commands, "cleanup_budget", None)
+    if scope is None:
+        yield
+        return
+    with scope(label, seconds):
+        yield
 
 
 class Kubernetes:
