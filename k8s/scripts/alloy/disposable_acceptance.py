@@ -330,7 +330,7 @@ def command(arguments: Sequence[str], *, timeout: int = TIMEOUT, input_text: str
             input=input_text or None,
             text=True,
             capture_output=True,
-            timeout=timeout,
+            timeout=alloy_runtime.teardown_timeout(timeout),
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -560,6 +560,9 @@ def raise_with_cleanup(
         cleanup_error = AcceptanceError(f"{label}: {details}")
         if primary is None:
             raise cleanup_error from cleanup_errors[0]
+        if isinstance(primary, (alloy_runtime.Interrupted, alloy_runtime.DeadlineExceeded)):
+            primary.add_note(f"cleanup also failed: {cleanup_error}")
+            raise primary.with_traceback(primary.__traceback__)
         if isinstance(primary, Exception):
             raise AcceptanceError(f"{primary}; cleanup also failed: {cleanup_error}") from primary
         raise primary from cleanup_error
@@ -2064,14 +2067,15 @@ def execute(args: argparse.Namespace) -> None:
             print(json.dumps(evidence, indent=2, sort_keys=True))
         except BaseException as error:
             primary = error
-        cleanup_errors = cleanup_products(
-            harness, products, profile["product_resources"]["shutdown_seconds"]
-        )
-        try:
-            harness.cleanup()
-        except Exception as error:
-            cleanup_errors.append(error)
-        raise_with_cleanup(primary, cleanup_errors, "disposable acceptance cleanup failed")
+        with alloy_runtime.teardown_activity(90):
+            cleanup_errors = cleanup_products(
+                harness, products, profile["product_resources"]["shutdown_seconds"]
+            )
+            try:
+                harness.cleanup()
+            except Exception as error:
+                cleanup_errors.append(error)
+            raise_with_cleanup(primary, cleanup_errors, "disposable acceptance cleanup failed")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -2095,10 +2099,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             execute(args)
     except alloy_runtime.Interrupted as error:
         print(f"disposable acceptance {error}", file=sys.stderr)
+        for note in getattr(error, "__notes__", ()):
+            print(note, file=sys.stderr)
         return error.status
     except (
         AcceptanceError,
         alloy_runtime.DeadlineExceeded,
+        alloy_runtime.TeardownExceeded,
         OSError,
         ValueError,
         json.JSONDecodeError,

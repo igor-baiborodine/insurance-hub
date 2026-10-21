@@ -104,7 +104,11 @@ def handler_for(fixture: MetricFixture):
 def run(arguments: Sequence[str], timeout: int = COMMAND_TIMEOUT) -> subprocess.CompletedProcess:
     try:
         result = subprocess.run(
-            list(arguments), capture_output=True, text=True, timeout=timeout, check=False
+            list(arguments),
+            capture_output=True,
+            text=True,
+            timeout=monitoring_runtime.teardown_timeout(timeout),
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise HarnessError(f"command failed: {arguments}: {error}") from error
@@ -172,7 +176,7 @@ def cleanup(container: str) -> None:
             ["docker", "rm", "-f", container],
             capture_output=True,
             text=True,
-            timeout=CLEANUP_TIMEOUT,
+            timeout=monitoring_runtime.teardown_timeout(CLEANUP_TIMEOUT),
             check=False,
         )
         remaining = run(
@@ -275,15 +279,23 @@ def execute(assets: MonitoringAssets) -> None:
         primary = error
         raise
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-        try:
-            cleanup(container)
-        except HarnessError as cleanup_error:
-            if primary is None:
-                raise
-            raise HarnessError(f"{primary}; cleanup also failed: {cleanup_error}") from primary
+        with monitoring_runtime.teardown_activity(45):
+            cleanup_errors: list[Exception] = []
+            for action in (
+                server.shutdown,
+                server.server_close,
+                lambda: thread.join(timeout=monitoring_runtime.teardown_timeout(5)),
+                lambda: cleanup(container),
+            ):
+                try:
+                    action()
+                except Exception as error:
+                    cleanup_errors.append(error)
+            if cleanup_errors:
+                if primary is not None:
+                    primary.add_note(f"monitoring cleanup also failed: {cleanup_errors}")
+                else:
+                    raise HarnessError(f"monitoring cleanup failed: {cleanup_errors}")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -304,8 +316,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             execute(load_assets(args.assets_root, args.environment, args.service))
     except monitoring_runtime.Interrupted as error:
         print(f"Monitoring fixture {error}", file=sys.stderr)
+        for note in getattr(error, "__notes__", ()):
+            print(note, file=sys.stderr)
         return error.status
-    except (AssetError, HarnessError, monitoring_runtime.DeadlineExceeded, OSError) as error:
+    except (
+        AssetError,
+        HarnessError,
+        monitoring_runtime.DeadlineExceeded,
+        monitoring_runtime.TeardownExceeded,
+        OSError,
+    ) as error:
         print(f"Monitoring fixture failed: {error}", file=sys.stderr)
         return 1
     return 0

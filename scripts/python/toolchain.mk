@@ -119,10 +119,12 @@ PYTHON_OBSERVABILITY_FILES := \
 	k8s/scripts/monitoring/monitoring_assets.py \
 	k8s/scripts/monitoring/monitoring_integration.py \
 	k8s/scripts/monitoring/monitoring_runtime.py \
+	k8s/scripts/monitoring/operations.py \
 	k8s/scripts/monitoring/render_grafana_dashboard.py \
 	k8s/scripts/monitoring/render_prometheus_rule.py \
 	k8s/scripts/monitoring/resolve_monitoring.py \
 	k8s/scripts/monitoring/test_check_monitoring.py \
+	k8s/scripts/monitoring/test_operations.py \
 	k8s/scripts/monitoring/test_verify_product_observability.py \
 	k8s/scripts/monitoring/verify_product_observability.py
 PYTHON_SCOPE_FILES = $(shell git -C "$(PYTHON_REPOSITORY_ROOT)" ls-files \
@@ -348,6 +350,7 @@ python-observability-test-fast: python-toolchain-check ## Run fast observability
 		k8s/scripts/alloy/test_disposable_acceptance_phase.py \
 		k8s/scripts/alloy/test_observability_runtime.py \
 		k8s/scripts/monitoring/test_check_monitoring.py \
+		k8s/scripts/monitoring/test_operations.py \
 		k8s/scripts/monitoring/test_verify_product_observability.py
 
 python-observability-check: python-observability-format-check python-observability-lint \

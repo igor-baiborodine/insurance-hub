@@ -123,8 +123,8 @@ class TestProductObservabilityVerification:
                 with verifier.forwards(target, services):
                     pass
         assert [
-            mock.call(first, graceful_seconds=5, teardown_seconds=10),
             mock.call(second, graceful_seconds=5, teardown_seconds=10),
+            mock.call(first, graceful_seconds=5, teardown_seconds=10),
         ] == terminate.call_args_list
 
     def test_product_reads_use_safe_get_and_deterministic_trace_header(self) -> None:

@@ -84,6 +84,7 @@ def wait_postgres(container: str) -> None:
             ["docker", "exec", container, "pg_isready", "-U", "postgres", "-d", "product"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            timeout=alloy_runtime.teardown_timeout(5),
             check=False,
         )
         if result.returncode == 0:
@@ -229,6 +230,8 @@ INSERT INTO public.product (code, definition) VALUES (
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
+            if args.ownership_file is not None:
+                args.ownership_file.write_text(f"{process.pid}\n", encoding="ascii")
             wait_http(f"http://127.0.0.1:{health_port}/readyz", timeout=30)
             request(f"http://127.0.0.1:{http_port}/products", args.trace_id)
             # The metric reader exports every ten seconds. Give one full interval plus
@@ -240,14 +243,35 @@ INSERT INTO public.product (code, definition) VALUES (
                 raise ProbeError(f"Product exited with status {return_code}")
             process = None
     finally:
-        if process is not None and process.poll() is None:
-            alloy_runtime.terminate_process_group(process, graceful_seconds=2, teardown_seconds=5)
-        subprocess.run(
-            ["docker", "rm", "-f", container],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        with alloy_runtime.teardown_activity(30):
+            primary = sys.exc_info()[1]
+            errors: list[Exception] = []
+            if process is not None:
+                try:
+                    alloy_runtime.terminate_process_group(
+                        process, graceful_seconds=2, teardown_seconds=5
+                    )
+                except Exception as error:
+                    errors.append(error)
+            try:
+                removal = subprocess.run(
+                    ["docker", "rm", "-f", container],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=alloy_runtime.teardown_timeout(15),
+                    check=False,
+                )
+                if removal.returncode != 0:
+                    raise ProbeError(f"could not remove disposable PostgreSQL: {container}")
+            except Exception as error:
+                errors.append(error)
+            if errors:
+                if primary is not None:
+                    primary.add_note(f"probe cleanup also failed: {errors}")
+                else:
+                    raise ProbeError(f"probe cleanup failed: {errors}")
+            if args.ownership_file is not None and not errors:
+                args.ownership_file.unlink(missing_ok=True)
 
 
 def execute(args: argparse.Namespace) -> None:
@@ -263,6 +287,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--version", required=True)
     parser.add_argument("--instance-id", required=True)
     parser.add_argument("--trace-id", required=True)
+    parser.add_argument("--ownership-file", type=Path)
     return parser.parse_args(argv)
 
 
@@ -276,9 +301,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             execute(args)
     except alloy_runtime.Interrupted as error:
         print(f"Product backend probe {error}", file=sys.stderr)
+        for note in getattr(error, "__notes__", ()):
+            print(note, file=sys.stderr)
         return error.status
     except (
         alloy_runtime.DeadlineExceeded,
+        alloy_runtime.TeardownExceeded,
         OSError,
         KeyError,
         ValueError,

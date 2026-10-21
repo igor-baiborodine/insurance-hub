@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -194,6 +195,52 @@ class TestAcceptancePhase:
 
         assert primary is raised.value.__cause__
         assert [] == runtime.products
+
+    @pytest.mark.parametrize("expires_in_work", (False, True))
+    def test_phase_cleanup_finishes_after_work_deadline(
+        self, tmp_path: Path, expires_in_work: bool
+    ) -> None:
+        # given
+        config = tmp_path / "config.alloy"
+        config.write_text("test config\n", encoding="utf-8")
+        args = SimpleNamespace(
+            phase="healthy",
+            config=config,
+            service_root=tmp_path,
+            catalog_fixture=tmp_path / "catalog.json",
+            product_image="product-image",
+        )
+        harness = mock.Mock()
+
+        def setup() -> None:
+            time.sleep(0.25 if expires_in_work else 0.15)
+            if not expires_in_work:
+                raise RuntimeError("setup failed")
+
+        harness.create.side_effect = setup
+        cleanup_done = []
+
+        def slow_cleanup() -> None:
+            time.sleep(0.25)
+            cleanup_done.append(True)
+
+        harness.cleanup.side_effect = slow_cleanup
+        # when / then
+        with (
+            mock.patch.object(
+                phase_runner.acceptance.backend, "DockerHarness", return_value=harness
+            ),
+            mock.patch.object(phase_runner.acceptance.backend, "write_configs"),
+            mock.patch.object(phase_runner.acceptance, "command"),
+            pytest.raises(
+                phase_runner.alloy_runtime.DeadlineExceeded if expires_in_work else RuntimeError,
+                match="work budget" if expires_in_work else "setup failed",
+            ),
+        ):
+            with phase_runner.alloy_runtime.bounded_activity("phase cleanup test", 0.2):
+                with phase_runner.phase_runtime(args, self.profile):
+                    pass
+        assert cleanup_done == [True]
 
     def test_failed_phase_stop_retains_product_for_cleanup_retry(self) -> None:
         product = object()

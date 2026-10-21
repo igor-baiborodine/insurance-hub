@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import signal
 from pathlib import Path
 from unittest import mock
 
@@ -14,6 +15,44 @@ import check_backend_config as backend_check
 
 
 class TestBackendConfig:
+    @pytest.mark.parametrize(("signum", "status"), ((signal.SIGINT, 130), (signal.SIGTERM, 143)))
+    def test_main_preserves_parent_interruption_with_cleanup_failure(
+        self, tmp_path: Path, capsys, signum: int, status: int
+    ) -> None:
+        # given
+        config = tmp_path / "config.alloy"
+        config.write_text("", encoding="utf-8")
+        service = tmp_path / "service"
+        service.mkdir()
+        probe = tmp_path / "probe.py"
+        probe.touch()
+        harness = mock.Mock(containers=[])
+        harness.create.side_effect = backend_harness.alloy_runtime.Interrupted(signum)
+        harness.cleanup.side_effect = backend_harness.HarnessError("cleanup failed")
+
+        # when
+        with (
+            mock.patch.object(backend_harness, "write_configs"),
+            mock.patch.object(backend_harness, "DockerHarness", return_value=harness),
+        ):
+            result = backend_harness.main(
+                [
+                    "--config",
+                    str(config),
+                    "--service-root",
+                    str(service),
+                    "--service-probe",
+                    str(probe),
+                    "--request-histogram-buckets",
+                    "15",
+                ]
+            )
+
+        # then
+        assert result == status
+        assert "cleanup failed" in capsys.readouterr().err
+        harness.cleanup.assert_called_once()
+
     def test_cleanup_retains_and_reports_container_removal_failure(self) -> None:
         harness = backend_harness.DockerHarness("fixture", Path("/tmp/fixture"))
         container = "fixture-alloy"

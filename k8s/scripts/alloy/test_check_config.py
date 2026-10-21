@@ -3,9 +3,41 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 import check_config as alloy_check
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_source_policy_requires_python_chart_injection_after_migration() -> None:
+    # given
+    values = (REPOSITORY_ROOT / "k8s/overlays/qa/infra/alloy/values.yaml").read_text(
+        encoding="utf-8"
+    )
+    config = (REPOSITORY_ROOT / "k8s/overlays/qa/infra/alloy/config.alloy").read_text(
+        encoding="utf-8"
+    )
+    makefiles = "\n".join(
+        (REPOSITORY_ROOT / name).read_text(encoding="utf-8")
+        for name in ("k8s/Makefile", "k8s/tests/validation.mk")
+    )
+    operations = (REPOSITORY_ROOT / "k8s/scripts/monitoring/operations.py").read_text(
+        encoding="utf-8"
+    )
+
+    # when / then
+    alloy_check.validate_source_policy(config, values, makefiles, operations)
+    with pytest.raises(alloy_check.ValidationError, match="every Alloy render"):
+        alloy_check.validate_source_policy(
+            config,
+            values,
+            makefiles,
+            operations.replace('f"alloy.configMap.content={args.alloy_config}"', '"missing"'),
+        )
+
 
 # Product data below is limited to the transitional legacy-Java contract. Shared Go
 # behavior uses neutral fixtures and is not extended when another service is added.

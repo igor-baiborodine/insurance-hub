@@ -2,7 +2,7 @@
 """Validate the repository-owned QA Alloy configuration and bounded policies.
 
 Python 3.9 or newer is required. The checker is read-only and uses only the
-standard library; Helm and Alloy execution remain owned by the k8s Makefile.
+standard library; Helm and Alloy execution are owned by monitoring operations.
 """
 
 from __future__ import annotations
@@ -192,7 +192,7 @@ def validate_log_target_policy(config: str) -> None:
         )
 
 
-def validate_source_policy(config: str, values: str, makefile: str) -> None:
+def validate_source_policy(config: str, values: str, makefile: str, operations: str = "") -> None:
     required_fragments = (
         'otelcol.receiver.zipkin "legacy_java"',
         'otelcol.receiver.otlp "otlp_ingress"',
@@ -369,7 +369,8 @@ def validate_source_policy(config: str, values: str, makefile: str) -> None:
     if '--values "$(ALLOY_VALUES_PATH)"' not in makefile:
         raise ValidationError("Alloy commands must consume the validated QA values path")
     config_injection = '--set-file alloy.configMap.content="$(ALLOY_CONFIG_PATH)"'
-    if makefile.count(config_injection) != 4:
+    python_injection = 'f"alloy.configMap.content={args.alloy_config}"'
+    if makefile.count(config_injection) != 1 or python_injection not in operations:
         raise ValidationError(
             "every Alloy render and install must inject config.alloy with --set-file"
         )
@@ -671,7 +672,7 @@ def run_check(args: argparse.Namespace) -> None:
     values = args.values.read_text(encoding="utf-8")
     config = args.config.read_text(encoding="utf-8")
     makefile = "\n".join(path.read_text(encoding="utf-8") for path in args.makefile)
-    validate_source_policy(config, values, makefile)
+    validate_source_policy(config, values, makefile, args.operations.read_text(encoding="utf-8"))
     rendered = (
         sys.stdin.read()
         if str(args.rendered_rbac) == "-"
@@ -685,6 +686,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--values", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--makefile", type=Path, required=True, action="append")
+    parser.add_argument("--operations", type=Path, required=True)
     parser.add_argument("--rendered-rbac", type=Path, required=True)
     return parser.parse_args(argv)
 

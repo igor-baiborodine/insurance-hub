@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import signal
 import tempfile
 import time
 from pathlib import Path
@@ -15,6 +16,19 @@ import pytest
 import disposable_acceptance as acceptance
 
 PROFILE_PATH = Path(__file__).parents[2] / "observability/services/product/acceptance.json"
+
+
+def test_cleanup_error_keeps_original_interruption_status() -> None:
+    # given
+    interrupted = acceptance.alloy_runtime.Interrupted(signal.SIGTERM)
+
+    # when / then
+    with pytest.raises(acceptance.alloy_runtime.Interrupted) as raised:
+        acceptance.raise_with_cleanup(
+            interrupted, [acceptance.AcceptanceError("Docker cleanup failed")], "phase cleanup"
+        )
+    assert raised.value.status == 143
+    assert "Docker cleanup failed" in "\n".join(raised.value.__notes__)
 
 
 class TestAcceptanceVerifier:

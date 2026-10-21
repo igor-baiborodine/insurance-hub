@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -429,7 +430,7 @@ class DockerHarness:
             input=input_text,
             text=True,
             capture_output=True,
-            timeout=timeout,
+            timeout=alloy_runtime.teardown_timeout(timeout),
             check=False,
         )
         if result.returncode != 0:
@@ -438,6 +439,66 @@ class DockerHarness:
                 f"command failed ({result.returncode}): {arguments[0]}: {diagnostic}"
             )
         return result.stdout.strip()
+
+    def probe(
+        self, arguments: Sequence[str], ownership_file: Path, *, timeout: float = 660
+    ) -> None:
+        """Let the probe unwind, then reclaim its separately owned resources."""
+        child = subprocess.Popen(
+            [*arguments, "--ownership-file", str(ownership_file)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = child.communicate(timeout=timeout)
+            if child.returncode != 0:
+                raise HarnessError(
+                    f"Product probe failed ({child.returncode}): {stderr.strip() or stdout.strip()}"
+                )
+        except BaseException as primary:
+            recovery_errors: list[Exception] = []
+            try:
+                with alloy_runtime.teardown_activity(60):
+                    try:
+                        os.killpg(child.pid, signal.SIGTERM)
+                    except OSError as error:
+                        if not isinstance(error, ProcessLookupError):
+                            recovery_errors.append(error)
+                    try:
+                        child.communicate(timeout=alloy_runtime.teardown_timeout(35))
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(child.pid, signal.SIGKILL)
+                        except OSError as error:
+                            if not isinstance(error, ProcessLookupError):
+                                recovery_errors.append(error)
+                        try:
+                            child.communicate(timeout=alloy_runtime.teardown_timeout(5))
+                        except subprocess.TimeoutExpired as error:
+                            recovery_errors.append(error)
+                    # The Product binary has its own session; the probe records its
+                    # group before readiness, allowing recovery after forced death.
+                    if ownership_file.exists():
+                        try:
+                            os.killpg(
+                                int(ownership_file.read_text(encoding="ascii")), signal.SIGKILL
+                            )
+                        except (OSError, ValueError) as error:
+                            if not isinstance(error, ProcessLookupError):
+                                recovery_errors.append(error)
+                    container = f"ih-product-probe-{child.pid}"
+                    try:
+                        if self.container_exists(container):
+                            self.command(["docker", "rm", "-f", container], timeout=15)
+                    except Exception as error:
+                        recovery_errors.append(error)
+            except Exception as cleanup_error:
+                recovery_errors.append(cleanup_error)
+            if recovery_errors:
+                primary.add_note(f"probe recovery also failed: {recovery_errors}")
+            raise
 
     def create(self) -> None:
         # Creation can time out after Docker has mutated state. Claim the unique
@@ -1333,7 +1394,7 @@ def execute(args: argparse.Namespace) -> None:
 
             grpc_port = harness.host_port(alloy, 4317)
             probe = args.service_probe.resolve()
-            harness.command(
+            harness.probe(
                 [
                     sys.executable,
                     str(probe),
@@ -1350,7 +1411,7 @@ def execute(args: argparse.Namespace) -> None:
                     "--trace-id",
                     SERVICE_TRACE_ID,
                 ],
-                timeout=300,
+                root / "probe-product-pgid",
             )
             validate_service_backends(
                 args.service_domain,
@@ -1361,35 +1422,45 @@ def execute(args: argparse.Namespace) -> None:
                 zipkin_port,
             )
         except BaseException as error:
-            if isinstance(error, Exception):
-                diagnostics = []
-                for name in harness.containers:
-                    try:
-                        output = harness.logs(name)[-4000:]
-                    except Exception as log_error:
-                        output = f"logs unavailable: {log_error}"
-                    diagnostics.append(f"\n--- {name} ---\n{output}")
-                primary_error: BaseException = HarnessError(f"{error}{''.join(diagnostics)}")
-            else:
-                primary_error = error
+            with alloy_runtime.teardown_activity(90):
+                if isinstance(error, Exception) and not isinstance(
+                    error, alloy_runtime.Interrupted
+                ):
+                    diagnostics = []
+                    for name in harness.containers:
+                        try:
+                            output = harness.logs(name)[-4000:]
+                        except Exception as log_error:
+                            output = f"logs unavailable: {log_error}"
+                        diagnostics.append(f"\n--- {name} ---\n{output}")
+                    notes = "\n".join(getattr(error, "__notes__", ()))
+                    primary_error: BaseException = HarnessError(
+                        f"{error}{''.join(diagnostics)}" + (f"\n{notes}" if notes else "")
+                    )
+                else:
+                    primary_error = error
 
-            cleanup_error: Exception | None = None
-            try:
-                harness.cleanup()
-            except Exception as candidate:
-                cleanup_error = candidate
+                cleanup_error: Exception | None = None
+                try:
+                    harness.cleanup()
+                except Exception as candidate:
+                    cleanup_error = candidate
 
-            if cleanup_error is not None:
-                if isinstance(primary_error, Exception):
-                    raise HarnessError(
-                        f"{primary_error}\ncleanup also failed: {cleanup_error}"
-                    ) from error
-                primary_error.add_note(f"cleanup also failed: {cleanup_error}")
-            if primary_error is error:
-                raise
-            raise primary_error from error
+                if cleanup_error is not None:
+                    if isinstance(primary_error, alloy_runtime.Interrupted):
+                        primary_error.add_note(f"cleanup also failed: {cleanup_error}")
+                        raise primary_error from error
+                    if isinstance(primary_error, Exception):
+                        raise HarnessError(
+                            f"{primary_error}\ncleanup also failed: {cleanup_error}"
+                        ) from error
+                    primary_error.add_note(f"cleanup also failed: {cleanup_error}")
+                if primary_error is error:
+                    raise
+                raise primary_error from error
         else:
-            harness.cleanup()
+            with alloy_runtime.teardown_activity(90):
+                harness.cleanup()
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -1412,9 +1483,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             execute(args)
     except alloy_runtime.Interrupted as error:
         print(f"backend ingestion test {error}", file=sys.stderr)
+        for note in getattr(error, "__notes__", ()):
+            print(note, file=sys.stderr)
         return error.status
     except (
         alloy_runtime.DeadlineExceeded,
+        alloy_runtime.TeardownExceeded,
         OSError,
         HarnessError,
         subprocess.TimeoutExpired,

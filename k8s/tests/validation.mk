@@ -58,64 +58,15 @@ postgres-svc-role-test: python-toolchain-check ## Exercise role dispatch and Pro
 
 .PHONY: prometheus-receiver-config-check
 prometheus-receiver-config-check: python-runtime-check ## Validate the pinned remote-write receiver and disabled native OTLP route without applying
-	@command -v helm >/dev/null || { echo "ERROR: helm is required."; exit 1; }
-	@helm template qa-prometheus prometheus-community/kube-prometheus-stack \
-		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
-		--namespace qa-monitoring \
-		--values "$(PROMETHEUS_VALUES_PATH)" \
-		--show-only templates/prometheus/prometheus.yaml | \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(OBSERVABILITY_BACKEND_CHECK_SCRIPT)" \
-			--values "$(PROMETHEUS_VALUES_PATH)" \
-			--makefile "$(K8S_MAKEFILE_DIR)Makefile" \
-			--makefile "$(K8S_VALIDATION_MAKEFILE)" \
-			--rendered-prometheus -
-	@helm template qa-prometheus prometheus-community/kube-prometheus-stack \
-		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
-		--namespace qa-monitoring \
-		--values "$(PROMETHEUS_VALUES_PATH)" >/dev/null
-	@echo "✅ Prometheus chart $(KUBE_PROMETHEUS_STACK_VERSION) receiver configuration passed."
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_OPERATIONS_SCRIPT)" receiver-check \
+		--stack-version "$(KUBE_PROMETHEUS_STACK_VERSION)" --prometheus-values "$(PROMETHEUS_VALUES_PATH)"
 
 .PHONY: monitoring-assets-check
 monitoring-assets-check: _monitoring-assets-args-check ## Validate one service dashboard and alert set without applying (ENV_NAME, SVC_NAME)
-	@command -v helm >/dev/null || { echo "ERROR: helm is required."; exit 1; }
-	@command -v docker >/dev/null || { echo "ERROR: docker is required."; exit 1; }
-	@docker image inspect "$(PROMETHEUS_IMAGE)" >/dev/null 2>&1 || { \
-		echo "ERROR: Missing pinned image $(PROMETHEUS_IMAGE). Pull it explicitly before validation."; \
-		exit 1; \
-	}
-	@set -eu; \
-	resolve() { PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_RESOLVE_SCRIPT)" \
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_OPERATIONS_SCRIPT)" assets-check \
 		--assets-root "$(MONITORING_ASSETS_ROOT)" --environment "$(ENV_NAME)" \
-		--service "$(SVC_NAME)" --field "$$1"; }; \
-	monitoring_namespace=$$(resolve namespace); \
-	monitoring_values=$$(resolve prometheus-values-path); \
-	monitoring_service_dir=$$(resolve service-dir); \
-	monitoring_alerts=$$(resolve alerts-path); \
-	monitoring_alert_tests=$$(resolve alert-tests-path); \
-	tmp_dir=$$(mktemp -d); \
-	trap 'rm -rf "$$tmp_dir"' EXIT INT TERM; \
-	chmod 755 "$$tmp_dir"; \
-	helm template "$(ENV_NAME)-prometheus" prometheus-community/kube-prometheus-stack \
-		--version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
-		--namespace "$$monitoring_namespace" \
-		--values "$$monitoring_values" > "$$tmp_dir/rendered.yaml"; \
-	PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_CHECK_SCRIPT)" \
-		--assets-root "$(MONITORING_ASSETS_ROOT)" \
-		--environment "$(ENV_NAME)" \
-		--service "$(SVC_NAME)" \
-		--values "$$monitoring_values" \
-		--makefile "$(K8S_MAKEFILE_DIR)Makefile" \
-		--makefile "$(K8S_VALIDATION_MAKEFILE)" \
-		--rendered-stack "$$tmp_dir/rendered.yaml"; \
-	docker run --rm \
-		--mount "type=bind,src=$$monitoring_service_dir,dst=/assets,readonly" \
-		--entrypoint /bin/promtool \
-		"$(PROMETHEUS_IMAGE)" check rules "/assets/$$(basename "$$monitoring_alerts")"; \
-	docker run --rm \
-		--mount "type=bind,src=$$monitoring_service_dir,dst=/fixture,readonly" \
-		--entrypoint /bin/promtool \
-		"$(PROMETHEUS_IMAGE)" test rules "/fixture/$$(basename "$$monitoring_alert_tests")"
-	@echo "✅ $(SVC_NAME) monitoring assets for $(ENV_NAME) passed chart $(KUBE_PROMETHEUS_STACK_VERSION) and Prometheus v3.15.0 checks."
+		--service "$(SVC_NAME)" --stack-version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
+		--prometheus-image "$(PROMETHEUS_IMAGE)"
 
 .PHONY: monitoring-tooling-test
 monitoring-tooling-test: python-toolchain-check ## Exercise generic dashboard/rule rendering, fixture, and cleanup policies
@@ -158,16 +109,11 @@ test-monitoring: _monitoring-assets-args-check ## Query one service dashboard ag
 		--service "$(SVC_NAME)"
 
 .PHONY: monitoring-assets-check-all
-monitoring-assets-check-all: ## Validate every registered monitoring service asset set
-	@if [ -z "$(strip $(MONITORING_SERVICES))" ]; then \
-		echo "ERROR: No service monitoring assets were found under $(MONITORING_ASSETS_ROOT)/services."; \
-		exit 1; \
-	fi
-	@set -eu; \
-	for service in $(MONITORING_SERVICES); do \
-		$(MAKE) --no-print-directory monitoring-assets-check \
-			ENV_NAME="$(MONITORING_CHECK_ENV)" SVC_NAME="$$service"; \
-	done
+monitoring-assets-check-all: python-runtime-check ## Validate every registered monitoring service asset set
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_OPERATIONS_SCRIPT)" assets-check-all \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" --environment "$(MONITORING_CHECK_ENV)" \
+		--services $(MONITORING_SERVICES) --stack-version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
+		--prometheus-image "$(PROMETHEUS_IMAGE)"
 
 .PHONY: observability-backend-test-tooling
 observability-backend-test-tooling: python-toolchain-check ## Exercise receiver, fixture, query, and cleanup policy checks
@@ -262,42 +208,9 @@ test-observability-acceptance-smoke: observability-acceptance-test-tooling ## Ex
 
 .PHONY: alloy-config-check
 alloy-config-check: python-runtime-check ## Validate Alloy source injection, pinned config, render, and scoped RBAC without applying
-	@command -v helm >/dev/null || { echo "ERROR: helm is required."; exit 1; }
-	@command -v docker >/dev/null || { echo "ERROR: docker is required."; exit 1; }
-	@docker image inspect "$(ALLOY_IMAGE)" >/dev/null 2>&1 || { \
-		echo "ERROR: Missing pinned image $(ALLOY_IMAGE). Pull it explicitly before validation."; \
-		exit 1; \
-	}
-	@helm template qa-alloy grafana/alloy \
-		--version "$(ALLOY_HELM_CHART_VERSION)" \
-		--namespace qa-monitoring \
-		--values "$(ALLOY_VALUES_PATH)" \
-		--set-file alloy.configMap.content="$(ALLOY_CONFIG_PATH)" \
-		--show-only templates/rbac.yaml | \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(ALLOY_CHECK_SCRIPT)" \
-			--values "$(ALLOY_VALUES_PATH)" \
-			--config "$(ALLOY_CONFIG_PATH)" \
-			--makefile "$(K8S_MAKEFILE_DIR)Makefile" \
-			--makefile "$(K8S_VALIDATION_MAKEFILE)" \
-			--rendered-rbac -
-	@helm template qa-alloy grafana/alloy \
-		--version "$(ALLOY_HELM_CHART_VERSION)" \
-		--namespace qa-monitoring \
-		--values "$(ALLOY_VALUES_PATH)" \
-		--set-file alloy.configMap.content="$(ALLOY_CONFIG_PATH)" \
-		--show-only templates/configmap.yaml | \
-		awk 'copy { sub(/^    /, ""); print } /^  config\.alloy: \|-$$/ { copy = 1 }' | \
-		cmp -s - "$(ALLOY_CONFIG_PATH)" || { \
-			echo "ERROR: Rendered Alloy ConfigMap differs from $(ALLOY_CONFIG_PATH)."; \
-			exit 1; \
-		}
-	@docker run --rm -i "$(ALLOY_IMAGE)" validate /dev/stdin < "$(ALLOY_CONFIG_PATH)"
-	@helm template qa-alloy grafana/alloy \
-		--version "$(ALLOY_HELM_CHART_VERSION)" \
-		--namespace qa-monitoring \
-		--values "$(ALLOY_VALUES_PATH)" \
-		--set-file alloy.configMap.content="$(ALLOY_CONFIG_PATH)" >/dev/null
-	@echo "✅ Alloy chart $(ALLOY_HELM_CHART_VERSION) and $(ALLOY_IMAGE) configuration passed."
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_OPERATIONS_SCRIPT)" alloy-check \
+		--alloy-version "$(ALLOY_HELM_CHART_VERSION)" --alloy-image "$(ALLOY_IMAGE)" \
+		--alloy-values "$(ALLOY_VALUES_PATH)" --alloy-config "$(ALLOY_CONFIG_PATH)"
 
 .PHONY: alloy-test-tooling
 alloy-test-tooling: python-toolchain-check ## Exercise shared Alloy identity, allowlist, target, position, and RBAC fixtures

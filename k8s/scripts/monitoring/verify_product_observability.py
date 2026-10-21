@@ -316,13 +316,24 @@ def forwards(
             require(label in ports, f"port-forward for {label} timed out")
         yield ports
     finally:
-        for child in children:
-            try:
-                monitoring_runtime.terminate_process_group(
-                    child, graceful_seconds=5, teardown_seconds=10
-                )
-            except RuntimeError as error:
-                raise VerificationError(f"port-forward cleanup failed: {error}") from error
+        primary = sys.exc_info()[1]
+        errors: list[Exception] = []
+        with monitoring_runtime.teardown_activity(45, resume_work=primary is None):
+            for child in reversed(children):
+                try:
+                    remaining = monitoring_runtime.teardown_timeout(10)
+                    monitoring_runtime.terminate_process_group(
+                        child,
+                        graceful_seconds=min(5, remaining / 2),
+                        teardown_seconds=remaining,
+                    )
+                except Exception as error:
+                    errors.append(error)
+        if errors:
+            if primary is not None:
+                primary.add_note(f"port-forward cleanup also failed: {errors}")
+            else:
+                raise VerificationError(f"port-forward cleanup failed: {errors}")
 
 
 def product_reads(ports: Mapping[str, int], trace_id: str) -> int:
@@ -488,10 +499,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             evidence = execute(args)
     except monitoring_runtime.Interrupted as error:
         print(f"Product observability verification {error}", file=sys.stderr)
+        for note in getattr(error, "__notes__", ()):
+            print(note, file=sys.stderr)
         return error.status
     except (
         AssetError,
         monitoring_runtime.DeadlineExceeded,
+        monitoring_runtime.TeardownExceeded,
         VerificationError,
         KeyError,
         TypeError,

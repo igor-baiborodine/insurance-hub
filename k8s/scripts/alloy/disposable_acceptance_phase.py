@@ -153,14 +153,17 @@ def phase_runtime(args: argparse.Namespace, profile: Mapping[str, Any]) -> Itera
             yield runtime
         except BaseException as error:
             primary = error
-        cleanup_errors = acceptance.cleanup_products(
-            harness, products, profile["product_resources"]["shutdown_seconds"]
-        )
-        try:
-            harness.cleanup()
-        except Exception as error:
-            cleanup_errors.append(error)
-        acceptance.raise_with_cleanup(primary, cleanup_errors, "acceptance phase cleanup failed")
+        with alloy_runtime.teardown_activity(90, resume_work=primary is None):
+            cleanup_errors = acceptance.cleanup_products(
+                harness, products, profile["product_resources"]["shutdown_seconds"]
+            )
+            try:
+                harness.cleanup()
+            except Exception as error:
+                cleanup_errors.append(error)
+            acceptance.raise_with_cleanup(
+                primary, cleanup_errors, "acceptance phase cleanup failed"
+            )
 
 
 def stop_product(runtime: PhaseRuntime, product: Any, profile: Mapping[str, Any]) -> float:
@@ -696,11 +699,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(document, indent=2, sort_keys=True))
     except alloy_runtime.Interrupted as error:
         print(f"disposable acceptance phase {error}", file=sys.stderr)
+        for note in getattr(error, "__notes__", ()):
+            print(note, file=sys.stderr)
         return error.status
     except (
         acceptance.AcceptanceError,
         acceptance.backend.HarnessError,
         alloy_runtime.DeadlineExceeded,
+        alloy_runtime.TeardownExceeded,
         json.JSONDecodeError,
         OSError,
         subprocess.TimeoutExpired,
