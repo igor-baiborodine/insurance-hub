@@ -2,6 +2,7 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
 - [QA Product qualification runbook](#qa-product-qualification-runbook)
+  - [Observed pilot and handoff](#observed-pilot-and-handoff)
   - [Before activation](#before-activation)
   - [Local forwards and protected credentials](#local-forwards-and-protected-credentials)
   - [Java and Go core checks](#java-and-go-core-checks)
@@ -21,6 +22,44 @@ operator observations under the ignored `ai/artifacts/epic-4.2/issue-136/` direc
 reviewed Git/Flux revision controls preview activation, Go selection, Java restoration and preview
 removal; none of these targets applies Kubernetes resources or publishes Git changes.
 
+## Observed pilot and handoff
+
+The 2026-10-21 QA run used context `qa-insurance-hub`, namespace `qa-svc`, and the accepted
+`CAR`/`FAI`/`HSI`/`TRI` catalog. The Go Product image was
+`ghcr.io/igor-baiborodine/insurance-hub/product-api@sha256:cea0196b31386f611e5a492edbf5e9233e9f4be171452a42008f60884ec3a561`;
+the Java Product image was
+`ghcr.io/igor-baiborodine/insurance-hub/product-api-legacy@sha256:4141ab731a96b453142a938d3629d29578a028b98a266cc8ccf382b5ae8d89f6`.
+The preview gateway and Vue used their existing QA images, with no application rebuild. The
+accepted schema/data MD5 identities were `76fac669b254931c0709c236fdd7804b` and
+`7ba18949c152e2979df14a28a67cba7f`; both remained unchanged through Java restoration.
+
+| Phase | Reviewed `main` revision | Selected preview Product backend | Observed result |
+| --- | --- | --- | --- |
+| Java baseline | `e9b8bfe7a1892a914de29cf39df43671e3914712` | `qa-product-api-legacy:80` | Accepted list/four gets and negatives; 1,500/1,500 correct measured reads. |
+| Go selection | `d45f53fe57b04cdc95eb860bc6880bca7c77f981` | `qa-product-api:8081` | Java/Go HTTP bodies matched; direct Go gRPC, Chrome consumer flows, 1,500/1,500 measured reads and representative log/metric/trace checks passed. |
+| Java restoration | `a58903adb7072ac08d0c82ad00d698f0ad359c74` | `qa-product-api-legacy:80` | Flux applied the reviewed revision; two accepted preview/established read rounds verified restoration 87.98 seconds after remote publication, below the 900-second bound. |
+
+Each measured phase ran 120 warm-up requests followed by 1,500 correct requests at 5.0/s,
+300 per list/detail operation, with zero unserved. The highest per-operation p95/p99 were
+9.31/45.99 ms for Java and 10.17/13.38 ms for Go, below the 500/1,000 ms limits. Preview
+gateway and active Product 60-second CPU/memory fractions stayed below the agreed 80% limit;
+the respective Java maxima were 15.93%/56.22% for the gateway and 9.67%/47.53% for Product,
+and the Go maxima were 16.69%/53.97% and 2.29%/4.35%. All 11 established Java controls in
+each phase returned the accepted catalog. Google Chrome 155.0.8059.39 on Linux signed in,
+rendered all four catalog cards and their 1/4/4/3 cover rows, opened all four details, and
+exercised choices, numeric input and a dashboard Product filter with Go selected. One queryable
+Go completion log, an advancing Product request metric, and a correlated gateway-to-Go Tempo
+trace were observed. These are pilot and happy-path observations, not a capacity, resilience,
+production SLO, or cutover claim.
+
+The existing Vue detail-to-detail route reuse remains a limitation; navigation from the catalog
+rendered each requested detail correctly. Date-question rendering, pricing, offers and policy
+submissions were outside this selected read-only qualification. The local run manifest and
+sanitized JSON records under the ignored ticket directory retain exact Pod/config identities,
+per-operation samples, browser observations and the restoration clock. **Preview cleanup remains
+pending until PR4 is merged and Flux pruning is observed.** The established route stays on Java;
+#137 needs its own traffic-cutover decision and checks.
+
 ## Before activation
 
 Use the accepted four-code QA catalog and current QA access. Run the ticket's QA fixture,
@@ -31,6 +70,20 @@ recapture or accept fixtures, reload the catalog, change credentials, run builds
 or overlap browser work with a measured phase. Record source and immutable application image
 digests, Product database identity, schema/data hashes, relevant resource limits and current
 monitoring identities in the local run manifest.
+
+For a repeat run, start with the owning read-only commands from the repository root. Inspect
+their output before creating the preview reference or starting a measured phase:
+
+```sh
+make product-baseline-fixtures-check BASELINE_ENV=qa
+run_id=$(date -u +%Y%m%dT%H%M%SZ)
+BASELINE_PREFLIGHT_CATALOG_OUTPUT="ai/artifacts/epic-4.2/issue-136/catalog-preflight-${run_id}.json" \
+  make product-baseline-preflight BASELINE_ENV=qa BASELINE_PRODUCT_DB_TRANSPORT=kubectl-exec
+make go-svc-deploy-check SVC_NAME=product
+```
+
+Use a new local output filename and record the actual revision, image and catalog identities;
+do not assume the observed pilot candidates above are still deployed.
 
 Run `make product-qualification-render` before each preview source revision. It checks the six
 rendered objects, distinct selectors, Java/Go URL allowlist and generated gateway ConfigMap.
@@ -189,6 +242,27 @@ ConfigMaps are pruned while established Java routing, Product Pods and catalog r
 Stop the owned forwards and securely delete the temporary token file. Preserve sanitized success
 and failure records locally; include candidate identities, comparison, restoration timing,
 limitations and #137 prerequisites in the handoff. #137 owns any actual route cutover.
+
+The owner of the QA aggregate is Flux. If its normal interval does not apply the reviewed PR4
+revision, `make flux-reconcile ENV_NAME=qa` is the supported forced reconcile; record its use.
+After the source and `qa-svc` Kustomization show the exact reviewed Ready revision, inspect
+pruning with these read-only commands from the repository root:
+
+```sh
+kubectl --context qa-insurance-hub -n flux-system get gitrepository insurance-hub
+kubectl --context qa-insurance-hub -n flux-system get kustomization qa-svc
+kubectl --context qa-insurance-hub -n qa-svc get deployments,services,configmaps -o name
+kubectl --context qa-insurance-hub -n qa-svc get pods -o wide
+run_id=$(date -u +%Y%m%dT%H%M%SZ)
+BASELINE_PREFLIGHT_CATALOG_OUTPUT="ai/artifacts/epic-4.2/issue-136/catalog-post-cleanup-${run_id}.json" \
+  make product-baseline-preflight BASELINE_ENV=qa BASELINE_PRODUCT_DB_TRANSPORT=kubectl-exec
+```
+
+The first QA resource list must have no `product-preview` names, and the Pod list must have no
+preview Pods. Compare established gateway/Vue and Java/Go Product workloads, Java gateway read
+results, non-secret credential metadata and accepted catalog identities with the pre-cleanup
+record. A static `make product-qualification-render` still validates the retained Java-default
+preview source after the aggregate reference is removed; it does not redeploy that source.
 
 ## Tooling checks and limits
 
