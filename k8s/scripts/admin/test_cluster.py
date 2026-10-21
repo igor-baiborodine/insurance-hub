@@ -4,11 +4,21 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import subprocess
 import sys
 
 import cluster
 import pytest
-from runtime import TARGETS, AdminError, CommandError, Commands, Kubernetes, secret_input
+from runtime import (
+    REPOSITORY_ROOT,
+    TARGETS,
+    AdminError,
+    CommandError,
+    Commands,
+    Kubernetes,
+    secret_input,
+)
 
 
 class FakeCommands:
@@ -503,6 +513,61 @@ def test_service_name_guard_never_contacts_kubernetes():
     # then
     assert not kube.verified
     assert kube.kubectl_calls == []
+
+
+@pytest.mark.parametrize(
+    ("override", "expected_error"),
+    [
+        ("CUR_CTX=other-context", "context must explicitly equal qa-insurance-hub"),
+        ("DATA_NS=other-data", "data namespace must explicitly equal qa-data"),
+    ],
+)
+@pytest.mark.parametrize(
+    "make_prefix",
+    [
+        pytest.param(["make"], id="root"),
+        pytest.param(["make", "-C", str(REPOSITORY_ROOT / "k8s")], id="k8s"),
+    ],
+)
+def test_retained_make_deploy_rejects_coordinate_override_before_kubectl(
+    tmp_path, override, expected_error, make_prefix
+):
+    # given
+    recorder = tmp_path / "kubectl"
+    calls = tmp_path / "kubectl-calls"
+    recorder.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{calls}"\n')
+    recorder.chmod(0o755)
+    environment = os.environ.copy()
+    environment["PATH"] = f"{tmp_path}:{environment['PATH']}"
+    make_arguments = [
+        *make_prefix,
+        "postgres-svc-deploy",
+        "ENV_NAME=qa",
+        "CUR_CTX=qa-insurance-hub",
+        "DATA_NS=qa-data",
+        "SVC_NS=qa-svc",
+        "MONITORING_NS=qa-monitoring",
+        "FLUX_SYSTEM_NS=flux-system",
+        "SVC_NAME=product",
+        f"PYTHON={sys.executable}",
+        override,
+    ]
+
+    # when
+    result = subprocess.run(
+        make_arguments,
+        cwd=REPOSITORY_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    # then
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+    assert calls.read_text().splitlines() == ["config current-context"]
 
 
 def test_secret_file_requires_exclusive_protected_input(tmp_path):

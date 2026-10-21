@@ -14,7 +14,7 @@ from runtime import AdminError
 class FakeCommands:
     def __init__(self, snapshots=None, fail_snapshot=False):
         self.calls = []
-        self.snapshots = snapshots or []
+        self.snapshots = {node: set(snapshots or []) for node in qa.ALL_NODES}
         self.fail_snapshot = fail_snapshot
         self.states = {node: "RUNNING" for node in qa.ALL_NODES}
 
@@ -25,15 +25,24 @@ class FakeCommands:
     def run(self, arguments, **_kwargs):
         self.calls.append(list(arguments))
         if arguments[:2] == ["lxc", "query"]:
-            return json.dumps(self.snapshots)
+            node = arguments[-1].split("/")[3]
+            return json.dumps(sorted(self.snapshots[node]))
         if arguments[:2] == ["lxc", "list"] and "-c" in arguments:
             return f"{self.states[arguments[2]]}\n"
         if arguments[:2] == ["lxc", "pause"]:
             self.states[arguments[2]] = "FROZEN"
         if arguments[:2] == ["lxc", "start"]:
             self.states[arguments[2]] = "RUNNING"
+        if arguments[:2] == ["lxc", "delete"]:
+            node, snapshot = arguments[2].split("/", 1)
+            self.snapshots[node] = {
+                item for item in self.snapshots[node] if item.rsplit("/", 1)[-1] != snapshot
+            }
         if self.fail_snapshot and arguments[:2] == ["lxc", "snapshot"]:
             raise AdminError("snapshot failed")
+        if arguments[:2] == ["lxc", "snapshot"]:
+            node, snapshot = arguments[2:4]
+            self.snapshots[node].add(f"/1.0/instances/{node}/snapshots/{snapshot}")
         return ""
 
 
@@ -92,18 +101,30 @@ def test_snapshot_failure_resumes_every_paused_node():
     assert starts == ["qa-worker2", "qa-worker1", "qa-master"]
 
 
-def test_existing_snapshot_is_replaced_before_new_snapshot():
+@pytest.mark.parametrize("state", ["RUNNING", "STOPPED"])
+def test_existing_snapshot_is_replaced_without_deleting_running_or_stopped_vm(state):
     # given
     commands = FakeCommands(snapshots=["/1.0/instances/qa-master/snapshots/baseline"])
+    commands.states = {node: state for node in qa.ALL_NODES}
+    expected_resources = {
+        "qa-master": "qa-master/baseline",
+        "qa-worker1": "qa-worker1/baseline",
+        "qa-worker2": "qa-worker2/baseline",
+    }
 
     # when
     qa.snapshot_nodes(commands, "baseline")
 
     # then
     for node in qa.ALL_NODES:
-        delete = ["lxc", "delete", node, "baseline"]
+        delete = ["lxc", "delete", expected_resources[node]]
         snapshot = ["lxc", "snapshot", node, "baseline"]
         assert commands.calls.index(delete) < commands.calls.index(snapshot)
+        assert ["lxc", "delete", node, "baseline"] not in commands.calls
+        assert any(
+            call[:2] == ["lxc", "query"] and call[-1].endswith(f"/{node}/snapshots")
+            for call in commands.calls[commands.calls.index(snapshot) + 1 :]
+        )
 
 
 def test_snapshot_does_not_start_a_preexisting_stopped_node():
@@ -158,6 +179,8 @@ def test_cluster_join_token_uses_stdin_file_channel_and_never_argv():
     class ClusterCommands:
         def __init__(self):
             self.calls = []
+            self.remote_files = {worker: {} for worker in qa.WORKERS}
+            self.agent_token_files = {}
 
         def succeeds(self, arguments, **_kwargs):
             self.calls.append((list(arguments), None))
@@ -165,6 +188,40 @@ def test_cluster_join_token_uses_stdin_file_channel_and_never_argv():
 
         def run(self, arguments, *, input_text=None, **_kwargs):
             self.calls.append((list(arguments), input_text))
+            if arguments[:3] == ["lxc", "file", "push"]:
+                worker, path = arguments[4].split("/", 1)
+                self.remote_files[worker][f"/{path}"] = (input_text, arguments[-1])
+                return ""
+            if arguments[:2] == ["lxc", "exec"] and any(
+                argument.startswith("INSTALL_K3S_EXEC=agent") for argument in arguments
+            ):
+                worker = arguments[2]
+                temporary, durable = arguments[-2:]
+                assert self.remote_files[worker][temporary][1] == "0600"
+                assert 'install -m 0600 -o root -g root "$1" "$2"' in arguments[-4]
+                self.remote_files[worker][durable] = (
+                    self.remote_files[worker][temporary][0],
+                    "0600:root:root",
+                )
+                install_exec = next(
+                    argument
+                    for argument in arguments
+                    if argument.startswith("INSTALL_K3S_EXEC=agent")
+                )
+                self.agent_token_files[worker] = install_exec.rsplit("--token-file=", 1)[-1]
+                return ""
+            if arguments[:2] == ["lxc", "exec"] and arguments[-3:-1] == ["rm", "-f"]:
+                self.remote_files[arguments[2]].pop(arguments[-1], None)
+                return ""
+            if arguments[:2] == ["lxc", "exec"] and arguments[-3:] == [
+                "systemctl",
+                "restart",
+                "k3s-agent",
+            ]:
+                worker = arguments[2]
+                assert self.agent_token_files[worker] in self.remote_files[worker]
+                assert not any(path.startswith("/run/") for path in self.remote_files[worker])
+                return ""
             if arguments[:3] == ["lxc", "list", "--format"]:
                 return json.dumps(
                     [
@@ -210,6 +267,28 @@ def test_cluster_join_token_uses_stdin_file_channel_and_never_argv():
         input_text for call, input_text in commands.calls if call[:3] == ["lxc", "file", "push"]
     ]
     assert token_inputs == [sentinel + "\n", sentinel + "\n"]
+    install_calls = [
+        call
+        for call, _ in commands.calls
+        if call[:2] == ["lxc", "exec"]
+        and any(argument.startswith("INSTALL_K3S_EXEC=agent") for argument in call)
+    ]
+    assert len(install_calls) == 2
+    for worker, install_call in zip(qa.WORKERS, install_calls, strict=True):
+        install_exec = next(
+            argument for argument in install_call if argument.startswith("INSTALL_K3S_EXEC=agent")
+        )
+        assert f"--token-file={qa.AGENT_TOKEN_FILE}" in install_exec
+        assert "/run/" not in install_exec
+        temporary = f"/run/insurance-hub-k3s-token-{qa.os.getpid()}"
+        cleanup = ["lxc", "exec", worker, "--", "rm", "-f", temporary]
+        restart = ["lxc", "exec", worker, "--", "systemctl", "restart", "k3s-agent"]
+        assert install_call[-2:] == [temporary, qa.AGENT_TOKEN_FILE]
+        assert commands.calls.index((cleanup, None)) < commands.calls.index((restart, None))
+        assert ["lxc", "exec", worker, "--", "rm", "-f", qa.AGENT_TOKEN_FILE] not in [
+            call for call, _ in commands.calls
+        ]
+        assert commands.remote_files[worker][qa.AGENT_TOKEN_FILE][1] == "0600:root:root"
 
 
 def test_pull_kubeconfig_writes_mode_0600_and_preserves_backup(tmp_path):

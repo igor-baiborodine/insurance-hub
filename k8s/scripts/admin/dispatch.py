@@ -100,7 +100,15 @@ def _parser() -> argparse.ArgumentParser:
 def _target() -> Kubernetes:
     environment = os.environ.get("ENV_NAME", "")
     require(environment in TARGETS, "ENV_NAME must explicitly equal local-dev or qa")
-    target = selected_target(environment, TARGETS[environment].context)
+    expected = TARGETS[environment]
+    target = selected_target(
+        environment,
+        os.environ.get("CUR_CTX", expected.context),
+        data_namespace=os.environ.get("DATA_NS", expected.data_namespace),
+        service_namespace=os.environ.get("SVC_NS", expected.service_namespace),
+        monitoring_namespace=os.environ.get("MONITORING_NS", expected.monitoring_namespace),
+        flux_namespace=os.environ.get("FLUX_SYSTEM_NS", expected.flux_namespace),
+    )
     return Kubernetes(Commands(), target)
 
 

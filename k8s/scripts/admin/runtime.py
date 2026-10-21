@@ -40,6 +40,7 @@ TARGETS = {
         "local-dev-all",
         "local-dev-all",
         "INVALID",
+        "INVALID",
     ),
     "qa": Target("qa", "qa-insurance-hub", "qa-data", "qa-svc", "qa-monitoring"),
 }
@@ -72,11 +73,45 @@ def safe_name(value: str, label: str) -> str:
     return value
 
 
-def selected_target(environment: str, context: str) -> Target:
+def selected_target(
+    environment: str,
+    context: str,
+    *,
+    data_namespace: str | None = None,
+    service_namespace: str | None = None,
+    monitoring_namespace: str | None = None,
+    flux_namespace: str | None = None,
+) -> Target:
     require(environment in TARGETS, "environment must be local-dev or qa")
-    target = TARGETS[environment]
-    require(context == target.context, f"context must explicitly equal {target.context}")
-    return target
+    expected = TARGETS[environment]
+    selected = Target(
+        environment,
+        context,
+        expected.data_namespace if data_namespace is None else data_namespace,
+        expected.service_namespace if service_namespace is None else service_namespace,
+        expected.monitoring_namespace if monitoring_namespace is None else monitoring_namespace,
+        expected.flux_namespace if flux_namespace is None else flux_namespace,
+    )
+    require(
+        selected.context == expected.context, f"context must explicitly equal {expected.context}"
+    )
+    require(
+        selected.data_namespace == expected.data_namespace,
+        f"data namespace must explicitly equal {expected.data_namespace}",
+    )
+    require(
+        selected.service_namespace == expected.service_namespace,
+        f"service namespace must explicitly equal {expected.service_namespace}",
+    )
+    require(
+        selected.monitoring_namespace == expected.monitoring_namespace,
+        f"monitoring namespace must explicitly equal {expected.monitoring_namespace}",
+    )
+    require(
+        selected.flux_namespace == expected.flux_namespace,
+        f"Flux namespace must explicitly equal {expected.flux_namespace}",
+    )
+    return selected
 
 
 def secret_input(name: str, environment: Mapping[str, str] | None = None) -> str:

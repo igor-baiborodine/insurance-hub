@@ -14,6 +14,7 @@ from runtime import AdminError, CommandError, Commands, require, safe_name
 MASTER = "qa-master"
 WORKERS = ("qa-worker1", "qa-worker2")
 ALL_NODES = (MASTER, *WORKERS)
+AGENT_TOKEN_FILE = "/etc/rancher/k3s/insurance-hub-agent-token"
 
 
 def selected_nodes(master_only: bool) -> tuple[str, ...]:
@@ -196,7 +197,7 @@ def cluster_create(commands: Commands, master_only: bool) -> None:
                     timeout=30,
                     activity=f"transfer protected join token to {worker}",
                 )
-                agent_exec = f"agent --flannel-iface={interface} --token-file={remote}"
+                agent_exec = f"agent --flannel-iface={interface} --token-file={AGENT_TOKEN_FILE}"
                 commands.run(
                     [
                         "lxc",
@@ -208,7 +209,12 @@ def cluster_create(commands: Commands, master_only: bool) -> None:
                         f"INSTALL_K3S_EXEC={agent_exec}",
                         "sh",
                         "-ceu",
+                        "install -d -m 0700 /etc/rancher/k3s; "
+                        'install -m 0600 -o root -g root "$1" "$2"; '
                         "curl -sfL https://get.k3s.io | sh -",
+                        "install-k3s-agent",
+                        remote,
+                        AGENT_TOKEN_FILE,
                     ],
                     timeout=600,
                     activity=f"install K3s agent on {worker}",
@@ -225,6 +231,19 @@ def cluster_create(commands: Commands, master_only: bool) -> None:
                             f"K3s installed but token cleanup failed on {worker}"
                         ) from error
                     primary_error.add_note(f"protected token cleanup also failed on {worker}")
+            commands.run(
+                ["lxc", "exec", worker, "--", "systemctl", "restart", "k3s-agent"],
+                timeout=120,
+                activity=f"restart K3s agent on {worker}",
+            )
+            _wait(
+                commands,
+                f"verify restarted K3s agent on {worker}",
+                lambda worker=worker: commands.succeeds(
+                    ["lxc", "exec", worker, "--", "systemctl", "is-active", "k3s-agent"]
+                ),
+                timeout=120,
+            )
     expected = 1 if master_only else 3
 
     def nodes_ready() -> bool:
@@ -412,13 +431,15 @@ def snapshot_nodes(commands: Commands, snapshot: str) -> None:
             paused.append(node)
             commands.run(["lxc", "pause", node], timeout=60)
         for node in existing:
-            snapshots = json.loads(
-                commands.run(["lxc", "query", f"/1.0/instances/{node}/snapshots"], timeout=30)
-            )
-            if any(item.rsplit("/", 1)[-1] == snapshot for item in snapshots):
-                commands.run(["lxc", "delete", node, snapshot], timeout=120)
+            snapshots = _snapshot_names(commands, node)
+            if snapshot in snapshots:
+                commands.run(["lxc", "delete", f"{node}/{snapshot}"], timeout=120)
                 replaced.append(node)
             commands.run(["lxc", "snapshot", node, snapshot], timeout=300)
+            require(
+                snapshot in _snapshot_names(commands, node),
+                f"snapshot postcondition failed for {node}/{snapshot}",
+            )
             created.append(node)
     except Exception as error:
         primary_error = error
@@ -444,3 +465,16 @@ def snapshot_nodes(commands: Commands, snapshot: str) -> None:
         raise AdminError(
             f"snapshots completed but resume failed for {', '.join(n for n, _ in cleanup_errors)}"
         )
+
+
+def _snapshot_names(commands: Commands, node: str) -> set[str]:
+    raw = commands.run(["lxc", "query", f"/1.0/instances/{node}/snapshots"], timeout=30)
+    try:
+        snapshots = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise AdminError(f"snapshot inventory for {node} returned malformed JSON") from error
+    require(
+        isinstance(snapshots, list) and all(isinstance(item, str) for item in snapshots),
+        f"snapshot inventory for {node} returned an unexpected structure",
+    )
+    return {item.rsplit("/", 1)[-1] for item in snapshots}
