@@ -123,40 +123,16 @@ frontend-build: ## Build frontend (Vue app)
 ################################################################################
 
 .PHONY: docker-java-svc-build
-docker-java-svc-build: _svc-name-check ## Build a Docker image for a Java service in the 'legacy' folder. Usage: make docker-java-svc-build SVC_NAME=<svc-name>
-	@SVC_FOLDER="legacy/$(SVC_NAME)-service"; \
-	IMAGE_NAME="insurance-hub-$(SVC_NAME)-api-legacy:latest"; \
-	if [ "$(SVC_NAME)" = "agent-portal-gateway" ]; then \
-		SVC_FOLDER="legacy/$(SVC_NAME)"; \
-		IMAGE_NAME="insurance-hub-$(SVC_NAME)-legacy:latest"; \
-	fi; \
-	if [ "$(SVC_NAME)" = "document" ]; then \
-		SVC_FOLDER="legacy/$(SVC_NAME)s-service"; \
-	fi; \
-	echo "🔨 Building Docker image for Java service '$(SVC_NAME)' from '$$SVC_FOLDER'..."; \
-	docker build --no-cache -f "$$SVC_FOLDER/Dockerfile" "$$SVC_FOLDER" -t "$$IMAGE_NAME"; \
-	docker image prune -f; \
-	echo "✅ Docker image '$$IMAGE_NAME' built successfully."
+docker-java-svc-build: _svc-name-check python-runtime-check ## Build a Docker image for a Java service in the 'legacy' folder. Usage: make docker-java-svc-build SVC_NAME=<svc-name>
+	@"$(PYTHON)" scripts/legacy/build.py service --service "$(SVC_NAME)"
 
 .PHONY: docker-java-svc-all-build
-docker-java-svc-all-build: ## Build all Java service Docker images. Usage: make docker-java-svc-all-build
-	@echo "🔨 Building all Java service Docker images..."
-	@SVC_NAMES="agent-portal-gateway,auth,product,policy-search,dashboard,policy,pricing,document,payment,chat" ; \
-	SVC_NAMES=$$(echo "$$SVC_NAMES" | tr ',' ' ') ; \
-	for svc in $$SVC_NAMES ; do \
-		$(MAKE) docker-java-svc-build SVC_NAME=$$svc ; \
-	done ; \
-	docker image prune -f; \
-	echo "✅ All Java service Docker images built!" ; \
+docker-java-svc-all-build: python-runtime-check ## Build all Java service Docker images. Usage: make docker-java-svc-all-build
+	@"$(PYTHON)" scripts/legacy/build.py all
 
 .PHONY: docker-frontend-build
-docker-frontend-build: ## Build the Docker image for the Vue frontend in the 'legacy' folder. Usage: make docker-frontend-build
-	@SVC_FOLDER="legacy/web-vue"; \
-	IMAGE_NAME="insurance-hub-web-vue-legacy:latest"; \
-	echo "🔨 Building Docker image for Frontend from '$$SVC_FOLDER'..."; \
-	docker build --no-cache -f "$$SVC_FOLDER/Dockerfile" "$$SVC_FOLDER" -t "$$IMAGE_NAME"; \
-	docker image prune -f; \
-	echo "✅ Docker image '$$IMAGE_NAME' built successfully."
+docker-frontend-build: python-runtime-check ## Build the Docker image for the Vue frontend in the 'legacy' folder. Usage: make docker-frontend-build
+	@"$(PYTHON)" scripts/legacy/build.py frontend
 
 .PHONY: legacy-all-build
 legacy-all-build: ## Build all legacy artifacts sequentially (Java -> Frontend -> Docker). Usage: legacy-all-build

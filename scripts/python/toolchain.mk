@@ -127,6 +127,13 @@ PYTHON_OBSERVABILITY_FILES := \
 	k8s/scripts/monitoring/test_operations.py \
 	k8s/scripts/monitoring/test_verify_product_observability.py \
 	k8s/scripts/monitoring/verify_product_observability.py
+PYTHON_LEGACY_FILES := \
+	legacy/scripts/prepare.py \
+	legacy/scripts/test_prepare.py \
+	scripts/legacy/build.py \
+	scripts/legacy/release.py \
+	scripts/legacy/test_build.py \
+	scripts/legacy/test_release.py
 PYTHON_SCOPE_FILES = $(shell git -C "$(PYTHON_REPOSITORY_ROOT)" ls-files \
 	--cached --others --exclude-standard -- '*.py' | LC_ALL=C sort)
 PYTHON_FILES ?=
@@ -149,6 +156,7 @@ export PYTHON_FILES PYTHON_ACCEPTANCE_PATH PYTHON_ACCEPTANCE_CONFIRM
 	python-k8s-admin-test-fast python-k8s-admin-check \
 	python-observability-format-check python-observability-lint \
 	python-observability-test-fast python-observability-check \
+	python-legacy-format-check python-legacy-lint python-legacy-test-fast python-legacy-check \
 	python-repository-format-check python-repository-lint python-test-collect \
 	python-examples-test-fast python-examples-test-integration _python-acceptance-check \
 	python-test-acceptance python-examples-check
@@ -355,6 +363,21 @@ python-observability-test-fast: python-toolchain-check ## Run fast observability
 
 python-observability-check: python-observability-format-check python-observability-lint \
 	python-observability-test-fast ## Run non-mutating observability tooling checks
+
+python-legacy-format-check: PYTHON_FILES := $(PYTHON_LEGACY_FILES)
+python-legacy-format-check: python-format-check ## Check legacy auxiliary Python formatting
+
+python-legacy-lint: PYTHON_FILES := $(PYTHON_LEGACY_FILES)
+python-legacy-lint: python-lint ## Lint legacy auxiliary Python tooling
+
+python-legacy-test-fast: python-toolchain-check ## Run focused legacy tooling tests
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 \
+		PYTHONPATH="$(PYTHON_REPOSITORY_ROOT)/legacy/scripts:$(PYTHON_REPOSITORY_ROOT)/scripts/legacy" \
+		"$(PYTHON)" -m pytest -q -m 'not integration and not acceptance' \
+		legacy/scripts/test_prepare.py scripts/legacy/test_build.py scripts/legacy/test_release.py
+
+python-legacy-check: python-legacy-format-check python-legacy-lint \
+	python-legacy-test-fast ## Run non-mutating legacy tooling checks
 
 python-repository-format-check: PYTHON_FILES = $(PYTHON_SCOPE_FILES)
 python-repository-format-check: python-format-check ## Check all visible handwritten Python without mutation

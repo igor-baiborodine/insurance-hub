@@ -1,3 +1,34 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [WIP](#wip)
+- [ASCLAB Micronaut PoC - LAB Insurance Sales Portal](#asclab-micronaut-poc---lab-insurance-sales-portal)
+  - [Architecture overview](#architecture-overview)
+  - [Building](#building)
+  - [Running for development](#running-for-development)
+    - [Prerequisites](#prerequisites)
+    - [Automated deployment](#automated-deployment)
+    - [Manual deployment](#manual-deployment)
+      - [max virtual memory areas vm.max_map_count [65530] is too low, increase to at least [262144]](#max-virtual-memory-areas-vmmax_map_count-65530-is-too-low-increase-to-at-least-262144)
+      - [Add POLICY template to JsReport](#add-policy-template-to-jsreport)
+      - [Consul without our script](#consul-without-our-script)
+      - [Zipkin without our script](#zipkin-without-our-script)
+      - [Kafka without our script](#kafka-without-our-script)
+      - [JSReport without our script](#jsreport-without-our-script)
+  - [OpenAPI/Swagger docs](#openapiswagger-docs)
+  - [Add new microservice](#add-new-microservice)
+  - [Examples](#examples)
+    - [Sample users](#sample-users)
+    - [Chat](#chat)
+    - [Sales Dashboard](#sales-dashboard)
+    - [Tracing requests with Zipkin](#tracing-requests-with-zipkin)
+    - [Show topics on Kafka](#show-topics-on-kafka)
+    - [Show registered services in Consul](#show-registered-services-in-consul)
+    - [Show document templates in JS Report](#show-document-templates-in-js-report)
+  - [References](#references)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # WIP
 This project is an exercise in migrating the original [Micronaut Microservices POC](https://github.com/asc-lab/micronaut-microservices-poc) from Java/Micronaut to Go.
 
@@ -103,6 +134,14 @@ For Windows users, append below line ```C:\Windows\System32\drivers\etc\hosts```
 ```
 
 For frontend app running, you must add file ```.env.local``` based on ```.env-example``` .
+
+On a Linux development host, `scripts/prepare.sh --target localhost --dry-run` reports whether
+`/etc/hosts`, the three local firewall ports (80, 8081, 8090), and the jsreport `POLICY` template
+need setup. The check contacts local jsreport at `http://localhost:5488` and requires `iptables`
+read access. After reviewing the report, run `sudo scripts/prepare.sh --target localhost` from
+the `legacy/` directory to apply it. Install the repository's managed Python 3.14.8 environment
+first with `make python-toolchain-setup` at the repository root. If setup stops partway through,
+inspect the hosts entry, firewall rules, and jsreport template before retrying.
 <p align="center">
     <img alt="Env" src="https://raw.githubusercontent.com/asc-lab/micronaut-microservices-poc/master/readme-images/env.png" />
 </p>

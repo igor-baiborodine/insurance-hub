@@ -29,31 +29,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
       - name: Detect changed service module
         id: detect
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CHANGED_FILES="$(git diff --name-only HEAD^ HEAD)"
-          MODULE_LIST="$(echo "$CHANGED_FILES" | grep -oP '^legacy/(command-bus|agent-portal-gateway|[^/]+-service)/' | sed 's|legacy/||;s|/||' | sort -u)"
-          MODULE_COUNT="$(echo "$MODULE_LIST" | grep -v '^$' | wc -l | tr -d ' ')"
-
-          if [ "$MODULE_COUNT" -gt 1 ]; then
-            echo "Error: Multiple service modules detected in a single push."
-            echo "$MODULE_LIST"
-            exit 1
-          fi
-
-          MODULE_NAME="$(echo "$MODULE_LIST" | sed '/^$/d')"
-
-          if [ -z "$MODULE_NAME" ]; then
-            echo "No changed service module detected."
-            exit 1
-          fi
-
-          echo "module=$MODULE_NAME" >> "$GITHUB_OUTPUT"
-          echo "module_path=legacy/$MODULE_NAME" >> "$GITHUB_OUTPUT"
+        run: .venv/bin/python scripts/legacy/release.py select service --before HEAD^ --after HEAD --output "$GITHUB_OUTPUT"
 
       - name: Compute next module version with monotag
         id: monotag
@@ -147,6 +133,14 @@ jobs:
           mvn -f "$MODULE_PATH/pom.xml" clean package -DskipTests \
             -s "${{ github.workspace }}/settings.xml"
 
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
       - name: Publish service artifact to GitHub Packages (command-bus, policy-service only)
         if: contains(fromJSON('["command-bus", "policy-service"]'), needs.detect-changes.outputs.module)
         shell: bash
@@ -159,10 +153,7 @@ jobs:
           MODULE_NAME="${{ needs.detect-changes.outputs.module }}"
           MODULE_PATH="${{ needs.detect-changes.outputs.module-path }}"
 
-          cd "$MODULE_PATH/target"
-          ORIGINAL_JAR=$(ls "$MODULE_NAME"*.jar | grep -v "sources" | head -n 1)
-          NEW_JAR="$MODULE_NAME-$VERSION.jar"
-          mv "$ORIGINAL_JAR" "$NEW_JAR"
+          NEW_JAR="$(.venv/bin/python scripts/legacy/release.py jar "$MODULE_NAME" "$VERSION")"
 
           mvn deploy:deploy-file \
                 -Dfile="$NEW_JAR" \
@@ -186,15 +177,7 @@ jobs:
 
           MODULE_PATH="legacy/$MODULE_NAME"
           SHORT_SHA="$(git rev-parse --short HEAD)"
-          SVC_NAME="$(echo "$MODULE_NAME" | sed 's/-service$//')"
-
-          if [ "$MODULE_NAME" = "agent-portal-gateway" ]; then
-            BASE_IMAGE_NAME="$MODULE_NAME-legacy"
-          elif [ "$MODULE_NAME" = "documents-service" ]; then
-            BASE_IMAGE_NAME="document-api-legacy"
-          else
-            BASE_IMAGE_NAME="$SVC_NAME-api-legacy"
-          fi
+          BASE_IMAGE_NAME="$(.venv/bin/python scripts/legacy/release.py image "$MODULE_NAME")"
 
           IMAGE_PATH="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/$BASE_IMAGE_NAME"
           SHA_TAG="sha-$SHORT_SHA"
@@ -216,30 +199,14 @@ jobs:
           RELEASE_VERSION: ${{ needs.detect-changes.outputs.release-version }}
         run: |
           set -euo pipefail
-
-          # Map service module name to k8s folder name
-          if [ "$MODULE_NAME" = "documents-service" ]; then
-            K8S_FOLDER="document"
-          elif [ "$MODULE_NAME" = "agent-portal-gateway" ]; then
-            K8S_FOLDER="agent-portal-gateway"
-          else
-            K8S_FOLDER=$(echo "$MODULE_NAME" | sed 's/-service$//')
-          fi
-
-          DEPLOYMENT_FILE="k8s/overlays/qa/svc/$K8S_FOLDER/legacy/deployment-patch.yaml"
-          
-          if [ -f "$DEPLOYMENT_FILE" ]; then
-            echo "Updating image version to $RELEASE_VERSION in $DEPLOYMENT_FILE"
-            sed -i "s|image: \(ghcr.io/${{ env.IMAGE_NAME }}/.*-legacy\):.*|image: \1:$RELEASE_VERSION|" "$DEPLOYMENT_FILE"
-            
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add "$DEPLOYMENT_FILE"
-            git commit -m "chore(k8s): update $K8S_FOLDER legacy image to $RELEASE_VERSION"
-            git push origin main
-          else
-            echo "Warning: Deployment file $DEPLOYMENT_FILE not found."
-          fi
+          DEPLOYMENT_FILE="$(.venv/bin/python scripts/legacy/release.py manifest "$MODULE_NAME" "$GITHUB_REPOSITORY" "$RELEASE_VERSION" --allow-missing)"
+          if [ -z "$DEPLOYMENT_FILE" ]; then exit 0; fi
+          K8S_FOLDER="$(basename "$(dirname "$(dirname "$DEPLOYMENT_FILE")")")"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$DEPLOYMENT_FILE"
+          git commit -m "chore(k8s): update $K8S_FOLDER legacy image to $RELEASE_VERSION"
+          git push origin main
 
       - name: Create scoped Git tag
         shell: bash

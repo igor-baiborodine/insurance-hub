@@ -1,11 +1,7 @@
-sed -i -E 's|kafkaserver||g' /etc/hosts
-sed -i -E 's|^(127.0.0.1.*)$|\1 kafkaserver|' /etc/hosts
-
-iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-iptables -A INPUT -p tcp --dport 8081 -j ACCEPT
-iptables -A INPUT -p tcp --dport 8090 -j ACCEPT
-
-curl -X POST \
-    -H "Content-Type: application/json" \
-    -d '{"name": "POLICY", "recipe" : "chrome-pdf", "engine": "handlebars", "content": "POLICY"}' \
-    localhost:5488/odata/templates
+#!/bin/sh
+set -eu
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+root=$(CDPATH= cd -- "$script_dir/../.." && pwd -P)
+python=${PYTHON:-"$root/.venv/bin/python"}
+"$root/scripts/python/runtime_check.sh" "$python"
+exec "$python" "$script_dir/prepare.py" "$@"

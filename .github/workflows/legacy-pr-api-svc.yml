@@ -21,36 +21,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
       - name: Detect changed legacy module
         id: detect
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # Get changed files between PR branch and base branch
-          CHANGED_FILES="$(git diff --name-only origin/${{ github.base_ref }}...HEAD)"
-          
-          # Regex matches: 
-          # 1. Any directory ending in -api (APIs)
-          # 2. command-bus or agent-portal-gateway
-          # 3. Any directory ending in -service (Services)
-          MODULE_LIST="$(echo "$CHANGED_FILES" | grep -oP '^legacy/(command-bus|agent-portal-gateway|[^/]+-api|[^/]+-service)/' | sed 's|legacy/||;s|/||' | sort -u)"
-          MODULE_COUNT="$(echo "$MODULE_LIST" | grep -v '^$' | wc -l | tr -d ' ')"
-
-          if [ "$MODULE_COUNT" -eq 0 ]; then
-            echo "No legacy service or API modules changed. Skipping build."
-            exit 0
-          fi
-
-          if [ "$MODULE_COUNT" -gt 1 ]; then
-            echo "Error: Multiple legacy modules detected ($MODULE_COUNT). PRs must be limited to 1 module."
-            echo "$MODULE_LIST"
-            exit 1
-          fi
-
-          MODULE_NAME="$(echo "$MODULE_LIST" | sed '/^$/d')"
-          echo "module=$MODULE_NAME" >> "$GITHUB_OUTPUT"
-          echo "module_path=legacy/$MODULE_NAME" >> "$GITHUB_OUTPUT"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: .venv/bin/python scripts/legacy/release.py select pr --before "origin/$BASE_REF" --after HEAD --output "$GITHUB_OUTPUT"
 
       - name: Set up Java 14
         if: steps.detect.outputs.module != ''
