@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import shlex
@@ -13,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -29,10 +31,8 @@ from runtime import (
 )
 
 OPERATOR_TIMEOUT = 600
+MINIO_TENANT_DISCOVERY_TIMEOUT = 300
 ZIPKIN_SETUP_IMAGE = "curlimages/curl:8.16.0"
-MINIO_POLICY_ATTACHMENT_ERROR = (
-    "MinIO policy attachment is disabled: mc requires the protected access key in child argv"
-)
 
 OPERATOR_SPECS = {
     "postgres": {
@@ -129,8 +129,6 @@ def validate_aggregate_configuration(target: Target, kind: str, values: Mapping[
     if kind == "infra":
         for service in ("auth", "document", "payment", "policy", "pricing", "product"):
             validate_secret_configuration(target, "postgres", {**values, "SVC_NAME": service})
-        validate_secret_configuration(target, "mongodb-root", values)
-        validate_secret_configuration(target, "mongodb-product", values)
         for service in ("document", "payment"):
             selected = {**values, "SVC_NAME": service}
             validate_secret_configuration(target, "minio-storage-user", selected)
@@ -139,7 +137,6 @@ def validate_aggregate_configuration(target: Target, kind: str, values: Mapping[
     require(kind == "services", f"unknown aggregate {kind}")
     for service in ("document", "payment"):
         validate_secret_configuration(target, "minio-service-user", {**values, "SVC_NAME": service})
-    raise AdminError(MINIO_POLICY_ATTACHMENT_ERROR)
 
 
 def _copy_secret_payload(source: dict, namespace: str) -> dict:
@@ -425,10 +422,61 @@ def _decode_secret_value(secret: dict, key: str) -> str:
         raise AdminError(f"Secret key {key} is invalid") from error
 
 
-def _minio_runtime(kube: Kubernetes, service: str) -> tuple[str, str, str, dict]:
+def _wait_for_minio_tenant(
+    kube: Kubernetes,
+    service: str,
+    *,
+    discovery_timeout: float = MINIO_TENANT_DISCOVERY_TIMEOUT,
+    poll_interval: float = 2,
+) -> tuple[str, str]:
     namespace = f"{kube.target.environment}-minio-{safe_name(service, 'SVC_NAME')}"
     kube.require_namespace(namespace)
     selector = f"v1.min.io/tenant={namespace}"
+    deadline = time.monotonic() + discovery_timeout
+    next_heartbeat = time.monotonic() + 30
+    pod = ""
+    while not pod:
+        pod_json = kube.kubectl(
+            "-n",
+            namespace,
+            "get",
+            "pods",
+            "-l",
+            selector,
+            "-o",
+            "json",
+            timeout=30,
+            activity=f"discover MinIO tenant {namespace}",
+        )
+        try:
+            inventory = json.loads(pod_json)
+        except json.JSONDecodeError as error:
+            raise AdminError(f"MinIO pod inventory in {namespace} is malformed") from error
+        require(isinstance(inventory, dict), f"MinIO pod inventory in {namespace} is invalid")
+        pods = inventory.get("items", [])
+        require(isinstance(pods, list), f"MinIO pod inventory in {namespace} is invalid")
+        require(
+            all(isinstance(item, dict) for item in pods),
+            f"MinIO pod inventory in {namespace} is invalid",
+        )
+        names = sorted(item.get("metadata", {}).get("name", "") for item in pods)
+        require(all(names), f"MinIO pod inventory in {namespace} is invalid")
+        if names:
+            pod = names[0]
+            break
+        now = time.monotonic()
+        if now >= deadline:
+            raise AdminError(
+                f"no MinIO tenant pod appeared in {namespace} within {discovery_timeout:g}s"
+            )
+        if now >= next_heartbeat:
+            elapsed = discovery_timeout - max(0, deadline - now)
+            print(
+                f"Waiting for MinIO tenant pod in {namespace} after {elapsed:.0f}s",
+                file=sys.stderr,
+            )
+            next_heartbeat = now + 30
+        time.sleep(min(poll_interval, deadline - now))
     kube.kubectl(
         "-n",
         namespace,
@@ -437,21 +485,15 @@ def _minio_runtime(kube: Kubernetes, service: str) -> tuple[str, str, str, dict]
         "pod",
         "-l",
         selector,
-        "--timeout=120s",
-        timeout=150,
+        "--timeout=5m",
+        timeout=330,
         activity=f"wait for MinIO tenant {namespace}",
     )
-    pod_json = kube.kubectl("-n", namespace, "get", "pods", "-l", selector, "-o", "json")
-    try:
-        inventory = json.loads(pod_json)
-    except json.JSONDecodeError as error:
-        raise AdminError(f"MinIO pod inventory in {namespace} is malformed") from error
-    require(isinstance(inventory, dict), f"MinIO pod inventory in {namespace} is invalid")
-    pods = inventory.get("items", [])
-    require(isinstance(pods, list), f"MinIO pod inventory in {namespace} is invalid")
-    names = sorted(item.get("metadata", {}).get("name", "") for item in pods)
-    require(names and all(names), f"no MinIO tenant pod found in {namespace}")
-    pod = names[0]
+    return namespace, pod
+
+
+def _minio_runtime(kube: Kubernetes, service: str) -> tuple[str, str, str, dict]:
+    namespace, pod = _wait_for_minio_tenant(kube, service)
     root = kube.secret(namespace, f"{namespace}-storage-config")
     config_text = _decode_secret_value(root, "config.env")
     entries = {}
@@ -563,8 +605,94 @@ def configure_minio(
         policy = json.loads(policy_path.read_text())
         require(isinstance(policy, dict), "policy must be a JSON object")
         require(isinstance(policy.get("Statement"), list), "policy must contain a Statement list")
-        safe_name(policy_path.stem, "policy name")
-        raise AdminError(MINIO_POLICY_ATTACHMENT_ERROR)
+        policy_name = safe_name(policy_path.stem, "policy name")
+        namespace, pod, directory, config = _minio_runtime(kube, service)
+        credentials = kube.secret(namespace, f"{namespace}-svc-user-creds")
+        access_key = _decode_secret_value(credentials, "MINIO_SVC_ACCESS_KEY")
+        secret_key = _decode_secret_value(credentials, "MINIO_SVC_SECRET_KEY")
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            bundle.writestr("iam-assets/policies.json", json.dumps({policy_name: policy}))
+            bundle.writestr(
+                "iam-assets/users.json",
+                json.dumps({access_key: {"secretKey": secret_key, "status": "enabled"}}),
+            )
+            bundle.writestr(
+                "iam-assets/user_mappings.json",
+                json.dumps({access_key: {"version": 1, "policy": policy_name}}),
+            )
+        archive_path = f"{directory}/iam.zip"
+        primary_error: BaseException | None = None
+        try:
+            _minio_exec(
+                kube,
+                namespace,
+                pod,
+                ["sh", "-ceu", f"umask 077; mkdir -p {directory}; cat > {directory}/config.json"],
+                input_text=json.dumps(config),
+            )
+            _minio_exec(
+                kube,
+                namespace,
+                pod,
+                ["sh", "-ceu", f"umask 077; base64 -d > {archive_path}"],
+                input_text=base64.b64encode(archive.getvalue()).decode(),
+            )
+            output = _minio_mutation(
+                kube,
+                namespace,
+                pod,
+                [
+                    "mc",
+                    "--json",
+                    "--config-dir",
+                    directory,
+                    "--insecure",
+                    "admin",
+                    "cluster",
+                    "iam",
+                    "import",
+                    namespace,
+                    archive_path,
+                ],
+                "MinIO IAM import",
+            )
+            results = _json_lines(output, "IAM import")
+            require(len(results) == 1, "MinIO IAM import returned an invalid result count")
+            result = results[0]
+            failed = result.get("failed", {})
+            require(isinstance(failed, dict), "MinIO IAM import returned invalid failure data")
+            require(not any(failed.values()), "MinIO IAM import reported failed entities")
+            added = result.get("added", {})
+            require(isinstance(added, dict), "MinIO IAM import returned invalid added data")
+            mappings = added.get("userPolicies", [])
+            require(
+                isinstance(mappings, list)
+                and all(isinstance(mapping, dict) for mapping in mappings),
+                "MinIO IAM import returned invalid user-policy data",
+            )
+            require(
+                policy_name in added.get("policies", []), "MinIO policy import was not confirmed"
+            )
+            require(access_key in added.get("users", []), "MinIO user import was not confirmed")
+            require(
+                any(mapping.get(access_key) == [policy_name] for mapping in mappings),
+                "MinIO user-policy mapping was not confirmed",
+            )
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            with cleanup_budget(kube.commands, "clean protected MinIO IAM files", 150):
+                try:
+                    _minio_exec(kube, namespace, pod, ["rm", "-rf", "--", directory])
+                except Exception as error:
+                    if primary_error is None:
+                        raise AdminError(
+                            "MinIO IAM import finished but protected cleanup failed"
+                        ) from error
+                    primary_error.add_note("protected MinIO IAM cleanup also failed")
+        return
     require(action == "bucket", "invalid MinIO action")
     safe_name(bucket, "BUCKET_NAME")
     namespace, pod, directory, config = _minio_runtime(kube, service)
@@ -875,22 +1003,14 @@ def deploy_aggregate(kube: Kubernetes, kind: str, values: Mapping[str, str] | No
     if kind == "infra":
         if environment == "local-dev":
             _make(kube.commands, "minio-operator-deploy")
-        for target in (
-            "postgres-operator-deploy",
-            "mongodb-operator-install",
-            "kafka-strimzi-operator-install",
-        ):
-            if target == "mongodb-operator-install":
-                kube.ensure_namespace(kube.target.data_namespace)
+        for target in ("postgres-operator-deploy", "kafka-strimzi-operator-install"):
             _make(kube.commands, target)
         if environment == "local-dev":
             _make(kube.commands, "es-deploy")
         for service in ("auth", "document", "payment", "policy", "pricing", "product"):
             create_secret(kube, "postgres", {**values, "SVC_NAME": service})
             _make(kube.commands, "postgres-svc-deploy", variables={"SVC_NAME": service})
-        create_secret(kube, "mongodb-root", values)
-        create_secret(kube, "mongodb-product", values)
-        for target in ("mongodb-deploy", "kafka-deploy", "jsreport-deploy"):
+        for target in ("kafka-deploy", "jsreport-deploy"):
             _make(kube.commands, target)
         minio_services = ("document", "payment")
         for service in minio_services:
@@ -899,18 +1019,29 @@ def deploy_aggregate(kube: Kubernetes, kind: str, values: Mapping[str, str] | No
             create_secret(kube, "minio-storage-config", service_values)
         for service in minio_services:
             _make(kube.commands, "minio-tenant-deploy", variables={"SVC_NAME": service})
-            namespace = f"{environment}-minio-{service}"
-            kube.kubectl(
-                "-n",
-                namespace,
-                "wait",
-                "--for=condition=Ready",
-                "pod",
-                "--all",
-                "--timeout=5m",
-                timeout=330,
-                activity=f"wait for {service} MinIO",
-            )
+            _wait_for_minio_tenant(kube, service)
+        kube.kubectl(
+            "-n",
+            kube.target.data_namespace,
+            "wait",
+            "--for=condition=Ready",
+            "cluster.postgresql.cnpg.io",
+            "--all",
+            "--timeout=10m",
+            timeout=630,
+            activity="wait for PostgreSQL clusters",
+        )
+        kube.kubectl(
+            "-n",
+            kube.target.data_namespace,
+            "wait",
+            "--for=condition=Ready",
+            "kafka.kafka.strimzi.io",
+            f"{environment}-kafka",
+            "--timeout=10m",
+            timeout=630,
+            activity="wait for Kafka cluster",
+        )
         return
     if environment == "qa":
         _make(kube.commands, "es-elastic-user-secret-copy")
@@ -943,9 +1074,8 @@ def deploy_aggregate(kube: Kubernetes, kind: str, values: Mapping[str, str] | No
         "payment",
         "chat",
     )
-    action = "svc-load-delete-deploy" if environment == "local-dev" else "svc-deploy"
     for service in services:
-        _make(kube.commands, action, variables={"SVC_NAME": service})
+        _make(kube.commands, "svc-load-delete-deploy", variables={"SVC_NAME": service})
     kube.kubectl(
         "-n",
         kube.target.service_namespace,

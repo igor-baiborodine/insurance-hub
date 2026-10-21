@@ -45,11 +45,14 @@ def _lxc_json(commands: Commands, timeout: float = 30) -> list[dict]:
 
 
 def _global_ipv4(commands: Commands, node: str, timeout: float = 30) -> tuple[str, str]:
+    excluded_prefixes = ("br-", "cni", "docker", "flannel", "kube", "veth", "virbr")
     for item in _lxc_json(commands, timeout):
         if item.get("name") != node:
             continue
         networks = item.get("state", {}).get("network", {})
         for interface, state in networks.items():
+            if interface == "lo" or interface.startswith(excluded_prefixes):
+                continue
             for address in state.get("addresses", []):
                 if (
                     address.get("family") == "inet"

@@ -93,11 +93,19 @@ prereq-k8s-cnpg-plugin: ## Install CloudNativePG kubectl plugin on Ubuntu 24.04.
 	@curl -sSfL https://github.com/cloudnative-pg/cloudnative-pg/raw/main/hack/install-cnpg-plugin.sh | sudo sh -s -- -b /usr/local/bin
 	@echo "kubectl-cnpg plugin installed at /usr/local/bin"
 
+FLUX_VERSION := 2.9.6
+
 .PHONY: prereq-k8s-flux
 prereq-k8s-flux: ## Install Flux CLI on Ubuntu 24.04.2 LTS
-	@echo "Installing Flux CLI..."
-	@curl -s https://fluxcd.io/install.sh | sudo bash
-	@flux --version
+	@echo "Installing Flux CLI v$(FLUX_VERSION)..."
+	@curl --fail --silent --show-error --location https://fluxcd.io/install.sh | \
+		sudo env FLUX_VERSION=$(FLUX_VERSION) bash
+	@INSTALLED_FLUX_VERSION="$$(flux --version)"; \
+	if [ "$$INSTALLED_FLUX_VERSION" != "flux version $(FLUX_VERSION)" ]; then \
+		echo "ERROR: Expected Flux CLI $(FLUX_VERSION), got '$$INSTALLED_FLUX_VERSION'."; \
+		exit 1; \
+	fi; \
+	echo "$$INSTALLED_FLUX_VERSION"
 
 .PHONY: prereq-k8s-all
 prereq-k8s-all: prereq-k8s-kubectl prereq-k8s-kubectx prereq-k8s-kubens prereq-k8s-helm prereq-k8s-lxd prereq-k8s-kind prereq-k8s-cnpg-plugin ## Install all Kubernetes prerequisites
@@ -241,6 +249,7 @@ flux-bootstrap: _flux-system-ns-ensure ## Bootstrap Flux into cluster and connec
 		--path=$(FLUX_QA_PATH) \
 		--context "$(CUR_CTX)" \
 		--namespace "$(FLUX_SYSTEM_NS)" \
+		--version=v$(FLUX_VERSION) \
 		--token-auth \
 		--personal
 		
@@ -492,7 +501,7 @@ ALLOY_CONFIG_PATH := $(K8S_MAKEFILE_DIR)overlays/qa/infra/alloy/config.alloy
 ALLOY_VALUES_PATH := $(K8S_MAKEFILE_DIR)overlays/qa/infra/alloy/values.yaml
 
 .PHONY: alloy-install
-alloy-install: _monitoring-ns-ensure ## Install Grafana Alloy in QA cluster
+alloy-install: _monitoring-ns-ensure _svc-ns-ensure ## Install Grafana Alloy in QA cluster
 	@if [ ! -f "$(ALLOY_VALUES_PATH)" ]; then \
 		echo "ERROR: Missing Alloy values file at '$(ALLOY_VALUES_PATH)'."; \
 		exit 1; \
@@ -619,7 +628,7 @@ es-operator-delete: _env-check ## Delete Elastic Cloud on Kubernetes (ECK) Opera
 .PHONY: es-deploy
 es-deploy: _env-check _data-ns-ensure es-operator-deploy ## Deploy Elasticsearch cluster
 	@echo "Deploying Elasticsearch cluster into '$(DATA_NS)' namespace...";
-	@kubectl --context "$(CUR_CTX)" apply --server-side -n "$(DATA_NS)" -f "$(OVERLAYS_FILE_PATH)"/infra/elastic/elasticsearch.yaml;
+	@kubectl --context "$(CUR_CTX)" apply --server-side --force-conflicts -n "$(DATA_NS)" -f "$(OVERLAYS_FILE_PATH)"/infra/elastic/elasticsearch.yaml;
 	@echo "✅ Elasticsearch cluster deployment initiated. Check status with: make es-status"
 
 .PHONY: es-elastic-user-secret-copy

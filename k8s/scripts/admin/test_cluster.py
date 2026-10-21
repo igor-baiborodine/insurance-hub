@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import signal
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 import cluster
@@ -92,8 +94,6 @@ def complete_infra_values() -> dict[str, str]:
         "MINIO_CONSOLE_SECRET_KEY": "console-secret",
         "MINIO_ROOT_USER": "root-user",
         "MINIO_ROOT_USER_PWD": "root-secret",
-        "MONGO_ROOT_USER_PWD": "mongo-root-secret",
-        "MONGO_PRODUCT_USER_PWD": "mongo-product-secret",
     }
 
 
@@ -235,7 +235,7 @@ def test_copy_secret_removes_controller_metadata():
     ]
 
 
-def test_minio_policy_attachment_fails_closed_before_credentials_enter_argv(tmp_path):
+def test_minio_policy_attachment_uses_protected_iam_archive_without_credentials_in_argv(tmp_path):
     # given
     kube = FakeKubernetes()
     namespace = "qa-minio-document"
@@ -257,14 +257,39 @@ def test_minio_policy_attachment_fails_closed_before_credentials_enter_argv(tmp_
     policy = tmp_path / "document-policy.json"
     policy.write_text('{"Version":"2012-10-17","Statement":[]}')
 
-    # when / then
-    with pytest.raises(AdminError, match="requires the protected access key in child argv"):
-        cluster.configure_minio(kube, "user-policy", "document", policy_path=policy)
+    def kubectl(*arguments, input_text=None, **_kwargs):
+        kube.kubectl_calls.append((list(arguments), input_text))
+        if arguments[-2:] == ("-o", "json"):
+            return json.dumps({"items": [{"metadata": {"name": "minio-0"}}]})
+        if "import" in arguments:
+            return json.dumps(
+                {
+                    "added": {
+                        "policies": ["document-policy"],
+                        "users": [access_sentinel],
+                        "userPolicies": [{access_sentinel: ["document-policy"]}],
+                    }
+                }
+            )
+        return ""
 
+    kube.kubectl = kubectl
+
+    # when
+    cluster.configure_minio(kube, "user-policy", "document", policy_path=policy)
+
+    # then
     all_arguments = [argument for call, _ in kube.kubectl_calls for argument in call]
     assert access_sentinel not in all_arguments
     assert secret_sentinel not in all_arguments
-    assert kube.kubectl_calls == []
+    archive_input = next(
+        input_text for call, input_text in kube.kubectl_calls if "base64 -d" in " ".join(call)
+    )
+    with zipfile.ZipFile(io.BytesIO(base64.b64decode(archive_input))) as bundle:
+        users = json.loads(bundle.read("iam-assets/users.json"))
+        mappings = json.loads(bundle.read("iam-assets/user_mappings.json"))
+    assert users == {access_sentinel: {"secretKey": secret_sentinel, "status": "enabled"}}
+    assert mappings[access_sentinel]["policy"] == "document-policy"
     assert kube.applied == []
 
 
@@ -359,27 +384,34 @@ def test_invalid_copy_destination_is_rejected_before_source_secret_mutation():
     assert kube.applied == []
 
 
-def test_service_aggregate_fails_closed_before_any_mutation(monkeypatch):
+def test_service_aggregate_validates_then_runs_the_complete_deployment(monkeypatch):
     # given
     kube = FakeKubernetes(target=TARGETS["local-dev"])
     calls = []
-    monkeypatch.setattr(cluster, "_make", lambda *_args, **_kwargs: calls.append("make"))
+    make_calls = []
+    monkeypatch.setattr(
+        cluster,
+        "_make",
+        lambda _commands, target, **kwargs: make_calls.append((target, kwargs.get("variables"))),
+    )
+    monkeypatch.setattr(cluster, "create_secret", lambda *_args, **_kwargs: calls.append("secret"))
 
-    # when / then
-    with pytest.raises(AdminError, match="requires the protected access key in child argv"):
-        cluster.deploy_aggregate(
-            kube,
-            "services",
-            {
-                "MINIO_SVC_ACCESS_KEY": "access-key",
-                "MINIO_SVC_SECRET_KEY": "secret-key",
-                "COPY_SECRET_NS": "local-dev-all",
-            },
-        )
-    assert not kube.verified
-    assert calls == []
-    assert kube.namespaces == []
-    assert kube.applied == []
+    # when
+    cluster.deploy_aggregate(
+        kube,
+        "services",
+        {
+            "MINIO_SVC_ACCESS_KEY": "access-key",
+            "MINIO_SVC_SECRET_KEY": "secret-key",
+            "COPY_SECRET_NS": "local-dev-all",
+        },
+    )
+
+    # then
+    assert kube.verified
+    assert calls.count("secret") == 2
+    assert len(make_calls) == 15
+    assert all(target == "svc-load-delete-deploy" for target, _ in make_calls[-11:])
 
 
 def test_infra_aggregate_preserves_postgres_and_minio_phase_order(monkeypatch):
@@ -433,7 +465,57 @@ def test_infra_aggregate_preserves_postgres_and_minio_phase_order(monkeypatch):
     assert len(minio_secret_indexes) == 4
     assert len(minio_deploy_indexes) == 2
     assert max(minio_secret_indexes) < min(minio_deploy_indexes)
-    assert "local-dev-all" in kube.ensured_namespaces
+    assert not any("mongodb" in str(event) for event in events)
+    wait_calls = [call for call, _ in kube.kubectl_calls if "wait" in call]
+    assert any("cluster.postgresql.cnpg.io" in call and "--all" in call for call in wait_calls)
+    assert any(
+        "kafka.kafka.strimzi.io" in call and "local-dev-kafka" in call for call in wait_calls
+    )
+
+
+def test_minio_tenant_waits_for_operator_to_create_pod(monkeypatch):
+    # given
+    kube = FakeKubernetes(target=TARGETS["local-dev"])
+    inventories = iter(([], [], [{"metadata": {"name": "minio-pool-0-0"}}]))
+    now = [0.0]
+
+    def kubectl(*arguments, input_text=None, **_kwargs):
+        kube.kubectl_calls.append((list(arguments), input_text))
+        if arguments[-2:] == ("-o", "json"):
+            return json.dumps({"items": next(inventories)})
+        return ""
+
+    kube.kubectl = kubectl
+    monkeypatch.setattr(cluster.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(cluster.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+
+    # when
+    namespace, pod = cluster._wait_for_minio_tenant(kube, "document")
+
+    # then
+    assert namespace == "local-dev-minio-document"
+    assert pod == "minio-pool-0-0"
+    inventory_calls = [call for call, _ in kube.kubectl_calls if call[-2:] == ["-o", "json"]]
+    assert len(inventory_calls) == 3
+    assert kube.kubectl_calls[-1][0][2:4] == ["wait", "--for=condition=Ready"]
+
+
+def test_minio_tenant_discovery_has_a_bounded_failure(monkeypatch):
+    # given
+    kube = FakeKubernetes(target=TARGETS["local-dev"])
+    now = [0.0]
+    kube.kubectl = lambda *_args, **_kwargs: json.dumps({"items": []})
+    monkeypatch.setattr(cluster.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(cluster.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+
+    # when / then
+    with pytest.raises(AdminError, match="no MinIO tenant pod appeared.*within 5s"):
+        cluster._wait_for_minio_tenant(
+            kube,
+            "document",
+            discovery_timeout=5,
+            poll_interval=2,
+        )
 
 
 def test_infra_aggregate_rejects_missing_credentials_before_operator_or_namespace_mutation(
