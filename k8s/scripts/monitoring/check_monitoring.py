@@ -93,8 +93,16 @@ def validate_dashboard(assets: MonitoringAssets) -> None:
             raise ValidationError(f"dashboard variable {name!r} lacks {label!r} or {selector!r}")
 
     panels = sequence(dashboard.get("panels"), "dashboard panels")
-    titles = {mapping(panel, "dashboard panel").get("title") for panel in panels}
-    expected_titles = set(sequence(config.get("required_panel_titles"), "required panel titles"))
+    titles: set[str] = set()
+    for index, panel_value in enumerate(panels):
+        title = mapping(panel_value, "dashboard panel").get("title")
+        if not isinstance(title, str) or not title:
+            raise ValidationError(f"dashboard panel {index} title must be a non-empty string")
+        titles.add(title)
+    required_titles = sequence(config.get("required_panel_titles"), "required panel titles")
+    if not all(isinstance(title, str) and title for title in required_titles):
+        raise ValidationError("required panel titles must be non-empty strings")
+    expected_titles = set(required_titles)
     if titles != expected_titles:
         raise ValidationError(
             f"dashboard panels are {sorted(titles)}, expected {sorted(expected_titles)}"
@@ -111,8 +119,12 @@ def validate_dashboard(assets: MonitoringAssets) -> None:
         isinstance(value, str) and value for value in required_filters
     ):
         raise ValidationError("dashboard required_query_filters must be non-empty strings")
-    for target in targets:
-        expression = target.get("expr", "")
+    for index, target in enumerate(targets):
+        expression = target.get("expr")
+        if not isinstance(expression, str) or not expression:
+            raise ValidationError(
+                f"dashboard Prometheus target {index} expression must be a non-empty string"
+            )
         if selector in expression:
             missing = [value for value in required_filters if value not in expression]
             if missing:

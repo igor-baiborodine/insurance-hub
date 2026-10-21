@@ -47,6 +47,43 @@ class TestMonitoringTooling:
         with pytest.raises(check.ValidationError, match="dashboard panel must be an object"):
             check.validate_dashboard(replace(self.assets, dashboard=dashboard))
 
+    @pytest.mark.parametrize(
+        ("field", "value", "diagnostic"),
+        (
+            ("title", [], "dashboard panel 0 title must be a non-empty string"),
+            ("expr", None, "dashboard Prometheus target 0 expression must be a non-empty string"),
+        ),
+    )
+    def test_dashboard_renderer_rejects_malformed_scalar_fields(
+        self, monkeypatch, capsys, field: str, value: object, diagnostic: str
+    ) -> None:
+        # given
+        dashboard = copy.deepcopy(self.assets.dashboard)
+        if field == "title":
+            dashboard["panels"][0]["title"] = value
+        else:
+            dashboard["panels"][0]["targets"][0]["expr"] = value
+        assets = replace(self.assets, dashboard=dashboard)
+        monkeypatch.setattr(dashboard_renderer, "load_assets", lambda *_args: assets)
+
+        # when
+        status = dashboard_renderer.main(
+            [
+                "--assets-root",
+                str(ASSETS_ROOT),
+                "--environment",
+                "qa",
+                "--service",
+                "product",
+            ]
+        )
+
+        # then
+        captured = capsys.readouterr()
+        assert status == 1
+        assert captured.out == ""
+        assert diagnostic in captured.err
+
     def test_malformed_alert_yaml_has_contextual_failure(self, tmp_path: Path) -> None:
         # given
         path = tmp_path / "alerts.yaml"
