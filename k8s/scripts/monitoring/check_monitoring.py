@@ -5,13 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
+
+import yaml
 
 from monitoring_assets import AssetError, MonitoringAssets, load_assets
-
 
 KUBE_PROMETHEUS_STACK_VERSION = "92.6.0"
 PROMETHEUS_IMAGE = "quay.io/prometheus/prometheus:v3.15.0-distroless"
@@ -21,22 +22,45 @@ class ValidationError(Exception):
     """A monitoring asset contract validation failed."""
 
 
-def prometheus_targets(dashboard: Dict[str, Any]) -> List[Dict[str, Any]]:
-    targets: List[Dict[str, Any]] = []
-    for panel in dashboard.get("panels", []):
-        if not isinstance(panel, dict):
-            continue
+def mapping(value: Any, label: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValidationError(f"{label} must be an object")
+    return value
+
+
+def sequence(value: Any, label: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise ValidationError(f"{label} must be an array")
+    return value
+
+
+def yaml_documents(text: str, label: str) -> list[Mapping[str, Any]]:
+    try:
+        loaded = list(yaml.safe_load_all(text))
+    except yaml.YAMLError as error:
+        raise ValidationError(f"{label} is malformed YAML: {error}") from error
+    documents = [document for document in loaded if document is not None]
+    if not documents or not all(isinstance(document, Mapping) for document in documents):
+        raise ValidationError(f"{label} must contain YAML mapping documents")
+    return documents
+
+
+def prometheus_targets(dashboard: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    targets: list[Mapping[str, Any]] = []
+    for index, panel_value in enumerate(sequence(dashboard.get("panels"), "dashboard panels")):
+        panel = mapping(panel_value, f"dashboard panel {index}")
         datasource = panel.get("datasource", {})
-        if isinstance(datasource, dict) and datasource.get("type") == "prometheus":
-            targets.extend(
-                target for target in panel.get("targets", []) if isinstance(target, dict)
-            )
+        if isinstance(datasource, Mapping) and datasource.get("type") == "prometheus":
+            for target_index, target in enumerate(
+                sequence(panel.get("targets"), f"dashboard panel {index} targets")
+            ):
+                targets.append(mapping(target, f"dashboard panel {index} target {target_index}"))
     return targets
 
 
 def validate_dashboard(assets: MonitoringAssets) -> None:
-    dashboard = assets.dashboard
-    config = assets.contract["dashboard"]
+    dashboard = mapping(assets.dashboard, "dashboard")
+    config = mapping(assets.contract.get("dashboard"), "monitoring dashboard contract")
     if dashboard.get("uid") != config.get("uid"):
         raise ValidationError(f"dashboard UID must be {config.get('uid')!r}")
     if dashboard.get("refresh") != config.get("refresh"):
@@ -45,11 +69,17 @@ def validate_dashboard(assets: MonitoringAssets) -> None:
         raise ValidationError("dashboard and monitoring.json must disable UI editing")
 
     expected_variables = config.get("variables")
-    variables = {
-        variable.get("name"): variable
-        for variable in dashboard.get("templating", {}).get("list", [])
-        if isinstance(variable, dict)
-    }
+    templating = mapping(dashboard.get("templating"), "dashboard templating")
+    variable_list = sequence(templating.get("list"), "dashboard templating list")
+    variables: dict[str, Mapping[str, Any]] = {}
+    for index, variable_value in enumerate(variable_list):
+        variable = mapping(variable_value, f"dashboard variable {index}")
+        name = variable.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValidationError(f"dashboard variable {index} has no name")
+        if name in variables:
+            raise ValidationError(f"dashboard variable {name!r} is duplicated")
+        variables[name] = variable
     if not isinstance(expected_variables, dict) or set(variables) != set(expected_variables):
         raise ValidationError("dashboard variables do not match monitoring.json")
     selector = config.get("application_selector")
@@ -62,9 +92,9 @@ def validate_dashboard(assets: MonitoringAssets) -> None:
         if label not in query or selector not in query:
             raise ValidationError(f"dashboard variable {name!r} lacks {label!r} or {selector!r}")
 
-    panels = dashboard.get("panels", [])
-    titles = {panel.get("title") for panel in panels if isinstance(panel, dict)}
-    expected_titles = set(config.get("required_panel_titles", []))
+    panels = sequence(dashboard.get("panels"), "dashboard panels")
+    titles = {mapping(panel, "dashboard panel").get("title") for panel in panels}
+    expected_titles = set(sequence(config.get("required_panel_titles"), "required panel titles"))
     if titles != expected_titles:
         raise ValidationError(
             f"dashboard panels are {sorted(titles)}, expected {sorted(expected_titles)}"
@@ -96,62 +126,71 @@ def validate_dashboard(assets: MonitoringAssets) -> None:
             raise ValidationError(f"dashboard lacks required marker {marker!r}")
 
 
-def alert_blocks(rules: str) -> Dict[str, str]:
-    matches = list(re.finditer(r"(?m)^    - alert: ([A-Za-z0-9_]+)\s*$", rules))
-    blocks: Dict[str, str] = {}
-    for index, match in enumerate(matches):
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(rules)
-        blocks[match.group(1)] = rules[match.start() : end]
-    return blocks
+def load_alert_document(assets: MonitoringAssets) -> Mapping[str, Any]:
+    if assets.alerts_path.suffix not in {".yaml", ".yml"}:
+        raise ValidationError("alert rules must use a .yaml or .yml file")
+    documents = yaml_documents(
+        assets.alerts_path.read_text(encoding="utf-8"), "Prometheus alert rules"
+    )
+    if len(documents) != 1:
+        raise ValidationError("alert rules must contain exactly one YAML document")
+    document = documents[0]
+    if "kind" in document or set(document) != {"groups"}:
+        raise ValidationError("alert rules must be a standalone Prometheus rule file")
+    return document
 
 
 def validate_alerts(assets: MonitoringAssets) -> None:
-    rules = assets.alerts_path.read_text(encoding="utf-8")
-    config = assets.contract["alerts"]
-    if assets.alerts_path.suffix not in {".yaml", ".yml"}:
-        raise ValidationError("alert rules must use a .yaml or .yml file")
-    if not rules.startswith("groups:\n") or re.search(r"(?m)^kind:\s*PrometheusRule\s*$", rules):
-        raise ValidationError("alert rules must be a standalone Prometheus rule file")
-    if f"name: {config.get('group')}" not in rules:
+    document = load_alert_document(assets)
+    config = mapping(assets.contract.get("alerts"), "monitoring alert contract")
+    groups = sequence(document.get("groups"), "alert groups")
+    if len(groups) != 1:
+        raise ValidationError("alert rules must contain exactly one group")
+    group = mapping(groups[0], "alert group")
+    if group.get("name") != config.get("group"):
         raise ValidationError("alert rule group does not match monitoring.json")
-    if f"interval: {config.get('interval')}" not in rules:
+    if group.get("interval") != config.get("interval"):
         raise ValidationError("alert rule interval does not match monitoring.json")
 
     expected_for = config.get("for")
     markers = config.get("expression_markers")
     expected_labels = config.get("labels")
     required_annotations = config.get("required_annotations")
-    if not all(isinstance(value, dict) for value in (expected_for, markers, expected_labels)):
+    if not all(isinstance(value, Mapping) for value in (expected_for, markers, expected_labels)):
         raise ValidationError("alert inventory, markers, and labels must be objects")
     if not isinstance(required_annotations, list):
         raise ValidationError("required alert annotations must be a list")
 
-    blocks = alert_blocks(rules)
-    if set(blocks) != set(expected_for):
-        raise ValidationError(
-            f"alerts are {sorted(blocks)}, expected {sorted(expected_for)}"
-        )
+    alert_rules: dict[str, Mapping[str, Any]] = {}
+    for index, rule_value in enumerate(sequence(group.get("rules"), "alert rules")):
+        rule = mapping(rule_value, f"alert rule {index}")
+        name = rule.get("alert")
+        if not isinstance(name, str) or not name:
+            raise ValidationError(f"alert rule {index} has no alert name")
+        if name in alert_rules:
+            raise ValidationError(f"alert {name} is duplicated")
+        alert_rules[name] = rule
+    if set(alert_rules) != set(expected_for):
+        raise ValidationError(f"alerts are {sorted(alert_rules)}, expected {sorted(expected_for)}")
     if set(markers) != set(expected_for):
         raise ValidationError("expression marker inventory does not match alert inventory")
 
     for name, duration in expected_for.items():
-        block = blocks[name]
+        rule = alert_rules[name]
+        labels = mapping(rule.get("labels"), f"{name} labels")
+        annotations = mapping(rule.get("annotations"), f"{name} annotations")
         for label, value in expected_labels.items():
-            if not re.search(
-                rf"(?m)^        {re.escape(label)}:\s*{re.escape(str(value))}\s*$", block
-            ):
+            if labels.get(label) != value:
                 raise ValidationError(f"{name} lacks label {label}={value}")
         for annotation in required_annotations:
-            if not re.search(rf"(?m)^        {re.escape(annotation)}:\s*", block):
+            if not isinstance(annotations.get(annotation), str) or not annotations[annotation]:
                 raise ValidationError(f"{name} lacks annotation {annotation}")
-        match = re.search(r"(?m)^      for:\s*(\S+)\s*$", block)
-        actual_duration = match.group(1) if match else None
+        actual_duration = rule.get("for")
         if actual_duration != duration:
-            raise ValidationError(
-                f"{name} for={actual_duration!r}, expected {duration!r}"
-            )
+            raise ValidationError(f"{name} for={actual_duration!r}, expected {duration!r}")
         for marker in markers[name]:
-            if marker not in block:
+            expression = rule.get("expr")
+            if not isinstance(expression, str) or marker not in expression:
                 raise ValidationError(f"{name} expression lacks {marker!r}")
 
 
@@ -171,21 +210,30 @@ def validate_fixture(assets: MonitoringAssets) -> None:
 
 
 def validate_values(values: str) -> None:
-    for marker in (
-        "defaultRules:\n  create: true",
-        "grafana:\n  enabled: true",
-        "defaultDashboardsEnabled: true",
-        "label: grafana_dashboard",
-        'labelValue: "1"',
-        "disableDelete: true",
-        "allowUiUpdates: false",
-        "  persistence:\n    enabled: true\n    type: pvc",
-    ):
-        if marker not in values:
-            raise ValidationError(f"Prometheus values lack {marker!r}")
-    for forbidden in ("additionalPrometheusRulesMap:", "  dashboards:\n    default:"):
-        if forbidden in values:
-            raise ValidationError(f"Prometheus values still embed service assets: {forbidden!r}")
+    document = yaml_documents(values, "Prometheus values")[0]
+    default_rules = mapping(document.get("defaultRules"), "defaultRules")
+    grafana = mapping(document.get("grafana"), "grafana")
+    sidecar = mapping(grafana.get("sidecar"), "grafana.sidecar")
+    dashboards = mapping(sidecar.get("dashboards"), "grafana.sidecar.dashboards")
+    provider = mapping(dashboards.get("provider"), "grafana.sidecar.dashboards.provider")
+    persistence = mapping(grafana.get("persistence"), "grafana.persistence")
+    expected = {
+        "defaultRules.create": default_rules.get("create") is True,
+        "grafana.enabled": grafana.get("enabled") is True,
+        "grafana.defaultDashboardsEnabled": grafana.get("defaultDashboardsEnabled") is True,
+        "grafana.sidecar.dashboards.label": dashboards.get("label") == "grafana_dashboard",
+        "grafana.sidecar.dashboards.labelValue": dashboards.get("labelValue") == "1",
+        "grafana.sidecar.dashboards.provider.disableDelete": provider.get("disableDelete") is True,
+        "grafana.sidecar.dashboards.provider.allowUiUpdates": provider.get("allowUiUpdates")
+        is False,
+        "grafana.persistence.enabled": persistence.get("enabled") is True,
+        "grafana.persistence.type": persistence.get("type") == "pvc",
+    }
+    for field, valid in expected.items():
+        if not valid:
+            raise ValidationError(f"Prometheus values violate {field}")
+    if "additionalPrometheusRulesMap" in document or "dashboards" in grafana:
+        raise ValidationError("Prometheus values still embed service assets")
 
 
 def validate_makefile(makefile: str) -> None:
@@ -203,31 +251,55 @@ def validate_makefile(makefile: str) -> None:
 
 
 def validate_rendered_stack(rendered: str) -> None:
-    documents = [
-        document for document in re.split(r"(?m)^---\s*$", rendered) if document.strip()
-    ]
-    if len([document for document in documents if "kind: PrometheusRule" in document]) < 10:
+    documents = yaml_documents(rendered, "rendered Prometheus stack")
+    if len([document for document in documents if document.get("kind") == "PrometheusRule"]) < 10:
         raise ValidationError("base chart render removed the default Prometheus rules")
-    dashboard_keys = re.findall(r"(?m)^  [a-z0-9-]+\.json:\s*(?:\|-)?\s*$", rendered)
+    dashboard_keys = [
+        key
+        for document in documents
+        if document.get("kind") == "ConfigMap"
+        for key in mapping(document.get("data", {}), "ConfigMap data")
+        if isinstance(key, str) and key.endswith(".json")
+    ]
     if len(dashboard_keys) < 20:
         raise ValidationError("base chart render removed the default Grafana dashboards")
-    grafana_claims = [
-        document
-        for document in documents
-        if "kind: PersistentVolumeClaim" in document
-        and "app.kubernetes.io/name: grafana" in document
-    ]
+    grafana_claims = []
+    for document in documents:
+        if document.get("kind") != "PersistentVolumeClaim":
+            continue
+        metadata = mapping(document.get("metadata"), "PVC metadata")
+        labels = mapping(metadata.get("labels", {}), "PVC labels")
+        if labels.get("app.kubernetes.io/name") == "grafana":
+            grafana_claims.append(document)
     if len(grafana_claims) != 1:
         raise ValidationError(
             f"base chart must render one persistent Grafana claim, found {len(grafana_claims)}"
         )
-    if "disableDeletion: true\n        allowUiUpdates: false" not in rendered:
-        raise ValidationError(
-            "Grafana dashboard provider must disable deletion and UI updates"
-        )
+    providers: list[Mapping[str, Any]] = []
+    for document in documents:
+        if document.get("kind") != "ConfigMap":
+            continue
+        for value in mapping(document.get("data", {}), "ConfigMap data").values():
+            if not isinstance(value, str):
+                continue
+            try:
+                embedded = yaml.safe_load(value)
+            except yaml.YAMLError:
+                continue
+            if not isinstance(embedded, Mapping):
+                continue
+            if "providers" not in embedded:
+                continue
+            for provider in sequence(embedded["providers"], "Grafana dashboard providers"):
+                providers.append(mapping(provider, "Grafana dashboard provider"))
+    if not any(
+        provider.get("disableDeletion") is True and provider.get("allowUiUpdates") is False
+        for provider in providers
+    ):
+        raise ValidationError("Grafana dashboard provider must disable deletion and UI updates")
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--assets-root", type=Path, required=True)
     parser.add_argument("--environment", required=True)
@@ -238,7 +310,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         assets = load_assets(args.assets_root, args.environment, args.service)
@@ -252,9 +324,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except (AssetError, OSError, ValidationError) as error:
         print(f"Monitoring asset check failed: {error}", file=sys.stderr)
         return 1
-    print(
-        f"Monitoring assets passed contract checks for {args.service} in {args.environment}"
-    )
+    print(f"Monitoring assets passed contract checks for {args.service} in {args.environment}")
     return 0
 
 

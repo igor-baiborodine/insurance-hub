@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional, Sequence
 
-from check_monitoring import ValidationError, validate_alerts
+import yaml
+
+from check_monitoring import ValidationError, load_alert_document, validate_alerts
 from monitoring_assets import AssetError, load_assets, prometheus_rule_resource
 
 
@@ -17,27 +18,11 @@ def render(assets_root: Path, environment: str, service: str) -> str:
     assets = load_assets(assets_root, environment, service)
     validate_alerts(assets)
     resource = prometheus_rule_resource(assets)
-    metadata = resource["metadata"]
-    labels = metadata["labels"]
-    output = [
-        f"apiVersion: {resource['apiVersion']}",
-        f"kind: {resource['kind']}",
-        "metadata:",
-        f"  name: {json.dumps(metadata['name'])}",
-        f"  namespace: {json.dumps(metadata['namespace'])}",
-        "  labels:",
-    ]
-    output.extend(
-        f"    {key}: {json.dumps(value)}" for key, value in sorted(labels.items())
-    )
-    output.append("spec:")
-    output.extend(f"  {line}" if line else "" for line in assets.alerts_path.read_text(
-        encoding="utf-8"
-    ).splitlines())
-    return "\n".join(output) + "\n"
+    resource["spec"] = dict(load_alert_document(assets))
+    return yaml.safe_dump(resource, sort_keys=False, allow_unicode=True)
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--assets-root", type=Path, required=True)
     parser.add_argument("--environment", required=True)
@@ -46,7 +31,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         rendered = render(args.assets_root, args.environment, args.service)

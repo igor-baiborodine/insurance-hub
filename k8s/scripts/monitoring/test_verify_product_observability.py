@@ -1,54 +1,45 @@
 #!/usr/bin/env python3
-"""Exercise Product observability target guards and cleanup without live access."""
+"""Pytest coverage for Product observability target guards and cleanup."""
 
 from __future__ import annotations
 
-import importlib.util
 import dataclasses
 import json
-import sys
-import unittest
 from contextlib import nullcontext
 from pathlib import Path
 from unittest import mock
 
+import pytest
+import verify_product_observability as verifier
 
-SCRIPT = Path(__file__).with_name("verify_product_observability.py")
-SPEC = importlib.util.spec_from_file_location("verify_product_observability", SCRIPT)
-if SPEC is None or SPEC.loader is None:
-    raise RuntimeError(f"cannot import {SCRIPT}")
-verifier = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = verifier
-SPEC.loader.exec_module(verifier)
 ASSETS_ROOT = Path(__file__).parents[2] / "observability"
 
 
-class ProductObservabilityVerificationTest(unittest.TestCase):
-    def setUp(self) -> None:
+class TestProductObservabilityVerification:
+    def setup_method(self) -> None:
         self.assets = verifier.load_assets(ASSETS_ROOT, "qa", "product")
 
     def test_configuration_resolves_exact_read_only_target(self) -> None:
         selected = verifier.verification_config(self.assets)
 
-        self.assertEqual("qa-svc", selected["service_namespace"])
-        self.assertEqual("qa-product-api", selected["product_deployment"])
-        self.assertEqual(
-            "qa-prometheus-kube-prometh-prometheus",
-            selected["prometheus_service"],
-        )
+        assert "qa-svc" == selected["service_namespace"]
+        assert "qa-product-api" == selected["product_deployment"]
+        assert "qa-prometheus-kube-prometh-prometheus" == selected["prometheus_service"]
 
     def test_target_rejects_non_qa_or_malformed_revision(self) -> None:
-        with self.assertRaisesRegex(verifier.VerificationError, "source revision"):
+        with pytest.raises(verifier.VerificationError, match="source revision"):
             verifier.KubernetesTarget(self.assets, "short")
         changed = dataclasses.replace(self.assets, environment_name="local-dev")
-        with self.assertRaisesRegex(verifier.VerificationError, "QA-only"):
+        with pytest.raises(verifier.VerificationError, match="QA-only"):
             verifier.KubernetesTarget(changed, "a" * 40)
 
     def test_coordinates_reject_wrong_active_context_before_resource_reads(self) -> None:
         target = verifier.KubernetesTarget(self.assets, "a" * 40)
-        with mock.patch.object(verifier, "run", return_value="kind-local-dev-insurance-hub\n"), \
-                mock.patch.object(target, "json") as kubernetes:
-            with self.assertRaisesRegex(verifier.VerificationError, "active Kubernetes context"):
+        with (
+            mock.patch.object(verifier, "run", return_value="kind-local-dev-insurance-hub\n"),
+            mock.patch.object(target, "json") as kubernetes,
+        ):
+            with pytest.raises(verifier.VerificationError, match="active Kubernetes context"):
                 target.coordinates()
             kubernetes.assert_not_called()
 
@@ -76,13 +67,10 @@ class ProductObservabilityVerificationTest(unittest.TestCase):
         with mock.patch.object(target, "json", side_effect=[rule, dashboard]):
             observed = target.monitoring_assets()
 
-        self.assertEqual(
-            {
-                "prometheus_rule": "qa-product-service",
-                "dashboard_config_map": "qa-product-dashboard",
-            },
-            observed,
-        )
+        assert {
+            "prometheus_rule": "qa-product-service",
+            "dashboard_config_map": "qa-product-dashboard",
+        } == observed
 
     def test_monitoring_assets_reject_alert_inventory_mismatch(self) -> None:
         target = verifier.KubernetesTarget(self.assets, "a" * 40)
@@ -96,9 +84,9 @@ class ProductObservabilityVerificationTest(unittest.TestCase):
         }
 
         with mock.patch.object(target, "json", return_value=rule):
-            with self.assertRaisesRegex(
+            with pytest.raises(
                 verifier.VerificationError,
-                "live Product alert inventory differs from reviewed assets",
+                match="live Product alert inventory differs from reviewed assets",
             ):
                 target.monitoring_assets()
 
@@ -126,28 +114,25 @@ class ProductObservabilityVerificationTest(unittest.TestCase):
             ("product", "qa-svc", "qa-product-api", 8081),
             ("health", "qa-svc", "qa-product-api-management", 8080),
         ]
-        with mock.patch.object(
-            verifier.subprocess, "Popen", side_effect=[first, second]
-        ), mock.patch.object(
-            verifier.socket, "create_connection", return_value=nullcontext()
+        with (
+            mock.patch.object(verifier.subprocess, "Popen", side_effect=[first, second]),
+            mock.patch.object(verifier.socket, "create_connection", return_value=nullcontext()),
+            mock.patch.object(verifier.monitoring_runtime, "terminate_process_group") as terminate,
         ):
-            with self.assertRaisesRegex(verifier.VerificationError, "health exited"):
+            with pytest.raises(verifier.VerificationError, match="health exited"):
                 with verifier.forwards(target, services):
                     pass
-        self.assertTrue(first.terminated)
-        self.assertTrue(first.waited and second.waited)
+        assert [
+            mock.call(second, graceful_seconds=5, teardown_seconds=10),
+            mock.call(first, graceful_seconds=5, teardown_seconds=10),
+        ] == terminate.call_args_list
 
     def test_product_reads_use_safe_get_and_deterministic_trace_header(self) -> None:
         responses = ["live\n", "ready\n", '[{"code":"CAR"}]']
         with mock.patch.object(verifier, "request_text", side_effect=responses) as request:
             rows = verifier.product_reads({"health": 1001, "product": 1002}, "a" * 32)
 
-        self.assertEqual(1, rows)
-        self.assertEqual(
-            {"traceparent": "00-" + "a" * 32 + "-0123456789abcdef-01"},
-            request.call_args_list[-1].args[1],
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert 1 == rows
+        assert {"traceparent": "00-" + "a" * 32 + "-0123456789abcdef-01"} == request.call_args_list[
+            -1
+        ].args[1]

@@ -15,12 +15,13 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence
+from typing import Any
 
+import monitoring_runtime
 from monitoring_assets import AssetError, MonitoringAssets, load_assets
-
 
 PROMETHEUS_IMAGE = "quay.io/prometheus/prometheus:v3.15.0-distroless"
 COMMAND_TIMEOUT = 30
@@ -37,7 +38,7 @@ def escape_label(value: str) -> str:
 
 
 class MetricFixture:
-    def __init__(self, config: Dict[str, Any]) -> None:
+    def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
         self.scrapes = 0
         self.lock = threading.Lock()
@@ -65,13 +66,12 @@ class MetricFixture:
                 name = item.get("name", "")
                 if not METRIC_NAME.fullmatch(name):
                     raise HarnessError(f"invalid metric fixture name: {name!r}")
-                labels: Dict[str, str] = {}
+                labels: dict[str, str] = {}
                 if item.get("use_common_labels"):
                     labels.update(common)
                 labels.update(item.get("labels", {}))
                 encoded = ",".join(
-                    f'{key}="{escape_label(str(value))}"'
-                    for key, value in sorted(labels.items())
+                    f'{key}="{escape_label(str(value))}"' for key, value in sorted(labels.items())
                 )
                 suffix = f"{{{encoded}}}" if encoded else ""
                 lines.append(f"{name}{suffix} {self.sample_value(item.get('value'))}")
@@ -104,7 +104,11 @@ def handler_for(fixture: MetricFixture):
 def run(arguments: Sequence[str], timeout: int = COMMAND_TIMEOUT) -> subprocess.CompletedProcess:
     try:
         result = subprocess.run(
-            list(arguments), capture_output=True, text=True, timeout=timeout, check=False
+            list(arguments),
+            capture_output=True,
+            text=True,
+            timeout=monitoring_runtime.teardown_timeout(timeout),
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise HarnessError(f"command failed: {arguments}: {error}") from error
@@ -115,7 +119,7 @@ def run(arguments: Sequence[str], timeout: int = COMMAND_TIMEOUT) -> subprocess.
     return result
 
 
-def read_json(url: str) -> Dict:
+def read_json(url: str) -> dict:
     try:
         with urllib.request.urlopen(url, timeout=5) as response:
             return json.loads(response.read())
@@ -172,7 +176,7 @@ def cleanup(container: str) -> None:
             ["docker", "rm", "-f", container],
             capture_output=True,
             text=True,
-            timeout=CLEANUP_TIMEOUT,
+            timeout=monitoring_runtime.teardown_timeout(CLEANUP_TIMEOUT),
             check=False,
         )
         remaining = run(
@@ -205,10 +209,8 @@ def execute(assets: MonitoringAssets) -> None:
     server = ThreadingHTTPServer(("0.0.0.0", 0), handler_for(fixture))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    container = (
-        f"monitoring-{assets.environment_name}-{assets.service}-{uuid.uuid4().hex[:10]}"
-    )
-    primary: Optional[BaseException] = None
+    container = f"monitoring-{assets.environment_name}-{assets.service}-{uuid.uuid4().hex[:10]}"
+    primary: BaseException | None = None
     try:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -257,9 +259,7 @@ def execute(assets: MonitoringAssets) -> None:
             while fixture.scrapes < minimum_scrapes and time.monotonic() < deadline:
                 time.sleep(0.25)
             if fixture.scrapes < minimum_scrapes:
-                raise HarnessError(
-                    f"Prometheus collected only {fixture.scrapes} fixture scrapes"
-                )
+                raise HarnessError(f"Prometheus collected only {fixture.scrapes} fixture scrapes")
             for expression in expressions:
                 if not query(port, expression):
                     raise HarnessError(f"dashboard query returned no data: {expression}")
@@ -279,18 +279,26 @@ def execute(assets: MonitoringAssets) -> None:
         primary = error
         raise
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-        try:
-            cleanup(container)
-        except HarnessError as cleanup_error:
-            if primary is None:
-                raise
-            raise HarnessError(f"{primary}; cleanup also failed: {cleanup_error}") from primary
+        with monitoring_runtime.teardown_activity(45):
+            cleanup_errors: list[Exception] = []
+            for action in (
+                server.shutdown,
+                server.server_close,
+                lambda: thread.join(timeout=monitoring_runtime.teardown_timeout(5)),
+                lambda: cleanup(container),
+            ):
+                try:
+                    action()
+                except Exception as error:
+                    cleanup_errors.append(error)
+            if cleanup_errors:
+                if primary is not None:
+                    primary.add_note(f"monitoring cleanup also failed: {cleanup_errors}")
+                else:
+                    raise HarnessError(f"monitoring cleanup failed: {cleanup_errors}")
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--assets-root", type=Path, required=True)
     parser.add_argument("--environment", required=True)
@@ -298,11 +306,26 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        execute(load_assets(args.assets_root, args.environment, args.service))
-    except (AssetError, HarnessError, OSError) as error:
+        with (
+            monitoring_runtime.controlled_signals(),
+            monitoring_runtime.bounded_activity("disposable monitoring integration", 300),
+        ):
+            execute(load_assets(args.assets_root, args.environment, args.service))
+    except monitoring_runtime.Interrupted as error:
+        print(f"Monitoring fixture {error}", file=sys.stderr)
+        for note in getattr(error, "__notes__", ()):
+            print(note, file=sys.stderr)
+        return error.status
+    except (
+        AssetError,
+        HarnessError,
+        monitoring_runtime.DeadlineExceeded,
+        monitoring_runtime.TeardownExceeded,
+        OSError,
+    ) as error:
         print(f"Monitoring fixture failed: {error}", file=sys.stderr)
         return 1
     return 0

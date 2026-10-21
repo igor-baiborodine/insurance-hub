@@ -6,8 +6,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional, Sequence
 
 from check_monitoring import ValidationError, validate_dashboard
 from monitoring_assets import AssetError, grafana_dashboard_resource, load_assets
@@ -29,15 +29,13 @@ def render(assets_root: Path, environment: str, service: str) -> str:
         f"  namespace: {json.dumps(metadata['namespace'])}",
         "  labels:",
     ]
-    output.extend(
-        f"    {key}: {json.dumps(value)}" for key, value in sorted(labels.items())
-    )
+    output.extend(f"    {key}: {json.dumps(value)}" for key, value in sorted(labels.items()))
     output.extend(("data:", f"  {dashboard_key}: |-"))
     output.extend(f"    {line}" for line in dashboard_json.splitlines())
     return "\n".join(output) + "\n"
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--assets-root", type=Path, required=True)
     parser.add_argument("--environment", required=True)
@@ -46,7 +44,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         rendered = render(args.assets_root, args.environment, args.service)

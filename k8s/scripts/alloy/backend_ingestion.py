@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -21,21 +22,13 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any
 
-from importlib import util as importlib_util
-
-
-CHECK_PATH = Path(__file__).with_name("check-backend-config.py")
-CHECK_SPEC = importlib_util.spec_from_file_location("backend_check", CHECK_PATH)
-if CHECK_SPEC is None or CHECK_SPEC.loader is None:
-    raise RuntimeError(f"cannot import {CHECK_PATH}")
-backend_check = importlib_util.module_from_spec(CHECK_SPEC)
-sys.modules[CHECK_SPEC.name] = backend_check
-CHECK_SPEC.loader.exec_module(backend_check)
-
+import alloy_runtime
+import check_backend_config as backend_check
 
 TIMEOUT = 90
 CLEANUP_TIMEOUT = 15
@@ -108,12 +101,12 @@ class HarnessError(Exception):
 @dataclass(frozen=True)
 class PrometheusSample:
     name: str
-    labels: Dict[str, str]
+    labels: dict[str, str]
     value: float
 
 
-def parse_prometheus_labels(text: str) -> Dict[str, str]:
-    labels: Dict[str, str] = {}
+def parse_prometheus_labels(text: str) -> dict[str, str]:
+    labels: dict[str, str] = {}
     position = 0
     while position < len(text):
         match = PROMETHEUS_LABEL_PATTERN.match(text, position)
@@ -132,7 +125,7 @@ def parse_prometheus_labels(text: str) -> Dict[str, str]:
     return labels
 
 
-def parse_prometheus_exposition(text: str) -> List[PrometheusSample]:
+def parse_prometheus_exposition(text: str) -> list[PrometheusSample]:
     samples = []
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
@@ -140,9 +133,7 @@ def parse_prometheus_exposition(text: str) -> List[PrometheusSample]:
             continue
         match = PROMETHEUS_SAMPLE_PATTERN.fullmatch(line)
         if match is None:
-            raise HarnessError(
-                f"invalid Prometheus sample on line {line_number}: {raw_line!r}"
-            )
+            raise HarnessError(f"invalid Prometheus sample on line {line_number}: {raw_line!r}")
         samples.append(
             PrometheusSample(
                 name=match.group("name"),
@@ -170,7 +161,7 @@ def remote_write_sample_value(text: str, metric_name: str, endpoint: str) -> flo
     return matches[0].value
 
 
-def block_range(config: str, marker: str) -> Tuple[int, int]:
+def block_range(config: str, marker: str) -> tuple[int, int]:
     start = config.find(marker)
     if start < 0:
         raise HarnessError(f"missing Alloy block: {marker}")
@@ -192,8 +183,9 @@ def replace_block(config: str, marker: str, replacement: str) -> str:
 
 
 def association_block(name: str, legacy: bool = False) -> str:
-    signal = "traces" if legacy else "traces  ="
-    metric_output = "" if legacy else "\n    metrics = [otelcol.processor.transform.qa_resource_identity.input]"
+    metric_output = (
+        "" if legacy else "\n    metrics = [otelcol.processor.transform.qa_resource_identity.input]"
+    )
     output_target = (
         "otelcol.processor.transform.legacy_java_identity.input"
         if legacy
@@ -202,9 +194,7 @@ def association_block(name: str, legacy: bool = False) -> str:
     conditions = ' where attributes["service.name"] != nil'
     implementation = "java" if legacy else "go"
     container_suffix = "-api-legacy" if legacy else "-api"
-    pod_uid_value = (
-        f'"{SERVICE_INSTANCE_ID}"' if legacy else 'attributes["service.instance.id"]'
-    )
+    pod_uid_value = f'"{SERVICE_INSTANCE_ID}"' if legacy else 'attributes["service.instance.id"]'
     version_value = f'"{SERVICE_VERSION}"' if legacy else 'attributes["service.version"]'
     statements = [
         f'`set(attributes["k8s.namespace.name"], "qa-svc"){conditions}`',
@@ -306,7 +296,7 @@ def build_alloy_config(source: str, service_domain: str, log_path: str) -> str:
     return config
 
 
-def attributes(values: Mapping[str, str]) -> List[Dict[str, Any]]:
+def attributes(values: Mapping[str, str]) -> list[dict[str, Any]]:
     return [{"key": key, "value": {"stringValue": value}} for key, value in values.items()]
 
 
@@ -422,7 +412,7 @@ class DockerHarness:
     prefix: str
     root: Path
     network: str = field(init=False)
-    containers: List[str] = field(default_factory=list)
+    containers: list[str] = field(default_factory=list)
     network_owned: bool = False
 
     def __post_init__(self) -> None:
@@ -432,16 +422,15 @@ class DockerHarness:
         self,
         arguments: Sequence[str],
         *,
-        input_text: Optional[str] = None,
+        input_text: str | None = None,
         timeout: int = TIMEOUT,
     ) -> str:
         result = subprocess.run(
             list(arguments),
             input=input_text,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
+            capture_output=True,
+            timeout=alloy_runtime.teardown_timeout(timeout),
             check=False,
         )
         if result.returncode != 0:
@@ -450,6 +439,66 @@ class DockerHarness:
                 f"command failed ({result.returncode}): {arguments[0]}: {diagnostic}"
             )
         return result.stdout.strip()
+
+    def probe(
+        self, arguments: Sequence[str], ownership_file: Path, *, timeout: float = 660
+    ) -> None:
+        """Let the probe unwind, then reclaim its separately owned resources."""
+        child = subprocess.Popen(
+            [*arguments, "--ownership-file", str(ownership_file)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = child.communicate(timeout=timeout)
+            if child.returncode != 0:
+                raise HarnessError(
+                    f"Product probe failed ({child.returncode}): {stderr.strip() or stdout.strip()}"
+                )
+        except BaseException as primary:
+            recovery_errors: list[Exception] = []
+            try:
+                with alloy_runtime.teardown_activity(60):
+                    try:
+                        os.killpg(child.pid, signal.SIGTERM)
+                    except OSError as error:
+                        if not isinstance(error, ProcessLookupError):
+                            recovery_errors.append(error)
+                    try:
+                        child.communicate(timeout=alloy_runtime.teardown_timeout(35))
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(child.pid, signal.SIGKILL)
+                        except OSError as error:
+                            if not isinstance(error, ProcessLookupError):
+                                recovery_errors.append(error)
+                        try:
+                            child.communicate(timeout=alloy_runtime.teardown_timeout(5))
+                        except subprocess.TimeoutExpired as error:
+                            recovery_errors.append(error)
+                    # The Product binary has its own session; the probe records its
+                    # group before readiness, allowing recovery after forced death.
+                    if ownership_file.exists():
+                        try:
+                            os.killpg(
+                                int(ownership_file.read_text(encoding="ascii")), signal.SIGKILL
+                            )
+                        except (OSError, ValueError) as error:
+                            if not isinstance(error, ProcessLookupError):
+                                recovery_errors.append(error)
+                    container = f"ih-product-probe-{child.pid}"
+                    try:
+                        if self.container_exists(container):
+                            self.command(["docker", "rm", "-f", container], timeout=15)
+                    except Exception as error:
+                        recovery_errors.append(error)
+            except Exception as cleanup_error:
+                recovery_errors.append(cleanup_error)
+            if recovery_errors:
+                primary.add_note(f"probe recovery also failed: {recovery_errors}")
+            raise
 
     def create(self) -> None:
         # Creation can time out after Docker has mutated state. Claim the unique
@@ -466,7 +515,7 @@ class DockerHarness:
         image: str,
         arguments: Sequence[str],
         *,
-        mounts: Iterable[Tuple[Path, str, bool]] = (),
+        mounts: Iterable[tuple[Path, str, bool]] = (),
         ports: Iterable[int] = (),
         docker_arguments: Iterable[str] = (),
     ) -> str:
@@ -680,10 +729,10 @@ service:
 def request(
     url: str,
     *,
-    data: Optional[bytes] = None,
-    content_type: Optional[str] = None,
+    data: bytes | None = None,
+    content_type: str | None = None,
     timeout: float = 5,
-) -> Tuple[int, bytes]:
+) -> tuple[int, bytes]:
     headers = {"Content-Type": content_type} if content_type else {}
     value = urllib.request.Request(url, data=data, headers=headers)
     try:
@@ -718,7 +767,7 @@ def wait_json(url: str, predicate: Any, description: str, timeout: float = TIMEO
                 last = json.loads(body)
                 if predicate(last):
                     return last
-        except (OSError, ValueError):
+        except OSError, ValueError:
             pass
         time.sleep(1)
     raise HarnessError(f"timed out waiting for {description}; last response={last!r}")
@@ -800,7 +849,7 @@ def prom_query(port: int, expression: str) -> Mapping[str, Any]:
     return json.loads(body)
 
 
-def query_results(response: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+def query_results(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return list(response.get("data", {}).get("result", []))
 
 
@@ -823,7 +872,7 @@ def metric_series(
     metric_name: str,
     service_name: str,
     expected_dimensions: Sequence[Mapping[str, str]],
-) -> List[Mapping[str, Any]]:
+) -> list[Mapping[str, Any]]:
     expression = f'{metric_name}{{service_name="{service_name}"}}'
     response = wait_json(
         f"http://127.0.0.1:{prometheus_port}/api/v1/query?"
@@ -834,8 +883,7 @@ def metric_series(
     results = query_results(response)
     if len(results) != len(expected_dimensions):
         raise HarnessError(
-            f"{metric_name} has {len(results)} series, "
-            f"expected {len(expected_dimensions)}"
+            f"{metric_name} has {len(results)} series, expected {len(expected_dimensions)}"
         )
     identity_keys = set(METRIC_IDENTITY) | {
         "service_name",
@@ -853,12 +901,8 @@ def metric_series(
         value = float(result.get("value", [0, "nan"])[1])
         if not math.isfinite(value):
             raise HarnessError(f"{metric_name} has a non-finite sample: {result}")
-    normalized_actual = sorted(
-        tuple(sorted(value.items())) for value in actual_dimensions
-    )
-    normalized_expected = sorted(
-        tuple(sorted(value.items())) for value in expected_dimensions
-    )
+    normalized_actual = sorted(tuple(sorted(value.items())) for value in actual_dimensions)
+    normalized_expected = sorted(tuple(sorted(value.items())) for value in expected_dimensions)
     if normalized_actual != normalized_expected:
         raise HarnessError(
             f"{metric_name} dimensions are {actual_dimensions}, "
@@ -997,7 +1041,7 @@ def validate_database_pool_and_runtime_metrics(
             )
 
 
-def start_prometheus(harness: DockerHarness, enabled: bool) -> Tuple[str, int]:
+def start_prometheus(harness: DockerHarness, enabled: bool) -> tuple[str, int]:
     arguments = [
         "--config.file=/fixture/prometheus.yml",
         "--storage.tsdb.path=/tmp/prometheus",
@@ -1017,7 +1061,7 @@ def start_prometheus(harness: DockerHarness, enabled: bool) -> Tuple[str, int]:
     return name, port
 
 
-def start_alloy(harness: DockerHarness) -> Tuple[str, int, int]:
+def start_alloy(harness: DockerHarness) -> tuple[str, int, int]:
     name = harness.start(
         "alloy",
         backend_check.DISPOSABLE_IMAGES["alloy"],
@@ -1092,16 +1136,12 @@ def validate_service_backends(
     query = f'{{service_name="{service_name}"}} |= "{SERVICE_TRACE_ID}"'
     start = int((time.time() - 300) * 1_000_000_000)
     end = int((time.time() + 30) * 1_000_000_000)
-    url = (
-        f"http://127.0.0.1:{loki_port}/loki/api/v1/query_range?"
-        + urllib.parse.urlencode({"query": query, "start": start, "end": end, "limit": 20})
+    url = f"http://127.0.0.1:{loki_port}/loki/api/v1/query_range?" + urllib.parse.urlencode(
+        {"query": query, "start": start, "end": end, "limit": 20}
     )
     logs = wait_json(
         url,
-        lambda value: sum(
-            len(stream.get("values", [])) for stream in query_results(value)
-        )
-        == 1,
+        lambda value: sum(len(stream.get("values", [])) for stream in query_results(value)) == 1,
         f"one correlated {service_domain} completion log",
     )
     streams = query_results(logs)
@@ -1115,15 +1155,12 @@ def validate_service_backends(
     }
     if not structured.issubset(returned_fields):
         raise HarnessError(f"{service_domain} Loki structured metadata is incomplete")
-    series_url = (
-        f"http://127.0.0.1:{loki_port}/loki/api/v1/series?"
-        + urllib.parse.urlencode(
-            {
-                "match[]": f'{{service_name="{service_name}"}}',
-                "start": start,
-                "end": end,
-            }
-        )
+    series_url = f"http://127.0.0.1:{loki_port}/loki/api/v1/series?" + urllib.parse.urlencode(
+        {
+            "match[]": f'{{service_name="{service_name}"}}',
+            "start": start,
+            "end": end,
+        }
     )
     series = wait_json(
         series_url,
@@ -1254,19 +1291,21 @@ def execute(args: argparse.Namespace) -> None:
                 + urllib.parse.urlencode(
                     {
                         "query": (
-                            'insurance_hub_synthetic_requests_total'
+                            "insurance_hub_synthetic_requests_total"
                             '{service_name="synthetic-service"}'
                         )
                     }
                 ),
-                lambda value: len(query_results(value)) == 1
-                and float(query_results(value)[0]["value"][1]) == 7,
+                lambda value: (
+                    len(query_results(value)) == 1
+                    and float(query_results(value)[0]["value"][1]) == 7
+                ),
                 "fresh cumulative synthetic counter after receiver enablement",
             )
             assert_metric_labels(query_results(synthetic)[0], "synthetic-service")
             histogram = prom_query(
                 prometheus_port,
-                'insurance_hub_synthetic_request_duration_seconds_bucket'
+                "insurance_hub_synthetic_request_duration_seconds_bucket"
                 '{service_name="synthetic-service"}',
             )
             if len(query_results(histogram)) != 4:
@@ -1321,13 +1360,15 @@ def execute(args: argparse.Namespace) -> None:
                 + urllib.parse.urlencode(
                     {
                         "query": (
-                            'insurance_hub_synthetic_requests_total'
+                            "insurance_hub_synthetic_requests_total"
                             '{service_name="synthetic-service"}'
                         )
                     }
                 ),
-                lambda value: len(query_results(value)) == 1
-                and float(query_results(value)[0]["value"][1]) == 9,
+                lambda value: (
+                    len(query_results(value)) == 1
+                    and float(query_results(value)[0]["value"][1]) == 9
+                ),
                 "WAL-replayed cumulative synthetic counter",
             )
 
@@ -1339,19 +1380,21 @@ def execute(args: argparse.Namespace) -> None:
                 + urllib.parse.urlencode(
                     {
                         "query": (
-                            'insurance_hub_synthetic_requests_total'
+                            "insurance_hub_synthetic_requests_total"
                             '{service_name="synthetic-service"}'
                         )
                     }
                 ),
-                lambda value: len(query_results(value)) == 1
-                and float(query_results(value)[0]["value"][1]) == 11,
+                lambda value: (
+                    len(query_results(value)) == 1
+                    and float(query_results(value)[0]["value"][1]) == 11
+                ),
                 "new metric delivery after Alloy replacement",
             )
 
             grpc_port = harness.host_port(alloy, 4317)
             probe = args.service_probe.resolve()
-            harness.command(
+            harness.probe(
                 [
                     sys.executable,
                     str(probe),
@@ -1368,7 +1411,7 @@ def execute(args: argparse.Namespace) -> None:
                     "--trace-id",
                     SERVICE_TRACE_ID,
                 ],
-                timeout=300,
+                root / "probe-product-pgid",
             )
             validate_service_backends(
                 args.service_domain,
@@ -1379,40 +1422,48 @@ def execute(args: argparse.Namespace) -> None:
                 zipkin_port,
             )
         except BaseException as error:
-            if isinstance(error, Exception):
-                diagnostics = []
-                for name in harness.containers:
-                    try:
-                        output = harness.logs(name)[-4000:]
-                    except Exception as log_error:
-                        output = f"logs unavailable: {log_error}"
-                    diagnostics.append(f"\n--- {name} ---\n{output}")
-                primary_error: BaseException = HarnessError(
-                    f"{error}{''.join(diagnostics)}"
-                )
-            else:
-                primary_error = error
+            with alloy_runtime.teardown_activity(90):
+                if isinstance(error, Exception) and not isinstance(
+                    error, alloy_runtime.Interrupted
+                ):
+                    diagnostics = []
+                    for name in harness.containers:
+                        try:
+                            output = harness.logs(name)[-4000:]
+                        except Exception as log_error:
+                            output = f"logs unavailable: {log_error}"
+                        diagnostics.append(f"\n--- {name} ---\n{output}")
+                    notes = "\n".join(getattr(error, "__notes__", ()))
+                    primary_error: BaseException = HarnessError(
+                        f"{error}{''.join(diagnostics)}" + (f"\n{notes}" if notes else "")
+                    )
+                else:
+                    primary_error = error
 
-            cleanup_error: Optional[Exception] = None
-            try:
-                harness.cleanup()
-            except Exception as candidate:
-                cleanup_error = candidate
+                cleanup_error: Exception | None = None
+                try:
+                    harness.cleanup()
+                except Exception as candidate:
+                    cleanup_error = candidate
 
-            if cleanup_error is not None:
-                if isinstance(primary_error, Exception):
-                    raise HarnessError(
-                        f"{primary_error}\ncleanup also failed: {cleanup_error}"
-                    ) from error
-                primary_error.add_note(f"cleanup also failed: {cleanup_error}")
-            if primary_error is error:
-                raise
-            raise primary_error from error
+                if cleanup_error is not None:
+                    if isinstance(primary_error, alloy_runtime.Interrupted):
+                        primary_error.add_note(f"cleanup also failed: {cleanup_error}")
+                        raise primary_error from error
+                    if isinstance(primary_error, Exception):
+                        raise HarnessError(
+                            f"{primary_error}\ncleanup also failed: {cleanup_error}"
+                        ) from error
+                    primary_error.add_note(f"cleanup also failed: {cleanup_error}")
+                if primary_error is error:
+                    raise
+                raise primary_error from error
         else:
-            harness.cleanup()
+            with alloy_runtime.teardown_activity(90):
+                harness.cleanup()
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--service-root", type=Path, required=True)
@@ -1422,11 +1473,26 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        execute(args)
-    except (OSError, HarnessError, subprocess.TimeoutExpired) as error:
+        with (
+            alloy_runtime.controlled_signals(),
+            alloy_runtime.bounded_activity("disposable backend ingestion", 1800),
+        ):
+            execute(args)
+    except alloy_runtime.Interrupted as error:
+        print(f"backend ingestion test {error}", file=sys.stderr)
+        for note in getattr(error, "__notes__", ()):
+            print(note, file=sys.stderr)
+        return error.status
+    except (
+        alloy_runtime.DeadlineExceeded,
+        alloy_runtime.TeardownExceeded,
+        OSError,
+        HarnessError,
+        subprocess.TimeoutExpired,
+    ) as error:
         print(f"backend ingestion test failed: {error}", file=sys.stderr)
         return 1
     print(

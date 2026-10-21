@@ -295,40 +295,13 @@ MONITORING_ASSETS_ROOT := $(K8S_MAKEFILE_DIR)observability
 MONITORING_RENDER_RULE_SCRIPT := $(K8S_MAKEFILE_DIR)scripts/monitoring/render_prometheus_rule.py
 MONITORING_RENDER_DASHBOARD_SCRIPT := $(K8S_MAKEFILE_DIR)scripts/monitoring/render_grafana_dashboard.py
 MONITORING_RESOLVE_SCRIPT := $(K8S_MAKEFILE_DIR)scripts/monitoring/resolve_monitoring.py
+MONITORING_OPERATIONS_SCRIPT := $(K8S_MAKEFILE_DIR)scripts/monitoring/operations.py
 
 .PHONY: prometheus-operator-crds-install
 prometheus-operator-crds-install: _monitoring-ns-ensure
-	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
-	@helm repo update prometheus-community
-	@echo "Installing Prometheus Operator CRDs chart v$(PROMETHEUS_OPERATOR_CRDS_VERSION) into $(MONITORING_NS) namespace..."
-	@helm upgrade --install prometheus-operator-crds prometheus-community/prometheus-operator-crds \
-		--version "$(PROMETHEUS_OPERATOR_CRDS_VERSION)" \
-		--kube-context "$(CUR_CTX)" \
-		--namespace $(MONITORING_NS) --create-namespace \
-		--wait --timeout 10m
-	@echo "Waiting for monitoring.coreos.com CRDs to be registered..."
-	@kubectl --context "$(CUR_CTX)" wait --for=condition=Established --timeout=60s \
-		crd/alertmanagerconfigs.monitoring.coreos.com \
-		crd/alertmanagers.monitoring.coreos.com \
-		crd/podmonitors.monitoring.coreos.com \
-		crd/probes.monitoring.coreos.com \
-		crd/prometheusagents.monitoring.coreos.com \
-		crd/prometheuses.monitoring.coreos.com \
-		crd/prometheusrules.monitoring.coreos.com \
-		crd/scrapeconfigs.monitoring.coreos.com \
-		crd/servicemonitors.monitoring.coreos.com \
-		crd/thanosrulers.monitoring.coreos.com
-	@echo "Confirming existing monitoring custom resources remain readable..."
-	@for resource in \
-		alertmanagers.monitoring.coreos.com \
-		podmonitors.monitoring.coreos.com \
-		probes.monitoring.coreos.com \
-		prometheuses.monitoring.coreos.com \
-		prometheusrules.monitoring.coreos.com \
-		scrapeconfigs.monitoring.coreos.com \
-		servicemonitors.monitoring.coreos.com; do \
-		kubectl --context "$(CUR_CTX)" get "$$resource" --all-namespaces >/dev/null; \
-	done
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_OPERATIONS_SCRIPT)" crds-install \
+		--context "$(CUR_CTX)" --namespace "$(MONITORING_NS)" \
+		--crds-version "$(PROMETHEUS_OPERATOR_CRDS_VERSION)"
 
 .PHONY: prometheus-stack-install
 prometheus-stack-install: prometheus-operator-crds-install ## Install Kube Prometheus Stack (Prometheus, Grafana, Alert Manager) in QA
@@ -364,11 +337,7 @@ prometheus-stack-status: _monitoring-ns-check ## Show Kube Prometheus Stack depl
 	@kubectl --context "$(CUR_CTX)" get svc -n $(MONITORING_NS) -l app.kubernetes.io/name=grafana || true
 
 .PHONY: _monitoring-assets-args-check
-_monitoring-assets-args-check: ## Require an explicit environment and service for a monitoring asset operation
-	@command -v python3 >/dev/null || { echo "ERROR: Python 3.9 or newer is required."; exit 1; }
-	@python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' || { \
-		echo "ERROR: Python 3.9 or newer is required."; exit 1; \
-	}
+_monitoring-assets-args-check: python-runtime-check ## Require an explicit environment and service for a monitoring asset operation
 	@if [ "$(origin ENV_NAME)" != "command line" ] || [ -z "$(ENV_NAME)" ]; then \
 		echo "ERROR: ENV_NAME is required on the make command line."; \
 		exit 1; \
@@ -377,84 +346,38 @@ _monitoring-assets-args-check: ## Require an explicit environment and service fo
 		echo "ERROR: SVC_NAME is required on the make command line."; \
 		exit 1; \
 	fi
-	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RESOLVE_SCRIPT)" \
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_RESOLVE_SCRIPT)" \
 		--assets-root "$(MONITORING_ASSETS_ROOT)" \
 		--environment "$(ENV_NAME)" \
 		--service "$(SVC_NAME)" >/dev/null
 
 .PHONY: prometheus-rules-render
 prometheus-rules-render: _monitoring-assets-args-check ## Render one service PrometheusRule to stdout (ENV_NAME, SVC_NAME)
-	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_RULE_SCRIPT)" \
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_RENDER_RULE_SCRIPT)" \
 		--assets-root "$(MONITORING_ASSETS_ROOT)" \
 		--environment "$(ENV_NAME)" \
 		--service "$(SVC_NAME)"
 
 .PHONY: prometheus-rules-apply
 prometheus-rules-apply: _monitoring-assets-args-check ## Validate and apply one service PrometheusRule through Kubernetes (ENV_NAME, SVC_NAME)
-	@$(MAKE) --no-print-directory -C "$(K8S_REPOSITORY_ROOT)" monitoring-assets-check \
-		ENV_NAME="$(ENV_NAME)" SVC_NAME="$(SVC_NAME)"
-	@command -v kubectl >/dev/null || { echo "ERROR: kubectl is required."; exit 1; }
-	@set -eu; \
-	eval "$$(PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RESOLVE_SCRIPT)" \
-		--assets-root "$(MONITORING_ASSETS_ROOT)" \
-		--environment "$(ENV_NAME)" \
-		--service "$(SVC_NAME)")"; \
-	actual_context=$$(kubectl config current-context); \
-	if [ "$$actual_context" != "$$MONITORING_KUBE_CONTEXT" ]; then \
-		echo "ERROR: Current context is '$$actual_context' (expected '$$MONITORING_KUBE_CONTEXT')."; \
-		exit 1; \
-	fi; \
-	tmp_file=$$(mktemp); \
-	trap 'rm -f "$$tmp_file"' EXIT INT TERM; \
-	PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_RULE_SCRIPT)" \
-		--assets-root "$(MONITORING_ASSETS_ROOT)" \
-		--environment "$(ENV_NAME)" \
-		--service "$(SVC_NAME)" \
-		--output "$$tmp_file"; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
-		apply --dry-run=server -f "$$tmp_file" >/dev/null; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
-		apply -f "$$tmp_file"; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
-		get prometheusrule "$$MONITORING_PROMETHEUS_RULE" >/dev/null
-	@echo "✅ Applied $(SVC_NAME) alert rules to $(ENV_NAME)."
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_OPERATIONS_SCRIPT)" apply-rules \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" --environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)" --stack-version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
+		--prometheus-image "$(PROMETHEUS_IMAGE)"
 
 .PHONY: grafana-dashboard-render
 grafana-dashboard-render: _monitoring-assets-args-check ## Render one service dashboard sidecar ConfigMap to stdout (ENV_NAME, SVC_NAME)
-	@PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_DASHBOARD_SCRIPT)" \
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_RENDER_DASHBOARD_SCRIPT)" \
 		--assets-root "$(MONITORING_ASSETS_ROOT)" \
 		--environment "$(ENV_NAME)" \
 		--service "$(SVC_NAME)"
 
 .PHONY: grafana-dashboard-apply
 grafana-dashboard-apply: _monitoring-assets-args-check ## Validate and apply one immutable service dashboard through Kubernetes (ENV_NAME, SVC_NAME)
-	@$(MAKE) --no-print-directory -C "$(K8S_REPOSITORY_ROOT)" monitoring-assets-check \
-		ENV_NAME="$(ENV_NAME)" SVC_NAME="$(SVC_NAME)"
-	@command -v kubectl >/dev/null || { echo "ERROR: kubectl is required."; exit 1; }
-	@set -eu; \
-	eval "$$(PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RESOLVE_SCRIPT)" \
-		--assets-root "$(MONITORING_ASSETS_ROOT)" \
-		--environment "$(ENV_NAME)" \
-		--service "$(SVC_NAME)")"; \
-	actual_context=$$(kubectl config current-context); \
-	if [ "$$actual_context" != "$$MONITORING_KUBE_CONTEXT" ]; then \
-		echo "ERROR: Current context is '$$actual_context' (expected '$$MONITORING_KUBE_CONTEXT')."; \
-		exit 1; \
-	fi; \
-	tmp_file=$$(mktemp); \
-	trap 'rm -f "$$tmp_file"' EXIT INT TERM; \
-	PYTHONDONTWRITEBYTECODE=1 python3 "$(MONITORING_RENDER_DASHBOARD_SCRIPT)" \
-		--assets-root "$(MONITORING_ASSETS_ROOT)" \
-		--environment "$(ENV_NAME)" \
-		--service "$(SVC_NAME)" \
-		--output "$$tmp_file"; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
-		apply --dry-run=server -f "$$tmp_file" >/dev/null; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
-		apply -f "$$tmp_file"; \
-	kubectl --context "$$MONITORING_KUBE_CONTEXT" --namespace "$$MONITORING_NAMESPACE" \
-		get configmap "$$MONITORING_GRAFANA_DASHBOARD_CONFIG_MAP" >/dev/null
-	@echo "✅ Applied immutable $(SVC_NAME) dashboard to $(ENV_NAME)."
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_OPERATIONS_SCRIPT)" apply-dashboard \
+		--assets-root "$(MONITORING_ASSETS_ROOT)" --environment "$(ENV_NAME)" \
+		--service "$(SVC_NAME)" --stack-version "$(KUBE_PROMETHEUS_STACK_VERSION)" \
+		--prometheus-image "$(PROMETHEUS_IMAGE)"
 
 .PHONY: prometheus-ui
 prometheus-ui: ## Access Prometheus UI via port-forward
@@ -1156,52 +1079,10 @@ legacy-all-build: ## Build all legacy artifacts sequentially (Java → Frontend 
 
 
 .PHONY: cluster-qa-monitoring-deploy
-cluster-qa-monitoring-deploy: _env-check _data-ns-ensure ## Deploy monitoring stack (Prometheus, Grafana, Loki, Tempo, Zipkin, Alloy) into qa cluster. Usage: make cluster-qa-monitoring-deploy
-	@echo "🚀 Deploying monitoring stack into '$(ENV_NAME)' cluster..."
-	@if [ "$(ENV_NAME)" != "qa" ]; then \
-		echo "ERROR: This target is only applicable for the 'qa' environment."; \
-		exit 1; \
-	fi
-
-	# Elasticsearch
-	$(MAKE) es-deploy
-
-	# Prometheus & Grafana stack
-	$(MAKE) prometheus-stack-install
-
-    # Monitoring operator
-	$(MAKE) minio-operator-deploy
-
-	# MinIO Monitoring Tenants
-	$(MAKE) minio-storage-user-secret-create SVC_NAME=loki
-	$(MAKE) minio-storage-config-secret-create SVC_NAME=loki
-	$(MAKE) minio-storage-user-secret-create SVC_NAME=tempo
-	$(MAKE) minio-storage-config-secret-create SVC_NAME=tempo
-	$(MAKE) minio-tenant-deploy SVC_NAME=loki & $(MAKE) minio-tenant-deploy SVC_NAME=tempo & wait
-	@echo "⏳ Waiting 3m for MinIO monitoring tenants.." && sleep 180
-
-    # MinIO Monitoring Tenant Configuration
-	# Loki
-	$(MAKE) minio-svc-bucket-create SVC_NAME=loki BUCKET_NAME=loki-logs
-	$(MAKE) minio-svc-user-secret-create SVC_NAME=loki COPY_SECRET_NS=$(MONITORING_NS)
-	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=loki POLICY_FILE=apps/infra/loki/minio/s3-policy-loki-logs.json
-
-	# Tempo
-	$(MAKE) minio-svc-bucket-create SVC_NAME=tempo BUCKET_NAME=tempo-traces
-	$(MAKE) minio-svc-user-secret-create SVC_NAME=tempo COPY_SECRET_NS=$(MONITORING_NS)
-	$(MAKE) minio-svc-user-with-policy-create SVC_NAME=tempo POLICY_FILE=apps/infra/tempo/minio/s3-policy-tempo-traces.json
-
-	# Zipkin (requires Elasticsearch)
-	$(MAKE) zipkin-es-user-secret-create
-	$(MAKE) zipkin-es-user-create
-	$(MAKE) zipkin-install
-
-	# Grafana Loki,Tempo and Alloy
-	$(MAKE) loki-install
-	$(MAKE) tempo-install
-	$(MAKE) alloy-install
-
-	@echo "✅ QA cluster monitoring stack deployed!"
+cluster-qa-monitoring-deploy: _env-check ## Deploy monitoring stack (Prometheus, Grafana, Loki, Tempo, Zipkin, Alloy) into qa cluster. Usage: make cluster-qa-monitoring-deploy
+	+@MAKE_COMMAND="$(MAKE)" PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_OPERATIONS_SCRIPT)" qa-deploy \
+		--environment "$(ENV_NAME)" --context "$(CUR_CTX)" \
+		--namespace "$(MONITORING_NS)" --make-command "$(MAKE)"
 
 .PHONY: cluster-infra-deploy
 cluster-infra-deploy: _env-check ## Deploy all infra apps (except monitoring stack) into either local-dev or qa cluster. Usage: make cluster-infra-deploy
@@ -1213,4 +1094,8 @@ cluster-svc-deploy:  _env-check ## Deploy all services into either local-dev or 
 
 ifndef INSURANCE_HUB_PYTHON_TOOLCHAIN_INCLUDED
 include $(K8S_REPOSITORY_ROOT)/scripts/python/toolchain.mk
+endif
+
+ifeq ($(abspath $(firstword $(MAKEFILE_LIST))),$(abspath $(K8S_MAKEFILE_DIR)Makefile))
+include $(K8S_MAKEFILE_DIR)tests/validation.mk
 endif
