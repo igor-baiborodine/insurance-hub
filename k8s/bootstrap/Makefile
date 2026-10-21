@@ -2,17 +2,32 @@
 # Child Makefile for initial setup of local dev and QA insurance-hub K8s clusters
 ################################################################################
 
-################################################################################
-# Variables
-################################################################################
-QA_NODES_MASTER			:= qa-master
-QA_NODES_WORKER			:= qa-worker1 qa-worker2
-QA_NODES_ALL			:= $(QA_NODES_MASTER) $(QA_NODES_WORKER)
-QA_CLUSTER_NAME  		:= qa-insurance-hub
-QA_KUBECTL_CONTEXT		:= $(QA_CLUSTER_NAME)
-QA_SNAPSHOT_NAME 		?= baseline
-KIND_CONFIG_FILE   		:= local-dev/local-dev-insurance-hub.yaml
-LOCAL_DEV_CLUSTER_NAME  := local-dev-insurance-hub
+ifeq ($(abspath $(firstword $(MAKEFILE_LIST))),$(abspath $(lastword $(MAKEFILE_LIST))))
+.DEFAULT_GOAL := bootstrap-help
+endif
+
+K8S_BOOTSTRAP_MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+K8S_BOOTSTRAP_REPOSITORY_ROOT := $(abspath $(K8S_BOOTSTRAP_MAKEFILE_DIR)../..)
+K8S_ADMIN_SCRIPT := $(K8S_BOOTSTRAP_REPOSITORY_ROOT)/k8s/scripts/admin/dispatch.py
+
+ifndef INSURANCE_HUB_PYTHON_TOOLCHAIN_INCLUDED
+include $(K8S_BOOTSTRAP_REPOSITORY_ROOT)/scripts/python/toolchain.mk
+endif
+
+QA_NODES_MASTER := qa-master
+QA_NODES_WORKER := qa-worker1 qa-worker2
+QA_NODES_ALL := $(QA_NODES_MASTER) $(QA_NODES_WORKER)
+QA_CLUSTER_NAME := qa-insurance-hub
+QA_KUBECTL_CONTEXT := $(QA_CLUSTER_NAME)
+QA_SNAPSHOT_NAME ?= baseline
+KIND_CONFIG_FILE := $(K8S_BOOTSTRAP_MAKEFILE_DIR)local-dev/local-dev-insurance-hub.yaml
+LOCAL_DEV_CLUSTER_NAME := local-dev-insurance-hub
+export MASTER_ONLY QA_SNAPSHOT_NAME
+
+.PHONY: bootstrap-help
+bootstrap-help: ## Show the safe cluster-bootstrap Make entry points
+	@echo "Use an explicit local-dev-* or qa-* target."
+	@echo "Every mutating Python target verifies the managed CPython runtime first."
 
 .PHONY: all-suspend
 all-suspend: local-dev-suspend qa-nodes-suspend ## Suspend local dev Kind cluster and all QA LXD VMs
@@ -20,30 +35,13 @@ all-suspend: local-dev-suspend qa-nodes-suspend ## Suspend local dev Kind cluste
 .PHONY: all-resume
 all-resume: local-dev-resume qa-nodes-resume ## Resume local dev Kind cluster and all QA LXD VMs
 
-################################################################################
-# Local Dev Cluster Management Targets
-# Targets for creating and managing the Kind cluster configuration
-################################################################################
 .PHONY: local-dev-create
-local-dev-create: ## Create and start the local dev Kind cluster (single-node) with Metrics Server
-	@mkdir -p $(HOME)/tmp/data/local-dev-storage
-	@kind create cluster --name $(LOCAL_DEV_CLUSTER_NAME) --config $(KIND_CONFIG_FILE)
-	@echo "📥 Downloading and applying Metrics Server..."
-	@curl -sL https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml | kubectl apply -f -
-	@echo "🔧 Patching Metrics Server for Kind (adding --kubelet-insecure-tls)..."
-	@kubectl patch deployment metrics-server -n kube-system --type=json -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"}]'
-	@echo "🔧 Optionally patching preferred address types..."
-	@kubectl patch deployment metrics-server -n kube-system --type=json -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-preferred-address-types=InternalIP,Hostname"}]'
-	@echo "✅ Metrics Server deployed (patched for Kind)."
-	@sleep 30  # Allow scrape cycles and readiness
-	@kubectl rollout status deployment/metrics-server -n kube-system --timeout=120s || echo "⚠️ Rollout check passed (ignore if pending)"
-	@echo "✅ Local dev Kind cluster ready with Metrics Server."
-	@echo "💡 Test metrics: kubectl top nodes"
-	@echo "🔍 Check logs: kubectl logs deployment/metrics-server -n kube-system"
+local-dev-create: python-runtime-check ## Create the local Kind cluster with a ready Metrics Server
+	@ENV_NAME=local-dev PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" local create
 
 .PHONY: local-dev-delete
-local-dev-delete: ## Stop and delete the local dev Kind cluster with its persistent storage
-	@rm -rf $(HOME)/tmp/data/local-dev-storage
+local-dev-delete: python-runtime-check ## Delete the local Kind cluster and its persistent storage
+	@ENV_NAME=local-dev PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" local delete-storage
 	@kind delete cluster --name $(LOCAL_DEV_CLUSTER_NAME)
 
 .PHONY: local-dev-suspend
@@ -58,92 +56,41 @@ local-dev-resume: ## Resume (start) the local dev Kind cluster
 	@docker start $(LOCAL_DEV_CLUSTER_NAME)-control-plane
 	@echo "Kind cluster '$(LOCAL_DEV_CLUSTER_NAME)' resumed."
 
-################################################################################
-# QA Cluster Management Targets
-# Targets for creating and managing the K3s cluster configuration
-################################################################################
 .PHONY: qa-create
 qa-create: qa-nodes-create qa-cluster-create qa-cluster-pull-kubeconfig ## Create and configure QA cluster
 
 .PHONY: qa-cluster-create
-qa-cluster-create: ## Set up Rancher K3s QA cluster (master + 2 workers by default; master only if MASTER_ONLY=true)
-	MASTER_ONLY=$(MASTER_ONLY) bash qa/scripts/qa-cluster-create.sh
+qa-cluster-create: python-runtime-check ## Set up K3s QA (MASTER_ONLY=true selects the master only)
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" qa-cluster create
 
 .PHONY: qa-cluster-pull-kubeconfig
-qa-cluster-pull-kubeconfig: ## Pull kubeconfig from QA cluster
-	bash qa/scripts/qa-cluster-pull-kubeconfig.sh
+qa-cluster-pull-kubeconfig: python-runtime-check ## Atomically merge the QA kubeconfig
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" qa-cluster pull-kubeconfig
 
-################################################################################
-# QA Nodes Management Targets 
-# Targets for creating and managing the LXD virtual machines for QA cluster
-################################################################################
 .PHONY: qa-nodes-create
-qa-nodes-create: ## Create LXD VMs for QA cluster (master + 2 workers by default; master only if MASTER_ONLY=true)
-	MASTER_ONLY=$(MASTER_ONLY) bash qa/scripts/qa-nodes-create.sh
+qa-nodes-create: python-runtime-check ## Create QA LXD VMs (MASTER_ONLY=true selects the master only)
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" qa-nodes create
 
 .PHONY: qa-nodes-suspend
-qa-nodes-suspend: ## Suspend (pause) all QA LXD VMs
-	@for NODE in $(QA_NODES_ALL); do \
-		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Suspending VM $$NODE..."; \
-			lxc pause $$NODE; \
-		else \
-			echo "VM $$NODE does not exist, skipping."; \
-		fi; \
-	done
-	@echo "All QA cluster VMs suspended (paused):"
-	@lxc list
+qa-nodes-suspend: python-runtime-check ## Suspend (pause) all existing QA LXD VMs
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" qa-nodes suspend
 
 .PHONY: qa-nodes-resume
-qa-nodes-resume: ## Resume (start) all QA LXD VMs
-	@for NODE in $(QA_NODES_ALL); do \
-		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Resuming (starting) VM $$NODE..."; \
-			lxc start $$NODE; \
-		else \
-			echo "VM $$NODE does not exist, skipping."; \
-		fi; \
-	done
-	@echo "All QA cluster VMs resumed (started):"
-	@lxc list
+qa-nodes-resume: python-runtime-check ## Resume (start) all existing QA LXD VMs
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" qa-nodes resume
 
 .PHONY: qa-nodes-snapshot
-qa-nodes-snapshot: ## Pause all VMs, delete existing snapshot, snapshot VMs, and resume. Usage: make qa-nodes-snapshot QA_SNAPSHOT_NAME=your_new_snapshot
-	bash qa/scripts/qa-nodes-snapshot.sh $(QA_SNAPSHOT_NAME)
+qa-nodes-snapshot: python-runtime-check ## Replace a snapshot and always resume paused VMs (QA_SNAPSHOT_NAME=name)
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" qa-nodes snapshot
 
 .PHONY: qa-nodes-snapshots-list
-qa-nodes-snapshots-list: ## List all snapshots for QA cluster nodes
-	@for NODE in $(QA_NODES_ALL); do \
-		echo "Snapshots for $$NODE:"; \
-		SNAPS=$$(lxc query "/1.0/instances/$$NODE/snapshots" 2>/dev/null | jq -r '.[] | split("/") | .[-1]' || echo ""); \
-		if [ -z "$$SNAPS" ]; then \
-			echo "  No snapshots exist for $$NODE"; \
-		else \
-			echo "$$SNAPS" | sed 's/^/  /'; \
-		fi; \
-		echo ""; \
-	done
+qa-nodes-snapshots-list: python-runtime-check ## List snapshots for QA cluster nodes
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" qa-nodes snapshots-list
 
 .PHONY: qa-nodes-restore
-qa-nodes-restore: ## Restore all QA cluster VMs from specified snapshot and start them. Usage: make qa-nodes-restore QA_SNAPSHOT_NAME=your_existing_snapshot
-	@echo "Restoring all QA cluster VMs from '$(QA_SNAPSHOT_NAME)' snapshot..."
-	@for NODE in $(QA_NODES_ALL); do \
-		if lxc info $$NODE &>/dev/null; then \
-			echo "Restoring and starting VM $$NODE from snapshot '$(QA_SNAPSHOT_NAME)'..."; \
-			lxc restore $$NODE $(QA_SNAPSHOT_NAME); \
-		fi; \
-	done
-	@echo "All QA cluster VMs restored to '$(QA_SNAPSHOT_NAME)' snapshot and started:"
-	@lxc list
+qa-nodes-restore: python-runtime-check ## Restore and start QA VMs (QA_SNAPSHOT_NAME=name)
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" qa-nodes restore
 
 .PHONY: qa-nodes-delete
-qa-nodes-delete: ## Delete all LXD VMs and its snapshots used by QA cluster
-	@for NODE in $(QA_NODES_ALL); do \
-		if lxc info $$NODE >/dev/null 2>&1; then \
-			echo "Deleting VM $$NODE..."; \
-			lxc delete $$NODE --force; \
-		else \
-			echo "VM $$NODE does not exist, skipping."; \
-		fi; \
-	done
-	@echo "All multi-node cluster VMs deleted."
+qa-nodes-delete: python-runtime-check ## Delete all QA LXD VMs and their snapshots
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(K8S_ADMIN_SCRIPT)" qa-nodes delete

@@ -81,6 +81,11 @@
 3. **Delete cluster**
 - `make local-dev-delete`
 
+`local-dev-create` creates `~/tmp/data/local-dev-storage`, the `local-dev-insurance-hub` Kind
+cluster, and Metrics Server resources. If setup fails after Kind creates the cluster, the target
+retains that cluster and reports the partial state for inspection and rerun. `local-dev-delete`
+removes the storage directory and then deletes the named Kind cluster.
+
 ## QA
 
 Use the following sequence of [Make](https://www.gnu.org/software/make/) targets and shell commands
@@ -96,6 +101,9 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     +------+-------+------+------+------+-----------+
     ```
 - `make qa-nodes-create` or `MASTER_ONLY=true make qa-nodes-create` with only the master node
+
+The create target preserves pre-existing VMs and profiles. If provisioning fails, it retains and
+reports the VMs and profiles created by that run so they can be inspected before a rerun.
 - `lxc list`
     ```bash
     +------------+---------+------------------------+-------------------------------------------------+-----------------+-----------+
@@ -140,7 +148,10 @@ to create and manage the QA cluster based on [K3s](https://www.rancher.com/produ
     |            |         | 10.42.2.0 (flannel.1)  |                                                 |                 |           |
     +------------+---------+------------------------+-------------------------------------------------+-----------------+-----------+  
     ```
-- `make qa-cluster-pull-kubeconfig`, current context should be `qa-insurance-hub` after execution
+- `make qa-cluster-pull-kubeconfig`, current context should be `qa-insurance-hub` after execution.
+  The target atomically merges into `~/.kube/config` with mode `0600`. When that file already
+  exists, its previous contents remain at `~/.kube/config.insurance-hub-backup` with mode `0600`;
+  the next successful merge replaces that backup. Temporary pull and write files are removed.
 - `kubectl get nodes`
     ```bash
     NAME         STATUS   ROLES                  AGE     VERSION
@@ -277,6 +288,10 @@ Log of current QA snapshots on your local machine.
 - Create a new snapshot: `make qa-nodes-snapshot QA_SNAPSHOT_NAME=your_new_snapshot`
 - Restore from existing snapshot: `make qa-nodes-restore QA_SNAPSHOT_NAME=your_existing_snapshot`
 - List snapshots: `make qa-nodes-snapshots-list`
+
+Creating a snapshot replaces the same named snapshot on each existing QA VM. The target pauses
+only VMs that were running and resumes those VMs in reverse order on success or failure; VMs that
+were already stopped remain stopped.
 
 | Name                                    | Description                                        |
 |-----------------------------------------|----------------------------------------------------|

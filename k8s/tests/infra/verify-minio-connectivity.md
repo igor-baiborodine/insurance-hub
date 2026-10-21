@@ -1,3 +1,12 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Verify MinIO Connectivity](#verify-minio-connectivity)
+  - [Local Dev](#local-dev)
+  - [QA](#qa)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ## Verify MinIO Connectivity
 
 ### Local Dev
@@ -23,7 +32,7 @@ Kind cluster.
     ```bash
     mc alias set local http://localhost:9000
     # Use values from the secret created by the target below, for example, qa-minio-document-storage-user-creds
-    # make minio-storage-user-secret-create SVC_NAME=<svc-name> MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>
+    # make minio-storage-user-secret-create SVC_NAME=<svc-name> MINIO_CONSOLE_ACCESS_KEY_FILE=</absolute/mode-0600-file> MINIO_CONSOLE_SECRET_KEY_FILE=</absolute/mode-0600-file>
     Enter Access Key: <access-key>
     Enter Secret Key: <secret-key>
     Added `local` successfully.
@@ -85,7 +94,7 @@ as port-forwarding is less practical for multi-user or production-like environme
     ```bash
     ./mc alias set local https://qa-minio-document-hl.qa-minio-document.svc.cluster.local:9000
     # Use values from the secret created by the target below, for example, qa-minio-document-storage-user-creds
-    # make minio-storage-user-secret-create SVC_NAME=<svc-name> MINIO_CONSOLE_ACCESS_KEY=<access-key> MINIO_CONSOLE_SECRET_KEY=<secret-key>
+    # make minio-storage-user-secret-create SVC_NAME=<svc-name> MINIO_CONSOLE_ACCESS_KEY_FILE=</absolute/mode-0600-file> MINIO_CONSOLE_SECRET_KEY_FILE=</absolute/mode-0600-file>
     Enter Access Key: <access-key>
     Enter Secret Key: <secret-key>
     Added `local` successfully.
