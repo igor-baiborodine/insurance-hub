@@ -31,28 +31,125 @@ and "Insurance Hub" infrastructure and services.
 
 ## Automated Deployment
 
-> ⚠️ Local Dev and/or QA environments are created.
-> - Local Dev: `make -C k8s/bootstrap local-dev-create`
-> - QA: `make -C k8s/bootstrap qa-create`
+Create the local-dev and/or QA base clusters first. See
+[`base-cluster-how-tos.md`](base-cluster-how-tos.md), including its QA clock checks.
 
-- **Local Dev** `make legacy-all-build`
-- `cd k8s`
-- **QA**: `make prereq-k8s-flux`
-- **QA**: Set and export `GITHUB_TOKEN` as described in
-  [Continuous Delivery (QA)](#continuous-delivery-qa), then run `make flux-bootstrap` and
-  `unset GITHUB_TOKEN`.
-- **QA**: `make flux-status`
-- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=flux-bootstrap-<iso-date>`
-- **QA**: `make cluster-qa-monitoring-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep -E -- "-[01]$|-[01] "`
-- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-monitoring-deploy-<iso-date>`
-- `make cluster-infra-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep -E -- "-[01]$|-[01] "`
-- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=qa-cluster-infra-deploy-<iso-date>` 
-- `make cluster-svc-deploy`, then ensure that all pods are running: `kgp --all-namespaces | grep -E -- "-[01]$|-[01] "`
+Build every legacy artifact and Docker image from the repository root with the supported Node.js
+version:
+
+```bash
+source "$HOME/.nvm/nvm.sh"
+nvm install 12.22.12
+nvm use 12.22.12
+node --version
+make legacy-all-build
+```
+
+Create protected credential files once per reconstruction. Each prompt is silent, and the files
+are created under a private temporary directory:
+
+```bash
+credential_dir=$(mktemp -d)
+chmod 700 "$credential_dir"
+
+write_secret() {
+  secret_name=$1
+  secret_prompt=$2
+  read -rsp "$secret_prompt: " secret_value
+  printf '\n'
+  (umask 077 && printf '%s\n' "$secret_value" > "$credential_dir/$secret_name")
+  unset secret_value
+}
+
+write_secret pg-svc-user-pwd 'PostgreSQL service password'
+write_secret minio-console-access-key 'MinIO console access key'
+write_secret minio-console-secret-key 'MinIO console secret key'
+write_secret minio-root-user-pwd 'MinIO root password'
+write_secret minio-svc-access-key 'MinIO service access key'
+write_secret minio-svc-secret-key 'MinIO service secret key'
+write_secret zipkin-es-user-pwd 'Zipkin Elasticsearch password'
+write_secret github-token 'GitHub token'
+
+export PG_SVC_USER_PWD_FILE="$credential_dir/pg-svc-user-pwd"
+export MINIO_CONSOLE_ACCESS_KEY_FILE="$credential_dir/minio-console-access-key"
+export MINIO_CONSOLE_SECRET_KEY_FILE="$credential_dir/minio-console-secret-key"
+export MINIO_ROOT_USER=insurance-hub-admin
+export MINIO_ROOT_USER_PWD_FILE="$credential_dir/minio-root-user-pwd"
+export MINIO_SVC_ACCESS_KEY_FILE="$credential_dir/minio-svc-access-key"
+export MINIO_SVC_SECRET_KEY_FILE="$credential_dir/minio-svc-secret-key"
+export ZIPKIN_ES_USER_PWD_FILE="$credential_dir/zipkin-es-user-pwd"
+export GITHUB_TOKEN_FILE="$credential_dir/github-token"
+```
+
+Deploy local-dev from `k8s`:
+
+```bash
+cd k8s
+kubectl config use-context kind-local-dev-insurance-hub
+make cluster-infra-deploy
+make cluster-svc-deploy
+kubectl get deployments,statefulsets -A
+kubectl get pods -A
+kubectl top nodes
+```
+
+Deploy QA from `k8s`. `cluster-svc-deploy` loads every locally built application image into all QA
+nodes before applying the workloads:
+
+```bash
+kubectl config use-context qa-insurance-hub
+make prereq-k8s-flux
+```
+
+Load the GitHub token from its protected file only for the bootstrap process, then remove the local
+copy after Flux has stored its authentication Secret in the QA cluster:
+
+```bash
+IFS= read -r GITHUB_TOKEN < "$GITHUB_TOKEN_FILE"
+export GITHUB_TOKEN
+make flux-bootstrap
+unset GITHUB_TOKEN
+rm -f "$GITHUB_TOKEN_FILE"
+unset GITHUB_TOKEN_FILE
+make flux-status
+make cluster-qa-monitoring-deploy
+make cluster-infra-deploy
+export POSTGRES_ROLE_ENV=qa
+export POSTGRES_ROLE_CONTEXT=qa-insurance-hub
+export POSTGRES_ROLE_DATA_NS=qa-data
+export POSTGRES_ROLE_SVC_NS=qa-svc
+export POSTGRES_ROLE_CLUSTER=qa-postgres-product
+export POSTGRES_ROLE_SECRET=qa-postgres-product-reader-creds
+export POSTGRES_ROLE_DB_HOST=qa-postgres-product-rw.qa-data.svc.cluster.local
+make postgres-svc-role-provision SVC_NAME=product ROLE_PROFILE=reader
+make postgres-svc-role-verify SVC_NAME=product ROLE_PROFILE=reader
+unset POSTGRES_ROLE_ENV POSTGRES_ROLE_CONTEXT POSTGRES_ROLE_DATA_NS POSTGRES_ROLE_SVC_NS
+unset POSTGRES_ROLE_CLUSTER POSTGRES_ROLE_SECRET POSTGRES_ROLE_DB_HOST
+make cluster-svc-deploy
+make flux-reconcile
+make flux-status
+kubectl get deployments,statefulsets -A
+kubectl get pods -A
+kubectl top nodes
+```
+
+After both environments are complete, remove the credential files and their exported paths:
+
+```bash
+rm -rf "$credential_dir"
+unset credential_dir PG_SVC_USER_PWD_FILE MINIO_CONSOLE_ACCESS_KEY_FILE
+unset MINIO_CONSOLE_SECRET_KEY_FILE MINIO_ROOT_USER MINIO_ROOT_USER_PWD_FILE
+unset MINIO_SVC_ACCESS_KEY_FILE MINIO_SVC_SECRET_KEY_FILE
+unset ZIPKIN_ES_USER_PWD_FILE GITHUB_TOKEN_FILE
+```
 
 ## Step-by-Step Deployment
 
 > ⚠️ Arguments in square brackets are optional. When omitted, the default value is used. The
 > default value can be found by searching argument name in the corresponding `Makefile`.
+
+Snapshot targets are optional recovery checkpoints. Skip them during clean reconstruction
+validation because copying all three QA VMs substantially increases the validation time.
 
 - `cd k8s`
 
@@ -60,20 +157,42 @@ and "Insurance Hub" infrastructure and services.
 
 **Prerequisites**: Create the QA cluster and pull its kubeconfig as described in
 [`base-cluster-how-tos.md`](base-cluster-how-tos.md). Create a GitHub personal access token that is
-authorized to update `igor-baiborodine/insurance-hub`.
+authorized to update `igor-baiborodine/insurance-hub`. For a fine-grained token, grant the target
+repository Administration read-only, Contents read-write, and Metadata read-only permissions, as
+described by the
+[Flux GitHub bootstrap documentation](https://fluxcd.io/flux/installation/bootstrap/github/).
 
 - `make prereq-k8s-flux`
 - `kubectl config use-context qa-insurance-hub`
 - `kubectl get nodes`
 - `flux check --pre`
-- Read and export the GitHub token without echoing it or placing it in shell history:
+
+`prereq-k8s-flux` installs the repository-pinned
+[Flux CLI 2.9.6](https://github.com/fluxcd/flux2/releases/tag/v2.9.6). `flux-bootstrap` also passes
+that version explicitly so its generated controller manifests do not depend on a different CLI
+already present on the host.
+
+- Create a protected token file without echoing the token or placing it in shell history. Reuse the
+  existing `credential_dir` from [Automated Deployment](#automated-deployment), or create one here:
     ```bash
-    read -rsp 'GitHub token: ' GITHUB_TOKEN
-    export GITHUB_TOKEN
+    credential_dir=${credential_dir:-$(mktemp -d)}
+    chmod 700 "$credential_dir"
+    GITHUB_TOKEN_FILE="$credential_dir/github-token"
+    read -rsp 'GitHub token: ' github_token
     printf '\n'
+    (umask 077 && printf '%s\n' "$github_token" > "$GITHUB_TOKEN_FILE")
+    unset github_token
+    export GITHUB_TOKEN_FILE
     ```
-- `make flux-bootstrap`
-- `unset GITHUB_TOKEN`
+- Load the token into the environment only while bootstrap is running, then remove the local file:
+    ```bash
+    IFS= read -r GITHUB_TOKEN < "$GITHUB_TOKEN_FILE"
+    export GITHUB_TOKEN
+    make flux-bootstrap
+    unset GITHUB_TOKEN
+    rm -f "$GITHUB_TOKEN_FILE"
+    unset GITHUB_TOKEN_FILE
+    ```
 - `make flux-status`
 - `kubectl get deployments -n flux-system`
 - `flux get sources git -n flux-system`
@@ -201,6 +320,28 @@ cannot be combined with its `*_FILE` variable.
   6. **product** service: 
   - `make postgres-svc-secret-create SVC_NAME=product PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make postgres-svc-deploy SVC_NAME=product`, wait at least one minute for the cluster to be ready.
+
+`cluster-infra-deploy` waits for every CloudNativePG cluster and the Strimzi Kafka cluster to report
+Ready before it returns. On QA, provision the restricted reader used by the Flux-managed Go Product
+deployment after that aggregate succeeds and before running `cluster-svc-deploy`:
+
+```bash
+export POSTGRES_ROLE_ENV=qa
+export POSTGRES_ROLE_CONTEXT=qa-insurance-hub
+export POSTGRES_ROLE_DATA_NS=qa-data
+export POSTGRES_ROLE_SVC_NS=qa-svc
+export POSTGRES_ROLE_CLUSTER=qa-postgres-product
+export POSTGRES_ROLE_SECRET=qa-postgres-product-reader-creds
+export POSTGRES_ROLE_DB_HOST=qa-postgres-product-rw.qa-data.svc.cluster.local
+make postgres-svc-role-provision SVC_NAME=product ROLE_PROFILE=reader
+make postgres-svc-role-verify SVC_NAME=product ROLE_PROFILE=reader
+unset POSTGRES_ROLE_ENV POSTGRES_ROLE_CONTEXT POSTGRES_ROLE_DATA_NS POSTGRES_ROLE_SVC_NS
+unset POSTGRES_ROLE_CLUSTER POSTGRES_ROLE_SECRET POSTGRES_ROLE_DB_HOST
+```
+
+The provision target creates a random credential and the two-key workload Secret without printing
+either value. Ordinary reapplication preserves the credential. After all services are Available,
+run `make flux-reconcile` so Flux records the healthy QA revision.
  
 - **QA**: `make grafana-ui`
 - **QA/Grafana**: In _Dashboards > New > Import_, add the "CloudNativePG" dashboard using the following
@@ -209,12 +350,10 @@ cannot be combined with its `*_FILE` variable.
 
 #### MongoDB (legacy)
 
-- `make mongodb-operator-install`
-- `make mongodb-root-user-secret-create MONGO_ROOT_USER_PWD_FILE=</absolute/mode-0600-file>`
-- `make mongodb-product-user-secret-create MONGO_PRODUCT_USER_PWD_FILE=</absolute/mode-0600-file>`
-- `make mongodb-deploy`
-- `make mongodb-status`  
-- **QA**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=mongodb-deploy-<iso-date>`
+MongoDB has been replaced by the PostgreSQL service databases. Skip the MongoDB operator,
+credentials, and workload during local-dev and QA reconstruction. The individual MongoDB Make
+targets remain only for troubleshooting historical deployments; `cluster-infra-deploy` does not
+invoke them or require MongoDB credentials.
 
 #### Elasticsearch
 
@@ -227,6 +366,10 @@ cannot be combined with its `*_FILE` variable.
 - **QA/Snapshot**: `make -C bootstrap qa-nodes-snapshot QA_SNAPSHOT_NAME=elasticsearch-deploy-<iso-date>`
 
 #### MinIO
+
+Tenant pods use a digest-pinned Chainguard MinIO image. Its development variant contains MinIO,
+`mc`, a shell, and the core utilities required by the protected administrative targets. Update the
+digest only after verifying the reported MinIO version and these runtime tools.
 
 - `make minio-operator-deploy`
   

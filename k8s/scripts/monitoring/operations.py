@@ -424,9 +424,52 @@ def make_target(runner: Runner, make: Sequence[str], target: str, *settings: str
     runner.completed.append(" ".join((target, *settings)))
 
 
-def tenant_ready(runner: Runner, context_name: str, service: str) -> None:
+def tenant_ready(
+    runner: Runner,
+    context_name: str,
+    service: str,
+    *,
+    discovery_timeout: float = 300,
+    poll_interval: float = 2,
+) -> None:
     namespace = f"qa-minio-{service}"
     selector = f"v1.min.io/tenant={namespace}"
+    deadline = time.monotonic() + discovery_timeout
+    next_heartbeat = time.monotonic() + 30
+    pods = ""
+    while not pods.strip():
+        pods = runner.run(
+            [
+                "kubectl",
+                "--context",
+                context_name,
+                "-n",
+                namespace,
+                "get",
+                "pods",
+                "-l",
+                selector,
+                "-o",
+                "name",
+            ],
+            label=f"{service} tenant discovery",
+            timeout=45,
+        )
+        if pods.strip():
+            break
+        now = time.monotonic()
+        if now >= deadline:
+            raise OperationError(
+                f"no MinIO tenant pod appeared in {namespace} within {discovery_timeout:g}s"
+            )
+        if now >= next_heartbeat:
+            elapsed = discovery_timeout - max(0, deadline - now)
+            print(
+                f"Waiting for MinIO tenant pod in {namespace} after {elapsed:.0f}s",
+                file=sys.stderr,
+            )
+            next_heartbeat = now + 30
+        time.sleep(min(poll_interval, deadline - now))
     runner.run(
         [
             "kubectl",
@@ -442,27 +485,8 @@ def tenant_ready(runner: Runner, context_name: str, service: str) -> None:
             "--timeout=180s",
         ],
         label=f"{service} tenant readiness",
-        timeout=195,
+        timeout=330,
     )
-    pods = runner.run(
-        [
-            "kubectl",
-            "--context",
-            context_name,
-            "-n",
-            namespace,
-            "get",
-            "pods",
-            "-l",
-            selector,
-            "-o",
-            "name",
-        ],
-        label=f"{service} tenant postcondition",
-        timeout=45,
-    )
-    if not pods.strip():
-        raise OperationError(f"no MinIO tenant pod found in {namespace}")
 
 
 def deploy_qa(args: argparse.Namespace, runner: Runner) -> None:

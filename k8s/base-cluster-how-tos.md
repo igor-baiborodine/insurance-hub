@@ -4,6 +4,7 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
 - [Prerequisites](#prerequisites)
+- [Clean Reconstruction](#clean-reconstruction)
 - [Local Dev](#local-dev)
   - [Manage Cluster](#manage-cluster)
 - [QA](#qa)
@@ -54,6 +55,26 @@
     sudo iptables -L FORWARD -v -n | grep "Chain FORWARD"
     Chain FORWARD (policy ACCEPT 340 packets, 335K bytes)
     ```
+
+## Clean Reconstruction
+
+Run these commands from the repository root when both clusters must be rebuilt without retained
+workloads or data:
+
+```bash
+make -C k8s/bootstrap local-dev-delete
+make -C k8s/bootstrap qa-nodes-delete
+
+make -C k8s/bootstrap local-dev-create
+kubectl --context kind-local-dev-insurance-hub get nodes
+
+make -C k8s/bootstrap qa-create
+kubectl --context qa-insurance-hub get nodes
+```
+
+`qa-nodes-delete` removes all three QA virtual machines and their snapshots. The QA LXD profiles
+remain and are reused by `qa-nodes-create`. Run the clock synchronization checks below after
+`qa-create` and before deploying credentials or applications.
 
 ## Local Dev
 
@@ -298,3 +319,9 @@ were already stopped remain stopped.
 | **qa-nodes-create-2025-09-29**          | Base cluster image without K8s installed           |
 | **qa-cluster-create-2025-09-29**        | Cluster image with K8s, DNS, and storage installed |
 | **qa-observability-install-2025-09-29** | Cluster image with observability apps installed    |
+
+4. **Delete cluster**
+
+- `make qa-nodes-delete`
+
+This removes the QA virtual machines and their snapshots. It preserves the reusable LXD profiles.

@@ -134,6 +134,47 @@ def test_kubeconfig_rewrite_rejects_unexpected_server():
         qa._rename_kubeconfig(source, "10.0.0.10")
 
 
+def test_global_ipv4_ignores_kubernetes_bridge_addresses() -> None:
+    # given
+    commands = FakeCommands()
+
+    def run(arguments, **_kwargs):
+        commands.calls.append(list(arguments))
+        return json.dumps(
+            [
+                {
+                    "name": "qa-master",
+                    "state": {
+                        "network": {
+                            "cni0": {
+                                "addresses": [
+                                    {"family": "inet", "scope": "global", "address": "10.42.0.1"}
+                                ]
+                            },
+                            "enp5s0": {
+                                "addresses": [
+                                    {
+                                        "family": "inet",
+                                        "scope": "global",
+                                        "address": "10.43.248.183",
+                                    }
+                                ]
+                            },
+                        }
+                    },
+                }
+            ]
+        )
+
+    commands.run = run
+
+    # when
+    address, interface = qa._global_ipv4(commands, "qa-master")
+
+    # then
+    assert (address, interface) == ("10.43.248.183", "enp5s0")
+
+
 def test_snapshot_failure_resumes_every_paused_node():
     # given
     commands = FakeCommands(fail_snapshot=True)

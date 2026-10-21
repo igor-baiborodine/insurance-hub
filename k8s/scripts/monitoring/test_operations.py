@@ -113,6 +113,33 @@ def test_qa_deploy_halts_on_failed_tenant_before_bucket_creation() -> None:
     assert runner.completed[-1] == "minio-storage-config-secret-create SVC_NAME=tempo"
 
 
+def test_tenant_readiness_waits_for_operator_to_create_pod(monkeypatch) -> None:
+    # given
+    runner = FakeRunner()
+    inventories = iter(("", "", "pod/tenant-0\n"))
+    now = [0.0]
+
+    def run(args, *, label: str, **_kwargs):
+        runner.calls.append(list(args))
+        if "get" in args:
+            return next(inventories)
+        return ""
+
+    runner.run = run
+    monkeypatch.setattr(operations.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        operations.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds)
+    )
+
+    # when
+    operations.tenant_ready(runner, "qa-insurance-hub", "loki")
+
+    # then
+    discovery_calls = [call for call in runner.calls if "get" in call]
+    assert len(discovery_calls) == 3
+    assert "wait" in runner.calls[-1]
+
+
 def test_qa_deploy_requires_exact_context_before_child_mutation() -> None:
     # given
     runner = FakeRunner()
