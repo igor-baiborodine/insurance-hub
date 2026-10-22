@@ -26,7 +26,7 @@ This framework exists to make AI-assisted work repeatable, auditable, and portab
 - `skills/` - repeatable workflows for recurring tasks
 - `prompts/` - reusable prompt fragments, indexed in `ai/prompts/README.md`
 - `examples/` - examples of acceptable artifacts and implementation patterns
-- `templates/` - reusable ticket-content specification, delivery plan, and PR templates
+- `templates/` - reusable requirements assessment, ticket-content specification, delivery plan, and PR templates
 - `checks/` - task checklists
 - `artifacts/` - local ticket working files, standalone or grouped under `epic-<number>/`, excluded from Git
 
@@ -59,17 +59,33 @@ At session start:
    read selected `SKILL.md` files completely, without loading unrelated skills.
 4. Load only the other rules, prompts, templates, or examples relevant to the current task.
 5. For ticket work, resolve `<ticket-dir>` using [AGENTS.md Artifact Rules](../AGENTS.md#artifact-rules)
-   and read `<ticket-dir>/<ticket>-ticket-content.md` as the specification before readiness
-   assessment or planning. Load the delivery plan and step summaries from that same directory
-   when continuing existing work.
+   and load the existing artifacts relevant to the requested stage. Reuse that directory across
+   assessment, specification, and delivery; apply the root artifact preflight before writing.
 
 Before planning or editing, follow `AGENTS.md` to discover and load nested instructions that apply
 to the affected paths. Do not load unrelated service guides. Root `AGENTS.md` is the canonical
 definition of instruction precedence, local-guide scope, and conflict handling.
 
-The ticket-content file is required at ticket startup. Follow `AGENTS.md` if it is missing or
-empty. `ai/templates/ticket-content-template.md` provides a structure for its content; a separate
-spec file is not required.
+For defining future scope, use
+[`ticket-requirements-workflow`](skills/ticket-requirements-workflow/SKILL.md) to write classified
+requirements in `<ticket-dir>/<ticket>-requirements.md` using `ai/templates/requirements-template.md`
+and stop after assessment. It does not require ticket content to exist first. When specification
+drafting is requested, use
+[`ticket-specification-workflow`](skills/ticket-specification-workflow/SKILL.md) to resume from
+that assessment and recheck readiness, potentially in a later session. Neither skill automatically
+creates an implementation plan. Requirements record assessment and provenance; ticket content
+remains the authoritative implementation specification. Existing ready tickets do not require a
+retrospective assessment.
+
+For planning or implementing a ticket, use
+[`ticket-implementation-workflow`](skills/ticket-implementation-workflow/SKILL.md) to validate
+readiness and create `<ticket-dir>/<ticket>-delivery-steps.md` before execution. Read
+`<ticket-dir>/<ticket>-ticket-content.md` as the specification before assessing readiness or
+planning; follow `AGENTS.md` if it is missing or empty. `ai/templates/ticket-content-template.md`
+provides its structure; no separate spec document is required. Stop after the delivery plan when
+only planning is requested. When implementation is requested, execute one tracked step at a time
+and apply `ticket-post-step-workflow` after each completed step. Load the existing delivery plan
+and relevant step summaries from the same directory when continuing work.
 
 ## Precedence
 

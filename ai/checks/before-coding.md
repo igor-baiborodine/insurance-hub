@@ -1,3 +1,10 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Before Coding Checklist](#before-coding-checklist)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Before Coding Checklist
 
 Use before implementing non-trivial changes.
@@ -9,6 +16,8 @@ Use before implementing non-trivial changes.
   and `git ls-files -- ai/artifacts/` reports no indexed artifact paths.
 - [ ] For ticket work, `<ticket-dir>/<ticket>-ticket-content.md` exists and was read as the specification.
 - [ ] Ticket readiness was checked.
+- [ ] Any bounded prerequisite decisions have explicit resolution steps and evidence; dependent
+  implementation remains blocked until ticket content is updated and readiness is rechecked.
 - [ ] Business objective is clear.
 - [ ] Scope and out-of-scope boundaries are clear.
 - [ ] Contract, persistence, validation, and security expectations are clear when relevant.

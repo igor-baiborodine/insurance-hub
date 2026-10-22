@@ -29,6 +29,9 @@ directory. When copying this template, update relative links for the destination
 - Scope clear:
 - Contracts clear:
 - Validation clear:
+- Prerequisite decision gates, when conditionally ready: [Decision IDs, safe resolution scope,
+  responsible role, evidence/acceptance conditions, and blocked dependent steps. Resolve and
+  update ticket content before rechecking readiness for those steps.]
 
 ## Pull Request Strategy
 

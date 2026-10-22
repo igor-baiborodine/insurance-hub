@@ -85,20 +85,47 @@ entry. If the ignore check fails, stop artifact writes and tell the user to add 
 do not edit `.git/info/exclude` automatically. If the index check prints paths, stop and report
 them; do not untrack or alter them automatically. Read-only inspection may continue.
 
-For ticket-based work, after this preflight, ensure `<ticket-dir>/<ticket>-ticket-content.md`
-exists and read it before assessing readiness or planning. If it is missing or empty, populate it
-from ticket content supplied by the user; ask for missing content rather than
-inventing requirements. No separate spec document is required.
+For defining future scope, use `ticket-requirements-workflow` to write classified requirements in
+`<ticket-dir>/<ticket>-requirements.md` and stop after assessment. It does not require ticket content
+to exist first. When specification drafting is requested, use `ticket-specification-workflow` to
+resume from that assessment, potentially in a later session. Resolve questions before drafting,
+except bounded decisions assigned to prerequisite delivery steps with dependent work blocked.
+Neither skill automatically creates an implementation plan; the implementation workflow owns that
+plan when planning or implementation is requested.
+The requirements file records assessment and provenance; ticket content remains the authoritative
+implementation specification. Existing ready tickets do not require a retrospective assessment.
 
-Use a spec-first workflow for non-trivial changes:
+For planning or implementing a ticket, use `ticket-implementation-workflow` to validate readiness
+and create `<ticket-dir>/<ticket>-delivery-steps.md` before execution. Read
+`<ticket-dir>/<ticket>-ticket-content.md` as the specification before assessing readiness or
+planning. If it is missing or empty, populate it from ticket content supplied by the user; ask
+for missing content rather than inventing requirements. No separate spec document is required.
+Stop after the delivery plan when only planning is requested. When implementation is requested,
+execute one tracked step at a time and apply `ticket-post-step-workflow` after each completed step.
 
-1. Validate that the ticket or request is implementation-ready.
-2. Clarify or enrich missing requirements before coding.
-3. Create a concrete delivery plan under the same resolved `<ticket-dir>`.
-4. Implement incrementally, one tracked step at a time.
-5. Apply the post-step workflow after each completed delivery step.
-6. Run validation appropriate to the changed modules.
-7. Summarize what changed, what was verified, and what remains.
+For non-trivial ticket work, follow this spec-first lifecycle. Enter at the requested stage using
+existing artifacts, and stop at its output unless later stages are also requested:
+
+1. Assess the scope and supplied acceptance criteria; record classified must-have and nice-to-have
+   requirements, evidence, and open questions in `<ticket-dir>/<ticket>-requirements.md`.
+2. Resolve blocking questions before specification drafting. Carry forward only bounded decisions
+   with a safe investigation scope, responsible role, expected evidence, acceptance condition,
+   and explicitly blocked dependent work.
+3. Draft `<ticket-dir>/<ticket>-ticket-content.md` from the assessed requirements, mapping
+   must-haves to observable acceptance criteria and preserving optional-work exclusions.
+4. When planning is requested, recheck specification readiness and create
+   `<ticket-dir>/<ticket>-delivery-steps.md`, ordering prerequisite decision steps before dependent
+   work. Stop here for a plan-only request.
+5. When implementation is requested, execute one ready delivery step at a time. Resolve prerequisite
+   decisions, update the specification, and recheck readiness before starting dependent work.
+6. Validate each step against its requirements using checks appropriate to the changed modules;
+   address failures before treating the step as complete.
+7. Apply `ticket-post-step-workflow` after each completed step to update the tracker, validation
+   evidence, summary, and branch snapshot. Repeat execution, validation, and post-step updates
+   for the remaining delivery steps.
+8. Check acceptance-criteria coverage and required completion evidence. Summarize what changed,
+   what was verified, and any blockers or follow-up; do not claim ticket completion while required
+   outcomes or checks remain unresolved.
 
 For small mechanical changes, keep the workflow lightweight, but still read relevant local code before editing and validate the result.
 
@@ -112,7 +139,9 @@ acting. Read linked references or scripts only as directed by that skill.
 | --- | --- | --- |
 | [`code-review`](ai/skills/code-review/SKILL.md) | Reviewing a pull request or proposed change against ticket requirements, repository rules, contracts, tests, and evidence. | Read-only workflow with local-checkout and GitHub Copilot modes. Do not implement fixes during the review. |
 | [`pr-description`](ai/skills/pr-description/SKILL.md) | Drafting a local PR description artifact or drafting and explicitly updating an existing GitHub pull request body. | Uses shared content and evidence standards with separate local and GitHub modes. A draft-only request does not authorize a GitHub update. |
-| [`ticket-implementation-workflow`](ai/skills/ticket-implementation-workflow/SKILL.md) | Implementing a non-trivial ticket from readiness assessment through validated delivery steps. | Primary ticket delivery workflow; it invokes `ticket-post-step-workflow` after each completed step. |
+| [`ticket-requirements-workflow`](ai/skills/ticket-requirements-workflow/SKILL.md) | Assessing future scope and classified requirements from product or technical input, with or without acceptance criteria. | Produces the requirements assessment and readiness; stops before specification drafting or implementation planning. |
+| [`ticket-specification-workflow`](ai/skills/ticket-specification-workflow/SKILL.md) | Drafting or revising ticket content from assessed requirements, including in a later session. | Rechecks assessment readiness and produces the specification; stops before implementation planning. Bounded decisions remain prerequisite gates. |
+| [`ticket-implementation-workflow`](ai/skills/ticket-implementation-workflow/SKILL.md) | Planning delivery or implementing a non-trivial ticket from readiness assessment through validated steps. | Owns the delivery plan; plan-only requests stop before execution. Invokes `ticket-post-step-workflow` after each completed implementation step. |
 | [`ticket-post-step-workflow`](ai/skills/ticket-post-step-workflow/SKILL.md) | A concrete ticket delivery step has been completed and its tracker, summary, validation evidence, and branch snapshot must be updated. | Use after each completed implementation step, normally through `ticket-implementation-workflow`. |
 
 Select skills from their names and descriptions rather than loading every skill at session start.
@@ -185,8 +214,8 @@ directory, relative to the repository root. Supported layouts are:
 Resolve the directory once and reuse it for the entire ticket workflow:
 
 1. Honor an explicit user-supplied ticket-content path or artifact directory under `ai/artifacts/`.
-2. Otherwise, search existing ticket-content files and ticket folders in both standalone and
-   epic-grouped locations. Include ignored files/directories in discovery: ordinary `rg --files`
+2. Otherwise, search existing ticket-content files, requirements files, and ticket folders in both
+   standalone and epic-grouped locations. Include ignored files/directories in discovery: ordinary `rg --files`
    omits these local artifacts. Reuse the matching location, including an existing empty placeholder
    folder; do not create a flat duplicate because a nested ticket-content file is missing.
 3. If multiple locations match and the session does not identify the intended one, ask which to
@@ -194,9 +223,10 @@ Resolve the directory once and reuse it for the entire ticket workflow:
 4. If no location exists, use the epic grouping specified by the user or current task context;
    otherwise default to `ai/artifacts/<ticket>`. Do not infer epic membership from the issue number.
 
-Keep the ticket-content specification, delivery plan, step summaries, diff snapshots, reviews, and
-PR drafts together in `<ticket-dir>`. Filenames retain the ticket ID, such as
-`<ticket>-ticket-content.md` and `<ticket>-delivery-steps.md`, regardless of directory depth.
+Keep the requirements assessment, ticket-content specification, delivery plan, step summaries,
+diff snapshots, reviews, and PR drafts together in `<ticket-dir>`. Filenames retain the ticket ID,
+such as `<ticket>-requirements.md`, `<ticket>-ticket-content.md`, and `<ticket>-delivery-steps.md`,
+regardless of directory depth.
 For a ticket split into multiple PRs, name each local review and description for its planned PR:
 `<ticket>-pr<n>-review.md` and `<ticket>-pr<n>-description.md` (for example,
 `issue-174-pr6-description.md`). Single-PR tickets keep `<ticket>-pr-review.md` and

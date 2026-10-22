@@ -1,6 +1,6 @@
 ---
 name: ticket-implementation-workflow
-description: Use when implementing a ticket in this repository from start to finish. This workflow validates ticket readiness, creates a delivery-step artifact, implements step by step, and applies the ticket post-step workflow after each completed step.
+description: Use when planning delivery or implementing a ticket in this repository. Validates readiness and creates a delivery plan; a plan-only request stops there. For implementation, executes step by step and applies the ticket post-step workflow after each completed step.
 ---
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
@@ -20,6 +20,8 @@ description: Use when implementing a ticket in this repository from start to fin
 # Ticket Implementation Workflow
 
 Use this skill for ticket-based specification-first development work in Insurance Hub.
+A plan-only request ends after producing the plan in Step 2; continue to execution only when
+implementation is requested.
 
 ## Prerequisite
 
@@ -72,6 +74,20 @@ If information is missing or ambiguous:
 - work with the user to clarify requirements and update the ticket-content file
 - do not move to planning until the implementation path is clear enough
 
+For a scope-assessment request, select
+[`ticket-requirements-workflow`](../ticket-requirements-workflow/SKILL.md); for specification
+drafting, select [`ticket-specification-workflow`](../ticket-specification-workflow/SKILL.md).
+Those workflows stop at their own artifacts. Use this implementation workflow for delivery
+planning only when planning or implementation is requested; a plan-only request stops before
+execution. Read the assessment when present, but use ticket content as the implementation
+specification; do not require retrospective requirements files for existing ready tickets.
+
+A conditional specification may carry bounded decision-resolution tasks. Validate each task's
+safe investigation scope, responsible role, expected evidence, acceptance condition, and blocked
+dependencies. Only these prerequisite tasks may proceed while the decision is open. Do not
+silently resolve disagreements between requirements and ticket content or treat missing scope,
+contracts, or safety obligations as ordinary implementation choices.
+
 ### 2. Produce The Detailed Plan
 
 Once the ticket is implementation-ready:
@@ -89,6 +105,11 @@ Once the ticket is implementation-ready:
   applicable, and the step summary artifact reference; keep implementation details, findings,
   decisions, and validation results in the dedicated step execution summary document
 - identify module boundaries, tests, and validation checkpoints
+
+For conditional readiness, put each decision-resolution task before its dependent steps and
+record the gate in the plan. Dependent steps remain blocked until the decision is recorded in
+ticket content, the assessment is reconciled if present, and implementation readiness is rechecked.
+Do not invent detailed implementation steps that depend on an unknown decision outcome.
 
 For Python tooling, distinguish pure logic/fake-adapter tests, disposable integration tests, and
 any separately authorized live operations. Select checks through
@@ -111,6 +132,7 @@ For each step:
   make ownership/scope unclear, resolve that with the user before proceeding.
 - read the relevant local code before changing anything
 - implement against the ticket-content specification and record agreed requirement changes there before adjusting the plan
+- resolve prerequisite decision gates and recheck readiness before starting dependent implementation
 - challenge assumptions and weak designs
 - prefer established repository patterns over inventing new ones
 - keep scope tight to the step at hand
