@@ -50,7 +50,10 @@ Assess only areas relevant to the ticket and proposed change:
    defect or meaningful maintenance risk.
 
 Verify implementation and execution evidence directly. Plans are not results. A missing or
-contradictory execution record is unverified, not a pass. Do not report an unrelated pre-existing
+contradictory execution record is unverified, not a pass. Compare each claimed pass's
+[tested-state identity and freshness](../ticket-post-step-workflow/SKILL.md#validation-evidence-record)
+with the revision, specification, and dirty inputs under review. A stale or identity-incomplete
+historical pass does not prove the reviewed state. Do not report an unrelated pre-existing
 issue as a regression unless it directly blocks acceptance, and label it as pre-existing when it
 must be reported.
 

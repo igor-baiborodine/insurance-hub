@@ -139,6 +139,9 @@ For each step:
 - prefer established repository patterns over inventing new ones
 - keep scope tight to the step at hand
 - validate the proposed implementation critically instead of accepting the first workable approach
+- capture each validation result's tested state at execution time using the
+  [post-step evidence record](../ticket-post-step-workflow/SKILL.md#validation-evidence-record);
+  recheck its freshness after later edits before marking the step complete
 - For QA cluster, Flux, DNS, or registry-pull work, apply the repository
   [QA network recovery runbook](../../../k8s/base-cluster-how-tos.md#qa-network-recovery) before
   classifying stale source or image state as a repository defect.
@@ -161,5 +164,8 @@ Before considering the ticket workflow complete, ensure:
 - each completed step has a matching summary artifact
 - each step summary records applicable validation with the shared evidence format and each
   acceptance criterion maps to evidence or is identified as unresolved
+- passed checks used for completion are current for the final code and specification, or have a
+  documented unaffected judgment; stale and identity-incomplete historical results are not counted
+  as final-state passes
 - post-step workflow was applied after each completed step
 - formatting and tests were run as required by the repository instructions and ticket scope

@@ -115,7 +115,10 @@ status mapping, required fields, defaults, nullability, versioning, and compatib
 
 Use the result statuses and execution-source fields defined by
 `ai/skills/ticket-post-step-workflow/SKILL.md`. Do not run tests merely to convert missing review
-evidence into a pass; report the available recorded evidence and its limits.
+evidence into a pass; report the available recorded evidence and its limits. For each claimed pass,
+compare its recorded tested state and specification digest with the selected local or published
+revision and any included dirty inputs. Report stale or identity-incomplete historical results as
+unverified for the reviewed state unless a documented unaffected judgment supports them.
 
 Write the review using `ai/templates/pr-review-template.md` and save it only to:
 

@@ -53,7 +53,9 @@ Use the result statuses and execution sources defined by
 Give a result only when an artifact or the current session shows its execution and outcome. Label
 an appropriate unexecuted command `To run` and preserve `Status: not run; Source: —` for checks a
 reviewer still needs to execute. Include module or package scope, working directory, blockers, and
-next actions when relevant.
+next actions when relevant. Compare recorded tested-state and specification identity with the
+complete proposed change. A historical pass that is stale or lacks identity may be described as
+historical, but must not be presented as validation of the proposed state.
 
 Include manual validation only when applicable:
 

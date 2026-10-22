@@ -17,7 +17,12 @@ Use before considering a ticket complete.
 - [ ] Each step summary has a validation-evidence record for applicable checks, including failed,
   blocked, not-run, and manual/CI-only checks.
 - [ ] Validation records separate result status from execution source and include enough command,
-  scope, result, and evidence detail to reproduce or assess each check.
+  scope, result, tested-state identity, execution time, and evidence detail to reproduce or assess
+  each check, as defined by the
+  [post-step evidence record](../skills/ticket-post-step-workflow/SKILL.md#validation-evidence-record).
+- [ ] Compare recorded check identities with the final code, relevant dirty inputs, specification,
+  and material environment. Rerun affected stale checks or record a specific unaffected judgment;
+  do not count identity-incomplete historical passes as final-state evidence.
 - [ ] Every acceptance criterion maps to evidence or is explicitly unresolved; pending CI/manual
   checks and blockers have next actions.
 - [ ] `ai/artifacts/` isolation is verified: the resolved ticket-content path is ignored by

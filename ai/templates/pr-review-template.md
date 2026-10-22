@@ -46,8 +46,9 @@ identified** and do not invent positive findings.
 
 - Requirement coverage: <criteria assessed and any gaps>
 - Source and contracts: <relevant implementation, callers, schemas, or migrations inspected>
-- Tests and validation: <per-check result status and execution source from recorded evidence;
-  failed/blocked/not-run checks and “No execution evidence reviewed” when appropriate. Do not
+- Tests and validation: <per-check result status, execution source, and freshness for the reviewed
+  code/specification; identify stale or identity-incomplete historical results and
+  failed/blocked/not-run checks. Use “No execution evidence reviewed” when appropriate. Do not
   infer execution from plans.>
 - Unverified areas and residual risk: <specific limits, or “None identified.”>
 

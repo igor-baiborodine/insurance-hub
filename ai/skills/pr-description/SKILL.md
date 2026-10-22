@@ -39,7 +39,10 @@ Use `ai/templates/pr-description-template.md` and retain its three top-level sec
 
 Describe only behavior, causes, endpoints, tests, commands, and results supported by the available
 ticket, repository, diff, or execution evidence. Label an inference or unknown. Plans and proposed
-commands are not results, and a CI result does not establish a local result or the reverse.
+commands are not results, and a CI result does not establish a local result or the reverse. Apply
+the [tested-state freshness rule](../ticket-post-step-workflow/SKILL.md#validation-evidence-record)
+before presenting a historical pass as evidence for the proposed code and specification; label
+stale or identity-incomplete results as unverified for that state.
 
 For API or contract changes, inspect authoritative schemas, controllers or handlers, gateway
 mappings, callers, and tests. State an HTTP method and path only when repository sources establish

@@ -47,6 +47,8 @@ artifact preflight before writing. Perform these actions in order:
    - include blockers or follow-up for the next step
    - include a `Validation Evidence` section with one row for each applicable check, including
      relevant checks that were not run or are blocked; use the record format below
+   - capture each check's tested state when it runs; a state reconstructed after later edits is
+     unverified, even if the command's historical result is known
 
 3. Refresh the git diff artifact:
    - Select the intended PR base from the delivery plan or actual PR target; for a stacked PR,
@@ -74,16 +76,34 @@ artifact preflight before writing. Perform these actions in order:
 ### Validation evidence record
 
 Keep planned validation in the delivery plan separate from results in the step summary. In each
-step summary, record validation in a table with these columns:
+step summary, record validation in a table with these columns. A row may reference a named state
+record in the same summary when multiple checks used exactly the same inputs; each row must name
+its state explicitly and record any check-specific input or environment difference.
 
-| Check | Status | Source | Scope | Command or scenario | Evidence/result | Blocker/next action |
-| --- | --- | --- | --- | --- | --- | --- |
+| Check | Status | Source | Scope | Command or scenario | Tested state | Run evidence/result | Freshness/next action |
+| --- | --- | --- | --- | --- | --- | --- | --- |
 
 - Use one result status: `passed`, `failed`, `blocked`, `not run`, or `not applicable`. Explain
   why a check is blocked, not run, or not applicable. `Proposed` or `planned` describes a future
   check in the delivery plan, never an executed result.
 - Record execution source separately as `local`, `CI`, or `manual`; use `—` when the check was
   not executed. Do not infer a local pass from a CI result or vice versa.
+- For each executed check, `Tested state` must resolve to the intended base ref and full SHA,
+  checked head ref and full SHA, specification path and SHA-256 digest, and whether the worktree
+  was clean or dirty at execution. For a dirty tree, include an inline manifest of relevant
+  staged, unstaged, and untracked inputs: path, state, and staged blob ID and/or worktree SHA-256
+  digest as applicable. Record deletions explicitly. Include relevant test fixtures, generated
+  inputs, configuration, and dependencies. Record excluded local changes and why they cannot affect
+  the check. A branch name or committed diff alone does not identify dirty inputs.
+- Capture tested-state identity at execution time. If a required ref, digest, or dirty input
+  identity was not captured, label final-state applicability `unverified`; do not reconstruct it
+  from a later tree or quietly assume the tree was clean. For a check outside a Git or ticket
+  boundary, use `not applicable` with a reason for the corresponding identity field and record
+  the actual source/specification identity that governed it.
+- In `Run evidence/result`, record the UTC execution time, relevant tool and environment identity
+  (including versions or CI job when material), a local log/artifact or CI run reference, and the
+  observed outcome. A concise, sanitized output excerpt in the summary may serve as the local
+  reference when no log is retained. Do not store secrets or full transcripts by default.
 - For command-based checks, include the exact invocation, working directory, relevant variables,
   and module/package coverage in the command or scope fields. For CI, identify the workflow/job
   and run or evidence reference when available.
@@ -92,6 +112,19 @@ step summary, record validation in a table with these columns:
 - Give failed, blocked, and not-run checks a blocker or next action. For `not applicable`, give a
   brief reason. Point to logs/output or summarize the relevant result; preserve useful failure
   evidence in the ticket artifacts.
+- Before step or ticket completion, compare each executed row's head, specification digest,
+  relevant input manifest, and material tool/environment inputs with the proposed final state.
+  A later change to a check's source, tests, fixtures, generated inputs, configuration,
+  dependencies, or governing acceptance criteria requires reassessment. Mark the historical
+  result `stale` for the final state until rerun or a documented unaffected judgment tied to the
+  exact change and check scope; a material change that can affect the outcome needs a rerun. Keep
+  its original execution status and identity visible. If impact cannot be established, mark final
+  applicability `unverified` and obtain new evidence. Record reruns as new rows or clearly
+  versioned results, never overwrite the historical result.
+- Historical records that lack these identity fields remain readable as historical observations,
+  but have `unverified` final-state applicability. Do not use them alone to support a current-code
+  pass. In `Freshness/next action`, use `current`, `stale`, or `unverified` for executed checks and
+  state the rerun or unaffected judgment needed; use `—` for checks never executed.
 - At ticket completion, map each acceptance criterion to its supporting evidence and list
   unresolved, CI-only, and manual checks. Do not treat an aggregate check as covering packages or
   modules its evidence does not show.
