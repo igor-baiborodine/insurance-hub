@@ -15,10 +15,8 @@
 # Go Design and Architecture
 
 Apply when designing, implementing, changing, or reviewing Go service boundaries and composition.
-Follow [Go API and transport](go-api-transport.md) for HTTP/gRPC facade and contract design,
-[Go development](go-development.md) for implementation, lifecycle, persistence, migration, and
-Makefile requirements; [Go testing](go-test.md) for test design; and
-[Go validation](go-validation.md) for required checks and evidence.
+Use [Go rules](go-rules.md) to select other policies for the affected boundary. For HTTP/gRPC
+facades and contracts, apply [Go API and transport](go-api-transport.md).
 
 ## Business purpose and proportional design
 

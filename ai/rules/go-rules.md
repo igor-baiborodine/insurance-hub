@@ -7,14 +7,25 @@
 
 # Go Rules
 
-For Go work, read and apply all six canonical rules:
+For Go work, select rules by the affected boundary. Read the entry point and these core rules
+for implementation, migration, or tooling changes:
 
-- [Go architecture](go-architecture.md): business visibility, dependency boundaries, ports, composition, and architecture handoff.
-- [Go API and transport](go-api-transport.md): HTTP/gRPC boundaries, OpenAPI ownership, wire mappings, and compatibility.
 - [Go development](go-development.md): Makefile interface, implementation, lifecycle, contracts, and Phase 4 migration.
-- [Go testing](go-test.md): readable names, test structure, assertions, isolation, and integration boundaries.
 - [Go formatting](go-formatting.md): mandatory formatter policy and scope.
 - [Go validation](go-validation.md): module-aware checks and evidence.
+
+Load the additional rules when the task crosses their boundary:
+
+- [Go architecture](go-architecture.md): new or changed service structure, dependencies, ports,
+  composition, resource ownership, or architecture handoff.
+- [Go API and transport](go-api-transport.md): HTTP/gRPC APIs, contracts, OpenAPI, transport
+  mappings, security, or compatibility.
+- [Go testing](go-test.md): writing or reviewing Go tests, fixtures, and test design.
+
+Read multiple additional rules when a change crosses multiple boundaries. For example, an HTTP
+handler and its tests require the API and transport and testing rules; a new service also requires
+architecture. Validation still selects the checks required for the changed module, even when a
+detail rule does not apply.
 
 All Go development operations must use the corresponding Makefile targets; do not invoke the
 underlying tools directly. See the development rule for target discovery and missing-target handling.

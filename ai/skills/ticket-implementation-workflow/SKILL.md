@@ -1,6 +1,6 @@
 ---
 name: ticket-implementation-workflow
-description: Use when implementing a ticket in this repository from start to finish. This workflow validates ticket readiness, creates a delivery-step artifact, implements step by step, and applies the ticket post-step workflow after each completed step.
+description: Use when planning delivery or implementing a ticket in this repository. Validates readiness and creates a delivery plan; a plan-only request stops there. For implementation, executes step by step and applies the ticket post-step workflow after each completed step.
 ---
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
@@ -20,6 +20,8 @@ description: Use when implementing a ticket in this repository from start to fin
 # Ticket Implementation Workflow
 
 Use this skill for ticket-based specification-first development work in Insurance Hub.
+A plan-only request ends after producing the plan in Step 2; continue to execution only when
+implementation is requested.
 
 ## Prerequisite
 
@@ -48,6 +50,12 @@ planning. Use `ai/templates/ticket-content-template.md` when helpful to structur
 If the ticket content is unavailable, ask the user for it rather than inferring requirements from
 the ticket ID. Preserve existing content and incorporate agreed clarifications into this file.
 
+Before planning or starting/resuming implementation, apply
+[GitHub ticket synchronization](../../rules/spec-first-rules.md#github-ticket-synchronization).
+Issue-based tickets require a current verified body match; every local specification edit triggers
+the authorized update procedure. Record ad hoc tickets as not applicable. A pending or failed
+check blocks dependent planning/implementation, while local clarification and drafting may continue.
+
 Before implementation, confirm that the ticket-content specification contains enough information to proceed.
 
 Check for:
@@ -58,6 +66,9 @@ Check for:
 - persistence expectations and out-of-scope boundaries
 - permissions and security requirements
 - acceptance criteria that can be tested
+- for behavior changes, stable AC IDs with independent expected outcomes for important success,
+  failure, and compatibility examples, the affected boundary, and a proposed runnable check or
+  justified manual scenario; bug reproduction and migration baseline provenance when applicable
 
 For auxiliary Python work, load [the Python entry point](../../rules/python-rules.md) and all four
 linked rules. Establish why Python fits better than a simple shell workflow, identify the script
@@ -71,6 +82,20 @@ If information is missing or ambiguous:
 - identify the gaps explicitly
 - work with the user to clarify requirements and update the ticket-content file
 - do not move to planning until the implementation path is clear enough
+
+For a scope-assessment request, select
+[`ticket-requirements-workflow`](../ticket-requirements-workflow/SKILL.md); for specification
+drafting, select [`ticket-specification-workflow`](../ticket-specification-workflow/SKILL.md).
+Those workflows stop at their own artifacts. Use this implementation workflow for delivery
+planning only when planning or implementation is requested; a plan-only request stops before
+execution. Read the assessment when present, but use ticket content as the implementation
+specification; do not require retrospective requirements files for existing ready tickets.
+
+A conditional specification may carry bounded decision-resolution tasks. Validate each task's
+safe investigation scope, responsible role, expected evidence, acceptance condition, and blocked
+dependencies. Only these prerequisite tasks may proceed while the decision is open. Do not
+silently resolve disagreements between requirements and ticket content or treat missing scope,
+contracts, or safety obligations as ordinary implementation choices.
 
 ### 2. Produce The Detailed Plan
 
@@ -89,6 +114,17 @@ Once the ticket is implementation-ready:
   applicable, and the step summary artifact reference; keep implementation details, findings,
   decisions, and validation results in the dedicated step execution summary document
 - identify module boundaries, tests, and validation checkpoints
+- assign each behavior example/check from the specification to a delivery step; identify the
+  expected failure under a relevant behavior mutation and any property or differential check that
+  gives stronger coverage of a sensitive invariant
+- for substantial contract, persistence, or architecture changes, put the specification's design
+  challenge (alternatives, tradeoffs, failure modes, migration impact, and AC rationale) before
+  dependent implementation; unresolved choices remain prerequisite decision gates
+
+For conditional readiness, put each decision-resolution task before its dependent steps and
+record the gate in the plan. Dependent steps remain blocked until the decision is recorded in
+ticket content, the assessment is reconciled if present, and implementation readiness is rechecked.
+Do not invent detailed implementation steps that depend on an unknown decision outcome.
 
 For Python tooling, distinguish pure logic/fake-adapter tests, disposable integration tests, and
 any separately authorized live operations. Select checks through
@@ -101,22 +137,34 @@ Implement one delivery step at a time.
 
 For each step:
 
-- Before making any change for the step, refresh the committed-branch snapshot using the post-step
-  workflow's `git diff main <current-branch>` convention and save it to
-  `<ticket-dir>/<ticket>-git-diff.txt`. Confirm `main` and the current branch resolve
-  before replacing the artifact; if they do not, preserve the previous snapshot and report the
-  blocker.
+- Before making any change for the step, identify the intended PR base from the delivery plan
+  or actual PR target. Do not assume `main`; record the selected ref, and resolve ambiguity
+  before refreshing the committed-patch snapshot. Use the post-step workflow's
+  [snapshot helper](../ticket-post-step-workflow/scripts/refresh_git_diff.sh) with that base,
+  the current branch ref, and `<ticket-dir>/<ticket>-git-diff.txt`. It records base/head and
+  merge-base SHAs and preserves the previous snapshot if a ref or comparison fails. The snapshot
+  covers committed changes only; inspect local changes separately.
 - Immediately check `git status --short` and report any staged, unstaged, or untracked work to the
   end user before editing. Inspect those changes and preserve them. If they overlap planned files or
   make ownership/scope unclear, resolve that with the user before proceeding.
 - read the relevant local code before changing anything
 - implement against the ticket-content specification and record agreed requirement changes there before adjusting the plan
+- after any ticket-content revision, apply the synchronization rule before dependent work;
+  prepare the GitHub update and obtain explicit permission unless existing authorization covers it
+- resolve prerequisite decision gates and recheck readiness before starting dependent implementation
 - challenge assumptions and weak designs
+- implement acceptance checks against the independently specified expected result, not output
+  copied from the new implementation or generated replacement; retain bug reproductions and
+  independent migration baselines, and verify that a relevant behavior mutation fails its check
+  when practical, recording a reason when it cannot be exercised
 - prefer established repository patterns over inventing new ones
 - keep scope tight to the step at hand
 - validate the proposed implementation critically instead of accepting the first workable approach
+- capture each validation result's tested state at execution time using the
+  [post-step evidence record](../ticket-post-step-workflow/SKILL.md#validation-evidence-record);
+  recheck its freshness after later edits before marking the step complete
 - For QA cluster, Flux, DNS, or registry-pull work, apply the repository
-  [QA cluster network recovery rule](../../rules/repo-rules.md#qa-cluster-network-recovery) before
+  [QA network recovery runbook](../../../k8s/base-cluster-how-tos.md#qa-network-recovery) before
   classifying stale source or image state as a repository defect.
 
 ### 4. Apply Post-Step Workflow
@@ -132,10 +180,15 @@ That workflow updates the delivery tracker, creates the per-step summary, and re
 Before considering the ticket workflow complete, ensure:
 
 - the ticket-content file exists and reflects the agreed requirements
+- a fresh GitHub issue-body comparison passed for that final specification, or the ticket is
+  explicitly ad hoc; pending publication or unavailable verification is not a completion pass
 - ticket readiness was explicitly validated
 - the delivery-step plan artifact exists
 - each completed step has a matching summary artifact
 - each step summary records applicable validation with the shared evidence format and each
   acceptance criterion maps to evidence or is identified as unresolved
+- passed checks used for completion are current for the final code and specification, or have a
+  documented unaffected judgment; stale and identity-incomplete historical results are not counted
+  as final-state passes
 - post-step workflow was applied after each completed step
 - formatting and tests were run as required by the repository instructions and ticket scope

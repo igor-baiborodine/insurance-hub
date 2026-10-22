@@ -239,9 +239,13 @@ request or treat a local result as hosted evidence.
 | Product documentation renderer or covered links | `make -C services/product-service bootstrap-doc-tools`; `make -C services/product-service check-docs` | Managed CPython 3.14.8, Node.js 20 or newer, npm, and the pinned module-local Mermaid tools. Record link and render counts. |
 | Markdown content | `./scripts/markdown-toc.sh format <file>...`; stage the result; the pre-commit hook runs `check` on the staged snapshot | Managed CPython 3.14.8; `npx` is needed only when Markdown is selected. Record the exact task-owned files checked. |
 
-Review evidence identifies the revision, exact command and working directory, changed scope,
-prerequisites, execution source (`local`, `CI`, or `manual`), result, and any blocked or unexecuted
-follow-up. Heavy security, deployment, image, database, topology, and tooling checks do not belong in
+Review evidence identifies the tested revision and relevant dirty inputs, specification digest,
+UTC execution time, exact command and working directory, changed scope, prerequisites, execution
+source (`local`, `CI`, or `manual`), tool/environment identity where relevant, result, and log or run
+reference. Compare it with the final state using the
+[shared evidence rule](ai/skills/ticket-post-step-workflow/SKILL.md#validation-evidence-record);
+rerun affected stale checks or document why a later change could not affect them. Heavy security,
+deployment, image, database, topology, and tooling checks do not belong in
 the pre-commit hook. Live-target commands retain their explicit environment, context, credential,
 and mutation safeguards in their owning runbooks.
 

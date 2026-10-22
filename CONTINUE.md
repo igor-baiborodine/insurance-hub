@@ -1,6 +1,14 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Continue Adapter](#continue-adapter)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Continue Adapter
 
-This repository uses `AGENTS.md` as the vendor-agnostic source of truth for AI-assisted development.
+This human-facing pointer complements the Continue rule in `.continue/rules/CONTINUE.md`.
+The rule is the repository discovery entry point; `AGENTS.md` remains the canonical guide.
 
 Before working in this repository with Continue:
 
@@ -10,7 +18,8 @@ Before working in this repository with Continue:
 
 Do not duplicate repository policy in this file. Keep this file as a Continue-facing pointer to the canonical instructions.
 
-For ticket-driven implementation, use:
+For ticket stages, select the matching skill from the `AGENTS.md` catalog. For implementation,
+use:
 
 - `ai/prompts/session-bootstrap.md`
 - `ai/skills/ticket-implementation-workflow/SKILL.md`

@@ -14,10 +14,9 @@
 Use only the corresponding Makefile targets, as required by
 [Go development](go-development.md#scope-and-makefile-interface). Never invoke underlying test,
 lint, build, generation, dependency, or security tools directly to bypass a missing/failing target.
-Apply [Go architecture](go-architecture.md) for dependency, composition, and architecture handoff
-review, [Go API and transport](go-api-transport.md) for contract and facade verification, and
-[Go testing](go-test.md) for test names, structure, and assertions. This file defines
-which checks to execute and what evidence to record.
+Use [Go rules](go-rules.md) to select architecture, API and transport, or testing details when the
+task crosses those boundaries. This file defines which checks to execute and what evidence to
+record.
 
 ## Discover the validation boundary
 
@@ -101,13 +100,9 @@ the target. Use documented equivalents in the owning Makefile and its supported 
 - After checks, inspect tracked and relevant new files for unintended generated, formatting, or
   dependency changes. Complete the evidence record, map acceptance criteria to evidence at ticket
   completion, and apply the repository before-merge checklist.
-- Insurance Hub currently has the scaffold at `templates/go-service` and the Product business
-  module at `services/product-service`, with no approved workspace. Each owns pinned setup and
-  non-mutating validation targets. Product's current checks cover its management shell; business,
-  contract, SQL, and integration gates join that module's `check` as implemented. Root
-  `go-topology-check`, `go-modules-check`, and `go-topology-test` enforce the canonical inventory,
-  standalone resolution, boundaries, controlled failures, and CI agreement. They cover only
-  modules recorded in `go-module-topology.json`; future modules require explicit owning targets,
-  consumers, resolution modes, CI triggers, and onboarding before repository validation may claim
-  coverage. Documentation-only rule changes still require reference, consistency, and whitespace
-  review and do not establish runtime correctness.
+- Use [go-module-topology.json](../../go-module-topology.json) for the current Go module inventory,
+  each module's Makefile for its validation coverage, and the root [Makefile](../../Makefile) for
+  topology checks. Root inventory checks cover only recorded modules; a new module needs explicit
+  owning targets, consumers, resolution modes, CI triggers, and onboarding before repository
+  validation may claim coverage. Documentation-only rule changes still require reference,
+  consistency, and whitespace review and do not establish runtime correctness.

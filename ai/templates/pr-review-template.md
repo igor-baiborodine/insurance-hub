@@ -15,8 +15,14 @@
 ## Review Summary
 
 - Outcome: <Findings identified / No findings identified / Review incomplete>
-- Change reviewed: <branch or change identifier and base, when known>
-- Working tree: <clean / staged, unstaged, and untracked changes with counts and paths>
+- Review mode: <Local proposed change / Published PR revision>
+- Strict upstream match: <Not requested / passed with local and fetched SHAs / failed with reason>
+- Change reviewed: <branch or change identifier; intended PR base ref and resolved base SHA;
+  merge-base SHA; head SHA; whether base freshness was verified>
+- Published PR identity: <PR URL, metadata source/time, base/head repository and ref, reported and
+  fetched SHAs; or Not applicable for a local review>
+- Working tree: <local mode: clean or staged, unstaged, and untracked paths; published mode: local
+  state excluded from published-revision claims>
 - Ticket: <ticket-id>
 
 ## Findings
@@ -39,9 +45,14 @@ identified** and do not invent positive findings.
 ## Review Coverage and Evidence
 
 - Requirement coverage: <criteria assessed and any gaps>
+- Behavior trace, when applicable: <representative requirement/AC/example IDs for success,
+  failure, and compatibility/invariants; affected boundary; check/scenario ID; independently expected result;
+  observed evidence; mutation sensitivity or the unverified gap. Give a reason when a category
+  does not apply.>
 - Source and contracts: <relevant implementation, callers, schemas, or migrations inspected>
-- Tests and validation: <per-check result status and execution source from recorded evidence;
-  failed/blocked/not-run checks and “No execution evidence reviewed” when appropriate. Do not
+- Tests and validation: <per-check result status, execution source, and freshness for the reviewed
+  code/specification; identify stale or identity-incomplete historical results and
+  failed/blocked/not-run checks. Use “No execution evidence reviewed” when appropriate. Do not
   infer execution from plans.>
 - Unverified areas and residual risk: <specific limits, or “None identified.”>
 
