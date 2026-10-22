@@ -53,6 +53,11 @@ When instructions overlap, apply them in this order:
 6. Task-local artifacts in the resolved `<ticket-dir>` under `ai/artifacts/`
 7. Vendor-specific adapter files, if any
 
+This is repository policy within the active client's higher-level instruction, permission, and
+security hierarchy. A repository file cannot expand host tool access or override host
+restrictions. Clients may discover and combine local instruction files differently; use the
+[client compatibility table](ai/client-compatibility.md) for the documented paths and limits.
+
 Before planning or editing, discover any nested `AGENTS.md` files on the path to each affected
 file or directory and read the ones whose scope covers the work. If a change spans directories,
 inspect the applicable local guidance for each area. Do not load unrelated service guides as if
@@ -134,6 +139,9 @@ replace the required post-step workflow. Briefly identify selected skills in wor
 Files under `.github/skills/` are vendor discovery adapters, not a second skill system.
 `.github/skills/code-review/SKILL.md` and `.github/skills/pr-description/SKILL.md` route GitHub
 Copilot to their canonical workflows under `ai/skills/`.
+The ticket-stage adapters under `.github/skills/` and `.claude/skills/` likewise route to the
+four canonical ticket workflows; `.continue/rules/CONTINUE.md` routes Continue through this
+catalog. Their presence alone does not prove a client read the target file.
 
 ## Repository Conventions
 

@@ -18,7 +18,9 @@ The `ai/` directory is the repository-owned, vendor-agnostic framework for AI-as
 
 ## Purpose
 
-This framework exists to make AI-assisted work repeatable, auditable, and portable across tools. It separates stable repository policy from reusable workflows, prompts, examples, and local ticket artifacts.
+This framework exists to make AI-assisted work repeatable and auditable, with portability checked
+per client and mode. It separates stable repository policy from reusable workflows, prompts,
+examples, and local ticket artifacts.
 
 ## Structure
 
@@ -29,6 +31,7 @@ This framework exists to make AI-assisted work repeatable, auditable, and portab
 - `templates/` - reusable requirements assessment, ticket-content specification, delivery plan, and PR templates
 - `checks/` - task checklists
 - `artifacts/` - local ticket working files, standalone or grouped under `epic-<number>/`, excluded from Git
+- [`client-compatibility.md`](client-compatibility.md) - versioned client discovery and verification status
 
 ## Source Of Truth
 
@@ -43,7 +46,12 @@ instruction-precedence layer or a grant of tool permissions.
 Tool-specific files should be thin pointers into the canonical framework.
 
 - `CONTINUE.md` is the root Continue-facing pointer for human discoverability.
-- `.continue/rules/CONTINUE.md` is the Continue adapter for repository rules only.
+- `.continue/rules/CONTINUE.md` is the Continue-discovered rule routing repository guidance and
+  stage selection to the canonical catalog.
+- `CLAUDE.md` imports `AGENTS.md` for Claude Code sessions that do not read it directly;
+  `.claude/skills/` contains ticket-stage discovery pointers.
+- `.github/skills/ticket-*/SKILL.md` exposes the four ticket stages to GitHub Copilot skill
+  discovery.
 - `.github/skills/code-review/SKILL.md` is the GitHub Copilot discovery adapter for the canonical
   code-review workflow under `ai/skills/`.
 - `.github/skills/pr-description/SKILL.md` is the GitHub Copilot discovery adapter for the
@@ -52,6 +60,8 @@ Tool-specific files should be thin pointers into the canonical framework.
   corresponding adapters.
 
 These files must redirect to `AGENTS.md` and `ai/`; they must not become an independent rule system.
+See the [client compatibility table](client-compatibility.md) for client/mode status, fixture
+evidence, and host-specific limits.
 
 ## Loading Order
 
@@ -79,7 +89,10 @@ the resolved ticket directory and its relevant artifacts when continuing work.
 
 Use the precedence order and conflict procedure defined in root [`AGENTS.md`](../AGENTS.md).
 This manifest describes how to load the shared framework; it does not maintain a second precedence
-list. Nested instruction discovery is scoped to the affected paths as described there.
+list. Nested instruction discovery is scoped to the affected paths as described there. Repository
+precedence applies within each client's higher-level instruction, permission, and security
+hierarchy; it cannot override host restrictions. A client's native local-file order may differ,
+so test conflict handling in that client before claiming equivalent behavior.
 
 ## Maintenance Rules
 
