@@ -15,9 +15,14 @@
 ## Review Summary
 
 - Outcome: <Findings identified / No findings identified / Review incomplete>
+- Review mode: <Local proposed change / Published PR revision>
+- Strict upstream match: <Not requested / passed with local and fetched SHAs / failed with reason>
 - Change reviewed: <branch or change identifier; intended PR base ref and resolved base SHA;
   merge-base SHA; head SHA; whether base freshness was verified>
-- Working tree: <clean / staged, unstaged, and untracked changes with counts and paths>
+- Published PR identity: <PR URL, metadata source/time, base/head repository and ref, reported and
+  fetched SHAs; or Not applicable for a local review>
+- Working tree: <local mode: clean or staged, unstaged, and untracked paths; published mode: local
+  state excluded from published-revision claims>
 - Ticket: <ticket-id>
 
 ## Findings

@@ -21,6 +21,8 @@ Choose the execution mode before reviewing:
 
 - For a review from a local checkout that produces a ticket PR review artifact, resolve
   `<ticket-dir>` through root `AGENTS.md` and follow [local review](references/local-review.md).
+  Select a local proposed-change review or exact published-PR verification before collecting evidence;
+  add the strict upstream match to the local review only when specifically requested.
 - For GitHub Copilot code review on a pull request, read and follow
   [GitHub review](references/github-review.md).
 
