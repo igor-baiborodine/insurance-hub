@@ -140,7 +140,7 @@ For each step:
 - keep scope tight to the step at hand
 - validate the proposed implementation critically instead of accepting the first workable approach
 - For QA cluster, Flux, DNS, or registry-pull work, apply the repository
-  [QA cluster network recovery rule](../../rules/repo-rules.md#qa-cluster-network-recovery) before
+  [QA network recovery runbook](../../../k8s/base-cluster-how-tos.md#qa-network-recovery) before
   classifying stale source or image state as a repository defect.
 
 ### 4. Apply Post-Step Workflow

@@ -16,10 +16,9 @@
 # Go API and Transport Contracts
 
 Apply when designing, implementing, changing, or reviewing Go HTTP APIs, gRPC services, HTTP
-facades, and OpenAPI descriptions. Use [Go architecture](go-architecture.md) for dependency and
-composition boundaries, [Go development](go-development.md) for lifecycle and the mandatory
-Makefile interface, [Go testing](go-test.md) for test design, and
-[Go validation](go-validation.md) for execution and evidence.
+facades, and OpenAPI descriptions. Use [Go rules](go-rules.md) to select other policies for the
+affected boundary; apply [Go architecture](go-architecture.md) when dependency or composition
+boundaries change.
 
 ## Transport design and ownership
 

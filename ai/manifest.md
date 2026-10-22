@@ -66,26 +66,10 @@ Before planning or editing, follow `AGENTS.md` to discover and load nested instr
 to the affected paths. Do not load unrelated service guides. Root `AGENTS.md` is the canonical
 definition of instruction precedence, local-guide scope, and conflict handling.
 
-For defining future scope, use
-[`ticket-requirements-workflow`](skills/ticket-requirements-workflow/SKILL.md) to write classified
-requirements in `<ticket-dir>/<ticket>-requirements.md` using `ai/templates/requirements-template.md`
-and stop after assessment. It does not require ticket content to exist first. When specification
-drafting is requested, use
-[`ticket-specification-workflow`](skills/ticket-specification-workflow/SKILL.md) to resume from
-that assessment and recheck readiness, potentially in a later session. Neither skill automatically
-creates an implementation plan. Requirements record assessment and provenance; ticket content
-remains the authoritative implementation specification. Existing ready tickets do not require a
-retrospective assessment.
-
-For planning or implementing a ticket, use
-[`ticket-implementation-workflow`](skills/ticket-implementation-workflow/SKILL.md) to validate
-readiness and create `<ticket-dir>/<ticket>-delivery-steps.md` before execution. Read
-`<ticket-dir>/<ticket>-ticket-content.md` as the specification before assessing readiness or
-planning; follow `AGENTS.md` if it is missing or empty. `ai/templates/ticket-content-template.md`
-provides its structure; no separate spec document is required. Stop after the delivery plan when
-only planning is requested. When implementation is requested, execute one tracked step at a time
-and apply `ticket-post-step-workflow` after each completed step. Load the existing delivery plan
-and relevant step summaries from the same directory when continuing work.
+The root [Skills catalog](../AGENTS.md#skills) routes assessment, specification, implementation,
+and post-step work. Each selected skill owns its procedure and stopping point. The requirements
+file records assessment; ticket content is the authoritative implementation specification. Reuse
+the resolved ticket directory and its relevant artifacts when continuing work.
 
 ## Precedence
 

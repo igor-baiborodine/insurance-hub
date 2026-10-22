@@ -14,9 +14,7 @@
 # Go Development
 
 Apply to handwritten Go services and their contracts, persistence, and runtime configuration.
-Load [Go architecture](go-architecture.md), [Go API and transport](go-api-transport.md),
-[Go testing](go-test.md), [Go formatting](go-formatting.md), and
-[Go validation](go-validation.md) alongside this rule.
+Use [Go rules](go-rules.md) to select the other policies for the affected boundary.
 Before planning or editing, discover and read the service-local `AGENTS.md` files applicable to
 each affected path, following the scope, precedence, and conflict procedure in
 [the root guide](../../AGENTS.md). Local Go conventions may add scoped detail; they do not silently

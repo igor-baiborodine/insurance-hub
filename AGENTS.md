@@ -32,11 +32,12 @@ Treat API contracts, DTOs, validation, persistence behavior, and security behavi
 
 Use these top-level directories to orient work:
 
-- `legacy/` contains the current Java services, API modules, and legacy frontend applications.
+- `legacy/` contains the Java services, API modules, and legacy frontend applications.
+- `services/` contains Go business services; `templates/` contains service scaffolds.
 - `k8s/` contains Kubernetes, bootstrap, Flux, and deployment-related automation.
 - `docs/` contains system analysis, migration notes, business flows, and local setup documentation.
 - `ai/` contains the canonical AI workflow framework for this repository.
-- `local-dev/` contains developer environment helper scripts.
+- `scripts/` contains repository tooling and developer helpers.
 
 When changing service behavior, identify whether the work belongs in a `*-service` module, a `*-service-api` contract module, the frontend, or deployment/configuration assets.
 
@@ -103,29 +104,10 @@ for missing content rather than inventing requirements. No separate spec documen
 Stop after the delivery plan when only planning is requested. When implementation is requested,
 execute one tracked step at a time and apply `ticket-post-step-workflow` after each completed step.
 
-For non-trivial ticket work, follow this spec-first lifecycle. Enter at the requested stage using
-existing artifacts, and stop at its output unless later stages are also requested:
-
-1. Assess the scope and supplied acceptance criteria; record classified must-have and nice-to-have
-   requirements, evidence, and open questions in `<ticket-dir>/<ticket>-requirements.md`.
-2. Resolve blocking questions before specification drafting. Carry forward only bounded decisions
-   with a safe investigation scope, responsible role, expected evidence, acceptance condition,
-   and explicitly blocked dependent work.
-3. Draft `<ticket-dir>/<ticket>-ticket-content.md` from the assessed requirements, mapping
-   must-haves to observable acceptance criteria and preserving optional-work exclusions.
-4. When planning is requested, recheck specification readiness and create
-   `<ticket-dir>/<ticket>-delivery-steps.md`, ordering prerequisite decision steps before dependent
-   work. Stop here for a plan-only request.
-5. When implementation is requested, execute one ready delivery step at a time. Resolve prerequisite
-   decisions, update the specification, and recheck readiness before starting dependent work.
-6. Validate each step against its requirements using checks appropriate to the changed modules;
-   address failures before treating the step as complete.
-7. Apply `ticket-post-step-workflow` after each completed step to update the tracker, validation
-   evidence, summary, and branch snapshot. Repeat execution, validation, and post-step updates
-   for the remaining delivery steps.
-8. Check acceptance-criteria coverage and required completion evidence. Summarize what changed,
-   what was verified, and any blockers or follow-up; do not claim ticket completion while required
-   outcomes or checks remain unresolved.
+For non-trivial ticket work, enter at the requested stage and follow the selected skill's
+procedure. Preserve the stage stopping points above. Resolve prerequisite decisions and update
+the specification before dependent implementation. Validate each delivery step, apply the post-step
+workflow, and check acceptance-criteria coverage and required evidence before claiming completion.
 
 For small mechanical changes, keep the workflow lightweight, but still read relevant local code before editing and validate the result.
 
@@ -162,8 +144,7 @@ Copilot to their canonical workflows under `ai/skills/`.
 - Follow [the Git rules](ai/rules/git-rules.md) when working with branches, preparing or reviewing
   commits, or managing the Git working tree and history.
 - For Go implementation, migration, or tooling work, load
-  [the Go entry point](ai/rules/go-rules.md) and all six linked rules: architecture, API and
-  transport, development, testing, formatting, and validation.
+  [the Go entry point](ai/rules/go-rules.md) and the rules it selects for the affected boundaries.
 - Use Python as an auxiliary language for administrative and repository tooling when structured
   data, validation, or orchestration makes Bash unwieldy. Keep simple shell tasks in Bash and
   preserve the existing service languages and migration direction. Before implementing or

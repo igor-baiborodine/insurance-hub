@@ -4,6 +4,7 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
 - [Prerequisites](#prerequisites)
+- [QA Network Recovery](#qa-network-recovery)
 - [Clean Reconstruction](#clean-reconstruction)
 - [Local Dev](#local-dev)
   - [Manage Cluster](#manage-cluster)
@@ -55,6 +56,34 @@
     sudo iptables -L FORWARD -v -n | grep "Chain FORWARD"
     Chain FORWARD (policy ACCEPT 340 packets, 335K bytes)
     ```
+
+## QA Network Recovery
+
+The maintainer's `qa-insurance-hub` cluster can lose outbound forwarding when the host
+`iptables` `FORWARD` policy is not `ACCEPT`. Check this condition before diagnosing a repository,
+Flux, DNS, or image defect when several symptoms appear together:
+
+- Flux reports `lookup github.com on 10.43.0.10:53: server misbehaving`.
+- CoreDNS reports upstream UDP timeouts to `8.8.8.8:53`.
+- Workloads report GHCR HTTPS timeouts or `ImagePullBackOff`.
+- The Flux source and Kustomization remain on an older revision despite newer desired state.
+
+A maintainer with host administration access should inspect the active policy with
+`sudo iptables -L FORWARD -v -n`, set it with `sudo iptables -P FORWARD ACCEPT` when required, and
+persist it with `sudo netfilter-persistent save` as described in [Prerequisites](#prerequisites).
+The policy change takes effect without restarting Docker or LXD. Verify the save or equivalent
+persistent configuration before claiming persistence.
+
+After recovery, use the explicit `qa-insurance-hub` context and request or await normal Flux
+reconciliation. The source is `flux-system/insurance-hub` and the service Kustomization is
+`flux-system/qa-svc`. Verify fresh evidence: the GitRepository must be ready on the expected
+current `main` revision, the Kustomization ready on that revision, and affected deployments using
+their checked-in images and becoming ready. Keep deployment changes under Flux ownership; do not
+bypass the failure with an ad hoc workload apply.
+
+If interactive `sudo` is unavailable, record the host action as blocked and give the maintainer
+the inspection and recovery commands above. Treat later QA provisioning or activation as blocked
+until fresh source, reconciliation, image-pull, and workload-readiness evidence passes.
 
 ## Clean Reconstruction
 
