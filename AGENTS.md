@@ -153,6 +153,9 @@ catalog. Their presence alone does not prove a client read the target file.
   commits, or managing the Git working tree and history.
 - For Go implementation, migration, or tooling work, load
   [the Go entry point](ai/rules/go-rules.md) and the rules it selects for the affected boundaries.
+- For Kubernetes, Helm, Flux, cluster bootstrap, infrastructure administration, or observability
+  work, load [the infrastructure entry point](ai/rules/infrastructure-rules.md) and follow its
+  change-to-check index and relevant runbooks.
 - Use Python as an auxiliary language for administrative and repository tooling when structured
   data, validation, or orchestration makes Bash unwieldy. Keep simple shell tasks in Bash and
   preserve the existing service languages and migration direction. Before implementing or
