@@ -32,6 +32,11 @@ Use before considering a ticket complete.
 - [ ] A relevant behavior mutation fails its corresponding acceptance check where practical, or
   the record explains why sensitivity was not exercised and what remains unverified. Sensitive
   invariants use property or differential checks when they provide stronger evidence than examples.
+- [ ] Agent actions stayed within the selected
+  [task profile](../rules/agent-security-rules.md#task-profiles); any host control or profile
+  scenario claimed as enforced has actual client/mode and tool/target evidence.
+- [ ] Changes to agent policy, entry points, or permission-bearing workflow instructions were
+  compared with the trusted base and received independent maintainer review before acceptance.
 - [ ] `ai/artifacts/` isolation is verified: the resolved ticket-content path is ignored by
   `.git/info/exclude`, and `git ls-files -- ai/artifacts/` plus
   `git diff --cached --name-only -- ai/artifacts/` report no paths.
