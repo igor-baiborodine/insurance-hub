@@ -15,7 +15,8 @@
 ## Review Summary
 
 - Outcome: <Findings identified / No findings identified / Review incomplete>
-- Change reviewed: <branch or change identifier and base, when known>
+- Change reviewed: <branch or change identifier; intended PR base ref and resolved base SHA;
+  merge-base SHA; head SHA; whether base freshness was verified>
 - Working tree: <clean / staged, unstaged, and untracked changes with counts and paths>
 - Ticket: <ticket-id>
 

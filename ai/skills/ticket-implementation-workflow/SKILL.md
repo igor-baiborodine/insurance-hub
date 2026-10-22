@@ -122,11 +122,13 @@ Implement one delivery step at a time.
 
 For each step:
 
-- Before making any change for the step, refresh the committed-branch snapshot using the post-step
-  workflow's `git diff main <current-branch>` convention and save it to
-  `<ticket-dir>/<ticket>-git-diff.txt`. Confirm `main` and the current branch resolve
-  before replacing the artifact; if they do not, preserve the previous snapshot and report the
-  blocker.
+- Before making any change for the step, identify the intended PR base from the delivery plan
+  or actual PR target. Do not assume `main`; record the selected ref, and resolve ambiguity
+  before refreshing the committed-patch snapshot. Use the post-step workflow's
+  [snapshot helper](../ticket-post-step-workflow/scripts/refresh_git_diff.sh) with that base,
+  the current branch ref, and `<ticket-dir>/<ticket>-git-diff.txt`. It records base/head and
+  merge-base SHAs and preserves the previous snapshot if a ref or comparison fails. The snapshot
+  covers committed changes only; inspect local changes separately.
 - Immediately check `git status --short` and report any staged, unstaged, or untracked work to the
   end user before editing. Inspect those changes and preserve them. If they overlap planned files or
   make ownership/scope unclear, resolve that with the user before proceeding.

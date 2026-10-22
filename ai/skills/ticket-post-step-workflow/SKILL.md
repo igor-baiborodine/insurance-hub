@@ -25,6 +25,7 @@ Use this skill only after a concrete delivery step has been completed.
 - `<ticket-dir>` resolved using [AGENTS.md Artifact Rules](../../../AGENTS.md#artifact-rules)
 - Current step number
 - Current branch name
+- Intended PR base ref from the delivery plan or actual PR target
 - Short step summary or title
 
 ## Required Post-Step Actions
@@ -48,12 +49,25 @@ artifact preflight before writing. Perform these actions in order:
      relevant checks that were not run or are blocked; use the record format below
 
 3. Refresh the git diff artifact:
-   - `git diff main <current-branch> > <ticket-dir>/<ticket>-git-diff.txt`
-   - Substitute the actual branch, resolved directory, and ticket ID before running the command;
-     quote the output path as needed.
-   - This snapshot compares committed trees only; staged, unstaged, and untracked work is not
-     included. Keep it as the branch-level review artifact and do not represent it as a complete
-     working-tree diff.
+   - Select the intended PR base from the delivery plan or actual PR target; for a stacked PR,
+     use the immediate target branch. Do not assume `main`. If the target is ambiguous, resolve
+     it before refreshing the snapshot. Record whether the chosen local or remote-tracking ref
+     is known to be current; a local ref alone does not prove remote freshness.
+   - Run from the repository root, substituting the actual refs and artifact path:
+
+     ```sh
+     ai/skills/ticket-post-step-workflow/scripts/refresh_git_diff.sh \
+       . <intended-base-ref> <current-branch-ref> \
+       <ticket-dir>/<ticket>-git-diff.txt
+     ```
+
+   - The helper verifies both refs and their merge base before replacing the snapshot. It records
+     the intended base ref, resolved base/head/merge-base SHAs, and the committed PR patch equivalent
+     to `git diff <base>...<head>`. If it fails, keep the prior snapshot and report the blocker;
+     never describe that prior snapshot as current evidence.
+   - Record staged, unstaged, and relevant untracked work separately with `git status --short`,
+     `git diff --cached`, `git diff`, and direct inspection. The snapshot excludes those changes;
+     record its identity and that limitation in the step summary.
 
 ## Constraints
 
@@ -84,7 +98,8 @@ step summary, record validation in a table with these columns:
 
 - Write ticket artifacts only under the resolved `<ticket-dir>`.
 - Do not create extra documentation files beyond the tracker and per-step summary unless the user asks.
-- Do not run `git diff` in another artifact format unless the user asks.
+- Keep the snapshot in the standard `.txt` artifact with the helper's identity header and patch;
+  do not create other diff artifacts unless the user asks.
 - Keep the per-step summary concise and factual.
 - Before any commit, inspect the complete proposed change in the working tree, including the
   branch snapshot, staged and unstaged changes, untracked files, and generated files. Apply the

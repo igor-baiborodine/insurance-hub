@@ -51,12 +51,17 @@ part of the later working-tree review and do not by themselves fail synchronizat
 
 After the synchronization gate passes:
 
-1. Confirm that local `main` and the current branch resolve. Refresh the committed-tree snapshot
-   with `git diff main <current-branch> > <ticket-dir>/<ticket>-git-diff.txt`, substituting the
-   actual branch, directory, and ticket ID and quoting the output path as needed. If either ref
-   cannot be resolved, preserve the previous snapshot and stop with a blocker.
-2. Immediately inspect `git status --short`, `git diff --cached`, and `git diff`. Read every untracked
-   proposed file. Record whether the tree is clean or list staged, unstaged, and untracked paths.
+1. Identify the intended PR base from the delivery plan or actual PR target, including the
+   immediate parent for a stacked PR. If it is missing or ambiguous, stop and report that blocker;
+   do not substitute `main`. Record the selected ref and whether its freshness was verified.
+   Refresh the snapshot with
+   [the shared helper](../../ticket-post-step-workflow/scripts/refresh_git_diff.sh), passing the
+   repository root, intended base ref, current branch ref, and ticket diff path. It records
+   base/head/merge-base SHAs and the committed patch from merge base to head. If a ref or merge
+   base cannot be resolved, preserve the previous snapshot and stop.
+2. Immediately inspect `git status --short`, `git diff --cached`, and `git diff`. Read every
+   relevant untracked proposed file. Record whether the tree is clean or list staged, unstaged,
+   and untracked paths.
 3. Read the complete ticket specification, delivery tracker, completed step summaries, refreshed
    snapshot, and relevant supporting artifacts. An empty snapshot does not prove an empty change;
    reconcile it with branch and working-tree state.
@@ -87,7 +92,9 @@ separate review file for each PR.
 Assign finding IDs in order (`F-001`, `F-002`, ...). Under repository-rule compliance, list every
 applicable rule area as **Satisfied**, **Finding identified**, **Unverified**, or, with a concrete
 reason, **Not applicable**. State the working-tree state and the local/fetched commit proven equal by
-the synchronization gate.
+the synchronization gate. State the intended PR base, its resolved SHA and freshness status, the
+merge-base SHA, and the head SHA. Distinguish the committed patch from staged, unstaged, and untracked
+work; never imply that the snapshot alone is the entire proposal.
 
 Before finishing, confirm each finding is reproducible and actionable, findings are severity-ordered,
 questions are not phrased as confirmed bugs, and claimed passes have inspected implementation or

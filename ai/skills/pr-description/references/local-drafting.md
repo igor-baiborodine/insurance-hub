@@ -32,11 +32,14 @@ the ticket ID.
 
 1. Read the complete ticket specification and shared PR template. Read the delivery tracker and
    completed step summaries to understand delivered scope and recorded validation.
-2. Read `<ticket-dir>/<ticket>-git-diff.txt`, then inspect the current branch and working
-   tree. The snapshot uses `git diff main <current-branch>` and covers committed trees only; it
-   omits staged, unstaged, and untracked changes. Inspect `git status --short`, `git diff --cached`,
-   `git diff`, and every relevant untracked file so the description represents the complete
-   proposed change.
+2. Identify the intended PR base from the delivery plan or actual PR target. Read
+   `<ticket-dir>/<ticket>-git-diff.txt` and check its base/head SHAs against the selected base
+   and current branch. If missing or stale, refresh it with
+   [the shared helper](../../ticket-post-step-workflow/scripts/refresh_git_diff.sh) after artifact
+   preflight; if the base is ambiguous or cannot be resolved, report the blocker. The snapshot
+   covers committed changes from merge base to head only. Inspect `git status --short`,
+   `git diff --cached`, `git diff`, and every relevant untracked file so the description represents
+   the complete proposed change. State the base and any unverified base freshness.
 3. Compare ticket requirements with the changed files and supporting evidence. State an
    investigation cause only when evidence establishes it; otherwise identify it as unconfirmed.
 4. Inspect the owning Makefiles and repository workflows before naming validation commands. For Go
