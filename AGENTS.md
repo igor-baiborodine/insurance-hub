@@ -202,26 +202,53 @@ AI agents must not load or use these documents as instructions. Follow this guid
 
 ## Artifact Rules
 
-`<ticket>` is the issue identifier, such as `issue-131`. `<ticket-dir>` is its resolved artifact
-directory, relative to the repository root. Supported layouts are:
+`<ticket>` is the issue identifier, such as `issue-131`, or the branch-derived identifier for
+ad hoc work without an issue number. `<ticket-dir>` is its resolved artifact directory, relative
+to the repository root. Supported layouts are:
 
 | Ticket organization | `<ticket-dir>` | Ticket-content example |
 | --- | --- | --- |
 | Standalone ticket | `ai/artifacts/<ticket>` | `ai/artifacts/issue-123/issue-123-ticket-content.md` |
 | Ticket grouped under an epic | `ai/artifacts/epic-<number>/<ticket>` | `ai/artifacts/epic-4.2/issue-131/issue-131-ticket-content.md` |
 | Epic's own ticket | `ai/artifacts/epic-<number>` | `ai/artifacts/epic-4.2/issue-130-ticket-content.md` |
+| Ad hoc ticket | `ai/artifacts/adhoc/<ticket>` | `ai/artifacts/adhoc/docs-ai-enhance-rules-and-skills-4/docs-ai-enhance-rules-and-skills-4-ticket-content.md` |
+
+For ad hoc work, derive `<ticket>` from the current Git branch reported by
+`git branch --show-current`, replacing every `/` with `-`. Preserve the branch type, remaining
+name segments, and suffixes; do not invent an issue number or use the generic `adhoc` as the
+ticket identifier. Use the resulting value for both the task folder name and every ticket-artifact
+filename prefix. For example, branch `docs/ai-enhance-rules-and-skills-4` yields:
+
+```text
+ai/artifacts/adhoc/docs-ai-enhance-rules-and-skills-4/
+  docs-ai-enhance-rules-and-skills-4-requirements.md
+  docs-ai-enhance-rules-and-skills-4-ticket-content.md
+  docs-ai-enhance-rules-and-skills-4-delivery-steps.md
+  docs-ai-enhance-rules-and-skills-4-step-01-<summary>.md
+  docs-ai-enhance-rules-and-skills-4-git-diff.txt
+```
+
+Use a dedicated task folder rather than placing new task artifacts directly in the shared
+`ai/artifacts/adhoc/` directory. If no current branch is available, ask which branch identifies
+the work before creating artifacts; do not switch branches or invent a prefix. Resolve the
+identifier and directory once, then reuse them across stages and sessions for the same task.
+Explicit user-supplied paths and existing task artifacts follow the resolution rules below;
+do not automatically rename or relocate existing artifacts to enforce the new convention.
 
 Resolve the directory once and reuse it for the entire ticket workflow:
 
 1. Honor an explicit user-supplied ticket-content path or artifact directory under `ai/artifacts/`.
-2. Otherwise, search existing ticket-content files, requirements files, and ticket folders in both
-   standalone and epic-grouped locations. Include ignored files/directories in discovery: ordinary `rg --files`
+2. Otherwise, search existing ticket-content files, requirements files, and ticket folders in
+   standalone, epic-grouped, and `ai/artifacts/adhoc/` locations. Include ignored files/directories
+   in discovery: ordinary `rg --files`
    omits these local artifacts. Reuse the matching location, including an existing empty placeholder
    folder; do not create a flat duplicate because a nested ticket-content file is missing.
 3. If multiple locations match and the session does not identify the intended one, ask which to
    use before writing. Do not merge, relocate, or delete artifacts automatically.
-4. If no location exists, use the epic grouping specified by the user or current task context;
-   otherwise default to `ai/artifacts/<ticket>`. Do not infer epic membership from the issue number.
+4. If no location exists, use `ai/artifacts/adhoc/<ticket>` for ad hoc work, with the branch-derived
+   identifier above. For issue-based tickets, use the epic grouping specified by the user or
+   current task context; otherwise default to `ai/artifacts/<ticket>`. Do not infer epic membership
+   from the issue number.
 
 Keep the requirements assessment, ticket-content specification, delivery plan, step summaries,
 diff snapshots, reviews, and PR drafts together in `<ticket-dir>`. Filenames retain the ticket ID,
