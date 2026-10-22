@@ -19,6 +19,9 @@ Use before implementing non-trivial changes.
   and `git ls-files -- ai/artifacts/` reports no indexed artifact paths.
 - [ ] For ticket work, `<ticket-dir>/<ticket>-ticket-content.md` exists and was read as the specification.
 - [ ] Ticket readiness was checked.
+- [ ] [GitHub ticket synchronization](../rules/spec-first-rules.md#github-ticket-synchronization)
+  passed for the current local specification, with explicit permission and read-back evidence for
+  any update, or is not applicable because this is an ad hoc ticket. Pending sync blocks implementation.
 - [ ] Any bounded prerequisite decisions have explicit resolution steps and evidence; dependent
   implementation remains blocked until ticket content is updated and readiness is rechecked.
 - [ ] Business objective is clear.

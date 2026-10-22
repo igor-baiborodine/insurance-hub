@@ -23,4 +23,8 @@ writing artifacts, and load the existing records needed for the requested stage.
 is the implementation specification; selected skills own assessment, drafting, planning, and
 post-step procedures.
 
+For issue-based tickets, apply the [GitHub synchronization checkpoints](../rules/spec-first-rules.md#github-ticket-synchronization),
+including on implementation resume. Local content is authoritative; GitHub updates require
+explicit permission. Ad hoc tickets are exempt.
+
 Briefly identify the rules and skills used in working notes.

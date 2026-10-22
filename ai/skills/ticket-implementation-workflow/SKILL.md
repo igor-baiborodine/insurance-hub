@@ -50,6 +50,12 @@ planning. Use `ai/templates/ticket-content-template.md` when helpful to structur
 If the ticket content is unavailable, ask the user for it rather than inferring requirements from
 the ticket ID. Preserve existing content and incorporate agreed clarifications into this file.
 
+Before planning or starting/resuming implementation, apply
+[GitHub ticket synchronization](../../rules/spec-first-rules.md#github-ticket-synchronization).
+Issue-based tickets require a current verified body match; every local specification edit triggers
+the authorized update procedure. Record ad hoc tickets as not applicable. A pending or failed
+check blocks dependent planning/implementation, while local clarification and drafting may continue.
+
 Before implementation, confirm that the ticket-content specification contains enough information to proceed.
 
 Check for:
@@ -143,6 +149,8 @@ For each step:
   make ownership/scope unclear, resolve that with the user before proceeding.
 - read the relevant local code before changing anything
 - implement against the ticket-content specification and record agreed requirement changes there before adjusting the plan
+- after any ticket-content revision, apply the synchronization rule before dependent work;
+  prepare the GitHub update and obtain explicit permission unless existing authorization covers it
 - resolve prerequisite decision gates and recheck readiness before starting dependent implementation
 - challenge assumptions and weak designs
 - implement acceptance checks against the independently specified expected result, not output
@@ -172,6 +180,8 @@ That workflow updates the delivery tracker, creates the per-step summary, and re
 Before considering the ticket workflow complete, ensure:
 
 - the ticket-content file exists and reflects the agreed requirements
+- a fresh GitHub issue-body comparison passed for that final specification, or the ticket is
+  explicitly ad hoc; pending publication or unavailable verification is not a completion pass
 - ticket readiness was explicitly validated
 - the delivery-step plan artifact exists
 - each completed step has a matching summary artifact

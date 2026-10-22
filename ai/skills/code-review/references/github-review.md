@@ -43,6 +43,11 @@ to ticket artifacts, uncommitted work, local branches, local validation output, 
 document. Use the GitHub issue, PR description, committed repository files, PR diff, and exposed
 check results as the available evidence.
 
+For issue-based work, assess any supplied [ticket synchronization evidence](../../../rules/spec-first-rules.md#github-ticket-synchronization)
+against the current issue body. Without the local specification, report the local-to-GitHub match
+as unverified; remote issue availability alone cannot prove it. Do not attempt to repair drift.
+Ad hoc work has no issue-body synchronization requirement.
+
 ## Output
 
 - Place each actionable finding on the smallest relevant changed line.

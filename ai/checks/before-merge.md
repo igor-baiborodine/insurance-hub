@@ -10,6 +10,10 @@
 Use before considering a ticket complete.
 
 - [ ] The ticket-content file reflects the agreed requirements used for implementation and validation.
+- [ ] A fresh [GitHub ticket synchronization](../rules/spec-first-rules.md#github-ticket-synchronization)
+  check matches the final local specification to the exact issue body, with update authorization
+  and read-back evidence when applicable, or records the ad hoc exemption. Unverified or pending
+  synchronization blocks ticket completion.
 - [ ] Ticket artifacts use the same resolved `<ticket-dir>` from
   [AGENTS.md Artifact Rules](../../AGENTS.md#artifact-rules), with links correct for its nesting depth.
 - [ ] Delivery tracker is updated.

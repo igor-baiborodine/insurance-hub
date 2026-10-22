@@ -45,6 +45,10 @@ artifact preflight before writing. Perform these actions in order:
    - include what changed or was inspected
    - include key decisions
    - include blockers or follow-up for the next step
+   - record [GitHub ticket synchronization](../../rules/spec-first-rules.md#github-ticket-synchronization)
+     evidence when ticket content changed, including update permission and read-back verification,
+     or the ad hoc exemption; unresolved synchronization blocks dependent work and ticket completion
+   - keep synchronization evidence in the summary, not the authoritative ticket-content body
    - include a `Validation Evidence` section with one row for each applicable check, including
      relevant checks that were not run or are blocked; use the record format below
    - for behavior changes, identify the specification's AC/example/check IDs supported by each

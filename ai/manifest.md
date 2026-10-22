@@ -85,6 +85,10 @@ and post-step work. Each selected skill owns its procedure and stopping point. T
 file records assessment; ticket content is the authoritative implementation specification. Reuse
 the resolved ticket directory and its relevant artifacts when continuing work.
 
+For issue-based tickets, follow [GitHub ticket synchronization](rules/spec-first-rules.md#github-ticket-synchronization)
+for local authority, comparison checkpoints, explicit update permission, and evidence. Ad hoc
+tickets are exempt; Git synchronization does not prove issue-body synchronization.
+
 ## Precedence
 
 Use the precedence order and conflict procedure defined in root [`AGENTS.md`](../AGENTS.md).

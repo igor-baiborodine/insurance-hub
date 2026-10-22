@@ -16,6 +16,10 @@ Use ticket-specification-workflow when drafting from assessed requirements. Draf
 ticket content; the implementation workflow creates a delivery plan only when requested.
 This ticket-content file is the specification used for readiness, planning, implementation, and
 validation.
+For issue-based tickets, follow ai/rules/spec-first-rules.md GitHub ticket synchronization:
+the complete local body is authoritative, and each edit triggers an update requiring explicit
+permission. Record the exact repository/issue identity and synchronization evidence in the
+requirements assessment, delivery tracker, or summary, outside this body. Ad hoc tickets are exempt.
 Replace bracketed prompts with ticket-specific content and remove inapplicable bullets.
 Preserve supplied requirements and record agreed clarifications; do not invent missing details.
 When drafting from <ticket>-requirements.md, map must-have IDs to observable ACs, preserve supplied

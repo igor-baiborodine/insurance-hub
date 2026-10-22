@@ -79,6 +79,11 @@ the ticket's applicable outcomes and evidence, including any required CI, manual
 checks. Commits, pushes, publication, merge, and remote issue closure remain separately authorized
 actions; this diagram does not trigger them.
 
+For issue-based work, [GitHub ticket synchronization](../rules/spec-first-rules.md#github-ticket-synchronization)
+also gates planning, implementation/resume, and completion. Every local specification edit
+triggers preparation of a GitHub update with explicit permission; local review checks the match
+without repairing drift. Ad hoc tickets are exempt.
+
 ## Example requests
 
 Replace each placeholder with the real issue or pull request number.

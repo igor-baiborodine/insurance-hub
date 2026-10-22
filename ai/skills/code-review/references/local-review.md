@@ -29,6 +29,12 @@ including existing standalone or epic-grouped locations. Use the same directory 
 and outputs below. Before writing any ticket artifact, perform the root artifact preflight.
 If required ticket content is missing or empty, follow that guide instead of inventing requirements.
 
+Perform the read-only [GitHub ticket synchronization check](../../../rules/spec-first-rules.md#github-ticket-synchronization)
+for issue-based tickets, or record the ad hoc exemption. This gate is distinct from optional Git
+upstream matching. Record current comparison evidence; report drift or unavailable verification
+as a completion blocker while continuing the review. Do not change local ticket content or the
+GitHub issue during review, and do not treat the remote body as a replacement specification.
+
 ## Choose the review mode
 
 - **Local proposed change (default):** Review the identified base, committed local branch patch,

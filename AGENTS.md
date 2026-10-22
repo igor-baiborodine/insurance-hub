@@ -101,6 +101,11 @@ plan when planning or implementation is requested.
 The requirements file records assessment and provenance; ticket content remains the authoritative
 implementation specification. Existing ready tickets do not require a retrospective assessment.
 
+For issue-based tickets, apply the [GitHub ticket synchronization rule](ai/rules/spec-first-rules.md#github-ticket-synchronization):
+local ticket content is the source of truth, and every content edit triggers a proposed GitHub
+issue-body update requiring explicit user permission. Check synchronization at the rule's
+workflow checkpoints; ad hoc tickets are exempt. Keep synchronization evidence outside ticket content.
+
 For planning or implementing a ticket, use `ticket-implementation-workflow` to validate readiness
 and create `<ticket-dir>/<ticket>-delivery-steps.md` before execution. Read
 `<ticket-dir>/<ticket>-ticket-content.md` as the specification before assessing readiness or

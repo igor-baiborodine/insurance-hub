@@ -1,6 +1,6 @@
 ---
 name: ticket-specification-workflow
-description: Draft or revise local ticket-content specifications from an existing requirements assessment. Use when ticket specification drafting is requested, including in a later session; does not create an implementation plan, implement, or publish the ticket.
+description: Draft or revise local ticket-content specifications from an existing requirements assessment. Use when ticket specification drafting is requested, including in a later session; does not plan or implement delivery. GitHub synchronization requires separate explicit permission.
 ---
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
@@ -95,6 +95,11 @@ artifact directory. Preserve the assessment's in-scope and out-of-scope boundari
   artifacts. Recheck artifact isolation before completion.
 - Report the specification path, readiness, unresolved decision gates, and validation actually
   performed. A drafted specification is not evidence that the future feature was implemented.
+- For an issue-based ticket, apply [GitHub ticket synchronization](../../rules/spec-first-rules.md#github-ticket-synchronization)
+  after final formatting: prepare the issue-body difference and request explicit update permission
+  unless existing authorization covers it. Verify the published body after any authorized update.
+  Keep evidence in the requirements assessment when no tracker exists. Report pending or blocked
+  synchronization separately from specification readiness; ad hoc tickets are exempt.
 - Stop after specification drafting. If planning or implementation is separately requested,
   hand off to [ticket implementation](../ticket-implementation-workflow/SKILL.md), which owns
   the delivery plan, readiness recheck, and post-step workflow. This skill does not authorize
