@@ -96,6 +96,11 @@ so test conflict handling in that client before claiming equivalent behavior.
 
 ## Maintenance Rules
 
+- Run `make ai-check` after changing the tracked framework or its adapters. The check validates
+  structure, links, and fast failure fixtures without modifying files. To include one ignored
+  local ticket, pass its resolved path, for example
+  `make ai-check AI_CHECK_TICKET_DIR=ai/artifacts/adhoc/my-ticket`; hosted CI runs without that
+  local-only variable.
 - Keep rules stable and concise.
 - Keep skills procedural and task-specific.
 - Keep the `AGENTS.md` Skills catalog synchronized with canonical directories under `ai/skills/`.

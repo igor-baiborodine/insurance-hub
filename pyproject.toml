@@ -44,6 +44,7 @@ known-first-party = [
     "check_cases",
     "check_ci",
     "check_docs",
+    "check_ai_framework",
     "check_java_results",
     "check_render",
     "compare_http",

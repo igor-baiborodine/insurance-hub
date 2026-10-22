@@ -1,0 +1,43 @@
+name: AI Framework PR Check
+
+on:
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'CONTINUE.md'
+      - 'ai/**'
+      - '.claude/**'
+      - '.continue/**'
+      - '.github/copilot-instructions.md'
+      - '.github/skills/**'
+      - '.github/workflows/ai-framework.yml'
+      - 'Makefile'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'scripts/python/toolchain.mk'
+
+permissions:
+  contents: read
+
+jobs:
+  ai-check:
+    name: Validate framework
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+          enable-cache: true
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
+      - name: Check framework integrity
+        run: make ai-check

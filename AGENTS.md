@@ -271,6 +271,10 @@ Prefer the narrowest validation that proves the change:
 - document any validation that could not be run
 - use `CONTRIBUTING.md`, the root `Makefile`, and module-local build files to choose the correct commands
 
+For changes to the canonical `ai/` framework or its vendor adapters, run `make ai-check`.
+When local ticket artifacts are part of the work, also supply their resolved directory through
+`AI_CHECK_TICKET_DIR`; the hosted gate checks tracked files only.
+
 Do not claim validation was performed unless it was actually run.
 
 ## Safety Expectations
