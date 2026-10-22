@@ -31,6 +31,14 @@ Choose the execution mode before reviewing:
 Assess only areas relevant to the ticket and proposed change:
 
 1. Verify every acceptance criterion and material non-functional requirement against the change.
+   For behavior changes, trace representative success, failure, and compatibility/invariant
+   examples from stable AC IDs to the affected boundary, check/scenario ID, independently expected
+   result, observed result, and final-state evidence. Inspect bug reproductions and independent
+   migration baselines where applicable. A passing assertion copied from the implementation or
+   generated replacement does not establish the expected behavior. Check whether a relevant
+   behavior mutation fails the corresponding check; if not demonstrated, assess the gap without
+   claiming mutation sensitivity. Manual scenarios need a reason automation was unsuitable and
+   an actual observation.
 2. Check behavior, boundaries, validation, errors, cancellation, cleanup, and unsafe defaults where
    applicable.
 3. Build a repository-rule applicability checklist from root and nested `AGENTS.md` files,
@@ -38,6 +46,9 @@ Assess only areas relevant to the ticket and proposed change:
    `ai/checks/before-merge.md`. Apply documented user or ticket exceptions according to precedence.
 4. Inspect authoritative contracts, implementations, callers, and generated sources together.
    Never infer API behavior solely from generated output, a ticket title, or a PR description.
+   For substantial contract, persistence, or architecture choices, inspect the recorded alternatives,
+   tradeoffs, failure modes, migration impact, and rationale against the specification before
+   accepting the selected design.
 5. Assess tests at the changed boundary and inspect the owning Makefiles or other validation entry
    points before accepting coverage claims. For non-core functionality such as auxiliary Python
    scripts, apply the repository's [80/20 test direction](../../rules/repo-rules.md#testability):

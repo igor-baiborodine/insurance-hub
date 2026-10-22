@@ -76,6 +76,11 @@ use “None” or “Not applicable” with a reason where appropriate instead o
   nice-to-haves are independently deferrable improvements. An empty optional section is valid.
 - Use stable requirement IDs, such as `M01` and `N01`, with source, rationale, and observable
   acceptance evidence. Retain IDs during revisions and when linking deferred work.
+- For behavior changes, capture independently expected results for the important success, failure,
+  and compatibility cases while assessing acceptance outcomes. Retain a bug reproduction or state
+  why automation is unavailable; for migration, identify baseline behavior and fixture provenance
+  independently of the proposed replacement. This assessment need not choose test names or claim
+  that planned checks have run.
 - Never trade away applicable security, authentication/authorization, personal-data protection,
   secret handling, data integrity, or mandatory compliance obligations to meet an 80/20 target.
   A safeguard necessary for safe delivery is mandatory; uncertainty about it is a blocker, not

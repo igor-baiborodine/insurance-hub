@@ -45,6 +45,10 @@ identified** and do not invent positive findings.
 ## Review Coverage and Evidence
 
 - Requirement coverage: <criteria assessed and any gaps>
+- Behavior trace, when applicable: <representative requirement/AC/example IDs for success,
+  failure, and compatibility/invariants; affected boundary; check/scenario ID; independently expected result;
+  observed evidence; mutation sensitivity or the unverified gap. Give a reason when a category
+  does not apply.>
 - Source and contracts: <relevant implementation, callers, schemas, or migrations inspected>
 - Tests and validation: <per-check result status, execution source, and freshness for the reviewed
   code/specification; identify stale or identity-incomplete historical results and

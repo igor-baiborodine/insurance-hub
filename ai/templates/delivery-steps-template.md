@@ -29,6 +29,9 @@ directory. When copying this template, update relative links for the destination
 - Scope clear:
 - Contracts clear:
 - Validation clear:
+- Behavior evidence ready, when applicable: [AC IDs and example/check IDs have independent
+  expected results, boundaries, and runnable checks or justified manual scenarios; retain bug
+  reproduction and migration baseline provenance.]
 - Prerequisite decision gates, when conditionally ready: [Decision IDs, safe resolution scope,
   responsible role, evidence/acceptance conditions, and blocked dependent steps. Resolve and
   update ticket content before rechecking readiness for those steps.]
@@ -57,11 +60,15 @@ For multi-PR delivery, mark every step heading with `PR1`, `PR2`, and so on.
 - Modules:
 - Changes:
 - Planned validation:
+- Acceptance examples/check IDs: [Assign applicable specification examples to this step and name
+  the expected failure for a relevant behavior mutation; note property/differential checks when useful.]
 - Artifact:
 
 ## Decisions
 
-- 
+- [For substantial contract, persistence, or architecture choices, summarize alternatives,
+  tradeoffs, failure modes, migration impact, and why the chosen design meets ACs before dependent
+  work. Link the specification's bounded decision gate if unresolved; do not assume its outcome.]
 
 ## Risks
 

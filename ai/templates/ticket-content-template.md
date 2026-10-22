@@ -50,10 +50,10 @@ The change must cover:
 
 ### Acceptance Criteria
 
-- [ ] **[Primary outcome]**: [State an observable result and the input, action, or condition that demonstrates it.]
-- [ ] **[Compatibility or failure behavior, if applicable]**: [State what remains compatible and the expected response to invalid input or failure.]
-- [ ] **[Validation]**: [Name the relevant automated checks or manual scenario and the expected result in the target environment.]
-- [ ] **[Documentation or reproducibility, if applicable]**: [Name the documentation/configuration deliverable and what a developer must be able to reproduce.]
+- [ ] **AC01 — [Primary outcome]**: [State an observable result and the input, action, or condition that demonstrates it. Preserve supplied AC IDs when present.]
+- [ ] **AC02 — [Compatibility or failure behavior, if applicable]**: [State what remains compatible and the expected response to invalid input or failure.]
+- [ ] **AC03 — [Validation]**: [Name the relevant automated checks or justified manual scenario and the expected result in the target environment.]
+- [ ] **AC04 — [Documentation or reproducibility, if applicable]**: [Name the documentation/configuration deliverable and what a developer must be able to reproduce.]
 
 ### Dev Notes
 
@@ -63,5 +63,12 @@ The change must cover:
 - **Security and configuration, when applicable**: [Specify authentication/authorization, validation, secret references, and environment-specific settings without including credentials.]
 - **Dependencies and prerequisites**: [List required tickets, services, tool versions, or infrastructure; distinguish existing dependencies from additions.]
 - **Verification commands and evidence**: [Give the narrowest relevant Make/module commands or manual steps, their working directory/environment, and expected output. Distinguish repository checks from checks requiring a live service or editor.]
+- **Behavior examples and checks, when applicable**: [Use the compact trace below for important success, failure, and compatibility cases. Keep expected results independent of generated output or the proposed replacement. Retain a bug reproduction or explain why it cannot be automated; for migration, identify a separately captured baseline fixture and its provenance. Explain why a manual case cannot be automated. Consider property or differential checks for money, dates, authorization, serialization, and other sensitive invariants when stronger than another example. Remove the table for routine documentation-only changes.]
+
+| Requirement ID when assessed / AC ID | Example ID and kind | Input/action and independent expected result | Boundary | Proposed test or manual scenario ID | Reproduction/baseline source, when applicable |
+| --- | --- | --- | --- | --- | --- |
+| M01 / AC01 | E01 success | [Concrete input/action → expected result from requirement or independently observed behavior] | [Owning module/interface] | [Test name or justified manual scenario ID] | [Bug reproduction or independently captured migration fixture; otherwise —] |
+
+- **Design challenge, when applicable**: [For a substantial contract, persistence, or architecture choice, summarize alternatives and tradeoffs, failure modes, migration impact, and why the selected design meets the ACs. Record an unresolved choice as a bounded prerequisite decision; create a shared architecture decision only when it will be reused beyond this ticket.]
 - **References and decisions**: [Link relevant repository or external documentation and the requirements assessment when present; map requirement IDs to ACs and record agreed decisions or constraints.]
 - **Open questions and prerequisite decisions**: [Write “None”, identify blockers, or describe each bounded deferred decision by ID, safe investigation scope, responsible role, expected evidence, acceptance condition, and blocked dependent work. Require a specification update and readiness recheck before dependent implementation; the delivery plan expands these into ordered steps.]

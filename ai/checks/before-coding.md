@@ -21,5 +21,11 @@ Use before implementing non-trivial changes.
 - [ ] Business objective is clear.
 - [ ] Scope and out-of-scope boundaries are clear.
 - [ ] Contract, persistence, validation, and security expectations are clear when relevant.
+- [ ] For behavior changes, stable AC IDs connect important success, failure, and compatibility
+  examples to independent expected results, affected boundaries, and runnable checks or justified
+  manual scenarios; bug reproductions and migration baseline provenance are retained when relevant.
+- [ ] Substantial contract, persistence, or architecture choices have a recorded design challenge
+  covering alternatives, tradeoffs, failure modes, migration impact, and AC rationale before
+  dependent implementation.
 - [ ] Relevant local code was read.
 - [ ] A delivery plan exists for multi-step work and references the ticket content for ticket-based work.

@@ -60,6 +60,9 @@ Check for:
 - persistence expectations and out-of-scope boundaries
 - permissions and security requirements
 - acceptance criteria that can be tested
+- for behavior changes, stable AC IDs with independent expected outcomes for important success,
+  failure, and compatibility examples, the affected boundary, and a proposed runnable check or
+  justified manual scenario; bug reproduction and migration baseline provenance when applicable
 
 For auxiliary Python work, load [the Python entry point](../../rules/python-rules.md) and all four
 linked rules. Establish why Python fits better than a simple shell workflow, identify the script
@@ -105,6 +108,12 @@ Once the ticket is implementation-ready:
   applicable, and the step summary artifact reference; keep implementation details, findings,
   decisions, and validation results in the dedicated step execution summary document
 - identify module boundaries, tests, and validation checkpoints
+- assign each behavior example/check from the specification to a delivery step; identify the
+  expected failure under a relevant behavior mutation and any property or differential check that
+  gives stronger coverage of a sensitive invariant
+- for substantial contract, persistence, or architecture changes, put the specification's design
+  challenge (alternatives, tradeoffs, failure modes, migration impact, and AC rationale) before
+  dependent implementation; unresolved choices remain prerequisite decision gates
 
 For conditional readiness, put each decision-resolution task before its dependent steps and
 record the gate in the plan. Dependent steps remain blocked until the decision is recorded in
@@ -136,6 +145,10 @@ For each step:
 - implement against the ticket-content specification and record agreed requirement changes there before adjusting the plan
 - resolve prerequisite decision gates and recheck readiness before starting dependent implementation
 - challenge assumptions and weak designs
+- implement acceptance checks against the independently specified expected result, not output
+  copied from the new implementation or generated replacement; retain bug reproductions and
+  independent migration baselines, and verify that a relevant behavior mutation fails its check
+  when practical, recording a reason when it cannot be exercised
 - prefer established repository patterns over inventing new ones
 - keep scope tight to the step at hand
 - validate the proposed implementation critically instead of accepting the first workable approach

@@ -25,6 +25,13 @@ Use before considering a ticket complete.
   do not count identity-incomplete historical passes as final-state evidence.
 - [ ] Every acceptance criterion maps to evidence or is explicitly unresolved; pending CI/manual
   checks and blockers have next actions.
+- [ ] For behavior changes, important success, failure, and compatibility/invariant examples trace
+  from stable AC/example IDs through a boundary and check/scenario ID to independent expected and
+  observed results. Bug reproductions and migration baseline fixtures retain their provenance;
+  justified manual cases have a reason, expected result, and actual observation.
+- [ ] A relevant behavior mutation fails its corresponding acceptance check where practical, or
+  the record explains why sensitivity was not exercised and what remains unverified. Sensitive
+  invariants use property or differential checks when they provide stronger evidence than examples.
 - [ ] `ai/artifacts/` isolation is verified: the resolved ticket-content path is ignored by
   `.git/info/exclude`, and `git ls-files -- ai/artifacts/` plus
   `git diff --cached --name-only -- ai/artifacts/` report no paths.

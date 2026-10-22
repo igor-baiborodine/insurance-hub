@@ -47,6 +47,10 @@ artifact preflight before writing. Perform these actions in order:
    - include blockers or follow-up for the next step
    - include a `Validation Evidence` section with one row for each applicable check, including
      relevant checks that were not run or are blocked; use the record format below
+   - for behavior changes, identify the specification's AC/example/check IDs supported by each
+     applicable validation row; record the independent expected result and observed result, or
+     explain why the case remains unverified. Keep bug reproduction and migration baseline fixture
+     provenance visible; a generated replacement is not its own oracle
    - capture each check's tested state when it runs; a state reconstructed after later edits is
      unverified, even if the command's historical result is known
 
@@ -126,8 +130,15 @@ its state explicitly and record any check-specific input or environment differen
   pass. In `Freshness/next action`, use `current`, `stale`, or `unverified` for executed checks and
   state the rerun or unaffected judgment needed; use `—` for checks never executed.
 - At ticket completion, map each acceptance criterion to its supporting evidence and list
-  unresolved, CI-only, and manual checks. Do not treat an aggregate check as covering packages or
-  modules its evidence does not show.
+  unresolved, CI-only, and manual checks. For behavior changes, use a concise trace from each
+  important requirement/AC/example ID through its affected boundary and test/manual scenario ID
+  to the observed validation row and final-state applicability. Show representative success, failure,
+  and compatibility/invariant cases; explain a missing category when inapplicable. Record whether
+  a relevant behavior mutation was shown to fail the corresponding check, or why that sensitivity
+  was not exercised and what evidence remains. Property or differential checks should be tied to
+  the invariant they test. A justified manual scenario names the reason automation was unsuitable,
+  its expected result, and its actual observation. Do not treat an aggregate check as covering
+  packages or modules its evidence does not show.
 
 - Write ticket artifacts only under the resolved `<ticket-dir>`.
 - Do not create extra documentation files beyond the tracker and per-step summary unless the user asks.

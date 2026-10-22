@@ -66,7 +66,7 @@ personal-data protection, and data-integrity safeguards mandatory. Label inferre
 
 | ID | Requirement | Source and rationale | Acceptance outcome / verification |
 | --- | --- | --- | --- |
-| M01 | [Observable required behavior] | [Supplied AC, evidence, or inferred proposal] | [Condition/action and expected result; planned check] |
+| M01 | [Observable required behavior] | [Supplied AC, evidence, or inferred proposal] | [Representative success/failure/compatibility input and independently expected result; planned verification] |
 
 #### Nice-to-have (20-part)
 

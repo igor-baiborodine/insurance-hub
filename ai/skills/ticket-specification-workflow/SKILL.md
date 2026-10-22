@@ -61,6 +61,16 @@ artifact directory. Preserve the assessment's in-scope and out-of-scope boundari
   and resolved decisions. Map every must-have ID to observable ACs and expected validation;
   preserve supplied AC identity and meaning. Link the requirements assessment for provenance,
   but do not leave mandatory requirements defined only in that assessment or an optional ledger.
+- Give behavior ACs stable IDs. In Dev Notes, link each important success, failure, and compatibility
+  example to its requirement/AC IDs, affected boundary, independently specified expected result,
+  and proposed test or manual scenario ID. Keep bug reproductions and migration baseline fixtures separate from the
+  replacement implementation. If a case cannot be automated, explain the manual route rather than
+  presenting it as a passing test. Do not require executable business examples for routine
+  documentation-only changes.
+- For substantial contract, persistence, or architecture choices, record a short design challenge
+  in Dev Notes: alternatives and tradeoffs, failure modes, migration impact, and why the selected
+  design meets the ACs. Leave unresolved choices as bounded decision gates; a shared architecture
+  decision is needed only if the reasoning will serve work beyond this ticket.
 - Exclude deferred nice-to-haves from mandatory scope and ACs. Link their disposition without
   implying a delivery commitment. If an optional item is explicitly selected, record the decision
   and update its classification and receiving scope/ACs before treating it as required; follow
