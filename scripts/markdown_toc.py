@@ -18,6 +18,23 @@ DOCTOC_VERSION = "2.5.0"
 DOCTOC_TIMEOUT_SECONDS = 180
 DOCTOC_TEARDOWN_SECONDS = 10
 MANAGED_PROCESS_GROUP_ENV = "MARKDOWN_TOC_MANAGED_PROCESS_GROUP"
+FRAMEWORK_ADAPTER_PATHS = frozenset(
+    f"{directory}/skills/{skill}/SKILL.md"
+    for directory in (".agents", ".claude")
+    for skill in (
+        "code-review",
+        "pr-description",
+        "ticket-requirements-workflow",
+        "ticket-specification-workflow",
+        "ticket-implementation-workflow",
+        "ticket-post-step-workflow",
+    )
+)
+
+
+def is_framework_adapter(relative_path: Path) -> bool:
+    """These exact consumer paths use pinned-template validation instead of doctoc."""
+    return relative_path.as_posix() in FRAMEWORK_ADAPTER_PATHS
 
 
 class MarkdownTocError(RuntimeError):
@@ -121,7 +138,8 @@ def select_files(root: Path, cwd: Path, values: list[str]) -> list[Path]:
         canonical = candidate.resolve(strict=True)
         if not canonical.is_relative_to(root):
             raise MarkdownTocError(f"file is outside the repository: {value}")
-        selected.append(canonical)
+        if not is_framework_adapter(canonical.relative_to(root)):
+            selected.append(canonical)
     return selected
 
 
@@ -184,6 +202,8 @@ def format_files(files: list[Path]) -> int:
 
 
 def check_files(root: Path, files: list[Path]) -> int:
+    if not files:
+        return 0
     stale: list[Path] = []
     with tempfile.TemporaryDirectory(prefix="markdown-toc-check.") as directory:
         temporary = Path(directory)

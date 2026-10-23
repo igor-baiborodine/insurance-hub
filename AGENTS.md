@@ -143,6 +143,13 @@ catalog. Their presence alone does not prove a client read the target file.
   then run the same command with `check`. The script uses the repository-pinned `doctoc` version;
   never hand-edit its generated table of contents. Pass only task-owned files so unrelated user
   changes remain untouched.
+- Generated framework adapters are exempt from TOC transformation and TOC checks: only
+  `.agents/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`, where `<name>` is
+  `code-review`, `pr-description`, `ticket-requirements-workflow`,
+  `ticket-specification-workflow`, `ticket-implementation-workflow`, or
+  `ticket-post-step-workflow`. The Markdown commands and staged-file hook exclude these exact
+  12 paths; all other Markdown retains normal checks. Regenerate adapters from the pinned
+  templates and validate their exact content with `make ai-framework-compose` / `make ai-check`.
 
 ## AI Directory
 

@@ -11,8 +11,9 @@
 # Client Compatibility
 
 **Matrix version:** 2 (2026-10-23). **Adoption scope:** Codex and Claude Code in local
-Insurance Hub checkouts using the pinned shared framework. Static installation initially passed, but final composition is blocked by a
-TOC/template-byte conflict. Runtime observations below do not override that failure. Continue/Copilot entries retain their
+Insurance Hub checkouts using the pinned shared framework. Static composition passes after the
+C-U18 exemption restores exact adapter-template bytes. Current runtime acceptance remains pending;
+the observations below predate the direct-source cleanup and adapter fix. Continue/Copilot entries retain their
 historical status and are outside this adoption's support claim.
 
 The C-U17 direct-source cleanup subsequently removed local forwarding documents, example symlinks
@@ -30,7 +31,7 @@ does not grant tool access, artifact access, or permission to publish.
 
 | Client/mode | Discovery and invocation | Instruction sources and precedence expectation | Tools and local artifacts | Version/date and evidence |
 | --- | --- | --- | --- | --- |
-| Codex CLI, local checkout | `AGENTS.md`, `ai/profile.json`, shared consumer entry and six `.agents/skills/` adapters | Root/nested discovery and actual canonical reads required; contributor guide is not consumer policy | Explicit root access; workspace-write or read-only trial mode, no publication | CLI 0.156.1, 2026-10-23: all four stage boundaries/post-step and seven negative/review decisions observed; canonical tool-read traces and unchanged source manifests retained. Model not emitted. Installation acceptance remains blocked. |
+| Codex CLI, local checkout | `AGENTS.md`, `ai/profile.json`, shared consumer entry and six `.agents/skills/` adapters | Root/nested discovery and actual canonical reads required; contributor guide is not consumer policy | Explicit root access; workspace-write or read-only trial mode, no publication | CLI 0.156.1, 2026-10-23: all four stage boundaries/post-step and seven negative/review decisions observed; canonical tool-read traces and unchanged source manifests retained. Model not emitted. Current runtime acceptance remains pending. |
 | Claude Code CLI, local checkout | `CLAUDE.md` imports root guide; six `.claude/skills/` adapters | Same pinned consumer entry and shared workflows; local Java/style bindings retained | Explicit root access and scoped tool permissions | CLI 2.1.309 / claude-opus-5-5, 2026-10-23: four stages completed and seven expected negative decisions observed after capacity reset. Qualified: specification briefly wrote outside its allowed directory; negative trial omitted some core reads and refreshed Git stat caches. No blanket pass. |
 | Continue IDE, Agent | `.continue/rules/CONTINUE.md` routes to root catalog and selected canonical `SKILL.md`; root `CONTINUE.md` is a human pointer. Start Agent mode with the fixture prompt. | Continue loads enabled rules; operator must confirm this rule is active and trace the canonical read. Root conflict procedure is project policy, not an override of Continue's rule order or tool policy. | Agent tools depend on local policy; ignored artifacts require workspace file access. | **Targeted, runtime unverified.** No Continue runtime identified here; version, active-rule trace, and fixture results pending. |
 | Continue IDE, Chat or Edit | Same rule path and stage prompt. | Rule loading is documented for both modes; selected canonical file read and conflict outcome require observation. | Do not infer shell or write capability from rule loading. Ticket stages needing unavailable tools must stop or hand off. | **Targeted, runtime unverified.** Version and fixture results pending. |

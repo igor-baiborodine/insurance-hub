@@ -54,6 +54,13 @@ trials, set `AI_DOCTOC_DIR` to the absolute initialized framework root after exp
 without npx. An explicit `npm_config_offline` setting is retained on the compatibility npx path. Name GitHub workflows by
 scope and purpose; retain filenames/job IDs unless the task changes them.
 
+The exact 12 generated adapter paths listed in
+[root conventions](../AGENTS.md#repository-conventions) are exempt from TOC transformation and
+TOC checks. Markdown format/check and the pre-commit hook share this exact-path selection;
+the hook excludes original staged paths before making temporary copies. The pinned framework's
+composition check owns adapter content validation and still rejects template drift. This is
+not an exemption for arbitrary `SKILL.md` files or all files in a client directory.
+
 ## Go ownership and validation
 
 All Go operations, including setup, formatting, generation, tests, build and deployment, use the

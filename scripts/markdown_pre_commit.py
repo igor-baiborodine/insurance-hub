@@ -13,7 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from markdown_toc import DOCTOC_TIMEOUT_SECONDS, MANAGED_PROCESS_GROUP_ENV
+from markdown_toc import DOCTOC_TIMEOUT_SECONDS, MANAGED_PROCESS_GROUP_ENV, is_framework_adapter
 
 CHECKER_OVERHEAD_SECONDS = 30
 CHECKER_TEARDOWN_SECONDS = 10
@@ -160,6 +160,7 @@ def staged_markdown(root: Path) -> list[str]:
 
 
 def validate_staged(root: Path, paths: list[str]) -> int:
+    paths = [path for path in paths if not is_framework_adapter(Path(path))]
     if not paths:
         return 0
     snapshot = Path(tempfile.mkdtemp(prefix=".markdown-toc-index.", dir=root))
