@@ -17,7 +17,8 @@ For repository work, read these canonical instructions in this order:
 
 1. `AGENTS.md`
 2. `ai/manifest.md`
-3. the selected workflow in `ai/skills/` and relevant files in `ai/rules/`
+3. the selected workflow in `ai/framework/skills/`, selected rules in `ai/framework/rules/`, and
+   applicable local extensions in `ai/rules/`
 
 Select the requested stage using the `AGENTS.md` Skills catalog: requirements assessment,
 specification drafting, delivery planning/implementation, or post-step recording. Read the selected
@@ -28,4 +29,5 @@ Continue tool availability depends on the selected mode and local tool policy. D
 Chat or Edit session can execute implementation checks or reach ignored ticket artifacts; report
 an unavailable prerequisite rather than claim it ran.
 
-Keep this file thin. If repository-wide rules change, update `AGENTS.md` or `ai/rules/`, not this adapter.
+Keep this file thin. Shared rules are maintained upstream in the framework; local policy belongs
+in `AGENTS.md`, `ai/consumer-profile.md`, or substantive local rules, not this adapter.

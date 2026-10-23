@@ -19,6 +19,7 @@
     - [Branch Names](#branch-names)
     - [Commit Messages](#commit-messages)
     - [Makefile](#makefile)
+    - [Shared AI Framework](#shared-ai-framework)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -178,11 +179,11 @@ TODO
 
 ### Go
 
-Phase 4 Go services follow the repository's [architecture rules](ai/rules/go-architecture.md),
-[API and transport rules](ai/rules/go-api-transport.md),
-[Go development rules](ai/rules/go-development.md),
-[testing rules](ai/rules/go-test.md),
-[formatting policy](ai/rules/go-formatting.md), and [validation rules](ai/rules/go-validation.md).
+Phase 4 Go services follow the repository's [architecture rules](ai/framework/rules/go/architecture.md),
+[API and transport rules](ai/framework/rules/go/api-transport.md),
+[Go development rules](ai/framework/rules/go/development.md),
+[testing rules](ai/framework/rules/go/test.md),
+[formatting policy](ai/framework/rules/go/formatting.md), and [validation rules](ai/framework/rules/go/validation.md).
 Use the owning Makefile targets for every Go operation, including tool installation, dependency
 maintenance, formatting, linting, tests, builds, execution, and generation. Do not replace them
 with direct Go or tool commands. Read the owning Makefile for supported targets and module scope.
@@ -243,7 +244,7 @@ Review evidence identifies the tested revision and relevant dirty inputs, specif
 UTC execution time, exact command and working directory, changed scope, prerequisites, execution
 source (`local`, `CI`, or `manual`), tool/environment identity where relevant, result, and log or run
 reference. Compare it with the final state using the
-[shared evidence rule](ai/skills/ticket-post-step-workflow/SKILL.md#validation-evidence-record);
+[shared evidence rule](ai/framework/skills/ticket-post-step-workflow/SKILL.md#validation-evidence-record);
 rerun affected stale checks or document why a later change could not affect them. Heavy security,
 deployment, image, database, topology, and tooling checks do not belong in
 the pre-commit hook. Live-target commands retain their explicit environment, context, credential,
@@ -257,10 +258,10 @@ difficult to maintain. Keep short, straightforward CLI sequences in Bash. Python
 repository's tooling; service implementation follows the existing Java-to-Go migration.
 
 Before implementing or reviewing auxiliary Python or its tests, configuration, Make callers, or
-administrative interfaces, read the [Python entry point](ai/rules/python-rules.md) and all four
-linked rules: [development](ai/rules/python-development.md),
-[testing](ai/rules/python-test.md), [formatting](ai/rules/python-formatting.md), and
-[validation](ai/rules/python-validation.md). Keep scripts with their existing owner. Prefer the
+administrative interfaces, read the [Python entry point](ai/framework/rules/python/README.md) and all four
+linked rules: [development](ai/framework/rules/python/development.md),
+[testing](ai/framework/rules/python/test.md), [formatting](ai/framework/rules/python/formatting.md), and
+[validation](ai/framework/rules/python/validation.md). Keep scripts with their existing owner. Prefer the
 standard library for operational dependencies where it meets the contract; pytest and Ruff are
 required development tools under the canonical rules. Install declared dependencies only through
 reproducible, isolated setup; do not install them into system Python.
@@ -389,12 +390,12 @@ make python-test-acceptance \
 
 Inspect the owning recipe and prerequisites before an acceptance run. The confirmation selects
 the interface; it does not authorize a live mutation or replace owner-specific environment and
-credential safeguards. The [Python testing examples](ai/examples/python-testing/README.md) show
+credential safeguards. The [Python testing examples](ai/framework/examples/python-testing/README.md) show
 the executable CLI, fake boundary, scenario structure, and disposable integration pattern.
 
 ### Branch Names
 
-Follow the canonical [Git branch rules](ai/rules/git-rules.md#branch-names). Branch names use an
+Follow the canonical [Git branch rules](ai/framework/rules/git-rules.md#branch-names). Branch names use an
 allowed Conventional Commit type, an optional `issue-<number>-` prefix, and a concise lowercase
 hyphen-separated description.
 
@@ -404,14 +405,14 @@ does not comply. Enable it as described in
 
 ### Commit Messages
 
-Follow the canonical [Git commit-message rules](ai/rules/git-rules.md#commit-messages). Commit
+Follow the canonical [Git commit-message rules](ai/framework/rules/git-rules.md#commit-messages). Commit
 messages use the repository's allowed Conventional Commit types, an optional bracketed issue
 reference such as `[issue-123]`, and a concise imperative description. Authors and reviewers check
 this policy because the repository does not provide a `commit-msg` hook.
 
 ### Makefile
 
-Follow the canonical [Makefile rules](ai/rules/makefile-rules.md) when creating or changing a
+Follow the canonical [Makefile rules](ai/framework/rules/makefile-rules.md) when creating or changing a
 `Makefile`, included `.mk` fragment, target, variable, or recipe. The rules define entry-point and
 fragment ownership, include composition, safe defaults, public and helper targets, variables and
 paths, recursive Make, recipe failure behavior, mutation boundaries, and validation.
@@ -419,3 +420,96 @@ paths, recursive Make, recipe failure behavior, mutation boundaries, and validat
 Inspect the owning Makefile before invoking a target. Use its documented working directory,
 prerequisites, and supported variables, and preserve existing public interfaces unless the change
 explicitly includes a migration.
+
+### Shared AI Framework
+
+Insurance Hub consumes `spec-first-ai-framework` as a pinned submodule at `ai/framework`.
+The [profile](ai/profile.json) and [local guide](ai/consumer-profile.md) select rules and command
+owners. Shared bodies are maintained upstream. Codex and Claude have six thin skill adapters;
+actual-client acceptance is tracked in [the compatibility matrix](ai/client-compatibility.md).
+Other client files point directly to shared sources without a new support claim.
+
+From a fresh checkout, initialize the recorded pin explicitly:
+
+```bash
+git submodule update --init -- ai/framework
+make python-toolchain-setup
+make ai-framework-integrity ai-framework-compose
+make ai-check
+make ai-framework-freshness
+```
+
+Preparation retrieves the index gitlink; it never selects latest implicitly. The SSH source in
+`.gitmodules` requires configured GitHub read access for manual preparation. GitHub Actions checkout
+uses its managed token to prepare the public dependency, then disables persisted credentials
+so local authentication overrides do not conflict with the integrity contract. Normal checks never initialize, install,
+repair exclusions or advance the pin. Framework loading itself needs no application toolchain.
+Offline integrity/compose use managed CPython 3.14.8 and Git; `ai-check` additionally uses the
+existing locked development dependencies. Freshness separately queries the exact configured
+`refs/heads/main`, has a 20-second work bound and fails on any mismatch/unavailable access.
+Hosted `ai-check` is structural/offline validation; it makes no online adoption claim.
+
+For ignored local tickets, keep the exact `/ai/artifacts/` entry in `.git/info/exclude` and use
+`make ai-check AI_CHECK_TICKET_DIR=ai/artifacts/<resolved-ticket-dir>` with the actual path.
+No helper changes the exclusion or artifact index. Existing ticket directories and evidence remain
+in place. Shared rules, skills, prompts, templates, checklists and examples are read directly from
+`ai/framework`; no old-path forwarding documents or example symlinks remain. Make and default
+pytest discovery use the canonical example source, including its `conftest.py`. For historical
+source references, use `git show <recorded-consumer-revision>:<old-path>`; preserve the original
+record and its tested identity. Do not format dependency
+files in this checkout; submit shared changes upstream and adopt a reviewed revision.
+
+The snapshot and review capabilities in `ai/profile.json` invoke shared scripts directly. From
+the consumer root, export the verified interpreter before using these bindings:
+
+```bash
+export PYTHON="$PWD/.venv/bin/python"
+make python-runtime-check
+# Append the actual consumer root, base, head and ignored output path to the snapshot helper:
+ai/framework/scripts/refresh_git_diff.sh "$PWD" main <head-ref> <ignored-output-path>
+```
+
+Strict upstream/published-review helpers have explicit network effects and are used only for their
+requested workflow. No compatibility launcher or implicit framework-local environment is required.
+
+`AI_FRAMEWORK_LANGUAGE` selects `go` (default), `python` or `java` for composition;
+`AI_FRAMEWORK_PROFILE` supports an explicit relative profile; installed root routing must name
+that same profile, as required by the pinned rendering contract. Composition validates both client
+installations. `PYTHON` remains the verified local interpreter override. Language-specific checks
+continue through their owners; for the bounded Go adoption pilot use:
+
+```bash
+GOTOOLCHAIN=local GOPROXY=off make -C services/product-service verify-tools pilot-test-json \
+  'TEST_PACKAGES=./internal/application ./internal/http' GO=/verified/path/to/go \
+  PYTHON=/verified/path/to/python TOOLS_BIN=/verified/path/to/product-tools
+```
+
+The pilot requires actual JSON events (40 results/16 top-level cases at its accepted baseline),
+no skipped cases, preserved fixtures and a controlled failure probe. It is not full Product CI.
+All legacy Java retains its current style; no Google-style gate is introduced.
+
+For an upgrade, inspect both worktrees and preserve unrelated edits. Select a reviewed, published
+immutable commit from the configured source, fetch explicitly if necessary, and check it out with
+`git -C ai/framework checkout --detach <reviewed-sha>`. Review matching profile/adapter changes,
+then stage only the intended `.gitmodules`/gitlink/profile/adapter combination. Run integrity,
+composition, applicable application/client checks and fresh upstream equality before acceptance.
+The index candidate differs from the committed pin until an explicitly authorized consumer commit.
+Checks report that distinction; they never stage or commit to make themselves pass.
+
+Rollback restores the previous reviewed gitlink/profile/adapters together through a normal reviewed
+consumer change, then runs `git submodule update --init -- ai/framework` and offline validation.
+Do not reset/stash unrelated work or touch local artifacts. An older pin remains reproducible but
+fails current freshness if upstream differs; record that limitation rather than auto-upgrading.
+See the [shared lifecycle](ai/framework/docs/upgrades.md) for the operation contract.
+
+For a client sandbox without access to the host npm cache, provision the pinned formatter explicitly
+with `make -C ai/framework markdown-setup` (Node/npm, package-lock verification, ignored
+`node_modules` writes). Then use the existing consumer owner without npx or downloads:
+
+```bash
+AI_DOCTOC_DIR="$PWD/ai/framework" ./scripts/markdown-toc.sh format <task-owned-files>
+AI_DOCTOC_DIR="$PWD/ai/framework" ./scripts/markdown-toc.sh check <task-owned-files>
+```
+
+This override verifies doctoc 2.5.0 before execution and never provisions on a check. The existing
+npx route remains supported; an explicit `npm_config_offline=true` is passed through unchanged.

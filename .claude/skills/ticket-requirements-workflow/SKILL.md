@@ -1,12 +1,13 @@
 ---
 name: ticket-requirements-workflow
-description: Assess Insurance Hub ticket scope and classified requirements from product or technical input; stop after the requirements assessment.
+description: Assess future ticket scope and classified requirements from product or technical inputs, with or without acceptance criteria. Use for requirements assessment or ticket scoping; produces a requirements artifact without drafting ticket content or an implementation plan.
 ---
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-Read and follow the canonical repository skill at
-`ai/skills/ticket-requirements-workflow/SKILL.md` from the repository root. Its stopping point
-and artifact rules govern this stage.
+Resolve the consumer checkout root from the applicable root guide.
+Read ai/framework/skills/ticket-requirements-workflow/SKILL.md completely from that root,
+then follow it within the host hierarchy and direct user scope. Missing canonical
+content blocks this workflow; do not replace it with an invented procedure.

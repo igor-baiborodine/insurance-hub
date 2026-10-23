@@ -8,5 +8,5 @@ description: Record an Insurance Hub ticket delivery step after implementation a
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 Read and follow the canonical repository skill at
-`ai/skills/ticket-post-step-workflow/SKILL.md` from the repository root. Use it only after a
+`ai/framework/skills/ticket-post-step-workflow/SKILL.md` from the repository root. Use it only after a
 concrete delivery step is complete.

@@ -15,6 +15,65 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
 
+def test_explicit_offline_markdown_never_drops_the_npx_setting(tmp_path: Path) -> None:
+    # given
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    npx = fake_bin / "npx"
+    npx.write_text('#!/bin/sh\n[ "${npm_config_offline:-}" = true ]\n')
+    npx.chmod(0o755)
+    document = tmp_path / "guide.md"
+    document.write_text("# Offline fixture\n")
+    environment = {
+        **os.environ,
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "npm_config_offline": "true",
+    }
+    environment.pop("AI_DOCTOC_DIR", None)
+    program = "from pathlib import Path; from markdown_toc import run_doctoc; import sys; run_doctoc(Path(sys.argv[1]))"
+
+    # when
+    result = run(
+        [sys.executable, "-c", program, document],
+        cwd=REPOSITORY_ROOT / "scripts",
+        env=environment,
+    )
+
+    # then
+    assert result.returncode == 0, result.stderr
+    assert document.read_text() == "# Offline fixture\n"
+
+
+@pytest.mark.parametrize("version,expected", [("2.5.0", 0), ("0.0.0", 1)])
+def test_provisioned_doctoc_requires_exact_pin_before_execution(
+    tmp_path: Path, version: str, expected: int
+) -> None:
+    # given
+    package = tmp_path / "node_modules/doctoc"
+    package.mkdir(parents=True)
+    (package / "package.json").write_text('{"version":"' + version + '"}')
+    (package / "doctoc.js").write_text("// synthetic tool\n")
+    node = tmp_path / "node"
+    node.write_text('#!/bin/sh\nprintf "provisioned-doctoc\\n"\n')
+    node.chmod(0o755)
+    document = tmp_path / "guide.md"
+    document.write_text("# Fixture\n")
+    environment = {**os.environ, "AI_DOCTOC_DIR": str(tmp_path), "PATH": str(tmp_path)}
+    program = "from pathlib import Path; from markdown_toc import run_doctoc; import sys; run_doctoc(Path(sys.argv[1]))"
+
+    # when
+    result = run(
+        [sys.executable, "-c", program, document],
+        cwd=REPOSITORY_ROOT / "scripts",
+        env=environment,
+    )
+
+    # then
+    assert result.returncode == expected, result.stderr
+    assert ("provisioned-doctoc" in result.stdout) == (expected == 0)
+    assert document.read_text() == "# Fixture\n"
+
+
 def run(
     arguments: list[str | Path], *, cwd: Path, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:

@@ -11,9 +11,13 @@
 
 # Java Rules
 
-These rules are intentionally minimal until service-specific Java conventions are formalized.
+These consumer-owned conventions supplement the [shared Java router](../framework/rules/java/README.md).
+Read its implementation and affected boundary rules with the [local profile](../consumer-profile.md).
+Preserve existing module style for all existing, modified and new Java/tests. Google Java Style,
+its gates and a formatting migration are excluded throughout Insurance Hub. Shared campsite
+house conventions are not selected; the local naming below remains applicable.
 
-Apply [Naming rules](naming-rules.md) when creating or renaming Java source files, package
+Apply [Naming rules](../framework/rules/naming-rules.md) when creating or renaming Java source files, package
 directories, or surrounding repository paths.
 
 - Follow the existing style of the target module.
@@ -29,7 +33,7 @@ directories, or surrounding repository paths.
 
 When writing or updating JUnit 5 unit or integration tests, prefer an explicit given-when-then
 structure over helper-driven BDD wrappers. Apply the repository-wide
-[testability assessment](repo-rules.md#testability) when fixture wiring or test implementation
+[testability assessment](../framework/rules/repo-rules.md#testability) when fixture wiring or test implementation
 becomes complicated.
 
 - Name classes with unit tests following `<ClassName>Test` pattern.

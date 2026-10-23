@@ -1,12 +1,13 @@
 ---
 name: ticket-specification-workflow
-description: Draft or revise Insurance Hub ticket content from an assessed requirements artifact; stop before implementation planning.
+description: Draft or revise local ticket-content specifications from an existing requirements assessment. Use when ticket specification drafting is requested, including in a later session; does not plan or implement delivery. GitHub synchronization requires separate explicit permission.
 ---
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-Read and follow the canonical repository skill at
-`ai/skills/ticket-specification-workflow/SKILL.md` from the repository root. Its readiness gate
-and stopping point govern this stage.
+Resolve the consumer checkout root from the applicable root guide.
+Read ai/framework/skills/ticket-specification-workflow/SKILL.md completely from that root,
+then follow it within the host hierarchy and direct user scope. Missing canonical
+content blocks this workflow; do not replace it with an invented procedure.

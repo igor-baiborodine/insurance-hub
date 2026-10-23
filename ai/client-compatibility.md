@@ -10,10 +10,16 @@
 
 # Client Compatibility
 
-**Matrix version:** 1 (2026-10-22). **Scope:** repository adapters requested for Claude Code,
-Continue IDE, and GitHub Copilot. “Targeted” means an adapter exists; “verified” requires an
-observed client run of the common [fixture](checks/client-compatibility-scenarios.md), including
-evidence that the canonical file was actually read. This table records no runtime pass yet.
+**Matrix version:** 2 (2026-10-23). **Adoption scope:** Codex and Claude Code in local
+Insurance Hub checkouts using the pinned shared framework. Static installation initially passed, but final composition is blocked by a
+TOC/template-byte conflict. Runtime observations below do not override that failure. Continue/Copilot entries retain their
+historical status and are outside this adoption's support claim.
+
+The C-U17 direct-source cleanup subsequently removed local forwarding documents, example symlinks
+and helper launchers, and changed consumer entry guidance/profile bindings. The runtime observations
+below predate that cleanup: their final-state applicability is **stale** pending focused reruns
+against the direct-source layout. Static checks and example/helper tests do not establish client
+loading. Historical event records are retained unchanged.
 
 The root [instruction precedence and conflict procedure](../AGENTS.md#instruction-precedence)
 is project policy inside each host's higher-level instructions and security controls. Native
@@ -24,7 +30,8 @@ does not grant tool access, artifact access, or permission to publish.
 
 | Client/mode | Discovery and invocation | Instruction sources and precedence expectation | Tools and local artifacts | Version/date and evidence |
 | --- | --- | --- | --- | --- |
-| Claude Code, local project session | Root `CLAUDE.md` imports `AGENTS.md`; four `.claude/skills/<stage>/SKILL.md` entries point to `ai/skills/`. Invoke by matching task or explicit `/ticket-…` skill. | Claude Code may load `AGENTS.md` directly on recent versions; the import covers other configurations. Applicable nested guides must be inspected and conflicts escalated under root policy, subject to Claude's host hierarchy. | Tool and ignored `ai/artifacts/` access depend on Claude Code settings and the local checkout. | **Targeted, runtime unverified.** No `claude` executable in this session. Docs checked 2026-10-22; actual version and canonical read trace pending. |
+| Codex CLI, local checkout | `AGENTS.md`, `ai/profile.json`, shared consumer entry and six `.agents/skills/` adapters | Root/nested discovery and actual canonical reads required; contributor guide is not consumer policy | Explicit root access; workspace-write or read-only trial mode, no publication | CLI 0.156.1, 2026-10-23: all four stage boundaries/post-step and seven negative/review decisions observed; canonical tool-read traces and unchanged source manifests retained. Model not emitted. Installation acceptance remains blocked. |
+| Claude Code CLI, local checkout | `CLAUDE.md` imports root guide; six `.claude/skills/` adapters | Same pinned consumer entry and shared workflows; local Java/style bindings retained | Explicit root access and scoped tool permissions | CLI 2.1.309 / claude-opus-5-5, 2026-10-23: four stages completed and seven expected negative decisions observed after capacity reset. Qualified: specification briefly wrote outside its allowed directory; negative trial omitted some core reads and refreshed Git stat caches. No blanket pass. |
 | Continue IDE, Agent | `.continue/rules/CONTINUE.md` routes to root catalog and selected canonical `SKILL.md`; root `CONTINUE.md` is a human pointer. Start Agent mode with the fixture prompt. | Continue loads enabled rules; operator must confirm this rule is active and trace the canonical read. Root conflict procedure is project policy, not an override of Continue's rule order or tool policy. | Agent tools depend on local policy; ignored artifacts require workspace file access. | **Targeted, runtime unverified.** No Continue runtime identified here; version, active-rule trace, and fixture results pending. |
 | Continue IDE, Chat or Edit | Same rule path and stage prompt. | Rule loading is documented for both modes; selected canonical file read and conflict outcome require observation. | Do not infer shell or write capability from rule loading. Ticket stages needing unavailable tools must stop or hand off. | **Targeted, runtime unverified.** Version and fixture results pending. |
 | GitHub Copilot coding agent | `.github/copilot-instructions.md` routes to root catalog; four `.github/skills/<stage>/SKILL.md` entries route to canonical skills. Invoke with a task naming the stage. | Copilot may combine repository, path, and agent instructions without a general local precedence order. Root conflict procedure remains the desired project behavior within host policy. | Hosted checkout and tool policy determine access. Ignored local ticket artifacts are absent unless explicitly provided in that environment. | **Targeted, runtime unverified.** Hosted version and canonical read trace pending; static pointers checked locally. |
@@ -36,12 +43,12 @@ above are **unverified**. No adapter is implied for them.
 ## Verification Contract
 
 Run the same stage-selection and nested-guidance cases in the
-[client fixture](checks/client-compatibility-scenarios.md) for each target mode. Record the actual
+[client fixture](framework/checks/client-compatibility-scenarios.md) for each target mode. Record the actual
 client version/date, checkout revision, mode and tool policy, prompt, applicable instruction files,
 canonical `SKILL.md` read evidence, output/artifact access, and expected-versus-observed outcome.
 If the client cannot expose a read trace, label canonical loading **unverified** even when its
 answer resembles the intended workflow. Repair a demonstrated discovery gap with a thin pointer;
-keep workflow bodies in `ai/skills/`.
+keep workflow bodies in the unmodified `ai/framework/skills/` dependency.
 
 ## Platform References
 

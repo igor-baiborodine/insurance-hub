@@ -8,5 +8,5 @@ description: Assess Insurance Hub ticket scope and classified requirements from 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 Read and follow the canonical repository skill at
-`ai/skills/ticket-requirements-workflow/SKILL.md` from the repository root. Its stopping point
+`ai/framework/skills/ticket-requirements-workflow/SKILL.md` from the repository root. Its stopping point
 and artifact rules govern this stage.

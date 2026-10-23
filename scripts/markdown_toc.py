@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import signal
@@ -125,18 +126,31 @@ def select_files(root: Path, cwd: Path, values: list[str]) -> list[Path]:
 
 
 def run_doctoc(path: Path, *, quiet: bool = False) -> None:
-    if shutil.which("npx") is None:
-        raise MarkdownTocError("npx is required")
+    provisioned = os.environ.get("AI_DOCTOC_DIR")
+    if provisioned:
+        package = Path(provisioned).resolve() / "node_modules/doctoc"
+        try:
+            version = json.loads((package / "package.json").read_text())["version"]
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise MarkdownTocError("AI_DOCTOC_DIR needs explicitly provisioned doctoc") from error
+        if version != DOCTOC_VERSION or not (package / "doctoc.js").is_file():
+            raise MarkdownTocError(f"AI_DOCTOC_DIR requires doctoc {DOCTOC_VERSION}")
+        if shutil.which("node") is None:
+            raise MarkdownTocError("node is required for AI_DOCTOC_DIR")
+        command = ["node", str(package / "doctoc.js")]
+    else:
+        if shutil.which("npx") is None:
+            raise MarkdownTocError("npx is required")
+        command = ["npx", "--yes", "--package", f"doctoc@{DOCTOC_VERSION}", "doctoc"]
     managed_process_group = os.environ.get(MANAGED_PROCESS_GROUP_ENV) == "1"
     if managed_process_group and os.getpid() != os.getpgrp():
         raise MarkdownTocError("managed doctoc execution requires an owned process group")
+    environment = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")}
+    if "npm_config_offline" in os.environ:
+        environment["npm_config_offline"] = os.environ["npm_config_offline"]
     process = subprocess.Popen(
         [
-            "npx",
-            "--yes",
-            "--package",
-            f"doctoc@{DOCTOC_VERSION}",
-            "doctoc",
+            *command,
             "--github",
             "--notitle",
             "--mintocitems",
@@ -144,7 +158,7 @@ def run_doctoc(path: Path, *, quiet: bool = False) -> None:
             str(path),
         ],
         stdout=subprocess.DEVNULL if quiet else None,
-        env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")},
+        env=environment,
         start_new_session=not managed_process_group,
     )
     try:

@@ -8,5 +8,5 @@ description: Draft or revise Insurance Hub ticket content from an assessed requi
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 Read and follow the canonical repository skill at
-`ai/skills/ticket-specification-workflow/SKILL.md` from the repository root. Its readiness gate
+`ai/framework/skills/ticket-specification-workflow/SKILL.md` from the repository root. Its readiness gate
 and stopping point govern this stage.

@@ -1,6 +1,6 @@
 ################################################################################
 # Insurance Hub - Root Makefile
-# Canonical conventions: ai/rules/makefile-rules.md
+# Canonical conventions: ai/framework/rules/makefile-rules.md
 ################################################################################
 
 .DEFAULT_GOAL := all
@@ -51,24 +51,7 @@ markdown-toc-test: python-toolchain-check ## Test staged Markdown TOC validation
 ################################################################################
 # AI Framework Checks
 ################################################################################
-AI_CHECK_PYTHON_FILES := ai/checks/check_ai_framework.py ai/checks/test_check_ai_framework.py
-AI_CHECK_TICKET_DIR ?=
-export AI_CHECK_TICKET_DIR
-
-.PHONY: ai-check ai-check-format-check ai-check-lint ai-check-test-fast ai-check-validate
-ai-check-format-check: PYTHON_FILES := $(AI_CHECK_PYTHON_FILES)
-ai-check-format-check: python-format-check ## Check AI framework validator/test formatting
-
-ai-check-lint: PYTHON_FILES := $(AI_CHECK_PYTHON_FILES)
-ai-check-lint: python-lint ## Lint AI framework validator and fixture tests
-
-ai-check-test-fast: python-toolchain-check ## Run disposable AI framework integrity fixtures
-	@cd "$(ROOT_DIR)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q ai/checks/test_check_ai_framework.py
-
-ai-check-validate: python-runtime-check ## Validate tracked AI framework structure and optional local ticket
-	@cd "$(ROOT_DIR)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" ai/checks/check_ai_framework.py
-
-ai-check: ai-check-format-check ai-check-lint ai-check-test-fast ai-check-validate ## Run the fast AI framework integrity gate
+include $(ROOT_DIR)scripts/ai/framework.mk
 
 ################################################################################
 # Go Targets

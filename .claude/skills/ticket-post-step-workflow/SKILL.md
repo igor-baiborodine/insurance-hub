@@ -1,12 +1,13 @@
 ---
 name: ticket-post-step-workflow
-description: Record an Insurance Hub ticket delivery step after implementation and validation, including tracker, evidence, and branch snapshot.
+description: Use after a concrete ticket delivery step has been completed. This workflow updates the delivery tracker, creates a per-step summary, and refreshes the ticket git diff artifact.
 ---
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-Read and follow the canonical repository skill at
-`ai/skills/ticket-post-step-workflow/SKILL.md` from the repository root. Use it only after a
-concrete delivery step is complete.
+Resolve the consumer checkout root from the applicable root guide.
+Read ai/framework/skills/ticket-post-step-workflow/SKILL.md completely from that root,
+then follow it within the host hierarchy and direct user scope. Missing canonical
+content blocks this workflow; do not replace it with an invented procedure.
