@@ -14,8 +14,7 @@
 Insurance Hub checkouts using the pinned shared framework. Static composition and refreshed
 runtime scenarios pass on the C-U17 direct-source layout with the C-U18 adapter TOC exemption.
 The refreshed runs use consumer `b3e57990edd330ef11825352a4ed61984f77ef47` and framework
-`aa36ce457834bb6b2314c674b381c945b2da61b1`. Independent maintainer policy acceptance remains
-separate. Continue/Copilot entries retain their historical status and are outside this adoption's
+`aa36ce457834bb6b2314c674b381c945b2da61b1`. The maintainer explicitly reviewed and accepted the Step 12 policy changes after these trials. Continue/Copilot entries retain their historical status and are outside this adoption's
 support claim.
 
 Both clients completed the four requested workflow stages and seven negative/review decisions.
