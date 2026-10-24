@@ -449,6 +449,14 @@ existing locked development dependencies. Freshness separately queries the exact
 `refs/heads/main`, has a 20-second work bound and fails on any mismatch/unavailable access.
 Hosted `ai-check` is structural/offline validation; it makes no online adoption claim.
 
+The [AI consumer workflow](.github/workflows/ai-framework.yml) prepares the recorded pin, sets up
+managed Python and Markdown tools, validates shared source/integrity/composition, checks tracked
+consumer AI Markdown, and tests local validation tooling. It uses the `AI Consumer Validation`
+name, `ai-check` job, Ubuntu 24.04, a 20-minute timeout, path-filtered PRs and manual dispatch. PR
+runs check the PR head; manual runs check the selected revision. Insurance Hub's command bindings 
+are `make python-toolchain-setup`, `make ai-check`, `./scripts/markdown-toc.sh check` and 
+`make markdown-toc-test`. Application checks and online freshness remain separate.
+
 For ignored local tickets, keep the exact `/ai/artifacts/` entry in `.git/info/exclude` and use
 `make ai-check AI_CHECK_TICKET_DIR=ai/artifacts/<resolved-ticket-dir>` with the actual path.
 No helper changes the exclusion or artifact index. Existing ticket directories and evidence remain

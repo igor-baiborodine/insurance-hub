@@ -27,6 +27,7 @@ on:
       - 'scripts/markdown_pre_commit.py'
       - 'scripts/test-markdown-pre-commit.sh'
       - 'scripts/test_markdown_pre_commit.py'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -35,13 +36,15 @@ jobs:
   ai-check:
     name: Validate framework
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
+      PYTHON: ${{ github.workspace }}/.venv/bin/python
       AI_DOCTOC_DIR: ${{ github.workspace }}/ai/framework
     steps:
-      - name: Checkout pull request head
+      - name: Check out consumer and recorded framework pin
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           persist-credentials: false
 
@@ -50,6 +53,7 @@ jobs:
         with:
           version: '0.13.1'
           enable-cache: true
+          cache-dependency-glob: 'uv.lock'
 
       - name: Set up managed Python 3.14.8
         run: make python-toolchain-setup
@@ -73,5 +77,5 @@ jobs:
             '.github/skills/*.md' .github/copilot-instructions.md |
             xargs -0 -r ./scripts/markdown-toc.sh check
 
-      - name: Test Markdown validation and generated adapter exemptions
+      - name: Test consumer validation tooling
         run: make markdown-toc-test
