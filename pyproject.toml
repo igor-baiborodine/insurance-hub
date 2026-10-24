@@ -76,10 +76,10 @@ known-first-party = [
 
 [tool.pytest.ini_options]
 addopts = ["--strict-config", "--strict-markers"]
-testpaths = ["ai/examples/python-testing/tests"]
+testpaths = ["ai/framework/examples/python-testing/tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-pythonpath = ["ai/examples/python-testing"]
+pythonpath = ["ai/framework/examples/python-testing", "ai/framework/tools"]
 markers = [
     "integration: explicitly selected tests using disposable external boundaries",
     "acceptance: explicitly selected full acceptance workflows",

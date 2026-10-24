@@ -15,13 +15,15 @@ import yaml
 
 LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
-SKILL_REFERENCE = re.compile(r"ai/skills/([a-z0-9-]+)/SKILL\.md")
-CATALOG_REFERENCE = re.compile(r"\]\(ai/skills/([a-z0-9-]+)/SKILL\.md\)")
+SKILL_REFERENCE = re.compile(r"ai/framework/skills/([a-z0-9-]+)/SKILL\.md")
+LEGACY_SKILL_REFERENCE = re.compile(r"ai/skills/([a-z0-9-]+)/SKILL\.md")
+CATALOG_REFERENCE = re.compile(r"\]\(ai/framework/skills/([a-z0-9-]+)/SKILL\.md\)")
 COMPLETED_STEP = re.compile(r"^- \[x\] Step \d+:.*$", re.MULTILINE)
 SUMMARY_REFERENCE = re.compile(r"Summary:\s*\[[^\]]+\]\(([^)]+)\)")
 READINESS = re.compile(r"^\s*- \*\*Status:\*\*\s*(.+)$", re.MULTILINE)
 READY_STATES = ("blocked", "ready", "conditionally ready for decision work")
 EVIDENCE_STATUSES = {"passed", "failed", "blocked", "not run", "not applicable"}
+
 
 TEMPLATE_FIELDS = {
     "requirements-template.md": (
@@ -141,11 +143,17 @@ def _anchors(text: str) -> set[str]:
 def framework_markdown(root: Path) -> list[Path]:
     files = [root / name for name in ("AGENTS.md", "CLAUDE.md", "CONTINUE.md")]
     files.append(root / ".github/copilot-instructions.md")
-    for directory in ("ai", ".github/skills", ".claude/skills", ".continue/rules"):
+    for directory in (
+        "ai",
+        ".github/skills",
+        ".claude/skills",
+        ".agents/skills",
+        ".continue/rules",
+    ):
         files.extend(
             path
             for path in (root / directory).rglob("*.md")
-            if not {"artifacts", "_legacy-artifacts"}.intersection(
+            if not {"artifacts", "_legacy-artifacts", "framework"}.intersection(
                 path.relative_to(root / directory).parts
             )
         )
@@ -211,13 +219,13 @@ def check_catalog(root: Path) -> list[str]:
     if guide is None:
         return issues
     catalog = set(CATALOG_REFERENCE.findall(guide))
-    skills = {path.parent.name for path in (root / "ai/skills").glob("*/SKILL.md")}
+    skills = {path.parent.name for path in (root / "ai/framework/skills").glob("*/SKILL.md")}
     for missing in sorted(skills - catalog):
         issues.append(f"AGENTS.md: missing skill catalog entry: {missing}")
     for stale in sorted(catalog - skills):
         issues.append(f"AGENTS.md: stale skill catalog entry: {stale}")
     for name in sorted(skills):
-        _metadata(root, root / "ai/skills" / name / "SKILL.md", issues)
+        _metadata(root, root / "ai/framework/skills" / name / "SKILL.md", issues)
     return issues
 
 
@@ -229,8 +237,13 @@ def check_skill_references(root: Path, files: list[Path]) -> list[str]:
         if text is None:
             continue
         for number, line in _without_fences(text):
+            for name in LEGACY_SKILL_REFERENCE.findall(line):
+                issues.append(
+                    f"{_display(root, source)}:{number}: use direct canonical skill path: "
+                    f"ai/framework/skills/{name}/SKILL.md"
+                )
             for name in SKILL_REFERENCE.findall(line):
-                if not (root / "ai/skills" / name / "SKILL.md").is_file():
+                if not (root / "ai/framework/skills" / name / "SKILL.md").is_file():
                     issues.append(
                         f"{_display(root, source)}:{number}: stale canonical skill reference: {name}"
                     )
@@ -240,8 +253,10 @@ def check_skill_references(root: Path, files: list[Path]) -> list[str]:
 def check_adapters(root: Path) -> list[str]:
     """Require each native skill adapter to point to its canonical peer."""
     issues: list[str] = []
-    ticket_skills = {path.parent.name for path in (root / "ai/skills").glob("ticket-*/SKILL.md")}
-    for vendor in (".github", ".claude"):
+    ticket_skills = {
+        path.parent.name for path in (root / "ai/framework/skills").glob("ticket-*/SKILL.md")
+    }
+    for vendor in (".github",):
         required = set(ticket_skills)
         if vendor == ".github":
             required.update(("code-review", "pr-description"))
@@ -258,13 +273,13 @@ def check_adapters(root: Path) -> list[str]:
             if references != {expected}:
                 issues.append(
                     f"{_display(root, path)}: adapter must point only to "
-                    f"ai/skills/{expected}/SKILL.md"
+                    f"ai/framework/skills/{expected}/SKILL.md"
                 )
-            if not (root / "ai/skills" / expected / "SKILL.md").is_file():
+            if not (root / "ai/framework/skills" / expected / "SKILL.md").is_file():
                 issues.append(f"{_display(root, path)}: missing canonical skill target: {expected}")
     for name, markers in {
         "CLAUDE.md": ("@AGENTS.md",),
-        ".continue/rules/CONTINUE.md": ("AGENTS.md", "ai/manifest.md", "ai/skills/"),
+        ".continue/rules/CONTINUE.md": ("AGENTS.md", "ai/manifest.md", "ai/framework/skills/"),
         ".github/copilot-instructions.md": ("AGENTS.md", "ai/manifest.md"),
     }.items():
         path = root / name
@@ -290,7 +305,7 @@ def check_adapters(root: Path) -> list[str]:
 def check_templates_and_lifecycle(root: Path) -> list[str]:
     issues: list[str] = []
     for name, markers in TEMPLATE_FIELDS.items():
-        path = root / "ai/templates" / name
+        path = root / "ai/framework/templates" / name
         text = _read(root, path, issues)
         if text is not None:
             for marker in markers:
@@ -299,7 +314,7 @@ def check_templates_and_lifecycle(root: Path) -> list[str]:
                         f"{_display(root, path)}: missing required template field: {marker}"
                     )
     for name, markers in LIFECYCLE_MARKERS.items():
-        path = root / "ai/skills" / name / "SKILL.md"
+        path = root / "ai/framework/skills" / name / "SKILL.md"
         text = _read(root, path, issues)
         if text is not None:
             for marker in markers:
@@ -326,7 +341,16 @@ def check_ci_trigger(root: Path) -> list[str]:
     paths = pull_request.get("paths", []) if isinstance(pull_request, dict) else []
     if not isinstance(paths, list):
         paths = []
-    for required in ("AGENTS.md", "ai/**", ".github/skills/**", ".claude/**", ".continue/**"):
+    for required in (
+        "AGENTS.md",
+        "ai/**",
+        ".github/skills/**",
+        ".claude/**",
+        ".agents/**",
+        ".continue/**",
+        ".gitmodules",
+        "scripts/ai/**",
+    ):
         if required not in paths:
             issues.append(f"{_display(root, path)}: missing PR path trigger: {required}")
     jobs = workflow.get("jobs", {})
@@ -336,6 +360,16 @@ def check_ci_trigger(root: Path) -> list[str]:
         isinstance(step, dict) and step.get("run") == "make ai-check" for step in steps
     ):
         issues.append(f"{_display(root, path)}: hosted job must run make ai-check")
+    if not any(
+        isinstance(step, dict)
+        and str(step.get("uses", "")).startswith("actions/checkout@")
+        and step.get("with", {}).get("submodules") == "recursive"
+        and step.get("with", {}).get("persist-credentials") == "false"
+        for step in steps
+    ):
+        issues.append(
+            f"{_display(root, path)}: checkout must prepare pinned submodules without persistent auth"
+        )
     return issues
 
 

@@ -8,5 +8,5 @@ description: Plan or implement an Insurance Hub ticket from ready ticket content
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 Read and follow the canonical repository skill at
-`ai/skills/ticket-implementation-workflow/SKILL.md` from the repository root. Apply its
+`ai/framework/skills/ticket-implementation-workflow/SKILL.md` from the repository root. Apply its
 post-step workflow after each completed implementation step.

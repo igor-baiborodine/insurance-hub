@@ -10,10 +10,18 @@ from pathlib import Path
 import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-LAUNCHERS = (
-    REPOSITORY_ROOT / "scripts" / "markdown-toc.sh",
-    REPOSITORY_ROOT / "ai" / "skills" / "code-review" / "scripts" / "check-upstream-sync.sh",
-)
+LAUNCHERS = {
+    REPOSITORY_ROOT / "scripts" / "markdown-toc.sh": (
+        "selected Python is missing or not executable: {python}",
+        "selected Python must be CPython 3.14.8",
+        "python-toolchain-setup",
+    ),
+    REPOSITORY_ROOT / "ai" / "framework" / "scripts" / "check_upstream_sync.sh": (
+        "Selected Python unavailable; run explicit setup. No installation attempted.",
+        "CPython 3.14.8 required; no fallback",
+        "",
+    ),
+}
 
 
 def run_launcher(launcher: Path, python: Path) -> subprocess.CompletedProcess[str]:
@@ -68,8 +76,9 @@ def test_direct_launcher_rejects_missing_runtime_before_cli(launcher: Path, tmp_
 
     # then
     assert result.returncode == 1
-    assert f"selected Python is missing or not executable: {missing}" in result.stderr
-    assert "python-toolchain-setup" in result.stderr
+    assert LAUNCHERS[launcher][0].format(python=missing) in result.stderr
+    if LAUNCHERS[launcher][2]:
+        assert LAUNCHERS[launcher][2] in result.stderr
 
 
 @pytest.mark.parametrize("launcher", LAUNCHERS, ids=lambda path: path.name)
@@ -92,6 +101,7 @@ def test_direct_launcher_rejects_wrong_runtime_before_cli(launcher: Path, tmp_pa
 
     # then
     assert result.returncode == 1
-    assert "selected Python must be CPython 3.14.8" in result.stderr
-    assert "python-toolchain-setup" in result.stderr
+    assert LAUNCHERS[launcher][1] in result.stderr
+    if LAUNCHERS[launcher][2]:
+        assert LAUNCHERS[launcher][2] in result.stderr
     assert not cli_started.exists()

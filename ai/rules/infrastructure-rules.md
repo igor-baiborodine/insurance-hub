@@ -21,9 +21,9 @@ changed boundary.
 - Read [CONTRIBUTING](../../CONTRIBUTING.md) for prerequisites and developer workflow. Inspect the
   affected Make target, prerequisites, and script before execution; a name containing `check`,
   `test`, or `preflight` does not establish its side effects.
-- Load [Makefile rules](makefile-rules.md) when changing Make interfaces, and the
-  [Python entry point](python-rules.md) and its four linked rules for auxiliary Python changes.
-  Load [Go rules](go-rules.md) when Go implementation or tooling is also affected.
+- Load [Makefile rules](../framework/rules/makefile-rules.md) when changing Make interfaces, and the
+  [Python entry point](../framework/rules/python/README.md) and its four linked rules for auxiliary Python changes.
+  Load [Go rules](../framework/rules/go/README.md) when Go implementation or tooling is also affected.
 - Use [base-cluster procedures](../../k8s/base-cluster-how-tos.md) for Kind, LXD, K3s, host
   networking, and reconstruction; use [cluster-app procedures](../../k8s/cluster-apps-how-tos.md)
   for operators, shared services, Flux, and component verification links.
@@ -76,7 +76,7 @@ as `blocked` or `not run`, its reason, and the next action.
 
 ## Live operations and completion evidence
 
-Apply the [agent execution boundaries](agent-security-rules.md) and the owning runbook. Establish
+Apply the [agent execution boundaries](../framework/rules/agent-security-rules.md) and the owning runbook. Establish
 the authorized environment, context, namespaces, resource ownership, side effects, and recovery
 path before live mutation. Preserve Flux ownership of QA desired state. Flux bootstrap may commit
 and push generated manifests as well as change the cluster; deployment scope alone does not grant
@@ -90,7 +90,7 @@ host/cluster operation scope.
 
 Record the selected checks, exact inputs/revisions, target identity when applicable, observed
 results, cleanup, and remaining blockers using the
-[post-step evidence format](../skills/ticket-post-step-workflow/SKILL.md#validation-evidence-record).
+[post-step evidence format](../framework/skills/ticket-post-step-workflow/SKILL.md#validation-evidence-record).
 Keep render, fake-adapter, disposable integration, and live observations distinct. Claim deployed
 behavior only from fresh evidence for the intended source/image and environment; retain unverified
 outcomes when the required environment is unavailable.

@@ -1,0 +1,203 @@
+{
+  "version": 1,
+  "consumer": "insurance-hub",
+  "framework_path": "ai/framework",
+  "components": [
+    "core",
+    "go",
+    "python",
+    "java",
+    "house",
+    "operations"
+  ],
+  "styles": {
+    "java": "local"
+  },
+  "guides": [
+    "AGENTS.md",
+    "ai/consumer-profile.md"
+  ],
+  "tool_sources": [
+    "Makefile",
+    "scripts/ai/framework.mk",
+    "scripts/python/toolchain.mk",
+    "pyproject.toml",
+    ".python-version",
+    "uv.lock",
+    "services/product-service/Makefile",
+    "go-module-topology.json"
+  ],
+  "artifact_root": "ai/artifacts",
+  "issue_sync": "GitHub local-authority exact-body synchronization through the connected provider or authenticated gh; user permission and read-back required for updates; ad hoc exempt; unavailable access blocks dependent work",
+  "conflicts": "stop-and-report",
+  "commands": {
+    "markdown-format": {
+      "owner": "scripts/markdown-toc.sh",
+      "cwd": ".",
+      "argv": [
+        "./scripts/markdown-toc.sh",
+        "format"
+      ],
+      "prerequisites": "Managed CPython and Node; doctoc 2.5.0 via npx cache or explicit AI_DOCTOC_DIR pointing to a provisioned package prefix",
+      "effects": "Writes selected Markdown",
+      "scope": "Append exact task-owned Markdown paths"
+    },
+    "markdown-check": {
+      "owner": "scripts/markdown-toc.sh",
+      "cwd": ".",
+      "argv": [
+        "./scripts/markdown-toc.sh",
+        "check"
+      ],
+      "prerequisites": "Managed CPython and Node; doctoc 2.5.0 via npx cache or explicit AI_DOCTOC_DIR pointing to a provisioned package prefix",
+      "effects": "Owned temporary copies only",
+      "scope": "Append exact task-owned Markdown paths"
+    },
+    "snapshot": {
+      "owner": "ai/framework/scripts/refresh_git_diff.sh",
+      "cwd": ".",
+      "argv": [
+        "ai/framework/scripts/refresh_git_diff.sh"
+      ],
+      "prerequisites": "Export PYTHON to an absolute verified managed CPython 3.14.8 interpreter (normally $PWD/.venv/bin/python from consumer root); Git and initialized framework. Shared scripts do not select the consumer environment implicitly.",
+      "effects": "Atomic ignored artifact snapshot",
+      "scope": "Append explicit consumer root and required verified refs/SHAs/output arguments; see shared helper contract"
+    },
+    "review-upstream": {
+      "owner": "ai/framework/scripts/check_upstream_sync.sh",
+      "cwd": ".",
+      "argv": [
+        "ai/framework/scripts/check_upstream_sync.sh"
+      ],
+      "prerequisites": "Export PYTHON to an absolute verified managed CPython 3.14.8 interpreter (normally $PWD/.venv/bin/python from consumer root); Git and initialized framework. Shared scripts do not select the consumer environment implicitly.",
+      "effects": "Explicit network fetch; Git metadata/objects only",
+      "scope": "Append explicit consumer root and required verified refs/SHAs/output arguments; see shared helper contract"
+    },
+    "published-pr": {
+      "owner": "ai/framework/scripts/verify_published_pr.sh",
+      "cwd": ".",
+      "argv": [
+        "ai/framework/scripts/verify_published_pr.sh"
+      ],
+      "prerequisites": "Export PYTHON to an absolute verified managed CPython 3.14.8 interpreter (normally $PWD/.venv/bin/python from consumer root); Git and initialized framework. Shared scripts do not select the consumer environment implicitly.",
+      "effects": "Explicit network fetch; Git metadata/objects only",
+      "scope": "Append explicit consumer root and required verified refs/SHAs/output arguments; see shared helper contract"
+    },
+    "framework-integrity": {
+      "owner": "scripts/ai/framework.mk",
+      "cwd": ".",
+      "argv": [
+        "make",
+        "ai-framework-integrity"
+      ],
+      "prerequisites": "Managed CPython 3.14.8; initialized framework; ai-check additionally needs locked dev dependencies",
+      "effects": "Local validation and owned scratch/cache only",
+      "scope": "Consumer root; compose explicitly selects both clients; ai-check optionally takes AI_CHECK_TICKET_DIR"
+    },
+    "framework-compose": {
+      "owner": "scripts/ai/framework.mk",
+      "cwd": ".",
+      "argv": [
+        "make",
+        "ai-framework-compose"
+      ],
+      "prerequisites": "Managed CPython 3.14.8; initialized framework; ai-check additionally needs locked dev dependencies",
+      "effects": "Local validation and owned scratch/cache only",
+      "scope": "Consumer root; compose explicitly selects both clients; ai-check optionally takes AI_CHECK_TICKET_DIR"
+    },
+    "framework-freshness": {
+      "owner": "scripts/ai/framework.mk",
+      "cwd": ".",
+      "argv": [
+        "make",
+        "ai-framework-freshness"
+      ],
+      "prerequisites": "Managed CPython 3.14.8; initialized framework; ai-check additionally needs locked dev dependencies",
+      "effects": "Fresh upstream query and owned scratch only",
+      "scope": "Consumer root; compose explicitly selects both clients; ai-check optionally takes AI_CHECK_TICKET_DIR"
+    },
+    "framework-check": {
+      "owner": "scripts/ai/framework.mk",
+      "cwd": ".",
+      "argv": [
+        "make",
+        "ai-check"
+      ],
+      "prerequisites": "Managed CPython 3.14.8; initialized framework; ai-check additionally needs locked dev dependencies",
+      "effects": "Local validation and owned scratch/cache only",
+      "scope": "Consumer root; compose explicitly selects both clients; ai-check optionally takes AI_CHECK_TICKET_DIR"
+    },
+    "artifact-preflight": {
+      "owner": "AGENTS.md",
+      "cwd": ".",
+      "argv": [
+        "git",
+        "check-ignore",
+        "-q"
+      ],
+      "prerequisites": "Git and user-configured exact /ai/artifacts/ local exclusion",
+      "effects": "Read-only",
+      "scope": "Append resolved ticket-content path; also inspect exact local exclusion, git ls-files and staged artifact listing as required by AGENTS.md"
+    },
+    "issue-sync": {
+      "owner": "AGENTS.md",
+      "cwd": ".",
+      "argv": [
+        "gh",
+        "issue",
+        "view"
+      ],
+      "prerequisites": "Authenticated GitHub CLI or connected GitHub provider; exact repository/issue identity",
+      "effects": "Read-only comparison; body update separately authorized",
+      "scope": "Append exact issue/repository and --json body; apply full shared synchronization procedure, including unavailable-access gates"
+    },
+    "product-tests": {
+      "owner": "services/product-service/Makefile",
+      "cwd": ".",
+      "argv": [
+        "make",
+        "-C",
+        "services/product-service",
+        "verify-tools",
+        "pilot-test-json",
+        "TEST_PACKAGES=./internal/application ./internal/http"
+      ],
+      "prerequisites": "Pinned module Go/tool binaries and managed Python; optional explicit verified GO/PYTHON/TOOLS_BIN",
+      "effects": "Test/cache output only; readonly modules; no install",
+      "scope": "E13 bounded Product application and HTTP baseline; require real JSON discovery"
+    },
+    "python-runtime": {
+      "owner": "scripts/python/toolchain.mk",
+      "cwd": ".",
+      "argv": [
+        "make",
+        "python-runtime-check"
+      ],
+      "prerequisites": "Existing managed Python owner and selected dev dependencies",
+      "effects": "Owned local test/cache output only",
+      "scope": "Owner-selected scope; select additional affected module targets using CONTRIBUTING"
+    },
+    "python-fast": {
+      "owner": "scripts/python/toolchain.mk",
+      "cwd": ".",
+      "argv": [
+        "make",
+        "python-shared-tooling-test-fast"
+      ],
+      "prerequisites": "Existing managed Python owner and selected dev dependencies",
+      "effects": "Owned local test/cache output only",
+      "scope": "Owner-selected scope; select additional affected module targets using CONTRIBUTING"
+    },
+    "python-integration": {
+      "owner": "scripts/python/toolchain.mk",
+      "cwd": ".",
+      "argv": [
+        "make",
+        "python-shared-tooling-test-integration"
+      ],
+      "prerequisites": "Existing managed Python owner and selected dev dependencies",
+      "effects": "Owned local test/cache output only",
+      "scope": "Owner-selected scope; select additional affected module targets using CONTRIBUTING"
+    }
+  }
+}

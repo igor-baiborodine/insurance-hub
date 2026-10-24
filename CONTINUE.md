@@ -21,9 +21,9 @@ Do not duplicate repository policy in this file. Keep this file as a Continue-fa
 For ticket stages, select the matching skill from the `AGENTS.md` catalog. For implementation,
 use:
 
-- `ai/prompts/session-bootstrap.md`
-- `ai/skills/ticket-implementation-workflow/SKILL.md`
-- `ai/skills/ticket-post-step-workflow/SKILL.md`
+- `ai/framework/prompts/session-bootstrap.md`
+- `ai/framework/skills/ticket-implementation-workflow/SKILL.md`
+- `ai/framework/skills/ticket-post-step-workflow/SKILL.md`
 
 Resolve local ticket paths through [AGENTS.md Artifact Rules](AGENTS.md#artifact-rules), which
 supports standalone and epic-grouped tickets. Artifacts remain local-only and must not be committed.

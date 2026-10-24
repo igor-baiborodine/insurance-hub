@@ -1,3 +1,53 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Phase 4 implementation review](#phase-4-implementation-review)
+  - [Reviewed defaults and open gates](#reviewed-defaults-and-open-gates)
+  - [Evidence and original-source key](#evidence-and-original-source-key)
+  - [Previous versus reviewed decisions](#previous-versus-reviewed-decisions)
+    - [Service stack and contracts](#service-stack-and-contracts)
+    - [Platform and phase dependencies](#platform-and-phase-dependencies)
+    - [Research and engineering requirements](#research-and-engineering-requirements)
+  - [Detailed assessments](#detailed-assessments)
+    - [Composition and lifecycle](#composition-and-lifecycle)
+    - [PostgreSQL and migrations](#postgresql-and-migrations)
+    - [Configuration and secrets](#configuration-and-secrets)
+    - [Transport and validation](#transport-and-validation)
+      - [Product HTTP compatibility decision (issue-132)](#product-http-compatibility-decision-issue-132)
+    - [Kafka and event processing](#kafka-and-event-processing)
+    - [Search and dashboard](#search-and-dashboard)
+    - [Realtime chat](#realtime-chat)
+    - [Object storage](#object-storage)
+    - [Document rendering](#document-rendering)
+    - [Pricing](#pricing)
+    - [Observability](#observability)
+    - [Security and Phase 5](#security-and-phase-5)
+    - [Development and validation tooling](#development-and-validation-tooling)
+  - [Preliminary research assessment](#preliminary-research-assessment)
+  - [Go example comparison](#go-example-comparison)
+  - [Deployment comparison](#deployment-comparison)
+    - [Configured infrastructure compatibility](#configured-infrastructure-compatibility)
+  - [Service consequences](#service-consequences)
+  - [Sequence and coexistence](#sequence-and-coexistence)
+  - [Prerequisites and adoption gates](#prerequisites-and-adoption-gates)
+  - [Follow-up validation scenarios](#follow-up-validation-scenarios)
+    - [PostgreSQL validation scenarios](#postgresql-validation-scenarios)
+    - [Composition validation scenarios](#composition-validation-scenarios)
+    - [Configuration validation scenarios](#configuration-validation-scenarios)
+    - [Transport validation scenarios](#transport-validation-scenarios)
+    - [Request validation scenarios](#request-validation-scenarios)
+    - [Messaging validation scenarios](#messaging-validation-scenarios)
+    - [Search validation scenarios](#search-validation-scenarios)
+    - [Realtime validation scenarios](#realtime-validation-scenarios)
+    - [Storage validation scenarios](#storage-validation-scenarios)
+    - [Rendering validation scenarios](#rendering-validation-scenarios)
+    - [Pricing validation scenarios](#pricing-validation-scenarios)
+    - [Observability validation scenarios](#observability-validation-scenarios)
+    - [Security validation scenarios](#security-validation-scenarios)
+    - [Tooling validation scenarios](#tooling-validation-scenarios)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Phase 4 implementation review
 
 **Review date: 30 September 2026. Status: reviewed documentation baseline; runtime adoption remains gated.**
@@ -91,7 +141,7 @@ coverage before this review, not a previously accepted decision.
 | P            | [PostgreSQL research](phase-4-postgresql-data-access-strategy.md), preliminary.                                                                                                      |
 | D            | [Dependency injection research](phase-4-dependency-injection-strategy.md), preliminary.                                                                                              |
 | C            | [Configuration research](phase-4-configuration-strategy.md), preliminary.                                                                                                            |
-| G / F / V    | Canonical [Go development](../../../ai/rules/go-development.md), [formatting](../../../ai/rules/go-formatting.md) and [validation](../../../ai/rules/go-validation.md) requirements. |
+| G / F / V    | Canonical [Go development](../../../ai/framework/rules/go/development.md), [formatting](../../../ai/framework/rules/go/formatting.md) and [validation](../../../ai/framework/rules/go/validation.md) requirements. |
 | Review scope | Required example/deployment/tooling comparison documented here; not a historical technology proposal.                                                                                |
 
 Canonical repository guidance remains authoritative. The Go rule's GORM reference describes the
@@ -188,7 +238,7 @@ dependencies. Standard-library choices add no separate third-party runtime packa
 ### Composition and lifecycle
 
 Manual constructors keep dependencies visible to the compiler and make small application tests
-easy to assemble. Follow the [canonical package responsibilities](../../../ai/rules/go-development.md#service-structure-and-dependencies):
+easy to assemble. Follow the [canonical package responsibilities](../../../ai/framework/rules/go/development.md#service-structure-and-dependencies):
 thin `cmd/`, construction/startup/shutdown in `internal/service`, domain/application-owned ports,
 and separate transport/storage adapters. Commands and queries are useful organization where
 complexity warrants them; generic handlers, decorators and a repository-wide business container
@@ -731,8 +781,8 @@ specified future behavior/security changes, not changes authorized or implemente
 
 ### Development and validation tooling
 
-Retain [canonical Make-only development](../../../ai/rules/go-development.md),
-[formatting](../../../ai/rules/go-formatting.md) and [validation](../../../ai/rules/go-validation.md).
+Retain [canonical Make-only development](../../../ai/framework/rules/go/development.md),
+[formatting](../../../ai/framework/rules/go/formatting.md) and [validation](../../../ai/framework/rules/go/validation.md).
 Insurance Hub has no Go module/workspace/service at the inspected revision. The root
 [Makefile](../../../Makefile) declares Go 1.24 and a go-build placeholder; the
 [CONTRIBUTING minimum](../../../CONTRIBUTING.md#prerequisites) is not an adopted compatible service toolchain.

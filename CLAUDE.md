@@ -5,5 +5,5 @@
 @AGENTS.md
 
 Claude Code: use the canonical skill catalog in `AGENTS.md` to select the requested stage, then
-read the selected `ai/skills/<name>/SKILL.md` in full. Project skill entries under
+read the selected `ai/framework/skills/<name>/SKILL.md` in full. Project skill entries under
 `.claude/skills/` are discovery pointers, not separate workflow definitions.

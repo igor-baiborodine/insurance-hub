@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import signal
@@ -11,8 +12,69 @@ import time
 from pathlib import Path
 
 import pytest
+from framework_check import installed_clients
+from framework_runtime import CheckError
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_explicit_offline_markdown_never_drops_the_npx_setting(tmp_path: Path) -> None:
+    # given
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    npx = fake_bin / "npx"
+    npx.write_text('#!/bin/sh\n[ "${npm_config_offline:-}" = true ]\n')
+    npx.chmod(0o755)
+    document = tmp_path / "guide.md"
+    document.write_text("# Offline fixture\n")
+    environment = {
+        **os.environ,
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "npm_config_offline": "true",
+    }
+    environment.pop("AI_DOCTOC_DIR", None)
+    program = "from pathlib import Path; from markdown_toc import run_doctoc; import sys; run_doctoc(Path(sys.argv[1]))"
+
+    # when
+    result = run(
+        [sys.executable, "-c", program, document],
+        cwd=REPOSITORY_ROOT / "scripts",
+        env=environment,
+    )
+
+    # then
+    assert result.returncode == 0, result.stderr
+    assert document.read_text() == "# Offline fixture\n"
+
+
+@pytest.mark.parametrize("version,expected", [("2.5.0", 0), ("0.0.0", 1)])
+def test_provisioned_doctoc_requires_exact_pin_before_execution(
+    tmp_path: Path, version: str, expected: int
+) -> None:
+    # given
+    package = tmp_path / "node_modules/doctoc"
+    package.mkdir(parents=True)
+    (package / "package.json").write_text('{"version":"' + version + '"}')
+    (package / "doctoc.js").write_text("// synthetic tool\n")
+    node = tmp_path / "node"
+    node.write_text('#!/bin/sh\nprintf "provisioned-doctoc\\n"\n')
+    node.chmod(0o755)
+    document = tmp_path / "guide.md"
+    document.write_text("# Fixture\n")
+    environment = {**os.environ, "AI_DOCTOC_DIR": str(tmp_path), "PATH": str(tmp_path)}
+    program = "from pathlib import Path; from markdown_toc import run_doctoc; import sys; run_doctoc(Path(sys.argv[1]))"
+
+    # when
+    result = run(
+        [sys.executable, "-c", program, document],
+        cwd=REPOSITORY_ROOT / "scripts",
+        env=environment,
+    )
+
+    # then
+    assert result.returncode == expected, result.stderr
+    assert ("provisioned-doctoc" in result.stdout) == (expected == 0)
+    assert document.read_text() == "# Fixture\n"
 
 
 def run(
@@ -39,6 +101,8 @@ def hook(repository: Path, *, path: str | None = None) -> subprocess.CompletedPr
     environment = {**os.environ, "PYTHON": sys.executable}
     if path is not None:
         environment["PATH"] = path
+        # Restricted-path cases exercise npx discovery, not a provisioned doctoc.
+        environment.pop("AI_DOCTOC_DIR", None)
     return run([repository / ".githooks" / "pre-commit"], cwd=repository, env=environment)
 
 
@@ -153,6 +217,8 @@ def start_hook_with_active_doctoc(
     }
     if checker_timeout is not None:
         environment["MARKDOWN_HOOK_TEST_CHECKER_TIMEOUT_SECONDS"] = str(checker_timeout)
+    # The fake npx owns this scenario's process and cleanup behavior.
+    environment.pop("AI_DOCTOC_DIR", None)
     process = subprocess.Popen(
         [str(repository / ".githooks" / "pre-commit")],
         cwd=repository,
@@ -256,6 +322,120 @@ def test_markdown_deletion_does_not_require_npx(
     # then
     assert result.returncode == 0, result.stderr
     assert_no_hook_temporary_files(repository)
+
+
+def write_framework_adapters(repository: Path) -> dict[str, bytes]:
+    adapters = {}
+    for client, directory in (("codex", ".agents"), ("claude", ".claude")):
+        templates = REPOSITORY_ROOT / "ai/framework/adapters" / client / "skills"
+        for template in templates.glob("*/SKILL.md.in"):
+            relative = f"{directory}/skills/{template.parent.name}/SKILL.md"
+            content = template.read_bytes().replace(b"{{framework_path}}", b"ai/framework")
+            path = repository / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+            adapters[relative] = content
+    assert len(adapters) == 12
+    return adapters
+
+
+def test_generated_adapters_stay_exact_without_doctoc(
+    fixture_repository: tuple[Path, Path],
+) -> None:
+    # given
+    repository, restricted = fixture_repository
+    adapters = write_framework_adapters(repository)
+    git(repository, "add", *adapters)
+    before = {name: git(repository, "rev-parse", f":{name}") for name in adapters}
+    environment = {**os.environ, "PYTHON": sys.executable, "PATH": str(restricted)}
+    environment.pop("AI_DOCTOC_DIR", None)
+
+    # when
+    results = [
+        run(
+            [repository / "scripts/markdown-toc.sh", mode, *adapters],
+            cwd=repository,
+            env=environment,
+        )
+        for mode in ("format", "check")
+    ]
+    staged = hook(repository, path=str(restricted))
+
+    # then
+    for result in [*results, staged]:
+        assert result.returncode == 0, result.stderr
+    assert {name: (repository / name).read_bytes() for name in adapters} == adapters
+    assert {name: git(repository, "rev-parse", f":{name}") for name in adapters} == before
+    assert_no_hook_temporary_files(repository)
+
+
+def test_mixed_adapter_selection_still_checks_other_markdown(
+    fixture_repository: tuple[Path, Path],
+) -> None:
+    # given
+    repository, _ = fixture_repository
+    adapters = write_framework_adapters(repository)
+    ordinary = (
+        "README.md",
+        ".agents/skills/custom/SKILL.md",
+        ".claude/skills/code-review/README.md",
+        "docs/.agents/skills/code-review/SKILL.md",
+        ".github/skills/code-review/SKILL.md",
+    )
+    for relative in ordinary:
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# Ordinary Markdown\n\n## Requires a TOC\n")
+    selected = [*adapters, *ordinary]
+    git(repository, "add", *selected)
+    environment = {**os.environ, "PYTHON": sys.executable}
+
+    # when
+    stale = hook(repository)
+    formatted = run(
+        [repository / "scripts/markdown-toc.sh", "format", *selected],
+        cwd=repository,
+        env=environment,
+    )
+    checked = run(
+        [repository / "scripts/markdown-toc.sh", "check", *selected],
+        cwd=repository,
+        env=environment,
+    )
+    git(repository, "add", *ordinary)
+    staged = hook(repository)
+
+    # then
+    assert stale.returncode == 1
+    assert all(relative in stale.stderr for relative in ordinary)
+    for result in (formatted, checked, staged):
+        assert result.returncode == 0, result.stderr
+    assert {name: (repository / name).read_bytes() for name in adapters} == adapters
+    assert all("START doctoc" in (repository / name).read_text() for name in ordinary)
+    assert_no_hook_temporary_files(repository)
+
+
+@pytest.mark.parametrize("client,directory", [("codex", ".agents"), ("claude", ".claude")])
+def test_toc_exemption_does_not_allow_adapter_template_drift(
+    tmp_path: Path, client: str, directory: str
+) -> None:
+    # given
+    framework = REPOSITORY_ROOT / "ai/framework"
+    write_framework_adapters(tmp_path)
+    (tmp_path / "AGENTS.md").write_bytes((REPOSITORY_ROOT / "AGENTS.md").read_bytes())
+    (tmp_path / "CLAUDE.md").write_text("@AGENTS.md\n")
+    catalog = json.loads((framework / "catalog.json").read_text())
+    profile = {"framework_path": "ai/framework"}
+    adapter = tmp_path / directory / "skills/code-review/SKILL.md"
+
+    # when
+    valid = installed_clients(tmp_path, framework, profile, catalog, [client], "ai/profile.json")
+    adapter.write_text(adapter.read_text() + "\n<!-- unauthorized template change -->\n")
+
+    # then
+    assert valid["status"] == "passed"
+    with pytest.raises(CheckError, match="installed adapter differs from pinned template"):
+        installed_clients(tmp_path, framework, profile, catalog, [client], "ai/profile.json")
 
 
 def test_valid_new_renamed_nested_and_spaced_paths_pass(

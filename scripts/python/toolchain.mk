@@ -12,7 +12,7 @@ PYTHON_VENV_PYTHON := $(PYTHON_VENV)/bin/python
 PYTHON ?= $(PYTHON_VENV_PYTHON)
 UV ?= uv
 PYTHON_SELECTED_ENVIRONMENT = $(abspath $(dir $(PYTHON))/..)
-PYTHON_EXAMPLE_ROOT := ai/examples/python-testing
+PYTHON_EXAMPLE_ROOT := ai/framework/examples/python-testing
 PYTHON_EXAMPLE_FILES := \
 	$(PYTHON_EXAMPLE_ROOT)/example_cli.py \
 	$(PYTHON_EXAMPLE_ROOT)/tests/conftest.py \
@@ -23,8 +23,8 @@ PYTHON_SELECTION_FILES := \
 	$(PYTHON_SELECTION_ROOT)/validate_selection.py \
 	$(PYTHON_SELECTION_ROOT)/test_validate_selection.py
 PYTHON_SHARED_TOOLING_FILES := \
-	ai/skills/code-review/scripts/check_upstream_sync.py \
-	ai/skills/code-review/scripts/test_check_upstream_sync.py \
+	ai/framework/tools/check_upstream_sync.py \
+	ai/framework/tests/test_check_upstream_sync.py \
 	scripts/markdown_pre_commit.py \
 	scripts/markdown_toc.py \
 	scripts/test_markdown_pre_commit.py \
@@ -278,7 +278,7 @@ python-shared-tooling-lint: python-lint ## Lint shared Python tooling
 python-shared-tooling-test-fast: python-toolchain-check ## Run fast shared repository tooling tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
 		-m 'not integration and not acceptance' \
-		ai/skills/code-review/scripts/test_check_upstream_sync.py \
+		ai/framework/tests/test_check_upstream_sync.py \
 		scripts/test_markdown_pre_commit.py \
 		scripts/python/test_runtime_check.py \
 		scripts/python/test_process_runner.py \
@@ -288,7 +288,8 @@ python-shared-tooling-test-fast: python-toolchain-check ## Run fast shared repos
 
 python-shared-tooling-test-integration: python-toolchain-check ## Run disposable shared tooling integration tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
-		-m integration scripts/go/test_report_card.py scripts/go/module/test_module_tooling.py
+		-m integration ai/framework/tests/test_check_upstream_sync.py \
+		scripts/go/test_report_card.py scripts/go/module/test_module_tooling.py
 
 python-shared-tooling-check: python-shared-tooling-format-check python-shared-tooling-lint \
 	python-shared-tooling-test-fast ## Run non-mutating shared Python tooling checks

@@ -88,6 +88,11 @@ COMMON_GO_TOOLING_DIR ?= ../../scripts/go/module
 COMMON_GO_TOOLING_DIR := $(abspath $(COMMON_GO_TOOLING_DIR))
 include $(COMMON_GO_TOOLING_DIR)/common.mk
 
+.PHONY: pilot-test-json
+pilot-test-json: ## Report selected uncached test execution as JSON for framework adoption
+	@test -n "$(strip $(TEST_PACKAGES))" || { echo "TEST_PACKAGES must not be empty" >&2; exit 1; }
+	GOWORK=off $(GO) test -json -mod=readonly -count=1 $(TEST_PACKAGES)
+
 .PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage \
