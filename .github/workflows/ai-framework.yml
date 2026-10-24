@@ -1,4 +1,4 @@
-name: AI Framework PR Check
+name: AI Consumer Validation
 
 on:
   pull_request:
@@ -6,8 +6,10 @@ on:
       - 'AGENTS.md'
       - 'CLAUDE.md'
       - 'CONTINUE.md'
+      - 'CONTRIBUTING.md'
       - 'ai/**'
       - '.gitmodules'
+      - '.githooks/**'
       - '.agents/**'
       - 'scripts/ai/**'
       - '.claude/**'
@@ -18,7 +20,13 @@ on:
       - 'Makefile'
       - 'pyproject.toml'
       - 'uv.lock'
-      - 'scripts/python/toolchain.mk'
+      - '.python-version'
+      - 'scripts/python/**'
+      - 'scripts/markdown-toc.sh'
+      - 'scripts/markdown_toc.py'
+      - 'scripts/markdown_pre_commit.py'
+      - 'scripts/test-markdown-pre-commit.sh'
+      - 'scripts/test_markdown_pre_commit.py'
 
 permissions:
   contents: read
@@ -27,6 +35,8 @@ jobs:
   ai-check:
     name: Validate framework
     runs-on: ubuntu-24.04
+    env:
+      AI_DOCTOC_DIR: ${{ github.workspace }}/ai/framework
     steps:
       - name: Checkout pull request head
         uses: actions/checkout@v6
@@ -44,5 +54,24 @@ jobs:
       - name: Set up managed Python 3.14.8
         run: make python-toolchain-setup
 
-      - name: Check framework integrity
+      - name: Set up Node 24.13.0
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.13.0'
+
+      - name: Set up pinned doctoc
+        run: make -C ai/framework markdown-setup
+
+      - name: Check shared source, pinned dependency and consumer adapters
         run: make ai-check
+
+      - name: Check consumer AI Markdown tables of contents
+        shell: bash
+        run: |
+          git ls-files -z -- AGENTS.md CLAUDE.md CONTINUE.md CONTRIBUTING.md \
+            'ai/*.md' '.agents/*.md' '.claude/*.md' '.continue/*.md' \
+            '.github/skills/*.md' .github/copilot-instructions.md |
+            xargs -0 -r ./scripts/markdown-toc.sh check
+
+      - name: Test Markdown validation and generated adapter exemptions
+        run: make markdown-toc-test

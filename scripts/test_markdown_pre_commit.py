@@ -101,6 +101,8 @@ def hook(repository: Path, *, path: str | None = None) -> subprocess.CompletedPr
     environment = {**os.environ, "PYTHON": sys.executable}
     if path is not None:
         environment["PATH"] = path
+        # Restricted-path cases exercise npx discovery, not a provisioned doctoc.
+        environment.pop("AI_DOCTOC_DIR", None)
     return run([repository / ".githooks" / "pre-commit"], cwd=repository, env=environment)
 
 
@@ -215,6 +217,8 @@ def start_hook_with_active_doctoc(
     }
     if checker_timeout is not None:
         environment["MARKDOWN_HOOK_TEST_CHECKER_TIMEOUT_SECONDS"] = str(checker_timeout)
+    # The fake npx owns this scenario's process and cleanup behavior.
+    environment.pop("AI_DOCTOC_DIR", None)
     process = subprocess.Popen(
         [str(repository / ".githooks" / "pre-commit")],
         cwd=repository,
