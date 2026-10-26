@@ -25,6 +25,7 @@ TARGETS = {
 }
 OPERATIONS = {"deploy-preflight", "deploy-status", "image-load", "deploy", "deploy-verify", "stop"}
 IDENTITY = "product-api"
+LOCAL_IMAGE = re.compile(r"insurance-hub-product-api:1\.[0-9]+\.[0-9]+-local\.([0-9a-f]{12})")
 
 
 class DeploymentError(Exception):
@@ -217,8 +218,8 @@ class Target:
             )
         else:
             require(
-                bool(re.fullmatch(r"insurance-hub-product-api:git-[0-9a-f]{12}", image)),
-                "local image must use the source-derived tag",
+                bool(LOCAL_IMAGE.fullmatch(image)),
+                "local image must use a versioned tag with its source revision",
             )
         return yaml, items, image
 
@@ -696,6 +697,8 @@ def secret_and_image(target: Target, image: str) -> None:
         "reader Secret is absent or has unexpected keys",
     )
     if target.environment == "local-dev":
+        match = LOCAL_IMAGE.fullmatch(image)
+        require(bool(match), "local image must use a versioned tag with its source revision")
         try:
             details = json.loads(run(["docker", "image", "inspect", image]))[0]
         except (ValueError, IndexError, KeyError) as error:
@@ -704,7 +707,7 @@ def secret_and_image(target: Target, image: str) -> None:
             details.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision", "")
         )
         require(
-            source.startswith(image.rsplit("git-", 1)[1]) and len(source) == 40,
+            source.startswith(match.group(1)) and len(source) == 40,
             "local image source revision differs from the rendered tag",
         )
 

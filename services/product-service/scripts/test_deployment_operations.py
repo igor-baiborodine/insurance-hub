@@ -61,7 +61,7 @@ class DeploymentGuardTests(unittest.TestCase):
             "DEPLOY_CONTEXT": "kind-local-dev-insurance-hub",
             "DEPLOY_SVC_NS": "local-dev-all",
             "DEPLOY_DATA_NS": "local-dev-all",
-            "DEPLOY_IMAGE_REF": "insurance-hub-product-api:git-00dab628c9cd",
+            "DEPLOY_IMAGE_REF": "insurance-hub-product-api:1.9.0-local.c977bbcd879d",
         }
         with patch.dict(os.environ, values):
             target = deployment.Target()
@@ -70,7 +70,9 @@ class DeploymentGuardTests(unittest.TestCase):
                 self.assertIn("kind: Deployment", yaml)
                 self.assertEqual(image, values["DEPLOY_IMAGE_REF"])
                 self.assertEqual(len(items), 4)
-                os.environ["DEPLOY_IMAGE_REF"] = "insurance-hub-product-api:git-000000000000"
+                os.environ["DEPLOY_IMAGE_REF"] = (
+                    "insurance-hub-product-api:1.9.0-local.000000000000"
+                )
                 with self.assertRaisesRegex(deployment.DeploymentError, "DEPLOY_IMAGE_REF"):
                     target.rendered()
                 self.assertTrue(all(call.args[0] == "kustomize" for call in kubectl.call_args_list))
@@ -157,6 +159,31 @@ class DeploymentGuardTests(unittest.TestCase):
             with self.assertRaisesRegex(deployment.DeploymentError, "unexpected keys"):
                 deployment.secret_and_image(target, "insurance-hub-product-api:git-123456789abc")
             command.assert_not_called()
+
+    def test_versioned_local_image_must_match_its_source_label(self) -> None:
+        target = deployment.Target.__new__(deployment.Target)
+        target.secret = "local-dev-postgres-product-reader-creds"
+        target.environment = "local-dev"
+        target.json = lambda *args: {
+            "kind": "Secret",
+            "data": {"database-url": "synthetic-secret", "ca.crt": "test-ca"},
+        }
+        image = "insurance-hub-product-api:1.9.0-local.c977bbcd879d"
+        details = {
+            "Config": {
+                "Labels": {
+                    "org.opencontainers.image.revision": "c977bbcd879d620e64855f46a85bc717362d5f81"
+                }
+            }
+        }
+        with patch.object(deployment, "run", return_value=deployment.json.dumps([details])):
+            deployment.secret_and_image(target, image)
+            with self.assertRaisesRegex(deployment.DeploymentError, "source revision differs"):
+                deployment.secret_and_image(
+                    target, "insurance-hub-product-api:1.9.0-local.000000000000"
+                )
+            with self.assertRaisesRegex(deployment.DeploymentError, "versioned tag"):
+                deployment.secret_and_image(target, "insurance-hub-product-api:1.9.0")
 
     def test_qa_mutation_rejected_before_cluster_access(self) -> None:
         values = {

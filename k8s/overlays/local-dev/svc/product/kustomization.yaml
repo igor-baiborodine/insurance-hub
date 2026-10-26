@@ -11,7 +11,7 @@ resources:
 images:
   - name: insurance-hub-product-api
     newName: insurance-hub-product-api
-    newTag: git-00dab628c9cd
+    newTag: 1.9.0-local.c977bbcd879d
 patches:
   - path: deployment-patch.yaml
     target:

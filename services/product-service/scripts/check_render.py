@@ -230,7 +230,7 @@ def validate_go_environment(
             "prefix": "local-dev-",
             "namespace": "local-dev-all",
             "secret": "local-dev-postgres-product-reader-creds",
-            "image": re.compile(r"insurance-hub-product-api:git-[0-9a-f]{12}"),
+            "image": re.compile(r"insurance-hub-product-api:1\.[0-9]+\.[0-9]+-local\.[0-9a-f]{12}"),
             "pull": "Never",
         },
         "qa": {

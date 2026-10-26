@@ -184,8 +184,9 @@ run before final Go can be claimed.
 
 Local-dev uses the same Product ports but its own accepted fixture and ordinary smoke checks.
 Verify active Kind context/namespaces and target state, build/check the intended Go image,
-update the local overlay tag to its actual `git-<12-hex-source>` value, and set the matching
-`DEPLOY_IMAGE_REF`. Run the guarded `go-svc-deploy-preflight`, `go-svc-image-load`,
+tag the checked image as `<1.x.y>-local.<12-hex-source>` with the same image ID, update the
+local overlay tag, and set the matching `DEPLOY_IMAGE_REF`. Run the guarded
+`go-svc-deploy-preflight`, `go-svc-image-load`,
 `go-svc-deploy`, `go-svc-deploy-status` and `go-svc-deploy-verify` targets with
 `SVC_NAME=product` and exact local-dev `DEPLOY_*` coordinates. Then apply the gateway's
 desired Go URL through `make -C k8s svc-deploy SVC_NAME=agent-portal-gateway
