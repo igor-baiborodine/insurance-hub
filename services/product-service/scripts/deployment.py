@@ -542,18 +542,20 @@ class Target:
         require(len(containers) == 1, "gateway container inventory differs")
         container = containers[0]
         path = "/etc/product-route/application.yml"
+        mounts = [
+            item
+            for item in container.get("volumeMounts", [])
+            if item.get("name") == "product-route-config"
+        ]
         require(
             any(
                 item.get("name") == "MICRONAUT_CONFIG_FILES" and item.get("value") == path
                 for item in container.get("env", [])
             )
-            and any(
-                item.get("name") == "product-route-config"
-                and item.get("mountPath") == "/etc/product-route"
-                and item.get("readOnly") is True
-                and "subPath" not in item
-                for item in container.get("volumeMounts", [])
-            ),
+            and len(mounts) == 1
+            and mounts[0].get("mountPath") == "/etc/product-route"
+            and mounts[0].get("readOnly") is True
+            and "subPath" not in mounts[0],
             "effective gateway Product override mount is missing",
         )
         volumes = [
@@ -602,16 +604,31 @@ class Target:
             status = pod.get("status", {})
             if status.get("podIP") not in addresses:
                 continue
+            pod_spec = pod.get("spec", {})
+            pod_containers = pod_spec.get("containers", [])
+            pod_volumes = [
+                item
+                for item in pod_spec.get("volumes", [])
+                if item.get("name") == "product-route-config"
+            ]
+            pod_mounts = (
+                [
+                    item
+                    for item in pod_containers[0].get("volumeMounts", [])
+                    if item.get("name") == "product-route-config"
+                ]
+                if len(pod_containers) == 1
+                else []
+            )
             require(
                 status.get("phase") == "Running"
                 and len(status.get("containerStatuses", [])) == 1
                 and status["containerStatuses"][0].get("ready")
                 and status["containerStatuses"][0].get("imageID")
-                and pod.get("spec", {}).get("volumes") == template.get("volumes")
-                and pod.get("spec", {}).get("containers", [{}])[0].get("env")
-                == container.get("env")
-                and pod.get("spec", {}).get("containers", [{}])[0].get("volumeMounts")
-                == container.get("volumeMounts"),
+                and pod_volumes == volumes
+                and len(pod_containers) == 1
+                and pod_containers[0].get("env") == container.get("env")
+                and pod_mounts == mounts,
                 "serving gateway Pod has stale override or is not Ready",
             )
             name = pod["metadata"]["name"]

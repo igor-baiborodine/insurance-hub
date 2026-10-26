@@ -8,6 +8,7 @@ import signal
 import sys
 import unittest
 from contextlib import nullcontext
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -343,6 +344,29 @@ class DeploymentGuardTests(unittest.TestCase):
         target.json = lambda _verb, *args: state[args]
         target.kubectl = lambda *_args, **_kwargs: config
         self.assertEqual(target.gateway_route("java")["gateway_pods"][0]["uid"], "one")
+        pod_spec = deepcopy(spec)
+        pod_spec["volumes"].append(
+            {"name": "kube-api-access-example", "projected": {"sources": []}}
+        )
+        pod_spec["containers"][0]["volumeMounts"].append(
+            {
+                "name": "kube-api-access-example",
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "readOnly": True,
+            }
+        )
+        state[("pods", "-l", "app.kubernetes.io/name=agent-portal-gateway-legacy")]["items"][0][
+            "spec"
+        ] = pod_spec
+        self.assertEqual(target.gateway_route("java")["gateway_pods"][0]["uid"], "one")
+        pod_spec["volumes"][0]["configMap"]["name"] = "stale-product-route"
+        with self.assertRaisesRegex(deployment.DeploymentError, "stale override"):
+            target.gateway_route("java")
+        pod_spec["volumes"][0]["configMap"]["name"] = config_name
+        pod_spec["containers"][0]["volumeMounts"][0]["mountPath"] = "/stale-product-route"
+        with self.assertRaisesRegex(deployment.DeploymentError, "stale override"):
+            target.gateway_route("java")
+        pod_spec["containers"][0]["volumeMounts"][0]["mountPath"] = "/etc/product-route"
         with self.assertRaisesRegex(deployment.DeploymentError, "wrong phase"):
             target.gateway_route("go")
         target.kubectl = lambda *_args, **_kwargs: "wrong mounted bytes"
