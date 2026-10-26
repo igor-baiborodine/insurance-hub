@@ -147,6 +147,13 @@ def invalid_qa_tag(values: Documents) -> None:
     )
 
 
+def unversioned_local_tag(values: Documents) -> None:
+    deployment = find(values["local-go"], "Deployment", "local-dev-product-api")
+    deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
+        "insurance-hub-product-api:git-c977bbcd879d"
+    )
+
+
 def disabled_qa_telemetry(values: Documents) -> None:
     config = find_prefix(values["qa-go"], "ConfigMap", "qa-product-config-")
     config["data"]["OTEL_ENABLED"] = "false"
@@ -220,6 +227,7 @@ CASES: list[tuple[str, Mutation, str]] = [
     ("stopped marker with Go objects", stopped_with_go, "still contains Go Product objects"),
     ("unreleased QA image tag", unreleased_qa_tag, "qa image reference is invalid"),
     ("invalid QA image tag", invalid_qa_tag, "qa image reference is invalid"),
+    ("unversioned local image tag", unversioned_local_tag, "local-dev image reference is invalid"),
     ("disabled QA telemetry", disabled_qa_telemetry, "qa Product ConfigMap"),
     ("missing QA Pod identity", missing_qa_instance, "PRODUCT_DATABASE_URL"),
     ("missing Java sampler", missing_java_sampler, "bind the QA Zipkin sampler"),

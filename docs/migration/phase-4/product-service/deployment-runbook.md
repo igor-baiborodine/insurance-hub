@@ -172,7 +172,7 @@ Choose one complete column and export its values before running targets:
 | `DEPLOY_CONTEXT` | `kind-local-dev-insurance-hub` | `qa-insurance-hub` |
 | `DEPLOY_SVC_NS` | `local-dev-all` | `qa-svc` |
 | `DEPLOY_DATA_NS` | `local-dev-all` | `qa-data` |
-| `DEPLOY_IMAGE_REF` | `insurance-hub-product-api:git-<12-hex-revision>` matching the local overlay | `ghcr.io/igor-baiborodine/insurance-hub/product-api:<1.x-semantic-version>` matching the QA overlay |
+| `DEPLOY_IMAGE_REF` | `insurance-hub-product-api:<1.x.y>-local.<12-hex-revision>` matching the local overlay | `ghcr.io/igor-baiborodine/insurance-hub/product-api:<1.x-semantic-version>` matching the QA overlay |
 | `DEPLOY_SOURCE_REVISION` | Unused | Full `main` SHA actually reconciled by the Flux source and `qa-svc`, which can differ from the image's source SHA |
 
 For example, local-dev selection is:
@@ -182,7 +182,7 @@ export DEPLOY_ENV=local-dev
 export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
 export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
-export DEPLOY_IMAGE_REF='insurance-hub-product-api:git-<reviewed-12-hex-revision>'
+export DEPLOY_IMAGE_REF='insurance-hub-product-api:<reviewed-1.x.y>-local.<reviewed-12-hex-revision>'
 kubectl config use-context "$DEPLOY_CONTEXT"
 kubectl config set-context "$DEPLOY_CONTEXT" --namespace="$DEPLOY_SVC_NS"
 date -u
@@ -250,9 +250,13 @@ fixture-loading harness against these shared databases.
 
 ## Local-dev deployment and verification
 
-Build the intended source with `make go-svc-image-check SVC_NAME=product`. Update the local
-Go overlay's `images[].newTag` to its actual `git-<12-hex-revision>` tag and set
-`DEPLOY_IMAGE_REF` to match. Record the image ID and source label; a tag alone is insufficient.
+Build the intended source with `make go-svc-image-check SVC_NAME=product`. This produces the
+source-derived `insurance-hub-product-api:git-<12-hex-revision>` image. Tag that checked image
+locally as `insurance-hub-product-api:<1.x.y>-local.<12-hex-revision>` using `docker tag`, then
+verify both references have the same image ID and the OCI source revision matches the suffix.
+Set the local Go overlay's `images[].newTag` and `DEPLOY_IMAGE_REF` to the versioned local tag.
+Keep the `-local.<revision>` suffix so the local build cannot be mistaken for the QA release
+image with the same version number. The deployment preflight inspects the local image label.
 With reader prerequisites verified, run:
 
 ```sh
