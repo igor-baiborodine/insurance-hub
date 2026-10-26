@@ -27,9 +27,9 @@ import (
 )
 
 const (
-	imageHTTPPort   = "8081/tcp"
+	imageHTTPPort   = "8080/tcp"
 	imageGRPCPort   = "9090/tcp"
-	imageHealthPort = "8080/tcp"
+	imageHealthPort = "8081/tcp"
 )
 
 func TestProductRuntimeImage(t *testing.T) {
@@ -90,9 +90,9 @@ func TestProductRuntimeImage(t *testing.T) {
 		image,
 		testcontainers.WithEnv(map[string]string{
 			"SERVICE_NAME":         "product-service-image-check",
-			"HTTP_ADDR":            "0.0.0.0:8081",
+			"HTTP_ADDR":            "0.0.0.0:8080",
 			"GRPC_ADDR":            "0.0.0.0:9090",
-			"HEALTH_ADDR":          "0.0.0.0:8080",
+			"HEALTH_ADDR":          "0.0.0.0:8081",
 			"PRODUCT_DATABASE_URL": databaseURL,
 			"DB_MAX_CONNS":         "4",
 			"STARTUP_TIMEOUT":      "10s",
@@ -133,6 +133,7 @@ func TestProductRuntimeImage(t *testing.T) {
 	grpcEndpoint := containerEndpoint(t, ctx, runtime, imageGRPCPort, "")
 	assertImageHealth(t, healthEndpoint)
 	assertImageHTTPReads(t, httpEndpoint, fixture)
+	assertImageRouteSeparation(t, httpEndpoint, healthEndpoint)
 	assertImageGRPCReads(t, ctx, grpcEndpoint, fixture)
 
 	stopTimeout := 15 * time.Second
@@ -241,6 +242,32 @@ func assertImageHealth(t *testing.T, endpoint string) {
 				readErr,
 				closeErr,
 			)
+		}
+	}
+}
+
+func assertImageRouteSeparation(t *testing.T, httpEndpoint, healthEndpoint string) {
+	t.Helper()
+	client := &http.Client{Timeout: 5 * time.Second}
+	for _, route := range []struct {
+		name string
+		url  string
+	}{
+		{name: "business listener rejects liveness", url: httpEndpoint + "/livez"},
+		{name: "business listener rejects readiness", url: httpEndpoint + "/readyz"},
+		{name: "management listener rejects catalog", url: healthEndpoint + "/products"},
+	} {
+		response, err := client.Get(
+			route.url,
+		) //nolint:gosec // Disposable loopback endpoint.
+		if err != nil {
+			t.Fatalf("%s: %v", route.name, err)
+		}
+		_, readErr := io.Copy(io.Discard, io.LimitReader(response.Body, 1024))
+		closeErr := response.Body.Close()
+		if readErr != nil || closeErr != nil || response.StatusCode != http.StatusNotFound {
+			t.Errorf("%s status/read/close = %d/%v/%v, want 404", route.name,
+				response.StatusCode, readErr, closeErr)
 		}
 	}
 }

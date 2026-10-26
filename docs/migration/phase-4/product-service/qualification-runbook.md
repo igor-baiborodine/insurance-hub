@@ -15,6 +15,10 @@
 
 # QA Product qualification runbook
 
+For issue #137's established gateway cutover and current Product listener layout, use the
+[established cutover runbook](established-cutover-runbook.md). The preview results below are
+historical evidence for issue #136.
+
 Issue #136 qualifies the existing Go Product read path in QA through an isolated Vue and Java
 gateway preview. The established QA gateway continues to select Java. Execute every command below
 from the repository root unless it says `make -C services/product-service`. Retain run JSON and

@@ -78,6 +78,7 @@ SECURITY_HARNESS_OUTPUT ?=
 TELEMETRY_ACCEPTANCE_OUTPUT ?=
 DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md \
 	../../docs/migration/phase-4/product-service/deployment-runbook.md \
+	../../docs/migration/phase-4/product-service/established-cutover-runbook.md \
 	../../docs/migration/phase-4/product-service/qualification-runbook.md \
 	../../docs/migration/phase-4/product-service/observability-contract.md \
 	../../docs/migration/phase-4/product-service/observability-runbook.md

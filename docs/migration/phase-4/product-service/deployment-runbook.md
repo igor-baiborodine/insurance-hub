@@ -17,6 +17,9 @@
 
 # Product Go deployment runbook
 
+For issue #137's Product listener migration and established gateway cutover, use the
+[established cutover runbook](established-cutover-runbook.md) alongside this deployment guide.
+
 Product Go reads the existing `product.public.product` catalog alongside Java. Java retains
 schema/seeding ownership and remains the gateway destination. Go uses a dedicated reader login,
 internal HTTP/gRPC Services, and a separate management Service. This is the operational procedure
