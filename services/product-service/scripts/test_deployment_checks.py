@@ -16,6 +16,8 @@ import pytest
 import check_render
 
 KEYS = tuple(deployment_check.OVERLAYS)
+QA_JAVA_URL = "http://qa-product-api-legacy.qa-svc.svc.cluster.local:80"
+QA_GO_URL = "http://qa-product-api.qa-svc.svc.cluster.local:80"
 Documents = dict[str, list[dict[str, Any]]]
 Mutation = Callable[[Documents], None]
 
@@ -177,11 +179,22 @@ def missing_java_sampler(values: Documents) -> None:
     ]
 
 
-def qa_gateway_selects_go(values: Documents) -> None:
+def qa_gateway_uses_management_port(values: Documents) -> None:
     config = find_prefix(values["qa-gateway"], "ConfigMap", "qa-gateway-product-route-config-")
     config["data"]["application.yml"] = config["data"]["application.yml"].replace(
-        "qa-product-api-legacy", "qa-product-api"
+        ".svc.cluster.local:80",
+        ".svc.cluster.local:8081",
     )
+
+
+def select_qa_gateway_backend(values: Documents, selected_url: str) -> None:
+    for key in ("qa-gateway", "qa-aggregate"):
+        config = find_prefix(values[key], "ConfigMap", "qa-gateway-product-route-config-")
+        current = config["data"]["application.yml"]
+        assert QA_JAVA_URL in current or QA_GO_URL in current
+        config["data"]["application.yml"] = current.replace(
+            QA_JAVA_URL if QA_JAVA_URL in current else QA_GO_URL, selected_url
+        )
 
 
 def local_gateway_has_second_url(values: Documents) -> None:
@@ -211,8 +224,11 @@ def gateway_references_stale_config(values: Documents) -> None:
 
 def qa_aggregate_changes_gateway_route(values: Documents) -> None:
     config = find_prefix(values["qa-aggregate"], "ConfigMap", "qa-gateway-product-route-config-")
-    config["data"]["application.yml"] = config["data"]["application.yml"].replace(
-        "qa-product-api-legacy", "qa-product-api"
+    current = config["data"]["application.yml"]
+    assert QA_JAVA_URL in current or QA_GO_URL in current
+    config["data"]["application.yml"] = current.replace(
+        QA_JAVA_URL if QA_JAVA_URL in current else QA_GO_URL,
+        QA_GO_URL if QA_JAVA_URL in current else QA_JAVA_URL,
     )
 
 
@@ -231,7 +247,7 @@ CASES: list[tuple[str, Mutation, str]] = [
     ("disabled QA telemetry", disabled_qa_telemetry, "qa Product ConfigMap"),
     ("missing QA Pod identity", missing_qa_instance, "PRODUCT_DATABASE_URL"),
     ("missing Java sampler", missing_java_sampler, "bind the QA Zipkin sampler"),
-    ("premature QA Go gateway route", qa_gateway_selects_go, "expected Product URL"),
+    ("QA gateway uses management port", qa_gateway_uses_management_port, "expected Product URL"),
     ("multiple local-dev gateway URLs", local_gateway_has_second_url, "expected Product URL"),
     ("gateway subPath mount", gateway_mount_uses_subpath, "without subPath"),
     (
@@ -276,12 +292,65 @@ def test_explicit_stopped_qa_state_is_accepted(
     values = active_documents(rendered_documents)
     missing_activation(values)
     mark_stopped(values)
+    select_qa_gateway_backend(values, QA_JAVA_URL)
 
     # when
     status = check_render.main(write_documents(tmp_path, values, "stopped"))
 
     # then
     assert status == 0
+
+
+@pytest.mark.integration
+def test_java_fallback_gateway_route_is_accepted(
+    rendered_documents: Documents,
+    tmp_path: Path,
+) -> None:
+    # given
+    values = active_documents(rendered_documents)
+    select_qa_gateway_backend(values, QA_JAVA_URL)
+
+    # when
+    status = check_render.main(write_documents(tmp_path, values, "java-fallback"))
+
+    # then
+    assert status == 0
+
+
+@pytest.mark.integration
+def test_go_gateway_route_is_accepted(
+    rendered_documents: Documents,
+    tmp_path: Path,
+) -> None:
+    # given
+    values = active_documents(rendered_documents)
+    select_qa_gateway_backend(values, QA_GO_URL)
+
+    # when
+    status = check_render.main(write_documents(tmp_path, values, "go-route"))
+
+    # then
+    assert status == 0
+
+
+@pytest.mark.integration
+def test_stopped_qa_state_cannot_route_to_go(
+    rendered_documents: Documents,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # given
+    values = active_documents(rendered_documents)
+    missing_activation(values)
+    mark_stopped(values)
+    select_qa_gateway_backend(values, QA_GO_URL)
+
+    # when
+    status = check_render.main(write_documents(tmp_path, values, "stopped-go-route"))
+
+    # then
+    assert status == 1
+    assert "stopped QA aggregate routes to Go Product" in capsys.readouterr().err
 
 
 @pytest.mark.integration
