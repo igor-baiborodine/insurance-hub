@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 import math
 import re
+import stat
 import subprocess
 import threading
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from scripts.product_qualification.core import (
@@ -22,6 +25,116 @@ from scripts.product_qualification.core import (
 )
 
 POD_NAME = re.compile(r"qa-[a-z0-9-]+\Z")
+TRACE_ID = re.compile(r"[0-9a-f]{32}\Z")
+SPAN_ID = re.compile(r"[0-9a-f]{16}\Z")
+GO_METRIC_QUERY = (
+    'insurance_hub_product_requests_total{service_name="product-service",'
+    'deployment_environment_name="qa",service_implementation="go"}'
+)
+GO_LOG_QUERY = (
+    '{service_name="product-service",deployment_environment_name="qa",'
+    'service_implementation="go"} | json'
+)
+GO_TRACE_QUERY = (
+    '{ resource.service.name = "product-service" && '
+    'resource.insurance_hub.service.implementation = "go" && '
+    'resource.deployment.environment.name = "qa" }'
+)
+
+
+def verify_signals(
+    path: Path,
+    *,
+    started: float,
+    finished: float,
+    revision: str,
+    image: str,
+    gateway_pod: str,
+    product_pod: str,
+) -> dict[str, Any]:
+    """Check bounded operator-collected Go signal evidence; retain its source file separately."""
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise QualificationError("Go signal evidence is unavailable") from error
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+        raise QualificationError("Go signal evidence must be a private regular file")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise QualificationError("Go signal evidence is unavailable or malformed") from error
+    if not isinstance(value, dict) or any(
+        value.get(key) != expected
+        for key, expected in (
+            ("revision", revision),
+            ("image", image),
+            ("gateway_pod", gateway_pod),
+            ("product_pod", product_pod),
+        )
+    ):
+        raise QualificationError("Go signal evidence target differs from observation")
+    log, metric, trace = (value.get(key) for key in ("log", "metric", "trace"))
+    if not all(isinstance(item, dict) for item in (log, metric, trace)):
+        raise QualificationError("Go log, metric and trace evidence are required")
+    for item in (log, metric, trace):
+        at = item.get("observed_at_unix")
+        if not isinstance(at, (int, float)) or not started <= at <= finished + 45:
+            raise QualificationError("Go signal evidence is outside the observation window")
+    if (
+        log.get("source") != "Loki"
+        or log.get("query") != GO_LOG_QUERY
+        or log.get("product_pod") != product_pod
+    ):
+        raise QualificationError("representative Go Product log is missing")
+    before, after = metric.get("before"), metric.get("after")
+    if (
+        metric.get("source") != "Prometheus"
+        or metric.get("query") != GO_METRIC_QUERY
+        or not isinstance(metric.get("before_at_unix"), (int, float))
+        or not started - 60 <= metric["before_at_unix"] <= started
+        or not isinstance(metric.get("after_at_unix"), (int, float))
+        or not started <= metric["after_at_unix"] <= finished + 45
+        or any(
+            not isinstance(item, (int, float)) or not math.isfinite(item)
+            for item in (before, after)
+        )
+        or before < 0
+        or after <= before
+    ):
+        raise QualificationError("Go Product request metric did not advance")
+    if (
+        trace.get("source") != "Tempo"
+        or trace.get("query") != GO_TRACE_QUERY
+        or not isinstance(trace.get("trace_id"), str)
+        or not TRACE_ID.fullmatch(trace["trace_id"])
+        or not isinstance(trace.get("gateway_span_id"), str)
+        or not SPAN_ID.fullmatch(trace["gateway_span_id"])
+        or not isinstance(trace.get("product_parent_span_id"), str)
+        or trace["product_parent_span_id"] != trace["gateway_span_id"]
+        or trace.get("product_service") != "product-service"
+        or log.get("trace_id") != trace.get("trace_id")
+    ):
+        raise QualificationError("correlated gateway-to-Go Tempo trace is missing")
+    return {
+        "log": "reported",
+        "metric_advance": after - before,
+        "trace_id": trace["trace_id"],
+        "source_file": str(path),
+    }
+
+
+def assess_observations(records: list[dict[str, Any]], duration: int) -> None:
+    """Reject missing 30-second resource/route samples across the accepted window."""
+    if len(records) < duration // 30 + 1:
+        raise QualificationError("mandatory resource and route observations are incomplete")
+    times = [item.get("observed_at_monotonic") for item in records]
+    if any(not isinstance(value, (int, float)) for value in times) or any(
+        later <= earlier or later - earlier > 45
+        for earlier, later in zip(times, times[1:], strict=False)
+    ):
+        raise QualificationError("mandatory resource and route observation schedule has gaps")
+    if times[-1] - times[0] < duration - 1:
+        raise QualificationError("mandatory resource and route observation window is short")
 
 
 def cpu_cores(value: str) -> float:
@@ -175,6 +288,7 @@ class Observer:
     gateway: dict[str, Any]
     product: dict[str, Any]
     database: dict[str, Any]
+    route_check: Callable[[], dict[str, Any]] | None = None
     records: list[dict[str, Any]] = field(default_factory=list)
     failure: str | None = None
     stopped: threading.Event = field(default_factory=threading.Event)
@@ -185,6 +299,7 @@ class Observer:
         validate_target(self.established)
 
     def snapshot(self) -> dict[str, Any]:
+        route = self.route_check() if self.route_check else None
         current = [
             identity(pod(item["pod"], item["namespace"]))
             for item in (self.gateway, self.product, self.database)
@@ -215,6 +330,8 @@ class Observer:
         connections = database_connections(self.database["pod"])
         return {
             "observed_at_unix": time.time(),
+            "observed_at_monotonic": time.monotonic(),
+            "route": route,
             "gateway": gateway_usage,
             "product": product_usage,
             "database": database_usage,
@@ -230,8 +347,12 @@ class Observer:
             while not self.stopped.wait(max(0, next_due - time.monotonic())):
                 try:
                     self.records.append(self.snapshot())
-                except QualificationError as error:
-                    self.failure = str(error)
+                except (QualificationError, KeyError, TypeError, ValueError) as error:
+                    self.failure = (
+                        str(error)
+                        if isinstance(error, QualificationError)
+                        else "resource or route observation is malformed"
+                    )
                     return
                 next_due += 30
 

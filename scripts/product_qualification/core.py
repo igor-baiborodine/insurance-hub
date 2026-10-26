@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
 import json
 import os
+import re
 import socket
 import stat
 import sys
@@ -13,6 +15,7 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -183,6 +186,31 @@ def check_reads(accepted: dict[str, Any], request: Request, token: str) -> dict[
     return observed
 
 
+def validate_established_baseline(earlier: dict[str, Any], fixture_sha: str) -> None:
+    route = earlier.get("route")
+    try:
+        recorded = datetime.fromisoformat(earlier["recorded_at_utc"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise QualificationError("Java baseline has no valid capture time") from error
+    if (
+        earlier.get("context") != "qa-insurance-hub"
+        or earlier.get("namespace") != "qa-svc"
+        or earlier.get("phase") != "java"
+        or earlier.get("route_kind") != "established"
+        or not isinstance(route, dict)
+        or route.get("phase") != "java"
+        or route.get("product_url") != "http://qa-product-api-legacy.qa-svc.svc.cluster.local:80"
+        or not isinstance(earlier.get("revision"), str)
+        or not re.fullmatch(r"main@sha1:[0-9a-f]{40}", earlier["revision"])
+        or route.get("source_revision") != earlier["revision"]
+        or earlier.get("fixture_sha256") != fixture_sha
+        or recorded.tzinfo is None
+        or recorded.utcoffset().total_seconds() != 0
+        or recorded > datetime.now(UTC)
+    ):
+        raise QualificationError("Java baseline is stale or from the wrong route/fixture")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--context", required=True)
@@ -190,7 +218,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--phase", choices=("java", "go"), required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--image", required=True)
-    parser.add_argument("--preview-url", required=True)
+    parser.add_argument("--preview-url")
+    parser.add_argument("--route", choices=("preview", "established"), default="preview")
+    parser.add_argument("--established-url")
     parser.add_argument("--token-file", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--compare-to", type=Path)
@@ -199,20 +229,46 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.context != "qa-insurance-hub" or args.namespace != "qa-svc":
             raise QualificationError("target must be qa-insurance-hub/qa-svc")
-        validate_target(args.preview_url)
         if not args.revision or not args.image or args.output.exists():
             raise QualificationError("revision, image and a new output path are required")
+        request_url = args.preview_url
+        route_state = None
+        if args.route == "established":
+            from scripts.product_qualification.ops import REVISION, established_status
+
+            if not args.established_url or not REVISION.fullmatch(args.revision):
+                raise QualificationError("established URL and exact main revision are required")
+            request_url = args.established_url
+            validate_target(request_url)
+            route_state = established_status(args.revision, args.phase)
+            if {pod["image_id"] for pod in route_state["backend_pods"]} != {args.image}:
+                raise QualificationError("selected Product backend image differs")
+        elif not request_url:
+            raise QualificationError("preview URL is required")
+        validate_target(request_url)
         token = load_token(args.token_file)
+        fixture_sha = hashlib.sha256(args.fixture.read_bytes()).hexdigest()
         accepted = accepted_bodies(args.fixture)
         observed = check_reads(
             accepted,
-            lambda path, credential: http_request(args.preview_url, credential, path),
+            lambda path, credential: http_request(request_url, credential, path),
             token,
         )
+        if args.route == "established":
+            if established_status(args.revision, args.phase) != route_state:
+                raise QualificationError("serving route changed during accepted reads")
         if args.compare_to:
             earlier = json.loads(args.compare_to.read_text(encoding="utf-8"))
+            if (
+                not isinstance(earlier, dict)
+                or not isinstance(earlier.get("bodies"), dict)
+                or any(not isinstance(earlier["bodies"].get(key), str) for key in ("list", *CODES))
+            ):
+                raise QualificationError("Java baseline bodies are missing or malformed")
             if earlier.get("phase") != "java" or args.phase != "go":
                 raise QualificationError("phase parity requires Java baseline and Go observation")
+            if args.route == "established":
+                validate_established_baseline(earlier, fixture_sha)
             for key in ("list", *CODES):
                 compare_body(
                     decode_body(earlier["bodies"][key].encode()),
@@ -225,6 +281,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             "phase": args.phase,
             "revision": args.revision,
             "image": args.image,
+            "route_kind": args.route,
+            "route": route_state,
+            "fixture_sha256": fixture_sha,
+            "recorded_at_utc": datetime.now(UTC).isoformat(),
             "checks": 8,
             "bodies": observed,
         }
@@ -237,7 +297,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OSError, KeyError, TypeError, ValueError:
         print("product-qualification: input, transport or evidence I/O failed", file=sys.stderr)
         return 1
-    print(f"product-qualification: {args.phase} preview reads passed")
+    print(f"product-qualification: {args.phase} {args.route} reads passed")
     return 0
 
 

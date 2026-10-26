@@ -244,6 +244,111 @@ class DeploymentGuardTests(unittest.TestCase):
         self.assertTrue(first.terminated)
         self.assertTrue(first.waited and second.waited)
 
+    def test_forwards_use_business_80_and_management_8081(self) -> None:
+        target = deployment.Target.__new__(deployment.Target)
+        target.context = "kind-local-dev-insurance-hub"
+        target.namespace = "local-dev-all"
+        target.business = "local-dev-product-api"
+        target.management = "local-dev-product-api-management"
+        commands = []
+
+        class Child:
+            terminated = False
+
+            def poll(self) -> int | None:
+                return 0 if self.terminated else None
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def wait(self, timeout: int) -> int:
+                return 0
+
+        def start(command, **_kwargs):
+            commands.append(command)
+            return Child()
+
+        with (
+            patch.object(deployment.subprocess, "Popen", side_effect=start),
+            patch.object(deployment.socket, "create_connection", return_value=nullcontext()),
+        ):
+            with deployment.forwards(target) as ports:
+                self.assertEqual(set(ports), {"http", "grpc", "health"})
+        self.assertEqual(
+            [(command[8], command[9].split(":")[-1]) for command in commands],
+            [
+                ("service/local-dev-product-api", "80"),
+                ("service/local-dev-product-api", "9090"),
+                ("service/local-dev-product-api-management", "8081"),
+            ],
+        )
+
+    def test_gateway_route_requires_serving_mounted_override_and_phase(self) -> None:
+        target = deployment.Target.__new__(deployment.Target)
+        target.prefix = "qa-"
+        target.namespace = "qa-svc"
+        target.business = "qa-product-api"
+        config_name = "qa-gateway-product-route-config-h5t75t5b9d"
+        config = (
+            "micronaut:\n  http:\n    services:\n      product-service:\n"
+            "        urls:\n"
+            "          - http://qa-product-api-legacy.qa-svc.svc.cluster.local:80\n"
+        )
+        spec = {
+            "containers": [
+                {
+                    "env": [
+                        {
+                            "name": "MICRONAUT_CONFIG_FILES",
+                            "value": "/etc/product-route/application.yml",
+                        }
+                    ],
+                    "volumeMounts": [
+                        {
+                            "name": "product-route-config",
+                            "mountPath": "/etc/product-route",
+                            "readOnly": True,
+                        }
+                    ],
+                }
+            ],
+            "volumes": [{"name": "product-route-config", "configMap": {"name": config_name}}],
+        }
+        state = {
+            ("deployment", "qa-agent-portal-gateway-legacy"): {
+                "metadata": {"generation": 2},
+                "spec": {"replicas": 1, "template": {"spec": spec}},
+                "status": {"observedGeneration": 2, "readyReplicas": 1, "updatedReplicas": 1},
+            },
+            ("configmap", config_name): {"data": {"application.yml": config}},
+            ("pods", "-l", "app.kubernetes.io/name=agent-portal-gateway-legacy"): {
+                "items": [
+                    {
+                        "metadata": {"name": "qa-gateway-1", "uid": "one"},
+                        "spec": spec,
+                        "status": {
+                            "phase": "Running",
+                            "podIP": "10.0.0.1",
+                            "containerStatuses": [{"ready": True, "imageID": "gateway@sha256:abc"}],
+                        },
+                    }
+                ]
+            },
+            ("endpointslices", "-l", "kubernetes.io/service-name=qa-agent-portal-gateway-legacy"): {
+                "items": [
+                    {"endpoints": [{"conditions": {"ready": True}, "addresses": ["10.0.0.1"]}]}
+                ]
+            },
+        }
+        target.json = lambda _verb, *args: state[args]
+        target.kubectl = lambda *_args, **_kwargs: config
+        self.assertEqual(target.gateway_route("java")["gateway_pods"][0]["uid"], "one")
+        with self.assertRaisesRegex(deployment.DeploymentError, "wrong phase"):
+            target.gateway_route("go")
+        target.kubectl = lambda *_args, **_kwargs: "wrong mounted bytes"
+        with self.assertRaisesRegex(deployment.DeploymentError, "mounted Product override differs"):
+            target.gateway_route("java")
+
     def test_live_rejects_selector_overlap_and_external_exposure(self) -> None:
         target = deployment.Target.__new__(deployment.Target)
         target.environment = "local-dev"
@@ -283,7 +388,7 @@ class DeploymentGuardTests(unittest.TestCase):
                 },
                 "spec": {"type": "ClusterIP", "selector": labels, "ports": [{"port": port}]},
             }
-            for name, port in ((target.business, 8081), (target.management, 8080))
+            for name, port in ((target.business, 80), (target.management, 8081))
         ]
         config = {
             "kind": "ConfigMap",
