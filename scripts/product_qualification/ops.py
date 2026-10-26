@@ -334,15 +334,19 @@ def established_status(expected_revision: str, phase: str) -> dict[str, Any]:
         raise QualificationError("established gateway container inventory differs")
     container = template["containers"][0]
     config_path = "/etc/product-route/application.yml"
+    mounts = [
+        item
+        for item in container.get("volumeMounts", [])
+        if item.get("name") == "product-route-config"
+    ]
     if not any(
         item.get("name") == "MICRONAUT_CONFIG_FILES" and item.get("value") == config_path
         for item in container.get("env", [])
-    ) or not any(
-        item.get("name") == "product-route-config"
-        and item.get("mountPath") == "/etc/product-route"
-        and item.get("readOnly") is True
-        and "subPath" not in item
-        for item in container.get("volumeMounts", [])
+    ) or not (
+        len(mounts) == 1
+        and mounts[0].get("mountPath") == "/etc/product-route"
+        and mounts[0].get("readOnly") is True
+        and "subPath" not in mounts[0]
     ):
         raise QualificationError("established gateway effective configuration mount is missing")
     volumes = [
@@ -370,17 +374,32 @@ def established_status(expected_revision: str, phase: str) -> dict[str, Any]:
         pod_state = item.get("status", {})
         if pod_state.get("podIP") not in serving:
             continue
+        pod_spec = item.get("spec", {})
+        pod_containers = pod_spec.get("containers", [])
+        pod_volumes = [
+            volume
+            for volume in pod_spec.get("volumes", [])
+            if volume.get("name") == "product-route-config"
+        ]
+        pod_mounts = (
+            [
+                mount
+                for mount in pod_containers[0].get("volumeMounts", [])
+                if mount.get("name") == "product-route-config"
+            ]
+            if len(pod_containers) == 1
+            else []
+        )
         if (
             pod_state.get("phase") != "Running"
             or len(pod_state.get("containerStatuses", [])) != 1
             or not pod_state["containerStatuses"][0].get("ready")
             or not pod_state["containerStatuses"][0].get("imageID")
-            or item.get("spec", {}).get("containers", [{}])[0].get("image")
-            != container.get("image")
-            or item.get("spec", {}).get("containers", [{}])[0].get("env") != container.get("env")
-            or item.get("spec", {}).get("containers", [{}])[0].get("volumeMounts")
-            != container.get("volumeMounts")
-            or item.get("spec", {}).get("volumes") != template.get("volumes")
+            or len(pod_containers) != 1
+            or pod_containers[0].get("image") != container.get("image")
+            or pod_containers[0].get("env") != container.get("env")
+            or pod_mounts != mounts
+            or pod_volumes != volumes
         ):
             raise QualificationError("serving established gateway Pod is stale or not Ready")
         pod_name = item["metadata"]["name"]
