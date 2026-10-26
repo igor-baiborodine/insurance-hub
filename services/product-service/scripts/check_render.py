@@ -556,19 +556,21 @@ def validate_qa_java_observability(
     )
 
 
-def validate_gateway_route(documents: list[dict[str, Any]], environment: str) -> None:
+def validate_gateway_route(documents: list[dict[str, Any]], environment: str) -> str:
     prefix = f"{environment}-"
     namespace = "qa-svc" if environment == "qa" else "local-dev-all"
-    backend = "product-api-legacy" if environment == "qa" else "product-api"
-    expected_url = f"http://{prefix}{backend}.{namespace}.svc.cluster.local:80"
-    expected_config = (
-        "micronaut:\n"
-        "  http:\n"
-        "    services:\n"
-        "      product-service:\n"
-        "        urls:\n"
-        f"          - {expected_url}\n"
-    )
+    backends = ("product-api-legacy", "product-api") if environment == "qa" else ("product-api",)
+    expected_configs = {
+        backend: (
+            "micronaut:\n"
+            "  http:\n"
+            "    services:\n"
+            "      product-service:\n"
+            "        urls:\n"
+            f"          - http://{prefix}{backend}.{namespace}.svc.cluster.local:80\n"
+        )
+        for backend in backends
+    }
 
     require_unique(documents, f"{environment} gateway render")
     require(len(documents) == 3, f"{environment} gateway render must contain three objects")
@@ -581,9 +583,13 @@ def validate_gateway_route(documents: list[dict[str, Any]], environment: str) ->
         "ConfigMap",
         re.compile(rf"{re.escape(prefix)}gateway-product-route-config-[a-z0-9]{{10}}"),
     )
+    selected = [
+        backend
+        for backend, expected_config in expected_configs.items()
+        if config.get("data") == {"application.yml": expected_config}
+    ]
     require(
-        config.get("data") == {"application.yml": expected_config},
-        f"{environment} gateway must configure exactly one expected Product URL",
+        len(selected) == 1, f"{environment} gateway must configure exactly one expected Product URL"
     )
     deployment = one(documents, "Deployment", f"{prefix}agent-portal-gateway-legacy")
     pod_spec = deployment["spec"]["template"]["spec"]
@@ -609,6 +615,7 @@ def validate_gateway_route(documents: list[dict[str, Any]], environment: str) ->
         == [{"name": "product-route-config", "configMap": {"name": config["metadata"]["name"]}}],
         f"{environment} gateway Pod must reference the generated Product ConfigMap name",
     )
+    return selected[0]
 
 
 def one_container(pod_spec: dict[str, Any], name: str, environment: str) -> dict[str, Any]:
@@ -621,6 +628,7 @@ def validate_aggregates(
     qa_go_index: dict[tuple[str, str, str], dict[str, Any]],
     qa_gateway: list[dict[str, Any]],
     aggregate: list[dict[str, Any]],
+    qa_backend: str,
 ) -> None:
     require_unique(aggregate, "QA aggregate")
     java = one(aggregate, "Deployment", "qa-product-api-legacy")
@@ -643,6 +651,7 @@ def validate_aggregates(
             and not any(object_identity in aggregate_index for object_identity in qa_go_index),
             "stopped QA aggregate still contains Go Product objects",
         )
+        require(qa_backend == "product-api-legacy", "stopped QA aggregate routes to Go Product")
         return
 
     require(contains_qa_go(aggregate), "active QA aggregate does not contain Go Product")
@@ -681,8 +690,8 @@ def main(argv: list[str] | None = None) -> int:
         validate_disjoint(qa_go, qa_legacy, "qa")
         validate_qa_java_observability(qa_legacy, qa_aggregate)
         validate_gateway_route(local_gateway, "local-dev")
-        validate_gateway_route(qa_gateway, "qa")
-        validate_aggregates(qa_go_index, qa_gateway, qa_aggregate)
+        qa_backend = validate_gateway_route(qa_gateway, "qa")
+        validate_aggregates(qa_go_index, qa_gateway, qa_aggregate, qa_backend)
     except ValidationError as error:
         print(f"product-deploy-check: {error}", file=sys.stderr)
         return 1
