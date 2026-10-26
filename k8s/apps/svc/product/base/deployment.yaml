@@ -50,13 +50,13 @@ spec:
                 - ALL
           ports:
             - name: http
-              containerPort: 8081
+              containerPort: 8080
               protocol: TCP
             - name: grpc
               containerPort: 9090
               protocol: TCP
             - name: management
-              containerPort: 8080
+              containerPort: 8081
               protocol: TCP
           envFrom:
             - configMapRef:

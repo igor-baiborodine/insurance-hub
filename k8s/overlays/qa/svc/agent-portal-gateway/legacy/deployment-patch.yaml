@@ -26,7 +26,17 @@ spec:
           env:
             - name: MICRONAUT_ENVIRONMENTS
               value: "qa"
+            - name: MICRONAUT_CONFIG_FILES
+              value: /etc/product-route/application.yml
             - name: TRACING_ZIPKIN_HTTP_URL
               value: "http://qa-alloy.qa-monitoring.svc.cluster.local:9411"
             - name: TRACING_ZIPKIN_SAMPLER_PROBABILITY
               value: "1.0"
+          volumeMounts:
+            - name: product-route-config
+              mountPath: /etc/product-route
+              readOnly: true
+      volumes:
+        - name: product-route-config
+          configMap:
+            name: gateway-product-route-config

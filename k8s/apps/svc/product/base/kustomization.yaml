@@ -13,9 +13,9 @@ configMapGenerator:
   - name: product-config
     literals:
       - SERVICE_NAME=product-service
-      - HTTP_ADDR=0.0.0.0:8081
+      - HTTP_ADDR=0.0.0.0:8080
       - GRPC_ADDR=0.0.0.0:9090
-      - HEALTH_ADDR=0.0.0.0:8080
+      - HEALTH_ADDR=0.0.0.0:8081
       - DB_MAX_CONNS=8
       - DB_CONNECT_TIMEOUT=3s
       - DB_ACQUIRE_TIMEOUT=2s

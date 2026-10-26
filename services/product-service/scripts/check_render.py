@@ -153,9 +153,9 @@ def selected(selector: dict[str, str], labels: dict[str, str]) -> bool:
 
 EXPECTED_CONFIG = {
     "SERVICE_NAME": "product-service",
-    "HTTP_ADDR": "0.0.0.0:8081",
+    "HTTP_ADDR": "0.0.0.0:8080",
     "GRPC_ADDR": "0.0.0.0:9090",
-    "HEALTH_ADDR": "0.0.0.0:8080",
+    "HEALTH_ADDR": "0.0.0.0:8081",
     "DB_MAX_CONNS": "8",
     "DB_CONNECT_TIMEOUT": "3s",
     "DB_ACQUIRE_TIMEOUT": "2s",
@@ -326,14 +326,14 @@ def validate_go_environment(
     validate_service(
         business,
         [
-            {"name": "http", "port": 8081, "protocol": "TCP", "targetPort": "http"},
+            {"name": "http", "port": 80, "protocol": "TCP", "targetPort": "http"},
             {"name": "grpc", "port": 9090, "protocol": "TCP", "targetPort": "grpc"},
         ],
         selector,
     )
     validate_service(
         management,
-        [{"name": "management", "port": 8080, "protocol": "TCP", "targetPort": "management"}],
+        [{"name": "management", "port": 8081, "protocol": "TCP", "targetPort": "management"}],
         selector,
     )
 
@@ -384,9 +384,9 @@ def validate_go_environment(
     require(
         container.get("ports")
         == [
-            {"containerPort": 8081, "name": "http", "protocol": "TCP"},
+            {"containerPort": 8080, "name": "http", "protocol": "TCP"},
             {"containerPort": 9090, "name": "grpc", "protocol": "TCP"},
-            {"containerPort": 8080, "name": "management", "protocol": "TCP"},
+            {"containerPort": 8081, "name": "management", "protocol": "TCP"},
         ],
         f"{environment} named container ports are incorrect",
     )
@@ -556,8 +556,70 @@ def validate_qa_java_observability(
     )
 
 
+def validate_gateway_route(documents: list[dict[str, Any]], environment: str) -> None:
+    prefix = f"{environment}-"
+    namespace = "qa-svc" if environment == "qa" else "local-dev-all"
+    backend = "product-api-legacy" if environment == "qa" else "product-api"
+    expected_url = f"http://{prefix}{backend}.{namespace}.svc.cluster.local:80"
+    expected_config = (
+        "micronaut:\n"
+        "  http:\n"
+        "    services:\n"
+        "      product-service:\n"
+        "        urls:\n"
+        f"          - {expected_url}\n"
+    )
+
+    require_unique(documents, f"{environment} gateway render")
+    require(len(documents) == 3, f"{environment} gateway render must contain three objects")
+    require(
+        all(identity(document)[1] == namespace for document in documents),
+        f"{environment} gateway namespace is incorrect",
+    )
+    config = one(
+        documents,
+        "ConfigMap",
+        re.compile(rf"{re.escape(prefix)}gateway-product-route-config-[a-z0-9]{{10}}"),
+    )
+    require(
+        config.get("data") == {"application.yml": expected_config},
+        f"{environment} gateway must configure exactly one expected Product URL",
+    )
+    deployment = one(documents, "Deployment", f"{prefix}agent-portal-gateway-legacy")
+    pod_spec = deployment["spec"]["template"]["spec"]
+    container = one_container(pod_spec, "agent-portal-gateway-legacy", environment)
+    environment_values = container.get("env", [])
+    require(
+        len({item.get("name") for item in environment_values}) == len(environment_values),
+        f"{environment} gateway environment has duplicate names",
+    )
+    values = {item.get("name"): item.get("value") for item in environment_values}
+    require(
+        values.get("MICRONAUT_ENVIRONMENTS") == environment
+        and values.get("MICRONAUT_CONFIG_FILES") == "/etc/product-route/application.yml",
+        f"{environment} gateway must load its mounted Product configuration",
+    )
+    require(
+        container.get("volumeMounts")
+        == [{"mountPath": "/etc/product-route", "name": "product-route-config", "readOnly": True}],
+        f"{environment} gateway must mount the Product configuration directory without subPath",
+    )
+    require(
+        pod_spec.get("volumes")
+        == [{"name": "product-route-config", "configMap": {"name": config["metadata"]["name"]}}],
+        f"{environment} gateway Pod must reference the generated Product ConfigMap name",
+    )
+
+
+def one_container(pod_spec: dict[str, Any], name: str, environment: str) -> dict[str, Any]:
+    matches = [item for item in pod_spec.get("containers", []) if item.get("name") == name]
+    require(len(matches) == 1, f"{environment} gateway must contain one {name} container")
+    return matches[0]
+
+
 def validate_aggregates(
     qa_go_index: dict[tuple[str, str, str], dict[str, Any]],
+    qa_gateway: list[dict[str, Any]],
     aggregate: list[dict[str, Any]],
 ) -> None:
     require_unique(aggregate, "QA aggregate")
@@ -569,6 +631,12 @@ def validate_aggregates(
     )
     require(state in {"active", "stopped"}, "QA aggregate has an invalid Product Go state")
     aggregate_index = {identity(document): document for document in aggregate}
+    for gateway_document in qa_gateway:
+        gateway_identity = identity(gateway_document)
+        require(
+            aggregate_index.get(gateway_identity) == gateway_document,
+            f"QA aggregate changed gateway object {gateway_identity}",
+        )
     if state == "stopped":
         require(
             not contains_qa_go(aggregate)
@@ -592,6 +660,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--qa-go", required=True, type=Path)
     parser.add_argument("--qa-legacy", required=True, type=Path)
     parser.add_argument("--qa-aggregate", required=True, type=Path)
+    parser.add_argument("--local-gateway", required=True, type=Path)
+    parser.add_argument("--qa-gateway", required=True, type=Path)
     return parser.parse_args(argv)
 
 
@@ -603,12 +673,16 @@ def main(argv: list[str] | None = None) -> int:
         qa_go = load_documents(arguments.qa_go)
         qa_legacy = load_documents(arguments.qa_legacy)
         qa_aggregate = load_documents(arguments.qa_aggregate)
+        local_gateway = load_documents(arguments.local_gateway)
+        qa_gateway = load_documents(arguments.qa_gateway)
         validate_go_environment(local_go, "local-dev")
         qa_go_index = validate_go_environment(qa_go, "qa")
         validate_disjoint(local_go, local_legacy, "local-dev")
         validate_disjoint(qa_go, qa_legacy, "qa")
         validate_qa_java_observability(qa_legacy, qa_aggregate)
-        validate_aggregates(qa_go_index, qa_aggregate)
+        validate_gateway_route(local_gateway, "local-dev")
+        validate_gateway_route(qa_gateway, "qa")
+        validate_aggregates(qa_go_index, qa_gateway, qa_aggregate)
     except ValidationError as error:
         print(f"product-deploy-check: {error}", file=sys.stderr)
         return 1

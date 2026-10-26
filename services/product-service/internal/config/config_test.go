@@ -20,9 +20,9 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Fatalf("load defaults: %v", err)
 	}
 	if settings.ServiceName != "product-service" ||
-		settings.HTTPAddress.String() != "127.0.0.1:8081" ||
+		settings.HTTPAddress.String() != "127.0.0.1:8080" ||
 		settings.GRPCAddress.String() != "127.0.0.1:9090" ||
-		settings.HealthAddress.String() != "127.0.0.1:8080" {
+		settings.HealthAddress.String() != "127.0.0.1:8081" {
 		t.Errorf("unexpected identity or listener defaults: %#v", settings)
 	}
 	if settings.Database.URL.Value() != testDatabaseURL ||
@@ -276,12 +276,12 @@ func TestLoad_RejectsDuplicateListenerAddresses(t *testing.T) {
 		{
 			name:    "gRPC duplicates HTTP",
 			setting: grpcAddressSetting,
-			value:   "127.0.0.1:8081",
+			value:   "127.0.0.1:8080",
 		},
 		{
 			name:    "management duplicates HTTP",
 			setting: healthAddressSetting,
-			value:   "127.0.0.1:8081",
+			value:   "127.0.0.1:8080",
 		},
 	}
 
