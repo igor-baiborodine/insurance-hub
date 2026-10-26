@@ -8,6 +8,10 @@ labels:
       environment: qa
 resources:
   - ../../../../../apps/svc/agent-portal-gateway/base/legacy
+configMapGenerator:
+  - name: gateway-product-route-config
+    files:
+      - application.yml=application.yml
 patches:
   - path: deployment-patch.yaml
     target:

@@ -516,25 +516,127 @@ class Target:
             ),
             "Java gateway deployment is not ready in the selected environment",
         )
-        route_file = (
-            ROOT
-            / "legacy"
-            / "agent-portal-gateway"
-            / "src"
-            / "main"
-            / "resources"
-            / f"application-{self.environment}.yml"
-        )
-        route_text = route_file.read_text(encoding="utf-8")
-        require(
-            f"http://{self.prefix}product-api-legacy:80" in route_text
-            and f"http://{self.business}:" not in route_text,
-            "checked-in gateway Product destination differs from Java",
-        )
         self.routes()
         print(
-            "product-deployment: Go/Java selectors, Services, Pods, EndpointSlices, gateway identity and routes checked"
+            "product-deployment: Go/Java selectors, Services, Pods, EndpointSlices, gateway identity and cluster routes checked"
         )
+
+    def gateway_route(self, phase: str) -> dict[str, Any]:
+        """Verify the effective mounted Product override in every serving gateway Pod."""
+        require(phase in {"java", "go"}, "DEPLOY_EXPECTED_GATEWAY_PHASE must be java or go")
+        gateway_name = self.prefix + "agent-portal-gateway-legacy"
+        gateway = self.json("get", "deployment", gateway_name)
+        desired = gateway.get("spec", {}).get("replicas", 1)
+        state = gateway.get("status", {})
+        require(
+            isinstance(desired, int)
+            and desired > 0
+            and state.get("readyReplicas") == desired
+            and state.get("updatedReplicas") == desired
+            and state.get("observedGeneration", -1)
+            >= gateway.get("metadata", {}).get("generation", 0),
+            "gateway rollout is not complete",
+        )
+        template = gateway["spec"]["template"]["spec"]
+        containers = template.get("containers", [])
+        require(len(containers) == 1, "gateway container inventory differs")
+        container = containers[0]
+        path = "/etc/product-route/application.yml"
+        require(
+            any(
+                item.get("name") == "MICRONAUT_CONFIG_FILES" and item.get("value") == path
+                for item in container.get("env", [])
+            )
+            and any(
+                item.get("name") == "product-route-config"
+                and item.get("mountPath") == "/etc/product-route"
+                and item.get("readOnly") is True
+                and "subPath" not in item
+                for item in container.get("volumeMounts", [])
+            ),
+            "effective gateway Product override mount is missing",
+        )
+        volumes = [
+            item
+            for item in template.get("volumes", [])
+            if item.get("name") == "product-route-config"
+        ]
+        require(len(volumes) == 1, "gateway Product override volume is missing")
+        config_name = volumes[0].get("configMap", {}).get("name", "")
+        require(
+            bool(
+                re.fullmatch(
+                    re.escape(self.prefix + "gateway-product-route-config-") + r"[a-z0-9]+",
+                    config_name,
+                )
+            ),
+            "gateway Product override is not generated",
+        )
+        config = self.json("get", "configmap", config_name)
+        data = config.get("data", {})
+        require(set(data) == {"application.yml"}, "gateway Product override data differs")
+        try:
+            parsed = yaml.safe_load(data["application.yml"])
+            urls = parsed["micronaut"]["http"]["services"]["product-service"]["urls"]
+        except (yaml.YAMLError, KeyError, TypeError) as error:
+            raise DeploymentError("gateway Product override is malformed") from error
+        expected = (
+            f"http://{self.prefix}product-api-legacy.{self.namespace}.svc.cluster.local:80"
+            if phase == "java"
+            else f"http://{self.business}.{self.namespace}.svc.cluster.local:80"
+        )
+        require(urls == [expected], "gateway Product override selects the wrong phase")
+        pods = self.json("get", "pods", "-l", "app.kubernetes.io/name=agent-portal-gateway-legacy")
+        slices = self.json(
+            "get", "endpointslices", "-l", f"kubernetes.io/service-name={gateway_name}"
+        )
+        addresses = {
+            address
+            for item in slices.get("items", [])
+            for endpoint in item.get("endpoints", [])
+            if endpoint.get("conditions", {}).get("ready") is True
+            for address in endpoint.get("addresses", [])
+        }
+        serving = []
+        for pod in pods.get("items", []):
+            status = pod.get("status", {})
+            if status.get("podIP") not in addresses:
+                continue
+            require(
+                status.get("phase") == "Running"
+                and len(status.get("containerStatuses", [])) == 1
+                and status["containerStatuses"][0].get("ready")
+                and status["containerStatuses"][0].get("imageID")
+                and pod.get("spec", {}).get("volumes") == template.get("volumes")
+                and pod.get("spec", {}).get("containers", [{}])[0].get("env")
+                == container.get("env")
+                and pod.get("spec", {}).get("containers", [{}])[0].get("volumeMounts")
+                == container.get("volumeMounts"),
+                "serving gateway Pod has stale override or is not Ready",
+            )
+            name = pod["metadata"]["name"]
+            require(
+                self.kubectl("exec", name, "--", "cat", path, timeout=8) == data["application.yml"],
+                "serving gateway mounted Product override differs",
+            )
+            serving.append(
+                {
+                    "pod": name,
+                    "uid": pod["metadata"]["uid"],
+                    "ip": status["podIP"],
+                    "image_id": status["containerStatuses"][0]["imageID"],
+                }
+            )
+        require(
+            len(serving) == desired and {pod["ip"] for pod in serving} == addresses,
+            "serving gateway endpoints do not match Ready replacement Pods",
+        )
+        return {
+            "phase": phase,
+            "product_url": expected,
+            "config_map": config_name,
+            "gateway_pods": serving,
+        }
 
     def routes(self) -> None:
         available = run(["kubectl", "--context", self.context, "api-resources", "-o", "name"])
@@ -602,9 +704,9 @@ def forwards(target: Target) -> Iterator[dict[str, int]]:
     ports: dict[str, int] = {}
     try:
         for name, service, remote in (
-            ("http", target.business, 8081),
+            ("http", target.business, 80),
             ("grpc", target.business, 9090),
-            ("health", target.management, 8080),
+            ("health", target.management, 8081),
         ):
             with socket.socket() as reservation:
                 reservation.bind(("127.0.0.1", 0))
@@ -753,6 +855,11 @@ def main(argv: list[str] | None = None) -> int:
     require(len(arguments) == 1 and arguments[0] in OPERATIONS, "unsupported operation")
     operation = arguments[0]
     target = Target()
+    expected_gateway_phase = os.environ.get("DEPLOY_EXPECTED_GATEWAY_PHASE", "")
+    require(
+        expected_gateway_phase in ("", "java", "go"),
+        "DEPLOY_EXPECTED_GATEWAY_PHASE must be java or go",
+    )
     if operation in {"image-load", "deploy", "stop"}:
         require(
             target.environment == "local-dev",
@@ -770,6 +877,11 @@ def main(argv: list[str] | None = None) -> int:
         print("product-deployment: target and prerequisites passed")
     elif operation == "deploy-status":
         target.live(items, require_deployment=True)
+        if expected_gateway_phase:
+            print(
+                "product-deployment: gateway route "
+                + json.dumps(target.gateway_route(expected_gateway_phase))
+            )
     elif operation == "image-load":
         require(target.environment == "local-dev", "Kind image load is local-dev only")
         run(
@@ -811,6 +923,11 @@ def main(argv: list[str] | None = None) -> int:
         print("product-deployment: local Go rollout ready; catalog/schema identity unchanged")
     elif operation == "deploy-verify":
         verify(target, items)
+        if expected_gateway_phase:
+            print(
+                "product-deployment: gateway route "
+                + json.dumps(target.gateway_route(expected_gateway_phase))
+            )
     elif operation == "stop":
         require(
             target.environment == "local-dev",

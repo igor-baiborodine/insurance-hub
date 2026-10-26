@@ -165,7 +165,7 @@ func load(lookup lookupEnv) (Config, error) {
 		return Config{}, invalid(serviceNameSetting, "must not be blank")
 	}
 
-	httpAddress, err := loadAddress(lookup, httpAddressSetting, "127.0.0.1:8081")
+	httpAddress, err := loadAddress(lookup, httpAddressSetting, "127.0.0.1:8080")
 	if err != nil {
 		return Config{}, err
 	}
@@ -173,7 +173,7 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	healthAddress, err := loadAddress(lookup, healthAddressSetting, "127.0.0.1:8080")
+	healthAddress, err := loadAddress(lookup, healthAddressSetting, "127.0.0.1:8081")
 	if err != nil {
 		return Config{}, err
 	}

@@ -26,6 +26,8 @@ OVERLAYS = {
     "qa-go": "k8s/overlays/qa/svc/product",
     "qa-legacy": "k8s/overlays/qa/svc/product/legacy",
     "qa-aggregate": "k8s/overlays/qa/svc",
+    "local-gateway": "k8s/overlays/local-dev/svc/agent-portal-gateway/legacy",
+    "qa-gateway": "k8s/overlays/qa/svc/agent-portal-gateway/legacy",
 }
 
 
@@ -74,6 +76,10 @@ def main(_argv: Sequence[str] | None = None) -> int:
                 str(paths["qa-legacy"]),
                 "--qa-aggregate",
                 str(paths["qa-aggregate"]),
+                "--local-gateway",
+                str(paths["local-gateway"]),
+                "--qa-gateway",
+                str(paths["qa-gateway"]),
             ]
             if check_render.main(arguments) != 0:
                 return 1

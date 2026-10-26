@@ -15,7 +15,7 @@ import pytest
 
 import check_render
 
-KEYS = ("local-go", "local-legacy", "qa-go", "qa-legacy", "qa-aggregate")
+KEYS = tuple(deployment_check.OVERLAYS)
 Documents = dict[str, list[dict[str, Any]]]
 Mutation = Callable[[Documents], None]
 
@@ -89,6 +89,16 @@ def wrong_port(values: Documents) -> None:
     deployment["spec"]["template"]["spec"]["containers"][0]["ports"][0]["containerPort"] = 8082
 
 
+def wrong_business_service_port(values: Documents) -> None:
+    service = find(values["local-go"], "Service", "local-dev-product-api")
+    service["spec"]["ports"][0]["port"] = 8081
+
+
+def wrong_management_service_port(values: Documents) -> None:
+    service = find(values["qa-go"], "Service", "qa-product-api-management")
+    service["spec"]["ports"][0]["port"] = 8080
+
+
 def missing_secret(values: Documents) -> None:
     deployment = find(values["local-go"], "Deployment", "local-dev-product-api")
     deployment["spec"]["template"]["spec"]["containers"][0]["env"] = []
@@ -160,9 +170,50 @@ def missing_java_sampler(values: Documents) -> None:
     ]
 
 
+def qa_gateway_selects_go(values: Documents) -> None:
+    config = find_prefix(values["qa-gateway"], "ConfigMap", "qa-gateway-product-route-config-")
+    config["data"]["application.yml"] = config["data"]["application.yml"].replace(
+        "qa-product-api-legacy", "qa-product-api"
+    )
+
+
+def local_gateway_has_second_url(values: Documents) -> None:
+    config = find_prefix(
+        values["local-gateway"], "ConfigMap", "local-dev-gateway-product-route-config-"
+    )
+    config["data"]["application.yml"] += (
+        "          - http://local-dev-product-api-legacy.local-dev-all.svc.cluster.local:80\n"
+    )
+
+
+def gateway_mount_uses_subpath(values: Documents) -> None:
+    deployment = find(values["qa-gateway"], "Deployment", "qa-agent-portal-gateway-legacy")
+    deployment["spec"]["template"]["spec"]["containers"][0]["volumeMounts"][0]["subPath"] = (
+        "application.yml"
+    )
+
+
+def gateway_references_stale_config(values: Documents) -> None:
+    deployment = find(
+        values["local-gateway"], "Deployment", "local-dev-agent-portal-gateway-legacy"
+    )
+    deployment["spec"]["template"]["spec"]["volumes"][0]["configMap"]["name"] = (
+        "local-dev-gateway-product-route-config-stale0000"
+    )
+
+
+def qa_aggregate_changes_gateway_route(values: Documents) -> None:
+    config = find_prefix(values["qa-aggregate"], "ConfigMap", "qa-gateway-product-route-config-")
+    config["data"]["application.yml"] = config["data"]["application.yml"].replace(
+        "qa-product-api-legacy", "qa-product-api"
+    )
+
+
 CASES: list[tuple[str, Mutation, str]] = [
     ("bad selector", bad_selector, "selector"),
     ("wrong port", wrong_port, "named container ports"),
+    ("wrong business Service port", wrong_business_service_port, "Product contract"),
+    ("wrong management Service port", wrong_management_service_port, "Product contract"),
     ("missing Secret reference", missing_secret, "PRODUCT_DATABASE_URL"),
     ("external exposure", external_exposure, "must remain ClusterIP"),
     ("missing QA activation", missing_activation, "does not contain Go Product"),
@@ -172,6 +223,19 @@ CASES: list[tuple[str, Mutation, str]] = [
     ("disabled QA telemetry", disabled_qa_telemetry, "qa Product ConfigMap"),
     ("missing QA Pod identity", missing_qa_instance, "PRODUCT_DATABASE_URL"),
     ("missing Java sampler", missing_java_sampler, "bind the QA Zipkin sampler"),
+    ("premature QA Go gateway route", qa_gateway_selects_go, "expected Product URL"),
+    ("multiple local-dev gateway URLs", local_gateway_has_second_url, "expected Product URL"),
+    ("gateway subPath mount", gateway_mount_uses_subpath, "without subPath"),
+    (
+        "stale gateway ConfigMap mount",
+        gateway_references_stale_config,
+        "generated Product ConfigMap",
+    ),
+    (
+        "QA aggregate changes gateway route",
+        qa_aggregate_changes_gateway_route,
+        "QA aggregate changed gateway object",
+    ),
 ]
 
 

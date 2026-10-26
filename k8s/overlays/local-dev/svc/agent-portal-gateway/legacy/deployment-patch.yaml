@@ -22,5 +22,15 @@ spec:
           env:
             - name: MICRONAUT_ENVIRONMENTS
               value: "local-dev"
+            - name: MICRONAUT_CONFIG_FILES
+              value: /etc/product-route/application.yml
             - name: TRACING_ZIPKIN_ENABLED
               value: "false"
+          volumeMounts:
+            - name: product-route-config
+              mountPath: /etc/product-route
+              readOnly: true
+      volumes:
+        - name: product-route-config
+          configMap:
+            name: gateway-product-route-config

@@ -129,7 +129,7 @@ def test_nearest_rank_and_failed_sample_limits() -> None:
             "measured",
             index,
             measure.OPERATIONS[index % 5],
-            float(index),
+            index / 5,
             True,
             float(index),
             float(index) + 0.1,
@@ -142,16 +142,115 @@ def test_nearest_rank_and_failed_sample_limits() -> None:
     ]
     assert measure.assess(samples, 1500, 300)["operations"]["list"]["p99_ms"] == 100
     samples[-1] = measure.Sample(
-        "measured", 1499, "TRI", 1499, False, None, None, None, None, False, "unserved"
+        "measured", 1499, "TRI", 1499 / 5, False, None, None, None, None, False, "unserved"
     )
     with pytest.raises(QualificationError):
         measure.assess(samples, 1500, 300)
     for index in (1484, 1489, 1494, 1499):
         samples[index] = measure.Sample(
-            "measured", index, "TRI", index, True, index, index + 1.001, 1001, 200, True, None
+            "measured", index, "TRI", index / 5, True, index, index + 1.001, 1001, 200, True, None
         )
     with pytest.raises(QualificationError, match="latency"):
         measure.assess(samples, 1500, 300)
+
+
+def test_final_observation_requires_all_900_scheduled_reads() -> None:
+    # given
+    samples = [
+        measure.Sample(
+            "observation",
+            index,
+            measure.OPERATIONS[index % 5],
+            float(index),
+            True,
+            float(index),
+            float(index) + 0.1,
+            100,
+            200,
+            True,
+            None,
+        )
+        for index in range(900)
+    ]
+
+    # when / then
+    assert measure.assess(samples, 900, 900)["operations"]["CAR"]["correct"] == 180
+    with pytest.raises(QualificationError, match="incomplete"):
+        measure.assess(samples[:-1], 900, 900)
+    duplicate = [*samples[:-1], samples[-2]]
+    with pytest.raises(QualificationError, match="incomplete"):
+        measure.assess(duplicate, 900, 900)
+
+
+def test_final_observation_rejects_missing_or_uncorrelated_signals(tmp_path) -> None:
+    # given
+    evidence = {
+        "revision": "main@sha1:" + "a" * 40,
+        "image": "go@sha256:abc",
+        "gateway_pod": "qa-gateway-1",
+        "product_pod": "qa-product-1",
+        "log": {
+            "source": "Loki",
+            "query": observe.GO_LOG_QUERY,
+            "product_pod": "qa-product-1",
+            "trace_id": "a" * 32,
+            "observed_at_unix": 150,
+        },
+        "metric": {
+            "source": "Prometheus",
+            "query": observe.GO_METRIC_QUERY,
+            "before": 1,
+            "after": 2,
+            "before_at_unix": 95,
+            "after_at_unix": 155,
+            "observed_at_unix": 155,
+        },
+        "trace": {
+            "source": "Tempo",
+            "query": observe.GO_TRACE_QUERY,
+            "trace_id": "a" * 32,
+            "gateway_span_id": "b" * 16,
+            "product_parent_span_id": "b" * 16,
+            "product_service": "product-service",
+            "observed_at_unix": 160,
+        },
+    }
+    path = tmp_path / "signals.json"
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    path.chmod(0o600)
+    args = dict(
+        started=100,
+        finished=1000,
+        revision=evidence["revision"],
+        image=evidence["image"],
+        gateway_pod=evidence["gateway_pod"],
+        product_pod=evidence["product_pod"],
+    )
+
+    # when / then
+    assert observe.verify_signals(path, **args)["metric_advance"] == 1
+    evidence["metric"]["after"] = 1
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    with pytest.raises(QualificationError, match="did not advance"):
+        observe.verify_signals(path, **args)
+    evidence["metric"]["after"] = 2
+    evidence["trace"]["product_parent_span_id"] = "c" * 16
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    with pytest.raises(QualificationError, match="correlated"):
+        observe.verify_signals(path, **args)
+
+
+def test_missing_resource_samples_fail_observation_schedule() -> None:
+    # given
+    complete = [{"observed_at_monotonic": float(index * 30)} for index in range(31)]
+
+    # when / then
+    observe.assess_observations(complete, 900)
+    with pytest.raises(QualificationError, match="incomplete"):
+        observe.assess_observations(complete[:-1], 900)
+    incomplete = [*complete[:11], complete[10], *complete[12:]]
+    with pytest.raises(QualificationError, match="gaps"):
+        observe.assess_observations(incomplete, 900)
 
 
 def test_resource_or_control_failure_aborts(monkeypatch) -> None:
@@ -228,7 +327,7 @@ def test_partial_measurement_retains_secret_free_evidence_and_cleans_up(
             closed.append("http")
 
     class FakeObserver:
-        def __init__(self, *_args) -> None:
+        def __init__(self, *_args, **_kwargs) -> None:
             self.records = []
             self.failure = None
 
@@ -361,3 +460,41 @@ def test_wrong_measurement_context_stops_before_qa_contact(tmp_path, monkeypatch
         == 1
     )
     assert not output.exists()
+
+
+def test_final_observation_requires_signal_path_before_qa_contact(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(measure, "pod", lambda *_args: pytest.fail("unexpected QA contact"))
+    assert (
+        measure.main(
+            [
+                "--context",
+                "qa-insurance-hub",
+                "--namespace",
+                "qa-svc",
+                "--phase",
+                "go",
+                "--revision",
+                "main@sha1:" + "a" * 40,
+                "--image",
+                "go@sha256:abc",
+                "--route",
+                "established",
+                "--observation",
+                "--established-url",
+                "http://127.0.0.1:18081",
+                "--prometheus-url",
+                "http://127.0.0.1:19091",
+                "--token-file",
+                str(tmp_path / "missing-token"),
+                "--output",
+                str(tmp_path / "missing-result"),
+                "--gateway-pod",
+                "qa-gateway-1",
+                "--product-pod",
+                "qa-product-1",
+                "--database-pod",
+                "qa-postgres-product-1",
+            ]
+        )
+        == 1
+    )

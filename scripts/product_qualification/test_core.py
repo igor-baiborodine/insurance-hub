@@ -234,6 +234,105 @@ def test_phase_output_is_secret_free_and_parity_is_sensitive(tmp_path, monkeypat
     assert not failed.exists()
 
 
+def test_established_core_rejects_changed_route_and_wrong_backend_image(
+    tmp_path, monkeypatch
+) -> None:
+    # given
+    from scripts.product_qualification import ops
+
+    _, responses = fixture_responses()
+    token_file = tmp_path / "token"
+    token_file.write_text("synthetic-secret", encoding="utf-8")
+    token_file.chmod(0o600)
+    state = {"backend_pods": [{"image_id": "java@sha256:abc"}], "phase": "java"}
+    drift = {"enabled": True}
+    calls = []
+
+    def route(_revision: str, _phase: str) -> dict:
+        calls.append(1)
+        return dict(state)
+
+    def request(_base: str, token: str | None, path: str) -> tuple[int, bytes]:
+        if not token:
+            return 401, b""
+        if path in responses:
+            if path == "/api/products" and drift["enabled"]:
+                state["phase"] = "go"
+            return 200, responses[path]
+        return 404, json.dumps(
+            {
+                "message": "Page Not Found",
+                "_links": {"self": {"href": path, "templated": False}},
+            }
+        ).encode()
+
+    monkeypatch.setattr(ops, "established_status", route)
+    monkeypatch.setattr(core, "http_request", request)
+    args = [
+        "--context",
+        "qa-insurance-hub",
+        "--namespace",
+        "qa-svc",
+        "--phase",
+        "java",
+        "--revision",
+        "main@sha1:" + "a" * 40,
+        "--image",
+        "java@sha256:abc",
+        "--route",
+        "established",
+        "--established-url",
+        "http://127.0.0.1:18081",
+        "--token-file",
+        str(token_file),
+        "--output",
+        str(tmp_path / "core.json"),
+    ]
+
+    # when / then
+    assert core.main(args) == 1
+    assert not (tmp_path / "core.json").exists()
+    assert len(calls) == 2
+    state["phase"] = "java"
+    state["backend_pods"][0]["image_id"] = "wrong@sha256:def"
+    assert core.main(args) == 1
+    assert len(calls) == 3
+    state["backend_pods"][0]["image_id"] = "java@sha256:abc"
+    drift["enabled"] = False
+    assert core.main(args) == 0
+    result = json.loads((tmp_path / "core.json").read_text(encoding="utf-8"))
+    assert result["route_kind"] == "established"
+    assert result["checks"] == 8
+    assert "synthetic-secret" not in (tmp_path / "core.json").read_text(encoding="utf-8")
+
+
+def test_established_parity_rejects_preview_or_wrong_fixture_baseline() -> None:
+    # given
+    revision = "main@sha1:" + "a" * 40
+    baseline = {
+        "context": "qa-insurance-hub",
+        "namespace": "qa-svc",
+        "phase": "java",
+        "route_kind": "preview",
+        "revision": revision,
+        "recorded_at_utc": "2026-10-26T12:00:00+00:00",
+        "fixture_sha256": "accepted",
+        "route": {
+            "phase": "java",
+            "product_url": "http://qa-product-api-legacy.qa-svc.svc.cluster.local:80",
+            "source_revision": revision,
+        },
+    }
+
+    # when / then
+    with pytest.raises(QualificationError, match="stale"):
+        core.validate_established_baseline(baseline, "accepted")
+    baseline["route_kind"] = "established"
+    with pytest.raises(QualificationError, match="stale"):
+        core.validate_established_baseline(baseline, "changed-fixture")
+    core.validate_established_baseline(baseline, "accepted")
+
+
 def test_bounded_http_does_not_follow_redirect(monkeypatch) -> None:
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:

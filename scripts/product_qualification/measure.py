@@ -29,7 +29,13 @@ from scripts.product_qualification.core import (
     load_token,
     validate_target,
 )
-from scripts.product_qualification.observe import Observer, identity, pod
+from scripts.product_qualification.observe import (
+    Observer,
+    assess_observations,
+    identity,
+    pod,
+    verify_signals,
+)
 
 WARMUP_SECONDS = 60
 WARMUP_RATE = 2
@@ -162,8 +168,17 @@ def summarize(samples: list[Sample], count: int, duration: int) -> dict[str, Any
 
 def assess(samples: list[Sample], expected_count: int, duration: int) -> dict[str, Any]:
     summary = summarize(samples, expected_count, duration)
+    ordered = sorted(samples, key=lambda item: item.index)
+    rate = expected_count / duration
     if (
         len(samples) != expected_count
+        or [sample.index for sample in ordered] != list(range(expected_count))
+        or any(sample.operation != OPERATIONS[sample.index % len(OPERATIONS)] for sample in ordered)
+        or any(
+            not math.isfinite(sample.scheduled_at)
+            or abs(sample.scheduled_at - (ordered[0].scheduled_at + sample.index / rate)) > 0.01
+            for sample in ordered
+        )
         or summary["attempted"] != expected_count
         or summary["completed"] != expected_count
         or any(not sample.correct for sample in samples)
@@ -309,11 +324,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--phase", choices=("java", "go"), required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--image", required=True)
-    parser.add_argument("--preview-url", required=True)
+    parser.add_argument("--preview-url")
+    parser.add_argument("--route", choices=("preview", "established"), default="preview")
+    parser.add_argument("--established-url", required=True)
+    parser.add_argument("--observation", action="store_true")
+    parser.add_argument("--signals-file", type=Path)
     parser.add_argument("--token-file", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--prometheus-url", required=True)
-    parser.add_argument("--established-url", required=True)
     parser.add_argument("--gateway-pod", required=True)
     parser.add_argument("--product-pod", required=True)
     parser.add_argument("--database-pod", required=True)
@@ -322,11 +340,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("product-qualification: wrong QA target", file=sys.stderr)
         return 1
     try:
-        validate_target(args.preview_url)
-        validate_target(args.prometheus_url)
-        validate_target(args.established_url)
         if args.output.exists() or not args.revision or not args.image:
             raise QualificationError("new output path and phase identities are required")
+        if args.observation and (args.route != "established" or args.phase != "go"):
+            raise QualificationError("final observation requires established Go route")
+        if args.observation and (not args.signals_file or args.signals_file == Path(".")):
+            raise QualificationError("final observation requires Go signal evidence path")
+        request_url = args.preview_url if args.route == "preview" else args.established_url
+        if not request_url:
+            raise QualificationError("selected qualification URL is required")
+        validate_target(request_url)
+        validate_target(args.prometheus_url)
+        validate_target(args.established_url)
+        route_check = None
+        if args.route == "established":
+            from scripts.product_qualification.ops import REVISION, established_status
+
+            if not REVISION.fullmatch(args.revision):
+                raise QualificationError("exact main revision is required")
+
+            def route_check() -> dict[str, Any]:
+                state = established_status(args.revision, args.phase)
+                if (
+                    {pod["image_id"] for pod in state["backend_pods"]} != {args.image}
+                    or args.product_pod not in {pod["name"] for pod in state["backend_pods"]}
+                    or args.gateway_pod not in {pod["name"] for pod in state["gateway_pods"]}
+                ):
+                    raise QualificationError("selected serving Pod or image changed")
+                return state
+
+            route_check()
         token = load_token(args.token_file)
         accepted = accepted_bodies(
             Path("legacy/product-service/src/test/resources/product-read-baseline/http/qa.json")
@@ -344,13 +387,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "phase": args.phase,
         "revision": args.revision,
         "image": args.image,
+        "route_kind": args.route,
+        "observation_profile": args.observation,
         "started_at_unix": time.time(),
         "pods": {"gateway": gateway, "product": product, "database": database},
         "profile": {
-            "warmup_seconds": WARMUP_SECONDS,
-            "warmup_rate": WARMUP_RATE,
-            "measured_seconds": MEASURED_SECONDS,
-            "measured_rate": MEASURED_RATE,
+            "warmup_seconds": 0 if args.observation else WARMUP_SECONDS,
+            "warmup_rate": 0 if args.observation else WARMUP_RATE,
+            "measured_seconds": 900 if args.observation else MEASURED_SECONDS,
+            "measured_rate": 1 if args.observation else MEASURED_RATE,
             "max_in_flight": MAX_IN_FLIGHT,
             "deadline_seconds": DEADLINE_SECONDS,
             "percentile": "nearest-rank",
@@ -359,7 +404,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "measured": [],
         "status": "incomplete",
     }
-    client = ReusableHTTP(args.preview_url, token)
+    client = ReusableHTTP(request_url, token)
     observer = Observer(
         args.prometheus_url,
         args.established_url,
@@ -368,6 +413,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         gateway,
         product,
         database,
+        route_check=route_check,
     )
     code = 1
     output_failed = False
@@ -380,22 +426,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     signal.signal(signal.SIGINT, interrupted)
     signal.signal(signal.SIGTERM, interrupted)
     try:
-        print("product-qualification: warm-up started", file=sys.stderr)
-        run_stage(
-            "warmup",
-            WARMUP_SECONDS,
-            WARMUP_RATE,
-            client.request,
-            accepted,
-            evidence["warmup"],
-            lambda: None,
+        if not args.observation:
+            print("product-qualification: warm-up started", file=sys.stderr)
+            run_stage(
+                "warmup",
+                WARMUP_SECONDS,
+                WARMUP_RATE,
+                client.request,
+                accepted,
+                evidence["warmup"],
+                lambda: None,
+            )
+        if route_check:
+            route_check()
+        print(
+            "product-qualification: observation started"
+            if args.observation
+            else "product-qualification: measured phase started",
+            file=sys.stderr,
         )
-        print("product-qualification: measured phase started", file=sys.stderr)
         observer.start()
         run_stage(
-            "measured",
-            MEASURED_SECONDS,
-            MEASURED_RATE,
+            "observation" if args.observation else "measured",
+            900 if args.observation else MEASURED_SECONDS,
+            1 if args.observation else MEASURED_RATE,
             client.request,
             accepted,
             evidence["measured"],
@@ -405,7 +459,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         observer.close()
         observer.check()
         observer.records.append(observer.snapshot())
-        evidence["summary"] = assess(evidence["measured"], 1500, MEASURED_SECONDS)
+        expected_count = 900 if args.observation else 1500
+        duration = 900 if args.observation else MEASURED_SECONDS
+        assess_observations(observer.records, duration)
+        evidence["summary"] = assess(evidence["measured"], expected_count, duration)
+        if args.observation:
+            evidence["signals"] = verify_signals(
+                args.signals_file,
+                started=evidence["started_at_unix"],
+                finished=time.time(),
+                revision=args.revision,
+                image=args.image,
+                gateway_pod=args.gateway_pod,
+                product_pod=args.product_pod,
+            )
         evidence["status"] = "passed"
         code = 0
     except Interrupted as error:
@@ -426,7 +493,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         evidence["warmup"] = [asdict(sample) for sample in evidence["warmup"]]
         evidence["measured"] = [asdict(sample) for sample in evidence["measured"]]
         evidence["summary"] = summarize(
-            [Sample(**sample) for sample in evidence["measured"]], 1500, MEASURED_SECONDS
+            [Sample(**sample) for sample in evidence["measured"]],
+            900 if args.observation else 1500,
+            900 if args.observation else MEASURED_SECONDS,
         )
         evidence["finished_at_unix"] = time.time()
         try:

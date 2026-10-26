@@ -1,4 +1,4 @@
-"""Read-only preview rendering/status and foreground localhost forwards."""
+"""Read-only preview and established-route inspection with localhost forwards."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -18,6 +19,7 @@ from typing import Any
 import yaml
 
 from scripts.product_qualification.core import (
+    CODES,
     QualificationError,
     accepted_bodies,
     check_reads,
@@ -29,11 +31,15 @@ from scripts.product_qualification.core import (
 )
 
 JAVA_URL = "http://qa-product-api-legacy.qa-svc.svc.cluster.local:80"
-GO_URL = "http://qa-product-api.qa-svc.svc.cluster.local:8081"
+GO_URL = "http://qa-product-api.qa-svc.svc.cluster.local:80"
+PREVIEW_GO_URL = "http://qa-product-api.qa-svc.svc.cluster.local:8081"
 REVISION = re.compile(r"main@sha1:[0-9a-f]{40}\Z")
 FORWARDS = {
     "preview": ("qa-svc", "service/qa-web-vue-product-preview", 80),
     "established": ("qa-svc", "service/qa-agent-portal-gateway-legacy", 80),
+    "business": ("qa-svc", "service/qa-product-api", 80),
+    "management": ("qa-svc", "service/qa-product-api-management", 8081),
+    "java": ("qa-svc", "service/qa-product-api-legacy", 80),
     "auth": ("qa-svc", "service/qa-auth-api-legacy", 80),
     "grpc": ("qa-svc", "service/qa-product-api", 9090),
     "prometheus": ("qa-monitoring", "service/qa-prometheus-kube-prometh-prometheus", 9090),
@@ -85,7 +91,11 @@ def selected_url(config: str) -> str:
         urls = value["micronaut"]["http"]["services"]["product-service"]["urls"]
     except (yaml.YAMLError, TypeError, KeyError) as error:
         raise QualificationError("preview Product override is malformed") from error
-    if not isinstance(urls, list) or len(urls) != 1 or urls[0] not in (JAVA_URL, GO_URL):
+    if (
+        not isinstance(urls, list)
+        or len(urls) != 1
+        or urls[0] not in (JAVA_URL, GO_URL, PREVIEW_GO_URL)
+    ):
         raise QualificationError("preview Product URL is not the agreed Java or Go target")
     return urls[0]
 
@@ -197,7 +207,9 @@ def status(expected_revision: str, phase: str) -> dict[str, Any]:
         raise QualificationError("preview gateway effective configuration mount is missing")
     config = kubectl("qa-svc", "get", "configmap", config_name)
     actual_url = selected_url(config["data"]["application.yml"])
-    if actual_url != (JAVA_URL if phase == "java" else GO_URL):
+    if (phase == "java" and actual_url != JAVA_URL) or (
+        phase == "go" and actual_url not in (GO_URL, PREVIEW_GO_URL)
+    ):
         raise QualificationError("preview backend selection differs from expected phase")
     pods = kubectl(
         "qa-svc", "get", "pods", "-l", "app.kubernetes.io/name=agent-portal-gateway-product-preview"
@@ -290,7 +302,160 @@ def status(expected_revision: str, phase: str) -> dict[str, Any]:
     }
 
 
+def established_status(expected_revision: str, phase: str) -> dict[str, Any]:
+    """Check the applied QA revision and every serving established gateway Pod."""
+    if not REVISION.fullmatch(expected_revision) or phase not in ("java", "go"):
+        raise QualificationError("expected main revision and phase are required")
+    source = kubectl("flux-system", "get", "gitrepository", "insurance-hub")
+    applied = kubectl("flux-system", "get", "kustomization", "qa-svc")
+    revision = source.get("status", {}).get("artifact", {}).get("revision")
+    if (
+        revision != expected_revision
+        or applied.get("status", {}).get("lastAppliedRevision") != revision
+        or not ready(source)
+        or not ready(applied)
+    ):
+        raise QualificationError("QA Flux has not applied the expected Ready revision")
+
+    name = "qa-agent-portal-gateway-legacy"
+    deployment = kubectl("qa-svc", "get", "deployment", name)
+    desired = deployment.get("spec", {}).get("replicas", 1)
+    state = deployment.get("status", {})
+    if (
+        not isinstance(desired, int)
+        or desired < 1
+        or state.get("readyReplicas") != desired
+        or state.get("updatedReplicas") != desired
+        or state.get("observedGeneration", -1) < deployment.get("metadata", {}).get("generation", 0)
+    ):
+        raise QualificationError("established gateway rollout is not complete")
+    template = deployment["spec"]["template"]["spec"]
+    if len(template.get("containers", [])) != 1:
+        raise QualificationError("established gateway container inventory differs")
+    container = template["containers"][0]
+    config_path = "/etc/product-route/application.yml"
+    if not any(
+        item.get("name") == "MICRONAUT_CONFIG_FILES" and item.get("value") == config_path
+        for item in container.get("env", [])
+    ) or not any(
+        item.get("name") == "product-route-config"
+        and item.get("mountPath") == "/etc/product-route"
+        and item.get("readOnly") is True
+        and "subPath" not in item
+        for item in container.get("volumeMounts", [])
+    ):
+        raise QualificationError("established gateway effective configuration mount is missing")
+    volumes = [
+        item for item in template.get("volumes", []) if item.get("name") == "product-route-config"
+    ]
+    if len(volumes) != 1:
+        raise QualificationError("established gateway configuration volume is missing")
+    config_name = volumes[0].get("configMap", {}).get("name", "")
+    if not re.fullmatch(r"qa-gateway-product-route-config-[a-z0-9]+", config_name):
+        raise QualificationError("established gateway has no generated configuration")
+    config = kubectl("qa-svc", "get", "configmap", config_name)
+    data = config.get("data", {})
+    if set(data) != {"application.yml"}:
+        raise QualificationError("established gateway Product override is incomplete")
+    selected = selected_url(data["application.yml"])
+    if selected != (JAVA_URL if phase == "java" else GO_URL):
+        raise QualificationError("established backend selection differs from expected phase")
+
+    pods = kubectl(
+        "qa-svc", "get", "pods", "-l", "app.kubernetes.io/name=agent-portal-gateway-legacy"
+    )
+    serving = endpoint_addresses(name)
+    current = []
+    for item in pods.get("items", []):
+        pod_state = item.get("status", {})
+        if pod_state.get("podIP") not in serving:
+            continue
+        if (
+            pod_state.get("phase") != "Running"
+            or len(pod_state.get("containerStatuses", [])) != 1
+            or not pod_state["containerStatuses"][0].get("ready")
+            or not pod_state["containerStatuses"][0].get("imageID")
+            or item.get("spec", {}).get("containers", [{}])[0].get("image")
+            != container.get("image")
+            or item.get("spec", {}).get("containers", [{}])[0].get("env") != container.get("env")
+            or item.get("spec", {}).get("containers", [{}])[0].get("volumeMounts")
+            != container.get("volumeMounts")
+            or item.get("spec", {}).get("volumes") != template.get("volumes")
+        ):
+            raise QualificationError("serving established gateway Pod is stale or not Ready")
+        pod_name = item["metadata"]["name"]
+        mounted = command(
+            "kubectl",
+            "--context",
+            "qa-insurance-hub",
+            "--namespace",
+            "qa-svc",
+            "exec",
+            pod_name,
+            "--",
+            "cat",
+            config_path,
+            timeout=8,
+        )
+        if mounted != data["application.yml"]:
+            raise QualificationError("serving gateway mounted Product override differs")
+        current.append(
+            {
+                "name": pod_name,
+                "uid": item["metadata"]["uid"],
+                "ip": pod_state["podIP"],
+                "image_id": pod_state["containerStatuses"][0]["imageID"],
+            }
+        )
+    if len(current) != desired or {item["ip"] for item in current} != serving:
+        raise QualificationError("serving gateway endpoints do not match Ready replacement Pods")
+    backend = "qa-product-api-legacy" if phase == "java" else "qa-product-api"
+    backend_endpoints = endpoint_addresses(backend)
+    if not backend_endpoints:
+        raise QualificationError("selected Product backend has no Ready endpoints")
+    backend_pods = kubectl(
+        "qa-svc", "get", "pods", "-l", f"app.kubernetes.io/name={backend.removeprefix('qa-')}"
+    )
+    active_backend = [
+        item
+        for item in backend_pods.get("items", [])
+        if item.get("status", {}).get("podIP") in backend_endpoints
+    ]
+    if (
+        len(active_backend) != len(backend_endpoints)
+        or {item.get("status", {}).get("podIP") for item in active_backend} != backend_endpoints
+        or any(
+            item.get("status", {}).get("phase") != "Running"
+            or len(item.get("status", {}).get("containerStatuses", [])) != 1
+            or not item["status"]["containerStatuses"][0].get("ready")
+            or not item["status"]["containerStatuses"][0].get("imageID")
+            for item in active_backend
+        )
+    ):
+        raise QualificationError("selected Product backend endpoints are not Ready Pods")
+    return {
+        "source_revision": revision,
+        "applied_revision": revision,
+        "phase": phase,
+        "product_url": selected,
+        "config_map": config_name,
+        "gateway_pods": current,
+        "gateway_endpoints": sorted(serving),
+        "backend_endpoints": sorted(backend_endpoints),
+        "backend_pods": [
+            {
+                "name": item["metadata"]["name"],
+                "uid": item["metadata"]["uid"],
+                "image_id": item["status"]["containerStatuses"][0]["imageID"],
+            }
+            for item in active_backend
+        ],
+    }
+
+
 def utc_time(raw: str) -> datetime:
+    if not isinstance(raw, str):
+        raise QualificationError("invalid UTC publication timestamp")
     try:
         value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError as error:
@@ -300,6 +465,53 @@ def utc_time(raw: str) -> datetime:
     return value
 
 
+def require_restored_java(state: dict[str, Any]) -> None:
+    if (
+        state.get("phase") != "java"
+        or state.get("product_url") != JAVA_URL
+        or not state.get("gateway_pods")
+        or not state.get("backend_pods")
+    ):
+        raise QualificationError("Java restoration lacks serving route and backend attribution")
+
+
+def verify_java_attribution(
+    path: Path, expected_revision: str, state: dict[str, Any], published: datetime
+) -> dict[str, str]:
+    """Validate operator-collected Tempo attribution against the serving Java Pods."""
+    try:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+            raise QualificationError("Java attribution must be a private regular file")
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise QualificationError("Java attribution evidence is unavailable or malformed") from error
+    if not isinstance(value, dict):
+        raise QualificationError("Java attribution evidence is malformed")
+    observed = utc_time(value.get("observed_at_utc", ""))
+    if (
+        value.get("source") != "Tempo"
+        or value.get("revision") != expected_revision
+        or value.get("backend") != "java"
+        or value.get("operation") != "list"
+        or value.get("gateway_pod") not in {pod["name"] for pod in state["gateway_pods"]}
+        or value.get("backend_pod") not in {pod["name"] for pod in state["backend_pods"]}
+        or not isinstance(value.get("trace_id"), str)
+        or not re.fullmatch(r"[0-9a-f]{32}", value["trace_id"])
+        or not isinstance(value.get("gateway_client_span_id"), str)
+        or not re.fullmatch(r"[0-9a-f]{16}", value["gateway_client_span_id"])
+        or value.get("java_parent_span_id") != value["gateway_client_span_id"]
+        or not published <= observed <= datetime.now(UTC)
+    ):
+        raise QualificationError("Java-attributed established read evidence is missing")
+    return {
+        "source": "Tempo",
+        "trace_id": value["trace_id"],
+        "gateway_pod": value["gateway_pod"],
+        "backend_pod": value["backend_pod"],
+    }
+
+
 def restore(
     expected_revision: str,
     published_at: str,
@@ -307,12 +519,26 @@ def restore(
     established_url: str,
     token_file: Path,
     output: Path,
+    *,
+    route: str = "preview",
+    decision_at: str | None = None,
+    attribution_file: Path | None = None,
 ) -> bool:
-    if not REVISION.fullmatch(expected_revision) or output.exists():
+    if (
+        not REVISION.fullmatch(expected_revision)
+        or output.exists()
+        or route not in ("preview", "established")
+    ):
         raise QualificationError("expected Java revision and new evidence path are required")
-    validate_target(preview_url)
+    if route == "preview":
+        validate_target(preview_url)
     validate_target(established_url)
     published = utc_time(published_at)
+    decision = utc_time(decision_at) if decision_at else None
+    if route == "established" and (decision is None or decision > published):
+        raise QualificationError("Java restoration decision must precede publication")
+    if route == "established" and (attribution_file is None or attribution_file == Path(".")):
+        raise QualificationError("Java restoration requires attributed read evidence path")
     if (datetime.now(UTC) - published).total_seconds() < -5:
         raise QualificationError("publication timestamp is in the future")
     token = load_token(token_file)
@@ -322,10 +548,13 @@ def restore(
     evidence: dict[str, Any] = {
         "expected_revision": expected_revision,
         "published_at_utc": published_at,
+        "decision_at_utc": decision_at,
+        "route_kind": route,
         "status": "incomplete",
         "observations": [],
     }
-    deadline = time.monotonic() + 1800
+    remaining = 900 - (datetime.now(UTC) - published).total_seconds()
+    deadline = time.monotonic() + (max(0, remaining) if route == "established" else 1800)
     next_heartbeat = time.monotonic()
     last_error = "awaiting QA reconciliation"
     attempt = 0
@@ -341,29 +570,54 @@ def restore(
         while time.monotonic() < deadline:
             attempt += 1
             try:
-                state = status(expected_revision, "java")
+                state = (
+                    established_status(expected_revision, "java")
+                    if route == "established"
+                    else status(expected_revision, "java")
+                )
+                if route == "established":
+                    require_restored_java(state)
                 for round_number in (1, 2):
-                    check_reads(
+                    if route == "established" and round_number == 2:
+                        require_restored_java(established_status(expected_revision, "java"))
+                    reads = check_reads(
                         accepted,
-                        lambda path, credential: http_request(preview_url, credential, path),
+                        lambda path, credential: http_request(
+                            established_url if route == "established" else preview_url,
+                            credential,
+                            path,
+                        ),
                         token,
                     )
-                    established_status, body = http_request(established_url, token, "/api/products")
-                    if established_status != 200:
-                        raise QualificationError("established Java list control failed")
-                    compare_body(accepted["list"], decode_body(body), "established")
+                    if route == "established" and set(reads) != {"list", *CODES}:
+                        raise QualificationError("Java restoration read round is incomplete")
+                    if route == "preview":
+                        control_status, body = http_request(established_url, token, "/api/products")
+                        if control_status != 200:
+                            raise QualificationError("established Java list control failed")
+                        compare_body(accepted["list"], decode_body(body), "established")
                     evidence["observations"].append(
                         {
                             "round": round_number,
                             "attempt": attempt,
                             "at_utc": datetime.now(UTC).isoformat(),
-                            "preview": "accepted",
+                            "read_route": route,
+                            **({"preview": "accepted"} if route == "preview" else {}),
                             "established": "accepted",
                         }
                     )
                     if round_number == 1:
                         time.sleep(5)
-                state = status(expected_revision, "java")
+                state = (
+                    established_status(expected_revision, "java")
+                    if route == "established"
+                    else status(expected_revision, "java")
+                )
+                if route == "established":
+                    require_restored_java(state)
+                    evidence["java_attribution"] = verify_java_attribution(
+                        attribution_file, expected_revision, state, published
+                    )
                 verified = datetime.now(UTC)
                 elapsed = (verified - published).total_seconds()
                 evidence.update(
@@ -411,6 +665,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     inspect = action.add_parser("status")
     inspect.add_argument("--expected-revision", required=True)
     inspect.add_argument("--phase", choices=("java", "go"), required=True)
+    established = action.add_parser("status-established")
+    established.add_argument("--expected-revision", required=True)
+    established.add_argument("--phase", choices=("java", "go"), required=True)
     restoration = action.add_parser("restore")
     restoration.add_argument("--expected-revision", required=True)
     restoration.add_argument("--published-at", required=True)
@@ -418,6 +675,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     restoration.add_argument("--established-url", required=True)
     restoration.add_argument("--token-file", type=Path, required=True)
     restoration.add_argument("--output", type=Path, required=True)
+    established_restoration = action.add_parser("restore-established")
+    established_restoration.add_argument("--expected-revision", required=True)
+    established_restoration.add_argument("--decision-at", required=True)
+    established_restoration.add_argument("--published-at", required=True)
+    established_restoration.add_argument("--established-url", required=True)
+    established_restoration.add_argument("--token-file", type=Path, required=True)
+    established_restoration.add_argument("--output", type=Path, required=True)
+    established_restoration.add_argument("--attribution-file", type=Path, required=True)
     forward = action.add_parser("forward")
     forward.add_argument("--service", choices=tuple(FORWARDS), required=True)
     forward.add_argument("--local-port", type=int, required=True)
@@ -427,6 +692,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(render(), indent=2))
         elif args.action == "status":
             print(json.dumps(status(args.expected_revision, args.phase), indent=2))
+        elif args.action == "status-established":
+            print(json.dumps(established_status(args.expected_revision, args.phase), indent=2))
         elif args.action == "restore":
             if not restore(
                 args.expected_revision,
@@ -437,6 +704,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.output,
             ):
                 raise QualificationError("Java restoration failed or exceeded its bound")
+        elif args.action == "restore-established":
+            if not restore(
+                args.expected_revision,
+                args.published_at,
+                "",
+                args.established_url,
+                args.token_file,
+                args.output,
+                route="established",
+                decision_at=args.decision_at,
+                attribution_file=args.attribution_file,
+            ):
+                raise QualificationError(
+                    "established Java restoration failed or exceeded its bound"
+                )
         else:
             if args.local_port < 1024 or args.local_port > 65535:
                 raise QualificationError("localhost port must be 1024–65535")
