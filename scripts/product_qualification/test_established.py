@@ -117,6 +117,26 @@ def test_established_status_requires_matching_serving_pods_mount_and_phase(monke
     result = ops.established_status(REVISION, "java")
     assert result["product_url"] == ops.JAVA_URL
     assert result["backend_pods"][0]["image_id"] == "java@sha256:def"
+    pod_spec = state["qa-svc", "pods", "app.kubernetes.io/name=agent-portal-gateway-legacy"][
+        "items"
+    ][0]["spec"]
+    pod_spec["volumes"].append({"name": "kube-api-access-example", "projected": {"sources": []}})
+    pod_spec["containers"][0]["volumeMounts"].append(
+        {
+            "name": "kube-api-access-example",
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "readOnly": True,
+        }
+    )
+    assert ops.established_status(REVISION, "java")["gateway_pods"][0]["uid"] == "gateway-uid"
+    pod_spec["volumes"][0]["configMap"]["name"] = "stale-product-route"
+    with pytest.raises(QualificationError, match="stale"):
+        ops.established_status(REVISION, "java")
+    pod_spec["volumes"][0]["configMap"]["name"] = "qa-gateway-product-route-config-h5t75t5b9d"
+    pod_spec["containers"][0]["volumeMounts"][0]["mountPath"] = "/stale-product-route"
+    with pytest.raises(QualificationError, match="stale"):
+        ops.established_status(REVISION, "java")
+    pod_spec["containers"][0]["volumeMounts"][0]["mountPath"] = "/etc/product-route"
     with pytest.raises(QualificationError, match="selection"):
         ops.established_status(REVISION, "go")
     state["qa-svc", "pods", "app.kubernetes.io/name=agent-portal-gateway-legacy"]["items"][0][
