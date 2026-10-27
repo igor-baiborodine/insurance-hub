@@ -47,6 +47,7 @@ OTEL_GRPC_VERSION := v0.71.0
 OTEL_B3_VERSION := v1.46.0
 X_NET_VERSION := v0.60.0
 PGX_VERSION := v5.11.0
+GOOSE_VERSION := v3.27.0
 TESTCONTAINERS_VERSION := v0.44.0
 MOBY_GO_ARCHIVE_VERSION := v0.3.0
 MERMAID_CLI_VERSION := 11.14.0
@@ -189,11 +190,33 @@ update-deps:
 		google.golang.org/grpc@$(GRPC_GO_VERSION) \
 		google.golang.org/protobuf@$(PROTOBUF_GO_VERSION) \
 		github.com/jackc/pgx/v5@$(PGX_VERSION) \
+		github.com/pressly/goose/v3@$(GOOSE_VERSION) \
 		github.com/testcontainers/testcontainers-go@$(TESTCONTAINERS_VERSION) \
 		github.com/testcontainers/testcontainers-go/modules/postgres@$(TESTCONTAINERS_VERSION) \
 		github.com/moby/go-archive@$(MOBY_GO_ARCHIVE_VERSION) \
 		golang.org/x/net@$(X_NET_VERSION)
 	GOWORK=off $(GO) mod tidy
+
+.PHONY: update-goose-dependency check-schema-adoption
+update-goose-dependency: verify-tools ## Resolve the pinned Goose library for the disposable adoption experiment
+	GOWORK=off $(GO) get github.com/pressly/goose/v3@$(GOOSE_VERSION)
+	GOWORK=off $(GO) mod tidy
+
+check-schema-adoption: verify-tools ## Lint, scan, and run the tagged disposable Q03 prototype; requires Docker
+	GOWORK=off $(GOLANGCI_LINT) run --config "$(GOLANGCI_CONFIG)" --build-tags=integration \
+		internal/testing/schema_adoption_integration_test.go internal/testing/harness.go internal/testing/fixture.go
+	GOWORK=off GOFLAGS=-mod=readonly $(GOVULNCHECK) -tags=integration -test ./internal/testing
+	$(MAKE) test-integration INTEGRATION_SUITE=schema-adoption
+
+.PHONY: check-administration-design
+check-administration-design: PYTHON_FILES := scripts/postgres/service/test_administration_design.py services/product-service/scripts/test_administration_release.py
+check-administration-design: python-toolchain-check python-format-check python-lint ## Q04 render/negative checks and disposable PostgreSQL roles; requires cached PostgreSQL image, Docker, kubectl
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest --collect-only -q \
+		scripts/postgres/service/test_administration_design.py \
+		services/product-service/scripts/test_administration_release.py
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" $(PYTHON) -m pytest -q \
+		scripts/postgres/service/test_administration_design.py \
+		services/product-service/scripts/test_administration_release.py
 
 gen-sql:
 	@test "$$($(SQLC) version)" = "$(SQLC_VERSION)"

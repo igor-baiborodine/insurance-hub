@@ -51,7 +51,7 @@ make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXT
 ```
 
 `INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, `parity`,
-`cancellation`, `lifecycle`, `telemetry`, `read-only`, `access`, or `all`.
+`cancellation`, `lifecycle`, `telemetry`, `read-only`, `access`, `schema-adoption`, or `all`.
 `FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
@@ -60,6 +60,29 @@ The harness resolves and reads the accepted QA snapshot directly under
 `legacy/product-service/src/test/resources/product-read-baseline/` without copying or changing
 it. Its setup identity creates the legacy table and `go_product_reader`; service tests receive only
 the generated reader URL.
+
+The `schema-adoption` suite is the issue-190 decision prototype. It starts the same pinned
+disposable PostgreSQL image with an empty schema, then exercises Goose v3.27.0 creation,
+verified adoption of the accepted catalog, drift/history rejection, concurrency, cancellation,
+replay, and inspection side effects. It also compares the migrated table with the sqlc schema.
+Its test-only SQL and synthetic ownership checks are not administrative commands or an approved
+live role policy. Run it with
+`make -C services/product-service test-integration INTEGRATION_SUITE=schema-adoption`.
+`make -C services/product-service check-schema-adoption` also lints the prototype and its
+existing harness/fixture helpers and scans the tagged test dependency graph for vulnerabilities.
+The suite has a three-minute work deadline, bounded harness cleanup, and mandatory scenario
+discovery; the existing runner reports progress and retains failed test output before cleanup.
+`update-goose-dependency` explicitly resolves the pinned library; checks never install tools.
+
+`make -C services/product-service check-administration-design` runs the issue-190 Q04 decision
+probes: authenticated PostgreSQL role denials and protected target markers,
+plus Kustomize candidate renders and negative release-lifecycle checks. It requires the existing
+managed Python environment, Docker, the already provisioned PostgreSQL image above and `kubectl`.
+It creates and removes four isolated containers and temporary render directories; it installs no
+tools, contacts no Kubernetes API and reads no live credentials. The candidate YAML under
+`testdata/administration-design/` is not active desired state. These checks do not qualify Flux
+reconciliation, deployed TLS or the final administrative binaries. Java Product is assumed absent;
+candidate desired state must not recreate it. Historical databases remain adoption inputs.
 
 The reader integration suite uses the same disposable database and QA snapshot:
 

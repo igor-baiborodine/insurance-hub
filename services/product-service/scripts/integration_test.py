@@ -16,7 +16,8 @@ from check_access_results import main as check_access_results
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 PATTERNS = {
-    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess)$",
+    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess|TestProductSchemaAdoption)$",
+    "schema-adoption": "^TestProductSchemaAdoption$",
     "harness": "^TestPostgresHarness$",
     "reader": "^TestPostgresReader$",
     "grpc": "^TestProductGRPC$",
@@ -36,6 +37,21 @@ TELEMETRY_CASES = (
     "refused_collector_does_not_affect_reads_or_probes",
     "collector_recovery_exports_without_a_Product_restart",
     "SIGTERM_bounds_an_in-flight_export",
+)
+SCHEMA_ADOPTION_CASES = (
+    "fresh_and_sqlc_schema_parity",
+    "adoption_and_replay_preserve_catalog",
+    "strict_create_rejects_legacy",
+    "schema_drift_is_rejected_before_history",
+    "existence_only_mutation_accepts_drift",
+    "inconsistent_history_is_rejected",
+    "statement_failure_preserves_populated_catalog",
+    "Goose_Up_bypasses_validation_on_replay",
+    "simultaneous_runners_serialize",
+    "cancellation_rolls_back_and_retries",
+    "lock_contention_is_bounded",
+    "inspection_has_no_writes",
+    "Goose_inspection_initializes_history",
 )
 
 
@@ -130,15 +146,23 @@ def main(_argv: Sequence[str] | None = None) -> int:
             arguments.extend(
                 ("-json", "-run", pattern, "./internal/testing", "./internal/postgres")
             )
-            run(
-                ["bash", str(MODULE_ROOT / "scripts/stream-test-log.sh"), str(result), *arguments],
-                cwd=MODULE_ROOT,
-                env=environment,
-                timeout_seconds=1_800,
-                teardown_seconds=20,
-                activity=f"run Product {suite} integration suite",
-            )
-            sys.stdout.write(result.read_text(encoding="utf-8"))
+            try:
+                run(
+                    [
+                        "bash",
+                        str(MODULE_ROOT / "scripts/stream-test-log.sh"),
+                        str(result),
+                        *arguments,
+                    ],
+                    cwd=MODULE_ROOT,
+                    env=environment,
+                    timeout_seconds=1_800,
+                    teardown_seconds=20,
+                    activity=f"run Product {suite} integration suite",
+                )
+            finally:
+                if result.is_file():
+                    sys.stdout.write(result.read_text(encoding="utf-8"))
             passed = passed_tests(result)
             selected = {
                 name.split("/", 1)[0]
@@ -146,6 +170,12 @@ def main(_argv: Sequence[str] | None = None) -> int:
                 if name.startswith("TestPostgres") or name.startswith("TestProduct")
             }
             require(bool(selected), f"suite {suite} selected zero tests")
+            if suite in {"all", "schema-adoption"}:
+                for scenario in SCHEMA_ADOPTION_CASES:
+                    require(
+                        f"TestProductSchemaAdoption/{scenario}" in passed,
+                        f"suite {suite} did not pass schema adoption case {scenario}",
+                    )
             if suite in {"all", "reader"}:
                 require(
                     "TestPostgresReader/real_reads_emit_bounded_database_and_pool_signals"

@@ -359,6 +359,16 @@ def test_integration_reports_zero_selected_tests(
     ("suite", "records", "message"),
     [
         (
+            "schema-adoption",
+            ["TestProductSchemaAdoption"],
+            "did not pass schema adoption case fresh_and_sqlc_schema_parity",
+        ),
+        (
+            "all",
+            ["TestProductHTTP"],
+            "did not pass schema adoption case fresh_and_sqlc_schema_parity",
+        ),
+        (
             "telemetry",
             [
                 "TestProductTelemetry",
@@ -693,3 +703,48 @@ def test_integration_runner_signal_reaps_active_process_group(
         if process.poll() is None:
             process.kill()
             process.wait(timeout=3)
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_adoption_runner_preserves_results_and_selects_owned_package(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    failure: bool,
+) -> None:
+    # given
+    integration_environment(monkeypatch, "schema-adoption")
+    monkeypatch.setattr(integration_test, "MODULE_ROOT", tmp_path)
+    result_paths: list[Path] = []
+
+    def fake_run(arguments: list[str], **kwargs: object) -> str:
+        log = integration_log_path(arguments, kwargs)
+        if log is not None:
+            assert "-race" in arguments
+            assert "-tags=integration" in arguments
+            assert "^TestProductSchemaAdoption$" in arguments
+            assert "./internal/testing" in arguments
+            result_paths.append(log)
+            records = ["TestProductSchemaAdoption"] + [
+                f"TestProductSchemaAdoption/{case}"
+                for case in integration_test.SCHEMA_ADOPTION_CASES
+            ]
+            log.write_text(
+                "".join(json.dumps({"Action": "pass", "Test": name}) + "\n" for name in records),
+                encoding="utf-8",
+            )
+            if failure:
+                raise ProductCommandError("controlled test failure")
+        return ""
+
+    monkeypatch.setattr(integration_test, "run", fake_run)
+
+    # when
+    status = integration_test.main([])
+
+    # then
+    assert status == int(failure)
+    output = capsys.readouterr()
+    assert "TestProductSchemaAdoption" in output.out
+    assert bool("controlled test failure" in output.err) == failure
+    assert result_paths and all(not path.exists() for path in result_paths)
