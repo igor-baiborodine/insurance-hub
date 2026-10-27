@@ -59,13 +59,16 @@ def load_catalog(path: Path) -> dict[str, Any]:
             relative_path(record.get(field), field)
         overlays = record.get("overlays")
         require(isinstance(overlays, dict), "catalog schema or service metadata is invalid")
-        relative_path(overlays.get("local-dev"), "overlays.local-dev")
-        relative_path(overlays.get("qa"), "overlays.qa")
         environments = record.get("environments")
         require(
-            isinstance(environments, list) and {"local-dev", "qa"}.issubset(environments),
-            "catalog schema or service metadata is invalid",
+            isinstance(environments, list)
+            and bool(environments)
+            and all(isinstance(item, str) and NAME.fullmatch(item) for item in environments),
+            "catalog environments are invalid",
         )
+        require(set(overlays) == set(environments), "overlay environments differ")
+        for environment in environments:
+            relative_path(overlays[environment], f"overlays.{environment}")
         capabilities = record.get("capabilities")
         require(
             isinstance(capabilities, list)

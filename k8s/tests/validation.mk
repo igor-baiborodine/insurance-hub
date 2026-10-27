@@ -48,13 +48,14 @@ ALLOY_CHECK_TEST := $(K8S_VALIDATION_ROOT)/scripts/alloy/test_check_config.py
 postgres-svc-role-verify: python-runtime-check ## Verify a selected service-owned database role profile. Requires explicit target coordinates.
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) "$(K8S_VALIDATION_REPOSITORY_ROOT)/scripts/postgres/service/dispatch.py" verify
 
-postgres-svc-role-test-fast: python-toolchain-check ## Exercise Product reader guards and adapters without a live target
+postgres-svc-role-test-fast: python-toolchain-check ## Exercise Product role guards and adapters without a live target
 	@cd "$(K8S_VALIDATION_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q \
-		-m 'not integration and not acceptance' scripts/postgres/service/test_reader.py
+		-m 'not integration and not acceptance' scripts/postgres/service/test_reader.py \
+		scripts/postgres/service/test_administration_roles.py
 
-postgres-svc-role-test: python-toolchain-check ## Exercise role dispatch and Product reader lifecycle against disposable PostgreSQL
+postgres-svc-role-test: python-toolchain-check ## Exercise Product role lifecycle against disposable PostgreSQL
 	@cd "$(K8S_VALIDATION_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q \
-		scripts/postgres/service/test_reader.py
+		scripts/postgres/service/test_reader.py scripts/postgres/service/test_administration_roles.py
 
 .PHONY: prometheus-receiver-config-check
 prometheus-receiver-config-check: python-runtime-check ## Validate the pinned remote-write receiver and disabled native OTLP route without applying

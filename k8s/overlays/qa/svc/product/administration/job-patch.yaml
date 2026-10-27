@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: product-init
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: migrate
+          args:
+            - --operation=migrate
+            - --environment=qa
+            - --context=qa-insurance-hub
+            - --target-file=/etc/product-admin/target/target.json
+            - --database-url-file=/etc/product-admin/migrator/database-url
+            - --ca-file=/etc/product-admin/migrator/ca.crt
+            - --timeout=${MIGRATION_TIMEOUT}
+      containers:
+        - name: seed
+          args:
+            - --environment=qa
+            - --context=qa-insurance-hub
+            - --target-file=/etc/product-admin/target/target.json
+            - --catalog-file=/usr/share/insurance-hub/product/catalogs/base.json
+            - --database-url-file=/etc/product-admin/seeder/database-url
+            - --ca-file=/etc/product-admin/seeder/ca.crt
+      volumes:
+        - name: target
+          secret:
+            secretName: qa-postgres-product-admin-target
+        - name: migrator
+          secret:
+            secretName: qa-postgres-product-migrator-creds
+        - name: seeder
+          secret:
+            secretName: qa-postgres-product-seeder-creds

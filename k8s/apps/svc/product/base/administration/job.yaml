@@ -1,0 +1,119 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: product-init
+  labels:
+    app.kubernetes.io/name: product-init
+    app.kubernetes.io/instance: insurance-hub-product-init
+    app.kubernetes.io/component: administration
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: product-init
+        app.kubernetes.io/instance: insurance-hub-product-init
+        app.kubernetes.io/component: administration
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 15
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: migrate
+          image: insurance-hub-product-api:unconfigured
+          imagePullPolicy: IfNotPresent
+          command:
+            - /product-migrate
+          args:
+            - --operation=migrate
+            - --environment=unconfigured
+            - --context=unconfigured
+            - --target-file=/etc/product-admin/target/target.json
+            - --database-url-file=/etc/product-admin/migrator/database-url
+            - --ca-file=/etc/product-admin/migrator/ca.crt
+            - --timeout=120s
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: target
+              mountPath: /etc/product-admin/target
+              readOnly: true
+            - name: migrator
+              mountPath: /etc/product-admin/migrator
+              readOnly: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      containers:
+        - name: seed
+          image: insurance-hub-product-api:unconfigured
+          imagePullPolicy: IfNotPresent
+          command:
+            - /product-seed
+          args:
+            - --environment=unconfigured
+            - --context=unconfigured
+            - --target-file=/etc/product-admin/target/target.json
+            - --catalog-file=/usr/share/insurance-hub/product/catalogs/base.json
+            - --database-url-file=/etc/product-admin/seeder/database-url
+            - --ca-file=/etc/product-admin/seeder/ca.crt
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: target
+              mountPath: /etc/product-admin/target
+              readOnly: true
+            - name: seeder
+              mountPath: /etc/product-admin/seeder
+              readOnly: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: target
+          secret:
+            secretName: postgres-product-admin-target
+            items:
+              - key: target.json
+                path: target.json
+        - name: migrator
+          secret:
+            secretName: postgres-product-migrator-creds
+            items:
+              - key: database-url
+                path: database-url
+              - key: ca.crt
+                path: ca.crt
+        - name: seeder
+          secret:
+            secretName: postgres-product-seeder-creds
+            items:
+              - key: database-url
+                path: database-url
+              - key: ca.crt
+                path: ca.crt

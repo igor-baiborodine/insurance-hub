@@ -101,7 +101,8 @@ pilot-test-json: ## Report selected uncached test execution as JSON for framewor
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage \
 	coverage-validate coverage-check test-integration test-telemetry-continuity \
 	build build-security-harness build-security-verifier build-qualification-client build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
-	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test vulncheck \
+	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
+	deploy-test-flux vulncheck \
 	bootstrap-doc-tools check-docs preview-docs check-go-pr check test-tooling run
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
@@ -127,6 +128,9 @@ deploy-test-tooling: python-toolchain-check ## Exercise guarded Product deployme
 deploy-test: python-toolchain-check image-build ## Exercise the image and rendered pod in an owned disposable Kind namespace
 	@PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" $(PYTHON) -m pytest -q \
 		-m integration scripts/test_deployment_lifecycle.py
+
+deploy-test-flux: python-toolchain-check image-build ## Exercise Product prerequisites with pinned Flux/CNPG in an owned disposable Kind cluster
+	@PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" $(PYTHON) scripts/flux_deployment_test.py
 
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
 	@test -n "$(strip $(SECURITY_HARNESS_OUTPUT))" || { echo "SECURITY_HARNESS_OUTPUT is required" >&2; exit 1; }

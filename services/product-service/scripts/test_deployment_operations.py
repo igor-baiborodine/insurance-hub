@@ -13,8 +13,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import deployment  # noqa: E402
 import deployment_lifecycle  # noqa: E402
+import product_deployment_checks as deployment  # noqa: E402
 
 
 class DeploymentGuardTests(unittest.TestCase):
@@ -201,6 +201,85 @@ class DeploymentGuardTests(unittest.TestCase):
                     with self.assertRaisesRegex(deployment.DeploymentError, "forbidden"):
                         deployment.main()
             coordinates.assert_not_called()
+
+    def test_qa_release_owner_requires_matching_source_dependency_and_digest(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DEPLOY_ENV": "qa",
+                "DEPLOY_CONTEXT": "qa-insurance-hub",
+                "DEPLOY_SVC_NS": "qa-svc",
+                "DEPLOY_DATA_NS": "qa-data",
+            },
+        ):
+            target = deployment.Target()
+        revision = "a" * 40
+        release_id = "0123456789abcdef"
+        identity = release_id + "0" * 48
+        ready = {"conditions": [{"type": "Ready", "status": "True"}]}
+        annotation = {"insurance-hub.io/release-identity": identity}
+        source_ref = {"kind": "GitRepository", "name": f"qa-product-release-{release_id}"}
+        shared_revision = "sha1:" + "b" * 40
+        state = {
+            ("gitrepository", "insurance-hub", "-n", "flux-system"): {
+                "spec": {"ref": {"branch": "main"}},
+                "status": {**ready, "artifact": {"revision": shared_revision}},
+            },
+            ("kustomization", "qa-svc", "-n", "flux-system"): {
+                "spec": {
+                    "path": "./k8s/overlays/qa/svc",
+                    "sourceRef": {"kind": "GitRepository", "name": "insurance-hub"},
+                    "prune": True,
+                    "wait": True,
+                },
+                "status": {**ready, "lastAppliedRevision": shared_revision},
+            },
+            ("kustomization", "qa-product-api", "-n", "flux-system", "--ignore-not-found"): {
+                "kind": "Kustomization",
+                "metadata": {"annotations": annotation},
+                "spec": {
+                    "path": "./k8s/overlays/qa/svc/product",
+                    "sourceRef": source_ref,
+                    "dependsOn": [{"name": f"qa-product-init-{release_id}-a2"}],
+                    "images": [
+                        {
+                            "name": "insurance-hub-product-api",
+                            "newName": "ghcr.io/igor-baiborodine/insurance-hub/product-api",
+                            "digest": "sha256:" + "c" * 64,
+                        }
+                    ],
+                },
+                "status": ready,
+            },
+            ("gitrepository", f"qa-product-release-{release_id}", "-n", "flux-system"): {
+                "metadata": {"annotations": annotation},
+                "spec": {"ref": {"commit": revision}},
+                "status": {**ready, "artifact": {"revision": "sha1:" + revision}},
+            },
+            ("kustomization", f"qa-product-init-{release_id}-a2", "-n", "flux-system"): {
+                "metadata": {"annotations": annotation},
+                "spec": {
+                    "path": "./k8s/overlays/qa/svc/product/administration",
+                    "sourceRef": source_ref,
+                    "images": [
+                        {
+                            "name": "insurance-hub-product-api",
+                            "newName": "ghcr.io/igor-baiborodine/insurance-hub/product-api",
+                            "digest": "sha256:" + "c" * 64,
+                        }
+                    ],
+                },
+                "status": ready,
+            },
+        }
+        target.json = lambda *args: deepcopy(state[args[1:]])
+        with patch.dict(os.environ, {"DEPLOY_SOURCE_REVISION": revision}, clear=False):
+            target.flux_source(require_release=True)
+            state[("kustomization", "qa-product-api", "-n", "flux-system", "--ignore-not-found")][
+                "spec"
+            ]["dependsOn"] = [{"name": "qa-product-init-stale-a1"}]
+            with self.assertRaisesRegex(deployment.DeploymentError, "prerequisite identity"):
+                target.flux_source(require_release=True)
 
     def test_route_reference_is_exact(self) -> None:
         names = {"qa-product-api", "qa-product-api-management"}
@@ -400,7 +479,7 @@ class DeploymentGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(deployment.DeploymentError, "mounted Product override differs"):
             target.gateway_route("java")
 
-    def test_live_rejects_selector_overlap_and_external_exposure(self) -> None:
+    def test_live_rejects_stale_java_and_external_exposure(self) -> None:
         target = deployment.Target.__new__(deployment.Target)
         target.environment = "local-dev"
         target.prefix = "local-dev-"
@@ -408,7 +487,6 @@ class DeploymentGuardTests(unittest.TestCase):
         target.business = target.deployment
         target.management = target.deployment + "-management"
         labels = {"app.kubernetes.io/name": "product-api", "app.kubernetes.io/component": "api"}
-        legacy_labels = {"app.kubernetes.io/name": "product-api-legacy"}
         deployment_doc = {
             "kind": "Deployment",
             "metadata": {
@@ -449,9 +527,7 @@ class DeploymentGuardTests(unittest.TestCase):
         items = [deployment_doc, *services, config]
         state = {
             ("deployment", "local-dev-product-api", "--ignore-not-found"): {},
-            ("deployment", "local-dev-product-api-legacy"): {
-                "spec": {"selector": {"matchLabels": legacy_labels}}
-            },
+            ("deployment", "local-dev-product-api-legacy", "--ignore-not-found"): {},
             ("service", target.business, "--ignore-not-found"): {
                 "kind": "Service",
                 "metadata": {"labels": {"app.kubernetes.io/instance": "insurance-hub-product-api"}},
@@ -466,10 +542,7 @@ class DeploymentGuardTests(unittest.TestCase):
             ("endpointslices", "-l", "kubernetes.io/service-name=local-dev-product-api"): {
                 "items": []
             },
-            ("service", "local-dev-product-api-legacy"): {"spec": {"selector": legacy_labels}},
-            ("endpointslices", "-l", "kubernetes.io/service-name=local-dev-product-api-legacy"): {
-                "items": [{"endpoints": [{"conditions": {"ready": True}}]}]
-            },
+            ("service", "local-dev-product-api-legacy", "--ignore-not-found"): {},
             ("configmap", "local-dev-product-config-hash", "--ignore-not-found"): {
                 "kind": "ConfigMap",
                 "data": config["data"],
@@ -491,14 +564,12 @@ class DeploymentGuardTests(unittest.TestCase):
         target.json = lambda *args: state[args[1:]]
         target.routes = lambda: None
         target.live(items, require_deployment=False)
-        state[("deployment", "local-dev-product-api-legacy")]["spec"]["selector"]["matchLabels"] = (
-            labels
-        )
-        with self.assertRaisesRegex(deployment.DeploymentError, "selectors overlap"):
+        state[("deployment", "local-dev-product-api-legacy", "--ignore-not-found")] = {
+            "kind": "Deployment"
+        }
+        with self.assertRaisesRegex(deployment.DeploymentError, "stale Java"):
             target.live(items, require_deployment=False)
-        state[("deployment", "local-dev-product-api-legacy")]["spec"]["selector"]["matchLabels"] = (
-            legacy_labels
-        )
+        state[("deployment", "local-dev-product-api-legacy", "--ignore-not-found")] = {}
         state[("service", target.business, "--ignore-not-found")]["spec"] = {
             **services[0]["spec"],
             "type": "LoadBalancer",

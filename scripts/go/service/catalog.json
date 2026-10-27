@@ -27,8 +27,69 @@
         "deploy-verify",
         "stop",
         "deploy-test-tooling",
-        "deploy-test"
-      ]
+        "deploy-test",
+        "deploy-test-flux"
+      ],
+      "releaseTargets": [
+        "qa"
+      ],
+      "administration": {
+        "assets": {
+          "migration": "services/product-service/internal/administration/migrations/00001_product.sql",
+          "catalog": "services/product-service/internal/administration/seeds/base.json"
+        },
+        "maxMigrationSeconds": 180,
+        "remainingJobSeconds": 75,
+        "jobDeadlineSeconds": 300,
+        "migrationContainer": "migrate"
+      },
+      "deploymentTargets": {
+        "local-dev": {
+          "mode": "direct",
+          "context": "kind-local-dev-insurance-hub",
+          "namespace": "local-dev-all",
+          "dataNamespace": "local-dev-all",
+          "overlay": "k8s/overlays/local-dev/svc/product",
+          "initialization": {
+            "overlay": "k8s/overlays/local-dev/svc/product/administration",
+            "jobName": "local-dev-product-init",
+            "migrationTimeout": "120s",
+            "targetRevision": "1",
+            "credentialRevision": "1",
+            "attempt": 1,
+            "waitSeconds": 420
+          },
+          "kindCluster": "local-dev-insurance-hub"
+        },
+        "qa": {
+          "mode": "flux",
+          "context": "qa-insurance-hub",
+          "namespace": "qa-svc",
+          "dataNamespace": "qa-data",
+          "overlay": "k8s/overlays/qa/svc/product",
+          "initialization": {
+            "overlay": "k8s/overlays/qa/svc/product/administration",
+            "jobName": "qa-product-init",
+            "migrationTimeout": "120s",
+            "targetRevision": "1",
+            "credentialRevision": "1",
+            "attempt": 1,
+            "waitSeconds": 420
+          },
+          "flux": {
+            "namespace": "flux-system",
+            "sourcePrefix": "qa-product-release",
+            "apiName": "qa-product-api",
+            "bundle": "k8s/flux/qa/releases/product/release.yaml",
+            "sharedSource": "insurance-hub",
+            "sharedOwner": "qa-svc",
+            "sharedPath": "./k8s/overlays/qa/svc",
+            "branch": "main",
+            "initializationTimeout": "6m",
+            "apiTimeout": "5m"
+          }
+        }
+      }
     }
   }
 }
