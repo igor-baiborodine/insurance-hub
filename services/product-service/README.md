@@ -51,7 +51,8 @@ make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXT
 ```
 
 `INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, `parity`,
-`cancellation`, `lifecycle`, `telemetry`, `read-only`, `access`, or `all`.
+`cancellation`, `lifecycle`, `telemetry`, `read-only`, `access`, `schema-adoption`, `migration`,
+`seed`, `marker-columns`, or `all`.
 `FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
@@ -60,6 +61,109 @@ The harness resolves and reads the accepted QA snapshot directly under
 `legacy/product-service/src/test/resources/product-read-baseline/` without copying or changing
 it. Its setup identity creates the legacy table and `go_product_reader`; service tests receive only
 the generated reader URL.
+
+The `schema-adoption` suite is the issue-190 decision prototype. It starts the same pinned
+disposable PostgreSQL image with an empty schema, then exercises Goose v3.27.0 creation,
+verified adoption of the accepted catalog, drift/history rejection, concurrency, cancellation,
+replay, and inspection side effects. It also compares the migrated table with the sqlc schema.
+Its test-only SQL and synthetic ownership checks are not administrative commands or an approved
+live role policy. Run it with
+`make -C services/product-service test-integration INTEGRATION_SUITE=schema-adoption`.
+`make -C services/product-service check-schema-adoption` also lints the prototype and its
+existing harness/fixture helpers and scans the tagged test dependency graph for vulnerabilities.
+The suite has a three-minute work deadline, bounded harness cleanup, and mandatory scenario
+discovery; the existing runner reports progress and retains failed test output before cleanup.
+`update-goose-dependency` explicitly resolves the pinned library; checks never install tools.
+
+The `migration` suite exercises the real embedded migration and status path against a separate
+disposable `product` database. It checks empty and populated adoption, modified rows, marker and
+history drift, concurrent replay, cancellation, reader denial and production enrollment without
+a seed role. `check-sql-drift` also runs this suite to compare the migrated table with the accepted
+issue-131 schema and the sqlc input; this check requires Docker. Run the focused path with
+`make -C services/product-service test-integration INTEGRATION_SUITE=migration`.
+
+The `seed` suite passes the version-1 base catalog explicitly to the generic seeder through the
+restricted seed identity. It checks accepted storage checksums and HTTP/gRPC responses,
+supplemental catalog application through the same engine, missing-only counts, preservation of
+modified and unrelated rows, concurrent replay, cancellation and target rejection against an owned
+disposable database. Run it with
+`make -C services/product-service test-integration INTEGRATION_SUITE=seed`.
+
+The `marker-columns` suite checks that status, migration, and seed reject column-level grants
+on the protected target marker in fresh and managed databases without changing protected state.
+It covers owner, migrator, seeder, and reader privileges, including grant options, and verifies
+permission denial before each grant and after its revocation. Run it with
+`make -C services/product-service test-integration INTEGRATION_SUITE=marker-columns`.
+
+`cmd/migrate` is the standalone schema administrator. Build it with
+`make -C services/product-service build-migrator MIGRATOR_OUTPUT=<owned-output-path>`.
+Invoke it with explicit `--operation=migrate|status|version`, `--environment`, `--context`,
+`--target-file`, `--database-url-file` and `--ca-file`. The protected target JSON records the exact
+environment, context, data/service namespaces, CNPG cluster and UID, database-instance UUID,
+database, host and seed policy. The credential file contains only the migrator URL, with
+`go_product_migrator`, the enrolled host and database, `sslmode=verify-full`, and the selected
+`sslrootcert` path. The target marker must independently match the enrollment after TLS connects.
+`status` and `version` use a read-only transaction; an absent table/history reports
+`uninitialized`, an accepted unmanaged table reports `unmanaged`, and a valid zero-history
+recovery state reports `pending` or version `0`. Migration holds Product
+advisory lock `190001`, validates the table and history before Goose can initialize history, and
+applies only version 1. There is no down operation. The 120-second migration/inspection budget
+starts before database opening; seed has a 60-second command budget. Connection, lock, SQL and
+cleanup are also bounded;
+inspect and resolve any uncertain result before replaying the same reviewed migration. The
+runtime reader still has no migration or seeding path.
+
+Administration deliberately uses a small validation boundary: the connected identity and protected
+marker, Product columns/primary key/owner and behavior-affecting features, and logical Goose history.
+Owner-only legacy tables, renamed primary-key constraints and additional ordinary non-unique indexes
+are accepted. Goose owns its history sequence/index/default layout. Migration reapplies explicit
+reader and optional seeder table grants transactionally on every successful run, including replay
+after interrupted grant setup; version-1 migration assets remain unchanged.
+
+Platform provisioning owns role memberships, restricted login attributes and database/schema/default
+permissions. Commands do not enumerate every role or ACL or attempt general permission repair.
+The marker remains platform-owned and non-writable by the command identities; unexpected marker
+column ACLs are rejected. Real SQL tests verify the provisioned reader/seeder permissions, but the
+commands do not promise to detect all later permission drift. API requests never run these checks.
+
+`cmd/seed` is the generic catalog administrator. Build it with
+`make -C services/product-service build-seeder SEEDER_OUTPUT=<owned-output-path>`. Invoke it with
+explicit `--environment`, `--context`, `--target-file`, `--catalog-file`,
+`--database-url-file` and `--ca-file` arguments. The target must enroll a non-production
+environment for seeding, and the credential URL must use `go_product_seeder` with the same protected
+target and TLS requirements as migration. The command validates the selected catalog before one
+insert-only transaction and prints deterministic `inserted=<n> existing=<n>` counts. Apply the base
+catalog first; a later environment-specific catalog can use the same command and explicit file
+selection without another Go seeder.
+
+Both commands write structured JSON failures to stderr through the service's redacting logger,
+with operation, validated environment, configuration/database stage and failure classification.
+Error text, credentials, URLs and SQL payloads are not emitted. Successful state/count output
+remains on stdout; failures exit with status 1.
+
+The standard `build` target verifies the API server, migrator and seeder executables. The Product
+image keeps `/product-service` as its entry point and also packages `/product-migrate`,
+`/product-seed`, the reviewed migration at
+`/usr/share/insurance-hub/product/migrations/00001_product.sql` and the base catalog at
+`/usr/share/insurance-hub/product/catalogs/base.json`. All three commands run as the image's
+non-root UID/GID `65532:65532`; the administrative binaries still require explicit protected files
+and never run during API startup. `image-check` inspects those paths and exercises migration then
+seeding from the image against its owned disposable PostgreSQL instance. Its required fault suite
+exercises both commands under SIGTERM, the actual advisory-lock deadline, failed startup and
+connection failure, plus lost COMMIT acknowledgements and a seed disconnect after earlier inserts.
+It checks database state, session/lock release, safe replay and diagnostics. Faults use a test-only
+TLS proxy and synthetic credentials; required subtest discovery prevents silent omissions. Image
+publication and deployment activation remain separate operations.
+
+`make -C services/product-service check-administration-design` runs the issue-190 Q04 decision
+probes: authenticated PostgreSQL role denials and protected target markers,
+plus Kustomize candidate renders and negative release-lifecycle checks. It requires the existing
+managed Python environment, Docker, the already provisioned PostgreSQL image above and `kubectl`.
+It creates and removes four isolated containers and temporary render directories; it installs no
+tools, contacts no Kubernetes API and reads no live credentials. The candidate YAML under
+`testdata/administration-design/` is not active desired state. These checks do not qualify Flux
+reconciliation, deployed TLS or the final administrative binaries. Java Product is assumed absent;
+candidate desired state must not recreate it. Historical databases remain adoption inputs.
 
 The reader integration suite uses the same disposable database and QA snapshot:
 
@@ -337,10 +441,12 @@ The concrete package and file responsibilities are:
 | Package or file | Responsibility |
 | --- | --- |
 | [`cmd/server/main.go`](cmd/server/main.go) | Loads configuration, creates the redacting logger, owns signal handling, and invokes the composition root. |
-| [`internal/service/service.go`](internal/service/service.go) | Constructs the singleton pool, reader, use cases, HTTP/gRPC/management servers, and optional telemetry; owns startup, drain, and cleanup. |
+| [`cmd/migrate/main.go`](cmd/migrate/main.go) / [`cmd/seed/main.go`](cmd/seed/main.go) | Parse explicit command settings, read the selected protected files, own signals and delegate to the administrative composition roots. |
+| [`internal/service`](internal/service) | Constructs and owns runtime or administrative database resources, injects them into the selected operation, and owns startup and cleanup. |
+| [`internal/administration`](internal/administration) | Owns protected target checks, versioned Product schema creation/adoption, Goose locking, read-only status and generic catalog seeding. |
 | [`internal/domain/catalog.go`](internal/domain/catalog.go) | Owns transport-independent Product catalog values and exact decimal tokens. |
 | [`internal/application/catalog.go`](internal/application/catalog.go) | Owns `ProductReader`, `ListProducts`, `GetProduct`, and application errors. |
-| [`internal/postgres`](internal/postgres) | Owns pool creation, restricted read execution, sqlc use, JSONB decoding, storage error classification, and safe database/pool telemetry. |
+| [`internal/postgres`](internal/postgres) | Owns runtime pool and administrative database construction, restricted read execution, sqlc use, JSONB decoding, storage error classification, and safe database/pool telemetry. |
 | [`internal/http`](internal/http) | Owns direct URI behavior, legacy-compatible DTO/presence/decimal mapping, JSON responses, and HTTP error mapping. |
 | [`internal/grpc`](internal/grpc) | Owns generated-service registration, validation, domain-to-protobuf mapping, limits, tracing hooks, and status mapping. |
 | [`internal/config`](internal/config) | Parses and validates the bounded runtime settings and holds the database URL in a redacting type. |

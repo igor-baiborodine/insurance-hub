@@ -35,9 +35,18 @@ const (
 type Options struct {
 	FixtureRoot string
 	Image       string
+	TLS         *TLSOptions
 
 	provision          func(context.Context, *pgxpool.Pool, string) error
 	onContainerStarted func(*postgres.PostgresContainer)
+}
+
+// TLSOptions enables the disposable PostgreSQL server's TLS listener for command-level tests.
+type TLSOptions struct {
+	CAFile     string
+	CertFile   string
+	KeyFile    string
+	ConfigFile string
 }
 
 // Harness owns one disposable PostgreSQL container and its setup-only connection.
@@ -118,9 +127,7 @@ func Start(ctx context.Context, options Options) (*Harness, error) {
 
 	startupCtx, cancel := context.WithTimeout(ctx, containerStartup)
 	defer cancel()
-	container, err := postgres.Run(
-		startupCtx,
-		options.Image,
+	customizers := []testcontainers.ContainerCustomizer{
 		postgres.WithDatabase(databaseName),
 		postgres.WithUsername(adminRole),
 		postgres.WithPassword(adminPassword),
@@ -129,7 +136,19 @@ func Start(ctx context.Context, options Options) (*Harness, error) {
 				WithOccurrence(2).
 				WithStartupTimeout(containerStartup),
 		),
-	)
+	}
+	if options.TLS != nil {
+		customizers = append(
+			customizers,
+			postgres.WithConfigFile(options.TLS.ConfigFile),
+			postgres.WithSSLCert(
+				options.TLS.CAFile,
+				options.TLS.CertFile,
+				options.TLS.KeyFile,
+			),
+		)
+	}
+	container, err := postgres.Run(startupCtx, options.Image, customizers...)
 	if err != nil {
 		return nil, fmt.Errorf("start PostgreSQL harness: run container: %w", err)
 	}

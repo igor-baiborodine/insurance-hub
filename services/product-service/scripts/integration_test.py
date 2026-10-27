@@ -16,7 +16,12 @@ from check_access_results import main as check_access_results
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 PATTERNS = {
-    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess)$",
+    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess|TestProductSchemaAdoption|TestProductMigration|TestProductSeed|TestProductMarkerColumns)$",
+    "marker-columns": "^TestProductMarkerColumns$",
+    "schema-adoption": "^TestProductSchemaAdoption$",
+    "migration": "^TestProductMigration$",
+    "seed": "^TestProductSeed$",
+    "seed-replay": "^TestProductSeed/repeat_reports_every_accepted_product_as_existing$",
     "harness": "^TestPostgresHarness$",
     "reader": "^TestPostgresReader$",
     "grpc": "^TestProductGRPC$",
@@ -36,6 +41,58 @@ TELEMETRY_CASES = (
     "refused_collector_does_not_affect_reads_or_probes",
     "collector_recovery_exports_without_a_Product_restart",
     "SIGTERM_bounds_an_in-flight_export",
+)
+SCHEMA_ADOPTION_CASES = (
+    "fresh_and_sqlc_schema_parity",
+    "adoption_and_replay_preserve_catalog",
+    "strict_create_rejects_legacy",
+    "schema_drift_is_rejected_before_history",
+    "existence_only_mutation_accepts_drift",
+    "inconsistent_history_is_rejected",
+    "statement_failure_preserves_populated_catalog",
+    "Goose_Up_bypasses_validation_on_replay",
+    "simultaneous_runners_serialize",
+    "cancellation_rolls_back_and_retries",
+    "lock_contention_is_bounded",
+    "inspection_has_no_writes",
+    "Goose_inspection_initializes_history",
+)
+MIGRATION_CASES = (
+    "grant_failure_is_atomic_and_retryable",
+    "owner-only_adoption_applies_reader_grants",
+    "ordinary_indexes_and_constraint_names_are_compatible",
+    "replay_restores_intended_grants",
+    "fresh_schema_and_read-only_status",
+    "adoption_and_replay_preserve_modified_catalog",
+    "target_mismatch_makes_no_history",
+    "managed_history_drift_is_rejected",
+    "failed_migration_retains_zero_history_and_retries",
+    "enrolled_production_migrates_without_seed_role",
+    "schema_drift_creates_no_history",
+    "simultaneous_runners_and_cancelled_lock",
+    "enrolled_seed_role_receives_only_explicit_managed_reads",
+)
+SEED_CASES = (
+    "empty_catalog_matches_accepted_storage_and_transports",
+    "repeat_reports_every_accepted_product_as_existing",
+    "same_engine_applies_a_supplemental_environment_catalog",
+    "partial_modified_catalog_preserves_existing_and_unrelated_rows",
+    "concurrent_seeds_serialize_without_duplicates",
+    "cancelled_lock_leaves_catalog_empty",
+    "lost_acknowledgement_replay_is_insert_only",
+    "disabled_target_rejects_before_writes",
+)
+MARKER_COLUMN_CASES = tuple(
+    f"{state}/{scenario}"
+    for state in ("fresh", "managed")
+    for scenario in (
+        "owner_update",
+        "migrator_update",
+        "seeder_update",
+        "seeder_insert",
+        "reader_select",
+        "seeder_grant_option",
+    )
 )
 
 
@@ -130,15 +187,23 @@ def main(_argv: Sequence[str] | None = None) -> int:
             arguments.extend(
                 ("-json", "-run", pattern, "./internal/testing", "./internal/postgres")
             )
-            run(
-                ["bash", str(MODULE_ROOT / "scripts/stream-test-log.sh"), str(result), *arguments],
-                cwd=MODULE_ROOT,
-                env=environment,
-                timeout_seconds=1_800,
-                teardown_seconds=20,
-                activity=f"run Product {suite} integration suite",
-            )
-            sys.stdout.write(result.read_text(encoding="utf-8"))
+            try:
+                run(
+                    [
+                        "bash",
+                        str(MODULE_ROOT / "scripts/stream-test-log.sh"),
+                        str(result),
+                        *arguments,
+                    ],
+                    cwd=MODULE_ROOT,
+                    env=environment,
+                    timeout_seconds=1_800,
+                    teardown_seconds=20,
+                    activity=f"run Product {suite} integration suite",
+                )
+            finally:
+                if result.is_file():
+                    sys.stdout.write(result.read_text(encoding="utf-8"))
             passed = passed_tests(result)
             selected = {
                 name.split("/", 1)[0]
@@ -146,6 +211,36 @@ def main(_argv: Sequence[str] | None = None) -> int:
                 if name.startswith("TestPostgres") or name.startswith("TestProduct")
             }
             require(bool(selected), f"suite {suite} selected zero tests")
+            if suite in {"all", "marker-columns"}:
+                for scenario in MARKER_COLUMN_CASES:
+                    require(
+                        f"TestProductMarkerColumns/{scenario}" in passed,
+                        f"suite {suite} did not pass marker column case {scenario}",
+                    )
+            if suite in {"all", "schema-adoption"}:
+                for scenario in SCHEMA_ADOPTION_CASES:
+                    require(
+                        f"TestProductSchemaAdoption/{scenario}" in passed,
+                        f"suite {suite} did not pass schema adoption case {scenario}",
+                    )
+            if suite in {"all", "migration"}:
+                for scenario in MIGRATION_CASES:
+                    require(
+                        f"TestProductMigration/{scenario}" in passed,
+                        f"suite {suite} did not pass migration case {scenario}",
+                    )
+            if suite in {"all", "seed"}:
+                for scenario in SEED_CASES:
+                    require(
+                        f"TestProductSeed/{scenario}" in passed,
+                        f"suite {suite} did not pass seed case {scenario}",
+                    )
+            if suite == "seed-replay":
+                scenario = "repeat_reports_every_accepted_product_as_existing"
+                require(
+                    f"TestProductSeed/{scenario}" in passed,
+                    f"suite {suite} did not pass seed case {scenario}",
+                )
             if suite in {"all", "reader"}:
                 require(
                     "TestPostgresReader/real_reads_emit_bounded_database_and_pool_signals"

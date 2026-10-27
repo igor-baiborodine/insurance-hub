@@ -197,6 +197,12 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
     if case == "sql-generated-missing":
         (generated / "querier.go").unlink()
         return "check-sql-drift", "missing expected output", ()
+    if case == "build-missing-migrator":
+        shutil.rmtree(fixture / "cmd/migrate")
+        return "build", "expected executable migrate was not produced", ()
+    if case == "build-missing-seeder":
+        shutil.rmtree(fixture / "cmd/seed")
+        return "build", "expected executable seed was not produced", ()
     raise AssertionError(f"unknown controlled Product tooling case: {case}")
 
 
@@ -212,6 +218,8 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
         "sql-generated-modified",
         "sql-generated-unexpected",
         "sql-generated-missing",
+        "build-missing-migrator",
+        "build-missing-seeder",
     ],
 )
 def test_product_defect_is_rejected_without_mutation(tooling: Tooling, case: str) -> None:

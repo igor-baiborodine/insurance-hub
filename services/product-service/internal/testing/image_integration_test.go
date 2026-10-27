@@ -50,9 +50,15 @@ func TestProductRuntimeImage(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
+	tlsFiles := createImageTLSFiles(t)
 	harness, err := Start(ctx, Options{
 		FixtureRoot: baselineRoot,
 		Image:       DefaultPostgresImage,
+		TLS: &TLSOptions{
+			CAFile: tlsFiles.ca, CertFile: tlsFiles.cert,
+			KeyFile: tlsFiles.key, ConfigFile: tlsFiles.config,
+		},
+		provision: provisionImageAdministration,
 	})
 	if err != nil {
 		t.Fatalf("start disposable PostgreSQL: %v", err)
@@ -62,10 +68,12 @@ func TestProductRuntimeImage(t *testing.T) {
 			t.Errorf("close disposable PostgreSQL: %v", closeErr)
 		}
 	})
-	fixture, err := harness.LoadCatalog(ctx, FixtureQA)
+	selectImageProductDatabase(t, ctx, harness)
+	fixture, err := LoadCatalog(baselineRoot, FixtureQA)
 	if err != nil {
 		t.Fatalf("load accepted QA catalog: %v", err)
 	}
+	runPackagedAdministration(t, ctx, image, harness, tlsFiles.ca)
 	before, err := harness.Snapshot(ctx)
 	if err != nil {
 		t.Fatalf("capture catalog before image startup: %v", err)

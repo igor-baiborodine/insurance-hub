@@ -12,6 +12,7 @@ from pathlib import Path
 
 import bootstrap_docs
 import build_image
+import image_check
 import integration_test
 import pytest
 from product_process import CAPTURE_LIMIT, ProductCommandError, run
@@ -217,6 +218,39 @@ def test_image_build_rejects_missing_identity_before_command(
     assert "IMAGE_NAME is required" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("missing", sorted(image_check.PACKAGED_FILES))
+def test_image_contents_reject_missing_runtime_or_administration_file(missing: str) -> None:
+    # given
+    names = set(image_check.PACKAGED_FILES)
+    names.add("etc/ssl/certs/ca-certificates.crt")
+    names.remove(missing)
+
+    # when / then
+    with pytest.raises(image_check.ImageCheckError, match="missing packaged files"):
+        image_check.validate_image_contents(names)
+
+
+def test_image_contents_reject_unreviewed_sql_asset() -> None:
+    # given
+    names = set(image_check.PACKAGED_FILES)
+    names.update({"etc/ssl/certs/ca-certificates.crt", "tmp/unreviewed.sql"})
+
+    # when / then
+    with pytest.raises(image_check.ImageCheckError, match="unexpected SQL content"):
+        image_check.validate_image_contents(names)
+
+
+def test_image_assets_reject_content_drift(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # given
+    source = tmp_path / "migration.sql"
+    source.write_bytes(b"reviewed\n")
+    monkeypatch.setattr(image_check, "EXPECTED_ASSETS", {"migration.sql": source})
+
+    # when / then
+    with pytest.raises(image_check.ImageCheckError, match="differs from source"):
+        image_check.validate_image_assets({"migration.sql": b"changed\n"})
+
+
 @pytest.mark.parametrize(
     ("suite", "fixture_set", "message"),
     [
@@ -295,6 +329,8 @@ def test_stream_test_log_preserves_output_and_status(tmp_path: Path, exit_status
     # given
     log = tmp_path / "go-test.json"
     script = Path(integration_test.__file__).resolve().parent / "stream-test-log.sh"
+    event = {"Action": "pass", "Test": "TestProductAccess"}
+    diagnostic = "go: downloading github.com/pressly/goose/v3 v3.27.0"
 
     # when
     result = subprocess.run(
@@ -304,7 +340,9 @@ def test_stream_test_log_preserves_output_and_status(tmp_path: Path, exit_status
             str(log),
             sys.executable,
             "-c",
-            f"print('controlled test event'); raise SystemExit({exit_status})",
+            "import json, sys; "
+            f"print({diagnostic!r}, file=sys.stderr); "
+            f"print(json.dumps({event!r})); raise SystemExit({exit_status})",
         ],
         check=False,
         capture_output=True,
@@ -315,7 +353,8 @@ def test_stream_test_log_preserves_output_and_status(tmp_path: Path, exit_status
     # then
     assert result.returncode == exit_status
     assert result.stdout == ""
-    assert log.read_text(encoding="utf-8") == "controlled test event\n"
+    assert result.stderr == diagnostic + "\n"
+    assert [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] == [event]
 
 
 def integration_log_path(arguments: list[str], kwargs: dict[str, object]) -> Path | None:
@@ -358,6 +397,31 @@ def test_integration_reports_zero_selected_tests(
 @pytest.mark.parametrize(
     ("suite", "records", "message"),
     [
+        (
+            "marker-columns",
+            ["TestProductMarkerColumns"],
+            "did not pass marker column case fresh/owner_update",
+        ),
+        (
+            "schema-adoption",
+            ["TestProductSchemaAdoption"],
+            "did not pass schema adoption case fresh_and_sqlc_schema_parity",
+        ),
+        (
+            "migration",
+            ["TestProductMigration"],
+            "did not pass migration case grant_failure_is_atomic_and_retryable",
+        ),
+        (
+            "seed",
+            ["TestProductSeed"],
+            "did not pass seed case empty_catalog_matches_accepted_storage_and_transports",
+        ),
+        (
+            "all",
+            ["TestProductHTTP"],
+            "did not pass marker column case fresh/owner_update",
+        ),
         (
             "telemetry",
             [
@@ -693,3 +757,87 @@ def test_integration_runner_signal_reaps_active_process_group(
         if process.poll() is None:
             process.kill()
             process.wait(timeout=3)
+
+
+@pytest.mark.parametrize("failure", [False, True])
+@pytest.mark.parametrize(
+    ("suite", "test_name", "cases"),
+    [
+        ("schema-adoption", "TestProductSchemaAdoption", integration_test.SCHEMA_ADOPTION_CASES),
+        ("migration", "TestProductMigration", integration_test.MIGRATION_CASES),
+        ("seed", "TestProductSeed", integration_test.SEED_CASES),
+        ("marker-columns", "TestProductMarkerColumns", integration_test.MARKER_COLUMN_CASES),
+    ],
+)
+def test_administration_runner_preserves_results_and_selects_owned_package(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    failure: bool,
+    suite: str,
+    test_name: str,
+    cases: tuple[str, ...],
+) -> None:
+    # given
+    integration_environment(monkeypatch, suite)
+    monkeypatch.setattr(integration_test, "MODULE_ROOT", tmp_path)
+    result_paths: list[Path] = []
+
+    def fake_run(arguments: list[str], **kwargs: object) -> str:
+        log = integration_log_path(arguments, kwargs)
+        if log is not None:
+            assert "-race" in arguments
+            assert "-tags=integration" in arguments
+            assert f"^{test_name}$" in arguments
+            assert "./internal/testing" in arguments
+            result_paths.append(log)
+            records = [test_name] + [f"{test_name}/{case}" for case in cases]
+            log.write_text(
+                "".join(json.dumps({"Action": "pass", "Test": name}) + "\n" for name in records),
+                encoding="utf-8",
+            )
+            if failure:
+                raise ProductCommandError("controlled test failure")
+        return ""
+
+    monkeypatch.setattr(integration_test, "run", fake_run)
+
+    # when
+    status = integration_test.main([])
+
+    # then
+    assert status == int(failure)
+    output = capsys.readouterr()
+    assert test_name in output.out
+    assert bool("controlled test failure" in output.err) == failure
+    assert result_paths and all(not path.exists() for path in result_paths)
+
+
+@pytest.mark.parametrize("missing", image_check.ADMINISTRATION_CASES)
+def test_image_gate_requires_each_administration_fault(tmp_path, missing):
+    # given
+    required = {
+        "TestProductRuntimeImage",
+        "TestProductAdministrationImage",
+        *image_check.ADMINISTRATION_CASES,
+    }
+    log = tmp_path / "image.json"
+    log.write_text(
+        "\n".join(json.dumps({"Action": "pass", "Test": name}) for name in required - {missing})
+    )
+    # when / then: successful parents cannot conceal an omitted fault case.
+    with pytest.raises(image_check.ImageCheckError, match="required cases"):
+        image_check.validate_image_tests(log)
+
+
+def test_image_gate_accepts_complete_administration_faults(tmp_path):
+    # given
+    required = {
+        "TestProductRuntimeImage",
+        "TestProductAdministrationImage",
+        *image_check.ADMINISTRATION_CASES,
+    }
+    log = tmp_path / "image.json"
+    log.write_text("\n".join(json.dumps({"Action": "pass", "Test": name}) for name in required))
+    # when / then
+    image_check.validate_image_tests(log)

@@ -1,0 +1,102 @@
+# Q04 render-only sketch. Not referenced by any active overlay or Flux source.
+# Placeholder commit/image identities are never runnable release evidence.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: product-release-RELEASE
+  namespace: flux-system
+spec:
+  interval: 5m
+  url: https://github.com/igor-baiborodine/insurance-hub
+  ref:
+    commit: SOURCE_COMMIT
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: qa-product-init-RELEASE-aATTEMPT
+  namespace: flux-system
+spec:
+  interval: 5m
+  retryInterval: 1m
+  timeout: 6m
+  prune: true
+  wait: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: product-release-RELEASE
+  path: ./k8s/overlays/qa/svc/product-admin
+  images:
+    - name: insurance-hub-product-api
+      newName: ghcr.io/igor-baiborodine/insurance-hub/product-api
+      digest: sha256:IMAGE_DIGEST
+  healthChecks:
+    - apiVersion: batch/v1
+      kind: Job
+      name: qa-product-init-RELEASE-aATTEMPT
+      namespace: qa-svc
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: qa-product-api
+  namespace: flux-system
+spec:
+  interval: 5m
+  timeout: 5m
+  prune: true
+  wait: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: product-release-RELEASE
+  path: ./k8s/overlays/qa/svc/product
+  images:
+    - name: insurance-hub-product-api
+      newName: ghcr.io/igor-baiborodine/insurance-hub/product-api
+      digest: sha256:IMAGE_DIGEST
+  dependsOn:
+    - name: qa-product-init-RELEASE-aATTEMPT
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: qa-product-init-RELEASE-aATTEMPT
+  namespace: qa-svc
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 15
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: migrate
+          image: ghcr.io/igor-baiborodine/insurance-hub/product-api@sha256:IMAGE_DIGEST
+          command: [/product-migrate]
+          args: [up, --environment=qa]
+          env:
+            - name: PRODUCT_ADMIN_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: qa-postgres-product-migrator-creds
+                  key: database-url
+      containers:
+        - name: seed
+          image: ghcr.io/igor-baiborodine/insurance-hub/product-api@sha256:IMAGE_DIGEST
+          command: [/product-seed]
+          args: [--environment=qa]
+          env:
+            - name: PRODUCT_ADMIN_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: qa-postgres-product-seeder-creds
+                  key: database-url

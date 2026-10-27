@@ -264,13 +264,14 @@ def test_build_reports_failed_or_missing_binary(
     fake_go.chmod(0o755)
     monkeypatch.setenv("MODULE_ROOT", str(tmp_path))
     monkeypatch.setenv("GO", str(fake_go))
+    monkeypatch.setenv("BUILD_EXECUTABLES", "server")
 
     # when / then
     with pytest.raises(module_tooling.ToolingError, match=message):
         module_tooling.build_command(object())
 
 
-def test_build_accepts_executable_server_and_cleans_output(
+def test_build_accepts_declared_executables_and_cleans_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # given
@@ -278,7 +279,8 @@ def test_build_accepts_executable_server_and_cleans_output(
     fake_go.write_text(
         "#!/bin/sh\n"
         "while test $# -gt 0; do\n"
-        '  if test "$1" = -o; then shift; mkdir -p "$1"; touch "$1/server"; chmod +x "$1/server"; exit 0; fi\n'
+        '  if test "$1" = -o; then shift; mkdir -p "$1"; '
+        'touch "$1/server" "$1/migrate" "$1/seed"; chmod +x "$1"/*; exit 0; fi\n'
         "  shift\n"
         "done\n"
         "exit 2\n",
@@ -287,6 +289,7 @@ def test_build_accepts_executable_server_and_cleans_output(
     fake_go.chmod(0o755)
     monkeypatch.setenv("MODULE_ROOT", str(tmp_path))
     monkeypatch.setenv("GO", str(fake_go))
+    monkeypatch.setenv("BUILD_EXECUTABLES", "server migrate seed")
 
     # when
     status = module_tooling.build_command(object())
@@ -313,6 +316,7 @@ def test_build_sigterm_reaps_child_and_cleans_temporary_output(tmp_path: Path) -
         **os.environ,
         "MODULE_ROOT": str(tmp_path),
         "GO": str(fake_go),
+        "BUILD_EXECUTABLES": "server",
         "TMPDIR": str(temporary_parent),
     }
     process = subprocess.Popen(

@@ -17,7 +17,20 @@ COPY internal ./internal
 
 RUN GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -mod=readonly -trimpath -buildvcs=false \
-    -ldflags='-s -w -buildid=' -o /out/product-service ./cmd/server
+    -ldflags='-s -w -buildid=' -o /out/product-service ./cmd/server && \
+    GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -mod=readonly -trimpath -buildvcs=false \
+    -ldflags='-s -w -buildid=' -o /out/product-migrate ./cmd/migrate && \
+    GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -mod=readonly -trimpath -buildvcs=false \
+    -ldflags='-s -w -buildid=' -o /out/product-seed ./cmd/seed
+
+RUN install -D -m 0444 \
+    internal/administration/migrations/00001_product.sql \
+    /out/assets/usr/share/insurance-hub/product/migrations/00001_product.sql && \
+    install -D -m 0444 \
+    internal/administration/seeds/base.json \
+    /out/assets/usr/share/insurance-hub/product/catalogs/base.json
 
 FROM ${RUNTIME_IMAGE}
 
@@ -33,6 +46,9 @@ LABEL org.opencontainers.image.created="${SOURCE_CREATED}" \
       org.opencontainers.image.version="${SOURCE_VERSION}"
 
 COPY --from=build --chmod=0555 /out/product-service /product-service
+COPY --from=build --chmod=0555 /out/product-migrate /product-migrate
+COPY --from=build --chmod=0555 /out/product-seed /product-seed
+COPY --from=build /out/assets/usr/share /usr/share
 
 USER 65532:65532
 EXPOSE 8080 8081 9090

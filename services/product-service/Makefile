@@ -47,6 +47,7 @@ OTEL_GRPC_VERSION := v0.71.0
 OTEL_B3_VERSION := v1.46.0
 X_NET_VERSION := v0.60.0
 PGX_VERSION := v5.11.0
+GOOSE_VERSION := v3.27.0
 TESTCONTAINERS_VERSION := v0.44.0
 MOBY_GO_ARCHIVE_VERSION := v0.3.0
 MERMAID_CLI_VERSION := 11.14.0
@@ -68,6 +69,7 @@ SQL_QUERIES := internal/postgres/sql/queries.sql
 GENERATED_SQL_FILES := internal/postgres/dbgen/db.go internal/postgres/dbgen/models.go \
 	internal/postgres/dbgen/queries.sql.go internal/postgres/dbgen/querier.go
 TEST_PACKAGES ?= ./...
+BUILD_EXECUTABLES := server migrate seed
 COVERAGE_FILE ?= coverage.txt
 INTEGRATION_COVERAGE_FILE ?=
 COVERAGE_MINIMUM ?= 75
@@ -189,16 +191,62 @@ update-deps:
 		google.golang.org/grpc@$(GRPC_GO_VERSION) \
 		google.golang.org/protobuf@$(PROTOBUF_GO_VERSION) \
 		github.com/jackc/pgx/v5@$(PGX_VERSION) \
+		github.com/pressly/goose/v3@$(GOOSE_VERSION) \
 		github.com/testcontainers/testcontainers-go@$(TESTCONTAINERS_VERSION) \
 		github.com/testcontainers/testcontainers-go/modules/postgres@$(TESTCONTAINERS_VERSION) \
 		github.com/moby/go-archive@$(MOBY_GO_ARCHIVE_VERSION) \
 		golang.org/x/net@$(X_NET_VERSION)
 	GOWORK=off $(GO) mod tidy
 
+.PHONY: update-goose-dependency check-schema-adoption
+update-goose-dependency: verify-tools ## Resolve the pinned Goose library for the disposable adoption experiment
+	GOWORK=off $(GO) get github.com/pressly/goose/v3@$(GOOSE_VERSION)
+	GOWORK=off $(GO) mod tidy
+
+check-schema-adoption: verify-tools ## Lint, scan, and run the tagged disposable Q03 prototype; requires Docker
+	GOWORK=off $(GOLANGCI_LINT) run --config "$(GOLANGCI_CONFIG)" --build-tags=integration \
+		internal/testing/schema_adoption_integration_test.go internal/testing/harness.go internal/testing/fixture.go
+	GOWORK=off GOFLAGS=-mod=readonly $(GOVULNCHECK) -tags=integration -test ./internal/testing
+	$(MAKE) test-integration INTEGRATION_SUITE=schema-adoption
+
+.PHONY: build-migrator build-seeder
+build-migrator: verify-tools ## Build standalone Product migrator; requires MIGRATOR_OUTPUT
+	@test -n "$(strip $(MIGRATOR_OUTPUT))" || { echo "MIGRATOR_OUTPUT is required" >&2; exit 1; }
+	GOWORK=off $(GO) build -mod=readonly -o "$(MIGRATOR_OUTPUT)" ./cmd/migrate
+
+build-seeder: verify-tools ## Build standalone Product seeder; requires SEEDER_OUTPUT
+	@test -n "$(strip $(SEEDER_OUTPUT))" || { echo "SEEDER_OUTPUT is required" >&2; exit 1; }
+	GOWORK=off $(GO) build -mod=readonly -o "$(SEEDER_OUTPUT)" ./cmd/seed
+
+.PHONY: check-administration-design check-administration-design-fast \
+	check-administration-design-integration
+check-administration-design: check-administration-design-fast \
+	check-administration-design-integration ## Run all Q04 design checks
+
+check-administration-design-fast: python-toolchain-check ## Run render-only Q04 checks
+	@$(MAKE) --no-print-directory python-format-check python-lint \
+		PYTHON_FILES=services/product-service/scripts/test_administration_release.py
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest --collect-only -q \
+		-m "not integration" services/product-service/scripts/test_administration_release.py
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" $(PYTHON) -m pytest -q \
+		-m "not integration" services/product-service/scripts/test_administration_release.py
+
+check-administration-design-integration: python-toolchain-check ## Run disposable PostgreSQL Q04 checks; requires cached PostgreSQL image and Docker
+	@$(MAKE) --no-print-directory python-format-check python-lint \
+		PYTHON_FILES=scripts/postgres/service/test_administration_design.py
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest --collect-only -q \
+		-m integration scripts/postgres/service/test_administration_design.py
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q \
+		-m integration scripts/postgres/service/test_administration_design.py
+
 gen-sql:
 	@test "$$($(SQLC) version)" = "$(SQLC_VERSION)"
 	rm -f $(GENERATED_SQL_FILES)
 	$(SQLC) generate
+
+.PHONY: check-migration-schema
+check-migration-schema: INTEGRATION_SUITE := migration
+check-migration-schema: test-integration ## Compare real migrated Product schema with accepted baseline and sqlc input
 
 check-sql-drift: verify-tools
 	@MODULE_ROOT="$(CURDIR)" \
@@ -213,6 +261,7 @@ check-sql-drift: verify-tools
 		GENERATED_PATTERN="internal/postgres/dbgen/*.go" \
 		GENERATED_FILES="$(GENERATED_SQL_FILES)" \
 		"$(COMMON_GO_TOOLING_DIR)/check-generated-drift.sh"
+	$(MAKE) check-migration-schema
 
 test-integration: python-runtime-check
 	@GO="$(GO)" \

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "seedVersion": 1,
+  "scenarioId": "DATA-QA-001",
+  "provenance": "issue-131 accepted QA stored catalog capture",
+  "sourceRevision": "eddc97efd09fecf441f37fa8fda2600afdb5da91",
+  "sourcePath": "legacy/product-service/src/test/resources/product-read-baseline/catalog/qa.json",
+  "rows": [
+    {
+      "code": "CAR",
+      "checksum": "915ca1a8e507fdb4bdb7039cde7e2998",
+      "rawDefinitionSha256": "7ad9daba8c0ef7b9061f1a0ff69e295c2e9f3638eddc83fa0ff23e1e3f311799",
+      "rawLosslessDefinitionJson": "{\"icon\": \"car\", \"name\": \"Happy Driver\", \"image\": \"/static/car.jpg\", \"covers\": [{\"code\": \"C1\", \"name\": \"Assistance\", \"optional\": true, \"sumInsured\": null, \"description\": \"\"}], \"questions\": [{\"code\": \"NUM_OF_CLAIM\", \"text\": \"Number of claims in last 5 years\", \"type\": \"numeric\", \"index\": 3}], \"description\": \"Car insurance\", \"maxNumberOfInsured\": 1}"
+    },
+    {
+      "code": "FAI",
+      "checksum": "df87da1ca51acaabf8b0717c9d2a666d",
+      "rawDefinitionSha256": "527ae471cdac4b7600760c82c3b447f4344d0ede5abc44f9b4c7389f9ff3e249",
+      "rawLosslessDefinitionJson": "{\"icon\": \"apple\", \"name\": \"Happy farm\", \"image\": \"/static/farm.jpg\", \"covers\": [{\"code\": \"C1\", \"name\": \"Crops\", \"optional\": false, \"sumInsured\": 200000, \"description\": \"\"}, {\"code\": \"C2\", \"name\": \"Flood\", \"optional\": false, \"sumInsured\": 100000, \"description\": \"\"}, {\"code\": \"C3\", \"name\": \"Fire\", \"optional\": false, \"sumInsured\": 50000, \"description\": \"\"}, {\"code\": \"C4\", \"name\": \"Equipment\", \"optional\": true, \"sumInsured\": 300000, \"description\": \"\"}], \"questions\": [{\"code\": \"TYP\", \"text\": \"Cultivation type\", \"type\": \"choice\", \"index\": 1, \"choices\": [{\"code\": \"ZB\", \"label\": \"Crop\"}, {\"code\": \"KW\", \"label\": \"Vegetable\"}]}, {\"code\": \"AREA\", \"text\": \"Area\", \"type\": \"numeric\", \"index\": 2}, {\"code\": \"NUM_OF_CLAIM\", \"text\": \"Number of claims in last 5 years\", \"type\": \"numeric\", \"index\": 3}, {\"code\": \"FLOOD\", \"text\": \"Located in flood risk area\", \"type\": \"choice\", \"index\": 4, \"choices\": [{\"code\": \"YES\", \"label\": \"Yes\"}, {\"code\": \"NO\", \"label\": \"No\"}]}], \"description\": \"Farm insurance\", \"maxNumberOfInsured\": 1}"
+    },
+    {
+      "code": "HSI",
+      "checksum": "d4c5d818a6a1225de8a189e0309f6b38",
+      "rawDefinitionSha256": "899ef689ac380cf8f176849b1704a0d2a507ed332f389fcb49117884c0b9e719",
+      "rawLosslessDefinitionJson": "{\"icon\": \"building\", \"name\": \"Happy House\", \"image\": \"/static/house.jpg\", \"covers\": [{\"code\": \"C1\", \"name\": \"Fire\", \"optional\": false, \"sumInsured\": 200000, \"description\": \"\"}, {\"code\": \"C2\", \"name\": \"Flood\", \"optional\": false, \"sumInsured\": 100000, \"description\": \"\"}, {\"code\": \"C3\", \"name\": \"Theft\", \"optional\": false, \"sumInsured\": 50000, \"description\": \"\"}, {\"code\": \"C4\", \"name\": \"Assistance\", \"optional\": true, \"sumInsured\": null, \"description\": \"\"}], \"questions\": [{\"code\": \"TYP\", \"text\": \"Apartment / House\", \"type\": \"choice\", \"index\": 1, \"choices\": [{\"code\": \"APT\", \"label\": \"Apartment\"}, {\"code\": \"HOUSE\", \"label\": \"House\"}]}, {\"code\": \"AREA\", \"text\": \"Area\", \"type\": \"numeric\", \"index\": 2}, {\"code\": \"NUM_OF_CLAIM\", \"text\": \"Number of claims in last 5 years\", \"type\": \"numeric\", \"index\": 3}, {\"code\": \"FLOOD\", \"text\": \"Located in flood risk area\", \"type\": \"choice\", \"index\": 4, \"choices\": [{\"code\": \"YES\", \"label\": \"Yes\"}, {\"code\": \"NO\", \"label\": \"No\"}]}], \"description\": \"House insurance\", \"maxNumberOfInsured\": 5}"
+    },
+    {
+      "code": "TRI",
+      "checksum": "4097333f55b5abb72892d714e9b2b1a4",
+      "rawDefinitionSha256": "f06a9394edb2e4d835932ef6a89527ec112715f5d078b71cb7ff31af10de3f3e",
+      "rawLosslessDefinitionJson": "{\"icon\": \"plane\", \"name\": \"Safe Traveller\", \"image\": \"/static/travel.jpg\", \"covers\": [{\"code\": \"C1\", \"name\": \"Luggage\", \"optional\": false, \"sumInsured\": 5000, \"description\": \"\"}, {\"code\": \"C2\", \"name\": \"Illness\", \"optional\": false, \"sumInsured\": 5000, \"description\": \"\"}, {\"code\": \"C3\", \"name\": \"Assistance\", \"optional\": true, \"sumInsured\": null, \"description\": \"\"}], \"questions\": [{\"code\": \"DESTINATION\", \"text\": \"Destination\", \"type\": \"choice\", \"index\": 1, \"choices\": [{\"code\": \"EUR\", \"label\": \"Europe\"}, {\"code\": \"WORLD\", \"label\": \"World\"}, {\"code\": \"PL\", \"label\": \"Poland\"}]}, {\"code\": \"NUM_OF_ADULTS\", \"text\": \"Number of adults\", \"type\": \"numeric\", \"index\": 2}, {\"code\": \"NUM_OF_CHILDREN\", \"text\": \"Number of children\", \"type\": \"numeric\", \"index\": 3}], \"description\": \"Travel insurance\", \"maxNumberOfInsured\": 10}"
+    }
+  ]
+}
