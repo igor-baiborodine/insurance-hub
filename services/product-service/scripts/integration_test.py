@@ -16,7 +16,8 @@ from check_access_results import main as check_access_results
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 PATTERNS = {
-    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess|TestProductSchemaAdoption|TestProductMigration|TestProductSeed)$",
+    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess|TestProductSchemaAdoption|TestProductMigration|TestProductSeed|TestProductMarkerColumns)$",
+    "marker-columns": "^TestProductMarkerColumns$",
     "schema-adoption": "^TestProductSchemaAdoption$",
     "migration": "^TestProductMigration$",
     "seed": "^TestProductSeed$",
@@ -57,6 +58,10 @@ SCHEMA_ADOPTION_CASES = (
     "Goose_inspection_initializes_history",
 )
 MIGRATION_CASES = (
+    "grant_failure_is_atomic_and_retryable",
+    "owner-only_adoption_applies_reader_grants",
+    "ordinary_indexes_and_constraint_names_are_compatible",
+    "replay_restores_intended_grants",
     "fresh_schema_and_read-only_status",
     "adoption_and_replay_preserve_modified_catalog",
     "target_mismatch_makes_no_history",
@@ -76,6 +81,18 @@ SEED_CASES = (
     "cancelled_lock_leaves_catalog_empty",
     "lost_acknowledgement_replay_is_insert_only",
     "disabled_target_rejects_before_writes",
+)
+MARKER_COLUMN_CASES = tuple(
+    f"{state}/{scenario}"
+    for state in ("fresh", "managed")
+    for scenario in (
+        "owner_update",
+        "migrator_update",
+        "seeder_update",
+        "seeder_insert",
+        "reader_select",
+        "seeder_grant_option",
+    )
 )
 
 
@@ -194,6 +211,12 @@ def main(_argv: Sequence[str] | None = None) -> int:
                 if name.startswith("TestPostgres") or name.startswith("TestProduct")
             }
             require(bool(selected), f"suite {suite} selected zero tests")
+            if suite in {"all", "marker-columns"}:
+                for scenario in MARKER_COLUMN_CASES:
+                    require(
+                        f"TestProductMarkerColumns/{scenario}" in passed,
+                        f"suite {suite} did not pass marker column case {scenario}",
+                    )
             if suite in {"all", "schema-adoption"}:
                 for scenario in SCHEMA_ADOPTION_CASES:
                     require(

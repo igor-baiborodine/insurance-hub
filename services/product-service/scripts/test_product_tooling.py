@@ -398,6 +398,11 @@ def test_integration_reports_zero_selected_tests(
     ("suite", "records", "message"),
     [
         (
+            "marker-columns",
+            ["TestProductMarkerColumns"],
+            "did not pass marker column case fresh/owner_update",
+        ),
+        (
             "schema-adoption",
             ["TestProductSchemaAdoption"],
             "did not pass schema adoption case fresh_and_sqlc_schema_parity",
@@ -405,7 +410,7 @@ def test_integration_reports_zero_selected_tests(
         (
             "migration",
             ["TestProductMigration"],
-            "did not pass migration case fresh_schema_and_read-only_status",
+            "did not pass migration case grant_failure_is_atomic_and_retryable",
         ),
         (
             "seed",
@@ -415,7 +420,7 @@ def test_integration_reports_zero_selected_tests(
         (
             "all",
             ["TestProductHTTP"],
-            "did not pass schema adoption case fresh_and_sqlc_schema_parity",
+            "did not pass marker column case fresh/owner_update",
         ),
         (
             "telemetry",
@@ -761,6 +766,7 @@ def test_integration_runner_signal_reaps_active_process_group(
         ("schema-adoption", "TestProductSchemaAdoption", integration_test.SCHEMA_ADOPTION_CASES),
         ("migration", "TestProductMigration", integration_test.MIGRATION_CASES),
         ("seed", "TestProductSeed", integration_test.SEED_CASES),
+        ("marker-columns", "TestProductMarkerColumns", integration_test.MARKER_COLUMN_CASES),
     ],
 )
 def test_administration_runner_preserves_results_and_selects_owned_package(

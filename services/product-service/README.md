@@ -52,7 +52,7 @@ make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXT
 
 `INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, `parity`,
 `cancellation`, `lifecycle`, `telemetry`, `read-only`, `access`, `schema-adoption`, `migration`,
-`seed`, or `all`.
+`seed`, `marker-columns`, or `all`.
 `FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
@@ -89,6 +89,12 @@ modified and unrelated rows, concurrent replay, cancellation and target rejectio
 disposable database. Run it with
 `make -C services/product-service test-integration INTEGRATION_SUITE=seed`.
 
+The `marker-columns` suite checks that status, migration, and seed reject column-level grants
+on the protected target marker in fresh and managed databases without changing protected state.
+It covers owner, migrator, seeder, and reader privileges, including grant options, and verifies
+permission denial before each grant and after its revocation. Run it with
+`make -C services/product-service test-integration INTEGRATION_SUITE=marker-columns`.
+
 `cmd/migrate` is the standalone schema administrator. Build it with
 `make -C services/product-service build-migrator MIGRATOR_OUTPUT=<owned-output-path>`.
 Invoke it with explicit `--operation=migrate|status|version`, `--environment`, `--context`,
@@ -104,6 +110,19 @@ advisory lock `190001`, validates the table and history before Goose can initial
 applies only version 1. There is no down operation. Connection, lock, SQL and cleanup are bounded;
 inspect and resolve any uncertain result before replaying the same reviewed migration. The
 runtime reader still has no migration or seeding path.
+
+Administration deliberately uses a small validation boundary: the connected identity and protected
+marker, Product columns/primary key/owner and behavior-affecting features, and logical Goose history.
+Owner-only legacy tables, renamed primary-key constraints and additional ordinary non-unique indexes
+are accepted. Goose owns its history sequence/index/default layout. Migration reapplies explicit
+reader and optional seeder table grants transactionally on every successful run, including replay
+after interrupted grant setup; version-1 migration assets remain unchanged.
+
+Platform provisioning owns role memberships, restricted login attributes and database/schema/default
+permissions. Commands do not enumerate every role or ACL or attempt general permission repair.
+The marker remains platform-owned and non-writable by the command identities; unexpected marker
+column ACLs are rejected. Real SQL tests verify the provisioned reader/seeder permissions, but the
+commands do not promise to detect all later permission drift. API requests never run these checks.
 
 `cmd/seed` is the generic catalog administrator. Build it with
 `make -C services/product-service build-seeder SEEDER_OUTPUT=<owned-output-path>`. Invoke it with

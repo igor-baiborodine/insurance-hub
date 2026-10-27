@@ -23,8 +23,6 @@ const (
 	maxSeedCatalogBytes  = 8 << 20
 	maxProductCodeLength = 255
 	seedOperationBudget  = 60 * time.Second
-	seedLockBudget       = 30 * time.Second
-	seedLockPollInterval = time.Second
 )
 
 type seedCatalog struct {
@@ -183,7 +181,7 @@ func seedCatalogRows(
 			)
 		}
 	}()
-	if err := acquireSeedLock(ctx, tx); err != nil {
+	if err := acquireProductLock(ctx, tx); err != nil {
 		return SeedResult{}, err
 	}
 	if err := inspectSeedBoundary(ctx, tx, target); err != nil {
@@ -260,31 +258,6 @@ ON CONFLICT(code) DO NOTHING`,
 	return insertedCount, nil
 }
 
-func acquireSeedLock(ctx context.Context, db queryRower) error {
-	lockCtx, cancel := context.WithTimeout(ctx, seedLockBudget)
-	defer cancel()
-	ticker := time.NewTicker(seedLockPollInterval)
-	defer ticker.Stop()
-	for {
-		var acquired bool
-		if err := db.QueryRowContext(
-			lockCtx,
-			`SELECT pg_try_advisory_xact_lock($1)`,
-			productLockID,
-		).Scan(&acquired); err != nil {
-			return fmt.Errorf("acquire product administration lock: %w", err)
-		}
-		if acquired {
-			return nil
-		}
-		select {
-		case <-lockCtx.Done():
-			return fmt.Errorf("acquire product administration lock: %w", lockCtx.Err())
-		case <-ticker.C:
-		}
-	}
-}
-
 func inspectSeedBoundary(ctx context.Context, db queryRower, target Target) error {
 	if target.Environment == "production" || !target.SeedAllowed {
 		return errors.New("target enrollment does not allow seeding")
@@ -298,18 +271,15 @@ func inspectSeedBoundary(ctx context.Context, db queryRower, target Target) erro
 	); err != nil {
 		return err
 	}
-	if err := inspectProduct(ctx, db, target); err != nil {
+	if err := inspectProduct(ctx, db); err != nil {
 		return err
 	}
-	version, err := inspectHistory(ctx, db, true, target)
+	version, err := inspectHistory(ctx, db, true)
 	if err != nil {
 		return err
 	}
 	if version != "version=1" {
 		return fmt.Errorf("product schema is not ready for seeding: %s", version)
-	}
-	if err := inspectManagedSeedGrants(ctx, db); err != nil {
-		return err
 	}
 	return nil
 }

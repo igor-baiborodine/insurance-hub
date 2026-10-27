@@ -4,6 +4,7 @@ package integrationtest
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 
@@ -200,12 +202,7 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 			rowCount != 0 {
 			t.Fatalf("reader cannot inspect fresh table: %v", err)
 		}
-		if _, err := reader.ExecContext(
-			ctx,
-			`INSERT INTO public.product VALUES('DENIED','{}')`,
-		); err == nil {
-			t.Fatal("reader write was permitted")
-		}
+		assertProductReaderDenied(t, ctx, reader)
 		if got := adoptionScalar(
 			t,
 			ctx,
@@ -221,17 +218,6 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		); err != nil ||
 			state != "version=1" {
 			t.Fatalf("unexpected managed status %q: %v", state, err)
-		}
-		if _, err := productAdmin.ExecContext(ctx,
-			`GRANT INSERT ON public.product TO go_product_reader`); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := administration.Status(ctx, migrator, target); err == nil {
-			t.Fatal("reader privilege escalation was accepted")
-		}
-		if _, err := productAdmin.ExecContext(ctx,
-			`REVOKE INSERT ON public.product FROM go_product_reader`); err != nil {
-			t.Fatal(err)
 		}
 		schema, err := os.ReadFile("../postgres/sql/schema.sql")
 		if err != nil {
@@ -302,6 +288,59 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 			t.Fatalf("unexpected history %s", got)
 		}
 	})
+	for _, scenario := range []struct {
+		name, prepare string
+	}{
+		{"owner-only adoption applies reader grants", `REVOKE ALL ON public.product FROM go_product_reader`},
+		{"ordinary indexes and constraint names are compatible", `ALTER TABLE public.product RENAME CONSTRAINT product_pkey TO catalog_code_key; CREATE INDEX catalog_code_lookup ON public.product(code)`},
+		{"replay restores intended grants", `REVOKE SELECT ON public.product FROM go_product_reader`},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			// given
+			reset(t)
+			legacy(t)
+			if scenario.name == "replay restores intended grants" {
+				if err := administration.Migrate(
+					ctx,
+					migrator,
+					target,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			adoptionExec(t, ctx, productAdmin, scenario.prepare)
+			before := productFingerprint(t)
+
+			// when
+			err := administration.Migrate(ctx, migrator, target)
+			// then
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after := productFingerprint(t); !reflect.DeepEqual(before, after) {
+				t.Fatalf(
+					"migration changed existing Product state: %v -> %v",
+					before,
+					after,
+				)
+			}
+			var count int
+			if err := reader.QueryRowContext(ctx, `SELECT count(*) FROM public.product`).
+				Scan(&count); err != nil ||
+				count != len(fixture.Rows) {
+				t.Fatalf(
+					"reader grant or retained rows differ: count=%d, error=%v",
+					count,
+					err,
+				)
+			}
+			assertProductReaderDenied(t, ctx, reader)
+			if scenario.name == "ordinary indexes and constraint names are compatible" &&
+				adoptionScalar(t, ctx, productAdmin, `SELECT (to_regclass('public.catalog_code_lookup') IS NOT NULL)::text`) != "true" {
+				t.Fatal("migration removed the additional index")
+			}
+		})
+	}
 	t.Run("target mismatch makes no history", func(t *testing.T) {
 		// given
 		reset(t)
@@ -457,29 +496,48 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		}
 	})
 	t.Run("schema drift creates no history", func(t *testing.T) {
-		// given
-		reset(t)
-		legacy(t)
-		if _, err := productAdmin.ExecContext(
-			ctx,
-			`ALTER TABLE public.product DROP CONSTRAINT product_pkey`,
-		); err != nil {
-			t.Fatal(err)
-		}
+		for _, scenario := range []struct{ name, alter string }{
+			{"missing primary key", `ALTER TABLE public.product DROP CONSTRAINT product_pkey`},
+			{"wrong column type", `ALTER TABLE public.product ALTER COLUMN code TYPE text`},
+			{"extra column", `ALTER TABLE public.product ADD COLUMN extra text`},
+			{"wrong owner", `ALTER TABLE public.product OWNER TO postgres`},
+			{"row security", `ALTER TABLE public.product ENABLE ROW LEVEL SECURITY`},
+			{"extra unique index", `CREATE UNIQUE INDEX extra_unique ON public.product(definition)`},
+			{"extra constraint", `ALTER TABLE public.product ADD CHECK (code <> 'DENIED')`},
+			{"column default", `ALTER TABLE public.product ALTER COLUMN definition SET DEFAULT '{}'`},
+			{"user trigger", `CREATE FUNCTION public.ignore_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$; CREATE TRIGGER ignore_write BEFORE INSERT ON public.product FOR EACH ROW EXECUTE FUNCTION public.ignore_write()`},
+		} {
+			t.Run(scenario.name, func(t *testing.T) {
+				// given
+				reset(t)
+				legacy(t)
+				adoptionExec(t, ctx, productAdmin, scenario.alter)
+				before := productFingerprint(t)
 
-		// when
-		if err := administration.Migrate(ctx, migrator, target); err == nil {
-			t.Fatal("schema drift accepted")
-		}
+				// when
+				err := administration.Migrate(ctx, migrator, target)
 
-		// then
-		if got := adoptionScalar(
-			t,
-			ctx,
-			productAdmin,
-			`SELECT (to_regclass('public.goose_db_version') IS NULL)::text`,
-		); got != "true" {
-			t.Fatal("drift rejection created history")
+				// then
+				if err == nil {
+					t.Fatal("incompatible schema was accepted")
+				}
+				if got := adoptionScalar(
+					t,
+					ctx,
+					productAdmin,
+					`SELECT (to_regclass('public.goose_db_version') IS NULL)::text`,
+				); got != "true" {
+					t.Fatal("schema rejection created history")
+				}
+				if after := productFingerprint(
+					t,
+				); !reflect.DeepEqual(
+					before,
+					after,
+				) {
+					t.Fatal("schema rejection changed Product state")
+				}
+			})
 		}
 	})
 	t.Run("simultaneous runners and cancelled lock", func(t *testing.T) {
@@ -525,6 +583,83 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 			`SELECT pg_advisory_unlock(190001)`,
 		); err != nil {
 			t.Fatal(err)
+		}
+	})
+	t.Run("grant failure is atomic and retryable", func(t *testing.T) {
+		// given
+		reset(t)
+		legacy(t)
+		if err := administration.Migrate(ctx, migrator, target); err != nil {
+			t.Fatal(err)
+		}
+		adoptionExec(
+			t,
+			ctx,
+			productAdmin,
+			`REVOKE SELECT ON public.product FROM go_product_reader`,
+		)
+		adoptionExec(
+			t,
+			ctx,
+			productAdmin,
+			`UPDATE product_admin.target_identity SET seed_allowed=true`,
+		)
+		t.Cleanup(func() {
+			adoptionExec(
+				t,
+				ctx,
+				productAdmin,
+				`UPDATE product_admin.target_identity SET seed_allowed=false`,
+			)
+		})
+		seedTarget := target
+		seedTarget.SeedAllowed = true // Platform has not provisioned the seed role yet.
+		before := productFingerprint(t)
+
+		// when
+		err := administration.Migrate(ctx, migrator, seedTarget)
+
+		// then
+		if err == nil {
+			t.Fatal("missing seed role did not fail grant setup")
+		}
+		if got := adoptionScalar(
+			t,
+			ctx,
+			productAdmin,
+			`SELECT has_table_privilege('go_product_reader','public.product','SELECT')::text`,
+		); got != "false" {
+			t.Fatal("failed grant transaction retained a partial reader grant")
+		}
+		if got := adoptionScalar(
+			t,
+			ctx,
+			productAdmin,
+			`SELECT string_agg(version_id::text,',' ORDER BY id) FROM public.goose_db_version`,
+		); got != "0,1" {
+			t.Fatal("grant failure changed migration history")
+		}
+		adoptionExec(
+			t,
+			ctx,
+			productAdmin,
+			`UPDATE product_admin.target_identity SET seed_allowed=false`,
+		)
+		if err := administration.Migrate(ctx, migrator, target); err != nil {
+			t.Fatal(err)
+		}
+		if after := productFingerprint(t); !reflect.DeepEqual(before, after) {
+			t.Fatal("grant recovery changed Product schema or data")
+		}
+		var count int
+		if err := reader.QueryRowContext(ctx, `SELECT count(*) FROM public.product`).
+			Scan(&count); err != nil ||
+			count != len(fixture.Rows) {
+			t.Fatalf(
+				"grant replay did not restore reads: count=%d, error=%v",
+				count,
+				err,
+			)
 		}
 	})
 	t.Run("enrolled seed role receives only explicit managed reads", func(t *testing.T) {
@@ -575,14 +710,44 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		if versionErr != nil || version != 1 {
 			t.Fatalf("seed role cannot inspect managed history: %v", versionErr)
 		}
-		if historyWriteErr == nil {
-			t.Fatal("seed role changed migration history")
-		}
+		assertPermissionDenied(t, historyWriteErr)
 		if insertErr != nil {
 			t.Fatalf("seed role lacks insert privilege: %v", insertErr)
 		}
-		if updateErr == nil {
-			t.Fatal("seed role changed existing Product rows")
-		}
+		assertPermissionDenied(t, updateErr)
 	})
+}
+
+func assertPermissionDenied(t *testing.T, err error) {
+	t.Helper()
+	var postgresErr *pgconn.PgError
+	if !errors.As(err, &postgresErr) || postgresErr.Code != "42501" {
+		t.Fatalf("expected PostgreSQL permission denial, got %v", err)
+	}
+}
+
+func assertProductReaderDenied(t *testing.T, ctx context.Context, reader *sql.DB) {
+	t.Helper()
+	for _, statement := range []string{
+		`INSERT INTO public.product VALUES('DENIED','{}')`,
+		`UPDATE public.product SET definition='{}'`,
+		`DELETE FROM public.product`,
+		`TRUNCATE public.product`,
+		`CREATE TABLE public.denied(id integer)`,
+		`ALTER TABLE public.product ADD COLUMN denied text`,
+		`DROP TABLE public.product`,
+		`SELECT * FROM public.goose_db_version`,
+		`UPDATE public.goose_db_version SET version_id=9`,
+		`SELECT nextval('public.goose_db_version_id_seq')`,
+	} {
+		tx, err := reader.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, probeErr := tx.ExecContext(ctx, statement)
+		if err := tx.Rollback(); err != nil {
+			t.Fatal(err)
+		}
+		assertPermissionDenied(t, probeErr)
+	}
 }

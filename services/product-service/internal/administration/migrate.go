@@ -53,12 +53,47 @@ func Migrate(parent context.Context, db *sql.DB, target Target) error {
 	if err != nil && !isOnlyAlreadyApplied(err) {
 		return fmt.Errorf("apply Product migration: %w", err)
 	}
-	status, err := Status(ctx, db, target)
+	return applyGrants(ctx, db, target)
+}
+
+// applyGrants also runs on replay, so an interrupted grant phase needs no special repair command.
+func applyGrants(ctx context.Context, db *sql.DB, target Target) (resultErr error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin Product grants: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("rollback Product grants: %w", err),
+			)
+		}
+	}()
+	if err := acquireProductLock(ctx, tx); err != nil {
+		return err
+	}
+	status, err := inspect(ctx, tx, target)
 	if err != nil {
 		return fmt.Errorf("verify Product migration: %w", err)
 	}
 	if status != "version=1" {
 		return fmt.Errorf("verify Product migration: unexpected state %q", status)
+	}
+	grants := []string{`GRANT SELECT ON public.product TO go_product_reader`}
+	if target.SeedAllowed {
+		grants = append(grants,
+			`GRANT SELECT, INSERT ON public.product TO go_product_seeder`,
+			`GRANT SELECT ON public.goose_db_version TO go_product_seeder`,
+		)
+	}
+	for _, grant := range grants {
+		if _, err := tx.ExecContext(ctx, grant); err != nil {
+			return fmt.Errorf("apply Product grants: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit Product grants; inspect and retry safely: %w", err)
 	}
 	return nil
 }

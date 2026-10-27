@@ -11,9 +11,7 @@ type queryRower interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-const productSchemaIdentity = "76fac669b254931c0709c236fdd7804b"
-
-// inspect verifies the protected target and complete initial version-1 boundary. The same
+// inspect checks target identity, Product compatibility and logical migration state. The same
 // function runs under Goose's session lock and inside read-only status transactions.
 func inspect(ctx context.Context, db queryRower, target Target) (string, error) {
 	if err := inspectPlatform(ctx, db, target, "product", "go_product_migrator"); err != nil {
@@ -25,7 +23,7 @@ func inspect(ctx context.Context, db queryRower, target Target) (string, error) 
 		return "", fmt.Errorf("inspect schema objects: %w", err)
 	}
 	if product {
-		if err := inspectProduct(ctx, db, target); err != nil {
+		if err := inspectProduct(ctx, db); err != nil {
 			return "", err
 		}
 	}
@@ -35,29 +33,7 @@ func inspect(ctx context.Context, db queryRower, target Target) (string, error) 
 		}
 		return "uninitialized", nil
 	}
-	version, err := inspectHistory(ctx, db, product, target)
-	if err != nil {
-		return "", err
-	}
-	if version == "version=1" && target.SeedAllowed {
-		if err := inspectManagedSeedGrants(ctx, db); err != nil {
-			return "", err
-		}
-	}
-	return version, nil
-}
-
-func inspectManagedSeedGrants(ctx context.Context, db queryRower) error {
-	var accepted bool
-	err := db.QueryRowContext(ctx, inspectManagedSeedGrantsQuery).
-		Scan(&accepted)
-	if err != nil {
-		return fmt.Errorf("inspect managed seed grants: %w", err)
-	}
-	if !accepted {
-		return errors.New("managed seed grants differ from enrollment")
-	}
-	return nil
+	return inspectHistory(ctx, db, product)
 }
 
 func inspectPlatform(
@@ -78,40 +54,20 @@ func inspectPlatform(
 		return fmt.Errorf("inspect protected target: %w", err)
 	}
 	if !accepted {
-		return errors.New("protected target, role or grant policy differs from enrollment")
-	}
-	return inspectRoles(ctx, db, target)
-}
-
-func inspectRoles(ctx context.Context, db queryRower, target Target) error {
-	var accepted bool
-	err := db.QueryRowContext(ctx, inspectRolesQuery,
-		target.Environment, target.SeedAllowed).Scan(&accepted)
-	if err != nil {
-		return fmt.Errorf("inspect administration roles: %w", err)
-	}
-	if !accepted {
-		return errors.New("administration role or grant policy differs from enrollment")
+		return errors.New(
+			"protected target identity or marker permissions differ from enrollment",
+		)
 	}
 	return nil
 }
 
-func inspectProduct(ctx context.Context, db queryRower, target Target) error {
-	var identity string
-	if err := db.QueryRowContext(ctx, inspectProductSchemaQuery).Scan(&identity); err != nil {
+func inspectProduct(ctx context.Context, db queryRower) error {
+	var accepted bool
+	if err := db.QueryRowContext(ctx, inspectProductSchemaQuery).Scan(&accepted); err != nil {
 		return fmt.Errorf("inspect Product schema: %w", err)
 	}
-	if identity != productSchemaIdentity {
-		return errors.New("incompatible Product columns or constraints")
-	}
-	var accepted bool
-	err := db.QueryRowContext(ctx, inspectProductMetadataQuery, target.SeedAllowed).
-		Scan(&accepted)
-	if err != nil {
-		return fmt.Errorf("inspect Product metadata: %w", err)
-	}
 	if !accepted {
-		return errors.New("incompatible Product ownership, index, security or grants")
+		return errors.New("incompatible Product schema or owner")
 	}
 	return nil
 }
@@ -120,10 +76,9 @@ func inspectHistory(
 	ctx context.Context,
 	db queryRower,
 	product bool,
-	target Target,
 ) (string, error) {
 	var shape bool
-	err := db.QueryRowContext(ctx, inspectHistorySchemaQuery, target.SeedAllowed).
+	err := db.QueryRowContext(ctx, inspectHistorySchemaQuery).
 		Scan(&shape)
 	if err != nil {
 		return "", fmt.Errorf("inspect migration history shape: %w", err)

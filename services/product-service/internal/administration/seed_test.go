@@ -109,8 +109,6 @@ func (c *seedFailureConnection) QueryContext(
 		c.checksumChecks++
 		return &syntheticRows{values: []driver.Value{checksum}}, nil
 	case query == inspectProductSchemaQuery:
-		return &syntheticRows{values: []driver.Value{productSchemaIdentity}}, nil
-	case query == inspectProductMetadataQuery:
 		return &syntheticRows{values: []driver.Value{true}}, nil
 	case query == inspectHistorySchemaQuery:
 		return &syntheticRows{values: []driver.Value{true}}, nil

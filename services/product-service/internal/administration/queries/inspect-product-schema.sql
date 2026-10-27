@@ -1,28 +1,34 @@
--- Computes the accepted Product column and constraint identity.
-WITH schema_parts AS (
-    SELECT format(
-        'column|%s|%s|%s|%s|%s|%s',
-        ordinal_position,
-        column_name,
-        udt_name,
-        COALESCE(character_maximum_length::text, ''),
-        is_nullable,
-        COALESCE(column_default, '')
-    ) AS value
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'product'
-
-    UNION ALL
-
-    SELECT format(
-        'constraint|%s|%s|%s',
-        conname,
-        contype,
-        pg_get_constraintdef(oid, true)
+-- Validate the business shape, not a fingerprint of PostgreSQL metadata.
+SELECT product.relkind = 'r' AND product.relpersistence = 'p'
+    AND product.relowner = 'product'::regrole
+    AND NOT product.relrowsecurity AND NOT product.relforcerowsecurity
+    AND (
+        SELECT count(*) = 2 AND bool_and(
+            attnotnull AND NOT atthasdef AND attidentity = '' AND attgenerated = ''
+            AND (
+                -- varchar typmod includes PostgreSQL's four-byte length header.
+                (attname = 'code' AND atttypid = 'varchar'::regtype AND atttypmod = 259)
+                OR (attname = 'definition' AND atttypid = 'jsonb'::regtype)
+            )
+        )
+        FROM pg_attribute
+        WHERE attrelid = product.oid AND attnum > 0 AND NOT attisdropped
     )
-    FROM pg_constraint
-    WHERE conrelid = to_regclass('public.product')
-)
-SELECT md5(string_agg(value, E'\n' ORDER BY value))
-FROM schema_parts
+    AND (
+        SELECT count(*) = 1 AND bool_and(
+            contype = 'p' AND NOT condeferrable AND convalidated
+            AND conkey = ARRAY[(SELECT attnum FROM pg_attribute
+                WHERE attrelid = product.oid AND attname = 'code' AND NOT attisdropped)]
+        )
+        FROM pg_constraint WHERE conrelid = product.oid
+    )
+    -- Additional non-unique indexes are harmless; extra uniqueness can reject valid seeds.
+    AND NOT EXISTS (
+        SELECT FROM pg_index
+        WHERE indrelid = product.oid
+          AND (NOT indisvalid OR NOT indisready OR (indisunique AND NOT indisprimary))
+    )
+    AND NOT EXISTS (SELECT FROM pg_trigger WHERE tgrelid = product.oid AND NOT tgisinternal)
+    AND NOT EXISTS (SELECT FROM pg_inherits WHERE inhrelid = product.oid OR inhparent = product.oid)
+FROM pg_class AS product
+WHERE product.oid = 'public.product'::regclass
