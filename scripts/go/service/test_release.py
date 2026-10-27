@@ -13,6 +13,7 @@ import release
 REPOSITORY = "igor-baiborodine/insurance-hub"
 SOURCE_COMMIT = "a" * 40
 IMAGE_DIGEST = "sha256:" + "b" * 64
+NEXT_SOURCE_COMMIT = "c" * 40
 
 
 def create_service(
@@ -245,6 +246,93 @@ def test_prepare_respects_target_capabilities(
         )
         assert initialize["spec"]["postBuild"]["substitute"] == {"MIGRATION_TIMEOUT": "120s"}
         assert initialize["spec"]["healthChecks"][0]["namespace"] == environment + "-apps"
+
+
+def test_prepare_retains_prior_release_prerequisites_and_replaces_only_api(
+    tmp_path: Path,
+) -> None:
+    # given
+    create_service(tmp_path, "claims", environment="staging", initialization=True)
+    [bundle] = release.prepare_release(
+        tmp_path, "claims", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST
+    )
+    initial = list(yaml.safe_load_all(bundle.read_text()))
+    initial_source, initial_prerequisite, initial_api = initial
+
+    # when
+    release.prepare_release(
+        tmp_path, "claims", REPOSITORY, "1.2.4", NEXT_SOURCE_COMMIT, IMAGE_DIGEST
+    )
+
+    # then
+    documents = list(yaml.safe_load_all(bundle.read_text()))
+    assert len(documents) == 5
+    assert documents[:2] == [initial_source, initial_prerequisite]
+    assert documents[-1]["metadata"]["name"] == initial_api["metadata"]["name"]
+    assert documents[-1] != initial_api
+    assert documents[-1]["spec"]["dependsOn"] == [{"name": documents[-2]["metadata"]["name"]}]
+    assert {
+        item["metadata"]["annotations"]["insurance-hub.io/source-revision"]
+        for item in documents[:-1]
+    } == {SOURCE_COMMIT, NEXT_SOURCE_COMMIT}
+
+
+def test_prepare_retains_failed_attempt_and_is_idempotent(tmp_path: Path) -> None:
+    # given
+    create_service(tmp_path, "claims", environment="staging", initialization=True)
+    [bundle] = release.prepare_release(
+        tmp_path, "claims", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST
+    )
+    initial = list(yaml.safe_load_all(bundle.read_text()))
+    configure(tmp_path, "claims", "staging", attempt=2)
+
+    # when
+    release.prepare_release(tmp_path, "claims", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST)
+    first_retry = bundle.read_bytes()
+    release.prepare_release(tmp_path, "claims", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST)
+
+    # then
+    documents = list(yaml.safe_load_all(bundle.read_text()))
+    assert bundle.read_bytes() == first_retry
+    assert len(documents) == 4
+    assert documents[0] == initial[0]
+    assert documents[1] == initial[1]
+    assert documents[2]["metadata"]["name"].endswith("-a2")
+    assert documents[3]["spec"]["dependsOn"] == [{"name": documents[2]["metadata"]["name"]}]
+
+
+@pytest.mark.parametrize("corruption", ["unmanaged", "missing-source", "missing-api"])
+def test_prepare_rejects_corrupt_retained_bundle_without_writing(
+    tmp_path: Path, corruption: str
+) -> None:
+    # given
+    create_service(tmp_path, "claims", environment="staging", initialization=True)
+    [bundle] = release.prepare_release(
+        tmp_path, "claims", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST
+    )
+    documents = list(yaml.safe_load_all(bundle.read_text()))
+    if corruption == "unmanaged":
+        documents.insert(
+            -1,
+            {
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {"name": "manual", "namespace": "flux-system"},
+            },
+        )
+    elif corruption == "missing-source":
+        documents.pop(0)
+    else:
+        documents.pop()
+    bundle.write_text(yaml.safe_dump_all(documents, explicit_start=True, sort_keys=False))
+    before = bundle.read_bytes()
+
+    # when / then
+    with pytest.raises(release.ReleaseSelectionError):
+        release.prepare_release(
+            tmp_path, "claims", REPOSITORY, "1.2.4", NEXT_SOURCE_COMMIT, IMAGE_DIGEST
+        )
+    assert bundle.read_bytes() == before
 
 
 def test_release_normalizes_timeout_and_retry_changes_only_attempt(tmp_path: Path) -> None:

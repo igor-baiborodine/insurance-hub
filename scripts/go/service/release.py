@@ -358,6 +358,153 @@ def release_documents(
     return [source, initialize, api]
 
 
+def retained_release_documents(
+    existing: list[object], generated: list[dict], target: dict
+) -> list[dict]:
+    """Retain immutable release prerequisites while replacing the stable API owner."""
+    flux = target["flux"]
+    initialization = target["initialization"]
+    source_prefix = flux["sourcePrefix"]
+    init_prefix = initialization["jobName"]
+    api_name = flux["apiName"]
+    namespace = flux["namespace"]
+    source_pattern = re.compile(rf"{re.escape(source_prefix)}-([0-9a-f]{{16}})")
+    init_pattern = re.compile(rf"{re.escape(init_prefix)}-([0-9a-f]{{16}})-a([1-9][0-9]*)")
+    retained: list[dict] = []
+    retained_by_key: dict[tuple[str, str, str], dict] = {}
+    source_identities: set[str] = set()
+    initialization_identities: list[str] = []
+    api_count = 0
+
+    def identity(document: dict, name: str) -> str:
+        metadata = document["metadata"]
+        annotations = metadata.get("annotations", {})
+        require(
+            isinstance(annotations, dict),
+            f"retained release annotations are invalid: {name}",
+        )
+        release_identity = annotations.get("insurance-hub.io/release-identity", "")
+        source_revision = annotations.get("insurance-hub.io/source-revision", "")
+        image_digest = annotations.get("insurance-hub.io/image-digest", "")
+        require(
+            bool(re.fullmatch(r"[0-9a-f]{64}", release_identity)),
+            f"retained release identity is invalid: {name}",
+        )
+        require(
+            bool(SHA.fullmatch(source_revision)),
+            f"retained release source revision is invalid: {name}",
+        )
+        require(
+            bool(re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest)),
+            f"retained release image digest is invalid: {name}",
+        )
+        return release_identity
+
+    def add(document: object, *, current: bool) -> None:
+        nonlocal api_count
+        require(isinstance(document, dict), "release bundle contains a non-document value")
+        metadata = document.get("metadata")
+        require(isinstance(metadata, dict), "release bundle document metadata is missing")
+        name = metadata.get("name", "")
+        document_namespace = metadata.get("namespace", "")
+        kind = document.get("kind", "")
+        require(
+            isinstance(name, str) and name,
+            "release bundle document name is missing",
+        )
+        require(document_namespace == namespace, f"release bundle namespace differs: {name}")
+
+        if name == api_name:
+            require(kind == "Kustomization", "stable API owner kind differs")
+            api_count += 1
+            require(api_count == 1, "release bundle contains multiple stable API owners")
+            return
+
+        release_identity = identity(document, name)
+        release_id = release_identity[:16]
+        spec = document.get("spec")
+        require(isinstance(spec, dict), f"retained release spec is invalid: {name}")
+        if kind == "GitRepository":
+            match = source_pattern.fullmatch(name)
+            require(
+                match is not None and match.group(1) == release_id,
+                f"release ID collision or unmanaged source: {name}",
+            )
+            require(
+                document.get("apiVersion") == "source.toolkit.fluxcd.io/v1",
+                f"retained release source API differs: {name}",
+            )
+            require(
+                spec.get("ref")
+                == {"commit": metadata["annotations"]["insurance-hub.io/source-revision"]},
+                f"retained release source ref differs: {name}",
+            )
+            source_identities.add(release_identity)
+        elif kind == "Kustomization":
+            match = init_pattern.fullmatch(name)
+            require(
+                match is not None and match.group(1) == release_id,
+                f"release ID collision or unmanaged prerequisite: {name}",
+            )
+            require(
+                document.get("apiVersion") == "kustomize.toolkit.fluxcd.io/v1",
+                f"retained prerequisite API differs: {name}",
+            )
+            require(
+                spec.get("sourceRef")
+                == {"kind": "GitRepository", "name": f"{source_prefix}-{release_id}"},
+                f"retained prerequisite source differs: {name}",
+            )
+            health_checks = spec.get("healthChecks", [])
+            require(
+                any(
+                    check.get("kind") == "Job"
+                    and check.get("name") == name
+                    and check.get("namespace") == target["namespace"]
+                    for check in health_checks
+                    if isinstance(check, dict)
+                ),
+                f"retained prerequisite health check differs: {name}",
+            )
+            initialization_identities.append(release_identity)
+        else:
+            raise ReleaseSelectionError(
+                f"release bundle contains unmanaged document: {kind}/{name}"
+            )
+
+        key = (kind, document_namespace, name)
+        previous = retained_by_key.get(key)
+        if previous is not None:
+            require(current and previous == document, f"release bundle document conflicts: {name}")
+            return
+        retained_by_key[key] = document
+        retained.append(document)
+
+    for document in existing:
+        add(document, current=False)
+    if existing:
+        require(api_count == 1, "release bundle stable API owner is missing")
+        require(
+            bool(source_identities) and set(initialization_identities) == source_identities,
+            "release bundle sources and prerequisites are incomplete",
+        )
+    for document in generated[:-1]:
+        add(document, current=True)
+    require(
+        set(initialization_identities) == source_identities,
+        "release bundle sources and prerequisites are incomplete",
+    )
+
+    api = generated[-1]
+    require(
+        api.get("kind") == "Kustomization"
+        and api.get("metadata", {}).get("name") == api_name
+        and api.get("metadata", {}).get("namespace") == namespace,
+        "generated stable API owner differs from target",
+    )
+    return [*retained, api]
+
+
 def prepare_release(
     root: Path,
     service: str,
@@ -383,19 +530,14 @@ def prepare_release(
         else:
             release = service_release(root, service, name, source_commit, image_digest)
             path = checkout_path(root, target["flux"]["bundle"])
-            if path.exists():
-                for document in yaml.safe_load_all(path.read_text()):
-                    metadata = document.get("metadata", {}) if isinstance(document, dict) else {}
-                    old = metadata.get("annotations", {}).get(
-                        "insurance-hub.io/release-identity", ""
-                    )
-                    if (
-                        metadata.get("name")
-                        == f"{target['flux']['sourcePrefix']}-{release.release_id}"
-                    ):
-                        require(old == release.identity_sha256, "release ID collision")
-            content = yaml.safe_dump_all(
+            existing = list(yaml.safe_load_all(path.read_text())) if path.exists() else []
+            documents = retained_release_documents(
+                existing,
                 release_documents(release, record, target, repository),
+                target,
+            )
+            content = yaml.safe_dump_all(
+                documents,
                 explicit_start=True,
                 sort_keys=False,
             )
