@@ -9,62 +9,17 @@ import (
 	"io/fs"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
 )
 
 const (
-	productLockID    int64 = 190001
-	operationBudget        = 120 * time.Second
-	connectionBudget       = 5 * time.Second
-	cleanupBudget          = 5 * time.Second
+	operationBudget = 120 * time.Second
+	cleanupBudget   = 5 * time.Second
 )
 
 //go:embed migrations/*.sql
 var migrationSQL embed.FS
-
-// Open connects only after the caller has validated the target and URL. Each session takes the
-// accepted owner role; a login identity check still runs before any migration write.
-func Open(ctx context.Context, databaseURL string) (*sql.DB, error) {
-	config, err := pgx.ParseConfig(databaseURL)
-	if err != nil {
-		return nil, errors.New("invalid PostgreSQL connection configuration")
-	}
-	config.ConnectTimeout = connectionBudget
-	db := stdlib.OpenDB(
-		*config,
-		stdlib.OptionAfterConnect(func(ctx context.Context, conn *pgx.Conn) error {
-			for _, statement := range []string{
-				`SET ROLE product`,
-				`SET statement_timeout='15s'`,
-				`SET lock_timeout='5s'`,
-				`SET idle_in_transaction_session_timeout='15s'`,
-			} {
-				if _, err := conn.Exec(ctx, statement); err != nil {
-					return err
-				}
-			}
-			return nil
-		}),
-	)
-	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(0)
-	dialCtx, cancel := context.WithTimeout(ctx, connectionBudget)
-	defer cancel()
-	if err := db.PingContext(dialCtx); err != nil {
-		_ = db.Close()
-		if dialCtx.Err() != nil {
-			return nil, fmt.Errorf(
-				"connect to enrolled Product database: %w",
-				dialCtx.Err(),
-			)
-		}
-		return nil, errors.New("connect to enrolled Product database failed")
-	}
-	return db, nil
-}
 
 // Migrate verifies the protected target and schema under the same session lock Goose uses for
 // history setup and version-1 execution. Replays validate even when version 1 is already applied.

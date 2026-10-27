@@ -83,6 +83,36 @@ func TestRunRejectsUnenrolledOrIncompleteCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output strings.Builder
+	called := false
+	if err := runWith(
+		context.Background(),
+		valid,
+		&output,
+		func(
+			_ context.Context,
+			actualURL string,
+			actualTarget administration.Target,
+			actualOperation string,
+		) (string, error) {
+			called = true
+			if actualURL != databaseURL || actualTarget != target ||
+				actualOperation != "status" {
+				t.Fatalf(
+					"migration composition inputs = %q, %+v, %q",
+					actualURL,
+					actualTarget,
+					actualOperation,
+				)
+			}
+			return "version=1", nil
+		},
+	); err != nil {
+		t.Fatalf("delegated migration failed: %v", err)
+	}
+	if !called || output.String() != "version=1\n" {
+		t.Fatalf("migration delegation = called %t, output %q", called, output.String())
+	}
+	output.Reset()
 	if err := run(context.Background(), valid, &output); err == nil || output.Len() != 0 {
 		t.Fatalf("unreachable database was accepted: %v", err)
 	}

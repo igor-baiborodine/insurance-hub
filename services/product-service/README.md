@@ -52,7 +52,7 @@ make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXT
 
 `INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, `parity`,
 `cancellation`, `lifecycle`, `telemetry`, `read-only`, `access`, `schema-adoption`, `migration`,
-or `all`.
+`seed`, or `all`.
 `FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
@@ -81,6 +81,13 @@ history drift, concurrent replay, cancellation, reader denial and production enr
 a seed role. `check-sql-drift` also runs this suite to compare the migrated table with the accepted
 issue-131 schema and the sqlc input; this check requires Docker. Run the focused path with
 `make -C services/product-service test-integration INTEGRATION_SUITE=migration`.
+
+The `seed` suite passes the version-1 base catalog explicitly to the generic seeder through the
+restricted seed identity. It checks accepted storage checksums and HTTP/gRPC responses,
+supplemental catalog application through the same engine, missing-only counts, preservation of
+modified and unrelated rows, concurrent replay, cancellation and target rejection against an owned
+disposable database. Run it with
+`make -C services/product-service test-integration INTEGRATION_SUITE=seed`.
 
 `cmd/migrate` is the standalone schema administrator. Build it with
 `make -C services/product-service build-migrator MIGRATOR_OUTPUT=<owned-output-path>`.
@@ -385,12 +392,12 @@ The concrete package and file responsibilities are:
 | Package or file | Responsibility |
 | --- | --- |
 | [`cmd/server/main.go`](cmd/server/main.go) | Loads configuration, creates the redacting logger, owns signal handling, and invokes the composition root. |
-| [`cmd/migrate/main.go`](cmd/migrate/main.go) | Selects an enrolled target and operation, reads the migrator Secret/CA files, and owns command signals. |
-| [`internal/administration`](internal/administration) | Owns protected target checks, versioned Product schema creation/adoption, Goose locking and read-only status. |
-| [`internal/service/service.go`](internal/service/service.go) | Constructs the singleton pool, reader, use cases, HTTP/gRPC/management servers, and optional telemetry; owns startup, drain, and cleanup. |
+| [`cmd/migrate/main.go`](cmd/migrate/main.go) / [`cmd/seed/main.go`](cmd/seed/main.go) | Parse explicit command settings, read the selected protected files, own signals and delegate to the administrative composition roots. |
+| [`internal/service`](internal/service) | Constructs and owns runtime or administrative database resources, injects them into the selected operation, and owns startup and cleanup. |
+| [`internal/administration`](internal/administration) | Owns protected target checks, versioned Product schema creation/adoption, Goose locking, read-only status and generic catalog seeding. |
 | [`internal/domain/catalog.go`](internal/domain/catalog.go) | Owns transport-independent Product catalog values and exact decimal tokens. |
 | [`internal/application/catalog.go`](internal/application/catalog.go) | Owns `ProductReader`, `ListProducts`, `GetProduct`, and application errors. |
-| [`internal/postgres`](internal/postgres) | Owns pool creation, restricted read execution, sqlc use, JSONB decoding, storage error classification, and safe database/pool telemetry. |
+| [`internal/postgres`](internal/postgres) | Owns runtime pool and administrative database construction, restricted read execution, sqlc use, JSONB decoding, storage error classification, and safe database/pool telemetry. |
 | [`internal/http`](internal/http) | Owns direct URI behavior, legacy-compatible DTO/presence/decimal mapping, JSON responses, and HTTP error mapping. |
 | [`internal/grpc`](internal/grpc) | Owns generated-service registration, validation, domain-to-protobuf mapping, limits, tracing hooks, and status mapping. |
 | [`internal/config`](internal/config) | Parses and validates the bounded runtime settings and holds the database URL in a redacting type. |

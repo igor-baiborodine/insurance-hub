@@ -63,8 +63,51 @@ func ReadTarget(path string) (Target, error) {
 	return target, nil
 }
 
-// Validate checks explicit selection, enrolled coordinates and connection identity before a dial.
-func (t Target) Validate(selectedEnvironment, selectedContext, databaseURL, caPath string) error {
+// ValidateMigrationConnection checks the selected target and migrator connection before a dial.
+func (t Target) ValidateMigrationConnection(
+	selectedEnvironment,
+	selectedContext,
+	databaseURL,
+	caPath string,
+) error {
+	return t.validateCredential(
+		selectedEnvironment,
+		selectedContext,
+		databaseURL,
+		caPath,
+		"go_product_migrator",
+		"migrator",
+	)
+}
+
+// ValidateSeedConnection checks the selected target and seeder connection before a dial.
+func (t Target) ValidateSeedConnection(
+	selectedEnvironment,
+	selectedContext,
+	databaseURL,
+	caPath string,
+) error {
+	if t.Environment == "production" || !t.SeedAllowed {
+		return errors.New("target enrollment does not allow seeding")
+	}
+	return t.validateCredential(
+		selectedEnvironment,
+		selectedContext,
+		databaseURL,
+		caPath,
+		"go_product_seeder",
+		"seed",
+	)
+}
+
+func (t Target) validateCredential(
+	selectedEnvironment,
+	selectedContext,
+	databaseURL,
+	caPath,
+	expectedUser,
+	operation string,
+) error {
 	if selectedEnvironment == "" || selectedContext == "" ||
 		t.Environment != selectedEnvironment || t.Context != selectedContext {
 		return errors.New("target environment or context does not match enrollment")
@@ -109,12 +152,12 @@ func (t Target) Validate(selectedEnvironment, selectedContext, databaseURL, caPa
 	parsed, err := url.Parse(databaseURL)
 	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") ||
 		parsed.User == nil ||
-		parsed.User.Username() != "go_product_migrator" || parsed.Hostname() != t.Host ||
+		parsed.User.Username() != expectedUser || parsed.Hostname() != t.Host ||
 		strings.TrimPrefix(parsed.Path, "/") != t.Database || parsed.Fragment != "" {
-		return errors.New("database URL does not match enrolled migrator target")
+		return fmt.Errorf("database URL does not match enrolled %s target", operation)
 	}
 	if password, hasPassword := parsed.User.Password(); !hasPassword || password == "" {
-		return errors.New("migrator credential is missing")
+		return fmt.Errorf("%s credential is missing", operation)
 	}
 	if port := parsed.Port(); port != "" && port != "5432" && !t.Disposable {
 		return errors.New("database port differs from CNPG enrollment")

@@ -62,7 +62,7 @@ func (c *failingConnection) QueryContext(
 		return &syntheticRows{values: []driver.Value{true}}, nil
 	}
 	if c.emptyState {
-		if strings.Contains(query, "SELECT to_regclass('public.product')") {
+		if query == inspectSchemaObjectsQuery {
 			return &syntheticRows{values: []driver.Value{false, false}}, nil
 		}
 		return &syntheticRows{values: []driver.Value{true}}, nil
@@ -196,12 +196,5 @@ func TestIsOnlyAlreadyApplied_RejectsCombinedCleanupFailure(t *testing.T) {
 				t.Fatalf("isOnlyAlreadyApplied()=%t, want %t", got, scenario.want)
 			}
 		})
-	}
-}
-
-func TestOpenRejectsInvalidConnectionConfiguration(t *testing.T) {
-	if db, err := Open(context.Background(), "not-a-postgres-url"); err == nil {
-		_ = db.Close()
-		t.Fatal("invalid PostgreSQL URL was accepted")
 	}
 }

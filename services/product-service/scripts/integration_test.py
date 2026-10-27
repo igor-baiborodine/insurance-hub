@@ -16,9 +16,10 @@ from check_access_results import main as check_access_results
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 PATTERNS = {
-    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess|TestProductSchemaAdoption|TestProductMigration)$",
+    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess|TestProductSchemaAdoption|TestProductMigration|TestProductSeed)$",
     "schema-adoption": "^TestProductSchemaAdoption$",
     "migration": "^TestProductMigration$",
+    "seed": "^TestProductSeed$",
     "harness": "^TestPostgresHarness$",
     "reader": "^TestPostgresReader$",
     "grpc": "^TestProductGRPC$",
@@ -64,6 +65,16 @@ MIGRATION_CASES = (
     "schema_drift_creates_no_history",
     "simultaneous_runners_and_cancelled_lock",
     "enrolled_seed_role_receives_only_explicit_managed_reads",
+)
+SEED_CASES = (
+    "empty_catalog_matches_accepted_storage_and_transports",
+    "repeat_reports_every_accepted_product_as_existing",
+    "same_engine_applies_a_supplemental_environment_catalog",
+    "partial_modified_catalog_preserves_existing_and_unrelated_rows",
+    "concurrent_seeds_serialize_without_duplicates",
+    "cancelled_lock_leaves_catalog_empty",
+    "lost_acknowledgement_replay_is_insert_only",
+    "disabled_target_rejects_before_writes",
 )
 
 
@@ -193,6 +204,12 @@ def main(_argv: Sequence[str] | None = None) -> int:
                     require(
                         f"TestProductMigration/{scenario}" in passed,
                         f"suite {suite} did not pass migration case {scenario}",
+                    )
+            if suite in {"all", "seed"}:
+                for scenario in SEED_CASES:
+                    require(
+                        f"TestProductSeed/{scenario}" in passed,
+                        f"suite {suite} did not pass seed case {scenario}",
                     )
             if suite in {"all", "reader"}:
                 require(

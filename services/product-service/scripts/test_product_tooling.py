@@ -374,6 +374,11 @@ def test_integration_reports_zero_selected_tests(
             "did not pass migration case fresh_schema_and_read-only_status",
         ),
         (
+            "seed",
+            ["TestProductSeed"],
+            "did not pass seed case empty_catalog_matches_accepted_storage_and_transports",
+        ),
+        (
             "all",
             ["TestProductHTTP"],
             "did not pass schema adoption case fresh_and_sqlc_schema_parity",
@@ -721,6 +726,7 @@ def test_integration_runner_signal_reaps_active_process_group(
     [
         ("schema-adoption", "TestProductSchemaAdoption", integration_test.SCHEMA_ADOPTION_CASES),
         ("migration", "TestProductMigration", integration_test.MIGRATION_CASES),
+        ("seed", "TestProductSeed", integration_test.SEED_CASES),
     ],
 )
 def test_administration_runner_preserves_results_and_selects_owned_package(

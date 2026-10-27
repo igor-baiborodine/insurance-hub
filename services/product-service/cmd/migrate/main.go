@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/administration"
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/service"
 )
 
 func main() {
@@ -24,6 +25,15 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, output io.Writer) error {
+	return runWith(ctx, args, output, service.RunMigration)
+}
+
+func runWith(
+	ctx context.Context,
+	args []string,
+	output io.Writer,
+	runMigration func(context.Context, string, administration.Target, string) (string, error),
+) error {
 	flags := flag.NewFlagSet("product-migrate", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	operation := flags.String("operation", "", "migrate, status or version")
@@ -35,7 +45,9 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return errors.New("invalid migration command arguments")
 	}
-	if *operation != "migrate" && *operation != "status" && *operation != "version" {
+	if *operation != service.MigrationOperationMigrate &&
+		*operation != service.MigrationOperationStatus &&
+		*operation != service.MigrationOperationVersion {
 		return errors.New("operation must be migrate, status or version")
 	}
 	target, err := administration.ReadTarget(*targetPath)
@@ -50,38 +62,18 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		return errors.New("cannot read migrator credential file")
 	}
 	databaseURL := strings.TrimSpace(string(content))
-	if err := target.Validate(*environment, *contextName, databaseURL, *caPath); err != nil {
+	if err := target.ValidateMigrationConnection(
+		*environment, *contextName, databaseURL, *caPath,
+	); err != nil {
 		return err
 	}
 	info, err := os.Stat(*caPath)
 	if err != nil || !info.Mode().IsRegular() {
 		return errors.New("selected CNPG CA file is unavailable")
 	}
-	db, err := administration.Open(ctx, databaseURL)
+	state, err := runMigration(ctx, databaseURL, target, *operation)
 	if err != nil {
 		return err
-	}
-	defer func() { _ = db.Close() }()
-	if *operation == "migrate" {
-		if err := administration.Migrate(ctx, db, target); err != nil {
-			return err
-		}
-		_, err = fmt.Fprintln(output, "version=1")
-		return err
-	}
-	state, err := administration.Status(ctx, db, target)
-	if err != nil {
-		return err
-	}
-	if *operation == "version" {
-		switch state {
-		case "version=1":
-			state = "1"
-		case "pending":
-			state = "0"
-		default:
-			state = "uninitialized"
-		}
 	}
 	_, err = fmt.Fprintln(output, state)
 	return err
