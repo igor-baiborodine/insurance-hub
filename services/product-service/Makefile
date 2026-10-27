@@ -218,15 +218,26 @@ build-seeder: verify-tools ## Build standalone Product seeder; requires SEEDER_O
 	@test -n "$(strip $(SEEDER_OUTPUT))" || { echo "SEEDER_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(SEEDER_OUTPUT)" ./cmd/seed
 
-.PHONY: check-administration-design
-check-administration-design: PYTHON_FILES := scripts/postgres/service/test_administration_design.py services/product-service/scripts/test_administration_release.py
-check-administration-design: python-toolchain-check python-format-check python-lint ## Q04 render/negative checks and disposable PostgreSQL roles; requires cached PostgreSQL image, Docker, kubectl
+.PHONY: check-administration-design check-administration-design-fast \
+	check-administration-design-integration
+check-administration-design: check-administration-design-fast \
+	check-administration-design-integration ## Run all Q04 design checks
+
+check-administration-design-fast: python-toolchain-check ## Run render-only Q04 checks
+	@$(MAKE) --no-print-directory python-format-check python-lint \
+		PYTHON_FILES=services/product-service/scripts/test_administration_release.py
 	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest --collect-only -q \
-		scripts/postgres/service/test_administration_design.py \
-		services/product-service/scripts/test_administration_release.py
+		-m "not integration" services/product-service/scripts/test_administration_release.py
 	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" $(PYTHON) -m pytest -q \
-		scripts/postgres/service/test_administration_design.py \
-		services/product-service/scripts/test_administration_release.py
+		-m "not integration" services/product-service/scripts/test_administration_release.py
+
+check-administration-design-integration: python-toolchain-check ## Run disposable PostgreSQL Q04 checks; requires cached PostgreSQL image and Docker
+	@$(MAKE) --no-print-directory python-format-check python-lint \
+		PYTHON_FILES=scripts/postgres/service/test_administration_design.py
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest --collect-only -q \
+		-m integration scripts/postgres/service/test_administration_design.py
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q \
+		-m integration scripts/postgres/service/test_administration_design.py
 
 gen-sql:
 	@test "$$($(SQLC) version)" = "$(SQLC_VERSION)"

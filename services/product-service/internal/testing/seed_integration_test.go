@@ -94,6 +94,14 @@ func TestProductSeed(t *testing.T) {
 	})
 
 	t.Run("repeat reports every accepted product as existing", func(t *testing.T) {
+		// given
+		clear(t)
+		if _, err := administration.Seed(
+			ctx, database.seeders[0], database.target, catalogPath,
+		); err != nil {
+			t.Fatal(err)
+		}
+
 		// when
 		result, seedErr := administration.Seed(
 			ctx, database.seeders[0], database.target, catalogPath,

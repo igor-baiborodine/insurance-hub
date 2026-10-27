@@ -61,13 +61,16 @@ def validate(documents):
 
 
 def test_release_candidates_render_and_isolate_sources():
-    # given/when: real Kustomize renders, without contacting any cluster
+    # given
     with tempfile.TemporaryDirectory(dir=FIXTURE, prefix="render-") as directory:
         root = Path(directory)
         (root / "release.yaml").write_text(yaml.safe_dump_all(candidate("a" * 16)))
         (root / "kustomization.yaml").write_text("resources:\n  - release.yaml\n")
+
+        # when
         rendered = deployment_check.render(os.environ.get("KUBECTL", "kubectl"), root)
-    # then: validate by kind/name, independent of Kustomize sorting
+
+    # then
     by_name = {(item["kind"], item["metadata"]["name"]): item for item in rendered}
     ordered = [by_name[(item["kind"], item["metadata"]["name"])] for item in candidate("a" * 16)]
     validate(ordered)
@@ -87,6 +90,7 @@ def test_release_candidates_render_and_isolate_sources():
     "defect", ["mutable-source", "no-wait", "ttl", "shared-credential", "retry"]
 )
 def test_release_lifecycle_defects_are_rejected(defect):
+    # given
     documents = candidate("a" * 16)
     validate(documents)
     source, initialize, _, job = documents
@@ -101,13 +105,21 @@ def test_release_lifecycle_defects_are_rejected(defect):
     else:
         pod = job["spec"]["template"]["spec"]
         pod["containers"][0]["env"] = copy.deepcopy(pod["initContainers"][0]["env"])
+
+    # when / then
     with pytest.raises(AssertionError):
         validate(documents)
 
 
 def test_explicit_retry_changes_only_prerequisite_identity():
-    first, retry = candidate("a" * 16), candidate("a" * 16, 2)
+    # given
+    first = candidate("a" * 16)
+
+    # when
+    retry = candidate("a" * 16, 2)
     validate(retry)
+
+    # then
     assert first[0] == retry[0]
     assert first[3]["spec"] == retry[3]["spec"]
     assert first[3]["metadata"]["name"] != retry[3]["metadata"]["name"]
@@ -115,6 +127,7 @@ def test_explicit_retry_changes_only_prerequisite_identity():
 
 
 def test_product_transfer_preserves_unrelated_inventory():
+    # given
     # Java Product is absent at this migration stage. Checked-in legacy references are stale.
     # Only Go Product transfers owners; unrelated services retain their exact resources.
     source = ROOT / "k8s/overlays/qa/svc/kustomization.yaml"
@@ -124,7 +137,7 @@ def test_product_transfer_preserves_unrelated_inventory():
     baseline = deployment_check.render(kubectl, source.parent)
     product = deployment_check.render(kubectl, source.parent / "product")
     legacy = deployment_check.render(kubectl, source.parent / "product/legacy")
-    # Relative references must stay inside the repository's Kustomize tree.
+    # when
     with tempfile.TemporaryDirectory(dir=source.parent, prefix="q04-render-") as directory:
         scratch = Path(directory)
         remaining = {
@@ -145,6 +158,7 @@ def test_product_transfer_preserves_unrelated_inventory():
             item["metadata"]["name"],
         )
 
+    # then
     legacy_ids = {identity(item) for item in legacy}
     go_only_baseline = [item for item in baseline if identity(item) not in legacy_ids]
     moved_ids = {identity(item) for item in product}
@@ -160,6 +174,6 @@ def test_product_transfer_preserves_unrelated_inventory():
         assert not ({identity(item) for item in items} & legacy_ids), "Java Product reintroduced"
 
     require_java_absent(rendered + product)
-    # Reintroducing the historical Java desired state must fail the candidate check.
+    # when / then
     with pytest.raises(AssertionError, match="Java Product reintroduced"):
         require_java_absent(rendered + product + legacy)

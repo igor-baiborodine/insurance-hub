@@ -134,7 +134,7 @@ func TestTarget_ValidateMigrationConnection(t *testing.T) {
 	}
 }
 
-func TestReadTargetRejectsUnknownAndTrailingContent(t *testing.T) {
+func TestReadTarget_RejectsUnknownAndTrailingContent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "target.json")
 	for _, content := range []string{
 		`{"environment":"qa","unexpected":true}`,
@@ -164,7 +164,7 @@ func TestReadTargetRejectsUnknownAndTrailingContent(t *testing.T) {
 	}
 }
 
-func TestTarget_ValidateSeedConnectionRequiresApprovedSeeder(t *testing.T) {
+func TestTarget_ValidateSeedConnection_RequiresApprovedSeeder(t *testing.T) {
 	target := Target{
 		Environment:      "disposable",
 		Context:          "owned-test",

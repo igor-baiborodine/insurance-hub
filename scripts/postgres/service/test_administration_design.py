@@ -57,7 +57,7 @@ def database():
 
 @pytest.mark.integration
 def test_partial_start_is_cleaned(monkeypatch):
-    # given: Docker created the resource but the caller lost its success acknowledgement
+    # given
     original = run
     created = []
 
@@ -69,10 +69,13 @@ def test_partial_start_is_cleaned(monkeypatch):
         return output
 
     monkeypatch.setitem(database.__wrapped__.__globals__, "run", lose_acknowledgement)
-    # when/then: the original failure propagates and no owned resource remains
+
+    # when / then
     with pytest.raises(AssertionError, match="injected start acknowledgement loss"):
         with database():
             pytest.fail("setup unexpectedly succeeded")
+
+    # then
     assert len(created) == 1
     assert created[0] not in original(["docker", "ps", "-a", "--format", "{{.Names}}"])
 
@@ -187,14 +190,16 @@ COMMIT;
 @pytest.mark.integration
 @pytest.mark.parametrize("adopted", [False, True], ids=["fresh", "adopted"])
 def test_administration_role_matrix(adopted):
-    # given: final proposed grant state in an owned real PostgreSQL instance
+    # given
     with database() as manager:
         provision(manager, adopted)
         before = fingerprint(manager)
-        # when/then: authentication succeeds, and each denial must be SQLSTATE 42501
-        assert allowed(manager, "go_product_reader", "SELECT count(*) FROM public.product") == str(
-            int(adopted)
-        )
+
+        # when
+        reader_count = allowed(manager, "go_product_reader", "SELECT count(*) FROM public.product")
+
+        # then
+        assert reader_count == str(int(adopted))
         for sql in (
             "INSERT INTO public.product VALUES ('DENIED','{}')",
             "UPDATE public.product SET definition='{}'",
@@ -246,18 +251,22 @@ AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR
 """)
             == "0"
         )
-        # A privileged mutation must make the denial oracle fail; rollback protects rows.
+        # given
         manager.admin("GRANT INSERT ON public.product TO go_product_reader")
+
+        # when / then
         with pytest.raises(AssertionError, match="privilege denial missing"):
             denied(
                 manager, "go_product_reader", "INSERT INTO public.product VALUES ('MUTANT','{}')"
             )
         manager.admin("REVOKE INSERT ON public.product FROM go_product_reader")
         assert fingerprint(manager) == before
-        # No future blanket table grants: history and newly created tables stay private.
+        # when
         allowed(
             manager, "go_product_migrator", "SET ROLE product; CREATE TABLE public.future(id int)"
         )
+
+        # then
         denied(manager, "go_product_reader", "SELECT * FROM public.future")
         denied(manager, "go_product_seeder", "SELECT * FROM public.future")
         assert (
@@ -267,15 +276,18 @@ WHERE d.defaclrole='product'::regrole AND a.grantee<>d.defaclrole;
 """)
             == "0"
         )
-        # Insert-only replay is possible with SELECT+INSERT, with no UPDATE grant.
+        # given
         seed = """
 BEGIN;
 INSERT INTO public.product VALUES ('CAR','{"seed":true}'),('TRI','{}') ON CONFLICT(code) DO NOTHING;
 COMMIT;
 """
+        # when
         allowed(manager, "go_product_seeder", seed)
         seeded = fingerprint(manager)
         allowed(manager, "go_product_seeder", seed)
+
+        # then
         assert fingerprint(manager) == seeded
         if adopted:
             assert (
@@ -290,9 +302,12 @@ COMMIT;
 
 @pytest.mark.integration
 def test_target_marker_cannot_be_relabelled_by_seed_caller():
+    # given
     with database() as manager:
         provision(manager, True)
         before = fingerprint(manager)
+
+        # when
         for actual, requested, enabled, accepted in (
             ("disposable", "disposable", True, True),
             ("qa", "qa", True, True),
@@ -316,6 +331,8 @@ AND instance_id='q04-owned';
 """,
             )
             assert (observed == "1") is accepted
+
+        # then
         denied(
             manager,
             "go_product_seeder",

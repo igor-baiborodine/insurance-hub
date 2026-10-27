@@ -20,6 +20,7 @@ PATTERNS = {
     "schema-adoption": "^TestProductSchemaAdoption$",
     "migration": "^TestProductMigration$",
     "seed": "^TestProductSeed$",
+    "seed-replay": "^TestProductSeed/repeat_reports_every_accepted_product_as_existing$",
     "harness": "^TestPostgresHarness$",
     "reader": "^TestPostgresReader$",
     "grpc": "^TestProductGRPC$",
@@ -211,6 +212,12 @@ def main(_argv: Sequence[str] | None = None) -> int:
                         f"TestProductSeed/{scenario}" in passed,
                         f"suite {suite} did not pass seed case {scenario}",
                     )
+            if suite == "seed-replay":
+                scenario = "repeat_reports_every_accepted_product_as_existing"
+                require(
+                    f"TestProductSeed/{scenario}" in passed,
+                    f"suite {suite} did not pass seed case {scenario}",
+                )
             if suite in {"all", "reader"}:
                 require(
                     "TestPostgresReader/real_reads_emit_bounded_database_and_pool_signals"

@@ -173,8 +173,13 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		}
 	}
 	t.Run("fresh schema and read-only status", func(t *testing.T) {
+		// given
 		reset(t)
+
+		// when
 		state, err := administration.Status(ctx, migrator, target)
+
+		// then
 		if err != nil || state != "uninitialized" {
 			t.Fatalf("unexpected initial status %q: %v", state, err)
 		}
@@ -251,6 +256,7 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		}
 	})
 	t.Run("adoption and replay preserve modified catalog", func(t *testing.T) {
+		// given
 		reset(t)
 		legacy(t)
 		if state, err := administration.Status(
@@ -274,12 +280,16 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 			t.Fatal(err)
 		}
 		before := productFingerprint(t)
+
+		// when
 		if err := administration.Migrate(ctx, migrator, target); err != nil {
 			t.Fatal(err)
 		}
 		if err := administration.Migrate(ctx, migrator, target); err != nil {
 			t.Fatal(err)
 		}
+
+		// then
 		if after := productFingerprint(t); !reflect.DeepEqual(before, after) {
 			t.Fatalf("adoption changed Product: %v -> %v", before, after)
 		}
@@ -293,6 +303,7 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		}
 	})
 	t.Run("target mismatch makes no history", func(t *testing.T) {
+		// given
 		reset(t)
 		if _, err := productAdmin.ExecContext(
 			ctx,
@@ -300,12 +311,16 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		); err != nil {
 			t.Fatal(err)
 		}
+
+		// when
 		if _, err := administration.Status(ctx, migrator, target); err == nil {
 			t.Fatal("mismatched target was inspected as valid")
 		}
 		if err := administration.Migrate(ctx, migrator, target); err == nil {
 			t.Fatal("mismatched target was migrated")
 		}
+
+		// then
 		if got := adoptionScalar(
 			t,
 			ctx,
@@ -322,6 +337,7 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		}
 	})
 	t.Run("managed history drift is rejected", func(t *testing.T) {
+		// given
 		reset(t)
 		if err := administration.Migrate(ctx, migrator, target); err != nil {
 			t.Fatal(err)
@@ -332,12 +348,16 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		); err != nil {
 			t.Fatal(err)
 		}
+
+		// when
 		if _, err := administration.Status(ctx, migrator, target); err == nil {
 			t.Fatal("drifted history reported a version")
 		}
 		if err := administration.Migrate(ctx, migrator, target); err == nil {
 			t.Fatal("drifted history was accepted")
 		}
+
+		// then
 		if got := adoptionScalar(
 			t,
 			ctx,
@@ -348,6 +368,7 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		}
 	})
 	t.Run("failed migration retains zero history and retries", func(t *testing.T) {
+		// given
 		reset(t)
 		for _, query := range []string{
 			`CREATE FUNCTION product_admin.reject_product_create() RETURNS event_trigger
@@ -363,9 +384,13 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 				t.Fatal(err)
 			}
 		}
+
+		// when
 		if err := administration.Migrate(ctx, migrator, target); err == nil {
 			t.Fatal("injected Product DDL failure was ignored")
 		}
+
+		// then
 		if got := adoptionScalar(
 			t,
 			ctx,
@@ -399,6 +424,7 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		}
 	})
 	t.Run("enrolled production migrates without seed role", func(t *testing.T) {
+		// given
 		reset(t)
 		if _, err := productAdmin.ExecContext(
 			ctx,
@@ -408,9 +434,13 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		}
 		production := target
 		production.Environment = "production"
+
+		// when
 		if err := administration.Migrate(ctx, migrator, production); err != nil {
 			t.Fatal(err)
 		}
+
+		// then
 		if state, err := administration.Status(
 			ctx,
 			migrator,
@@ -427,6 +457,7 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		}
 	})
 	t.Run("schema drift creates no history", func(t *testing.T) {
+		// given
 		reset(t)
 		legacy(t)
 		if _, err := productAdmin.ExecContext(
@@ -435,9 +466,13 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		); err != nil {
 			t.Fatal(err)
 		}
+
+		// when
 		if err := administration.Migrate(ctx, migrator, target); err == nil {
 			t.Fatal("schema drift accepted")
 		}
+
+		// then
 		if got := adoptionScalar(
 			t,
 			ctx,
@@ -448,8 +483,11 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		}
 	})
 	t.Run("simultaneous runners and cancelled lock", func(t *testing.T) {
+		// given
 		reset(t)
 		results := make(chan error, 2)
+
+		// when
 		for range 2 {
 			go func() { results <- administration.Migrate(ctx, migrator, target) }()
 		}
@@ -458,6 +496,8 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 				t.Fatal(err)
 			}
 		}
+
+		// then
 		if got := adoptionScalar(
 			t,
 			ctx,
@@ -488,6 +528,7 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		}
 	})
 	t.Run("enrolled seed role receives only explicit managed reads", func(t *testing.T) {
+		// given
 		reset(t)
 		for _, query := range []string{
 			`CREATE ROLE go_product_seeder LOGIN NOINHERIT PASSWORD 'synthetic-seed-password'`,
@@ -510,23 +551,37 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		seedConfig.Password = "synthetic-seed-password"
 		seed := stdlib.OpenDB(seedConfig)
 		defer func() { _ = seed.Close() }()
+
+		// when
 		var version int
-		if err := seed.QueryRowContext(
+		versionErr := seed.QueryRowContext(
 			ctx,
 			`SELECT max(version_id) FROM public.goose_db_version`,
-		).Scan(&version); err != nil || version != 1 {
-			t.Fatalf("seed role cannot inspect managed history: %v", err)
+		).Scan(&version)
+		_, historyWriteErr := seed.ExecContext(
+			ctx,
+			`UPDATE public.goose_db_version SET version_id=9`,
+		)
+		_, insertErr := seed.ExecContext(
+			ctx,
+			`INSERT INTO public.product VALUES('NEW','{}')`,
+		)
+		_, updateErr := seed.ExecContext(
+			ctx,
+			`UPDATE public.product SET definition='{}'`,
+		)
+
+		// then
+		if versionErr != nil || version != 1 {
+			t.Fatalf("seed role cannot inspect managed history: %v", versionErr)
 		}
-		if _, err := seed.ExecContext(ctx,
-			`UPDATE public.goose_db_version SET version_id=9`); err == nil {
+		if historyWriteErr == nil {
 			t.Fatal("seed role changed migration history")
 		}
-		if _, err := seed.ExecContext(ctx,
-			`INSERT INTO public.product VALUES('NEW','{}')`); err != nil {
-			t.Fatalf("seed role lacks insert privilege: %v", err)
+		if insertErr != nil {
+			t.Fatalf("seed role lacks insert privilege: %v", insertErr)
 		}
-		if _, err := seed.ExecContext(ctx,
-			`UPDATE public.product SET definition='{}'`); err == nil {
+		if updateErr == nil {
 			t.Fatal("seed role changed existing Product rows")
 		}
 	})

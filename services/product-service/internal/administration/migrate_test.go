@@ -107,11 +107,16 @@ func (tx failingTransaction) Rollback() error {
 	return nil
 }
 
-func TestStatusUsesReadOnlyTransactionAndRollsBackOnCatalogError(t *testing.T) {
+func TestStatus_RollsBackReadOnlyInspectionOnCatalogError(t *testing.T) {
+	// given
 	connection := &failingConnection{}
 	db := sql.OpenDB(failingConnector{connection: connection})
 	defer func() { _ = db.Close() }()
+
+	// when
 	state, err := Status(context.Background(), db, Target{})
+
+	// then
 	if state != "" || !errors.Is(err, errSyntheticQuery) {
 		t.Fatalf("catalog failure was lost: state=%q, error=%v", state, err)
 	}
@@ -124,24 +129,35 @@ func TestStatusUsesReadOnlyTransactionAndRollsBackOnCatalogError(t *testing.T) {
 	}
 }
 
-func TestStatusReportsUninitializedWithoutWrite(t *testing.T) {
+func TestStatus_ReportsUninitializedWithoutWrite(t *testing.T) {
+	// given
 	connection := &failingConnection{emptyState: true}
 	db := sql.OpenDB(failingConnector{connection: connection})
 	defer func() { _ = db.Close() }()
+
+	// when
 	state, err := Status(context.Background(), db, Target{})
+
+	// then
 	if err != nil || state != "uninitialized" || !connection.readOnly ||
 		!connection.committed || connection.rolledBack {
 		t.Fatalf("read-only empty inspection failed: state=%q, error=%v", state, err)
 	}
 }
 
-func TestMigrationFailsClosedWithoutWriting(t *testing.T) {
+func TestMigration_FailsClosedWithoutWriting(t *testing.T) {
+	// given
 	connection := &failingConnection{}
 	db := sql.OpenDB(failingConnector{connection: connection})
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := Migrate(context.Background(), db, Target{}); err == nil {
+
+	// when
+	err := Migrate(context.Background(), db, Target{})
+
+	// then
+	if err == nil {
 		t.Fatal("closed database was accepted")
 	}
 	if connection.rolledBack {
@@ -149,17 +165,23 @@ func TestMigrationFailsClosedWithoutWriting(t *testing.T) {
 	}
 }
 
-func TestMigrationReleasesLockWhenInspectionFails(t *testing.T) {
+func TestMigration_ReleasesLockWhenInspectionFails(t *testing.T) {
+	// given
 	connection := &failingConnection{lock: true}
 	db := sql.OpenDB(failingConnector{connection: connection})
 	defer func() { _ = db.Close() }()
+
+	// when
 	err := Migrate(context.Background(), db, Target{})
+
+	// then
 	if !errors.Is(err, errSyntheticQuery) || !connection.unlocked {
 		t.Fatalf("inspection error or lock release lost: %v", err)
 	}
 }
 
 func TestIsOnlyAlreadyApplied_RejectsCombinedCleanupFailure(t *testing.T) {
+	// given
 	for _, scenario := range []struct {
 		name string
 		err  error
@@ -192,7 +214,11 @@ func TestIsOnlyAlreadyApplied_RejectsCombinedCleanupFailure(t *testing.T) {
 		{"different error", errors.New("migration failed"), false},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			if got := isOnlyAlreadyApplied(scenario.err); got != scenario.want {
+			// when
+			got := isOnlyAlreadyApplied(scenario.err)
+
+			// then
+			if got != scenario.want {
 				t.Fatalf("isOnlyAlreadyApplied()=%t, want %t", got, scenario.want)
 			}
 		})
