@@ -337,14 +337,48 @@ def secret_values(role: str, password: str, hostname: str, ca: bytes) -> dict[st
     return {"database-url": database_url(role, password, hostname).encode(), "ca.crt": ca}
 
 
+def compensation_sql(
+    created_roles: Sequence[str],
+    target: dict[str, object],
+    *,
+    remove_target: bool,
+    remove_migrator_membership: bool,
+) -> str:
+    roles = tuple(created_roles)
+    reader.require(
+        len(set(roles)) == len(roles) and all(role in ROLES for role in roles),
+        "invalid administration compensation role",
+    )
+    statements = ["BEGIN", "SET LOCAL lock_timeout='2s'", "SET LOCAL statement_timeout='10s'"]
+    if remove_target:
+        statements.append(
+            "DELETE FROM product_admin.target_identity WHERE singleton "
+            f"AND environment={reader.sql_literal(str(target['environment']))} "
+            f"AND instance_id={reader.sql_literal(str(target['instanceID']))}::uuid "
+            f"AND cluster_uid={reader.sql_literal(str(target['clusterUID']))} "
+            f"AND seed_allowed={str(bool(target['seedAllowed'])).lower()}"
+        )
+    if remove_migrator_membership:
+        statements.append("REVOKE product FROM go_product_migrator")
+    if roles:
+        statements.append("DROP OWNED BY " + ",".join(roles))
+        statements.extend(f"DROP ROLE IF EXISTS {role}" for role in reversed(roles))
+    statements.append("COMMIT")
+    return ";\n".join(statements) + ";\n"
+
+
 def provision(manager: AdministrationKubernetes) -> None:
     before = role_inventory(manager)
     existing_roles = {item["rolname"] for item in before["roles"]}
+    expected_membership = {
+        "role": "product",
+        "member": "go_product_migrator",
+        "inherit": False,
+        "set": True,
+        "admin": False,
+    }
     reader.require(
-        all(
-            item["member"] == "go_product_migrator" and item["role"] == "product"
-            for item in before["memberships"]
-        ),
+        before["memberships"] in ([], [expected_membership]),
         "unexpected administration role membership requires inspection",
     )
     passwords, existing_secrets, target = read_or_create_inputs(manager)
@@ -380,13 +414,27 @@ def provision(manager: AdministrationKubernetes) -> None:
             except reader.RoleError:
                 pass
         created_roles = [role for role in ROLES if role not in existing_roles]
-        if created_roles:
+        remove_target = before["target"] is None
+        if created_roles or remove_target or not before["memberships"]:
             try:
                 manager.admin(
-                    "BEGIN; "
-                    "REVOKE product FROM go_product_migrator; "
-                    + " ".join(f"DROP ROLE IF EXISTS {role};" for role in reversed(created_roles))
-                    + " COMMIT;"
+                    compensation_sql(
+                        created_roles,
+                        target,
+                        remove_target=remove_target,
+                        remove_migrator_membership=not before["memberships"],
+                    )
+                )
+                compensated = role_inventory(manager)
+                reader.require(
+                    not ({item["rolname"] for item in compensated["roles"]} & set(created_roles))
+                    and compensated["memberships"] == before["memberships"]
+                    and compensated["target"] == before["target"],
+                    "administration compensation state differs from its predecessor",
+                )
+                reader.require(
+                    all(manager.get_secret(name, manager.svc_ns) is None for name in written),
+                    "administration compensation left a newly written Secret",
                 )
             except reader.RoleError as compensation_error:
                 raise reader.RoleError(

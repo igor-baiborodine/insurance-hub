@@ -175,6 +175,14 @@ denial using SQLSTATE `42501`. A role without its matching Secret, a changed CNP
 that differs from its protected target is a recovery condition; provisioning does not silently
 replace it.
 
+If initial provisioning commits roles but a later workload-Secret write or final contract check
+fails, compensation deletes only Secrets written by that attempt, removes its target-marker row,
+revokes its new membership, removes Product-database grants from its newly created roles, and drops
+those roles. Pre-existing roles, privileges, Secrets, memberships, and marker rows remain unchanged.
+The `product_admin` schema and empty marker table may remain as idempotent platform-owned scaffolding;
+the failed target row does not. Inspect the reported failure before retrying the same provisioning
+command.
+
 ## Build and initialize local-dev
 
 Build and inspect the intended image, tag it with the local release convention, and load it:

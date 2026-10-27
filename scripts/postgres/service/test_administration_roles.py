@@ -107,6 +107,7 @@ class DisposableAdministration:
         self.container = container
         self.port = port
         self.secrets: dict[str, dict[str, bytes]] = {}
+        self.fail_secret: str | None = None
 
     def role_secret(self, role: str) -> str:
         return f"qa-postgres-product-{administration.SECRET_SUFFIX[role]}"
@@ -136,6 +137,8 @@ class DisposableAdministration:
         return self.secrets.get(name)
 
     def put_named_secret(self, name: str, values: dict[str, bytes]) -> None:
+        if name == self.fail_secret:
+            raise administration.reader.RoleError("injected disposable Secret write failure")
         self.secrets[name] = values
 
     def delete_named_secret(self, name: str) -> None:
@@ -230,6 +233,99 @@ def disposable_database():
     finally:
         if name in run(["docker", "ps", "-a", "--format", "{{.Names}}"]).splitlines():
             run(["docker", "rm", "-f", name])
+
+
+def test_compensation_sql_is_scoped_to_created_roles_and_exact_marker() -> None:
+    # given
+    target = {
+        "environment": "qa",
+        "instanceID": "00000000-0000-4000-8000-000000000191",
+        "clusterUID": "00000000-0000-4000-8000-000000000190",
+        "seedAllowed": True,
+    }
+
+    # when
+    sql = administration.compensation_sql(
+        ("go_product_migrator", "go_product_seeder"),
+        target,
+        remove_target=True,
+        remove_migrator_membership=True,
+    )
+
+    # then
+    assert "DROP OWNED BY go_product_migrator,go_product_seeder" in sql
+    assert "DROP ROLE IF EXISTS go_product_reader" not in sql
+    assert "REVOKE product FROM go_product_migrator" in sql
+    assert "instance_id='00000000-0000-4000-8000-000000000191'::uuid" in sql
+
+
+@pytest.mark.integration
+def test_initial_provision_secret_failure_compensates_and_retries() -> None:
+    # given
+    with disposable_database() as manager:
+        manager.fail_secret = manager.role_secret("go_product_seeder")
+
+        # when
+        with pytest.raises(
+            administration.reader.RoleError,
+            match="administration provisioning failed; partial state compensated",
+        ):
+            administration.provision(manager)
+
+        # then
+        assert manager.secrets == {}
+        assert administration.role_inventory(manager) == {
+            "roles": [],
+            "memberships": [],
+            "target": None,
+        }
+        assert (
+            manager.admin("SELECT to_regclass('product_admin.target_identity') IS NOT NULL;") == "t"
+        )
+        assert manager.admin("SELECT count(*) FROM product_admin.target_identity;") == "0"
+
+        manager.fail_secret = None
+        administration.provision(manager)
+        administration.verify(manager)
+
+
+@pytest.mark.integration
+def test_initial_provision_compensation_preserves_existing_reader() -> None:
+    # given
+    with disposable_database() as manager:
+        password = "r" * 64
+        manager.admin(
+            "CREATE ROLE go_product_reader LOGIN NOINHERIT PASSWORD "
+            f"'{password}'; GRANT CONNECT ON DATABASE product TO go_product_reader; "
+            "GRANT USAGE,CREATE ON SCHEMA public TO go_product_reader;"
+        )
+        reader_secret = administration.secret_values(
+            "go_product_reader", password, manager.hostname, manager.ca()
+        )
+        manager.secrets[manager.role_secret("go_product_reader")] = reader_secret
+        manager.fail_secret = manager.role_secret("go_product_seeder")
+
+        # when
+        with pytest.raises(
+            administration.reader.RoleError,
+            match="administration provisioning failed; partial state compensated",
+        ):
+            administration.provision(manager)
+
+        # then
+        state = administration.role_inventory(manager)
+        assert [item["rolname"] for item in state["roles"]] == ["go_product_reader"]
+        assert state["memberships"] == []
+        assert state["target"] is None
+        assert manager.secrets == {manager.role_secret("go_product_reader"): reader_secret}
+        assert (
+            manager.admin(
+                "SELECT has_database_privilege('go_product_reader','product','CONNECT') "
+                "AND has_schema_privilege('go_product_reader','public','USAGE') "
+                "AND has_schema_privilege('go_product_reader','public','CREATE');"
+            )
+            == "t"
+        )
 
 
 @pytest.mark.integration
