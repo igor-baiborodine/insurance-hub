@@ -811,3 +811,33 @@ def test_administration_runner_preserves_results_and_selects_owned_package(
     assert test_name in output.out
     assert bool("controlled test failure" in output.err) == failure
     assert result_paths and all(not path.exists() for path in result_paths)
+
+
+@pytest.mark.parametrize("missing", image_check.ADMINISTRATION_CASES)
+def test_image_gate_requires_each_administration_fault(tmp_path, missing):
+    # given
+    required = {
+        "TestProductRuntimeImage",
+        "TestProductAdministrationImage",
+        *image_check.ADMINISTRATION_CASES,
+    }
+    log = tmp_path / "image.json"
+    log.write_text(
+        "\n".join(json.dumps({"Action": "pass", "Test": name}) for name in required - {missing})
+    )
+    # when / then: successful parents cannot conceal an omitted fault case.
+    with pytest.raises(image_check.ImageCheckError, match="required cases"):
+        image_check.validate_image_tests(log)
+
+
+def test_image_gate_accepts_complete_administration_faults(tmp_path):
+    # given
+    required = {
+        "TestProductRuntimeImage",
+        "TestProductAdministrationImage",
+        *image_check.ADMINISTRATION_CASES,
+    }
+    log = tmp_path / "image.json"
+    log.write_text("\n".join(json.dumps({"Action": "pass", "Test": name}) for name in required))
+    # when / then
+    image_check.validate_image_tests(log)

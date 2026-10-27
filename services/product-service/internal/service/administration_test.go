@@ -7,6 +7,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/administration"
 )
@@ -90,5 +91,41 @@ func TestRunSeed_OwnsDatabaseLifecycle(t *testing.T) {
 	}
 	if !closed.Load() {
 		t.Fatal("seed database was not closed")
+	}
+}
+
+func TestRunMigration_DeadlineIncludesOpening(t *testing.T) {
+	// given
+	for _, operation := range []string{MigrationOperationMigrate, MigrationOperationStatus, MigrationOperationVersion} {
+		t.Run(operation, func(t *testing.T) {
+			openingFailure := errors.New("synthetic connection failure")
+			var remaining time.Duration
+			var hasDeadline bool
+
+			// when
+			_, err := runMigration(
+				context.Background(),
+				"synthetic",
+				administration.Target{},
+				operation,
+				func(ctx context.Context, _ string) (*sql.DB, error) {
+					deadline, ok := ctx.Deadline()
+					hasDeadline = ok
+					remaining = time.Until(deadline)
+					return nil, openingFailure
+				},
+			)
+
+			// then
+			if !errors.Is(err, openingFailure) || !hasDeadline || remaining <= 0 ||
+				remaining > 120*time.Second {
+				t.Fatalf(
+					"opening must consume the overall budget: deadline=%t remaining=%s error=%v",
+					hasDeadline,
+					remaining,
+					err,
+				)
+			}
+		})
 	}
 }

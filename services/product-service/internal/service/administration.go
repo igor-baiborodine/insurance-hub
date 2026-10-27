@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/administration"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/postgres"
@@ -35,6 +36,8 @@ func runMigration(
 	operation string,
 	openDatabase openAdministrationDatabase,
 ) (state string, resultErr error) {
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
 	db, err := openDatabase(ctx, databaseURL)
 	if err != nil {
 		return "", err

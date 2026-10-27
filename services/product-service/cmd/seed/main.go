@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/administration"
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/service"
 )
 
@@ -21,27 +23,39 @@ const seedCommandBudget = 60 * time.Second
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Args[1:], os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "product seed:", err)
+	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, args []string, output io.Writer) error {
-	return runWith(ctx, args, output, service.RunSeed)
+func run(ctx context.Context, args []string, output, diagnostics io.Writer) error {
+	return runWith(ctx, args, output, diagnostics, service.RunSeed)
 }
 
 func runWith(
 	ctx context.Context,
 	args []string,
-	output io.Writer,
+	output, diagnostics io.Writer,
 	runSeed func(
 		context.Context,
 		string,
 		administration.Target,
 		string,
 	) (administration.SeedResult, error),
-) error {
+) (resultErr error) {
+	operationName, environmentName, stage := "seed", "unvalidated", "configuration"
+	defer func() {
+		if resultErr != nil {
+			kind := "operation_failed"
+			if errors.Is(resultErr, context.Canceled) {
+				kind = "cancelled"
+			} else if errors.Is(resultErr, context.DeadlineExceeded) {
+				kind = "deadline_exceeded"
+			}
+			logger.New(diagnostics, "product-seed", slog.LevelInfo).
+				ErrorContext(ctx, "administration failed", "operation", operationName, "environment", environmentName, "stage", stage, "error_kind", kind, "error", resultErr)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(ctx, seedCommandBudget)
 	defer cancel()
 	flags := flag.NewFlagSet("product-seed", flag.ContinueOnError)
@@ -78,10 +92,12 @@ func runWith(
 	); err != nil {
 		return err
 	}
+	environmentName = target.Environment
 	info, err := os.Stat(*caPath)
 	if err != nil || !info.Mode().IsRegular() {
 		return errors.New("selected CNPG CA file is unavailable")
 	}
+	stage = "database_operation"
 	result, err := runSeed(ctx, databaseURL, target, *catalogPath)
 	if err != nil {
 		return err

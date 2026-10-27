@@ -107,7 +107,9 @@ database, host and seed policy. The credential file contains only the migrator U
 `uninitialized`, an accepted unmanaged table reports `unmanaged`, and a valid zero-history
 recovery state reports `pending` or version `0`. Migration holds Product
 advisory lock `190001`, validates the table and history before Goose can initialize history, and
-applies only version 1. There is no down operation. Connection, lock, SQL and cleanup are bounded;
+applies only version 1. There is no down operation. The 120-second migration/inspection budget
+starts before database opening; seed has a 60-second command budget. Connection, lock, SQL and
+cleanup are also bounded;
 inspect and resolve any uncertain result before replaying the same reviewed migration. The
 runtime reader still has no migration or seeding path.
 
@@ -134,6 +136,11 @@ insert-only transaction and prints deterministic `inserted=<n> existing=<n>` cou
 catalog first; a later environment-specific catalog can use the same command and explicit file
 selection without another Go seeder.
 
+Both commands write structured JSON failures to stderr through the service's redacting logger,
+with operation, validated environment, configuration/database stage and failure classification.
+Error text, credentials, URLs and SQL payloads are not emitted. Successful state/count output
+remains on stdout; failures exit with status 1.
+
 The standard `build` target verifies the API server, migrator and seeder executables. The Product
 image keeps `/product-service` as its entry point and also packages `/product-migrate`,
 `/product-seed`, the reviewed migration at
@@ -141,8 +148,12 @@ image keeps `/product-service` as its entry point and also packages `/product-mi
 `/usr/share/insurance-hub/product/catalogs/base.json`. All three commands run as the image's
 non-root UID/GID `65532:65532`; the administrative binaries still require explicit protected files
 and never run during API startup. `image-check` inspects those paths and exercises migration then
-seeding from the image against its owned disposable PostgreSQL instance. Image publication and
-deployment activation remain separate operations.
+seeding from the image against its owned disposable PostgreSQL instance. Its required fault suite
+exercises both commands under SIGTERM, the actual advisory-lock deadline, failed startup and
+connection failure, plus lost COMMIT acknowledgements and a seed disconnect after earlier inserts.
+It checks database state, session/lock release, safe replay and diagnostics. Faults use a test-only
+TLS proxy and synthetic credentials; required subtest discovery prevents silent omissions. Image
+publication and deployment activation remain separate operations.
 
 `make -C services/product-service check-administration-design` runs the issue-190 Q04 decision
 probes: authenticated PostgreSQL role denials and protected target markers,

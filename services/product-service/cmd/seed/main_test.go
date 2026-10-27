@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,7 +106,7 @@ func TestRun_RejectsInvalidOrUnapprovedCommand(t *testing.T) {
 			var output strings.Builder
 
 			// when
-			err := run(context.Background(), scenario.args, &output)
+			err := run(context.Background(), scenario.args, &output, io.Discard)
 
 			// then
 			if err == nil || !strings.Contains(err.Error(), scenario.want) ||
@@ -134,7 +136,7 @@ func TestRun_RejectsInvalidOrUnapprovedCommand(t *testing.T) {
 		"--catalog-file=" + fixture.catalogPath,
 		"--database-url-file=" + fixture.urlPath,
 		"--ca-file=" + fixture.caPath,
-	}, &output)
+	}, &output, io.Discard)
 
 	// then
 	if err == nil || !strings.Contains(err.Error(), "does not allow seeding") ||
@@ -155,6 +157,7 @@ func TestRun_DelegatesValidSeedCommand(t *testing.T) {
 		context.Background(),
 		fixture.valid,
 		&output,
+		io.Discard,
 		func(
 			_ context.Context,
 			actualURL string,
@@ -190,10 +193,57 @@ func TestRun_ReturnsDatabaseConnectionFailure(t *testing.T) {
 	var output strings.Builder
 
 	// when
-	err := run(context.Background(), fixture.valid, &output)
+	err := run(context.Background(), fixture.valid, &output, io.Discard)
 
 	// then
 	if err == nil || output.Len() != 0 {
 		t.Fatalf("unreachable database was accepted: %v", err)
+	}
+}
+
+func TestRun_LogsSafeStructuredFailures(t *testing.T) {
+	// given
+	fixture := newSeedCommandFixture(t)
+	fixture.writeCA(t)
+	for _, scenario := range []struct {
+		name string
+		err  error
+		kind string
+	}{
+		{"secret", errors.New("postgres://secret-sentinel:password@private-host/product SELECT private_payload"), "operation_failed"},
+		{"signal", context.Canceled, "cancelled"},
+		{"deadline", context.DeadlineExceeded, "deadline_exceeded"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var output, diagnostics strings.Builder
+			// when
+			err := runWith(
+				context.Background(),
+				fixture.valid,
+				&output,
+				&diagnostics,
+				func(context.Context, string, administration.Target, string) (administration.SeedResult, error) {
+					return administration.SeedResult{}, scenario.err
+				},
+			)
+			// then
+			var record map[string]any
+			if !errors.Is(err, scenario.err) || output.Len() != 0 ||
+				json.Unmarshal([]byte(diagnostics.String()), &record) != nil {
+				t.Fatalf("invalid failure output: %v", err)
+			}
+			if record["service"] != "product-seed" || record["operation"] != "seed" ||
+				record["environment"] != "disposable" ||
+				record["stage"] != "database_operation" ||
+				record["error_kind"] != scenario.kind ||
+				record["error"] != "[REDACTED]" {
+				t.Fatalf("unexpected diagnostic: %v", record)
+			}
+			for _, secret := range []string{"secret-sentinel", "password@", "private-host", "private_payload"} {
+				if strings.Contains(diagnostics.String(), secret) {
+					t.Fatal("sensitive error content was logged")
+				}
+			}
+		})
 	}
 }

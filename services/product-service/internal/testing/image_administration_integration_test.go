@@ -213,6 +213,25 @@ func runPackagedAdministration(
 	if err != nil {
 		t.Fatalf("resolve image-check PostgreSQL port: %v", err)
 	}
+	files, args := imageAdministrationInputs(t, caFile, port.Port(), "migrate")
+	runImageAdministrationCommand(t, ctx, image, "/product-migrate", files, args, "version=1")
+	files, args = imageAdministrationInputs(t, caFile, port.Port(), "seed")
+	runImageAdministrationCommand(
+		t,
+		ctx,
+		image,
+		"/product-seed",
+		files,
+		args,
+		"inserted=4 existing=0",
+	)
+}
+
+func imageAdministrationInputs(
+	t *testing.T,
+	caFile, port, operation string,
+) ([]imageFileMount, []string) {
+	t.Helper()
 	directory := t.TempDir()
 	target := administration.Target{
 		Environment: imageEnvironment, Context: imageContext,
@@ -235,7 +254,7 @@ func runPackagedAdministration(
 			User:   url.UserPassword(role, password),
 			Host: net.JoinHostPort(
 				testcontainers.HostInternal,
-				port.Port(),
+				port,
 			),
 			Path: "/" + imageDatabase,
 		}
@@ -255,32 +274,26 @@ func runPackagedAdministration(
 		{hostPath: targetFile, containerPath: "/target.json"},
 		{hostPath: caFile, containerPath: "/ca.crt"},
 	}
-	runImageAdministrationCommand(t, ctx, image, "/product-migrate", append(
-		files,
-		imageFileMount{
-			hostPath:      migratorURL,
-			containerPath: "/database-url",
-		},
-	), []string{
-		"--operation=migrate",
+
+	credential := migratorURL
+	args := []string{
 		"--environment=" + imageEnvironment,
 		"--context=" + imageContext,
 		"--target-file=/target.json",
 		"--database-url-file=/database-url",
 		"--ca-file=/ca.crt",
-	}, "version=1")
-	runImageAdministrationCommand(t, ctx, image, "/product-seed", append(
-		files,
-		imageFileMount{
-			hostPath:      seederURL,
-			containerPath: "/database-url",
-		},
-	), []string{
-		"--environment=" + imageEnvironment, "--context=" + imageContext,
-		"--target-file=/target.json",
-		"--catalog-file=/usr/share/insurance-hub/product/catalogs/base.json",
-		"--database-url-file=/database-url", "--ca-file=/ca.crt",
-	}, "inserted=4 existing=0")
+	}
+	if operation == "seed" {
+		credential = seederURL
+		args = append(
+			args,
+			"--catalog-file=/usr/share/insurance-hub/product/catalogs/base.json",
+		)
+	} else {
+		args = append(args, "--operation="+operation)
+	}
+	files = append(files, imageFileMount{hostPath: credential, containerPath: "/database-url"})
+	return files, args
 }
 
 func runImageAdministrationCommand(
@@ -293,36 +306,18 @@ func runImageAdministrationCommand(
 	wantOutput string,
 ) {
 	t.Helper()
-	command, err := testcontainers.Run(
+	command, err := startImageAdministrationCommand(
+		t,
 		ctx,
 		image,
-		testcontainers.WithEntrypoint(entrypoint),
-		testcontainers.WithCmd(arguments...),
-		testcontainers.WithHostConfigModifier(func(config *container.HostConfig) {
-			config.ExtraHosts = append(
-				config.ExtraHosts,
-				testcontainers.HostInternal+":host-gateway",
-			)
-			for _, file := range files {
-				config.Binds = append(
-					config.Binds,
-					file.hostPath+":"+file.containerPath+":ro",
-				)
-			}
-			config.ReadonlyRootfs = true
-			config.CapDrop = append(config.CapDrop, "ALL")
-			config.SecurityOpt = append(config.SecurityOpt, "no-new-privileges")
-		}),
-		testcontainers.WithWaitStrategy(wait.ForExit().WithExitTimeout(90*time.Second)),
+		entrypoint,
+		files,
+		arguments,
+		wait.ForExit().WithExitTimeout(90*time.Second),
 	)
 	if err != nil {
 		t.Fatalf("run %s from Product image: %v", entrypoint, err)
 	}
-	t.Cleanup(func() {
-		if err := command.Terminate(context.Background()); err != nil {
-			t.Errorf("terminate %s image command: %v", entrypoint, err)
-		}
-	})
 	state, err := command.State(ctx)
 	if err != nil {
 		t.Fatalf("inspect %s image command: %v", entrypoint, err)
@@ -345,4 +340,49 @@ func runImageAdministrationCommand(
 			wantOutput,
 		)
 	}
+}
+
+// Register cleanup even when startup or its wait strategy fails after creation.
+func startImageAdministrationCommand(
+	t *testing.T,
+	ctx context.Context,
+	image, entrypoint string,
+	files []imageFileMount,
+	arguments []string,
+	strategy wait.Strategy,
+) (*testcontainers.DockerContainer, error) {
+	t.Helper()
+	options := []testcontainers.ContainerCustomizer{
+		testcontainers.WithEntrypoint(entrypoint),
+		testcontainers.WithCmd(arguments...),
+		testcontainers.WithHostConfigModifier(func(config *container.HostConfig) {
+			config.ExtraHosts = append(
+				config.ExtraHosts,
+				testcontainers.HostInternal+":host-gateway",
+			)
+			for _, file := range files {
+				config.Binds = append(
+					config.Binds,
+					file.hostPath+":"+file.containerPath+":ro",
+				)
+			}
+			config.ReadonlyRootfs = true
+			config.CapDrop = append(config.CapDrop, "ALL")
+			config.SecurityOpt = append(config.SecurityOpt, "no-new-privileges")
+		}),
+	}
+	if strategy != nil {
+		options = append(options, testcontainers.WithWaitStrategy(strategy))
+	}
+	command, err := testcontainers.Run(ctx, image, options...)
+	if command != nil {
+		t.Cleanup(func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := command.Terminate(cleanup); err != nil {
+				t.Errorf("terminate %s image command: %v", entrypoint, err)
+			}
+		})
+	}
+	return command, err
 }
