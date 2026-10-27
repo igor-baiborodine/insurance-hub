@@ -51,7 +51,8 @@ make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXT
 ```
 
 `INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, `parity`,
-`cancellation`, `lifecycle`, `telemetry`, `read-only`, `access`, `schema-adoption`, or `all`.
+`cancellation`, `lifecycle`, `telemetry`, `read-only`, `access`, `schema-adoption`, `migration`,
+or `all`.
 `FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
@@ -73,6 +74,30 @@ existing harness/fixture helpers and scans the tagged test dependency graph for 
 The suite has a three-minute work deadline, bounded harness cleanup, and mandatory scenario
 discovery; the existing runner reports progress and retains failed test output before cleanup.
 `update-goose-dependency` explicitly resolves the pinned library; checks never install tools.
+
+The `migration` suite exercises the real embedded migration and status path against a separate
+disposable `product` database. It checks empty and populated adoption, modified rows, marker and
+history drift, concurrent replay, cancellation, reader denial and production enrollment without
+a seed role. `check-sql-drift` also runs this suite to compare the migrated table with the accepted
+issue-131 schema and the sqlc input; this check requires Docker. Run the focused path with
+`make -C services/product-service test-integration INTEGRATION_SUITE=migration`.
+
+`cmd/migrate` is the standalone schema administrator. Build it with
+`make -C services/product-service build-migrator MIGRATOR_OUTPUT=<owned-output-path>`.
+Invoke it with explicit `--operation=migrate|status|version`, `--environment`, `--context`,
+`--target-file`, `--database-url-file` and `--ca-file`. The protected target JSON records the exact
+environment, context, data/service namespaces, CNPG cluster and UID, database-instance UUID,
+database, host and seed policy. The credential file contains only the migrator URL, with
+`go_product_migrator`, the enrolled host and database, `sslmode=verify-full`, and the selected
+`sslrootcert` path. The target marker must independently match the enrollment after TLS connects.
+`status` and `version` use a read-only transaction; an absent table/history reports
+`uninitialized`, an accepted unmanaged table reports `unmanaged`, and a valid zero-history
+recovery state reports `pending` or version `0`. Migration holds Product
+advisory lock `190001`, validates the table and history before Goose can initialize history, and
+applies only version 1. There is no down operation. Connection, lock, SQL and cleanup are bounded;
+inspect and resolve any uncertain result before replaying the same reviewed migration. The
+runtime reader still has no migration or seeding path. Image packaging and deployment integration
+are separate delivery steps.
 
 `make -C services/product-service check-administration-design` runs the issue-190 Q04 decision
 probes: authenticated PostgreSQL role denials and protected target markers,
@@ -360,6 +385,8 @@ The concrete package and file responsibilities are:
 | Package or file | Responsibility |
 | --- | --- |
 | [`cmd/server/main.go`](cmd/server/main.go) | Loads configuration, creates the redacting logger, owns signal handling, and invokes the composition root. |
+| [`cmd/migrate/main.go`](cmd/migrate/main.go) | Selects an enrolled target and operation, reads the migrator Secret/CA files, and owns command signals. |
+| [`internal/administration`](internal/administration) | Owns protected target checks, versioned Product schema creation/adoption, Goose locking and read-only status. |
 | [`internal/service/service.go`](internal/service/service.go) | Constructs the singleton pool, reader, use cases, HTTP/gRPC/management servers, and optional telemetry; owns startup, drain, and cleanup. |
 | [`internal/domain/catalog.go`](internal/domain/catalog.go) | Owns transport-independent Product catalog values and exact decimal tokens. |
 | [`internal/application/catalog.go`](internal/application/catalog.go) | Owns `ProductReader`, `ListProducts`, `GetProduct`, and application errors. |

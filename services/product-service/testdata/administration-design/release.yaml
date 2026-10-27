@@ -98,5 +98,5 @@ spec:
             - name: PRODUCT_ADMIN_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: qa-postgres-product-seed-creds
+                  name: qa-postgres-product-seeder-creds
                   key: database-url

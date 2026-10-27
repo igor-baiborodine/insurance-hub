@@ -16,8 +16,9 @@ from check_access_results import main as check_access_results
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 PATTERNS = {
-    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess|TestProductSchemaAdoption)$",
+    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess|TestProductSchemaAdoption|TestProductMigration)$",
     "schema-adoption": "^TestProductSchemaAdoption$",
+    "migration": "^TestProductMigration$",
     "harness": "^TestPostgresHarness$",
     "reader": "^TestPostgresReader$",
     "grpc": "^TestProductGRPC$",
@@ -52,6 +53,17 @@ SCHEMA_ADOPTION_CASES = (
     "lock_contention_is_bounded",
     "inspection_has_no_writes",
     "Goose_inspection_initializes_history",
+)
+MIGRATION_CASES = (
+    "fresh_schema_and_read-only_status",
+    "adoption_and_replay_preserve_modified_catalog",
+    "target_mismatch_makes_no_history",
+    "managed_history_drift_is_rejected",
+    "failed_migration_retains_zero_history_and_retries",
+    "enrolled_production_migrates_without_seed_role",
+    "schema_drift_creates_no_history",
+    "simultaneous_runners_and_cancelled_lock",
+    "enrolled_seed_role_receives_only_explicit_managed_reads",
 )
 
 
@@ -175,6 +187,12 @@ def main(_argv: Sequence[str] | None = None) -> int:
                     require(
                         f"TestProductSchemaAdoption/{scenario}" in passed,
                         f"suite {suite} did not pass schema adoption case {scenario}",
+                    )
+            if suite in {"all", "migration"}:
+                for scenario in MIGRATION_CASES:
+                    require(
+                        f"TestProductMigration/{scenario}" in passed,
+                        f"suite {suite} did not pass migration case {scenario}",
                     )
             if suite in {"all", "reader"}:
                 require(

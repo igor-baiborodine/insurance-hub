@@ -55,6 +55,9 @@ def validate(documents):
         migration["env"][0]["valueFrom"]["secretKeyRef"]["name"]
         != seed["env"][0]["valueFrom"]["secretKeyRef"]["name"]
     )
+    assert seed["env"][0]["valueFrom"]["secretKeyRef"]["name"] == (
+        "qa-postgres-product-seeder-creds"
+    )
 
 
 def test_release_candidates_render_and_isolate_sources():
