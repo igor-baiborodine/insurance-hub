@@ -295,6 +295,8 @@ def test_stream_test_log_preserves_output_and_status(tmp_path: Path, exit_status
     # given
     log = tmp_path / "go-test.json"
     script = Path(integration_test.__file__).resolve().parent / "stream-test-log.sh"
+    event = {"Action": "pass", "Test": "TestProductAccess"}
+    diagnostic = "go: downloading github.com/pressly/goose/v3 v3.27.0"
 
     # when
     result = subprocess.run(
@@ -304,7 +306,9 @@ def test_stream_test_log_preserves_output_and_status(tmp_path: Path, exit_status
             str(log),
             sys.executable,
             "-c",
-            f"print('controlled test event'); raise SystemExit({exit_status})",
+            "import json, sys; "
+            f"print({diagnostic!r}, file=sys.stderr); "
+            f"print(json.dumps({event!r})); raise SystemExit({exit_status})",
         ],
         check=False,
         capture_output=True,
@@ -315,7 +319,8 @@ def test_stream_test_log_preserves_output_and_status(tmp_path: Path, exit_status
     # then
     assert result.returncode == exit_status
     assert result.stdout == ""
-    assert log.read_text(encoding="utf-8") == "controlled test event\n"
+    assert result.stderr == diagnostic + "\n"
+    assert [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] == [event]
 
 
 def integration_log_path(arguments: list[str], kwargs: dict[str, object]) -> Path | None:

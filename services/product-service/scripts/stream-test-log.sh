@@ -8,4 +8,5 @@ fi
 
 log_path=$1
 shift
-"$@" 2>&1 | tee -- "$log_path" >/dev/null
+# Keep Go tool diagnostics (for example cold-cache downloads) out of the JSON report.
+"$@" | tee -- "$log_path" >/dev/null
