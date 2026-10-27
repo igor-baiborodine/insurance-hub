@@ -26,7 +26,11 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from scripts.go.service.configuration import service_record  # noqa: E402
-from scripts.go.service.release import release_documents, service_release  # noqa: E402
+from scripts.go.service.release import (  # noqa: E402
+    release_documents,
+    retained_release_documents,
+    service_release,
+)
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -320,13 +324,35 @@ class GitSource:
                 "resources": shared_resources,
             },
         )
+        return self._commit(f"release {release}")
+
+    def write_bundle(self, documents: list[dict[str, Any]]) -> str:
+        root = self.repository / "root"
+        root.mkdir(parents=True, exist_ok=True)
+        for child in root.iterdir():
+            child.unlink()
+        (root / "release.yaml").write_text(
+            yaml.safe_dump_all(documents, explicit_start=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        self._write_yaml(
+            "root/kustomization.yaml",
+            {
+                "apiVersion": "kustomize.config.k8s.io/v1beta1",
+                "kind": "Kustomization",
+                "resources": ["release.yaml"],
+            },
+        )
+        return self._commit("replace root-owned release bundle")
+
+    def _commit(self, message: str) -> str:
         self.cluster.command(
             ["git", "-C", str(self.repository), "add", "."],
             activity="stage disposable source",
             timeout=30,
         )
         self.cluster.command(
-            ["git", "-C", str(self.repository), "commit", "-m", f"release {release}"],
+            ["git", "-C", str(self.repository), "commit", "-m", message],
             activity="commit disposable source",
             timeout=30,
         )
@@ -397,6 +423,32 @@ def source_document(name: str, url: str, commit: str) -> dict[str, Any]:
         "kind": "GitRepository",
         "metadata": metadata(name),
         "spec": {"interval": "2s", "url": url, "ref": {"commit": commit}},
+    }
+
+
+def branch_source_document(name: str, url: str) -> dict[str, Any]:
+    document = source_document(name, url, "0" * 40)
+    document["spec"]["ref"] = {"branch": "main"}
+    return document
+
+
+def root_kustomization(name: str, source: str) -> dict[str, Any]:
+    return {
+        "apiVersion": "kustomize.toolkit.fluxcd.io/v1",
+        "kind": "Kustomization",
+        "metadata": metadata(name),
+        "spec": {
+            # The real root reconciles periodically on a long interval and reacts to source
+            # revision events. Avoid continuously perturbing the child owners under test.
+            "interval": "5m",
+            "retryInterval": "2s",
+            "timeout": "90s",
+            "prune": True,
+            "wait": False,
+            "force": False,
+            "sourceRef": {"kind": "GitRepository", "name": source},
+            "path": "./root",
+        },
     }
 
 
@@ -648,7 +700,7 @@ def condition_status(cluster: Cluster, name: str) -> str:
 
 def generated_release(
     cluster: Cluster, commit: str, digest: str, url: str, attempt: int
-) -> tuple[str, list[dict]]:
+) -> tuple[str, list[dict], dict[str, Any]]:
     """Use the production generator with disposable coordinates and a short reconcile interval."""
     release = service_release(ROOT, "product", "qa", commit, digest)
     record = service_record(ROOT, "product")
@@ -666,7 +718,7 @@ def generated_release(
     # Kind loads the exact local image ID under a local tag; no registry is used in this test.
     for item in documents[1:]:
         item["spec"].pop("images")
-    return release.release_id, documents
+    return release.release_id, documents, target
 
 
 def run() -> None:
@@ -740,14 +792,17 @@ def run() -> None:
                 activity="inspect loaded image identity",
                 timeout=30,
             ).strip()
-            _, documents_a = generated_release(cluster, commit_a, image_digest, url, 1)
+            _, documents_a, target_a = generated_release(cluster, commit_a, image_digest, url, 1)
+            bundle_a = retained_release_documents([], documents_a, target_a)
+            source.write_bundle(bundle_a)
             source_a = documents_a[0]["metadata"]["name"]
             init_a = documents_a[1]["metadata"]["name"]
-            cluster.apply(documents_a[0])
+            root_source = "product-release-bundle"
+            root_owner = "product-release-root"
+            cluster.apply(branch_source_document(root_source, url))
+            cluster.apply(root_kustomization(root_owner, root_source))
             cluster.apply(kustomization("shared-owner", source_a, "./shared", cluster.namespace))
-            for document in documents_a[1:]:
-                cluster.apply(document)
-            for name in ("shared-owner", init_a, "product-api"):
+            for name in (root_owner, "shared-owner", init_a, "product-api"):
                 cluster.wait(
                     f"initial Flux Kustomization {name}",
                     lambda name=name: condition_status(cluster, name) == "True",
@@ -774,7 +829,8 @@ def run() -> None:
                 "reader cannot read the seeded catalog",
             )
             commit_b = source.write("release-b", transfer=True)
-            id_b, documents_b = generated_release(cluster, commit_b, image_digest, url, 1)
+            id_b, documents_b, target_b = generated_release(cluster, commit_b, image_digest, url, 1)
+            bundle_b = retained_release_documents(bundle_a, documents_b, target_b)
             source_b = f"product-release-{id_b}"
             init_b1 = f"product-init-{id_b}-a1"
             init_b2 = f"product-init-{id_b}-a2"
@@ -792,10 +848,8 @@ def run() -> None:
                 "namespace": cluster.namespace,
             }
             cluster.apply(bad_secret)
-            cluster.apply(documents_b[0])
             cluster.apply(kustomization("shared-owner", source_b, "./shared", cluster.namespace))
-            for document in documents_b[1:]:
-                cluster.apply(document)
+            source.write_bundle(bundle_b)
             cluster.wait(
                 "failed new-release prerequisite",
                 lambda: condition_status(cluster, init_b1) == "False",
@@ -805,6 +859,12 @@ def run() -> None:
             require(
                 marker["data"] == {"release": "release-a"}, "old success released new API state"
             )
+            retained_success_uid = cluster.object("job", init_a, cluster.namespace)["metadata"][
+                "uid"
+            ]
+            retained_failure_uid = cluster.object("job", init_b1, cluster.namespace)["metadata"][
+                "uid"
+            ]
             repaired = cluster.object(
                 "secret", "postgres-product-migrator-creds", cluster.namespace
             )
@@ -815,15 +875,27 @@ def run() -> None:
                 "namespace": cluster.namespace,
             }
             cluster.apply(repaired)
-            _, retry_documents = generated_release(cluster, commit_b, image_digest, url, 2)
-            for document in retry_documents[1:]:
-                cluster.apply(document)
+            _, retry_documents, retry_target = generated_release(
+                cluster, commit_b, image_digest, url, 2
+            )
+            retry_bundle = retained_release_documents(bundle_b, retry_documents, retry_target)
+            source.write_bundle(retry_bundle)
             for name in ("shared-owner", init_b2, "product-api"):
                 cluster.wait(
                     f"recovered Flux Kustomization {name}",
                     lambda name=name: condition_status(cluster, name) == "True",
                     seconds=240,
                 )
+            require(
+                cluster.object("job", init_a, cluster.namespace)["metadata"]["uid"]
+                == retained_success_uid,
+                "root replacement pruned the previous successful Job",
+            )
+            require(
+                cluster.object("job", init_b1, cluster.namespace)["metadata"]["uid"]
+                == retained_failure_uid,
+                "root replacement pruned the failed attempt Job",
+            )
             require(
                 cluster.object("configmap", "product-release-state", cluster.namespace)["data"]
                 == {"release": "release-b"},
@@ -892,7 +964,8 @@ RESET ROLE;
                 "permission-probe:42501" in denial, "reader write did not fail with SQLSTATE 42501"
             )
             print(
-                "PASS old-success mismatch, failure, retry, recreation, ownership and isolation",
+                "PASS root retention, old-success mismatch, failure, retry, recreation, "
+                "ownership and isolation",
                 flush=True,
             )
     finally:

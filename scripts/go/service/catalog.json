@@ -39,7 +39,8 @@
           "catalog": "services/product-service/internal/administration/seeds/base.json"
         },
         "maxMigrationSeconds": 180,
-        "remainingJobSeconds": 75,
+        "seedSeconds": 60,
+        "minimumJobReserveSeconds": 60,
         "jobDeadlineSeconds": 300,
         "migrationContainer": "migrate"
       },

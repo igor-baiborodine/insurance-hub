@@ -9,6 +9,8 @@
   - [Provision and verify roles, marker, and Secrets](#provision-and-verify-roles-marker-and-secrets)
   - [Build and initialize local-dev](#build-and-initialize-local-dev)
   - [Publish and stage the QA release](#publish-and-stage-the-qa-release)
+    - [Advance a manifest-only QA source](#advance-a-manifest-only-qa-source)
+    - [Retry the same QA release](#retry-the-same-qa-release)
   - [Activate and verify QA](#activate-and-verify-qa)
   - [Abort, stop, and restoration](#abort-stop-and-restoration)
   - [Credential rotation and revocation](#credential-rotation-and-revocation)
@@ -173,6 +175,14 @@ denial using SQLSTATE `42501`. A role without its matching Secret, a changed CNP
 that differs from its protected target is a recovery condition; provisioning does not silently
 replace it.
 
+If initial provisioning commits roles but a later workload-Secret write or final contract check
+fails, compensation deletes only Secrets written by that attempt, removes its target-marker row,
+revokes its new membership, removes Product-database grants from its newly created roles, and drops
+those roles. Pre-existing roles, privileges, Secrets, memberships, and marker rows remain unchanged.
+The `product_admin` schema and empty marker table may remain as idempotent platform-owned scaffolding;
+the failed target row does not. Inspect the reported failure before retrying the same provisioning
+command.
+
 ## Build and initialize local-dev
 
 Build and inspect the intended image, tag it with the local release convention, and load it:
@@ -235,6 +245,86 @@ timeout, target and credential revisions, Job name, source references, API depen
 of mutable tags in the tuple. A successful release workflow does not prove QA pull access or grant
 authorization for activation.
 
+### Advance a manifest-only QA source
+
+**Go Service Release** runs only when a qualifying Go service build input changes. A reviewed
+change limited to Kubernetes manifests, initialization configuration, or other release assets does
+not publish an image or advance the immutable QA tuple automatically. If the existing Product image
+is still the intended executable, advance the tuple manually after the manifest change is merged to
+canonical `main`. This creates a new release identity from the later full source commit while
+retaining the previously published immutable image digest as a separate identity input.
+
+Use a clean checkout at the exact canonical commit that owns the desired manifests. Fetch `main`,
+resolve its full commit, and require that the checkout contains no tracked change:
+
+```sh
+git fetch origin main
+source_commit="$(git rev-parse 'origin/main^{commit}')"
+test "$(git rev-parse 'HEAD^{commit}')" = "$source_commit"
+test -z "$(git status --porcelain --untracked-files=no)"
+```
+
+Select the image from the currently reviewed and qualified Product tuple, not from a mutable tag.
+In `k8s/flux/qa/releases/product/release.yaml`, require the stable `qa-product-api` owner, its exact
+prerequisite, and their release annotations to agree on `insurance-hub.io/image-digest`. Record the
+semantic Product version that originally published that digest. Resolve the version in the registry
+again and require the registry result to equal the recorded digest:
+
+```sh
+image='ghcr.io/igor-baiborodine/insurance-hub/product-api'
+release_version='<existing-published-1.x-version>'
+image_digest='sha256:<recorded-64-hex-digest>'
+resolved_digest="$(docker buildx imagetools inspect "$image:$release_version" \
+  --format '{{json .Manifest.Digest}}' | tr -d '"')"
+test "$resolved_digest" = "$image_digest"
+```
+
+Stop if the active tuple is unavailable, its source/init/API annotations disagree, the registry
+digest differs, the image is no longer qualified for the desired manifests, or the source commit
+contains a Go build change that needs a normal published release. Do not substitute `latest`, a
+source tag, or a locally built image.
+
+Generate the new tuple through the existing generic interface. `RELEASE_VERSION` identifies the
+already published image version; the initialization-enabled target continues to pin the digest:
+
+```sh
+make go-svc-release-prepare \
+  RELEASE_SERVICE=product RELEASE_TARGET=qa \
+  RELEASE_REPOSITORY=igor-baiborodine/insurance-hub \
+  RELEASE_VERSION="$release_version" \
+  RELEASE_SOURCE_COMMIT="$source_commit" \
+  RELEASE_IMAGE_DIGEST="$image_digest" \
+  RELEASE_OUTPUT=/tmp/product-release-paths
+```
+
+Review the complete generated bundle and its exact output path before staging anything:
+
+```sh
+git diff --check -- k8s/flux/qa/releases/product/release.yaml
+git diff -- k8s/flux/qa/releases/product/release.yaml
+make go-svc-deploy-check SVC_NAME=product
+make go-svc-release-test
+```
+
+Require all of the following before proposing the tuple:
+
+- the new source annotation and GitRepository `spec.ref.commit` equal `source_commit`;
+- the init and API image digests equal the previously published `image_digest`;
+- the migration and catalog annotation hashes equal the files at `source_commit`;
+- target revision, credential revision, normalized timeout, and configured attempt have only the
+  changes intended by the reviewed manifest work;
+- the new full release identity is consistent on its source, init owner, and stable API owner;
+- the stable API owner depends on the new exact initialization owner; and
+- every prior generated source and initialization owner remains byte-equivalent in the bundle,
+  including previous successes and unresolved failures, while exactly one stable API owner exists.
+
+Regenerating with the same inputs must be idempotent. The emitted NUL-delimited path list is for
+exact Git staging; it is not approval to commit, push, or activate. Those actions remain separately
+reviewed and authorized. After activation, use the QA checks below to prove that Flux applied the
+new source while the running image digest remained the selected immutable digest.
+
+### Retry the same QA release
+
 A reviewed retry increments `product.deploymentTargets.qa.initialization.attempt` in the catalog,
 then regenerates the same release through the generic interface:
 
@@ -254,7 +344,9 @@ bundle destination: destinations come from the validated catalog. The local prep
 files only; commit/push and live activation remain separately authorized actions.
 
 Do this only after inspecting the retained failed Job and proving the correction. Do not change
-assets, revisions, or timeout while calling the result a retry of the same release.
+source commit, image digest, assets, revisions, or timeout while calling the result a retry of the
+same release. A manifest-only advance changes the source commit and release identity; a retry keeps
+those identities fixed and changes only the configured attempt.
 
 ## Activate and verify QA
 

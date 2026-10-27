@@ -16,6 +16,11 @@ ROOT = deployment_check.REPOSITORY_ROOT
 FIXTURE = ROOT / "services/product-service/testdata/administration-design"
 
 
+def administration_policy():
+    catalog = json.loads((ROOT / "scripts/go/service/catalog.json").read_text())
+    return catalog["services"]["product"]["administration"]
+
+
 def candidate(release, attempt=1):
     """Materialize the proposed immutable-source graph in owned scratch only."""
     documents = list(yaml.safe_load_all((FIXTURE / "release.yaml").read_text()))
@@ -30,6 +35,7 @@ def candidate(release, attempt=1):
 
 def validate(documents):
     source, initialize, api, job = documents
+    policy = administration_policy()
     assert source["kind"] == "GitRepository"
     assert set(source["spec"]["ref"]) == {"commit"}
     assert len(source["spec"]["ref"]["commit"]) == 40
@@ -40,7 +46,11 @@ def validate(documents):
     assert initialize["spec"]["force"] is False
     assert initialize["spec"]["healthChecks"][0]["name"] == job["metadata"]["name"]
     assert job["spec"]["backoffLimit"] == 0
-    assert job["spec"]["activeDeadlineSeconds"] == 300
+    assert job["spec"]["activeDeadlineSeconds"] == policy["jobDeadlineSeconds"]
+    assert (
+        policy["maxMigrationSeconds"] + policy["seedSeconds"] + policy["minimumJobReserveSeconds"]
+        <= job["spec"]["activeDeadlineSeconds"]
+    )
     assert "ttlSecondsAfterFinished" not in job["spec"]
     pod = job["spec"]["template"]["spec"]
     assert pod["automountServiceAccountToken"] is False
@@ -88,7 +98,8 @@ def test_release_candidates_render_and_isolate_sources():
 
 
 @pytest.mark.parametrize(
-    "defect", ["mutable-source", "no-wait", "ttl", "shared-credential", "retry"]
+    "defect",
+    ["mutable-source", "no-wait", "ttl", "shared-credential", "retry", "job-budget"],
 )
 def test_release_lifecycle_defects_are_rejected(defect):
     # given
@@ -103,6 +114,8 @@ def test_release_lifecycle_defects_are_rejected(defect):
         job["spec"]["ttlSecondsAfterFinished"] = 60
     elif defect == "retry":
         job["spec"]["backoffLimit"] = 6
+    elif defect == "job-budget":
+        job["spec"]["activeDeadlineSeconds"] = 299
     else:
         pod = job["spec"]["template"]["spec"]
         pod["containers"][0]["env"] = copy.deepcopy(pod["initContainers"][0]["env"])
@@ -196,12 +209,17 @@ def test_real_administration_overlay_is_separate_and_bounded(
     documents = deployment_check.render(kubectl, overlay)
 
     # then
+    policy = administration_policy()
     assert len(documents) == 1
     job = documents[0]
     assert job["kind"] == "Job"
     assert job["metadata"]["namespace"] == namespace
     assert job["spec"]["backoffLimit"] == 0
-    assert job["spec"]["activeDeadlineSeconds"] == 300
+    assert job["spec"]["activeDeadlineSeconds"] == policy["jobDeadlineSeconds"]
+    assert (
+        policy["maxMigrationSeconds"] + policy["seedSeconds"] + policy["minimumJobReserveSeconds"]
+        <= job["spec"]["activeDeadlineSeconds"]
+    )
     assert "ttlSecondsAfterFinished" not in job["spec"]
     pod = job["spec"]["template"]["spec"]
     assert pod["automountServiceAccountToken"] is False
