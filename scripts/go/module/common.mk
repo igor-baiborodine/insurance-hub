@@ -7,6 +7,7 @@ COVERAGE_FILE ?= coverage.txt
 COVERAGE_MINIMUM ?= 75
 COVERAGE_PACKAGES ?= ./...
 COVERAGE_EXCLUDE_PATHS ?=
+BUILD_EXECUTABLES ?= server
 PYTHON ?= $(abspath $(COMMON_GO_TOOLING_DIR)/../../../.venv/bin/python)
 COMMON_GO_TOOLING_PYTHON ?= $(PYTHON)
 COMMON_PYTHON_VERSION := 3.14.8
@@ -164,7 +165,8 @@ test-coverage-tooling: _common-python-check
 		MAKE_COMMAND="$(MAKE)" PYTHON="$(COMMON_GO_TOOLING_PYTHON)" "$(COMMON_GO_TOOLING_DIR)/test-coverage.sh"
 
 build: _common-python-check
-	@MODULE_ROOT="$(CURDIR)" GO="$(GO)" PYTHONDONTWRITEBYTECODE=1 \
+	@MODULE_ROOT="$(CURDIR)" GO="$(GO)" BUILD_EXECUTABLES="$(BUILD_EXECUTABLES)" \
+		PYTHONDONTWRITEBYTECODE=1 \
 		"$(COMMON_GO_TOOLING_PYTHON)" "$(COMMON_GO_TOOLING_DIR)/module_tooling.py" build
 
 vulncheck: verify-tools

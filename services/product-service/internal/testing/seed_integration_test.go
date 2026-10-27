@@ -52,7 +52,7 @@ func TestProductSeed(t *testing.T) {
 		"..",
 		"administration",
 		"seeds",
-		"00001_catalog.json",
+		"base.json",
 	)
 	root, err := ResolveBaselineRoot(".")
 	if err != nil {

@@ -30,7 +30,7 @@ func baseSeedCatalogPath(t *testing.T) string {
 	if !ok {
 		t.Fatal("cannot locate seed test source")
 	}
-	return filepath.Join(filepath.Dir(filename), "seeds", "00001_catalog.json")
+	return filepath.Join(filepath.Dir(filename), "seeds", "base.json")
 }
 
 type seedFailureConnector struct{ connection *seedFailureConnection }

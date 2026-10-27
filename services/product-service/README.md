@@ -103,8 +103,27 @@ recovery state reports `pending` or version `0`. Migration holds Product
 advisory lock `190001`, validates the table and history before Goose can initialize history, and
 applies only version 1. There is no down operation. Connection, lock, SQL and cleanup are bounded;
 inspect and resolve any uncertain result before replaying the same reviewed migration. The
-runtime reader still has no migration or seeding path. Image packaging and deployment integration
-are separate delivery steps.
+runtime reader still has no migration or seeding path.
+
+`cmd/seed` is the generic catalog administrator. Build it with
+`make -C services/product-service build-seeder SEEDER_OUTPUT=<owned-output-path>`. Invoke it with
+explicit `--environment`, `--context`, `--target-file`, `--catalog-file`,
+`--database-url-file` and `--ca-file` arguments. The target must enroll a non-production
+environment for seeding, and the credential URL must use `go_product_seeder` with the same protected
+target and TLS requirements as migration. The command validates the selected catalog before one
+insert-only transaction and prints deterministic `inserted=<n> existing=<n>` counts. Apply the base
+catalog first; a later environment-specific catalog can use the same command and explicit file
+selection without another Go seeder.
+
+The standard `build` target verifies the API server, migrator and seeder executables. The Product
+image keeps `/product-service` as its entry point and also packages `/product-migrate`,
+`/product-seed`, the reviewed migration at
+`/usr/share/insurance-hub/product/migrations/00001_product.sql` and the base catalog at
+`/usr/share/insurance-hub/product/catalogs/base.json`. All three commands run as the image's
+non-root UID/GID `65532:65532`; the administrative binaries still require explicit protected files
+and never run during API startup. `image-check` inspects those paths and exercises migration then
+seeding from the image against its owned disposable PostgreSQL instance. Image publication and
+deployment activation remain separate operations.
 
 `make -C services/product-service check-administration-design` runs the issue-190 Q04 decision
 probes: authenticated PostgreSQL role denials and protected target markers,

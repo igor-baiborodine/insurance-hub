@@ -12,6 +12,7 @@ from pathlib import Path
 
 import bootstrap_docs
 import build_image
+import image_check
 import integration_test
 import pytest
 from product_process import CAPTURE_LIMIT, ProductCommandError, run
@@ -215,6 +216,39 @@ def test_image_build_rejects_missing_identity_before_command(
     # then
     assert status == 1
     assert "IMAGE_NAME is required" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("missing", sorted(image_check.PACKAGED_FILES))
+def test_image_contents_reject_missing_runtime_or_administration_file(missing: str) -> None:
+    # given
+    names = set(image_check.PACKAGED_FILES)
+    names.add("etc/ssl/certs/ca-certificates.crt")
+    names.remove(missing)
+
+    # when / then
+    with pytest.raises(image_check.ImageCheckError, match="missing packaged files"):
+        image_check.validate_image_contents(names)
+
+
+def test_image_contents_reject_unreviewed_sql_asset() -> None:
+    # given
+    names = set(image_check.PACKAGED_FILES)
+    names.update({"etc/ssl/certs/ca-certificates.crt", "tmp/unreviewed.sql"})
+
+    # when / then
+    with pytest.raises(image_check.ImageCheckError, match="unexpected SQL content"):
+        image_check.validate_image_contents(names)
+
+
+def test_image_assets_reject_content_drift(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # given
+    source = tmp_path / "migration.sql"
+    source.write_bytes(b"reviewed\n")
+    monkeypatch.setattr(image_check, "EXPECTED_ASSETS", {"migration.sql": source})
+
+    # when / then
+    with pytest.raises(image_check.ImageCheckError, match="differs from source"):
+        image_check.validate_image_assets({"migration.sql": b"changed\n"})
 
 
 @pytest.mark.parametrize(

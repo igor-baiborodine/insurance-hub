@@ -768,6 +768,16 @@ def _config_value(config: str, name: str) -> str:
 def build_command(_: argparse.Namespace) -> int:
     module_root = Path(required_environment("MODULE_ROOT")).resolve(strict=True)
     go = os.environ.get("GO", "go")
+    executables = required_environment("BUILD_EXECUTABLES").split()
+    require(
+        bool(executables) and len(executables) == len(set(executables)),
+        "build: expected executable list must be non-empty and unique",
+    )
+    for executable in executables:
+        require(
+            re.fullmatch(r"[a-z][a-z0-9-]*", executable) is not None,
+            f"build: invalid expected executable: {executable}",
+        )
     with tempfile.TemporaryDirectory(prefix="go-module-build.") as directory:
         output = Path(directory)
         run_command(
@@ -777,10 +787,11 @@ def build_command(_: argparse.Namespace) -> int:
             env=command_environment(GOWORK="off"),
             capture=False,
         )
-        require(
-            (output / "server").is_file() and os.access(output / "server", os.X_OK),
-            "build: expected executable server was not produced",
-        )
+        for executable in executables:
+            require(
+                (output / executable).is_file() and os.access(output / executable, os.X_OK),
+                f"build: expected executable {executable} was not produced",
+            )
     return 0
 
 

@@ -69,6 +69,7 @@ SQL_QUERIES := internal/postgres/sql/queries.sql
 GENERATED_SQL_FILES := internal/postgres/dbgen/db.go internal/postgres/dbgen/models.go \
 	internal/postgres/dbgen/queries.sql.go internal/postgres/dbgen/querier.go
 TEST_PACKAGES ?= ./...
+BUILD_EXECUTABLES := server migrate seed
 COVERAGE_FILE ?= coverage.txt
 INTEGRATION_COVERAGE_FILE ?=
 COVERAGE_MINIMUM ?= 75
@@ -208,10 +209,14 @@ check-schema-adoption: verify-tools ## Lint, scan, and run the tagged disposable
 	GOWORK=off GOFLAGS=-mod=readonly $(GOVULNCHECK) -tags=integration -test ./internal/testing
 	$(MAKE) test-integration INTEGRATION_SUITE=schema-adoption
 
-.PHONY: build-migrator
+.PHONY: build-migrator build-seeder
 build-migrator: verify-tools ## Build standalone Product migrator; requires MIGRATOR_OUTPUT
 	@test -n "$(strip $(MIGRATOR_OUTPUT))" || { echo "MIGRATOR_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(MIGRATOR_OUTPUT)" ./cmd/migrate
+
+build-seeder: verify-tools ## Build standalone Product seeder; requires SEEDER_OUTPUT
+	@test -n "$(strip $(SEEDER_OUTPUT))" || { echo "SEEDER_OUTPUT is required" >&2; exit 1; }
+	GOWORK=off $(GO) build -mod=readonly -o "$(SEEDER_OUTPUT)" ./cmd/seed
 
 .PHONY: check-administration-design
 check-administration-design: PYTHON_FILES := scripts/postgres/service/test_administration_design.py services/product-service/scripts/test_administration_release.py
