@@ -67,7 +67,8 @@ def create_service(
         record["administration"] = {
             "assets": {"migration": str(asset.relative_to(root))},
             "maxMigrationSeconds": 180,
-            "remainingJobSeconds": 75,
+            "seedSeconds": 60,
+            "minimumJobReserveSeconds": 60,
             "jobDeadlineSeconds": 300,
             "migrationContainer": "migrate",
         }
@@ -368,6 +369,43 @@ def test_invalid_timeout_fails_before_output(tmp_path: Path, value: str) -> None
             tmp_path, "claims", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST
         )
     assert not (tmp_path / "k8s/flux").exists()
+
+
+def test_combined_job_budget_rejects_valid_maximum_timeout(tmp_path: Path) -> None:
+    # given
+    create_service(tmp_path, "claims", environment="staging", initialization=True)
+    configure(tmp_path, "claims", "staging", migrationTimeout="180s")
+    path = tmp_path / "scripts/go/service/catalog.json"
+    catalog = json.loads(path.read_text())
+    catalog["services"]["claims"]["administration"]["jobDeadlineSeconds"] = 299
+    path.write_text(json.dumps(catalog))
+
+    # when / then
+    with pytest.raises(
+        release.ConfigurationError,
+        match="migration, seed and minimum reserve budgets exceed the Job deadline",
+    ):
+        release.prepare_release(
+            tmp_path, "claims", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST
+        )
+    assert not (tmp_path / "k8s/flux").exists()
+
+
+def test_normalized_timeout_rejects_combined_job_budget() -> None:
+    # given
+    policy = {
+        "maxMigrationSeconds": 180,
+        "seedSeconds": 60,
+        "minimumJobReserveSeconds": 60,
+        "jobDeadlineSeconds": 299,
+    }
+
+    # when / then
+    with pytest.raises(
+        release.ReleaseSelectionError,
+        match="migration, seed and minimum reserve budgets exceed the Job deadline",
+    ):
+        release.normalized_timeout("180s", policy)
 
 
 def test_target_validation_precedes_all_writes(tmp_path: Path) -> None:

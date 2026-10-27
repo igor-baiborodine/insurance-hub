@@ -217,9 +217,10 @@ def normalized_timeout(value: str, policy: dict) -> str:
         "migration timeout exceeds the configured command budget",
     )
     require(
-        nanoseconds + Decimal(policy["remainingJobSeconds"] * 1_000_000_000)
+        nanoseconds
+        + Decimal((policy["seedSeconds"] + policy["minimumJobReserveSeconds"]) * 1_000_000_000)
         <= policy["jobDeadlineSeconds"] * 1_000_000_000,
-        "migration, seed and termination budgets exceed the Job deadline",
+        "migration, seed and minimum reserve budgets exceed the Job deadline",
     )
     for divisor, suffix in (
         (1_000_000_000, "s"),

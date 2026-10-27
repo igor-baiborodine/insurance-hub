@@ -82,11 +82,23 @@ def target_record(root: Path, record: dict[str, Any], name: str) -> dict[str, An
         for label, value in assets.items():
             require(bool(re.fullmatch(r"[a-z][a-z0-9-]*", label)), "invalid asset label")
             require(checkout_path(root, value).is_file(), "administration asset is missing")
-        for field in ("maxMigrationSeconds", "remainingJobSeconds", "jobDeadlineSeconds"):
+        for field in (
+            "maxMigrationSeconds",
+            "seedSeconds",
+            "minimumJobReserveSeconds",
+            "jobDeadlineSeconds",
+        ):
             require(
                 type(administration.get(field)) is int and administration[field] > 0,
                 f"invalid {field}",
             )
+        require(
+            administration["maxMigrationSeconds"]
+            + administration["seedSeconds"]
+            + administration["minimumJobReserveSeconds"]
+            <= administration["jobDeadlineSeconds"],
+            "migration, seed and minimum reserve budgets exceed the Job deadline",
+        )
     if target["mode"] == "flux":
         flux = target.get("flux", {})
         for field in ("namespace", "sourcePrefix", "apiName", "sharedSource", "sharedOwner"):
