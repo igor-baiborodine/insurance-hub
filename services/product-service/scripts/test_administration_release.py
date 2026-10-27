@@ -160,8 +160,7 @@ def test_product_transfer_preserves_unrelated_inventory():
     legacy_ids = {identity(item) for item in legacy}
     moved_ids = {identity(item) for item in product}
     assert all(
-        item["metadata"].get("annotations", {}).get("kustomize.toolkit.fluxcd.io/prune")
-        == "disabled"
+        "kustomize.toolkit.fluxcd.io/prune" not in item["metadata"].get("annotations", {})
         for item in product
     )
     expected = {identity(item): item for item in staged if identity(item) not in moved_ids}
