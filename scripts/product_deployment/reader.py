@@ -105,11 +105,15 @@ SELECT json_build_object(
  'tableOwner', (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid='public.product'::regclass),
  'otherLogins', (SELECT coalesce(json_agg(rolname), '[]'::json) FROM pg_roles
    WHERE rolcanlogin AND rolname !~ '^pg_'
-   AND rolname NOT IN ('postgres','product','go_product_reader','streaming_replica')
+   AND rolname NOT IN
+   ('postgres','product','go_product_reader','go_product_migrator','go_product_seeder',
+    'streaming_replica')
    AND has_database_privilege(rolname,current_database(),'CONNECT')),
  'otherSessions', (SELECT coalesce(json_agg(DISTINCT usename), '[]'::json) FROM pg_stat_activity
    WHERE datname=current_database() AND usename IS NOT NULL
-   AND usename NOT IN ('postgres','product','go_product_reader','streaming_replica')),
+   AND usename NOT IN
+   ('postgres','product','go_product_reader','go_product_migrator','go_product_seeder',
+    'streaming_replica')),
  'reader', (SELECT row_to_json(r) FROM (
    SELECT rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolreplication,
           rolbypassrls FROM pg_roles WHERE rolname='go_product_reader') r),

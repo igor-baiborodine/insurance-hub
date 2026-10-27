@@ -805,6 +805,7 @@ def record_snapshot(stage: str, value: dict[str, Any]) -> None:
 
 def verify(target: Target, items: list[dict[str, Any]]) -> None:
     target.live(items, require_deployment=True)
+    initialization_check(target)
     before = role_snapshot(target)
     record_snapshot("before verification", before)
     role_action(target, "verify")

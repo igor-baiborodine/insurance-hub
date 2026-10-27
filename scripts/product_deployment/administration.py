@@ -19,7 +19,11 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
-from scripts.product_deployment import reader
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from scripts.product_deployment import reader  # noqa: E402
 
 ROLES = ("go_product_reader", "go_product_migrator", "go_product_seeder")
 ADMIN_ROLES = ROLES[1:]
@@ -403,6 +407,12 @@ def verify(manager: AdministrationKubernetes) -> None:
     check_role_contract(role_inventory(manager), target)
     ca = manager.ca()
     product_exists = manager.admin("SELECT to_regclass('public.product') IS NOT NULL;") == "t"
+    history_exists = (
+        manager.admin("SELECT to_regclass('public.goose_db_version') IS NOT NULL;") == "t"
+    )
+    reader.require(
+        product_exists or not history_exists, "Goose history exists without Product table"
+    )
     with ExitStack() as stack:
         connections = {
             role: stack.enter_context(manager.role_connection(role, passwords[role], ca))
@@ -433,21 +443,24 @@ def verify(manager: AdministrationKubernetes) -> None:
             "CREATE TABLE public.denied_seeder(value integer)",
             "UPDATE product_admin.target_identity SET seed_allowed=false",
         ]
-        if product_exists:
+        if product_exists and history_exists:
             seeder(
                 "SELECT count(*) FROM public.product; SELECT count(*) FROM public.goose_db_version;"
             )
+        else:
+            reader.require(
+                seeder("SELECT current_user;") == "go_product_seeder",
+                "seeder effective identity differs before initialization",
+            )
+            if product_exists:
+                statements.append("SELECT count(*) FROM public.product")
+        if product_exists:
             statements.extend(
                 (
                     "UPDATE public.product SET definition=definition WHERE false",
                     "DELETE FROM public.product WHERE false",
                     "ALTER TABLE public.product ADD COLUMN denied integer",
                 )
-            )
-        else:
-            reader.require(
-                seeder("SELECT current_user;") == "go_product_seeder",
-                "seeder effective identity differs before initialization",
             )
         for statement in statements:
             reader.require(

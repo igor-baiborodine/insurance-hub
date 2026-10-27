@@ -61,7 +61,7 @@ class DeploymentGuardTests(unittest.TestCase):
             "DEPLOY_CONTEXT": "kind-local-dev-insurance-hub",
             "DEPLOY_SVC_NS": "local-dev-all",
             "DEPLOY_DATA_NS": "local-dev-all",
-            "DEPLOY_IMAGE_REF": "insurance-hub-product-api:1.9.0-local.c977bbcd879d",
+            "DEPLOY_IMAGE_REF": "insurance-hub-product-api:1.10.0-local.ff52ab5655e3",
         }
         with patch.dict(os.environ, values):
             target = deployment.Target()
@@ -71,7 +71,7 @@ class DeploymentGuardTests(unittest.TestCase):
                 self.assertEqual(image, values["DEPLOY_IMAGE_REF"])
                 self.assertEqual(len(items), 4)
                 os.environ["DEPLOY_IMAGE_REF"] = (
-                    "insurance-hub-product-api:1.9.0-local.000000000000"
+                    "insurance-hub-product-api:1.10.0-local.000000000000"
                 )
                 with self.assertRaisesRegex(deployment.DeploymentError, "DEPLOY_IMAGE_REF"):
                     target.rendered()
