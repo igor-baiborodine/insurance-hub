@@ -2,11 +2,11 @@
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
 metadata:
-  name: qa-product-release-295a6e810338b678
+  name: qa-product-release-51725efd0db3b1c3
   namespace: flux-system
   annotations:
-    insurance-hub.io/release-identity: 295a6e810338b678da10075eabdc4baa352aa91715013caad0c6b8c824624ac9
-    insurance-hub.io/source-revision: 303ba872f95b7e5ef76fa9671bc71a15584b3ee9
+    insurance-hub.io/release-identity: 51725efd0db3b1c302aa69243696889fb810d212180ce364660ce9f10f9f2c8c
+    insurance-hub.io/source-revision: 5218e4ffcc2be0b0bf48fe9bbd9c624e9e096513
     insurance-hub.io/image-digest: sha256:538b4fed1f110c60e782f62d2ab03b8bab667ed7165382ebf404689e8acdb1b5
     insurance-hub.io/asset-hashes: '{"catalog": "a42eca3c26ebd504c6ce3cf3eb037698e575592ef564e64b3c262da0b8d449b4",
       "migration": "5328b42ef8bfb59ee48cb146f84506b86cb322ccca7da3307b1b5e56e2ff23f4"}'
@@ -17,16 +17,16 @@ spec:
   interval: 5m
   url: https://github.com/igor-baiborodine/insurance-hub
   ref:
-    commit: 303ba872f95b7e5ef76fa9671bc71a15584b3ee9
+    commit: 5218e4ffcc2be0b0bf48fe9bbd9c624e9e096513
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: qa-product-init-295a6e810338b678-a1
+  name: qa-product-init-51725efd0db3b1c3-a1
   namespace: flux-system
   annotations:
-    insurance-hub.io/release-identity: 295a6e810338b678da10075eabdc4baa352aa91715013caad0c6b8c824624ac9
-    insurance-hub.io/source-revision: 303ba872f95b7e5ef76fa9671bc71a15584b3ee9
+    insurance-hub.io/release-identity: 51725efd0db3b1c302aa69243696889fb810d212180ce364660ce9f10f9f2c8c
+    insurance-hub.io/source-revision: 5218e4ffcc2be0b0bf48fe9bbd9c624e9e096513
     insurance-hub.io/image-digest: sha256:538b4fed1f110c60e782f62d2ab03b8bab667ed7165382ebf404689e8acdb1b5
     insurance-hub.io/asset-hashes: '{"catalog": "a42eca3c26ebd504c6ce3cf3eb037698e575592ef564e64b3c262da0b8d449b4",
       "migration": "5328b42ef8bfb59ee48cb146f84506b86cb322ccca7da3307b1b5e56e2ff23f4"}'
@@ -41,21 +41,21 @@ spec:
   force: false
   sourceRef:
     kind: GitRepository
-    name: qa-product-release-295a6e810338b678
+    name: qa-product-release-51725efd0db3b1c3
   path: ./k8s/overlays/qa/svc/product/administration
   images:
   - name: insurance-hub-product-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/product-api
     digest: sha256:538b4fed1f110c60e782f62d2ab03b8bab667ed7165382ebf404689e8acdb1b5
   retryInterval: 1m
-  nameSuffix: -295a6e810338b678-a1
+  nameSuffix: -51725efd0db3b1c3-a1
   postBuild:
     substitute:
       MIGRATION_TIMEOUT: 120s
   healthChecks:
   - apiVersion: batch/v1
     kind: Job
-    name: qa-product-init-295a6e810338b678-a1
+    name: qa-product-init-51725efd0db3b1c3-a1
     namespace: qa-svc
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
@@ -64,8 +64,8 @@ metadata:
   name: qa-product-api
   namespace: flux-system
   annotations:
-    insurance-hub.io/release-identity: 295a6e810338b678da10075eabdc4baa352aa91715013caad0c6b8c824624ac9
-    insurance-hub.io/source-revision: 303ba872f95b7e5ef76fa9671bc71a15584b3ee9
+    insurance-hub.io/release-identity: 51725efd0db3b1c302aa69243696889fb810d212180ce364660ce9f10f9f2c8c
+    insurance-hub.io/source-revision: 5218e4ffcc2be0b0bf48fe9bbd9c624e9e096513
     insurance-hub.io/image-digest: sha256:538b4fed1f110c60e782f62d2ab03b8bab667ed7165382ebf404689e8acdb1b5
     insurance-hub.io/asset-hashes: '{"catalog": "a42eca3c26ebd504c6ce3cf3eb037698e575592ef564e64b3c262da0b8d449b4",
       "migration": "5328b42ef8bfb59ee48cb146f84506b86cb322ccca7da3307b1b5e56e2ff23f4"}'
@@ -80,11 +80,11 @@ spec:
   force: false
   sourceRef:
     kind: GitRepository
-    name: qa-product-release-295a6e810338b678
+    name: qa-product-release-51725efd0db3b1c3
   path: ./k8s/overlays/qa/svc/product
   images:
   - name: insurance-hub-product-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/product-api
     digest: sha256:538b4fed1f110c60e782f62d2ab03b8bab667ed7165382ebf404689e8acdb1b5
   dependsOn:
-  - name: qa-product-init-295a6e810338b678-a1
+  - name: qa-product-init-51725efd0db3b1c3-a1

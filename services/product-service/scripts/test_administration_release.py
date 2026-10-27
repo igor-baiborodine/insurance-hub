@@ -257,6 +257,36 @@ def test_api_and_shared_qa_owner_separate_release_and_credentials():
 def test_product_release_bundle_is_active_after_reviewed_transfer():
     # given / when
     root = yaml.safe_load((ROOT / "k8s/flux/qa/kustomization.yaml").read_text())
+    documents = list(
+        yaml.safe_load_all((ROOT / "k8s/flux/qa/releases/product/release.yaml").read_text())
+    )
+    source = next(item for item in documents if item.get("kind") == "GitRepository")
+    api = next(
+        item
+        for item in documents
+        if item.get("kind") == "Kustomization"
+        and item.get("metadata", {}).get("name") == "qa-product-api"
+    )
+    revision = source["spec"]["ref"]["commit"]
+    pinned_overlay = yaml.safe_load(
+        deployment_check.run_command(
+            [
+                "git",
+                "show",
+                f"{revision}:k8s/overlays/qa/svc/product/kustomization.yaml",
+            ],
+            cwd=ROOT,
+            env=os.environ,
+            timeout_seconds=30,
+            teardown_seconds=5,
+            activity="read active QA Product release overlay",
+        ).stdout
+    )
 
     # then
     assert root["resources"] == ["./flux-system", "./releases/product/release.yaml"]
+    assert api["spec"]["sourceRef"]["name"] == source["metadata"]["name"]
+    assert api["metadata"]["annotations"]["insurance-hub.io/source-revision"] == revision
+    assert (
+        pinned_overlay.get("commonAnnotations", {}).get("kustomize.toolkit.fluxcd.io/prune") is None
+    )
