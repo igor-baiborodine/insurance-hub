@@ -41,12 +41,16 @@ def find_prefix(documents: list[dict[str, Any]], kind: str, prefix: str) -> dict
     return matches[0]
 
 
-def write_documents(root: Path, values: Documents, prefix: str) -> list[str]:
+def write_documents(
+    root: Path, values: Documents, prefix: str, *, release_active: bool = True
+) -> list[str]:
     arguments: list[str] = []
     for key in KEYS:
         path = root / f"{prefix}-{key}.json"
         path.write_text(json.dumps(values[key]), encoding="utf-8")
         arguments.extend((f"--{key}", str(path)))
+    if release_active:
+        arguments.append("--qa-release-active")
     return arguments
 
 
@@ -98,17 +102,8 @@ def external_exposure(values: Documents) -> None:
     service["spec"]["type"] = "LoadBalancer"
 
 
-def missing_activation(values: Documents) -> None:
-    values["qa-aggregate"] = [
-        document
-        for document in values["qa-aggregate"]
-        if document.get("metadata", {}).get("name")
-        not in {"qa-product-api", "qa-product-api-management"}
-        and not (
-            document.get("kind") == "ConfigMap"
-            and document.get("metadata", {}).get("name", "").startswith("qa-product-config-")
-        )
-    ]
+def duplicate_qa_ownership(values: Documents) -> None:
+    values["qa-aggregate"].extend(copy.deepcopy(values["qa-go"]))
 
 
 def stale_java_product(values: Documents) -> None:
@@ -209,7 +204,11 @@ CASES: list[tuple[str, Mutation, str]] = [
     ("wrong management Service port", wrong_management_service_port, "Product contract"),
     ("missing Secret reference", missing_secret, "PRODUCT_DATABASE_URL"),
     ("external exposure", external_exposure, "must remain ClusterIP"),
-    ("missing QA activation", missing_activation, "does not contain Go Product"),
+    (
+        "duplicate QA Product ownership",
+        duplicate_qa_ownership,
+        "still contains Go Product after release activation",
+    ),
     ("stale Java Product desired state", stale_java_product, "stale Java Product objects"),
     ("unreleased QA image tag", unreleased_qa_tag, "qa image reference is invalid"),
     ("invalid QA image tag", invalid_qa_tag, "qa image reference is invalid"),
@@ -239,17 +238,51 @@ def test_semantic_qa_release_tag_is_accepted(
 ) -> None:
     # given
     values = active_documents(rendered_documents)
-    for key in ("qa-go", "qa-aggregate"):
-        deployment = find(values[key], "Deployment", "qa-product-api")
-        deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
-            "ghcr.io/igor-baiborodine/insurance-hub/product-api:1.2.3"
-        )
+    deployment = find(values["qa-go"], "Deployment", "qa-product-api")
+    deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
+        "ghcr.io/igor-baiborodine/insurance-hub/product-api:1.2.3"
+    )
 
     # when
     status = check_render.main(write_documents(tmp_path, values, "semantic"))
 
     # then
     assert status == 0
+
+
+@pytest.mark.integration
+def test_staged_shared_qa_ownership_is_accepted(
+    rendered_documents: Documents,
+    tmp_path: Path,
+) -> None:
+    # given
+    values = active_documents(rendered_documents)
+    values["qa-aggregate"].extend(copy.deepcopy(values["qa-go"]))
+
+    # when
+    status = check_render.main(write_documents(tmp_path, values, "staged", release_active=False))
+
+    # then
+    assert status == 0
+
+
+@pytest.mark.integration
+def test_staged_shared_qa_owner_requires_product(
+    rendered_documents: Documents,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # given
+    values = active_documents(rendered_documents)
+
+    # when
+    status = check_render.main(
+        write_documents(tmp_path, values, "missing-staged", release_active=False)
+    )
+
+    # then
+    assert status == 1
+    assert "does not contain Go Product" in capsys.readouterr().err
 
 
 @pytest.mark.integration

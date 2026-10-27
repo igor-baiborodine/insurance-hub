@@ -630,6 +630,7 @@ def validate_aggregates(
     qa_gateway: list[dict[str, Any]],
     aggregate: list[dict[str, Any]],
     qa_backend: str,
+    qa_release_active: bool,
 ) -> None:
     require_unique(aggregate, "QA aggregate")
     aggregate_index = {identity(document): document for document in aggregate}
@@ -645,12 +646,23 @@ def validate_aggregates(
             f"QA aggregate changed gateway object {gateway_identity}",
         )
     require(qa_backend == "product-api", "QA aggregate must route to Go Product")
-    require(contains_qa_go(aggregate), "QA aggregate does not contain Go Product")
-    for object_identity, expected in qa_go_index.items():
+    if qa_release_active:
         require(
-            aggregate_index.get(object_identity) == expected,
-            f"QA aggregate changed Go object {object_identity}",
+            not contains_qa_go(aggregate),
+            "QA shared aggregate still contains Go Product after release activation",
         )
+        for object_identity in qa_go_index:
+            require(
+                object_identity not in aggregate_index,
+                f"QA shared aggregate retained Go object {object_identity}",
+            )
+    else:
+        require(contains_qa_go(aggregate), "QA aggregate does not contain Go Product")
+        for object_identity, expected in qa_go_index.items():
+            require(
+                aggregate_index.get(object_identity) == expected,
+                f"QA aggregate changed Go object {object_identity}",
+            )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -662,6 +674,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--qa-aggregate", required=True, type=Path)
     parser.add_argument("--local-gateway", required=True, type=Path)
     parser.add_argument("--qa-gateway", required=True, type=Path)
+    parser.add_argument("--qa-release-active", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -681,7 +694,14 @@ def main(argv: list[str] | None = None) -> int:
         validate_disjoint(qa_go, qa_legacy, "qa")
         validate_gateway_route(local_gateway, "local-dev")
         qa_backend = validate_gateway_route(qa_gateway, "qa")
-        validate_aggregates(qa_go_index, qa_legacy, qa_gateway, qa_aggregate, qa_backend)
+        validate_aggregates(
+            qa_go_index,
+            qa_legacy,
+            qa_gateway,
+            qa_aggregate,
+            qa_backend,
+            arguments.qa_release_active,
+        )
     except ValidationError as error:
         print(f"product-deploy-check: {error}", file=sys.stderr)
         return 1
