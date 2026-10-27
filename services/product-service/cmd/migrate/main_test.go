@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/administration"
 )
@@ -98,6 +99,10 @@ func TestRun_RejectsInvalidOrUnenrolledCommand(t *testing.T) {
 		{"unreadable URL file", []string{fixture.valid[0], fixture.valid[1], fixture.valid[2], fixture.valid[3], "--database-url-file=" + filepath.Join(t.TempDir(), "absent")}, "cannot read migrator credential"},
 		{"wrong context", []string{fixture.valid[0], fixture.valid[1], "--context=other", fixture.valid[3], fixture.valid[4], fixture.valid[5]}, "target environment or context"},
 		{"missing CA", fixture.valid, "selected CNPG CA file is unavailable"},
+		{"zero timeout", append([]string{"--timeout=0s"}, fixture.valid...), "migration timeout must"},
+		{"negative timeout", append([]string{"--timeout=-1s"}, fixture.valid...), "migration timeout must"},
+		{"excessive timeout", append([]string{"--timeout=181s"}, fixture.valid...), "migration timeout must"},
+		{"malformed timeout", append([]string{"--timeout=forever"}, fixture.valid...), "invalid migration command arguments"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			var output strings.Builder
@@ -135,15 +140,17 @@ func TestRun_DelegatesValidMigrationCommand(t *testing.T) {
 			actualURL string,
 			actualTarget administration.Target,
 			actualOperation string,
+			actualTimeout time.Duration,
 		) (string, error) {
 			called = true
 			if actualURL != fixture.databaseURL || actualTarget != fixture.target ||
-				actualOperation != "status" {
+				actualOperation != "status" || actualTimeout != defaultMigrationTimeout {
 				t.Fatalf(
-					"migration composition inputs = %q, %+v, %q",
+					"migration composition inputs = %q, %+v, %q, %s",
 					actualURL,
 					actualTarget,
 					actualOperation,
+					actualTimeout,
 				)
 			}
 			return "version=1", nil
@@ -155,6 +162,41 @@ func TestRun_DelegatesValidMigrationCommand(t *testing.T) {
 	}
 	if !called || output.String() != "version=1\n" {
 		t.Fatalf("migration delegation = called %t, output %q", called, output.String())
+	}
+}
+
+func TestRun_AcceptsConfiguredMigrationTimeouts(t *testing.T) {
+	// given
+	fixture := newMigrationCommandFixture(t)
+	fixture.writeCA(t)
+	for _, timeout := range []time.Duration{15 * time.Second, 180 * time.Second} {
+		t.Run(timeout.String(), func(t *testing.T) {
+			args := append([]string{"--timeout=" + timeout.String()}, fixture.valid...)
+			var observed time.Duration
+
+			// when
+			err := runWith(
+				context.Background(),
+				args,
+				io.Discard,
+				io.Discard,
+				func(
+					_ context.Context,
+					_ string,
+					_ administration.Target,
+					_ string,
+					actual time.Duration,
+				) (string, error) {
+					observed = actual
+					return "version=1", nil
+				},
+			)
+
+			// then
+			if err != nil || observed != timeout {
+				t.Fatalf("configured timeout = %s, error = %v", observed, err)
+			}
+		})
 	}
 }
 
@@ -194,7 +236,15 @@ func TestRun_LogsSafeStructuredFailures(t *testing.T) {
 				fixture.valid,
 				&output,
 				&diagnostics,
-				func(context.Context, string, administration.Target, string) (string, error) { return "", scenario.err },
+				func(
+					context.Context,
+					string,
+					administration.Target,
+					string,
+					time.Duration,
+				) (string, error) {
+					return "", scenario.err
+				},
 			)
 			// then
 			var record map[string]any

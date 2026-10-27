@@ -25,8 +25,16 @@ func RunMigration(
 	databaseURL string,
 	target administration.Target,
 	operation string,
+	timeout time.Duration,
 ) (string, error) {
-	return runMigration(ctx, databaseURL, target, operation, postgres.OpenMigrationDatabase)
+	return runMigration(
+		ctx,
+		databaseURL,
+		target,
+		operation,
+		timeout,
+		postgres.OpenMigrationDatabase,
+	)
 }
 
 func runMigration(
@@ -34,9 +42,10 @@ func runMigration(
 	databaseURL string,
 	target administration.Target,
 	operation string,
+	timeout time.Duration,
 	openDatabase openAdministrationDatabase,
 ) (state string, resultErr error) {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	db, err := openDatabase(ctx, databaseURL)
 	if err != nil {

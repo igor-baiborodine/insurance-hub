@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: product-init
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: migrate
+          args:
+            - --operation=migrate
+            - --environment=local-dev
+            - --context=kind-local-dev-insurance-hub
+            - --target-file=/etc/product-admin/target/target.json
+            - --database-url-file=/etc/product-admin/migrator/database-url
+            - --ca-file=/etc/product-admin/migrator/ca.crt
+            - --timeout=120s
+      containers:
+        - name: seed
+          args:
+            - --environment=local-dev
+            - --context=kind-local-dev-insurance-hub
+            - --target-file=/etc/product-admin/target/target.json
+            - --catalog-file=/usr/share/insurance-hub/product/catalogs/base.json
+            - --database-url-file=/etc/product-admin/seeder/database-url
+            - --ca-file=/etc/product-admin/seeder/ca.crt
+      volumes:
+        - name: target
+          secret:
+            secretName: local-dev-postgres-product-admin-target
+        - name: migrator
+          secret:
+            secretName: local-dev-postgres-product-migrator-creds
+        - name: seeder
+          secret:
+            secretName: local-dev-postgres-product-seeder-creds

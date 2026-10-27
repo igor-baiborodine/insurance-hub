@@ -40,6 +40,9 @@ PYTHON_SHARED_TOOLING_FILES := \
 	scripts/go/module/module_tooling.py \
 	scripts/go/module/test_module_tooling.py \
 	scripts/go/service/release.py \
+	scripts/go/service/configuration.py \
+	scripts/go/service/deployment.py \
+	scripts/go/service/test_deployment.py \
 	scripts/go/service/resolve.py \
 	scripts/go/service/test_dispatch.py \
 	scripts/go/service/test_release.py
@@ -53,6 +56,7 @@ PYTHON_SCAFFOLD_TOOLING_FILES := \
 	templates/go-service/scripts/test_tooling_runner.py
 PYTHON_PRODUCT_TOOLING_FILES := \
 	scripts/postgres/service/dispatch.py \
+	scripts/postgres/service/test_administration_roles.py \
 	scripts/postgres/service/test_reader.py \
 	scripts/product_baseline/__init__.py \
 	scripts/product_baseline/accept.py \
@@ -76,6 +80,7 @@ PYTHON_PRODUCT_TOOLING_FILES := \
 	scripts/product_qualification/test_measure.py \
 	scripts/product_qualification/test_ops.py \
 	scripts/product_deployment/__init__.py \
+	scripts/product_deployment/administration.py \
 	scripts/product_deployment/reader.py \
 	scripts/product_security/__init__.py \
 	scripts/product_security/check_cases.py \
@@ -91,8 +96,10 @@ PYTHON_PRODUCT_TOOLING_FILES := \
 	services/product-service/scripts/check_docs.py \
 	services/product-service/scripts/check_render.py \
 	services/product-service/scripts/deployment.py \
+	services/product-service/scripts/product_deployment_checks.py \
 	services/product-service/scripts/deployment_check.py \
 	services/product-service/scripts/deployment_lifecycle.py \
+	services/product-service/scripts/flux_deployment_test.py \
 	services/product-service/scripts/integration_test.py \
 	services/product-service/scripts/image_check.py \
 	services/product-service/scripts/product_process.py \
@@ -284,7 +291,7 @@ python-shared-tooling-test-fast: python-toolchain-check ## Run fast shared repos
 		scripts/python/test_process_runner.py \
 		scripts/go/test_report_card.py scripts/go/test_select_pr_module.py \
 		scripts/go/test_topology.py scripts/go/module/test_module_tooling.py \
-		scripts/go/service/test_dispatch.py scripts/go/service/test_release.py
+		scripts/go/service/test_dispatch.py scripts/go/service/test_release.py scripts/go/service/test_deployment.py
 
 python-shared-tooling-test-integration: python-toolchain-check ## Run disposable shared tooling integration tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
@@ -325,6 +332,7 @@ python-product-tooling-test-fast: python-toolchain-check ## Run fast Product too
 		scripts/product_qualification/test_measure.py \
 		scripts/product_qualification/test_ops.py \
 		scripts/product_security/test_validators.py \
+		scripts/postgres/service/test_administration_roles.py \
 		scripts/postgres/service/test_reader.py \
 		services/product-service/scripts/test_check_access_results.py \
 		services/product-service/scripts/test_deployment_checks.py \

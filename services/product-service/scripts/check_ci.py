@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check generic Go release, report-card, and selected-module PR validation contracts."""
 
+import json
 import os
 import re
 import shutil
@@ -156,16 +157,27 @@ def validate_release(workflow: dict) -> None:
         commands.count("docker build \\") == 1
         and commands.count("docker push ") == 2
         and '--tag "$image:$RELEASE_VERSION"' in commands
-        and '--tag "$image:sha-$short_sha"' in commands,
-        "release must build once and push semantic and short-SHA image tags",
+        and '--tag "$image:sha-$short_sha"' in commands
+        and "docker buildx imagetools inspect" in commands
+        and 'echo "digest=$image_digest" >> "$GITHUB_OUTPUT"' in commands,
+        "release must build once, push both tags and resolve the immutable digest",
     )
     require(
-        "make go-svc-release-update-qa" in commands
+        "make go-svc-release-prepare" in commands
+        and 'git add --pathspec-from-file="$release_paths" --pathspec-file-nul' in commands
         and "git push origin HEAD:main" in commands
         and "git diff --cached --quiet" in commands
         and 'git tag -a "$RELEASE_TAG" -m' in commands
         and 'git push origin "$RELEASE_TAG"' in commands,
-        "release must create the scoped tag and update the semantic QA tag when needed",
+        "release must stage only the configured release outputs",
+    )
+    release_text = json.dumps(workflow)
+    require(
+        "PRODUCT_RELEASE" not in release_text
+        and "QA_KUSTOMIZATION" not in release_text
+        and "update-product" not in release_text
+        and "overlays/qa" not in release_text,
+        "shared release workflow contains service or environment policy",
     )
 
     tag_steps = [step for step in steps if step.get("name") == "Create scoped source tag"]
@@ -192,7 +204,7 @@ def validate_release(workflow: dict) -> None:
     require(
         names.index("Build once and push semantic and source tags")
         < names.index("Create scoped source tag")
-        < names.index("Commit semantic QA image tag")
+        < names.index("Prepare and commit configured release targets")
         < names.index("Create GitHub Release"),
         "release mutation order differs",
     )
@@ -214,7 +226,6 @@ def validate_release(workflow: dict) -> None:
     )
     forbidden = (
         "git worktree",
-        "@sha256:",
         "upload-artifact",
         "setup-go",
         "go test",
@@ -226,7 +237,7 @@ def validate_release(workflow: dict) -> None:
     )
     require(
         not any(value in str(workflow) for value in forbidden),
-        "release contains recovery, digest, package, full-CI, or deployment behavior",
+        "release contains recovery, package, full-CI, or deployment behavior",
     )
 
 

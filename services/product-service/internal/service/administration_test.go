@@ -64,6 +64,7 @@ func TestRunMigration_OwnsDatabaseLifecycle(t *testing.T) {
 		"synthetic",
 		administration.Target{},
 		"unsupported",
+		120*time.Second,
 		openTrackedDatabase(&closed),
 	)
 
@@ -108,6 +109,7 @@ func TestRunMigration_DeadlineIncludesOpening(t *testing.T) {
 				"synthetic",
 				administration.Target{},
 				operation,
+				120*time.Second,
 				func(ctx context.Context, _ string) (*sql.DB, error) {
 					deadline, ok := ctx.Deadline()
 					hasDeadline = ok
@@ -123,6 +125,59 @@ func TestRunMigration_DeadlineIncludesOpening(t *testing.T) {
 					"opening must consume the overall budget: deadline=%t remaining=%s error=%v",
 					hasDeadline,
 					remaining,
+					err,
+				)
+			}
+		})
+	}
+}
+
+func TestRunMigration_ConfiguredAndParentDeadlines(t *testing.T) {
+	// given
+	for _, scenario := range []struct {
+		name       string
+		parent     time.Duration
+		configured time.Duration
+		maximum    time.Duration
+	}{
+		{"shorter configured timeout", 0, 15 * time.Second, 15 * time.Second},
+		{"maximum configured timeout has no nested cap", 0, 180 * time.Second, 180 * time.Second},
+		{"earlier parent deadline wins", 5 * time.Second, 180 * time.Second, 5 * time.Second},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			ctx := context.Background()
+			if scenario.parent > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, scenario.parent)
+				defer cancel()
+			}
+			openingFailure := errors.New("synthetic connection failure")
+			var remaining time.Duration
+
+			// when
+			_, err := runMigration(
+				ctx,
+				"synthetic",
+				administration.Target{},
+				MigrationOperationStatus,
+				scenario.configured,
+				func(ctx context.Context, _ string) (*sql.DB, error) {
+					deadline, ok := ctx.Deadline()
+					if !ok {
+						t.Fatal("migration context has no deadline")
+					}
+					remaining = time.Until(deadline)
+					return nil, openingFailure
+				},
+			)
+
+			// then
+			if !errors.Is(err, openingFailure) || remaining <= 0 ||
+				remaining > scenario.maximum || remaining < scenario.maximum-time.Second {
+				t.Fatalf(
+					"deadline remaining = %s, want near %s; error = %v",
+					remaining,
+					scenario.maximum,
 					err,
 				)
 			}

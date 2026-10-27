@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -162,6 +163,11 @@ def test_product_transfer_preserves_unrelated_inventory():
     legacy_ids = {identity(item) for item in legacy}
     go_only_baseline = [item for item in baseline if identity(item) not in legacy_ids]
     moved_ids = {identity(item) for item in product}
+    assert all(
+        item["metadata"].get("annotations", {}).get("kustomize.toolkit.fluxcd.io/prune")
+        == "disabled"
+        for item in product
+    )
     expected = {
         identity(item): item for item in go_only_baseline if identity(item) not in moved_ids
     }
@@ -177,3 +183,88 @@ def test_product_transfer_preserves_unrelated_inventory():
     # when / then
     with pytest.raises(AssertionError, match="Java Product reintroduced"):
         require_java_absent(rendered + product + legacy)
+
+
+@pytest.mark.parametrize(
+    ("environment", "namespace", "context", "timeout"),
+    [
+        ("local-dev", "local-dev-all", "kind-local-dev-insurance-hub", "120s"),
+        ("qa", "qa-svc", "qa-insurance-hub", "${MIGRATION_TIMEOUT}"),
+    ],
+)
+def test_real_administration_overlay_is_separate_and_bounded(
+    environment, namespace, context, timeout
+):
+    # given
+    kubectl = os.environ.get("KUBECTL", "kubectl")
+    overlay = ROOT / f"k8s/overlays/{environment}/svc/product/administration"
+
+    # when
+    documents = deployment_check.render(kubectl, overlay)
+
+    # then
+    assert len(documents) == 1
+    job = documents[0]
+    assert job["kind"] == "Job"
+    assert job["metadata"]["namespace"] == namespace
+    assert job["spec"]["backoffLimit"] == 0
+    assert job["spec"]["activeDeadlineSeconds"] == 300
+    assert "ttlSecondsAfterFinished" not in job["spec"]
+    pod = job["spec"]["template"]["spec"]
+    assert pod["automountServiceAccountToken"] is False
+    assert pod["restartPolicy"] == "Never"
+    assert pod["securityContext"]["runAsUser"] == 65532
+    migrate = pod["initContainers"]
+    seed = pod["containers"]
+    assert len(migrate) == len(seed) == 1
+    assert migrate[0]["command"] == ["/product-migrate"]
+    assert seed[0]["command"] == ["/product-seed"]
+    assert f"--environment={environment}" in migrate[0]["args"]
+    assert f"--context={context}" in migrate[0]["args"]
+    assert f"--timeout={timeout}" in migrate[0]["args"]
+    assert f"--environment={environment}" in seed[0]["args"]
+    assert migrate[0]["image"] == seed[0]["image"]
+    assert all(
+        container["securityContext"]
+        == {
+            "allowPrivilegeEscalation": False,
+            "readOnlyRootFilesystem": True,
+            "capabilities": {"drop": ["ALL"]},
+        }
+        for container in (migrate[0], seed[0])
+    )
+    secret_names = {volume["secret"]["secretName"] for volume in pod["volumes"]}
+    assert secret_names == {
+        f"{environment}-postgres-product-admin-target",
+        f"{environment}-postgres-product-migrator-creds",
+        f"{environment}-postgres-product-seeder-creds",
+    }
+
+
+def test_api_and_shared_qa_owner_exclude_administration_and_java_credentials():
+    # given
+    kubectl = os.environ.get("KUBECTL", "kubectl")
+
+    # when
+    api = deployment_check.render(kubectl, ROOT / "k8s/overlays/qa/svc/product")
+    aggregate = deployment_check.render(kubectl, ROOT / "k8s/overlays/qa/svc")
+
+    # then
+    deployment = next(item for item in api if item["kind"] == "Deployment")
+    rendered = json.dumps(deployment, sort_keys=True)
+    assert "postgres-product-reader-creds" in rendered
+    assert "migrator-creds" not in rendered
+    assert "seeder-creds" not in rendered
+    identities = {(item["kind"], item["metadata"]["name"]) for item in aggregate}
+    assert ("Deployment", "qa-product-api") in identities
+    assert ("Deployment", "qa-product-api-legacy") not in identities
+    assert not any("product-init" in name for _, name in identities)
+
+
+def test_product_release_bundle_is_dormant_until_explicit_activation():
+    # given / when
+    root = yaml.safe_load((ROOT / "k8s/flux/qa/kustomization.yaml").read_text())
+
+    # then
+    assert root["resources"] == ["./flux-system"]
+    assert "./releases/product/release.yaml" not in root["resources"]

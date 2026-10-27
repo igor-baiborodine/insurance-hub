@@ -51,20 +51,7 @@ def write_documents(root: Path, values: Documents, prefix: str) -> list[str]:
 
 
 def active_documents(baseline: Documents) -> Documents:
-    active = copy.deepcopy(baseline)
-    java = find(active["qa-aggregate"], "Deployment", "qa-product-api-legacy")
-    java.get("metadata", {}).get("labels", {}).pop("insurance-hub.io/product-go-state", None)
-    aggregate_identities = {
-        (document.get("kind"), document.get("metadata", {}).get("name"))
-        for document in active["qa-aggregate"]
-    }
-    active["qa-aggregate"].extend(
-        copy.deepcopy(document)
-        for document in active["qa-go"]
-        if (document.get("kind"), document.get("metadata", {}).get("name"))
-        not in aggregate_identities
-    )
-    return active
+    return copy.deepcopy(baseline)
 
 
 @pytest.fixture(scope="module")
@@ -124,15 +111,8 @@ def missing_activation(values: Documents) -> None:
     ]
 
 
-def mark_stopped(values: Documents) -> None:
-    deployment = find(values["qa-aggregate"], "Deployment", "qa-product-api-legacy")
-    deployment.setdefault("metadata", {}).setdefault("labels", {})[
-        "insurance-hub.io/product-go-state"
-    ] = "stopped"
-
-
-def stopped_with_go(values: Documents) -> None:
-    mark_stopped(values)
+def stale_java_product(values: Documents) -> None:
+    values["qa-aggregate"].extend(copy.deepcopy(values["qa-legacy"]))
 
 
 def unreleased_qa_tag(values: Documents) -> None:
@@ -166,16 +146,6 @@ def missing_qa_instance(values: Documents) -> None:
     container = deployment["spec"]["template"]["spec"]["containers"][0]
     container["env"] = [
         item for item in container["env"] if item.get("name") != "SERVICE_INSTANCE_ID"
-    ]
-
-
-def missing_java_sampler(values: Documents) -> None:
-    deployment = find(values["qa-legacy"], "Deployment", "qa-product-api-legacy")
-    container = deployment["spec"]["template"]["spec"]["containers"][0]
-    container["env"] = [
-        item
-        for item in container["env"]
-        if item.get("name") != "TRACING_ZIPKIN_SAMPLER_PROBABILITY"
     ]
 
 
@@ -240,13 +210,12 @@ CASES: list[tuple[str, Mutation, str]] = [
     ("missing Secret reference", missing_secret, "PRODUCT_DATABASE_URL"),
     ("external exposure", external_exposure, "must remain ClusterIP"),
     ("missing QA activation", missing_activation, "does not contain Go Product"),
-    ("stopped marker with Go objects", stopped_with_go, "still contains Go Product objects"),
+    ("stale Java Product desired state", stale_java_product, "stale Java Product objects"),
     ("unreleased QA image tag", unreleased_qa_tag, "qa image reference is invalid"),
     ("invalid QA image tag", invalid_qa_tag, "qa image reference is invalid"),
     ("unversioned local image tag", unversioned_local_tag, "local-dev image reference is invalid"),
     ("disabled QA telemetry", disabled_qa_telemetry, "qa Product ConfigMap"),
     ("missing QA Pod identity", missing_qa_instance, "PRODUCT_DATABASE_URL"),
-    ("missing Java sampler", missing_java_sampler, "bind the QA Zipkin sampler"),
     ("QA gateway uses management port", qa_gateway_uses_management_port, "expected Product URL"),
     ("multiple local-dev gateway URLs", local_gateway_has_second_url, "expected Product URL"),
     ("gateway subPath mount", gateway_mount_uses_subpath, "without subPath"),
@@ -284,27 +253,11 @@ def test_semantic_qa_release_tag_is_accepted(
 
 
 @pytest.mark.integration
-def test_explicit_stopped_qa_state_is_accepted(
-    rendered_documents: Documents,
-    tmp_path: Path,
-) -> None:
-    # given
-    values = active_documents(rendered_documents)
-    missing_activation(values)
-    mark_stopped(values)
-    select_qa_gateway_backend(values, QA_JAVA_URL)
-
-    # when
-    status = check_render.main(write_documents(tmp_path, values, "stopped"))
-
-    # then
-    assert status == 0
-
-
 @pytest.mark.integration
-def test_java_fallback_gateway_route_is_accepted(
+def test_java_fallback_gateway_route_is_rejected(
     rendered_documents: Documents,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     # given
     values = active_documents(rendered_documents)
@@ -314,7 +267,8 @@ def test_java_fallback_gateway_route_is_accepted(
     status = check_render.main(write_documents(tmp_path, values, "java-fallback"))
 
     # then
-    assert status == 0
+    assert status == 1
+    assert "must route to Go Product" in capsys.readouterr().err
 
 
 @pytest.mark.integration
@@ -331,26 +285,6 @@ def test_go_gateway_route_is_accepted(
 
     # then
     assert status == 0
-
-
-@pytest.mark.integration
-def test_stopped_qa_state_cannot_route_to_go(
-    rendered_documents: Documents,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    # given
-    values = active_documents(rendered_documents)
-    missing_activation(values)
-    mark_stopped(values)
-    select_qa_gateway_backend(values, QA_GO_URL)
-
-    # when
-    status = check_render.main(write_documents(tmp_path, values, "stopped-go-route"))
-
-    # then
-    assert status == 1
-    assert "stopped QA aggregate routes to Go Product" in capsys.readouterr().err
 
 
 @pytest.mark.integration

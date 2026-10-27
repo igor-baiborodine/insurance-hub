@@ -98,7 +98,9 @@ permission denial before each grant and after its revocation. Run it with
 `cmd/migrate` is the standalone schema administrator. Build it with
 `make -C services/product-service build-migrator MIGRATOR_OUTPUT=<owned-output-path>`.
 Invoke it with explicit `--operation=migrate|status|version`, `--environment`, `--context`,
-`--target-file`, `--database-url-file` and `--ca-file`. The protected target JSON records the exact
+`--target-file`, `--database-url-file`, `--ca-file`, and optional `--timeout`. The timeout defaults
+to `120s`, accepts Go duration syntax greater than zero and at most `180s`, and is rejected before
+database opening when invalid. The protected target JSON records the exact
 environment, context, data/service namespaces, CNPG cluster and UID, database-instance UUID,
 database, host and seed policy. The credential file contains only the migrator URL, with
 `go_product_migrator`, the enrolled host and database, `sslmode=verify-full`, and the selected
@@ -107,8 +109,9 @@ database, host and seed policy. The credential file contains only the migrator U
 `uninitialized`, an accepted unmanaged table reports `unmanaged`, and a valid zero-history
 recovery state reports `pending` or version `0`. Migration holds Product
 advisory lock `190001`, validates the table and history before Goose can initialize history, and
-applies only version 1. There is no down operation. The 120-second migration/inspection budget
-starts before database opening; seed has a 60-second command budget. Connection, lock, SQL and
+applies only version 1. There is no down operation. One migration/inspection deadline starts before
+database opening and covers the complete operation; an earlier caller deadline still wins. Seed has
+a 60-second command budget. Connection, lock, SQL and
 cleanup are also bounded;
 inspect and resolve any uncertain result before replaying the same reviewed migration. The
 runtime reader still has no migration or seeding path.
@@ -155,15 +158,14 @@ It checks database state, session/lock release, safe replay and diagnostics. Fau
 TLS proxy and synthetic credentials; required subtest discovery prevents silent omissions. Image
 publication and deployment activation remain separate operations.
 
-`make -C services/product-service check-administration-design` runs the issue-190 Q04 decision
-probes: authenticated PostgreSQL role denials and protected target markers,
-plus Kustomize candidate renders and negative release-lifecycle checks. It requires the existing
+`make -C services/product-service check-administration-design` runs the issue-190 administration
+contract checks: authenticated PostgreSQL role denials and protected target markers,
+plus actual local-dev/QA Kustomize renders and negative release-lifecycle checks. It requires the existing
 managed Python environment, Docker, the already provisioned PostgreSQL image above and `kubectl`.
-It creates and removes four isolated containers and temporary render directories; it installs no
-tools, contacts no Kubernetes API and reads no live credentials. The candidate YAML under
-`testdata/administration-design/` is not active desired state. These checks do not qualify Flux
-reconciliation, deployed TLS or the final administrative binaries. Java Product is assumed absent;
-candidate desired state must not recreate it. Historical databases remain adoption inputs.
+It creates and removes isolated containers and temporary render directories; it installs no tools,
+contacts no Kubernetes API and reads no live credentials. These checks do not qualify Flux
+reconciliation or deployed TLS. Java Product is assumed absent; desired state must not recreate it.
+Historical databases remain adoption inputs.
 
 The reader integration suite uses the same disposable database and QA snapshot:
 
@@ -343,10 +345,10 @@ credentials, tokens, request/response payloads, and arbitrary error causes. Tele
 default and requires no collector; #135 owns usable pipeline and delivery qualification.
 
 The `read-only` suite proves the runtime identity has only the required database connect, schema
-use, and Product table select privileges. Java retains schema, seed, and write ownership. Issue
-#134 must provision the environment-specific role, grants, and Secret; the service never falls back
-to an owner credential and never migrates or seeds the table. Issue #136 owns live Java/Go
-differential, consumer, load, failure, and rollback qualification. Route cutover remains #137.
+use, and Product table select privileges. Issue #190 owns separate migrator/seeder identities,
+protected target enrollment, and a prerequisite Job; the service never falls back to an owner
+credential and never migrates or seeds during API startup. Java Product is absent from current
+desired state. Earlier differential and cutover evidence remains historical compatibility input.
 
 ### Interim security validation
 
@@ -475,15 +477,16 @@ the core.
 
 The [Product Go deployment runbook](../../docs/migration/phase-4/product-service/deployment-runbook.md)
 owns image publication, local-dev/QA prerequisites, reader provisioning, rollout/rotation recovery,
-and Go-only stop/restoration. Use root `go-svc-* SVC_NAME=product` targets and separate
-`postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader` operations. PR checks build and test.
+database initialization, and Go-only stop/restoration. Use root `go-svc-* SVC_NAME=product` targets
+and the `reader` and `administration` Product role profiles. PR checks build and test.
 For a Product image-build input merged to canonical `main`, **Go Service Release** uses the same
 standard module convention intended for future Go services. Release inputs are the Dockerfile,
 Docker context policy, module manifests, and non-test content copied from `cmd`, `gen`, and
 `internal`; documentation, scripts, tests, generator inputs, and local validation configuration do
 not publish an image. The workflow creates the scoped semantic release, builds once, publishes
-semantic and short-SHA image tags, and commits the semantic version to the dormant QA overlay. QA
-activation remains a separate reviewed Git/Flux operation.
+semantic and short-SHA image tags, resolves the image digest, and commits the semantic version plus
+an immutable dormant Product source/prerequisite/API tuple. The explicit QA Flux root excludes that
+tuple until a separate reviewed activation change.
 
 **Go Module PR Check** runs Product's focused `check-go-pr` target only when a qualifying
 Product input changes and the complete pull-request diff touches no second supported Go module. It
@@ -496,3 +499,11 @@ establishes shared-environment acceptance. `make -C services/product-service boo
 installs the pinned workflow validators; `check-ci` checks release and selected-module workflow
 boundaries, and `make go-svc-release-test` proves generic service selection, QA-entry requirements,
 and semantic-tag updates with controlled fixtures.
+
+The shared release workflow reads service and target policy from
+[`scripts/go/service/catalog.json`](../../scripts/go/service/catalog.json). It uses one preparation
+path for every registered service; optional initialization selects the immutable Flux prerequisite
+bundle. Administration manifests live below `product/base/administration` and each environment's
+`product/administration` overlay, outside the API's Kustomize resource list. The shared deployment
+engine owns Job ordering and release checks; Product-specific workload and SQL probes remain in
+[`product_deployment_checks.py`](scripts/product_deployment_checks.py).

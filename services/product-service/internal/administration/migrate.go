@@ -14,8 +14,7 @@ import (
 )
 
 const (
-	operationBudget = 120 * time.Second
-	cleanupBudget   = 5 * time.Second
+	cleanupBudget = 5 * time.Second
 )
 
 //go:embed migrations/*.sql
@@ -24,8 +23,6 @@ var migrationSQL embed.FS
 // Migrate verifies the protected target and schema under the same session lock Goose uses for
 // history setup and version-1 execution. Replays validate even when version 1 is already applied.
 func Migrate(parent context.Context, db *sql.DB, target Target) error {
-	ctx, cancel := context.WithTimeout(parent, operationBudget)
-	defer cancel()
 	source, err := fs.Sub(migrationSQL, "migrations")
 	if err != nil {
 		return fmt.Errorf("load migration assets: %w", err)
@@ -49,11 +46,11 @@ func Migrate(parent context.Context, db *sql.DB, target Target) error {
 	if err != nil {
 		return fmt.Errorf("configure Product migration: %w", err)
 	}
-	_, err = provider.ApplyVersion(ctx, 1, true)
+	_, err = provider.ApplyVersion(parent, 1, true)
 	if err != nil && !isOnlyAlreadyApplied(err) {
 		return fmt.Errorf("apply Product migration: %w", err)
 	}
-	return applyGrants(ctx, db, target)
+	return applyGrants(parent, db, target)
 }
 
 // applyGrants also runs on replay, so an interrupted grant phase needs no special repair command.
@@ -121,10 +118,8 @@ func isOnlyAlreadyApplied(err error) bool {
 // Status has no Goose calls. Its transaction rejects writes even though the migration login can
 // SET ROLE to the Product object owner.
 func Status(parent context.Context, db *sql.DB, target Target) (state string, resultErr error) {
-	ctx, cancel := context.WithTimeout(parent, operationBudget)
-	defer cancel()
 	tx, err := db.BeginTx(
-		ctx,
+		parent,
 		&sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead},
 	)
 	if err != nil {
@@ -138,7 +133,7 @@ func Status(parent context.Context, db *sql.DB, target Target) (state string, re
 			)
 		}
 	}()
-	state, err = inspect(ctx, tx, target)
+	state, err = inspect(parent, tx, target)
 	if err != nil {
 		return "", err
 	}

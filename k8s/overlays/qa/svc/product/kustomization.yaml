@@ -6,6 +6,8 @@ labels:
   - includeSelectors: true
     pairs:
       environment: qa
+commonAnnotations:
+  kustomize.toolkit.fluxcd.io/prune: disabled
 resources:
   - ../../../../apps/svc/product/base
 images:

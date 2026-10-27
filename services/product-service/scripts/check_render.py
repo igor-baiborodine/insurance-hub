@@ -626,39 +626,30 @@ def one_container(pod_spec: dict[str, Any], name: str, environment: str) -> dict
 
 def validate_aggregates(
     qa_go_index: dict[tuple[str, str, str], dict[str, Any]],
+    qa_legacy: list[dict[str, Any]],
     qa_gateway: list[dict[str, Any]],
     aggregate: list[dict[str, Any]],
     qa_backend: str,
 ) -> None:
     require_unique(aggregate, "QA aggregate")
-    java = one(aggregate, "Deployment", "qa-product-api-legacy")
-    state = (
-        java.get("metadata", {})
-        .get("labels", {})
-        .get("insurance-hub.io/product-go-state", "active")
-    )
-    require(state in {"active", "stopped"}, "QA aggregate has an invalid Product Go state")
     aggregate_index = {identity(document): document for document in aggregate}
+    legacy_identities = {identity(document) for document in qa_legacy}
+    require(
+        not (legacy_identities & set(aggregate_index)),
+        "QA aggregate still contains stale Java Product objects",
+    )
     for gateway_document in qa_gateway:
         gateway_identity = identity(gateway_document)
         require(
             aggregate_index.get(gateway_identity) == gateway_document,
             f"QA aggregate changed gateway object {gateway_identity}",
         )
-    if state == "stopped":
-        require(
-            not contains_qa_go(aggregate)
-            and not any(object_identity in aggregate_index for object_identity in qa_go_index),
-            "stopped QA aggregate still contains Go Product objects",
-        )
-        require(qa_backend == "product-api-legacy", "stopped QA aggregate routes to Go Product")
-        return
-
-    require(contains_qa_go(aggregate), "active QA aggregate does not contain Go Product")
+    require(qa_backend == "product-api", "QA aggregate must route to Go Product")
+    require(contains_qa_go(aggregate), "QA aggregate does not contain Go Product")
     for object_identity, expected in qa_go_index.items():
         require(
             aggregate_index.get(object_identity) == expected,
-            f"active QA aggregate changed Go object {object_identity}",
+            f"QA aggregate changed Go object {object_identity}",
         )
 
 
@@ -688,14 +679,13 @@ def main(argv: list[str] | None = None) -> int:
         qa_go_index = validate_go_environment(qa_go, "qa")
         validate_disjoint(local_go, local_legacy, "local-dev")
         validate_disjoint(qa_go, qa_legacy, "qa")
-        validate_qa_java_observability(qa_legacy, qa_aggregate)
         validate_gateway_route(local_gateway, "local-dev")
         qa_backend = validate_gateway_route(qa_gateway, "qa")
-        validate_aggregates(qa_go_index, qa_gateway, qa_aggregate, qa_backend)
+        validate_aggregates(qa_go_index, qa_legacy, qa_gateway, qa_aggregate, qa_backend)
     except ValidationError as error:
         print(f"product-deploy-check: {error}", file=sys.stderr)
         return 1
-    print("product-deploy-check: rendered overlays, Java isolation, and QA lifecycle state passed")
+    print("product-deploy-check: rendered overlays, Java isolation, and QA ownership passed")
     return 0
 
 

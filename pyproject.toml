@@ -53,6 +53,8 @@ known-first-party = [
     "disposable_acceptance_phase",
     "check_monitoring",
     "deployment",
+    "product_deployment_checks",
+    "test_release",
     "example_cli",
     "legacy_process",
     "markdown_pre_commit",

@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pressly/goose/v3"
 )
@@ -32,6 +33,7 @@ type failingConnection struct {
 	unlocked   bool
 	emptyState bool
 	committed  bool
+	deadline   time.Time
 }
 
 func (*failingConnection) Prepare(string) (driver.Stmt, error) {
@@ -41,12 +43,37 @@ func (*failingConnection) Close() error              { return nil }
 func (*failingConnection) Begin() (driver.Tx, error) { return nil, errors.New("BeginTx required") }
 
 func (c *failingConnection) BeginTx(
-	_ context.Context,
+	ctx context.Context,
 	options driver.TxOptions,
 ) (driver.Tx, error) {
 	c.readOnly = options.ReadOnly
 	c.isolation = options.Isolation
+	c.deadline, _ = ctx.Deadline()
 	return failingTransaction{connection: c}, nil
+}
+
+func TestStatus_PreservesCallerDeadlineBeyondPreviousFixedBudget(t *testing.T) {
+	// given
+	connection := &failingConnection{emptyState: true}
+	db := sql.OpenDB(failingConnector{connection: connection})
+	defer func() { _ = db.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	want, _ := ctx.Deadline()
+
+	// when
+	_, err := Status(ctx, db, Target{})
+	// then
+	if err != nil {
+		t.Fatalf("status failed: %v", err)
+	}
+	if connection.deadline != want {
+		t.Fatalf(
+			"status replaced caller deadline: got %v, want %v",
+			connection.deadline,
+			want,
+		)
+	}
 }
 
 func (c *failingConnection) QueryContext(

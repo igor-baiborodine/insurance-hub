@@ -11,10 +11,16 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/administration"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/service"
+)
+
+const (
+	defaultMigrationTimeout = 120 * time.Second
+	maximumMigrationTimeout = 180 * time.Second
 )
 
 func main() {
@@ -33,7 +39,13 @@ func runWith(
 	ctx context.Context,
 	args []string,
 	output, diagnostics io.Writer,
-	runMigration func(context.Context, string, administration.Target, string) (string, error),
+	runMigration func(
+		context.Context,
+		string,
+		administration.Target,
+		string,
+		time.Duration,
+	) (string, error),
 ) (resultErr error) {
 	operationName, environmentName, stage := "unvalidated", "unvalidated", "configuration"
 	defer func() {
@@ -56,8 +68,16 @@ func runWith(
 	targetPath := flags.String("target-file", "", "protected target enrollment")
 	urlPath := flags.String("database-url-file", "", "migrator credential file")
 	caPath := flags.String("ca-file", "", "selected CNPG CA")
+	timeout := flags.Duration(
+		"timeout",
+		defaultMigrationTimeout,
+		"overall connection and migration timeout",
+	)
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return errors.New("invalid migration command arguments")
+	}
+	if *timeout <= 0 || *timeout > maximumMigrationTimeout {
+		return errors.New("migration timeout must be greater than zero and at most 180s")
 	}
 	if *operation != service.MigrationOperationMigrate &&
 		*operation != service.MigrationOperationStatus &&
@@ -88,7 +108,7 @@ func runWith(
 		return errors.New("selected CNPG CA file is unavailable")
 	}
 	stage = "database_operation"
-	state, err := runMigration(ctx, databaseURL, target, *operation)
+	state, err := runMigration(ctx, databaseURL, target, *operation, *timeout)
 	if err != nil {
 		return err
 	}

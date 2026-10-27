@@ -99,17 +99,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build once and push semantic and source tags
+        id: image
         shell: bash
         env:
           MODULE_PATH: ${{ steps.service.outputs.module_path }}
-          SVC_NAME: ${{ steps.service.outputs.service }}
+          RELEASE_IMAGE: ${{ steps.service.outputs.registry_image }}
           RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
         run: |
           set -euo pipefail
           short_sha="$(git rev-parse --short "$SOURCE_REVISION")"
           source_created="$(git show -s --format=%cI "$SOURCE_REVISION")"
           source_version="git-${SOURCE_REVISION:0:12}"
-          image="$REGISTRY/$GITHUB_REPOSITORY/$SVC_NAME-api"
+          image="$RELEASE_IMAGE"
 
           docker build \
             --build-arg "SOURCE_CREATED=$source_created" \
@@ -123,6 +124,10 @@ jobs:
 
           docker push "$image:$RELEASE_VERSION"
           docker push "$image:sha-$short_sha"
+          image_digest="$(docker buildx imagetools inspect "$image:$RELEASE_VERSION" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          [[ "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$image_digest" >> "$GITHUB_OUTPUT"
 
       - name: Create scoped source tag
         env:
@@ -137,23 +142,25 @@ jobs:
           git tag -a "$RELEASE_TAG" -m "Release $MODULE_NAME $RELEASE_VERSION"
           git push origin "$RELEASE_TAG"
 
-      - name: Commit semantic QA image tag
+      - name: Prepare and commit configured release targets
         env:
           RELEASE_REPOSITORY: ${{ github.repository }}
           RELEASE_SERVICE: ${{ steps.service.outputs.service }}
           RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
-          QA_KUSTOMIZATION: ${{ steps.service.outputs.qa_kustomization }}
+          RELEASE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          RELEASE_SOURCE_COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
-          make go-svc-release-update-qa
+          release_paths="$RUNNER_TEMP/go-service-release/paths"
+          make go-svc-release-prepare RELEASE_OUTPUT="$release_paths"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$QA_KUSTOMIZATION"
+          git add --pathspec-from-file="$release_paths" --pathspec-file-nul
           git diff --cached --check
           if git diff --cached --quiet; then
-            echo "$QA_KUSTOMIZATION already uses $RELEASE_VERSION."
+            echo "Configured release targets already use $RELEASE_VERSION."
           else
-            git commit -m "chore(k8s): update $RELEASE_SERVICE Go image to $RELEASE_VERSION"
+            git commit -m "chore(k8s): update $RELEASE_SERVICE Go release to $RELEASE_VERSION"
             git push origin HEAD:main
           fi
 

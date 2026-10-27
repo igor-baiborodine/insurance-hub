@@ -1,440 +1,361 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Product Go deployment runbook](#product-go-deployment-runbook)
-  - [Ownership and delivery sequence](#ownership-and-delivery-sequence)
-  - [Prerequisites and validation commands](#prerequisites-and-validation-commands)
-  - [Publish a merged image](#publish-a-merged-image)
-  - [Environment switching and target inputs](#environment-switching-and-target-inputs)
-  - [Provision and verify the reader](#provision-and-verify-the-reader)
-  - [Local-dev deployment and verification](#local-dev-deployment-and-verification)
-  - [QA activation and verification](#qa-activation-and-verification)
-  - [Configuration and credential rollout](#configuration-and-credential-rollout)
+- [Product Go deployment and database-initialization runbook](#product-go-deployment-and-database-initialization-runbook)
+  - [Ownership and release contract](#ownership-and-release-contract)
+  - [Time and lifecycle budgets](#time-and-lifecycle-budgets)
+  - [Repository and disposable validation](#repository-and-disposable-validation)
+  - [Select and verify an environment](#select-and-verify-an-environment)
+  - [Provision and verify roles, marker, and Secrets](#provision-and-verify-roles-marker-and-secrets)
+  - [Build and initialize local-dev](#build-and-initialize-local-dev)
+  - [Publish and stage the QA release](#publish-and-stage-the-qa-release)
+  - [Activate and verify QA](#activate-and-verify-qa)
   - [Abort, stop, and restoration](#abort-stop-and-restoration)
-  - [Acceptance evidence and handoff](#acceptance-evidence-and-handoff)
+  - [Credential rotation and revocation](#credential-rotation-and-revocation)
+  - [Evidence and handoff](#evidence-and-handoff)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# Product Go deployment runbook
+# Product Go deployment and database-initialization runbook
 
-For issue #137's Product listener migration and established gateway cutover, use the
-[established cutover runbook](established-cutover-runbook.md) alongside this deployment guide.
+This runbook covers the Product Go API and the explicit Product schema/catalog administration
+introduced by issue #190. Java Product is absent from current local-dev and QA desired state. Its
+historical schema and fixtures remain compatibility evidence, but no Java workload owns startup DDL,
+seeding, fallback, or recovery.
 
-Product Go reads the existing `product.public.product` catalog alongside Java. Java retains
-schema/seeding ownership and remains the gateway destination. Go uses a dedicated reader login,
-internal HTTP/gRPC Services, and a separate management Service. This is the operational procedure
-delivered by issue #134. The issue's final acceptance audit passed in local-dev and QA on
-2026-10-14; every later operation must still establish fresh target, revision, workload, reader,
-catalog, and Java-routing evidence rather than relying on that historical pass.
+The API starts with the reader Secret only. Database migration and base-catalog seeding run in a
+separate bounded Job before the matching API release. Merging the administration assets or a dormant
+QA release tuple does not authorize a live operation. Local-dev and QA qualification are separate,
+sequential operations and require the environment scope stated in the issue #190 delivery plan.
 
-## Ownership and delivery sequence
+## Ownership and release contract
 
 | Resource or action | Owner and boundary |
 | --- | --- |
-| Runtime image | Product module Makefile; pinned Go 1.27.3 builder and minimal non-root runtime; `linux/amd64`, `GOWORK=off` |
-| Publication | **Go Service Release** runs automatically for a canonical `main` push that changes image-build inputs for exactly one `services/<service>-service`; it owns GHCR publication, scoped Git/GitHub release identities, and the dormant QA semantic-tag update |
-| PR validation | **Go Module PR Check** owns Product's focused selected-module Go checks for qualifying inputs; release-selector, image, manifest, role-tooling, baseline, deployment-tooling, and combined Java/Go security checks remain change-based local review evidence |
-| QA desired state | The release workflow commits the generated 1.x semantic tag; activation separately adds `./product` through review, after which `flux-system/insurance-hub` and `flux-system/qa-svc` reconcile `main` |
-| Local-dev desired state | Explicit `go-svc-* SVC_NAME=product` commands and the local Go overlay |
-| Database login and Secret | Maintainer with Kubernetes/CNPG administrative access, through `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader`; outside application startup and Flux |
-| Catalog and Java routing | Existing Java owner and gateway configuration; never changed by Go deployment |
+| Product database and bootstrap owner | CloudNativePG/platform automation; application tooling does not create or replace the database |
+| Reader, migrator, seeder, target marker, and workload Secrets | `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=administration`; explicit environment coordinates and administrative cluster access required |
+| Schema/history | `/product-migrate`; the migrator login may `SET ROLE product`, while the API and seeder cannot |
+| Base catalog | `/product-seed` with the packaged `/usr/share/insurance-hub/product/catalogs/base.json`; insert-only and non-production enrollment required |
+| Initialization Job | Product administration overlay; migration init container then seed container, separate credentials, 300-second deadline, no TTL |
+| API | Stable local/QA Go Product owner; reader Secret only |
+| QA release tuple | **Go Service Release**; immutable Product source, exact image digest, release-specific prerequisite, and stable API dependency |
+| QA activation | Reviewed removal of Product from the shared QA owner and addition of `./releases/product/release.yaml` to `k8s/flux/qa/kustomization.yaml` after prerequisites and explicit live scope |
 
-The delivered sequence used a foundation PR with Go excluded from the QA aggregate, a generic
-release-automation PR that produced the semantic image/tag/Release and dormant QA image update,
-and an activation PR that added `./product` while retaining `./product/legacy`. Subsequent reviewed
-changes exercised non-secret rollout, reader rotation, Flux-owned Go-only stop, and restoration.
-Repeat that ownership sequence for future services or material Product changes: validate the full
-QA render and prerequisites before activation, let Flux reconcile canonical `main`, and complete
-live verification before treating the change as accepted.
+Release identity is the SHA-256 of the full source commit, image digest, migration and catalog
+SHA-256 values, target-contract revision, credential revision, and normalized migration timeout.
+Resource names use its collision-checked 16-hex prefix. Equivalent timeout spellings such as
+`120s` and `2m` produce the same identity. A changed effective input produces a new identity.
 
-The activation manifest checker requires the release-owned 1.x semantic tag and active `./product`
-inclusion alongside `./product/legacy`. Its corruption fixtures reject a missing activation,
-unpublished or invalid tags, overlapping selectors, external exposure, and contract drift. Do not
-bypass the checker to activate Go.
+The release-specific source is `qa-product-release-<id>`. QA initialization is
+`qa-product-init-<id>-a<attempt>` and the stable API owner is `qa-product-api`. Both use the same
+immutable source and image digest. The API depends on that exact initialization owner. An earlier
+successful Job cannot unlock a new release.
 
-## Prerequisites and validation commands
+## Time and lifecycle budgets
 
-Use the repository root as the working directory for all commands below. See
-[CONTRIBUTING](../../../../CONTRIBUTING.md) for host prerequisites. The Product tools require the
-module's pinned Go toolchain, Node.js >=20, Docker/Buildx, Python >=3.10, Make, jq, and
-kubectl/Kustomize. Role administration also requires host `psql`, healthy CNPG, and access to
-its primary Pod and CA Secret. No application-owner password is accepted as a Go runtime input.
+| Operation | Bound |
+| --- | --- |
+| Migration overall | Default `120s`; greater than zero and at most `180s` |
+| Database connection | 5 seconds within the remaining operation deadline |
+| Advisory lock | 30 seconds maximum, with one-second probes |
+| SQL statement / row or DDL lock | 15 seconds / 5 seconds |
+| Seed overall | 60 seconds |
+| Independent cleanup | 5 seconds |
+| Job / termination grace | 300 seconds / 15 seconds |
+| Flux prerequisite / local orchestration | 6 minutes / 7 minutes |
+
+`product-migrate --timeout` establishes one deadline before connection and carries it through target
+inspection and migration. It never extends an earlier caller deadline. Invalid, nonpositive, or
+greater-than-`180s` values fail before connection. The 300-second Job budget reserves at least 60
+seconds beyond the maximum migration and seed budgets for startup, cleanup, and termination.
+
+Jobs use `restartPolicy: Never`, `backoffLimit: 0`, and no TTL. A failed or ambiguous attempt is
+retained. Inspect it, correct the cause, and create a new attempt identity. Do not patch an immutable
+Job, delete a failed Job automatically, or reuse an old success. Deleting the current successful Job
+may cause Flux to recreate it; migration and seeding must replay safely.
+
+## Repository and disposable validation
+
+Run checks from the repository root. They install no tools and contact no shared database unless an
+operator explicitly invokes a live role or deployment action.
 
 ```sh
-make go-product-bootstrap-tools
-make -C services/product-service bootstrap-ci-tools
 make -C services/product-service check-ci
-make go-svc-release-test
-make go-svc-dispatch-test
 make go-svc-image-check SVC_NAME=product
 make go-svc-deploy-check SVC_NAME=product
 make go-svc-deploy-test-tooling SVC_NAME=product
+make go-svc-release-test
+make go-svc-dispatch-test
 make postgres-svc-role-test
-make product-baseline-fixtures-check
-make product-baseline-test BASELINE_SUITE=db-permissions
+make go-svc-deploy-test-flux SVC_NAME=product
 ```
 
-The root uv lock supplies PyYAML 6.0.3 to the managed CPython 3.14.8 environment.
-`bootstrap-ci-tools` checksum-verifies Kind 0.30.0, kubectl 1.34.1, and actionlint 1.7.7 into
-`.tools/bin`; it requires Linux amd64. Check targets do not install tools. Local operators may
-continue using their existing compatible clients where the owning scripts permit them.
+The Flux test creates a uniquely named Kind cluster, installs the pinned checked-in Flux components
+and CloudNativePG 1.27.0, and deletes only that owned cluster. It proves failure gating, old-success
+rejection, retry identity, Job recreation, safe replay, Product resource adoption, unrelated resource
+preservation, and effective restricted-role SQL denial. It must not receive a shared database URL.
+Rendered or fake-controller results do not replace this test and none of these results proves a live
+environment.
 
-`make go-svc-deploy-test SVC_NAME=product` requires the active local Kind cluster and a ready CNPG
-operator. It creates and removes a uniquely labelled namespace and a separate database; it must
-not receive `PRODUCT_DATABASE_URL`. It exercises startup failures, empty/accepted catalog reads,
-dependency loss/recovery, readiness versus liveness, rollout, HTTP/gRPC drain, and Pod termination.
-The generic release does not create a hosted disposable cluster; this local target remains
-available for explicitly prepared, owned disposable infrastructure and keeps its existing cleanup
-boundary.
+## Select and verify an environment
 
-Shared topology, security, documentation, and deployment gates remain local responsibilities when
-their inputs change. The
-[contributor validation matrix](../../../../CONTRIBUTING.md#change-based-local-validation) maps
-change types to commands, prerequisites, and required review evidence. For local reproduction:
-
-```sh
-make go-modules-check
-make product-security-test-tooling
-make product-security-check
-make -C services/product-service check-docs
-```
-
-The combined security gate additionally needs the documented Java/Maven/package prerequisites in
-[security reproduction](security-baseline.md#reproduction). Do not infer a hosted pass from local
-results. Disposable tests may mutate only their own infrastructure and never prove live QA TLS,
-registry access, effective exposure, or Java routing.
-
-## Publish a merged image
-
-A canonical `main` push that changes image-build inputs for exactly one
-`services/<service>-service` module automatically starts **Go Service Release**. Qualifying inputs
-are the Dockerfile, `.dockerignore`, `go.mod`, `go.sum`, and non-test content under `cmd`, `gen`, or
-`internal` that is admitted to the Docker context. Documentation, scripts, test files and helpers,
-generator source inputs, and local validation configuration do not publish an image; their generated
-production output triggers publication when it changes. The Kubernetes-only QA bot commit is
-outside the qualifying paths, so it cannot recursively publish. Releases are serialized and never
-cancel an in-flight publication. Record the source push SHA and inspect the matching run:
-
-```sh
-export RELEASE_REVISION='<full-40-character-source-SHA>'
-gh run list --workflow go-release-svc.yml --limit 5
-```
-
-Select the run matching that revision and record its run ID, URL, and conclusion:
-
-```sh
-export RELEASE_RUN_ID='<matching-run-id>'
-gh run watch "$RELEASE_RUN_ID"
-```
-
-The workflow uses `monotag` to calculate the next scoped 1.x version, starting at `1.0.0`, under
-`product-service/v<version>`. It detects the changed standard module, derives `product`,
-requires its Dockerfile and conventional QA image entry, and builds the module once. It publishes
-`<version>` and `sha-<short-source-SHA>` under
-`ghcr.io/igor-baiborodine/insurance-hub/product-api`, commits `<version>` to the dormant QA Product
-overlay, creates the annotated scoped tag on the triggering source revision, and creates a
-non-draft GitHub Release from the generated notes.
-
-The release deliberately has no manual dispatch, recovery mode, digest finalization, pullback
-verification, uploaded evidence bundle, Go package publication, complete module test suite, or
-hosted disposable cluster. A failed or timed-out mutation may have completed; inspect the image,
-QA commit, scoped tag, and GitHub Release before deciding on a separately reviewed repair.
-
-The release job authenticates to GHCR and GitHub with its scoped `GITHUB_TOKEN`; PR checks receive
-no publishing credentials. The workflow never receives cluster or database credentials and never
-applies QA resources. These boundaries follow GitHub's
-[package permissions](https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions)
-contract. Local `docker login` is not required for the automatic hosted release.
-
-Before activation, verify package visibility and pullability using QA's intended registry access.
-The checked-in Go Pod has no `imagePullSecrets`; public pull access must actually work. If the
-package is private, establish an explicitly reviewed pull-Secret reference and separately
-provisioned registry credential before activation. The reader database Secret is not a registry
-credential. A successful pull by the authenticated release runner alone does not prove QA access.
-Record the published semantic and short-SHA tags, source revision, and pulled image ID/digest.
-Validate that release image before enabling QA.
-
-## Environment switching and target inputs
-
-The laptop runs local-dev and QA sequentially. Stop task-owned forwards and the previous
-environment before starting the next; use the existing
-[cluster procedures](../../../../k8s/base-cluster-how-tos.md). For the maintainer's frozen QA VMs,
-resume only after local Kind is stopped. Do not restart shared infrastructure to manufacture a
-test failure. Recheck UTC host/node clocks, connectivity, context, namespaces, Java readiness,
-CNPG primary, catalog identity, and spare resources after each switch.
-
-The deployment tools refuse a different active context or namespace; they do not switch them.
-Choose one complete column and export its values before running targets:
+The laptop runs local-dev and QA sequentially. Stop task-owned forwards and the previous environment
+before switching. Recheck context, namespaces, CNPG identity and readiness, clock health, capacity,
+source revision, image, catalog, roles, and unexpected writers after every switch.
 
 | Input | local-dev | QA |
 | --- | --- | --- |
-| `DEPLOY_ENV` | `local-dev` | `qa` |
-| `DEPLOY_CONTEXT` | `kind-local-dev-insurance-hub` | `qa-insurance-hub` |
-| `DEPLOY_SVC_NS` | `local-dev-all` | `qa-svc` |
-| `DEPLOY_DATA_NS` | `local-dev-all` | `qa-data` |
-| `DEPLOY_IMAGE_REF` | `insurance-hub-product-api:<1.x.y>-local.<12-hex-revision>` matching the local overlay | `ghcr.io/igor-baiborodine/insurance-hub/product-api:<1.x-semantic-version>` matching the QA overlay |
-| `DEPLOY_SOURCE_REVISION` | Unused | Full `main` SHA actually reconciled by the Flux source and `qa-svc`, which can differ from the image's source SHA |
+| `DEPLOY_ENV` / `POSTGRES_ROLE_ENV` | `local-dev` | `qa` |
+| Context | `kind-local-dev-insurance-hub` | `qa-insurance-hub` |
+| Service namespace | `local-dev-all` | `qa-svc` |
+| Data namespace | `local-dev-all` | `qa-data` |
+| CNPG cluster | `local-dev-postgres-product` | `qa-postgres-product` |
+| Database host | `local-dev-postgres-product-rw.local-dev-all.svc.cluster.local` | `qa-postgres-product-rw.qa-data.svc.cluster.local` |
+| API image | Reviewed local version/revision tag | Published semantic tag and recorded digest |
 
-For example, local-dev selection is:
+Export one complete selection. For local-dev:
 
 ```sh
 export DEPLOY_ENV=local-dev
 export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
 export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
-export DEPLOY_IMAGE_REF='insurance-hub-product-api:<reviewed-1.x.y>-local.<reviewed-12-hex-revision>'
-kubectl config use-context "$DEPLOY_CONTEXT"
-kubectl config set-context "$DEPLOY_CONTEXT" --namespace="$DEPLOY_SVC_NS"
-date -u
-kubectl --context "$DEPLOY_CONTEXT" get nodes -o wide
-kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_DATA_NS" get cluster.postgresql.cnpg.io
-```
+export DEPLOY_IMAGE_REF='insurance-hub-product-api:<version>-local.<12-hex-source>'
 
-Check node clock synchronization through the host/VM administration interface; Kubernetes node
-readiness alone does not prove it. For QA, run the host service, bounded synchronization, and
-two-second drift checks in
-[Synchronize host and QA VM clocks](../../../../k8s/base-cluster-how-tos.md#synchronize-host-and-qa-vm-clocks).
-If the installed host service is disabled or inactive, the required administrative correction is:
-
-```sh
-sudo systemctl enable --now systemd-timesyncd
-sudo timedatectl set-ntp true
-```
-
-Do not provision credentials or activate Go until the host reports `NTPSynchronized=yes` and the
-documented host-to-node drift check passes for all three QA VMs. Capacity must allow
-Java/PostgreSQL plus up to two Go Pods: requests per Pod `100m`/`64Mi`, limits `300m`/`256Mi`, pool
-8 (16 total during surge). A capacity failure blocks activation until a reviewed, tested rollout
-strategy fits the laptop.
-
-## Provision and verify the reader
-
-Derive explicit role coordinates from the verified environment selection:
-
-```sh
 export POSTGRES_ROLE_ENV="$DEPLOY_ENV"
 export POSTGRES_ROLE_CONTEXT="$DEPLOY_CONTEXT"
-export POSTGRES_ROLE_DATA_NS="$DEPLOY_DATA_NS"
 export POSTGRES_ROLE_SVC_NS="$DEPLOY_SVC_NS"
-export POSTGRES_ROLE_CLUSTER="$DEPLOY_ENV-postgres-product"
-export POSTGRES_ROLE_SECRET="$DEPLOY_ENV-postgres-product-reader-creds"
-export POSTGRES_ROLE_DB_HOST="$DEPLOY_ENV-postgres-product-rw.$DEPLOY_DATA_NS.svc.cluster.local"
-make postgres-svc-role-inventory SVC_NAME=product ROLE_PROFILE=reader
-make postgres-svc-role-snapshot SVC_NAME=product ROLE_PROFILE=reader
+export POSTGRES_ROLE_DATA_NS="$DEPLOY_DATA_NS"
+export POSTGRES_ROLE_CLUSTER=local-dev-postgres-product
+export POSTGRES_ROLE_SECRET=local-dev-postgres-product-reader-creds
+export POSTGRES_ROLE_DB_HOST=local-dev-postgres-product-rw.local-dev-all.svc.cluster.local
 ```
 
-Review consumers and grants first. The profile rejects unknown login/session consumers and
-unexpected ownership, memberships, or objects; it revokes inherited `PUBLIC` privileges and
-retains Java's owner access. Resolve unexpected consumers before provisioning. Retain the
-sanitized snapshot and compare it with the accepted environment inventory/schema/catalog baseline.
+Use the QA column for QA. Set `DEPLOY_SOURCE_REVISION` to the full revision actually reported by
+Flux when running QA status/verification. The deployment tool never changes the active context or
+namespace and rejects coordinates that differ from the selected environment.
+
+Before administration, confirm that no Java Product Deployment or Service exists and no unexpected
+writer/session or role membership can interfere. Stop and report a mismatch. Do not scale, fence,
+delete, or repair an unexpected workload automatically.
+
+## Provision and verify roles, marker, and Secrets
+
+Inventory and retain a sanitized snapshot before mutation:
 
 ```sh
-make postgres-svc-role-provision SVC_NAME=product ROLE_PROFILE=reader
-make postgres-svc-role-verify SVC_NAME=product ROLE_PROFILE=reader
-make postgres-svc-role-snapshot SVC_NAME=product ROLE_PROFILE=reader
+make postgres-svc-role-inventory SVC_NAME=product ROLE_PROFILE=administration
+make postgres-svc-role-snapshot SVC_NAME=product ROLE_PROFILE=administration
 ```
 
-Provisioning creates `go_product_reader`, restricted to CONNECT/USAGE/SELECT on
-`public.product`, and the dedicated workload Secret with exactly `database-url` and `ca.crt`.
-It obtains the CNPG CA from `<environment>-postgres-product-ca` and uses `sslmode=verify-full`
-with `/etc/product-service/postgres/ca.crt`. Administration runs through the existing CNPG primary;
-credentials do not appear in Make arguments or logs. Ordinary reapply preserves the password.
-A role without its Secret is a recovery condition, not permission to silently generate a replacement.
+Provisioning creates or reconciles:
 
-Verification opens a new connection using the actual Secret, checks effective identity and
-privileges, performs reads and rollback-safe denial probes, and proves Java owner reads and
-unchanged schema/catalog identity. Each SQL operation owns a fresh bounded loopback port-forward
-and cleans it up because a cluster transport may close a tunnel after one database connection.
-Destructive denial tests belong only to the disposable suite. Never use the security
-fixture-loading harness against these shared databases.
+- `go_product_reader`: login, no inheritance, Product table read only;
+- `go_product_migrator`: login, no inheritance, may `SET ROLE product` and cannot administer it;
+- `go_product_seeder`: login, no inheritance, Product/history reads plus insert-only Product access
+  after migration applies grants;
+- `product_admin.target_identity`: a `postgres`-owned single-row marker with environment, generated
+  instance UUID, CNPG Cluster UID, and seed policy;
+- separate reader, migrator, seeder, and target Secrets in the service namespace.
 
-## Local-dev deployment and verification
-
-Build the intended source with `make go-svc-image-check SVC_NAME=product`. This produces the
-source-derived `insurance-hub-product-api:git-<12-hex-revision>` image. Tag that checked image
-locally as `insurance-hub-product-api:<1.x.y>-local.<12-hex-revision>` using `docker tag`, then
-verify both references have the same image ID and the OCI source revision matches the suffix.
-Set the local Go overlay's `images[].newTag` and `DEPLOY_IMAGE_REF` to the versioned local tag.
-Keep the `-local.<revision>` suffix so the local build cannot be mistaken for the QA release
-image with the same version number. The deployment preflight inspects the local image label.
-With reader prerequisites verified, run:
+Each credential Secret contains only `database-url` and `ca.crt`. The target Secret contains only
+`target.json` and no credential. The API references only the reader Secret.
 
 ```sh
+make postgres-svc-role-provision SVC_NAME=product ROLE_PROFILE=administration
+make postgres-svc-role-verify SVC_NAME=product ROLE_PROFILE=administration
+make postgres-svc-role-snapshot SVC_NAME=product ROLE_PROFILE=administration
+```
+
+Verification opens new TLS connections with the actual Secrets. It proves reader access, reader
+write/DDL denial, migrator owner-role assumption, seeder update/delete/DDL denial, and marker-write
+denial using SQLSTATE `42501`. A role without its matching Secret, a changed CNPG UID, or a marker
+that differs from its protected target is a recovery condition; provisioning does not silently
+replace it.
+
+## Build and initialize local-dev
+
+Build and inspect the intended image, tag it with the local release convention, and load it:
+
+```sh
+make go-svc-image-check SVC_NAME=product
 make go-svc-deploy-check SVC_NAME=product
 make go-svc-deploy-preflight SVC_NAME=product
 make go-svc-image-load SVC_NAME=product
-make go-svc-deploy SVC_NAME=product
-make go-svc-deploy-status SVC_NAME=product
-make go-svc-deploy-verify SVC_NAME=product
 ```
 
-Preflight checks exact coordinates, image, Secret key names, Java ownership/routing, selectors,
-Services, Pods, EndpointSlices, and route exposure. Local apply performs server dry-run and a
-bounded rollout and compares sanitized before/after schema/catalog snapshots. For an intentional
-image or configuration change, first record the observed current image/ConfigMap and export
-`DEPLOY_PREVIOUS_IMAGE_REF` or `DEPLOY_PREVIOUS_CONFIG_MAP` respectively; undeclared drift blocks
-apply. Clear those previous-state variables after successful verification.
+The reviewed service catalog at `scripts/go/service/catalog.json` owns each deployment target.
+For `product.deploymentTargets.local-dev.initialization`, set `migrationTimeout`, `targetRevision`,
+`credentialRevision` and `attempt` before deploying. Increment `attempt` only after retaining and
+inspecting a failed or ambiguous run. The same fields apply to every registered service and target;
+there are no service-prefixed release variables.
 
-`deploy-verify` checks the effective deployment and reader and runs anonymous HTTP/gRPC/management
-checks via owned loopback forwards, cleaning them up on failure too. Internal-only Services do
-not establish caller authentication or gateway-exclusive access. Follow the
-[security baseline](security-baseline.md#go-deployment-exposure-gate-for-issue-134) to separately
-exercise authenticated gateway `/api/products` and `/api/products/TRI` plus its negative-credential
-subset. Correlate the effective Java destination with its Service endpoints; equal Java/Go JSON
-does not establish which service the gateway reached. Keep tokens out of arguments and evidence.
-
-## QA activation and verification
-
-Before the activation PR, establish a fresh QA preflight using the explicit context, reader
-inventory/proof, automatically published image availability, node capacity, and full rendered QA
-diff. Require the dormant overlay semantic tag to match the release and bot commit; do not
-manually retag or replace the release-owned version.
-
-The activation PR adds only `./product` to the aggregate. Review the entire render and update the
-phase-specific activation checks described above. The QA source stays on `main` with `wait` and
-`prune`; existing gateway routes, the release-owned semantic tag, and `./product/legacy` remain
-intact.
-
-After merge, await reconciliation and inspect:
+`go-svc-deploy` verifies the administration profile, computes the full release identity from the
+local image and repository assets, dry-runs and applies the release-specific Job, waits at most seven
+minutes for that exact Job, re-verifies administration, then applies the API and waits for rollout.
+The API step must leave the post-initialization catalog/schema identity unchanged.
 
 ```sh
-kubectl --context qa-insurance-hub -n flux-system get gitrepository insurance-hub
-kubectl --context qa-insurance-hub -n flux-system get kustomization qa-svc
+make go-svc-deploy SVC_NAME=product
+make go-svc-deploy-status SVC_NAME=product DEPLOY_EXPECTED_GATEWAY_PHASE=go
+make go-svc-deploy-verify SVC_NAME=product DEPLOY_EXPECTED_GATEWAY_PHASE=go
 ```
 
-Record their ready conditions and actual source/applied revisions. Set all QA target variables,
-including `DEPLOY_SOURCE_REVISION`, then run `go-svc-deploy-preflight`, `go-svc-deploy-status`,
-and `go-svc-deploy-verify` with `SVC_NAME=product`. Repeat the independent gateway checks and
-before/after accepted catalog identity comparisons. Record pod image IDs and compare with the
-recorded release coordinates. Direct QA `go-svc-deploy`, image load, and stop are rejected by design.
+For a fresh database, expect migration history version 1 and the four base products. For adoption,
+expect the compatible table and every existing row/definition to remain while missing base products
+are inserted. Extra or modified rows are preserved. Incompatible schema/history, target mismatch,
+or unexpected permissions must abort before API rollout.
 
-If Flux DNS and GHCR pulls fail together, inspect the host forwarding condition described in
-[cluster prerequisites](../../../../k8s/base-cluster-how-tos.md#prerequisites) before changing
-repository manifests. A maintainer checks `sudo iptables -L FORWARD -v -n`, applies
-`sudo iptables -P FORWARD ACCEPT` only if needed, and persists it with
-`sudo netfilter-persistent save`. No Docker/LXD restart is required for that rule. After recovery,
-require fresh source, reconciliation, and image-pull evidence; do not bypass Flux with direct apply.
+## Publish and stage the QA release
 
-## Configuration and credential rollout
+A qualifying canonical `main` push runs **Go Service Release**. It builds once, publishes the
+semantic and source tags, resolves the immutable image digest, and prepares the service's configured
+`releaseTargets`. The workflow contains no Product or QA branches. Product currently selects `qa`
+in `scripts/go/service/catalog.json`; its target configuration owns the bundle path, resource names,
+time budgets, target/credential revisions and retry attempt.
 
-Kustomize's generated ConfigMap hash causes a pod-template change for non-secret configuration.
-Change only the intended Go configuration, render/check, and apply locally or merge its reviewed
-QA change. Prove a newly ready Pod received the value and still serves reads. Follow the separate
-[Product observability runbook](observability-runbook.md) for the guarded telemetry activation and
-verification sequence; `OTEL_ENABLED=false` remains explicit outside that sequence.
+For a target with `initialization`, release preparation writes only its source/init/API bundle.
+It does not advance the API overlay's tag while the shared owner is still active. For a target
+without initialization, the same tooling updates the configured overlay's semantic image tag.
+This capability choice is explicit catalog data, not a service-name special case.
 
-A mutable Secret update does not change an environment variable in an existing process.
-Prepare a non-secret pod-template annotation in the selected environment's deployment patch:
+The shared implementation lives in `scripts/go/service/release.py` and
+`scripts/go/service/deployment.py`. Product's entry point delegates to that lifecycle engine;
+`services/product-service/scripts/product_deployment_checks.py` owns only the Product workload,
+SQL, reader, gateway and compatibility checks. A future service registers targets and supplies its
+own checks without copying release generation or Job ordering logic.
+
+The administration Kustomize roots are `k8s/apps/svc/product/base/administration` and
+`k8s/overlays/<environment>/svc/product/administration`. Parent API kustomizations deliberately
+exclude those directories from `resources`; directory nesting does not enroll a Job in API rollout.
+
+The root `k8s/flux/qa/kustomization.yaml` includes only `./flux-system`, so the generated Product
+tuple is dormant. Confirm the release source SHA, image digest, migration/catalog hashes, normalized
+timeout, target and credential revisions, Job name, source references, API dependency, and absence
+of mutable tags in the tuple. A successful release workflow does not prove QA pull access or grant
+authorization for activation.
+
+A reviewed retry increments `product.deploymentTargets.qa.initialization.attempt` in the catalog,
+then regenerates the same release through the generic interface:
+
+```sh
+make go-svc-release-prepare \
+  RELEASE_SERVICE=product RELEASE_TARGET=qa \
+  RELEASE_REPOSITORY=igor-baiborodine/insurance-hub \
+  RELEASE_VERSION='<1.x-semantic-version>' \
+  RELEASE_SOURCE_COMMIT='<full-source-sha>' \
+  RELEASE_IMAGE_DIGEST='sha256:<64-hex-digest>' \
+  RELEASE_OUTPUT=/tmp/product-release-paths
+```
+
+`RELEASE_TARGET` optionally selects one registered target; omitting it uses `releaseTargets`.
+`RELEASE_OUTPUT` receives the exact NUL-delimited path list consumed by Git staging. It is not the
+bundle destination: destinations come from the validated catalog. The local prepare command writes
+files only; commit/push and live activation remain separately authorized actions.
+
+Do this only after inspecting the retained failed Job and proving the correction. Do not change
+assets, revisions, or timeout while calling the result a retry of the same release.
+
+## Activate and verify QA
+
+Before activation, provision and verify the QA administration profile, record sanitized before
+state, prove Java Product absence, verify the published digest is pullable, and render the full Flux
+and QA desired state. The staged QA Product overlay marks its current resources with Flux prune
+disabled so transfer cannot delete them between owners.
+
+Activation is one reviewed change: remove `./product` from
+`k8s/overlays/qa/svc/kustomization.yaml` and add the release tuple below to
+`k8s/flux/qa/kustomization.yaml`:
 
 ```yaml
-spec:
-  template:
-    metadata:
-      annotations:
-        insurance-hub.io/product-reader-credential-revision: "rotation-<UTC-change-id>"
+resources:
+  - ./flux-system
+  - ./releases/product/release.yaml
 ```
 
-Choose a new revision for each rotation/restoration. Review that change before rotating, especially
-in QA where it must merge and reconcile promptly. Record the previous Pods/UIDs, generation,
-image, ConfigMap, and schema/catalog identity. Use an unused recovery path in a private directory
-outside the repository; the tool creates the file with mode 0600 and exclusive creation:
+After merge, let Flux reconcile. Do not apply the Job or API directly. Observe the exact source,
+prerequisite, and stable API owners:
 
 ```sh
-export POSTGRES_ROLE_RECOVERY_FILE='/absolute/private-directory/reader-before-rotation'
-make postgres-svc-role-rotate SVC_NAME=product ROLE_PROFILE=reader
-make postgres-svc-role-verify SVC_NAME=product ROLE_PROFILE=reader
+kubectl --context qa-insurance-hub -n flux-system get gitrepository qa-product-release-<id>
+kubectl --context qa-insurance-hub -n flux-system get kustomization \
+  qa-product-init-<id>-a<attempt> qa-product-api
+kubectl --context qa-insurance-hub -n qa-svc get job qa-product-init-<id>-a<attempt>
 ```
 
-Apply the annotation locally through `go-svc-deploy`, or merge/reconcile it through Flux in QA.
-Verify rollout completion, replacement Pod UIDs, new reader connections, reads, safe denials,
-and unchanged catalog/Java behavior. The old password can no longer open connections, but
-existing sessions may survive until the old process exits. A Secret object update or an old
-connection's successful query is not sufficient proof. Retain the recovery file until replacement
-Pods and new connections pass. Remove it through the owner's secure credential-retention procedure.
+Require the source revision and applied revisions to match the tuple, the exact Job to complete,
+and `qa-product-api` to report that exact prerequisite in `dependsOn`. Record the Pod image ID and
+digest, role proof, schema/history, accepted catalog identity, gateway reads, and Java absence. Then
+run the guarded QA status and verification commands with the complete QA selection. Direct QA
+deployment, image load, and stop remain forbidden.
 
-Rotation changes the database and Secret separately. The tool attempts to restore both on a
-partial failure. Inspect its result before retrying; if automatic recovery failed, reconcile the
-role and Secret through the protected administrative recovery procedure first. Do not print the
-Secret or fall back to Java's owner login. Once both are consistent and a fresh login works,
-restoring the saved password uses the same guarded rotate target:
-
-```sh
-export POSTGRES_ROLE_RESTORE_FILE='/absolute/private-directory/reader-before-rotation'
-export POSTGRES_ROLE_RECOVERY_FILE='/absolute/private-directory/reader-before-restoration'
-make postgres-svc-role-rotate SVC_NAME=product ROLE_PROFILE=reader
-unset POSTGRES_ROLE_RESTORE_FILE
-```
-
-That target requires the current Secret/password to authenticate; it cannot repair an already
-inconsistent pair automatically. Restoration still needs a new annotation revision, Pod rollout,
-and full verification. Do not repeatedly retry a failed rotation with the same recovery output
-path; preserve that file and use a new path after inspecting state.
+After both owners have reconciled and the Product Deployment, Services, and ConfigMap retain their
+UIDs under `qa-product-api`, remove the temporary prune-disabled annotation from the Product overlay
+through a separate reviewed Git change. Reconcile again and confirm the stable owner retains the
+same resource UIDs. Do not combine that cleanup with the initial ownership transfer.
 
 ## Abort, stop, and restoration
 
-Abort on unavailable image/Secret, unknown grant consumer, catalog drift, unexpected exposure,
-Java route changes, insufficient capacity, or failed readiness/drain evidence. Retain the failed
-observations and recover before continuing. Do not recapture expected fixtures automatically.
+Abort on target/Cluster UID mismatch, incomplete role/Secret pairs, unexpected writer or Java
+Product resource, schema/history incompatibility, catalog drift, failed Job, image/source mismatch,
+or unavailable release. Retain the failed Job and sanitized observations.
 
-For local-dev stop and restore:
+For an initialization failure:
+
+1. Inspect Job conditions, events, redacted logs, target identity, role verification, and catalog
+   snapshot. Never print Secret YAML or credential-bearing URLs.
+2. Fix the external cause without destructive down migration, reset, or catalog overwrite.
+3. Generate a new attempt identity with the same release inputs and review the tuple.
+4. Reconcile and prove safe replay plus unchanged pre-existing catalog values.
+
+API rollback selects a previously qualified Go image compatible with migration version 1. It does
+not roll back schema, delete history, reseed over existing rows, or restart Java. Backup restoration
+is a separate platform operation. Keep the current and immediately previous successful release and
+all unresolved failures. Prune older release Jobs/sources only after no dependency references them
+and required evidence is retained.
+
+Local `go-svc-stop` scales only the Go API to zero and preserves Product data; it does not provide a
+serving fallback. Restore the accepted Go release through the guarded deployment path. In QA, change
+the reviewed release tuple or activation resource through Git and Flux; never suspend reconciliation
+or manufacture rollback with direct apply.
+
+## Credential rotation and revocation
+
+Reader rotation continues to use `ROLE_PROFILE=reader` and a protected unused recovery file. A new
+pod-template credential revision is required so new API Pods open connections with the new Secret.
+Migrator/seeder rotation uses `ROLE_PROFILE=administration`, rotates both elevated identities, and
+must also produce a new release credential revision and prerequisite identity.
 
 ```sh
-make go-svc-stop SVC_NAME=product
-make postgres-svc-role-snapshot SVC_NAME=product ROLE_PROFILE=reader
-# Verify Java gateway reads while Go is stopped, then restore its desired replicas.
-make go-svc-deploy SVC_NAME=product
-make go-svc-deploy-verify SVC_NAME=product
+export POSTGRES_ROLE_RECOVERY_FILE='/absolute/private-directory/admin-before-rotation.json'
+make postgres-svc-role-rotate SVC_NAME=product ROLE_PROFILE=administration
+make postgres-svc-role-verify SVC_NAME=product ROLE_PROFILE=administration
 ```
 
-Stop scales only Go to zero, waits for its Pods/endpoints to disappear, and verifies Java and
-catalog state. It does not remove the database or reader Secret. To abort a failed local image or
-configuration rollout, restore the accepted overlay, declare the observed previous image/config
-where required, and apply/verify it. Inspect failures that prevent guarded preflight before any
-separately reviewed repair; the target is not a universal repair bypass.
+Retain the mode-0600 recovery file through successful Job/API qualification, then dispose of it
+through the credential owner. Rotation attempts automatic restoration on partial failure; inspect
+the result before retrying.
 
-In QA, remove only `./product` from the aggregate through a reviewed Git change while retaining
-`./product/legacy`. Flux pruning removes Go resources. Verify reconciliation, absent Go endpoints,
-Java gateway reads, and unchanged catalog. Restore the exact accepted semantic
-version/configuration and re-add `./product` through review. A manual scale-down that Flux reverses
-is not durable stop;
-never suspend reconciliation or delete shared databases/PVCs/Java resources to stop Go. The
-activation-aware checks must support and test this reviewed stopped state too.
+Administrative revocation is a deliberate decommissioning action. It requires no Product init Jobs
+to exist and exact confirmation:
 
-For an image/configuration-only rollback, restore the last accepted Go desired state through Git
-and verify reconciliation. For credential rollback, follow the protected restoration procedure
-above; reverting Git alone cannot restore a database password.
+```sh
+export POSTGRES_ROLE_CONFIRM_REVOKE="product/administration/$POSTGRES_ROLE_ENV"
+make postgres-svc-role-revoke SVC_NAME=product ROLE_PROFILE=administration
+```
 
-Reader revocation is for deliberate decommissioning after the Go Deployment has been removed,
-not routine scale-to-zero. The role tool refuses revocation while the Deployment exists. After
-reviewing that separate operation, set `POSTGRES_ROLE_CONFIRM_REVOKE=product/reader/<environment>`
-and run `make postgres-svc-role-revoke SVC_NAME=product ROLE_PROFILE=reader`. It preserves Java
-and the catalog; restoration then requires explicit reprovisioning before restoring Go.
+It removes migrator/seeder membership, roles, and Secrets while preserving the reader, target marker,
+schema, history, and catalog. It is not routine cleanup after a successful release.
 
-## Acceptance evidence and handoff
+## Evidence and handoff
 
-Keep sanitized ticket evidence in the ignored `ai/artifacts/epic-4.2/issue-134/` directory, with
-UTC time, context/namespaces, source/Flux revisions, image reference/digest/ID, platform, Deployment
-generation, ready EndpointSlices, Pod UIDs, configuration revision, reader proof, accepted
-schema/catalog identity, Java routing observations, commands, outcomes, and CI run references.
-Never retain passwords, tokens, full URLs containing credentials, or raw Secret YAML there.
+Keep sanitized evidence in the resolved issue #190 artifact directory. Record UTC time, context and
+namespaces, CNPG name/UID, target-contract and credential revisions, full source revision, image
+reference/digest/ID, migration/catalog hashes, normalized timeout, release ID and attempt, Flux
+source/applied revisions, Job UID/result, API Pod UIDs, role/SQLSTATE proof, schema/history/catalog
+identity, gateway observations, Java absence, commands, outcomes, and cleanup.
 
-Issue #134's accepted QA handoff uses release `product-service/v1.1.0`, source revision
-`854aab61920170f4740c56487251b3612df1e1ba`, image digest
-`sha256:7ca2e64ad560f35194444b67f2c37bd8de243ffecc3f34eaef179c1048621a99`, and restored Flux
-revision `ff43bfaf9baad6c9a6219d20d95b29954edd8eb4`. At the final audit, Go and Java each had one
-ready replica, Go used the rotated restricted-reader Secret through a fresh database connection,
-both Go Services were internal `ClusterIP`, and catalog/schema identity and Java gateway routing
-were unchanged. These coordinates are provenance for #135 and #136, not a substitute for their
-own fresh environment preflight.
-
-Separate rendered, fake-adapter, disposable container/Kind, hosted CI, shared local-dev, and QA
-results. Image tests do not prove cluster exposure. Port-forwards do not prove routes are absent.
-The disposable suite owns disruptive database failures, locks, destructive SQL, and blocked-work
-cases; shared environments own ordinary startup, Go-only rollout/restart/drain/stop/restoration,
-safe permission checks, and Java/data preservation.
-
-Record idle and in-flight termination against the 10-second application shutdown budget and
-30-second Kubernetes grace period. Inspect loss/recovery of readiness and release of old reader
-connections. Map AC134-01 through AC134-10 to evidence in the final ticket record and keep failed
-or unexecuted gates open. #135 owns telemetry delivery, #136 integrated qualification and test-route
-rollback, and #137 existing gateway cutover; none replaces failed #134 deployment acceptance.
+Never retain passwords, tokens, credential-bearing URLs, raw Secrets, or full product definitions.
+Separate offline render, fake-adapter, disposable Flux/CNPG, local-dev, and QA evidence. A later
+environment cannot inherit an earlier environment's result, and an unexecuted live gate remains
+open.

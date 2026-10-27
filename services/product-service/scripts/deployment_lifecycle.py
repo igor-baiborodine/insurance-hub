@@ -23,7 +23,7 @@ from urllib.request import urlopen
 
 from product_process import run_cli
 
-from deployment import Target, forwards
+from product_deployment_checks import Target, forwards
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTEXT = "kind-local-dev-insurance-hub"
