@@ -29,6 +29,8 @@ OVERLAYS = {
     "local-gateway": "k8s/overlays/local-dev/svc/agent-portal-gateway/legacy",
     "qa-gateway": "k8s/overlays/qa/svc/agent-portal-gateway/legacy",
 }
+QA_FLUX_ROOT = REPOSITORY_ROOT / "k8s/flux/qa/kustomization.yaml"
+QA_RELEASE_BUNDLE = "./releases/product/release.yaml"
 
 
 class DeploymentCheckError(RuntimeError):
@@ -81,6 +83,13 @@ def main(_argv: Sequence[str] | None = None) -> int:
                 "--qa-gateway",
                 str(paths["qa-gateway"]),
             ]
+            flux_root = yaml.safe_load(QA_FLUX_ROOT.read_text(encoding="utf-8"))
+            resources = flux_root.get("resources", []) if isinstance(flux_root, dict) else []
+            if QA_RELEASE_BUNDLE in resources:
+                bundle = QA_FLUX_ROOT.parent / QA_RELEASE_BUNDLE
+                if not bundle.is_file():
+                    raise DeploymentCheckError("active QA Product release bundle is missing")
+                arguments.append("--qa-release-active")
             if check_render.main(arguments) != 0:
                 return 1
     except (DeploymentCheckError, OSError, TypeError, ValueError) as error:

@@ -133,23 +133,20 @@ def test_product_transfer_preserves_unrelated_inventory():
     # Only Go Product transfers owners; unrelated services retain their exact resources.
     source = ROOT / "k8s/overlays/qa/svc/kustomization.yaml"
     original = yaml.safe_load(source.read_text())
-    assert original["resources"].count("./product") == 1
+    assert "./product" not in original["resources"]
     kubectl = os.environ.get("KUBECTL", "kubectl")
-    baseline = deployment_check.render(kubectl, source.parent)
+    transferred = deployment_check.render(kubectl, source.parent)
     product = deployment_check.render(kubectl, source.parent / "product")
     legacy = deployment_check.render(kubectl, source.parent / "product/legacy")
     # when
     with tempfile.TemporaryDirectory(dir=source.parent, prefix="q04-render-") as directory:
         scratch = Path(directory)
         remaining = {
-            "resources": [
-                "../" + item.removeprefix("./")
-                for item in original["resources"]
-                if item not in {"./product", "./product/legacy"}
-            ]
+            "resources": ["../" + item.removeprefix("./") for item in original["resources"]]
+            + ["../product"]
         }
         (scratch / "kustomization.yaml").write_text(yaml.safe_dump(remaining))
-        rendered = deployment_check.render(kubectl, scratch)
+        staged = deployment_check.render(kubectl, scratch)
 
     def identity(item):
         return (
@@ -161,28 +158,25 @@ def test_product_transfer_preserves_unrelated_inventory():
 
     # then
     legacy_ids = {identity(item) for item in legacy}
-    go_only_baseline = [item for item in baseline if identity(item) not in legacy_ids]
     moved_ids = {identity(item) for item in product}
     assert all(
         item["metadata"].get("annotations", {}).get("kustomize.toolkit.fluxcd.io/prune")
         == "disabled"
         for item in product
     )
-    expected = {
-        identity(item): item for item in go_only_baseline if identity(item) not in moved_ids
-    }
-    assert {identity(item): item for item in rendered} == expected
+    expected = {identity(item): item for item in staged if identity(item) not in moved_ids}
+    assert {identity(item): item for item in transferred} == expected
     assert {identity(item): item for item in product} == {
-        identity(item): item for item in go_only_baseline if identity(item) in moved_ids
+        identity(item): item for item in staged if identity(item) in moved_ids
     }
 
     def require_java_absent(items):
         assert not ({identity(item) for item in items} & legacy_ids), "Java Product reintroduced"
 
-    require_java_absent(rendered + product)
+    require_java_absent(transferred + product)
     # when / then
     with pytest.raises(AssertionError, match="Java Product reintroduced"):
-        require_java_absent(rendered + product + legacy)
+        require_java_absent(transferred + product + legacy)
 
 
 @pytest.mark.parametrize(
@@ -241,7 +235,7 @@ def test_real_administration_overlay_is_separate_and_bounded(
     }
 
 
-def test_api_and_shared_qa_owner_exclude_administration_and_java_credentials():
+def test_api_and_shared_qa_owner_separate_release_and_credentials():
     # given
     kubectl = os.environ.get("KUBECTL", "kubectl")
 
@@ -256,15 +250,14 @@ def test_api_and_shared_qa_owner_exclude_administration_and_java_credentials():
     assert "migrator-creds" not in rendered
     assert "seeder-creds" not in rendered
     identities = {(item["kind"], item["metadata"]["name"]) for item in aggregate}
-    assert ("Deployment", "qa-product-api") in identities
+    assert ("Deployment", "qa-product-api") not in identities
     assert ("Deployment", "qa-product-api-legacy") not in identities
     assert not any("product-init" in name for _, name in identities)
 
 
-def test_product_release_bundle_is_dormant_until_explicit_activation():
+def test_product_release_bundle_is_active_after_reviewed_transfer():
     # given / when
     root = yaml.safe_load((ROOT / "k8s/flux/qa/kustomization.yaml").read_text())
 
     # then
-    assert root["resources"] == ["./flux-system"]
-    assert "./releases/product/release.yaml" not in root["resources"]
+    assert root["resources"] == ["./flux-system", "./releases/product/release.yaml"]
