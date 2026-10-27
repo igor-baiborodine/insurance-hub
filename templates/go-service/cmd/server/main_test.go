@@ -45,7 +45,7 @@ func TestRun_LogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 	if decodeErr := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &entry); decodeErr != nil {
 		t.Fatalf("decode startup log: %v", decodeErr)
 	}
-	if entry["service"] != "go-service" || entry["level"] != "ERROR" ||
+	if entry["service_name"] != "go-service" || entry["level"] != "ERROR" ||
 		entry["msg"] != "configuration failed" {
 		t.Errorf("unexpected startup log: %#v", entry)
 	}

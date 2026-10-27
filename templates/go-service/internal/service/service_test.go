@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -134,6 +136,7 @@ func TestRun_CleansUpAfterLaterStartupFailureAndPreservesErrors(t *testing.T) {
 		*slog.Logger,
 		trace.TracerProvider,
 		propagation.TextMapPropagator,
+		transport.Settings,
 		transport.Echo,
 	) (grpcServer, error) {
 		return server, nil
@@ -187,6 +190,7 @@ func TestRun_ForcesGRPCStopAndReservesTelemetryCleanupTime(t *testing.T) {
 		*slog.Logger,
 		trace.TracerProvider,
 		propagation.TextMapPropagator,
+		transport.Settings,
 		transport.Echo,
 	) (grpcServer, error) {
 		return server, nil
@@ -275,6 +279,7 @@ func TestRun_BoundsSlowCleanupToOverallShutdownBudget(t *testing.T) {
 		*slog.Logger,
 		trace.TracerProvider,
 		propagation.TextMapPropagator,
+		transport.Settings,
 		transport.Echo,
 	) (grpcServer, error) {
 		return server, nil
@@ -352,6 +357,8 @@ func testConfig(timeout time.Duration) config.Config {
 	return config.Config{
 		ServiceName:     "go-service",
 		ShutdownTimeout: timeout,
+		RequestTimeout:  time.Second, ProbeTimeout: time.Second,
+		GRPC: config.GRPC{MaxReceiveBytes: 1048576, MaxSendBytes: 8388608},
 		Telemetry: config.Telemetry{
 			ExporterTimeout: time.Second,
 		},
@@ -626,4 +633,8 @@ func equalStrings(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+func (provider *fakeTelemetryProvider) MeterProvider() metric.MeterProvider {
+	return metricnoop.NewMeterProvider()
 }

@@ -38,7 +38,7 @@ Please note that the Kubernetes cluster dependencies can be installed by using t
 
 * **Git** `>=2.43.0`,
   see [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
-* **Go** `1.27.3` for Product and `1.27.2` for the service scaffold, see
+* **Go** `1.27.3` for Product and the service scaffold, see
   [Install Go](https://go.dev/doc/install). Each module requires its exact `go.mod` version.
 * **CPython 3.14.8** for auxiliary tooling governed by the current Python policy; use the owning
   isolated environment and Make targets described in
@@ -188,7 +188,7 @@ Use the owning Makefile targets for every Go operation, including tool installat
 maintenance, formatting, linting, tests, builds, execution, and generation. Do not replace them
 with direct Go or tool commands. Read the owning Makefile for supported targets and module scope.
 
-The current [Go service scaffold](templates/go-service/README.md) requires exact Go 1.27.2 and
+The current [Go service scaffold](templates/go-service/README.md) requires exact Go 1.27.3 and
 managed CPython 3.14.8. It pins Go tools under ignored `templates/go-service/.tools/` and uses the
 repository's root Python declarations, lock, and ignored `.venv/`. Run `bootstrap-tools`,
 `update-deps`, `update-proto-deps`, `format`, `format-proto`, and `gen-proto` only when their

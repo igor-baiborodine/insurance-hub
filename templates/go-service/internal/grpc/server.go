@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"buf.build/go/protovalidate"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -12,10 +13,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	grpcgo "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
+	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
 )
 
 const internalMessage = "internal error"
@@ -31,11 +34,19 @@ func IdentityEcho(ctx context.Context, message string) (string, error) {
 	return message, nil
 }
 
+type Settings struct {
+	RequestTimeout  time.Duration
+	MaxReceiveBytes int
+	MaxSendBytes    int
+	Observer        *telemetry.RequestObserver
+}
+
 // NewServer constructs the instrumented server and registers the generated ExampleService.
 func NewServer(
 	logger *slog.Logger,
 	tracerProvider trace.TracerProvider,
 	propagator propagation.TextMapPropagator,
+	settings Settings,
 	echo Echo,
 ) (*grpcgo.Server, error) {
 	if logger == nil {
@@ -51,6 +62,13 @@ func NewServer(
 		return nil, errors.New("create gRPC server: echo handler is required")
 	}
 
+	if settings.RequestTimeout <= 0 || settings.MaxReceiveBytes <= 0 ||
+		settings.MaxSendBytes <= 0 {
+		return nil, errors.New(
+			"create gRPC server: request timeout and message limits must be positive",
+		)
+	}
+
 	validator, err := protovalidate.New(
 		protovalidate.WithMessages(&scaffoldv1.EchoRequest{}),
 		protovalidate.WithDisableLazy(),
@@ -60,31 +78,48 @@ func NewServer(
 	}
 
 	server := grpcgo.NewServer(
-		grpcgo.StatsHandler(otelgrpc.NewServerHandler(
-			otelgrpc.WithTracerProvider(tracerProvider),
-			otelgrpc.WithPropagators(propagator),
-			otelgrpc.WithMeterProvider(metricnoop.NewMeterProvider()),
-		)),
+		grpcgo.MaxRecvMsgSize(settings.MaxReceiveBytes),
+		grpcgo.MaxSendMsgSize(settings.MaxSendBytes),
+		grpcgo.StatsHandler(
+			&requestStatsHandler{
+				observer: settings.Observer,
+				Handler: otelgrpc.NewServerHandler(
+					otelgrpc.WithTracerProvider(tracerProvider),
+					otelgrpc.WithPropagators(propagator),
+					otelgrpc.WithMeterProvider(metricnoop.NewMeterProvider()),
+					otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
+						return info.FullMethodName == scaffoldv1.ExampleService_Echo_FullMethodName
+					}),
+				),
+			},
+		),
 		grpcgo.UnaryInterceptor(validationInterceptor(logger, validator)),
 	)
 	scaffoldv1.RegisterExampleServiceServer(server, &exampleServer{
-		logger: logger,
-		echo:   echo,
+		logger:         logger,
+		requestTimeout: settings.RequestTimeout,
+		echo:           echo,
 	})
 	return server, nil
 }
 
 type exampleServer struct {
 	scaffoldv1.UnimplementedExampleServiceServer
-	logger *slog.Logger
-	echo   Echo
+	logger         *slog.Logger
+	requestTimeout time.Duration
+	echo           Echo
 }
 
 func (server *exampleServer) Echo(
 	ctx context.Context,
 	request *scaffoldv1.EchoRequest,
 ) (*scaffoldv1.EchoResponse, error) {
-	message, err := server.echo(ctx, request.GetMessage())
+	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
+	defer cancel()
+	message, err := server.echo(requestCtx, request.GetMessage())
+	if err == nil {
+		err = requestCtx.Err()
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return nil, status.Error(codes.Canceled, context.Canceled.Error())
@@ -130,5 +165,50 @@ func validationInterceptor(
 			return nil, status.Error(codes.Internal, internalMessage)
 		}
 		return handler(ctx, request)
+	}
+}
+
+type requestStateKey struct{}
+
+type requestStatsHandler struct {
+	stats.Handler
+	observer *telemetry.RequestObserver
+}
+
+func (handler *requestStatsHandler) TagRPC(
+	ctx context.Context,
+	info *stats.RPCTagInfo,
+) context.Context {
+	ctx = handler.Handler.TagRPC(ctx, info)
+	if handler.observer != nil &&
+		info.FullMethodName == scaffoldv1.ExampleService_Echo_FullMethodName {
+		return context.WithValue(ctx, requestStateKey{}, handler.observer.StartGRPC(ctx))
+	}
+	return ctx
+}
+
+func (handler *requestStatsHandler) HandleRPC(ctx context.Context, event stats.RPCStats) {
+	if end, ok := event.(*stats.End); ok {
+		if request, ok := ctx.Value(requestStateKey{}).(*telemetry.Request); ok {
+			request.Finish(ctx, rpcCodeName(status.Code(end.Error)))
+		}
+	}
+	handler.Handler.HandleRPC(ctx, event)
+}
+
+func rpcCodeName(code codes.Code) string {
+	switch code {
+	case codes.OK:
+		return "OK"
+	case codes.InvalidArgument:
+		return "INVALID_ARGUMENT"
+	case codes.Canceled:
+		return "CANCELLED"
+	case codes.DeadlineExceeded:
+		return "DEADLINE_EXCEEDED"
+	case codes.ResourceExhausted:
+		return "RESOURCE_EXHAUSTED"
+	default:
+		return "INTERNAL"
 	}
 }

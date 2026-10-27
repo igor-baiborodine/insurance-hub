@@ -42,14 +42,17 @@ func TestLoad_Defaults(t *testing.T) {
 			got.Telemetry.ExporterEndpoint,
 		)
 	}
-	if got.Telemetry.ExporterTimeout != 5*time.Second {
-		t.Errorf("Telemetry.ExporterTimeout = %v, want 5s", got.Telemetry.ExporterTimeout)
+	if got.Telemetry.ExporterTimeout != 2*time.Second {
+		t.Errorf("Telemetry.ExporterTimeout = %v, want 2s", got.Telemetry.ExporterTimeout)
 	}
 }
 
 func TestLoad_ValidOverrides(t *testing.T) {
 	// given
 	values := map[string]string{
+		environmentSetting:     "test",
+		serviceVersionSetting:  "test-revision",
+		serviceInstanceSetting: "test-instance",
 		serviceNameSetting:     "copy-service",
 		grpcAddressSetting:     "[::1]:0",
 		healthAddressSetting:   "localhost:0",
@@ -248,5 +251,59 @@ func mapLookup(values map[string]string) lookupEnv {
 	return func(name string) (string, bool) {
 		value, exists := values[name]
 		return value, exists
+	}
+}
+
+func TestLoad_RuntimeBoundsAndIdentity(t *testing.T) {
+	// given
+	valid := map[string]string{
+		otelEnabledSetting:         "true",
+		otelEndpointSetting:        "http://127.0.0.1:4317",
+		environmentSetting:         "staging",
+		serviceVersionSetting:      "sha-1234567",
+		serviceInstanceSetting:     "instance-123",
+		requestTimeoutSetting:      "3s",
+		probeTimeoutSetting:        "250ms",
+		grpcMaxReceiveBytesSetting: "2048",
+		grpcMaxSendBytesSetting:    "4096",
+	}
+	cases := []struct{ name, setting, value string }{
+		{"missing environment", environmentSetting, ""},
+		{"development environment", environmentSetting, "development"},
+		{"development version", serviceVersionSetting, "development"},
+		{"local instance", serviceInstanceSetting, "local-123"},
+		{"padded service", serviceNameSetting, " service "},
+		{"control character", serviceInstanceSetting, "private-marker\n"},
+		{"zero request timeout", requestTimeoutSetting, "0s"},
+		{"negative probe timeout", probeTimeoutSetting, "-1s"},
+		{"oversized receive limit", grpcMaxReceiveBytesSetting, "16777217"},
+		{"zero send limit", grpcMaxSendBytesSetting, "0"},
+		{"export exceeds shutdown", shutdownTimeoutSetting, "1s"},
+	}
+	// when
+	got, err := load(mapLookup(valid))
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Telemetry.Identity.Environment != "staging" || got.RequestTimeout != 3*time.Second ||
+		got.ProbeTimeout != 250*time.Millisecond || got.GRPC.MaxReceiveBytes != 2048 || got.GRPC.MaxSendBytes != 4096 {
+		t.Fatalf("unexpected runtime configuration: %+v", got)
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			values := make(map[string]string, len(valid)+1)
+			for key, value := range valid {
+				values[key] = value
+			}
+			values[test.setting] = test.value
+			// when
+			_, err := load(mapLookup(values))
+			// then
+			if err == nil || strings.Contains(err.Error(), "private-marker") {
+				t.Fatalf("unsafe or absent rejection: %v", err)
+			}
+		})
 	}
 }
