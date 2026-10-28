@@ -1,3 +1,3 @@
-// Package identity owns neutral runtime identity values.
-// Runtime implementation follows the module onboarding step.
+// Package identity provides neutral runtime identity values without process state,
+// environment loading, generation or service-specific validation policy.
 package identity

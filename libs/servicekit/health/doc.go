@@ -1,3 +1,3 @@
-// Package health owns lifecycle state and bounded caller-supplied readiness checks.
-// Runtime implementation follows the module onboarding step.
+// Package health provides lifecycle state and management HTTP probes. Callers own
+// readiness transitions, dependency clients and context-cooperative readiness checks.
 package health

@@ -3,6 +3,8 @@
 
 - [Servicekit](#servicekit)
   - [Package boundary](#package-boundary)
+  - [Configuration and identity](#configuration-and-identity)
+  - [Health probes and ownership](#health-probes-and-ownership)
   - [Owning commands](#owning-commands)
   - [Resolution and registration](#resolution-and-registration)
   - [Release and qualification](#release-and-qualification)
@@ -14,9 +16,9 @@
 
 `github.com/igor-baiborodine/insurance-hub/libs/servicekit` is the independently versioned
 runtime library owned by Insurance Hub repository maintainers. Igor Baiborodine is the initial
-accountable release maintainer. Module onboarding is implemented; the runtime packages are
-documentation-only until the subsequent extraction steps. Neither Product nor the scaffold
-currently depends on this module.
+accountable release maintainer. Configuration, neutral identity and health mechanics are
+implemented. Logging and telemetry provider extraction remain pending. Neither Product nor the
+scaffold currently depends on this module.
 
 ## Package boundary
 
@@ -31,8 +33,64 @@ currently depends on this module.
 The library contains no business models, DTOs, repositories, use cases, database schemas, server
 executable or generated contracts. `check-boundaries` rejects imports of other repository modules
 and additional public package roots. Source/API review must also reject business declarations
-that require no prohibited imports. There are currently no exported declarations or dependencies.
-The owning service explicitly composes future runtime objects and retains their cleanup ownership.
+that require no prohibited imports. The implemented packages use the standard library and the
+module's own `identity` package. The owning service composes runtime objects and retains their
+cleanup ownership.
+
+## Configuration and identity
+
+`config.Runtime` contains value-only request, probe and shutdown timeouts plus the diagnostic log
+level. It supports named composition or embedding, but has no promoted loading or validation
+method. A service's `internal/config.Load` supplies `config.Lookup` (normally `os.LookupEnv`),
+explicitly parses settings and invokes `config.ValidateRuntime`, `config.ValidateTelemetry` and
+its own validation before creating runtime dependencies. No package reads the environment or
+initializes process state on import.
+
+`DefaultRuntime`, `DefaultGRPC`, `DefaultHTTPServer` and `DefaultTelemetry` return fresh defaults.
+The address defaults are business HTTP `127.0.0.1:8080`, health `127.0.0.1:8081` and gRPC
+`127.0.0.1:9090`. Address constants do not create listeners or a business API. `LoadAddress`
+preserves explicit overrides, IPv6 and port zero; callers use `Address.Port` to apply their own
+collision policy. Scaffold adoption will change its existing health default in its separate PR.
+
+`ValueOrDefault` uses a fallback only when a value is absent; an explicitly empty value fails.
+`LoadPositiveDuration`, `LoadBoundedInt`, `ParseLogLevel` and `ParseBool` retain the consumer
+parsing semantics. `OptionalEndpoint` is the deliberate exception: absent or empty means no
+endpoint when export is disabled, and fails when enabled. Nonempty endpoints are validated even
+when disabled. OTLP/gRPC endpoints require HTTP(S), a host and nonzero numeric port; credentials,
+query values, fragments and OTLP/HTTP paths are rejected. A trailing slash is normalized away.
+
+Parsing errors retain only schema names and fixed reasons. All name arguments and both arguments
+to `Invalid` must be trusted schema text, never environment values or raw parser errors.
+`ErrorDetails` extracts those fields through wrappers and returns a constant category for unknown
+errors; it never renders the wrapper. It is not a general sanitizer for arbitrary message text.
+
+`identity.Identity` is a plain value containing namespace, service, version, instance, environment
+and implementation. It has no identity validator or generator. `ValidateTelemetry` checks a
+positive timeout and endpoint mechanics, without constraining identity or enforcing Product's
+enabled exactly-2s timeout. Product retains required database settings and credential redaction,
+pool bounds, QA/test identity, timeout relationships and listener collision rules. The scaffold
+retains its explicit non-development identity policy and ephemeral-listener behavior. These
+policies must still be called explicitly by each consumer; passing common validation is not a
+complete service validation result. Treat parsed settings, including endpoint URLs, as immutable
+after startup.
+
+## Health probes and ownership
+
+`health.NewState(timeout, check)` rejects nonpositive budgets and nil checks and starts not ready.
+The composition root calls `SetReady(true)` only after startup and `SetReady(false)` before drain.
+`Ready` reports lifecycle state only; `/readyz` also checks dependencies. The injected `Check` may
+compose several dependencies and must honor cancellation and return promptly. It runs synchronously
+under the shorter of the caller deadline and probe budget; the library creates no detached worker
+to hide a check that ignores cancellation. Clients and their cleanup remain caller-owned.
+
+`health.NewHandler` accepts a state returned by `NewState`. A `GET /readyz` returns 503 before
+startup, on dependency failure or cancellation, or after readiness withdrawal during the probe;
+bounded success returns 200. It rechecks cancellation and state after the dependency returns.
+`GET /livez` always returns 200 independently of dependencies. Bodies are fixed `live\n`,
+`ready\n` and `not ready\n`, with `text/plain; charset=utf-8` and `Cache-Control: no-store`.
+The standard HTTP mux provides method/path rejection. Dependency errors are never returned in
+responses. Listener creation, authentication/exposure policy, startup rollback and the overall
+shutdown budget remain with the service composition root.
 
 ## Owning commands
 
@@ -53,7 +111,10 @@ Checks never install tools. `TOOLS_BIN`, `GO` and `PYTHON` support explicit comp
 copy and compares both manifests. `update-deps` is the explicit manifest-maintenance operation.
 Formatting reuses the repository's gofumpt/goimports/golines pipeline and 100-column policy.
 The gate includes format, lint/vet, race, build, dependency, vulnerability and boundary checks.
-At onboarding, Go reports no test files; that is not evidence of runtime behavior.
+The config and health tests cover parsing, safe failures, default ports, explicit local validation,
+real HTTP probes, deadline/cancellation and readiness withdrawal. Identity is a value-only package;
+logger and telemetry remain documentation-only. These checks do not establish consumer adoption
+or complete service startup/shutdown behavior.
 
 The OTel pins reserved for extraction are v1.46.0 and otelgrpc v0.71.0, matching current consumers.
 Do not add unused runtime dependencies merely to populate `go.sum`; it is intentionally empty
