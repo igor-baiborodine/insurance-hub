@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -724,5 +725,24 @@ func validHost(host string) bool {
 }
 
 func invalid(name, problem string) error {
-	return fmt.Errorf("invalid %s: %s", name, problem)
+	return &validationError{setting: name, problem: problem}
+}
+
+// validationError contains only validator-owned setting names and reasons, never input values.
+type validationError struct {
+	setting string
+	problem string
+}
+
+func (err *validationError) Error() string {
+	return fmt.Sprintf("invalid %s: %s", err.setting, err.problem)
+}
+
+// ErrorDetails exposes safe configuration diagnostics without rendering arbitrary errors.
+// Unknown errors retain a constant category; wrappers cannot contribute text to the log fields.
+func ErrorDetails(err error) (setting, reason string) {
+	if validation, ok := errors.AsType[*validationError](err); ok {
+		return validation.setting, validation.problem
+	}
+	return "unknown", "could not load configuration"
 }

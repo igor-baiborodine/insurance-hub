@@ -31,7 +31,7 @@ func TestRun_LogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 		"OTEL_EXPORTER_OTLP_ENDPOINT",
 		"http://user:"+privateMarker+"@127.0.0.1:4317",
 	)
-	t.Setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "1s")
+	t.Setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "2s")
 	var output bytes.Buffer
 
 	// when
@@ -58,6 +58,11 @@ func TestRun_LogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 		entry["service_implementation"] != "go" || entry["level"] != "ERROR" ||
 		entry["msg"] != "configuration failed" {
 		t.Errorf("unexpected startup log: %#v", entry)
+	}
+	if entry["setting"] != "OTEL_EXPORTER_OTLP_ENDPOINT" ||
+		entry["reason"] != "must be an HTTP or HTTPS OTLP/gRPC URL" ||
+		entry["error"] != "[REDACTED]" {
+		t.Errorf("missing safe configuration diagnostic: %#v", entry)
 	}
 	if timestamp, ok := entry["time"].(string); !ok || !strings.HasSuffix(timestamp, "Z") {
 		t.Errorf("startup timestamp is not UTC: %#v", entry["time"])
@@ -166,5 +171,33 @@ func TestRunWith_LogsServiceFailureUsingConfiguredIdentity(t *testing.T) {
 	}
 	if _, hasLegacyAlias := entry["service"]; hasLegacyAlias {
 		t.Errorf("validated service log contains legacy identity alias: %#v", entry)
+	}
+}
+
+func TestRun_LogsUnknownConfigurationFailureSafely(t *testing.T) {
+	// given
+	var output bytes.Buffer
+	cause := errors.New("private-marker")
+	load := func() (config.Config, error) { return config.Config{}, cause }
+	runService := func(context.Context, config.Config, *slog.Logger) error {
+		t.Fatal("service started despite configuration failure")
+		return nil
+	}
+	// when
+	err := runWith(context.Background(), &output, load, runService)
+	// then
+	if !errors.Is(err, cause) {
+		t.Fatalf("original error lost: %v", err)
+	}
+	if strings.Contains(output.String(), "private-marker") {
+		t.Fatalf("unsafe log: %s", output.String())
+	}
+	var entry map[string]any
+	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry["setting"] != "unknown" || entry["reason"] != "could not load configuration" ||
+		entry["error"] != "[REDACTED]" {
+		t.Errorf("unsafe or incomplete diagnostic: %#v", entry)
 	}
 }

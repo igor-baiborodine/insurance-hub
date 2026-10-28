@@ -272,3 +272,35 @@ def test_go_bootstrap_does_not_invoke_non_go_tools(tooling: Tooling) -> None:
 
     # then
     assert "go install github.com/bufbuild/buf/cmd/buf@" in trace.read_text(encoding="utf-8")
+
+
+def test_default_make_shows_help_without_tool_setup(tooling: Tooling) -> None:
+    # given
+    fixture = new_fixture(tooling, "default-help")
+    before = inventory(fixture)
+    arguments = [
+        *tooling.make_arguments,
+        "--no-print-directory",
+        "-C",
+        str(fixture),
+        "GO=false",
+        "NODE=false",
+        "NPM=false",
+        "PYTHON=false",
+        "COMMON_GO_TOOLING_PYTHON=false",
+        f"COMMON_GO_TOOLING_DIR={fixture / '.common-go-tooling'}",
+        f"PRODUCT_TOOLING_REPOSITORY_ROOT={tooling.repository_root}",
+    ]
+    # when
+    output = run(
+        arguments,
+        cwd=fixture,
+        env=os.environ,
+        timeout_seconds=10,
+        activity="Product default help without tools",
+        capture=True,
+    )
+    # then
+    assert "Product service commands" in output
+    assert "make bootstrap-tools" in output
+    assert before == inventory(fixture)

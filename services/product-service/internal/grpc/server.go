@@ -88,17 +88,21 @@ func NewServer(
 	server := grpcgo.NewServer(
 		grpcgo.MaxRecvMsgSize(settings.MaxReceiveBytes),
 		grpcgo.MaxSendMsgSize(settings.MaxSendBytes),
-		grpcgo.StatsHandler(&requestStatsHandler{Handler: otelgrpc.NewServerHandler(
-			otelgrpc.WithTracerProvider(tracerProvider),
-			otelgrpc.WithPropagators(propagator),
-			otelgrpc.WithMeterProvider(metricnoop.NewMeterProvider()),
-			otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
-				return info.FullMethodName == productv1.ProductService_ListProducts_FullMethodName ||
-					info.FullMethodName == productv1.ProductService_GetProduct_FullMethodName
-			}),
-		)}),
+		grpcgo.StatsHandler(
+			&requestStatsHandler{
+				observer: settings.Observer,
+				Handler: otelgrpc.NewServerHandler(
+					otelgrpc.WithTracerProvider(tracerProvider),
+					otelgrpc.WithPropagators(propagator),
+					otelgrpc.WithMeterProvider(metricnoop.NewMeterProvider()),
+					otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
+						return info.FullMethodName == productv1.ProductService_ListProducts_FullMethodName ||
+							info.FullMethodName == productv1.ProductService_GetProduct_FullMethodName
+					}),
+				),
+			},
+		),
 		grpcgo.ChainUnaryInterceptor(
-			requestInterceptor(settings.Observer),
 			validationInterceptor(validator),
 		),
 	)
@@ -239,14 +243,12 @@ func validationInterceptor(
 
 type requestStateKey struct{}
 
-type requestStateSlot struct {
-	request *telemetry.Request
-}
-
 // The stats End event includes failures that occur after the unary handler returns,
-// including response encoding and the configured send-size check.
+// including response encoding and the configured send-size check. TagRPC starts
+// observation before decoding so registered calls rejected before dispatch also finish.
 type requestStatsHandler struct {
 	stats.Handler
+	observer *telemetry.RequestObserver
 }
 
 func (handler *requestStatsHandler) TagRPC(
@@ -254,14 +256,26 @@ func (handler *requestStatsHandler) TagRPC(
 	info *stats.RPCTagInfo,
 ) context.Context {
 	ctx = handler.Handler.TagRPC(ctx, info)
-	return context.WithValue(ctx, requestStateKey{}, &requestStateSlot{})
+	if handler.observer == nil {
+		return ctx
+	}
+	var operation string
+	switch info.FullMethodName {
+	case productv1.ProductService_ListProducts_FullMethodName:
+		operation = telemetry.OperationList
+	case productv1.ProductService_GetProduct_FullMethodName:
+		operation = telemetry.OperationGet
+	default:
+		return ctx
+	}
+	ctx, request := handler.observer.StartGRPC(ctx, operation)
+	return context.WithValue(ctx, requestStateKey{}, request)
 }
 
 func (handler *requestStatsHandler) HandleRPC(ctx context.Context, event stats.RPCStats) {
 	if end, ok := event.(*stats.End); ok {
-		if slot, ok := ctx.Value(requestStateKey{}).(*requestStateSlot); ok &&
-			slot.request != nil {
-			slot.request.Finish(
+		if request, ok := ctx.Value(requestStateKey{}).(*telemetry.Request); ok {
+			request.Finish(
 				ctx,
 				"rpc.response.status_code",
 				rpcCodeName(status.Code(end.Error)),
@@ -272,45 +286,43 @@ func (handler *requestStatsHandler) HandleRPC(ctx context.Context, event stats.R
 	handler.Handler.HandleRPC(ctx, event)
 }
 
-func requestInterceptor(observer *telemetry.RequestObserver) grpcgo.UnaryServerInterceptor {
-	return func(ctx context.Context, request any, info *grpcgo.UnaryServerInfo,
-		handler grpcgo.UnaryHandler,
-	) (any, error) {
-		if observer == nil {
-			return handler(ctx, request)
-		}
-		var operation string
-		switch info.FullMethod {
-		case productv1.ProductService_ListProducts_FullMethodName:
-			operation = telemetry.OperationList
-		case productv1.ProductService_GetProduct_FullMethodName:
-			operation = telemetry.OperationGet
-		default:
-			return handler(ctx, request)
-		}
-		ctx, state := observer.StartGRPC(ctx, operation)
-		ctx.Value(requestStateKey{}).(*requestStateSlot).request = state
-		return handler(ctx, request)
-	}
-}
-
 func rpcCodeName(code codes.Code) string {
 	switch code {
 	case codes.OK:
 		return "OK"
 	case codes.InvalidArgument:
 		return "INVALID_ARGUMENT"
-	case codes.NotFound:
-		return "NOT_FOUND"
 	case codes.Canceled:
 		return "CANCELLED"
 	case codes.DeadlineExceeded:
 		return "DEADLINE_EXCEEDED"
 	case codes.ResourceExhausted:
 		return "RESOURCE_EXHAUSTED"
+	case codes.Unknown:
+		return "UNKNOWN"
+	case codes.NotFound:
+		return "NOT_FOUND"
+	case codes.AlreadyExists:
+		return "ALREADY_EXISTS"
+	case codes.PermissionDenied:
+		return "PERMISSION_DENIED"
+	case codes.FailedPrecondition:
+		return "FAILED_PRECONDITION"
+	case codes.Aborted:
+		return "ABORTED"
+	case codes.OutOfRange:
+		return "OUT_OF_RANGE"
+	case codes.Unimplemented:
+		return "UNIMPLEMENTED"
+	case codes.Internal:
+		return "INTERNAL"
 	case codes.Unavailable:
 		return "UNAVAILABLE"
+	case codes.DataLoss:
+		return "DATA_LOSS"
+	case codes.Unauthenticated:
+		return "UNAUTHENTICATED"
 	default:
-		return "INTERNAL"
+		return "UNKNOWN"
 	}
 }
