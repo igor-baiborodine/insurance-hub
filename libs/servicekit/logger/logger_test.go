@@ -151,6 +151,42 @@ func TestNewIdentity_RedactsAttributesRecursivelyAndUsesUTC(t *testing.T) {
 	}
 }
 
+func TestNew_RedactsSensitiveHandlerGroupsAndBoundAttributes(t *testing.T) {
+	const privateMarker = "private-marker"
+	var output bytes.Buffer
+	log := logger.New(&output, "go-service", slog.LevelInfo)
+
+	log.WithGroup("customer").Info("safe message", "name", privateMarker)
+	log.WithGroup("request").With("name", privateMarker).
+		WithGroup("details").Info("safe message", "note", privateMarker)
+	log.WithGroup("public").WithGroup("payment").Info(
+		"safe message", "note", privateMarker,
+	)
+	log.WithGroup("public").Info("safe message", "name", "kept")
+
+	if strings.Contains(output.String(), privateMarker) {
+		t.Fatalf("sensitive handler group exposed private marker: %s", output.String())
+	}
+	entries := decodeEntries(t, output.String())
+	if len(entries) != 4 {
+		t.Fatalf("entry count = %d, want 4", len(entries))
+	}
+	if customer := entries[0]["customer"].(map[string]any); customer["name"] != "[REDACTED]" {
+		t.Errorf("customer name = %#v", customer["name"])
+	}
+	request := entries[1]["request"].(map[string]any)
+	if request["name"] != "[REDACTED]" ||
+		request["details"].(map[string]any)["note"] != "[REDACTED]" {
+		t.Errorf("request group was not fully redacted: %#v", request)
+	}
+	if payment := entries[2]["public"].(map[string]any)["payment"].(map[string]any); payment["note"] != "[REDACTED]" {
+		t.Errorf("payment note = %#v", payment["note"])
+	}
+	if public := entries[3]["public"].(map[string]any); public["name"] != "kept" {
+		t.Errorf("safe group name = %#v", public["name"])
+	}
+}
+
 func testIdentity() identity.Identity {
 	return identity.Identity{
 		ServiceNamespace: "insurance-hub",

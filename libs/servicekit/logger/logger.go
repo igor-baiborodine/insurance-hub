@@ -67,7 +67,8 @@ func newLogger(output io.Writer, level slog.Level) *slog.Logger {
 type requiredKey struct{}
 
 type safeHandler struct {
-	next slog.Handler
+	next           slog.Handler
+	sensitiveGroup bool
 }
 
 func (handler *safeHandler) Enabled(ctx context.Context, level slog.Level) bool {
@@ -80,7 +81,7 @@ func (handler *safeHandler) Enabled(ctx context.Context, level slog.Level) bool 
 func (handler *safeHandler) Handle(ctx context.Context, record slog.Record) error {
 	safeRecord := slog.NewRecord(record.Time, record.Level, record.Message, record.PC)
 	record.Attrs(func(attribute slog.Attr) bool {
-		safeRecord.AddAttrs(sanitize(attribute))
+		safeRecord.AddAttrs(handler.sanitize(attribute))
 		return true
 	})
 
@@ -98,13 +99,26 @@ func (handler *safeHandler) Handle(ctx context.Context, record slog.Record) erro
 func (handler *safeHandler) WithAttrs(attributes []slog.Attr) slog.Handler {
 	safeAttributes := make([]slog.Attr, 0, len(attributes))
 	for _, attribute := range attributes {
-		safeAttributes = append(safeAttributes, sanitize(attribute))
+		safeAttributes = append(safeAttributes, handler.sanitize(attribute))
 	}
-	return &safeHandler{next: handler.next.WithAttrs(safeAttributes)}
+	return &safeHandler{
+		next:           handler.next.WithAttrs(safeAttributes),
+		sensitiveGroup: handler.sensitiveGroup,
+	}
 }
 
 func (handler *safeHandler) WithGroup(name string) slog.Handler {
-	return &safeHandler{next: handler.next.WithGroup(name)}
+	return &safeHandler{
+		next:           handler.next.WithGroup(name),
+		sensitiveGroup: handler.sensitiveGroup || sensitiveKey(name),
+	}
+}
+
+func (handler *safeHandler) sanitize(attribute slog.Attr) slog.Attr {
+	if handler.sensitiveGroup {
+		return slog.String(attribute.Key, redactedValue)
+	}
+	return sanitize(attribute)
 }
 
 func sanitize(attribute slog.Attr) slog.Attr {

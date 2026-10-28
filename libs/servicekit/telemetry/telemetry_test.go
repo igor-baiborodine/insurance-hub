@@ -7,6 +7,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -421,6 +423,80 @@ func TestInstallDiagnostics_RateLimitsRedactsAndRestoresPreviousHandler(t *testi
 	otel.Handle(errors.New("after-restore"))
 	if previous.calls != 1 {
 		t.Errorf("previous handler calls = %d, want 1", previous.calls)
+	}
+}
+
+func TestInstallDiagnostics_FirstInstallationDetachesLogger(t *testing.T) {
+	const marker = "private-after-cleanup-marker"
+	if os.Getenv("SERVICEKIT_FRESH_DIAGNOSTICS") == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		command := exec.CommandContext(
+			ctx, os.Args[0],
+			"-test.run=^TestInstallDiagnostics_FirstInstallationDetachesLogger$",
+		)
+		command.Env = append(os.Environ(), "SERVICEKIT_FRESH_DIAGNOSTICS=1")
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("fresh-process diagnostics failed: %v: %s", err, output)
+		}
+		if bytes.Contains(output, []byte(marker)) {
+			t.Fatalf("post-cleanup diagnostic exposed private marker: %s", output)
+		}
+		return
+	}
+
+	initial := otel.GetErrorHandler()
+	var firstOutput bytes.Buffer
+	restore := InstallDiagnostics(slog.New(slog.NewJSONHandler(&firstOutput, nil)))
+	otel.Handle(errors.New("private-during-installation-marker"))
+	if !bytes.Contains(firstOutput.Bytes(), []byte("telemetry export failed")) ||
+		bytes.Contains(firstOutput.Bytes(), []byte("private-during-installation-marker")) {
+		t.Fatalf("installed diagnostic was not safe: %s", firstOutput.String())
+	}
+	restore()
+	if otel.GetErrorHandler() != initial {
+		t.Fatal("first cleanup did not restore the original handler identity")
+	}
+	otel.Handle(errors.New(marker))
+	if bytes.Count(firstOutput.Bytes(), []byte("telemetry export failed")) != 1 {
+		t.Fatalf("first logger received post-cleanup diagnostic: %s", firstOutput.String())
+	}
+	var secondOutput bytes.Buffer
+	restoreSecond := InstallDiagnostics(slog.New(slog.NewJSONHandler(&secondOutput, nil)))
+	otel.Handle(errors.New("private-second-marker"))
+	restoreSecond()
+	if !bytes.Contains(secondOutput.Bytes(), []byte("telemetry export failed")) ||
+		bytes.Contains(secondOutput.Bytes(), []byte("private-second-marker")) {
+		t.Fatalf("second installation did not route safely: %s", secondOutput.String())
+	}
+}
+
+func TestInstallDiagnostics_NestedInstallationsRestoreInLIFOOrder(t *testing.T) {
+	original := otel.GetErrorHandler()
+	previous := &recordingErrorHandler{}
+	otel.SetErrorHandler(previous)
+	t.Cleanup(func() { otel.SetErrorHandler(original) })
+	var outerOutput, innerOutput bytes.Buffer
+	restoreOuter := InstallDiagnostics(slog.New(slog.NewJSONHandler(&outerOutput, nil)))
+	restoreInner := InstallDiagnostics(slog.New(slog.NewJSONHandler(&innerOutput, nil)))
+	otel.Handle(errors.New("private-inner-marker"))
+	restoreInner()
+	otel.Handle(errors.New("private-outer-marker"))
+	restoreOuter()
+	otel.Handle(errors.New("after-restore"))
+	if !bytes.Contains(innerOutput.Bytes(), []byte("telemetry export failed")) ||
+		bytes.Contains(innerOutput.Bytes(), []byte("private-inner-marker")) ||
+		!bytes.Contains(outerOutput.Bytes(), []byte("telemetry export failed")) ||
+		bytes.Contains(outerOutput.Bytes(), []byte("private-outer-marker")) {
+		t.Fatalf(
+			"nested diagnostics were not safely routed: outer=%s inner=%s",
+			outerOutput.String(),
+			innerOutput.String(),
+		)
+	}
+	if previous.calls != 1 || otel.GetErrorHandler() != previous {
+		t.Fatal("nested cleanup did not restore the custom handler")
 	}
 }
 

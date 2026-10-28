@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import io
 import json
+import subprocess
 import time
 from pathlib import Path
 
@@ -93,6 +94,160 @@ class Provider:
         if not self.attested:
             raise SharedError("invalid attestation")
         return ""
+
+
+def disposable_history(root: Path) -> tuple[str, str]:
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=root, check=True, capture_output=True, text=True, timeout=5
+        )
+        return result.stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.name", "Release Test")
+    git("config", "user.email", "release-test@example.invalid")
+    (root / "source.txt").write_text("base\n")
+    git("add", "source.txt")
+    git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    (root / "source.txt").write_text("reviewed\n")
+    git("commit", "-qam", "reviewed source")
+    main = git("rev-parse", "HEAD")
+    git("checkout", "-qb", "unmerged", base)
+    (root / "source.txt").write_text("unmerged\n")
+    git("commit", "-qam", "unmerged source")
+    side = git("rev-parse", "HEAD")
+    git("checkout", "-q", "main")
+    assert git("rev-parse", "HEAD") == main
+    return main, side
+
+
+class ReviewAPI(release.GitHub):
+    def __init__(self, root: Path, sha: str):
+        super().__init__(root)
+        self.sha = sha
+        self.reviews = [{"state": "APPROVED", "commit_id": sha, "user": {"login": "reviewer"}}]
+        self.pulls = [
+            {
+                "merged_at": "2026-01-01T00:00:00Z",
+                "merge_commit_sha": sha,
+                "base": {"ref": "main", "repo": {"full_name": REPOSITORY}},
+                "head": {"sha": sha},
+                "user": {"login": "author"},
+                "number": 7,
+            }
+        ]
+        self.calls = []
+
+    def api(self, suffix, method="GET", body=None, absent=False):
+        self.calls.append((method, suffix))
+        if suffix == "git/ref/heads/main":
+            return {"object": {"sha": self.sha}}
+        if suffix.startswith("commits/") and suffix.endswith("/pulls?per_page=100"):
+            return self.pulls
+        if suffix == "pulls/7/reviews?per_page=100":
+            return self.reviews
+        raise AssertionError(suffix)
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [None, "unmerged", "no_pull", "unreviewed", "author_only", "stale", "revoked", "changes"],
+)
+def test_reviewed_source_requires_merged_ancestor_and_current_independent_approval(
+    tmp_path: Path, defect: str | None
+) -> None:
+    # given: main and an unmerged branch are real disposable Git history.
+    main, side = disposable_history(tmp_path)
+    provider = ReviewAPI(tmp_path, main)
+    source = side if defect == "unmerged" else main
+    if defect == "no_pull":
+        provider.pulls = []
+    elif defect == "unreviewed":
+        provider.reviews = []
+    elif defect == "author_only":
+        provider.reviews[0]["user"]["login"] = "author"
+    elif defect == "stale":
+        provider.reviews[0]["commit_id"] = side
+    elif defect == "revoked":
+        provider.reviews.append(
+            {"state": "DISMISSED", "commit_id": main, "user": {"login": "reviewer"}}
+        )
+    elif defect == "changes":
+        provider.reviews.append(
+            {"state": "CHANGES_REQUESTED", "commit_id": main, "user": {"login": "other"}}
+        )
+
+    # when / then: every denied path stops before any publication request.
+    if defect:
+        with pytest.raises(RuntimeError):
+            release.reviewed_source(provider, tmp_path, source)
+    else:
+        release.reviewed_source(provider, tmp_path, source)
+    assert all(method == "GET" for method, _ in provider.calls)
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        None,
+        "missing_immutability",
+        "disabled_immutability",
+        "missing_environment",
+        "denied_environment",
+        "missing_reviewers",
+        "self_review",
+        "admin_bypass",
+    ],
+)
+def test_real_github_protections_rejects_unprotected_publication(
+    tmp_path: Path, defect: str | None
+) -> None:
+    # given: fake API responses feed the real protection guard before publish_tag can create a tag.
+    class ProtectionsAPI(release.GitHub):
+        def __init__(self):
+            super().__init__(tmp_path)
+            self.calls = []
+
+        def api(self, suffix, method="GET", body=None, absent=False):
+            self.calls.append((method, suffix))
+            assert method == "GET"
+            if suffix == "immutable-releases":
+                if defect == "missing_immutability":
+                    raise SharedError("GitHub GET request failed: HTTP 404")
+                return {"enabled": defect != "disabled_immutability"}
+            if suffix == "environments/servicekit-release":
+                if defect in {"missing_environment", "denied_environment"}:
+                    code = 403 if defect == "denied_environment" else 404
+                    raise SharedError(f"GitHub GET request failed: HTTP {code}")
+                return {
+                    "protection_rules": [
+                        {
+                            "type": "required_reviewers",
+                            "reviewers": [] if defect == "missing_reviewers" else [{"id": 1}],
+                            "prevent_self_review": defect != "self_review",
+                        }
+                    ],
+                    "can_admins_bypass": defect == "admin_bypass",
+                }
+            if suffix == "git/ref/tags/libs%2Fservicekit%2Fv0.1.0":
+                return None
+            if suffix == "git/matching-refs/tags/libs/servicekit/":
+                return []
+            raise AssertionError(suffix)
+
+    provider = ProtectionsAPI()
+    # when / then
+    if defect:
+        with pytest.raises(SharedError):
+            release.publish_tag(provider, "v0.1.0", SHA)
+        assert all(not path.startswith("git/") for _, path in provider.calls)
+    else:
+        provider.protections()
+        assert provider.calls == [
+            ("GET", "immutable-releases"),
+            ("GET", "environments/servicekit-release"),
+        ]
 
 
 @pytest.mark.parametrize("defect", [None, "job_ids", "missing", "duplicate", "failed"])

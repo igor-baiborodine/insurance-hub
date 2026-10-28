@@ -124,8 +124,11 @@ and exporter timeout; the composition root retains the overall lifecycle budget.
 
 `telemetry.InstallDiagnostics` is an explicit process-global action. It replaces raw SDK errors
 with fixed, rate-limited warnings and returns an idempotent cleanup that restores the previous
-handler. Installations must be restored in LIFO order after providers have shut down. The library
-does not install a global tracer provider, meter provider or propagator.
+handler and detaches the supplied logger. Installations must be restored in LIFO order after
+providers have shut down. On the first installation, OpenTelemetry's default handler retains a
+delegate permanently; after cleanup it emits only a fixed, rate-limited fallback warning without
+using the released logger. The library does not install a global tracer provider, meter provider
+or propagator.
 
 ## Owning commands
 
