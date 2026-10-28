@@ -231,17 +231,26 @@ def test_aggregate_rejects_incomplete_or_misattributed_results(defect: str) -> N
 def test_installed_workflow_contracts() -> None:
     registration.shared_ci_contract(ROOT, ".github/workflows/go-pr-shared.yml")
     workflow = yaml.safe_load((ROOT / ".github/workflows/go-release-lib.yml").read_text())
-    assert workflow.get("on", workflow.get(True)).keys() == {"workflow_dispatch"}
+    triggers = workflow.get("on", workflow.get(True))
+    assert set(triggers) == {"push"}
+    assert triggers["push"]["branches"] == ["main"]
+    assert triggers["push"]["paths"] == ["libs/servicekit/**"]
     assert workflow["concurrency"]["cancel-in-progress"] is False
+    assert workflow["env"]["RELEASE_SHA"] == "${{ github.sha }}"
+    assert workflow["jobs"]["validate"]["outputs"]["version"] == (
+        "${{ steps.monotag.outputs.version }}"
+    )
     for name, job in workflow["jobs"].items():
         permissions = job.get("permissions", workflow["permissions"])
         assert "packages" not in permissions
         if permissions.get("contents") == "write":
             assert name in {"publish-tag", "publish-notes"}
-            assert job["environment"] == "servicekit-release"
+        assert "environment" not in job
         assert job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
-    assert workflow["jobs"]["verify"]["needs"] == "publish-tag"
-    assert workflow["jobs"]["publish-notes"]["needs"] == "verify"
+    assert workflow["jobs"]["verify"]["needs"] == ["validate", "publish-tag"]
+    assert workflow["jobs"]["publish-notes"]["needs"] == ["validate", "verify"]
+    for job in workflow["jobs"].values():
+        assert all("GH_INSPECTION_TOKEN" not in step.get("env", {}) for step in job["steps"])
 
 
 def test_shared_planner_prepares_tools_before_real_candidate_integration() -> None:

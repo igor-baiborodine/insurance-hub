@@ -36,7 +36,7 @@ def expected_plan() -> dict:
 def release_validation(version: str, sha: str) -> dict:
     provider = shared_release.GitHub(ROOT)
     producer = shared_release.producer()
-    shared_release.reviewed_source(provider, ROOT, sha)
+    shared_release.merged_source(provider, ROOT, sha)
     # Source code runs only in the read-only validation job.
     with tempfile.TemporaryDirectory(prefix="servicekit-release-validation-") as temporary:
         checkout = Path(temporary) / "source"
@@ -122,7 +122,7 @@ def release_command(action: str, work: Path) -> None:
         "validation artifact identity mismatch",
     )
     if action == "release-tag":
-        shared_release.reviewed_source(provider, ROOT, sha)
+        shared_release.merged_source(provider, ROOT, sha)
         shared_release.publish_tag(provider, version, sha)
     elif action == "release-verify":
         require(provider.tag_sha(tag) == sha, "public verification tag mismatch")

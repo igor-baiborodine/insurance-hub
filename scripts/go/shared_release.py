@@ -1,4 +1,4 @@
-"""Servicekit release identity, immutable publication and qualification admission."""
+"""Servicekit release identity, exact publication and qualification admission."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def release_identity(version: str, sha: str) -> str:
     require(
         VERSION.fullmatch(version) and version != "v0.0.0", "expected canonical stable v0 version"
     )
-    require(SHA.fullmatch(sha), "expected full reviewed merged source SHA")
+    require(SHA.fullmatch(sha), "expected full merged source SHA")
     return f"libs/servicekit/{version}"
 
 
@@ -58,8 +58,6 @@ class GitHub:
             "Content-Type": "application/json",
         }
         token = os.environ.get("GH_TOKEN")
-        if method == "GET" and suffix in {"immutable-releases", "environments/servicekit-release"}:
-            token = os.environ.get("GH_INSPECTION_TOKEN", token)
         if token:
             headers["Authorization"] = "Bearer " + token
         request = urllib.request.Request(
@@ -93,26 +91,6 @@ class GitHub:
             60,
         )
 
-    def protections(self) -> None:
-        require(
-            self.api("immutable-releases").get("enabled") is True,
-            "release immutability not enabled",
-        )
-        settings = self.api("environments/servicekit-release")
-        rules = settings.get("protection_rules", [])
-        require(
-            any(
-                r.get("type") == "required_reviewers"
-                and r.get("reviewers")
-                and r.get("prevent_self_review") is True
-                for r in rules
-            ),
-            "release environment needs independent required reviewers",
-        )
-        require(
-            settings.get("can_admins_bypass") is False, "release approval must prevent admin bypass"
-        )
-
     def tag_sha(self, tag: str) -> str | None:
         ref = self.api("git/ref/tags/" + urllib.parse.quote(tag, safe=""), absent=True)
         if ref is None:
@@ -126,7 +104,7 @@ class GitHub:
         raise SharedError("tag nesting exceeds limit")
 
 
-def reviewed_source(provider: GitHub, root: Path, sha: str) -> None:
+def merged_source(provider: GitHub, root: Path, sha: str) -> None:
     verify_sha(root, sha)
     main = provider.api("git/ref/heads/main")["object"]["sha"]
     verify_sha(root, main)
@@ -141,34 +119,15 @@ def reviewed_source(provider: GitHub, root: Path, sha: str) -> None:
         and p["base"]["repo"]["full_name"] == REPOSITORY
     ]
     require(candidates, "source lacks merged PR evidence")
-    approved = False
-    for pull in candidates:
-        reviews = provider.api(f"pulls/{pull['number']}/reviews?per_page=100")
-        require(len(reviews) < 100, "review pagination requires explicit resolution")
-        latest = {}
-        for review in reviews:
-            if review["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
-                latest[review["user"]["login"]] = review
-        approved = approved or (
-            any(
-                r["state"] == "APPROVED"
-                and r["commit_id"] == pull["head"]["sha"]
-                and r["user"]["login"] != pull["user"]["login"]
-                for r in latest.values()
-            )
-            and not any(r["state"] == "CHANGES_REQUESTED" for r in latest.values())
-        )
-    require(approved, "source lacks current independent approving review")
 
 
 def publish_tag(provider: GitHub, version: str, sha: str) -> None:
     tag = release_identity(version, sha)
-    provider.protections()
     existing = provider.tag_sha(tag)
     if existing is None:
         tags = provider.api("git/matching-refs/tags/libs/servicekit/")
         require(tags or version == "v0.1.0", "first library release must be v0.1.0")
-    require(existing in {None, sha}, "immutable tag collision")
+    require(existing in {None, sha}, "tag collision")
     if existing is None:
         try:
             provider.api("git/refs", "POST", {"ref": "refs/tags/" + tag, "sha": sha})
@@ -229,7 +188,7 @@ def qualification(record: Any, version: str, sha: str) -> None:
     require(
         producer["repository"] == REPOSITORY
         and producer["workflow"] == WORKFLOW
-        and SHA.fullmatch(producer["workflow_sha"]),
+        and producer["workflow_sha"] == sha,
         "untrusted qualification producer",
     )
     require(
@@ -253,11 +212,14 @@ def producer() -> dict[str, Any]:
     require(
         os.environ.get("GITHUB_REPOSITORY") == REPOSITORY
         and os.environ.get("GITHUB_REF") == "refs/heads/main"
-        and os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch",
-        "release requires main dispatch",
+        and os.environ.get("GITHUB_EVENT_NAME") == "push",
+        "release requires a main push",
     )
     workflow_sha = os.environ.get("GITHUB_SHA", "")
     require(SHA.fullmatch(workflow_sha), "missing trusted workflow revision")
+    require(
+        os.environ.get("RELEASE_SHA") == workflow_sha, "release source must equal push revision"
+    )
     return {
         "repository": REPOSITORY,
         "workflow": WORKFLOW,
@@ -274,8 +236,12 @@ def verify_admission(
     sha: str,
     selected: dict[str, Any],
     trusted_workflow_sha: str,
+    expected_asset_digest: str,
 ) -> None:
-    record = json.loads(asset.read_text())
+    require(DIGEST.fullmatch(expected_asset_digest), "invalid pinned qualification digest")
+    asset_bytes = asset.read_bytes()
+    require(digest(asset_bytes) == expected_asset_digest, "pinned qualification digest mismatch")
+    record = json.loads(asset_bytes)
     qualification(record, version, sha)
     require(
         record["producer"]["workflow_sha"] == trusted_workflow_sha,
@@ -292,37 +258,44 @@ def verify_admission(
     tag = record["tag"]
     require(provider.tag_sha(tag) == sha, "release tag/source mismatch")
     release = provider.api("releases/tags/" + urllib.parse.quote(tag, safe=""))
+    require(not release.get("draft"), "qualification release is still a draft")
     require(
-        release.get("immutable") is True and not release.get("draft"), "release is not immutable"
+        sum(item.get("name") == "qualification.json" for item in release.get("assets", [])) == 1,
+        "published qualification asset missing or ambiguous",
     )
-    provider.command(["release", "verify", tag])
-    provider.command(["release", "verify-asset", tag, str(asset)])
-    provider.command(
-        [
-            "attestation",
-            "verify",
-            str(asset),
-            "--signer-workflow",
-            REPOSITORY + "/" + WORKFLOW,
-            "--signer-digest",
-            trusted_workflow_sha,
-            "--source-digest",
-            trusted_workflow_sha,
-            "--source-ref",
-            "refs/heads/main",
-            "--deny-self-hosted-runners",
-        ]
-    )
+    with tempfile.TemporaryDirectory(prefix="servicekit-admission-") as temporary:
+        provider.command(
+            ["release", "download", tag, "--pattern", "qualification.json", "--dir", temporary]
+        )
+        published = Path(temporary) / "qualification.json"
+        require(published.read_bytes() == asset_bytes, "published qualification asset changed")
+        provider.command(
+            [
+                "attestation",
+                "verify",
+                str(published),
+                "--signer-workflow",
+                REPOSITORY + "/" + WORKFLOW,
+                "--signer-digest",
+                trusted_workflow_sha,
+                "--source-digest",
+                trusted_workflow_sha,
+                "--source-ref",
+                "refs/heads/main",
+                "--deny-self-hosted-runners",
+            ]
+        )
     run_id = record["producer"]["run_id"]
     run = provider.api(f"actions/runs/{run_id}")
     require(
         run.get("path") == WORKFLOW
         and run.get("head_sha") == trusted_workflow_sha
-        and run.get("event") == "workflow_dispatch"
+        and run.get("event") == "push"
         and run.get("status") == "completed",
         "untrusted or unfinished release run",
     )
     verify_run_jobs(provider, run_id, record["producer"]["run_attempt"])
+    require(provider.tag_sha(tag) == sha, "release tag changed during admission")
 
 
 def public_verify(root: Path, version: str, sha: str, source_digest: str) -> dict[str, Any]:
@@ -390,7 +363,7 @@ def public_verify(root: Path, version: str, sha: str, source_digest: str) -> dic
         )
         require(
             manifest_digest(Path(download["Dir"])) == source_digest,
-            "public module content does not match reviewed source",
+            "public module content does not match merged source",
         )
         budget.run(["go", "mod", "tidy"], consumer, "resolve smoke consumer", env)
         selected = json.loads(
@@ -449,7 +422,6 @@ def public_verify(root: Path, version: str, sha: str, source_digest: str) -> dic
 def publish_qualification(provider: GitHub, asset: Path, version: str, sha: str) -> None:
     record = json.loads(asset.read_text())
     qualification(record, version, sha)
-    provider.protections()
     verify_run_jobs(provider, record["producer"]["run_id"], record["producer"]["run_attempt"])
     tag = release_identity(version, sha)
     require(provider.tag_sha(tag) == sha, "tag changed before qualification")
@@ -501,11 +473,8 @@ def publish_qualification(provider: GitHub, asset: Path, version: str, sha: str)
             if release.get("draft"):
                 provider.command(["release", "edit", tag, "--draft=false"])
             final = provider.api("releases/tags/" + urllib.parse.quote(tag, safe=""))
-            require(
-                final.get("immutable") is True and not final.get("draft"),
-                "resume did not publish immutable release",
-            )
-            provider.command(["release", "verify-asset", tag, str(previous_asset)])
+            require(not final.get("draft"), "resume did not publish release")
+            require(provider.tag_sha(tag) == sha, "tag changed during resume publication")
         return
     require(release is None or release.get("draft"), "published release lacks qualification asset")
     if release is None:
@@ -538,8 +507,26 @@ def publish_qualification(provider: GitHub, asset: Path, version: str, sha: str)
     require(provider.tag_sha(tag) == sha, "tag changed during qualification")
     provider.command(["release", "edit", tag, "--draft=false"])
     release = provider.api("releases/tags/" + urllib.parse.quote(tag, safe=""))
-    require(
-        release.get("immutable") is True and not release.get("draft"),
-        "immutable publication readback failed",
-    )
-    provider.command(["release", "verify-asset", tag, str(asset)])
+    require(not release.get("draft"), "publication readback found a draft")
+    with tempfile.TemporaryDirectory(prefix="servicekit-publication-") as temporary:
+        provider.command(
+            ["release", "download", tag, "--pattern", "qualification.json", "--dir", temporary]
+        )
+        published = Path(temporary) / "qualification.json"
+        require(
+            published.read_bytes() == asset.read_bytes(), "published qualification asset differs"
+        )
+        provider.command(
+            [
+                "attestation",
+                "verify",
+                str(published),
+                "--signer-workflow",
+                REPOSITORY + "/" + WORKFLOW,
+                "--signer-digest",
+                record["producer"]["workflow_sha"],
+                "--source-ref",
+                "refs/heads/main",
+            ]
+        )
+    require(provider.tag_sha(tag) == sha, "tag changed after qualification publication")
