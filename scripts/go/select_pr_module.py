@@ -19,6 +19,8 @@ class SelectionError(RuntimeError):
 
 def classify_module(path_value: str) -> str | None:
     path = PurePosixPath(path_value)
+    if len(path.parts) >= 3 and path.parts[0] == "libs":
+        return f"libs/{path.parts[1]}"
     if len(path.parts) >= 2 and path.parts[:2] == ("templates", "go-service"):
         return "templates/go-service"
     if len(path.parts) >= 3 and path.parts[0] == "services" and path.parts[1].endswith("-service"):
@@ -35,7 +37,13 @@ def selection_outputs(paths: list[str], merge_base: str) -> dict[str, str]:
             f"Multiple Go modules changed; split the pull request: {' '.join(modules)}"
         )
     module_dir = modules[0]
-    module_role = "service-scaffold" if module_dir == "templates/go-service" else "business-service"
+    module_role = (
+        "public-shared"
+        if module_dir.startswith("libs/")
+        else "service-scaffold"
+        if module_dir == "templates/go-service"
+        else "business-service"
+    )
     coverage_file = f"{module_dir}/coverage.txt"
     coverage_files = coverage_file
     if module_role == "business-service":
@@ -76,6 +84,7 @@ def changed_paths(root: Path, base: str, head: str) -> tuple[str, list[str]]:
         root,
         "diff",
         "--name-only",
+        "--no-renames",
         "--diff-filter=ACDMRT",
         "-z",
         merge_base,

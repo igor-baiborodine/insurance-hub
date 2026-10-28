@@ -210,8 +210,9 @@ repository and share its root `.python-version`, `pyproject.toml`, `uv.lock`, `.
 `scripts/go/module` helpers. Their Makefiles resolve the root without shell activation and preserve
 an explicit interpreter override that satisfies the root runtime and lock checks.
 
-The current inventory contains `templates/go-service` and
-[`services/product-service`](services/product-service/README.md), both supported standalone with
+The current inventory contains `templates/go-service`,
+[`services/product-service`](services/product-service/README.md), and
+[`libs/servicekit`](libs/servicekit/README.md), all supported standalone with
 `GOWORK=off`; no workspace or filesystem replacement is approved. Bootstrap Product's module-owned
 tools with `make -C services/product-service bootstrap-tools` before running the aggregate. The six
 `go-scaffold-*` root delegates remain narrow scaffold conveniences. The

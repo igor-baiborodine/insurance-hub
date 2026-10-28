@@ -1,0 +1,150 @@
+name: Go Shared Runtime PR Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-shared-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  PR_BASE: ${{ github.event.pull_request.base.sha }}
+  PR_HEAD: ${{ github.event.pull_request.head.sha }}
+
+jobs:
+  plan:
+    name: Plan shared runtime validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has_work: ${{ steps.plan.outputs.has_work }}
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
+      - name: Select Go modules and required validation
+        id: plan
+        run: make go-shared-plan
+
+      - name: Set up selected Go version
+        if: steps.plan.outputs.root_checks == 'true'
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: libs/servicekit/go.mod
+          cache: false
+
+      - name: Check shared tooling and Go topology
+        if: steps.plan.outputs.root_checks == 'true'
+        run: make python-shared-tooling-check python-shared-tooling-test-integration go-topology-check go-topology-test
+
+      - name: Upload shared validation plan
+        uses: actions/upload-artifact@v6
+        with:
+          name: shared-plan
+          path: .work/servicekit/plan.json
+          if-no-files-found: error
+          include-hidden-files: true
+
+  validate:
+    name: Validate Go module (${{ matrix.module }})
+    needs: plan
+    if: needs.plan.outputs.has_work == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
+      - name: Set up selected Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache: false
+
+      - name: Download shared validation plan
+        uses: actions/download-artifact@v6
+        with:
+          name: shared-plan
+          path: .work/servicekit
+
+      - name: Run selected module validation
+        env:
+          MODULE_DIR: ${{ matrix.module }}
+        run: make go-shared-validate
+
+      - name: Upload selected module validation results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: shared-result-${{ matrix.key }}
+          path: .work/servicekit/result.json
+          if-no-files-found: error
+          include-hidden-files: true
+
+  result:
+    name: Check shared runtime validation results
+    if: always()
+    needs: [plan, validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
+      - name: Download module validation results
+        uses: actions/download-artifact@v6
+        with:
+          pattern: shared-result-*
+          path: .work/servicekit/results
+
+      - name: Check required validation results
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          VALIDATION_RESULT: ${{ needs.validate.result }}
+        run: make go-shared-results-check

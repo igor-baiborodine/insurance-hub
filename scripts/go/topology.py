@@ -229,12 +229,20 @@ def load_inventory(path: Path) -> dict[str, Any]:
         raise TopologyError("inventory schema validation failed") from error
     try:
         require(isinstance(value, dict), "go-module-topology.json: root must be an object")
+        require(
+            type(value.get("schemaVersion")) is int and value["schemaVersion"] in {1, 2},
+            "unsupported topology schema version",
+        )
         exact_keys(
             value,
-            {"schemaVersion", "repositoryModulePrefix", "modules", "workspaces", "exclusions"},
+            {"schemaVersion", "repositoryModulePrefix", "modules", "workspaces", "exclusions"}
+            | ({"activeConsumers"} if value["schemaVersion"] == 2 else set()),
             "root",
         )
-        require(value["schemaVersion"] == 1, "go-module-topology.json: schemaVersion must equal 1")
+        if value["schemaVersion"] == 2:
+            from shared_registration import schema
+
+            schema(value["activeConsumers"])
         prefix = nonempty_string(value["repositoryModulePrefix"], "repositoryModulePrefix")
         require(
             bool(re.fullmatch(r"[A-Za-z0-9.-]+(?:/[A-Za-z0-9._~-]+)*/", prefix)),
@@ -572,6 +580,14 @@ def validate_selector_contract(module: dict[str, Any], workflow: str) -> None:
 def ci_check(root: Path, inventory: dict[str, Any]) -> None:
     workflows = sorted({module["ciWorkflow"] for module in inventory["modules"]})
     for workflow in workflows:
+        if workflow == ".github/workflows/go-pr-shared.yml":
+            from shared_registration import shared_ci_contract
+
+            shared_ci_contract(root, workflow)
+            for module in inventory["modules"]:
+                if module["ciWorkflow"] == workflow:
+                    validate_selector_contract(module, workflow)
+            continue
         path = root / workflow
         require(path.is_file(), f"missing workflow: {workflow}")
         text = path.read_text(encoding="utf-8")
@@ -903,6 +919,10 @@ def modules_check(root: Path, inventory: dict[str, Any]) -> None:
 
 
 def topology_check(root: Path, inventory: dict[str, Any]) -> None:
+    if inventory["schemaVersion"] == 2:
+        from shared_registration import registration_check
+
+        registration_check(root, inventory)
     errors, ignored = topology_errors(root, inventory)
     for line in ignored:
         print(line)

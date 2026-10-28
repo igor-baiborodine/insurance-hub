@@ -21,12 +21,13 @@ inventory, owning Make target, consumers, and CI path agree.
 
 ## Current topology
 
-The repository currently owns two Go modules and no Go workspace.
+The repository currently owns three Go modules and no Go workspace.
 
 | Directory | Module path | Role and owner | Consumers | Replacements | Supported mode | Owning validation | CI |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `templates/go-service` | `github.com/igor-baiborodine/insurance-hub/templates/go-service` | Reusable service scaffold; Insurance Hub repository maintainers | Itself only | None | Standalone, `GOWORK=off` | `make -C templates/go-service check-go-pr` | `.github/workflows/go-pr-mod.yml` |
 | `services/product-service` | `github.com/igor-baiborodine/insurance-hub/services/product-service` | Product business service; Product service maintainers | Its current executable and support packages | None | Standalone, `GOWORK=off` | `make -C services/product-service check-go-pr` | `.github/workflows/go-pr-mod.yml` |
+| `libs/servicekit` | `github.com/igor-baiborodine/insurance-hub/libs/servicekit` | Public runtime infrastructure; Insurance Hub repository maintainers | Product/scaffold allowed; zero active consumers | None | Standalone, `GOWORK=off` | `make -C libs/servicekit check-go-pr` | `.github/workflows/go-pr-shared.yml` |
 
 The scaffold owns its Protobuf source and generated bindings. It is not a deployed business
 service, shared business model, or independently distributed contract module. Product owns its
@@ -52,6 +53,7 @@ Install pinned tools explicitly before running the full local job:
 ```sh
 make go-scaffold-bootstrap-tools
 make go-product-bootstrap-tools
+make -C libs/servicekit bootstrap-go-tools
 ```
 
 The focused Product `bootstrap-go-tools` target installs only pinned Go validation tools. Its
@@ -81,14 +83,14 @@ readonly module resolution, and enforces repository import boundaries.
 `go-modules-check` runs topology validation first and then visits every inventory module exactly
 once. It forces standalone mode, rejects unapproved filesystem replacements, forwards only the
 module's declared validation variables, and verifies that module/workspace manifest paths and bytes
-remain unchanged. `FORMAT_SCOPE=all` covers every eligible handwritten Go file in both modules.
+remain unchanged. `FORMAT_SCOPE=all` covers every eligible handwritten Go file in all modules.
 The scaffold and Product `./...` scopes cover all their current packages. Product coverage includes
 `cmd/server`, the test-owned HTTP boundary, generated Product v1 bindings, sqlc-generated queries,
 the bounded PostgreSQL reader, contract tests, the authoritative QA fixture loader, and the tagged
 PostgreSQL harness/reader suites invoked by `test-integration`. Product `check-docs` also validates
 the service README and versioned Product migration handoff, including a real Mermaid render.
 
-Both modules include the root-owned `scripts/go/module/common.mk`. The shared scripts implement
+The service and scaffold include the root-owned `scripts/go/module/common.mk`. The shared scripts implement
 tool verification, formatting, dependency reproduction, and exact generated-output drift checks;
 module Makefiles retain their pins and explicit Protobuf, SQL, integration, and run targets. The
 scaffold copy proof points its disposable service at the repository helper, so the renamed service
@@ -97,6 +99,10 @@ this repository and resolve the root Python declarations, root `.venv/`, and sha
 through their Makefiles. The copy proof transfers no environment, lock, or helper duplicate; it
 verifies those repository references and bounds every child phase and cleanup. No runtime package
 import or Go module dependency points at the scaffold or shared tooling directory.
+
+Servicekit has a separate library-only Make interface using the same formatter policy and exact
+Go/tool pins. It requires no executable, Protobuf generator, database or service-image release.
+See its [ownership, registration and release contract](../../../libs/servicekit/README.md).
 
 `go-topology-test` creates local temporary repositories with no network requirement. It proves
 malformed and drifted inventory failures, workspace and replacement masking, allowed contract
@@ -118,7 +124,8 @@ match the qualifying inputs for the scaffold or any immediate `services/*-servic
 Qualifying inputs include Go source and generated output, `go.mod`/`go.sum`, owned Protobuf and SQL
 inputs, contract baselines, and module lint/generator configuration. Scripts, Makefiles,
 documentation, workflow YAML, topology metadata, Codecov configuration, legacy baseline fixtures,
-Dockerfiles, and deployment assets do not independently trigger hosted Go validation.
+Dockerfiles, and deployment assets do not independently trigger that selected-module workflow.
+The additive shared workflow below covers module auxiliary files and root validation tooling.
 
 `.github/workflows/go-report-card.yml` uses the same qualifying path matrix for pushes to `main`
 and pull requests targeting `main`. Its manual dispatch remains available for workflow-only
@@ -165,11 +172,21 @@ A local pass is local evidence. YAML inspection is configuration evidence. Only 
 of an active GitHub Actions workflow is hosted-CI evidence; historical results from retired
 workflows remain historical evidence.
 
+The additive `go-pr-shared.yml` runs on every PR to `main`. Its planner examines complete base/head
+ownership, both rename endpoints, discovered modules and active registration before Go/tool setup.
+Library changes validate all active consumers against the exact candidate; root tooling changes
+conservatively validate every module. Its aggregate recomputes phase obligations and checks source,
+lockfile and candidate identities. The empty active-consumer set is an explicit initial state.
+Branch protection requires separate repository configuration; adding YAML does not establish it.
+The separately dispatched `go-release-lib.yml` owns source-tag and qualified-release publication.
+
 ## Import and consumer policy
 
 Imports within one module and public external dependencies are allowed. Cross-module imports are
 allowed only when the owner is classified as `public-contract` or `public-shared` and the importing
-module is listed in that owner's `consumers`. Workspace membership or local replacement does not
+module is listed in that owner's `consumers`. For servicekit, this is an allowed-consumer list;
+schema-2 `activeConsumers` separately records actual dependencies and complete phase support.
+Workspace membership or local replacement does not
 grant permission.
 
 The checker rejects sibling `internal` imports, scaffold runtime imports, non-public module edges,
@@ -196,7 +213,8 @@ Onboarding is one reviewed topology change. Complete all applicable items togeth
 5. Place a business service directly under `services/` with a `-service` suffix and retain the
    standard `bootstrap-go-tools` and `check-go-pr` targets. The Go PR workflow's generic paths,
    selector, cache metadata, and coverage identity then apply without a workflow edit. Do not make
-   auxiliary paths independent triggers.
+   auxiliary paths independent triggers in the existing selected-module workflow; register its
+   supplemental coverage in the shared planner instead.
 6. Add positive boundary coverage for any approved public edge and negative fixtures for private,
    scaffold, unapproved-consumer, workspace-masking, or replacement risks introduced by the new
    topology.
