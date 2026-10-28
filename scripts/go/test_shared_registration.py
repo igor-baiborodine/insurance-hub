@@ -244,6 +244,29 @@ def test_installed_workflow_contracts() -> None:
     assert workflow["jobs"]["publish-notes"]["needs"] == "verify"
 
 
+def test_shared_planner_prepares_tools_before_real_candidate_integration() -> None:
+    # given: the integration suite runs real formatting, lint and vulnerability phases.
+    workflow = yaml.safe_load((ROOT / ".github/workflows/go-pr-shared.yml").read_text())
+    steps = workflow["jobs"]["plan"]["steps"]
+    # when
+    setup = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("run") == "make -C libs/servicekit bootstrap-go-tools"
+    )
+    integration = next(
+        index
+        for index, step in enumerate(steps)
+        if "python-shared-tooling-test-integration" in step.get("run", "")
+    )
+    go = next(
+        index for index, step in enumerate(steps) if "actions/setup-go@" in step.get("uses", "")
+    )
+    # then
+    assert go < setup < integration
+    assert steps[setup]["if"] == steps[integration]["if"]
+
+
 def test_unknown_inventory_schema_is_rejected(tmp_path: Path) -> None:
     inventory = fixture_tree(tmp_path)
     inventory["schemaVersion"] = 99
