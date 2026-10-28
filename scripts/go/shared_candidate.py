@@ -29,6 +29,11 @@ from shared_support import (
 SIMPLE_PHASES = {"unit", "race", "build", "lint", "vulnerability", "dependency", "format"}
 
 
+def _python_executable(root: Path) -> str:
+    """Return an absolute interpreter path without resolving a virtual-environment symlink."""
+    return str(Path(os.environ.get("PYTHON", root / ".venv/bin/python")).absolute())
+
+
 def locks(root: Path, prefix: str = "go") -> dict[str, str]:
     return {suffix: digest((root / f"{prefix}.{suffix}").read_bytes()) for suffix in ("mod", "sum")}
 
@@ -222,9 +227,7 @@ def validate(
             checkout = scratch / "checkout"
             extract(root, expected["head"], checkout)
             target = checkout / module
-            env = environment(
-                PYTHON=str(Path(os.environ.get("PYTHON", root / ".venv/bin/python")).resolve())
-            )
+            env = environment(PYTHON=_python_executable(root))
             arguments = [
                 "make",
                 "-C",

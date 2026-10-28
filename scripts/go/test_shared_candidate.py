@@ -29,6 +29,23 @@ class GoEnvironment:
         return json.dumps({"Replace": self.replacements})
 
 
+def test_python_executable_preserves_virtual_environment_entry_point(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # given
+    runtime = tmp_path / "runtime/python"
+    runtime.parent.mkdir()
+    runtime.touch()
+    virtual_python = tmp_path / ".venv/bin/python"
+    virtual_python.parent.mkdir(parents=True)
+    virtual_python.symlink_to(runtime)
+    monkeypatch.setenv("PYTHON", str(virtual_python))
+    # when
+    selected = candidate._python_executable(tmp_path)
+    # then
+    assert selected == str(virtual_python)
+
+
 @pytest.mark.parametrize(
     "settings",
     [
