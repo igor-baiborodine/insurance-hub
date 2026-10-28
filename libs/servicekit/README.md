@@ -5,6 +5,7 @@
   - [Package boundary](#package-boundary)
   - [Configuration and identity](#configuration-and-identity)
   - [Health probes and ownership](#health-probes-and-ownership)
+  - [Logging and telemetry](#logging-and-telemetry)
   - [Owning commands](#owning-commands)
   - [Resolution and registration](#resolution-and-registration)
   - [Release and qualification](#release-and-qualification)
@@ -16,9 +17,8 @@
 
 `github.com/igor-baiborodine/insurance-hub/libs/servicekit` is the independently versioned
 runtime library owned by Insurance Hub repository maintainers. Igor Baiborodine is the initial
-accountable release maintainer. Configuration, neutral identity and health mechanics are
-implemented. Logging and telemetry provider extraction remain pending. Neither Product nor the
-scaffold currently depends on this module.
+accountable release maintainer. Configuration, neutral identity, health, logging and telemetry
+mechanics are implemented. Neither Product nor the scaffold currently depends on this module.
 
 ## Package boundary
 
@@ -27,14 +27,13 @@ scaffold currently depends on this module.
 | `config` | Explicit parsing and safe validation of neutral setting groups | Environment loader, required database settings, policy and startup validation |
 | `identity` | Neutral identity values | Product QA/test and scaffold identity policies |
 | `logger` | JSON handlers, recursive attribute redaction and trace correlation | Completion status, severity, route and business classification |
-| `telemetry` | Explicit provider construction, runtime instruments and bounded cleanup | SDK ownership, scopes, views, propagation and business spans |
+| `telemetry` | Explicit provider construction, runtime instruments and bounded cleanup | Scope/view/propagation selection, process-global installation, transport and business spans |
 | `health` | State and bounded injected readiness checks | Dependencies, readiness transition and resource lifetime |
 
 The library contains no business models, DTOs, repositories, use cases, database schemas, server
 executable or generated contracts. `check-boundaries` rejects imports of other repository modules
 and additional public package roots. Source/API review must also reject business declarations
-that require no prohibited imports. The implemented packages use the standard library and the
-module's own `identity` package. The owning service composes runtime objects and retains their
+that require no prohibited imports. The owning service composes runtime objects and retains their
 cleanup ownership.
 
 ## Configuration and identity
@@ -92,6 +91,42 @@ The standard HTTP mux provides method/path rejection. Dependency errors are neve
 responses. Listener creation, authentication/exposure policy, startup rollback and the overall
 shutdown budget remain with the service composition root.
 
+## Logging and telemetry
+
+`logger.New` creates a JSON logger with a short service label. `logger.NewIdentity` binds the six
+caller-owned identity fields. Both use UTC timestamps, add valid trace/span IDs from the logging
+context and recursively redact sensitive attribute keys in groups, maps, structs and lists.
+Errors and unsupported structured values are replaced with `[REDACTED]`. Bound attributes are
+sanitized when the logger is derived. Attribute redaction does not inspect or rewrite arbitrary
+message strings; callers must keep messages safe.
+
+`logger.LogRequired` bypasses the diagnostic threshold for a caller-owned contract record. Its
+message, severity and classification remain explicit arguments, so completion wording and
+Product/route/business policy stay in the consumer. Logs are written only to the supplied writer;
+executables select stdout or stderr.
+
+`telemetry.New` accepts caller-validated `config.Telemetry` and explicit `telemetry.Options`.
+`RuntimeScope` is required. HTTP/gRPC propagators, metric views and the trace sampler are caller
+choices; nil propagators use W3C trace context and a nil sampler uses parent-based always-sample.
+`HistogramView` preserves caller-owned signal names and buckets. Product retains its W3C+B3 HTTP
+policy, W3C-only gRPC policy, business/database views and transport completion behavior. The
+scaffold retains its own request signal names. This module intentionally has no B3 or transport
+instrumentation dependency.
+
+Disabled telemetry creates no exporter, reader, callback or network connection and returns no-op
+providers while retaining the selected propagators. Enabled telemetry validates all six resource
+identity values before exporter startup, uses OTLP/gRPC, cumulative metrics, caller-bounded export
+timeouts, a 2048-span nonblocking queue, 256-span batches, one-second batching and bounded retry.
+Runtime instruments cover memory, allocation, GC, goroutine and processor state under the exact
+caller scope. Provider construction closes already-created resources when a later exporter or
+runtime step fails. `ForceFlush` and idempotent `Shutdown` use the shorter of the caller context
+and exporter timeout; the composition root retains the overall lifecycle budget.
+
+`telemetry.InstallDiagnostics` is an explicit process-global action. It replaces raw SDK errors
+with fixed, rate-limited warnings and returns an idempotent cleanup that restores the previous
+handler. Installations must be restored in LIFO order after providers have shut down. The library
+does not install a global tracer provider, meter provider or propagator.
+
 ## Owning commands
 
 Run from this directory or use `make -C libs/servicekit` from the repository root. Prerequisites
@@ -111,14 +146,14 @@ Checks never install tools. `TOOLS_BIN`, `GO` and `PYTHON` support explicit comp
 copy and compares both manifests. `update-deps` is the explicit manifest-maintenance operation.
 Formatting reuses the repository's gofumpt/goimports/golines pipeline and 100-column policy.
 The gate includes format, lint/vet, race, build, dependency, vulnerability and boundary checks.
-The config and health tests cover parsing, safe failures, default ports, explicit local validation,
-real HTTP probes, deadline/cancellation and readiness withdrawal. Identity is a value-only package;
-logger and telemetry remain documentation-only. These checks do not establish consumer adoption
-or complete service startup/shutdown behavior.
+The tests cover parsing, safe failures, default ports, explicit local validation, real HTTP probes,
+deadline/cancellation, readiness withdrawal, recursive logging redaction, trace correlation,
+resource/scope/view preservation, disabled mode, bounded export queues and partial-startup cleanup.
+Identity is a value-only package. These checks do not establish consumer adoption, transport
+final-status behavior or complete service startup/shutdown behavior.
 
-The OTel pins reserved for extraction are v1.46.0 and otelgrpc v0.71.0, matching current consumers.
-Do not add unused runtime dependencies merely to populate `go.sum`; it is intentionally empty
-until implementation requires dependencies.
+The OTel packages are pinned at v1.46.0, matching current consumers. Consumer adoption retains
+otelgrpc v0.71.0 in each service because transport instrumentation remains local.
 
 ## Resolution and registration
 
