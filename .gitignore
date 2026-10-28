@@ -59,5 +59,6 @@
 *.tgz
 
 # Go coverage reports
+/.work/servicekit/
 /services/*-service/coverage.txt
 /services/*-service/integration-coverage.txt

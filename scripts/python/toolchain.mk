@@ -23,6 +23,15 @@ PYTHON_SELECTION_FILES := \
 	$(PYTHON_SELECTION_ROOT)/validate_selection.py \
 	$(PYTHON_SELECTION_ROOT)/test_validate_selection.py
 PYTHON_SHARED_TOOLING_FILES := \
+	scripts/go/library_tooling.py \
+	scripts/go/shared_candidate.py \
+	scripts/go/shared_cli.py \
+	scripts/go/shared_registration.py \
+	scripts/go/shared_release.py \
+	scripts/go/shared_support.py \
+	scripts/go/test_shared_candidate.py \
+	scripts/go/test_shared_registration.py \
+	scripts/go/test_shared_release.py \
 	ai/framework/tools/check_upstream_sync.py \
 	ai/framework/tests/test_check_upstream_sync.py \
 	scripts/markdown_pre_commit.py \
@@ -292,13 +301,14 @@ python-shared-tooling-test-fast: python-toolchain-check ## Run fast shared repos
 		scripts/python/test_runtime_check.py \
 		scripts/python/test_process_runner.py \
 		scripts/go/test_report_card.py scripts/go/test_select_pr_module.py \
+		scripts/go/test_shared_*.py \
 		scripts/go/test_topology.py scripts/go/module/test_module_tooling.py \
 		scripts/go/service/test_dispatch.py scripts/go/service/test_release.py scripts/go/service/test_deployment.py
 
 python-shared-tooling-test-integration: python-toolchain-check ## Run disposable shared tooling integration tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
 		-m integration ai/framework/tests/test_check_upstream_sync.py \
-		scripts/go/test_report_card.py scripts/go/module/test_module_tooling.py
+		scripts/go/test_report_card.py scripts/go/module/test_module_tooling.py scripts/go/test_shared_*.py
 
 python-shared-tooling-check: python-shared-tooling-format-check python-shared-tooling-lint \
 	python-shared-tooling-test-fast ## Run non-mutating shared Python tooling checks

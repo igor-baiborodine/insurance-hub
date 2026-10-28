@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "repositoryModulePrefix": "github.com/igor-baiborodine/insurance-hub/",
   "modules": [
     {
@@ -55,6 +55,34 @@
       ],
       "localReplacements": [],
       "ciWorkflow": ".github/workflows/go-pr-mod.yml"
+    },
+    {
+      "directory": "libs/servicekit",
+      "modulePath": "github.com/igor-baiborodine/insurance-hub/libs/servicekit",
+      "role": "public-shared",
+      "owner": "insurance-hub repository maintainers",
+      "supportedModes": [
+        "standalone"
+      ],
+      "validationTarget": "check-go-pr",
+      "validationVariables": [
+        "FORMAT_SCOPE",
+        "FORMAT_BASE"
+      ],
+      "packageScope": "config, identity, logger, telemetry and health public runtime packages; no server, business model, generated contract or persistence",
+      "prerequisites": [
+        "Go 1.27.3",
+        "managed CPython 3.14.8",
+        "pinned library tools via make -C libs/servicekit bootstrap-go-tools",
+        "GCC for race tests",
+        "public module and vulnerability services unless cached"
+      ],
+      "consumers": [
+        "github.com/igor-baiborodine/insurance-hub/templates/go-service",
+        "github.com/igor-baiborodine/insurance-hub/services/product-service"
+      ],
+      "localReplacements": [],
+      "ciWorkflow": ".github/workflows/go-pr-shared.yml"
     }
   ],
   "workspaces": [],
@@ -99,5 +127,6 @@
       "category": "generated-copy",
       "reason": "The scaffold reuse proof creates this disposable copy temporarily."
     }
-  ]
+  ],
+  "activeConsumers": []
 }

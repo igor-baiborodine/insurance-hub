@@ -1,0 +1,200 @@
+name: Go Library Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact stable v0 version (first release v0.1.0)
+        type: string
+        required: true
+      source_sha:
+        description: Full independently reviewed commit merged into main
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: go-library-release-servicekit
+  cancel-in-progress: false
+
+env:
+  RELEASE_VERSION: ${{ inputs.version }}
+  RELEASE_SHA: ${{ inputs.source_sha }}
+
+jobs:
+  validate:
+    name: Validate Go library release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout triggering source revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
+      - name: Set up selected Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: libs/servicekit/go.mod
+          cache: false
+
+      - name: Validate reviewed library source and consumers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make go-library-release-validate
+
+      - name: Upload library validation results
+        uses: actions/upload-artifact@v6
+        with:
+          name: library-validation
+          path: .work/servicekit/validation.json
+          if-no-files-found: error
+          include-hidden-files: true
+
+  publish-tag:
+    name: Publish Go library tag
+    needs: validate
+    environment: servicekit-release
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout triggering source revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
+      - name: Download library validation results
+        uses: actions/download-artifact@v6
+        with:
+          name: library-validation
+          path: .work/servicekit
+
+      - name: Create scoped library source tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_INSPECTION_TOKEN: ${{ secrets.SERVICEKIT_RELEASE_INSPECTION_TOKEN }}
+        run: make go-library-release-tag
+
+  verify:
+    name: Verify published Go library
+    needs: publish-tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout triggering source revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
+      - name: Set up selected Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: libs/servicekit/go.mod
+          cache: false
+
+      - name: Download library validation results
+        uses: actions/download-artifact@v6
+        with:
+          name: library-validation
+          path: .work/servicekit
+
+      - name: Verify public module resolution and builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make go-library-release-verify
+
+      - name: Upload library qualification record
+        uses: actions/upload-artifact@v6
+        with:
+          name: library-qualification
+          path: .work/servicekit/qualification.json
+          if-no-files-found: error
+          include-hidden-files: true
+
+  publish-notes:
+    name: Publish Go library release
+    needs: verify
+    environment: servicekit-release
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+      id-token: write
+      attestations: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout triggering source revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
+      - name: Download library validation results
+        uses: actions/download-artifact@v6
+        with:
+          name: library-validation
+          path: .work/servicekit
+
+      - name: Download library qualification record
+        uses: actions/download-artifact@v6
+        with:
+          name: library-qualification
+          path: .work/servicekit
+
+      - name: Attest library qualification record
+        uses: actions/attest@v4
+        with:
+          subject-path: .work/servicekit/qualification.json
+
+      - name: Create qualified GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_INSPECTION_TOKEN: ${{ secrets.SERVICEKIT_RELEASE_INSPECTION_TOKEN }}
+        run: make go-library-release-publish
