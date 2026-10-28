@@ -65,14 +65,18 @@ func (request *Request) Finish(ctx context.Context, status string) {
 	switch status {
 	case "OK":
 		outcome, level = "success", slog.LevelInfo
-	case "INVALID_ARGUMENT", "RESOURCE_EXHAUSTED":
+	case "INVALID_ARGUMENT", "RESOURCE_EXHAUSTED", "NOT_FOUND", "ALREADY_EXISTS",
+		"PERMISSION_DENIED", "FAILED_PRECONDITION", "ABORTED", "OUT_OF_RANGE",
+		"UNIMPLEMENTED", "UNAUTHENTICATED":
 		outcome, level = "invalid_request", slog.LevelInfo
 	case "CANCELLED":
 		outcome, level = "cancelled", slog.LevelWarn
 	case "DEADLINE_EXCEEDED":
 		outcome, level = "deadline_exceeded", slog.LevelWarn
+	case "UNKNOWN", "INTERNAL", "UNAVAILABLE", "DATA_LOSS":
+		// Retain the final transport status independently of the bounded outcome.
 	default:
-		status = "INTERNAL"
+		status = "UNKNOWN"
 	}
 	elapsed := time.Since(request.started)
 	attrs := []attribute.KeyValue{

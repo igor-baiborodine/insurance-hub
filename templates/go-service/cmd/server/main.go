@@ -42,9 +42,12 @@ func runWith(
 	)
 	settings, err := loadConfig()
 	if err != nil {
+		setting, reason := config.ErrorDetails(err)
 		bootstrapLogger.ErrorContext(
 			context.Background(),
 			"configuration failed",
+			slog.String("setting", setting),
+			slog.String("reason", reason),
 			slog.Any("error", err),
 		)
 		return err

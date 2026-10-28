@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -32,6 +33,7 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 		code                           codes.Code
 		sendLimit, receiveLimit        int
 		echo                           transport.Echo
+		unsupportedCompression         bool
 	}{
 		{
 			name:    "success",
@@ -74,6 +76,15 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 			echo:    func(context.Context, string) (string, error) { return "", errors.New("private-error") },
 		},
 		{
+			name:                   "unsupported compression",
+			message:                "private-payload",
+			outcome:                "invalid_request",
+			status:                 "UNIMPLEMENTED",
+			code:                   codes.Unimplemented,
+			echo:                   transport.IdentityEcho,
+			unsupportedCompression: true,
+		},
+		{
 			name:    "server timeout",
 			message: "private-payload",
 			outcome: "deadline_exceeded",
@@ -103,7 +114,17 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 				t.Fatal(err)
 			}
 			settings.Observer = observer
-			client, stop := runtimeClient(t, settings, test.echo, &logs)
+			var options []grpcgo.DialOption
+			if test.unsupportedCompression {
+				// The legacy client-only compressor sends an unsupported encoding without
+				// registering a process-global compressor that the server would also accept.
+				//nolint:staticcheck // Client-only injection is needed to test server rejection.
+				compressor := grpcgo.WithCompressor(
+					unsupportedCompressor{},
+				)
+				options = append(options, compressor)
+			}
+			client, stop := runtimeClient(t, settings, test.echo, &logs, options...)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			// when
@@ -204,6 +225,7 @@ func runtimeClient(
 	settings transport.Settings,
 	echo transport.Echo,
 	logs *bytes.Buffer,
+	options ...grpcgo.DialOption,
 ) (scaffoldv1.ExampleServiceClient, func()) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -223,10 +245,8 @@ func runtimeClient(
 	}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
-	connection, err := grpcgo.NewClient(
-		listener.Addr().String(),
-		grpcgo.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	options = append(options, grpcgo.WithTransportCredentials(insecure.NewCredentials()))
+	connection, err := grpcgo.NewClient(listener.Addr().String(), options...)
 	if err != nil {
 		server.Stop()
 		t.Fatal(err)
@@ -257,4 +277,13 @@ func runtimeClient(
 	}
 	t.Cleanup(stop)
 	return scaffoldv1.NewExampleServiceClient(connection), stop
+}
+
+type unsupportedCompressor struct{}
+
+func (unsupportedCompressor) Type() string { return "private-unsupported-encoding" }
+
+func (unsupportedCompressor) Do(writer io.Writer, payload []byte) error {
+	_, err := writer.Write(payload)
+	return err
 }

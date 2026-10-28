@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -303,6 +305,49 @@ func TestLoad_RuntimeBoundsAndIdentity(t *testing.T) {
 			// then
 			if err == nil || strings.Contains(err.Error(), "private-marker") {
 				t.Fatalf("unsafe or absent rejection: %v", err)
+			}
+		})
+	}
+}
+
+func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
+	// given
+	_, validation := load(mapLookup(map[string]string{requestTimeoutSetting: "0s"}))
+	if validation == nil {
+		t.Fatal("invalid duration accepted")
+	}
+	cases := []struct {
+		name            string
+		err             error
+		setting, reason string
+	}{
+		{"invalid duration", validation, "REQUEST_TIMEOUT", "must be a positive duration"},
+		{
+			"wrapped validation",
+			fmt.Errorf("private-wrapper: %w", validation),
+			"REQUEST_TIMEOUT",
+			"must be a positive duration",
+		},
+		{
+			"unknown error",
+			errors.New("private-marker"),
+			"unknown",
+			"could not load configuration",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			setting, reason := ErrorDetails(test.err)
+			// then
+			if setting != test.setting || reason != test.reason {
+				t.Errorf(
+					"safe details = (%q, %q), want (%q, %q)",
+					setting,
+					reason,
+					test.setting,
+					test.reason,
+				)
 			}
 		})
 	}

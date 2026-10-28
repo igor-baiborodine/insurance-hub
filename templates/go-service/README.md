@@ -262,6 +262,8 @@ Logs are JSON with UTC timestamps and `service_namespace`, `service_name`, `serv
 contexts add `trace_id` and `span_id`. Credential, token, payload, customer, policy and payment
 attribute keys are redacted recursively, and error objects are redacted entirely. Callers must
 still select safe fields and keep sensitive data out of messages and ordinary string attributes.
+Configuration failures include validator-owned `setting` and `reason` fields alongside the redacted
+error. Unrecognized errors use constant fallback fields and never contribute their raw text.
 The lightweight `logger.New` constructor remains available for tests; process wiring uses
 `logger.NewIdentity`.
 
@@ -282,6 +284,8 @@ captures decode and send-size failures as well as application results. Completio
 these safe fields and duration even when the diagnostic log threshold is higher. Request payloads,
 raw errors, client-selected methods and instance IDs are not metric labels. Service identity stays
 on the resource. The service lifecycle owns provider shutdown within the overall shutdown budget.
+All 17 canonical gRPC statuses remain distinct in completion logs and request metrics; unsupported
+compression returns and records `UNIMPLEMENTED`. Unknown status values normalize to `UNKNOWN`.
 
 Local tests use an owned loopback OTLP receiver to verify actual trace/metric transport; they do
 not prove Alloy pipelines or deployed delivery.
@@ -308,6 +312,8 @@ shutdown begins. It combines lifecycle state with a dependency check bounded by 
 root supplies a no-dependency check for Echo. A future service supplies checks for its required
 resources; those checks must honor context cancellation, return safe errors, and never mutate the
 dependency. Liveness does not depend on dependency availability.
+After each successful dependency probe, readiness rechecks cancellation and lifecycle state so a
+probe cannot restore a successful readiness result after withdrawal during the probe.
 
 An interrupt or `SIGTERM` first withdraws readiness and asks gRPC to stop accepting new work while
 in-flight RPCs drain. Half of `SHUTDOWN_TIMEOUT` is reserved for graceful gRPC drain. The remaining
