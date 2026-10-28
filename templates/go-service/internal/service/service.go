@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	grpcgo "google.golang.org/grpc"
@@ -31,6 +32,7 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) error
 }
 
 type telemetryProvider interface {
+	MeterProvider() metric.MeterProvider
 	TracerProvider() trace.TracerProvider
 	Propagator() propagation.TextMapPropagator
 	Shutdown(context.Context) error
@@ -55,9 +57,11 @@ type dependencies struct {
 		*slog.Logger,
 		trace.TracerProvider,
 		propagation.TextMapPropagator,
+		transport.Settings,
 		transport.Echo,
 	) (grpcServer, error)
 	newManagement func(*health.State) managementServer
+	readiness     health.Check
 	echo          transport.Echo
 	after         func(time.Duration) <-chan time.Time
 }
@@ -86,9 +90,16 @@ func productionDependencies() dependencies {
 			logger *slog.Logger,
 			tracerProvider trace.TracerProvider,
 			propagator propagation.TextMapPropagator,
+			settings transport.Settings,
 			echo transport.Echo,
 		) (grpcServer, error) {
-			return transport.NewServer(logger, tracerProvider, propagator, echo)
+			return transport.NewServer(
+				logger,
+				tracerProvider,
+				propagator,
+				settings,
+				echo,
+			)
 		},
 		newManagement: func(state *health.State) managementServer {
 			return &http.Server{
@@ -97,8 +108,9 @@ func productionDependencies() dependencies {
 				IdleTimeout:       managementIdleTimeout,
 			}
 		},
-		echo:  transport.IdentityEcho,
-		after: time.After,
+		readiness: func(ctx context.Context) error { return ctx.Err() },
+		echo:      transport.IdentityEcho,
+		after:     time.After,
 	}
 }
 
@@ -115,15 +127,31 @@ func run(
 		return errors.New("run service: shutdown timeout must be positive")
 	}
 
+	state, err := health.NewState(settings.ProbeTimeout, deps.readiness)
+	if err != nil {
+		return fmt.Errorf("run service: %w", err)
+	}
+
 	provider, err := deps.newTelemetry(ctx, settings.ServiceName, settings.Telemetry)
 	if err != nil {
 		return fmt.Errorf("run service: %w", err)
+	}
+
+	observer, err := telemetry.NewRequestObserver(logger, provider.MeterProvider())
+	if err != nil {
+		return errors.Join(err, shutdownTelemetry(provider, settings.ShutdownTimeout))
 	}
 
 	server, err := deps.newGRPCServer(
 		logger,
 		provider.TracerProvider(),
 		provider.Propagator(),
+		transport.Settings{
+			RequestTimeout:  settings.RequestTimeout,
+			MaxReceiveBytes: settings.GRPC.MaxReceiveBytes,
+			MaxSendBytes:    settings.GRPC.MaxSendBytes,
+			Observer:        observer,
+		},
 		deps.echo,
 	)
 	if err != nil {
@@ -149,7 +177,6 @@ func run(
 		)
 	}
 
-	state := new(health.State)
 	runtime := &runningService{
 		state:              state,
 		grpcServer:         server,

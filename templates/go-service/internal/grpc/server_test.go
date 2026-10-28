@@ -456,6 +456,7 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 				selectedLogger,
 				selectedTracer,
 				selectedPropagator,
+				defaultSettings(),
 				selectedEcho,
 			)
 
@@ -483,6 +484,7 @@ func newExampleClient(
 		logger.New(logs, "go-service", 0),
 		tracerProvider,
 		propagator,
+		defaultSettings(),
 		echo,
 	)
 	if err != nil {
@@ -525,4 +527,12 @@ func newExampleClient(
 		}
 	})
 	return scaffoldv1.NewExampleServiceClient(connection)
+}
+
+func defaultSettings() transport.Settings {
+	return transport.Settings{
+		RequestTimeout:  time.Second,
+		MaxReceiveBytes: 1048576,
+		MaxSendBytes:    8388608,
+	}
 }

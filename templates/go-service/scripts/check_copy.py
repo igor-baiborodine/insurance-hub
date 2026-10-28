@@ -134,7 +134,9 @@ def rewrite_readme(content: str) -> str:
     lines = [
         line
         for line in content.splitlines()
-        if "`make check-copy`" not in line and line.strip() != "make check-copy"
+        if "check-foundations" not in line
+        and "`make check-copy`" not in line
+        and line.strip() != "make check-copy"
     ]
     start = next(index for index, line in enumerate(lines) if line == "### Root scaffold delegates")
     end = next(
@@ -157,10 +159,18 @@ def rewrite_readme(content: str) -> str:
 def remove_scaffold_only_surface(copy_root: Path) -> None:
     makefile = copy_root / "Makefile"
     makefile.write_text(
-        remove_make_target(makefile.read_text(encoding="utf-8"), "check-copy"),
+        remove_make_target(
+            remove_make_target(makefile.read_text(encoding="utf-8"), "check-copy"),
+            "check-foundations",
+        ),
         encoding="utf-8",
     )
-    for relative in ("scripts/check_copy.py", "scripts/test_check_copy.py"):
+    for relative in (
+        "scripts/check_copy.py",
+        "scripts/test_check_copy.py",
+        "scripts/check_foundations.py",
+        "scripts/test_check_foundations.py",
+    ):
         (copy_root / relative).unlink()
     readme = copy_root / "README.md"
     readme.write_text(rewrite_readme(readme.read_text(encoding="utf-8")), encoding="utf-8")
@@ -227,7 +237,9 @@ def validate_copy_surface(copy_root: Path) -> None:
         "copied Makefile does not use repository Go tooling",
     )
     require(
-        "check-copy" not in makefile and "`make check-copy`" not in readme,
+        "check-copy" not in makefile
+        and "check-foundations" not in makefile
+        and "`make check-copy`" not in readme,
         "copied service retained scaffold-only copy interface",
     )
     require("make go-scaffold-" not in readme, "copied README claims scaffold-only coverage")

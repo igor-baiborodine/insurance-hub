@@ -111,21 +111,22 @@ rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
 sed -i 's/^# Go service scaffold$/# Example copy service/' README.md
 ```
 
-The source scaffold's `check-copy` target proves this procedure, but it is not a service-owned
-validation capability. Remove that target and script from the copy, and replace the scaffold-only
+The source scaffold's `check-copy` and `check-foundations` targets support source maintenance, but are not service-owned
+validation capabilities. Remove those targets and scripts from the copy, and replace the scaffold-only
 root-delegate and CI sections with the copied module's actual onboarding boundary:
 
 ```sh
-sed -i 's/ check-copy//g' Makefile
+sed -i 's/ check-copy//g; s/ check-foundations//g' Makefile
 awk '
-  /^check-copy:/ { skipping = 1; next }
+  /^(check-copy|check-foundations):/ { skipping = 1; next }
   skipping && /^\t/ { next }
   { skipping = 0; print }
 ' Makefile > Makefile.copy
 mv Makefile.copy Makefile
-rm scripts/check_copy.py scripts/test_check_copy.py
+rm scripts/check_copy.py scripts/test_check_copy.py scripts/check_foundations.py scripts/test_check_foundations.py
 
 sed -i \
+  -e '/check-foundations/d' \
   -e '/^| `make check-copy`/d' \
   -e '/^make check-copy$/d' \
   README.md

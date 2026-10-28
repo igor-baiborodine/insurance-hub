@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -15,18 +16,28 @@ import (
 const DefaultServiceName = "go-service"
 
 const (
-	serviceNameSetting     = "SERVICE_NAME"
-	grpcAddressSetting     = "GRPC_ADDR"
-	healthAddressSetting   = "HEALTH_ADDR"
-	logLevelSetting        = "LOG_LEVEL"
-	shutdownTimeoutSetting = "SHUTDOWN_TIMEOUT"
-	otelEnabledSetting     = "OTEL_ENABLED"
-	otelEndpointSetting    = "OTEL_EXPORTER_OTLP_ENDPOINT"
-	otelTimeoutSetting     = "OTEL_EXPORTER_OTLP_TIMEOUT"
+	requestTimeoutSetting      = "REQUEST_TIMEOUT"
+	probeTimeoutSetting        = "PROBE_TIMEOUT"
+	grpcMaxReceiveBytesSetting = "GRPC_MAX_RECV_BYTES"
+	grpcMaxSendBytesSetting    = "GRPC_MAX_SEND_BYTES"
+	environmentSetting         = "DEPLOYMENT_ENVIRONMENT"
+	serviceVersionSetting      = "SERVICE_VERSION"
+	serviceInstanceSetting     = "SERVICE_INSTANCE_ID"
+	serviceNameSetting         = "SERVICE_NAME"
+	grpcAddressSetting         = "GRPC_ADDR"
+	healthAddressSetting       = "HEALTH_ADDR"
+	logLevelSetting            = "LOG_LEVEL"
+	shutdownTimeoutSetting     = "SHUTDOWN_TIMEOUT"
+	otelEnabledSetting         = "OTEL_ENABLED"
+	otelEndpointSetting        = "OTEL_EXPORTER_OTLP_ENDPOINT"
+	otelTimeoutSetting         = "OTEL_EXPORTER_OTLP_TIMEOUT"
 )
 
 // Config contains settings parsed and validated once during process startup.
 type Config struct {
+	RequestTimeout  time.Duration
+	ProbeTimeout    time.Duration
+	GRPC            GRPC
 	ServiceName     string
 	GRPCAddress     Address
 	HealthAddress   Address
@@ -45,8 +56,37 @@ func (address Address) String() string {
 	return net.JoinHostPort(address.host, strconv.FormatUint(uint64(address.port), 10))
 }
 
-// Telemetry contains the optional OTLP trace-export configuration.
+// GRPC contains business gRPC message-size bounds.
+type GRPC struct {
+	MaxReceiveBytes int
+	MaxSendBytes    int
+}
+
+// Identity is the application-owned resource and log identity. Collectors add infrastructure fields.
+type Identity struct {
+	ServiceNamespace string
+	ServiceName      string
+	ServiceVersion   string
+	ServiceInstance  string
+	Environment      string
+	Implementation   string
+}
+
+// DevelopmentIdentity labels local startup diagnostics before configuration is validated.
+func DevelopmentIdentity(serviceName string) Identity {
+	return Identity{
+		ServiceNamespace: "insurance-hub",
+		ServiceName:      serviceName,
+		ServiceVersion:   "development",
+		ServiceInstance:  fmt.Sprintf("local-%d", os.Getpid()),
+		Environment:      "development",
+		Implementation:   "go",
+	}
+}
+
+// Telemetry contains optional OTLP trace and metric export configuration.
 type Telemetry struct {
+	Identity         Identity
 	Enabled          bool
 	ExporterEndpoint *url.URL
 	ExporterTimeout  time.Duration
@@ -110,7 +150,7 @@ func load(lookup lookupEnv) (Config, error) {
 		return Config{}, invalid(otelEnabledSetting, "must be a boolean")
 	}
 
-	otelTimeoutValue, err := valueOrDefault(lookup, otelTimeoutSetting, "5s")
+	otelTimeoutValue, err := valueOrDefault(lookup, otelTimeoutSetting, "2s")
 	if err != nil {
 		return Config{}, err
 	}
@@ -124,13 +164,49 @@ func load(lookup lookupEnv) (Config, error) {
 		return Config{}, err
 	}
 
+	identity, err := loadIdentity(lookup, serviceName, otelEnabled)
+	if err != nil {
+		return Config{}, err
+	}
+	requestTimeout, err := loadPositiveDuration(lookup, requestTimeoutSetting, "8s")
+	if err != nil {
+		return Config{}, err
+	}
+	probeTimeout, err := loadPositiveDuration(lookup, probeTimeoutSetting, "2s")
+	if err != nil {
+		return Config{}, err
+	}
+	receiveBytes, err := loadBoundedInt(
+		lookup,
+		grpcMaxReceiveBytesSetting,
+		"1048576",
+		1,
+		16777216,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	sendBytes, err := loadBoundedInt(lookup, grpcMaxSendBytesSetting, "8388608", 1, 67108864)
+	if err != nil {
+		return Config{}, err
+	}
+	if otelTimeout > shutdownTimeout {
+		return Config{}, invalid(otelTimeoutSetting, "must not exceed SHUTDOWN_TIMEOUT")
+	}
+	if grpcAddress.port != 0 && grpcAddress.String() == healthAddress.String() {
+		return Config{}, invalid(healthAddressSetting, "must be distinct from GRPC_ADDR")
+	}
+
 	return Config{
+		RequestTimeout: requestTimeout, ProbeTimeout: probeTimeout,
+		GRPC:            GRPC{MaxReceiveBytes: receiveBytes, MaxSendBytes: sendBytes},
 		ServiceName:     serviceName,
 		GRPCAddress:     grpcAddress,
 		HealthAddress:   healthAddress,
 		LogLevel:        logLevel,
 		ShutdownTimeout: shutdownTimeout,
 		Telemetry: Telemetry{
+			Identity:         identity,
 			Enabled:          otelEnabled,
 			ExporterEndpoint: otelEndpoint,
 			ExporterTimeout:  otelTimeout,
@@ -257,5 +333,126 @@ func validHost(host string) bool {
 }
 
 func invalid(name, problem string) error {
-	return fmt.Errorf("invalid %s: %s", name, problem)
+	return &validationError{setting: name, problem: problem}
+}
+
+// validationError contains only validator-owned setting names and reasons, never input values.
+type validationError struct {
+	setting string
+	problem string
+}
+
+func (err *validationError) Error() string {
+	return fmt.Sprintf("invalid %s: %s", err.setting, err.problem)
+}
+
+// ErrorDetails exposes safe configuration diagnostics without rendering arbitrary errors.
+// Unknown errors retain a constant category; wrappers cannot contribute text to the log fields.
+func ErrorDetails(err error) (setting, reason string) {
+	if validation, ok := errors.AsType[*validationError](err); ok {
+		return validation.setting, validation.problem
+	}
+	return "unknown", "could not load configuration"
+}
+
+func loadBoundedInt(
+	lookup lookupEnv,
+	name string,
+	fallback string,
+	minimum int,
+	maximum int,
+) (int, error) {
+	value, err := valueOrDefault(lookup, name, fallback)
+	if err != nil {
+		return 0, err
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < minimum || parsed > maximum {
+		return 0, invalid(
+			name,
+			fmt.Sprintf("must be an integer from %d through %d", minimum, maximum),
+		)
+	}
+	return parsed, nil
+}
+
+func loadPositiveDuration(lookup lookupEnv, name, fallback string) (time.Duration, error) {
+	value, err := valueOrDefault(lookup, name, fallback)
+	if err != nil {
+		return 0, err
+	}
+	return parsePositiveDuration(name, value)
+}
+
+func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity, error) {
+	identity := DevelopmentIdentity(serviceName)
+	fields := []struct {
+		name  string
+		value *string
+	}{
+		{environmentSetting, &identity.Environment},
+		{serviceVersionSetting, &identity.ServiceVersion},
+		{serviceInstanceSetting, &identity.ServiceInstance},
+	}
+	for _, field := range fields {
+		fallback := *field.value
+		if enabled {
+			fallback = ""
+		}
+		value, err := valueOrDefault(lookup, field.name, fallback)
+		if err != nil {
+			return Identity{}, err
+		}
+		*field.value = value
+	}
+	if err := identity.Validate(enabled); err != nil {
+		return Identity{}, err
+	}
+	return identity, nil
+}
+
+// Validate rejects incomplete identity without echoing supplied values.
+func (identity Identity) Validate(enabled bool) error {
+	if identity.ServiceNamespace != "insurance-hub" || identity.Implementation != "go" {
+		return invalid(
+			"telemetry identity",
+			"must use the insurance-hub namespace and Go implementation",
+		)
+	}
+	for _, field := range []struct{ name, value string }{
+		{serviceNameSetting, identity.ServiceName},
+		{environmentSetting, identity.Environment},
+		{serviceVersionSetting, identity.ServiceVersion},
+		{serviceInstanceSetting, identity.ServiceInstance},
+	} {
+		if !validIdentityValue(field.value) {
+			return invalid(
+				field.name,
+				"must contain 1 through 128 ASCII letters, digits, dots, underscores or hyphens",
+			)
+		}
+	}
+	if enabled &&
+		(identity.Environment == "development" || identity.ServiceVersion == "development" || strings.HasPrefix(identity.ServiceInstance, "local-")) {
+		return invalid(
+			"telemetry identity",
+			"must use explicit non-development environment, version and instance when enabled",
+		)
+	}
+	return nil
+}
+
+func validIdentityValue(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for _, ch := range value {
+		if (ch < 'a' || ch > 'z') && (ch < 'A' || ch > 'Z') && (ch < '0' || ch > '9') &&
+			ch != '.' &&
+			ch != '_' &&
+			ch != '-' {
+			return false
+		}
+	}
+	return true
 }

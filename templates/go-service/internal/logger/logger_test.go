@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
 )
 
@@ -204,4 +206,45 @@ func decodeEntries(t *testing.T, output string) []map[string]any {
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+func TestNewIdentity_RedactsErrorsAndUsesUTC(t *testing.T) {
+	// given
+	var output bytes.Buffer
+	identity := config.Identity{
+		ServiceNamespace: "insurance-hub",
+		ServiceName:      "go-service",
+		ServiceVersion:   "sha-1234567",
+		ServiceInstance:  "instance-123",
+		Environment:      "staging",
+		Implementation:   "go",
+	}
+	log := logger.NewIdentity(&output, identity, slog.LevelError)
+	// when
+	logger.LogCompletion(
+		context.Background(),
+		log,
+		slog.LevelInfo,
+		slog.Any("error", errors.New("private-marker")),
+	)
+	// then
+	if strings.Contains(output.String(), "private-marker") {
+		t.Fatalf("error disclosed: %s", output.String())
+	}
+	var entry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &entry); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"service_namespace": "insurance-hub", "service_name": "go-service", "service_version": "sha-1234567",
+		"service_instance_id": "instance-123", "deployment_environment_name": "staging", "service_implementation": "go",
+		"error": "[REDACTED]", "msg": "request completed", "level": "INFO",
+	} {
+		if entry[key] != want {
+			t.Errorf("%s = %v, want %s", key, entry[key], want)
+		}
+	}
+	if !strings.HasSuffix(entry["time"].(string), "Z") {
+		t.Errorf("timestamp is not UTC: %v", entry["time"])
+	}
 }

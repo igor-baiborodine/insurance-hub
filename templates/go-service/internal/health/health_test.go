@@ -1,25 +1,39 @@
 package health_test
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/health"
 )
 
 func TestHandler_ReflectsLifecycleState(t *testing.T) {
 	// given
-	state := new(health.State)
+	var dependencyReady atomic.Bool
+	state, err := health.NewState(time.Second, func(context.Context) error {
+		if !dependencyReady.Load() {
+			return errors.New("dependency unavailable")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := health.NewHandler(state)
 	tests := []struct {
-		name       string
-		ready      bool
-		method     string
-		path       string
-		wantStatus int
-		wantBody   string
+		name            string
+		ready           bool
+		dependencyReady bool
+		method          string
+		path            string
+		wantStatus      int
+		wantBody        string
 	}{
 		{
 			name:       "live",
@@ -36,12 +50,21 @@ func TestHandler_ReflectsLifecycleState(t *testing.T) {
 			wantBody:   "not ready\n",
 		},
 		{
-			name:       "ready after startup",
+			name:            "ready after startup",
+			ready:           true,
+			dependencyReady: true,
+			method:          http.MethodGet,
+			path:            "/readyz",
+			wantStatus:      http.StatusOK,
+			wantBody:        "ready\n",
+		},
+		{
+			name:       "not ready during dependency loss",
 			ready:      true,
 			method:     http.MethodGet,
 			path:       "/readyz",
-			wantStatus: http.StatusOK,
-			wantBody:   "ready\n",
+			wantStatus: http.StatusServiceUnavailable,
+			wantBody:   "not ready\n",
 		},
 		{
 			name:       "not ready after withdrawal",
@@ -70,6 +93,7 @@ func TestHandler_ReflectsLifecycleState(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// given
 			state.SetReady(test.ready)
+			dependencyReady.Store(test.dependencyReady)
 			request := httptest.NewRequest(test.method, test.path, nil)
 			recorder := httptest.NewRecorder()
 
@@ -93,5 +117,145 @@ func TestHandler_ReflectsLifecycleState(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestReadinessCheck_UsesProbeDeadline(t *testing.T) {
+	// given
+	const timeout = 20 * time.Millisecond
+	deadlineObserved := make(chan time.Duration, 1)
+	state, err := health.NewState(timeout, func(ctx context.Context) error {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return errors.New("probe has no deadline")
+		}
+		deadlineObserved <- time.Until(deadline)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.SetReady(true)
+	recorder := httptest.NewRecorder()
+
+	// when
+	health.NewHandler(state).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/readyz", nil),
+	)
+
+	// then
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Errorf("readiness status = %d", recorder.Code)
+	}
+	observed := <-deadlineObserved
+	if observed <= 0 || observed > timeout {
+		t.Errorf("probe deadline = %s, want within %s", observed, timeout)
+	}
+}
+
+func TestNewState_RejectsInvalidDependencies(t *testing.T) {
+	// given
+	checks := []struct {
+		timeout time.Duration
+		check   health.Check
+	}{
+		{timeout: 0, check: func(context.Context) error { return nil }},
+		{timeout: time.Second},
+	}
+
+	for _, check := range checks {
+		// when
+		state, err := health.NewState(check.timeout, check.check)
+
+		// then
+		if err == nil || state != nil {
+			t.Errorf("NewState() = (%v, %v), want (nil, error)", state, err)
+		}
+	}
+}
+
+func TestReadinessCheck_RejectsWithdrawalDuringProbe(t *testing.T) {
+	// given
+	started := make(chan struct{})
+	release := make(chan struct{})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	state, err := health.NewState(time.Second, func(ctx context.Context) error {
+		close(started)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.SetReady(true)
+	handler := health.NewHandler(state)
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("readiness handler did not stop")
+		}
+	})
+	go func() {
+		handler.ServeHTTP(
+			recorder,
+			httptest.NewRequestWithContext(ctx, http.MethodGet, "/readyz", nil),
+		)
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("dependency probe did not start")
+	}
+	// when
+	state.SetReady(false)
+	close(release)
+	// then
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("readiness request did not finish")
+	}
+	if recorder.Code != http.StatusServiceUnavailable ||
+		recorder.Body.String() != "not ready\n" {
+		t.Errorf("withdrawn readiness = (%d, %q)", recorder.Code, recorder.Body.String())
+	}
+	live := httptest.NewRecorder()
+	handler.ServeHTTP(live, httptest.NewRequest(http.MethodGet, "/livez", nil))
+	if live.Code != http.StatusOK {
+		t.Errorf("liveness = %d", live.Code)
+	}
+}
+
+func TestReadinessCheck_RejectsSuccessAfterCancellation(t *testing.T) {
+	// given
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	state, err := health.NewState(time.Second, func(context.Context) error {
+		cancel()
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.SetReady(true)
+	recorder := httptest.NewRecorder()
+	// when
+	health.NewHandler(state).
+		ServeHTTP(recorder, httptest.NewRequestWithContext(ctx, http.MethodGet, "/readyz", nil))
+	// then
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Errorf("cancelled readiness = %d", recorder.Code)
 	}
 }

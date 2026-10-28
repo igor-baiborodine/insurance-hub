@@ -11,6 +11,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/service"
+	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
 )
 
 func main() {
@@ -27,18 +28,35 @@ func shutdownContext(parent context.Context) (context.Context, context.CancelFun
 }
 
 func run(ctx context.Context, output io.Writer) error {
-	bootstrapLogger := logger.New(output, config.DefaultServiceName, slog.LevelInfo)
-	settings, err := config.Load()
+	return runWith(ctx, output, config.Load, service.Run)
+}
+
+func runWith(
+	ctx context.Context,
+	output io.Writer,
+	loadConfig func() (config.Config, error),
+	runService func(context.Context, config.Config, *slog.Logger) error,
+) error {
+	bootstrapLogger := logger.NewIdentity(
+		output, config.DevelopmentIdentity(config.DefaultServiceName), slog.LevelInfo,
+	)
+	settings, err := loadConfig()
 	if err != nil {
+		setting, reason := config.ErrorDetails(err)
 		bootstrapLogger.ErrorContext(
 			context.Background(),
 			"configuration failed",
+			slog.String("setting", setting),
+			slog.String("reason", reason),
 			slog.Any("error", err),
 		)
 		return err
 	}
-	serviceLogger := logger.New(output, settings.ServiceName, settings.LogLevel)
-	if err := service.Run(ctx, settings, serviceLogger); err != nil {
+	serviceLogger := logger.NewIdentity(output, settings.Telemetry.Identity, settings.LogLevel)
+	if settings.Telemetry.Enabled {
+		telemetry.InstallDiagnostics(serviceLogger)
+	}
+	if err := runService(ctx, settings, serviceLogger); err != nil {
 		serviceLogger.ErrorContext(
 			context.Background(),
 			"service failed",

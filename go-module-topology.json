@@ -17,7 +17,7 @@
       ],
       "packageScope": "all Go packages under ./..., the server executable, owned Protobuf schema and generated output, and module dependency metadata",
       "prerequisites": [
-        "Go 1.27.2",
+        "Go 1.27.3",
         "pinned scaffold Go tools installed by make -C templates/go-service bootstrap-go-tools",
         "GCC for race-enabled tests",
         "public module, schema, tool, and vulnerability services unless cached"

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
@@ -109,6 +110,7 @@ func TestProvider_PropagatesW3CTraceContext(t *testing.T) {
 		func(context.Context, config.Telemetry) (sdktrace.SpanExporter, error) {
 			return nil, errors.New("unexpected exporter call")
 		},
+		testMetricReader,
 	)
 	if err != nil {
 		t.Fatalf("new provider: %v", err)
@@ -160,6 +162,7 @@ func TestProvider_BoundsExporterInitializationAndHidesCauseDetails(t *testing.T)
 			<-ctx.Done()
 			return nil, cause
 		},
+		testMetricReader,
 	)
 	elapsed := time.Since(start)
 
@@ -334,6 +337,7 @@ func TestNew_RejectsInvalidEnabledSettings(t *testing.T) {
 				test.serviceName,
 				test.settings,
 				newExporter,
+				testMetricReader,
 			)
 
 			// then
@@ -409,6 +413,7 @@ func enabledProvider(
 		func(context.Context, config.Telemetry) (sdktrace.SpanExporter, error) {
 			return exporter, nil
 		},
+		testMetricReader,
 	)
 	if err != nil {
 		t.Fatalf("new provider: %v", err)
@@ -418,7 +423,15 @@ func enabledProvider(
 
 func testTelemetrySettings(timeout time.Duration) config.Telemetry {
 	return config.Telemetry{
-		Enabled:          true,
+		Enabled: true,
+		Identity: config.Identity{
+			ServiceNamespace: "insurance-hub",
+			ServiceName:      "go-service",
+			ServiceVersion:   "test-revision",
+			ServiceInstance:  "test-instance",
+			Environment:      "test",
+			Implementation:   "go",
+		},
 		ExporterEndpoint: mustURL("http://127.0.0.1:4317"),
 		ExporterTimeout:  timeout,
 	}
@@ -441,4 +454,8 @@ func receiveSpans(t *testing.T, spans <-chan []sdktrace.ReadOnlySpan) []sdktrace
 		t.Fatal("span export timed out")
 		return nil
 	}
+}
+
+func testMetricReader(context.Context, config.Telemetry) (sdkmetric.Reader, error) {
+	return sdkmetric.NewManualReader(), nil
 }
