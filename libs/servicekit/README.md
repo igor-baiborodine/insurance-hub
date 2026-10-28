@@ -200,22 +200,19 @@ are stored under ignored `.work/servicekit`; temporary overrides never live ther
 
 ## Release and qualification
 
-The **Go Library Release** workflow is explicitly dispatched from `main` with a canonical stable
-v0 version and full independently reviewed merged SHA. Start at `v0.1.0` and tag
-`libs/servicekit/v0.1.0` only after the complete runtime library has merged and release publication
-has been authorized. The workflow fixes control tooling to the dispatch SHA, verifies main
-ancestry and approving review evidence, and validates the exact source plus active consumers.
+The **Go Library Release** workflow runs after a `libs/servicekit` change merges to `main`.
+Monotag calculates a scoped stable v0 version from conventional commits and existing library
+tags, starting at `v0.1.0`. Because the Go module is in `libs/servicekit`, its tags must use
+`libs/servicekit/vX.Y.Z`; a shorter `servicekit/vX.Y.Z` tag does not provide a normal Go module
+version. The workflow fixes control tooling and source to the triggering merge SHA, verifies main
+ancestry and merged-PR evidence without an approving-review requirement, and validates the exact
+source plus active consumers. A direct push to `main` cannot qualify as a library release.
 
-The `servicekit-release` environment must have independent required reviewers, self-review
-prevention and no admin bypass. Repository release immutability must be enabled. The publication
-jobs verify these settings; inability to read them blocks publication. Configure settings and
-credential permissions separately before the first authorized hosted run. CI requires GitHub CLI
-with release and artifact-attestation verification (locally qualified with 2.103.0).
-If `GITHUB_TOKEN` cannot inspect protection settings, provision the protected environment secret
-`SERVICEKIT_RELEASE_INSPECTION_TOKEN` with read-only Administration/Environments access to this
-repository. It is used only for those two GET requests; publication uses the job's scoped token.
+The automatic workflow needs no repository release-immutability setting, inspection secret,
+separate reviewer or protected release environment. CI requires GitHub CLI with release download
+and artifact-attestation verification (locally qualified with 2.103.0).
 
-Only protected tag/qualification jobs receive `contents: write`; the qualification job also needs
+Only tag/qualification jobs receive `contents: write`; the qualification job also needs
 OIDC and attestation permissions. Module-wide concurrency disables cancellation. Tags use
 create-if-absent and exact readback; collisions fail, and an identical source resumes verification.
 No Packages upload, consumer pin update or service-image release occurs.
@@ -227,19 +224,20 @@ has a separate 30-second budget. Only transient proxy availability is retried; c
 is fatal. An unqualified tag may remain downloadable after failure, but cannot be adopted.
 
 After verification, the workflow attests `qualification.json`, uploads it to a draft Release,
-then publishes and verifies immutable release/asset attestations. The schema binds module,
+then publishes the Release and reads back the asset bytes and tag SHA. The schema binds module,
 version, tag/SHA, source digest, both Go checksums, trusted workflow revision/run/attempt and
 validation/public-resolution identities. Admission checks actual selected graph/checksums,
-immutable tag/source binding, asset and producer attestations and successful required jobs.
-The caller supplies an independently approved workflow revision; a record cannot approve itself.
-Network or verification failure does not disable admission. Offline cached-record admission is
-not implemented and therefore fails closed. Local fake-provider tests do not establish hosted
-protections, publication or a qualified release.
+current tag/source binding, the qualification asset's SHA-256 digest pinned by the consumer PR,
+artifact attestation and successful required jobs. The caller supplies a trusted workflow revision;
+a record cannot approve itself. Network or verification failure does not disable admission.
+Offline cached-record admission is not implemented and therefore fails closed. GitHub can later
+change or remove the tag or asset; subsequent admission checks detect changed identity and fail,
+but cannot guarantee permanent availability. Local fake-provider tests do not establish hosted
+publication or a qualified release.
 
-Provider contracts follow GitHub's [release verification](https://cli.github.com/manual/gh_release_verify-asset)
-and [artifact provenance verification](https://cli.github.com/manual/gh_attestation_verify).
-Consumer admission integration is required in each adoption PR. A release is not authorized by
-running local checks or by merging this onboarding change.
+Provider checks use GitHub's [artifact provenance verification](https://cli.github.com/manual/gh_attestation_verify).
+Consumer admission integration is required in each adoption PR. A library-changing merge starts
+the release, but local checks and a tag alone do not establish qualification.
 
 ## Compatibility and handoff
 
@@ -249,7 +247,7 @@ old/new versions, affected settings/APIs/consumers, before/after behavior, requi
 qualified rollback target with reversal limits. Consumers explicitly pin and verify exact
 qualified versions; automatic minor upgrades are unsupported. Rollback restores a qualified pin
 and necessary source/configuration changes in that consumer's own PR and reruns its full gate.
-Never move a release tag. Review v1 readiness after both real consumers complete compatibility
+The release workflow never moves a tag. Review v1 readiness after both real consumers complete compatibility
 qualification; publishing v1 needs separate approval.
 
 Root validation owners are `go-shared-test`, `go-shared-test-integration`, `go-shared-check-ci`,

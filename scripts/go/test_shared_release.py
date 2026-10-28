@@ -16,7 +16,7 @@ import shared_release as release
 from shared_support import MODULE, REPOSITORY, WORKFLOW, SharedError, write_json
 
 SHA = "a" * 40
-CONTROL = "b" * 40
+CONTROL = SHA
 SUM = "h1:" + "A" * 43 + "="
 
 
@@ -49,13 +49,11 @@ class Provider:
         self.sha = None
         self.creates = 0
         self.commands = []
-        self.immutable = True
         self.attested = True
         self.success = True
-
-    def protections(self):
-        if not self.immutable:
-            raise SharedError("protection missing")
+        self.move_tag_after_attestation = False
+        self.published_draft = False
+        self.published_bytes = None
 
     def tag_sha(self, _tag):
         return self.sha
@@ -70,7 +68,7 @@ class Provider:
             self.creates += 1
             return None
         if path.startswith("releases/"):
-            return {"immutable": self.immutable, "draft": False}
+            return {"draft": self.published_draft, "assets": [{"name": "qualification.json"}]}
         if "/jobs?" in path:
             return {
                 "total_count": 2,
@@ -83,7 +81,7 @@ class Provider:
             return {
                 "path": WORKFLOW,
                 "head_sha": CONTROL,
-                "event": "workflow_dispatch",
+                "event": "push",
                 "status": "completed",
                 "conclusion": "success" if self.success else "failure",
             }
@@ -91,8 +89,15 @@ class Provider:
 
     def command(self, args):
         self.commands.append(args)
+        if args[:2] == ["release", "download"]:
+            assert self.published_bytes is not None
+            (Path(args[args.index("--dir") + 1]) / "qualification.json").write_bytes(
+                self.published_bytes
+            )
         if not self.attested:
             raise SharedError("invalid attestation")
+        if args[:2] == ["attestation", "verify"] and self.move_tag_after_attestation:
+            self.sha = "e" * 40
         return ""
 
 
@@ -110,8 +115,8 @@ def disposable_history(root: Path) -> tuple[str, str]:
     git("add", "source.txt")
     git("commit", "-qm", "base")
     base = git("rev-parse", "HEAD")
-    (root / "source.txt").write_text("reviewed\n")
-    git("commit", "-qam", "reviewed source")
+    (root / "source.txt").write_text("merged\n")
+    git("commit", "-qam", "merged source")
     main = git("rev-parse", "HEAD")
     git("checkout", "-qb", "unmerged", base)
     (root / "source.txt").write_text("unmerged\n")
@@ -122,11 +127,10 @@ def disposable_history(root: Path) -> tuple[str, str]:
     return main, side
 
 
-class ReviewAPI(release.GitHub):
+class MergeAPI(release.GitHub):
     def __init__(self, root: Path, sha: str):
         super().__init__(root)
         self.sha = sha
-        self.reviews = [{"state": "APPROVED", "commit_id": sha, "user": {"login": "reviewer"}}]
         self.pulls = [
             {
                 "merged_at": "2026-01-01T00:00:00Z",
@@ -145,117 +149,66 @@ class ReviewAPI(release.GitHub):
             return {"object": {"sha": self.sha}}
         if suffix.startswith("commits/") and suffix.endswith("/pulls?per_page=100"):
             return self.pulls
-        if suffix == "pulls/7/reviews?per_page=100":
-            return self.reviews
         raise AssertionError(suffix)
 
 
 @pytest.mark.parametrize(
     "defect",
-    [None, "unmerged", "no_pull", "unreviewed", "author_only", "stale", "revoked", "changes"],
+    [None, "unmerged", "no_pull", "wrong_merge", "wrong_base", "wrong_repo"],
 )
-def test_reviewed_source_requires_merged_ancestor_and_current_independent_approval(
+def test_merged_source_requires_merged_ancestor_and_exact_pr_evidence(
     tmp_path: Path, defect: str | None
 ) -> None:
     # given: main and an unmerged branch are real disposable Git history.
     main, side = disposable_history(tmp_path)
-    provider = ReviewAPI(tmp_path, main)
+    provider = MergeAPI(tmp_path, main)
     source = side if defect == "unmerged" else main
     if defect == "unmerged":
         # The PR evidence otherwise qualifies, isolating the real Git ancestry guard.
         provider.pulls[0]["merge_commit_sha"] = side
         provider.pulls[0]["head"]["sha"] = side
-        provider.reviews[0]["commit_id"] = side
     elif defect == "no_pull":
         provider.pulls = []
-    elif defect == "unreviewed":
-        provider.reviews = []
-    elif defect == "author_only":
-        provider.reviews[0]["user"]["login"] = "author"
-    elif defect == "stale":
-        provider.reviews[0]["commit_id"] = side
-    elif defect == "revoked":
-        provider.reviews.append(
-            {"state": "DISMISSED", "commit_id": main, "user": {"login": "reviewer"}}
-        )
-    elif defect == "changes":
-        provider.reviews.append(
-            {"state": "CHANGES_REQUESTED", "commit_id": main, "user": {"login": "other"}}
-        )
+    elif defect == "wrong_merge":
+        provider.pulls[0]["merge_commit_sha"] = side
+    elif defect == "wrong_base":
+        provider.pulls[0]["base"]["ref"] = "release"
+    elif defect == "wrong_repo":
+        provider.pulls[0]["base"]["repo"]["full_name"] = "example/other"
 
     # when / then: every denied path stops before any publication request.
     if defect == "unmerged":
         with pytest.raises(RuntimeError, match="inspect Git failed with status 1"):
-            release.reviewed_source(provider, tmp_path, source)
+            release.merged_source(provider, tmp_path, source)
     elif defect:
-        with pytest.raises(RuntimeError):
-            release.reviewed_source(provider, tmp_path, source)
+        with pytest.raises(SharedError, match="merged PR evidence"):
+            release.merged_source(provider, tmp_path, source)
     else:
-        release.reviewed_source(provider, tmp_path, source)
+        release.merged_source(provider, tmp_path, source)
     assert all(method == "GET" for method, _ in provider.calls)
 
 
-@pytest.mark.parametrize(
-    "defect",
-    [
-        None,
-        "missing_immutability",
-        "disabled_immutability",
-        "missing_environment",
-        "denied_environment",
-        "missing_reviewers",
-        "self_review",
-        "admin_bypass",
-    ],
-)
-def test_real_github_protections_rejects_unprotected_publication(
-    tmp_path: Path, defect: str | None
+def test_release_producer_requires_main_push_at_exact_source(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # given: fake API responses feed the real protection guard before publish_tag can create a tag.
-    class ProtectionsAPI(release.GitHub):
-        def __init__(self):
-            super().__init__(tmp_path)
-            self.calls = []
+    # given: the canonical repository, main ref and a single triggering push SHA.
+    monkeypatch.setenv("GITHUB_REPOSITORY", REPOSITORY)
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("GITHUB_SHA", SHA)
+    monkeypatch.setenv("RELEASE_SHA", SHA)
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
 
-        def api(self, suffix, method="GET", body=None, absent=False):
-            self.calls.append((method, suffix))
-            assert method == "GET"
-            if suffix == "immutable-releases":
-                if defect == "missing_immutability":
-                    raise SharedError("GitHub GET request failed: HTTP 404")
-                return {"enabled": defect != "disabled_immutability"}
-            if suffix == "environments/servicekit-release":
-                if defect in {"missing_environment", "denied_environment"}:
-                    code = 403 if defect == "denied_environment" else 404
-                    raise SharedError(f"GitHub GET request failed: HTTP {code}")
-                return {
-                    "protection_rules": [
-                        {
-                            "type": "required_reviewers",
-                            "reviewers": [] if defect == "missing_reviewers" else [{"id": 1}],
-                            "prevent_self_review": defect != "self_review",
-                        }
-                    ],
-                    "can_admins_bypass": defect == "admin_bypass",
-                }
-            if suffix == "git/ref/tags/libs%2Fservicekit%2Fv0.1.0":
-                return None
-            if suffix == "git/matching-refs/tags/libs/servicekit/":
-                return []
-            raise AssertionError(suffix)
-
-    provider = ProtectionsAPI()
-    # when / then
-    if defect:
-        with pytest.raises(SharedError):
-            release.publish_tag(provider, "v0.1.0", SHA)
-        assert all(not path.startswith("git/") for _, path in provider.calls)
-    else:
-        provider.protections()
-        assert provider.calls == [
-            ("GET", "immutable-releases"),
-            ("GET", "environments/servicekit-release"),
-        ]
+    # when / then: a push qualifies; manual dispatch and mismatched sources do not.
+    assert release.producer()["workflow_sha"] == SHA
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
+    with pytest.raises(SharedError, match="main push"):
+        release.producer()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("RELEASE_SHA", "b" * 40)
+    with pytest.raises(SharedError, match="push revision"):
+        release.producer()
 
 
 @pytest.mark.parametrize("defect", [None, "job_ids", "missing", "duplicate", "failed"])
@@ -311,7 +264,8 @@ def test_release_version_rejects_unapproved_forms(version: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "defect", ["schema", "module", "sha", "producer", "missing", "failed", "checksum"]
+    "defect",
+    ["schema", "module", "sha", "producer", "producer_sha", "missing", "failed", "checksum"],
 )
 def test_qualification_rejects_untrusted_incomplete_records(defect: str) -> None:
     # given
@@ -325,6 +279,8 @@ def test_qualification_rejects_untrusted_incomplete_records(defect: str) -> None
         value["source_sha"] = "e" * 40
     elif defect == "producer":
         value["producer"]["workflow"] = ".github/workflows/untrusted.yml"
+    elif defect == "producer_sha":
+        value["producer"]["workflow_sha"] = "b" * 40
     elif defect == "missing":
         del value["public_resolution"]["container"]
     elif defect == "failed":
@@ -337,7 +293,20 @@ def test_qualification_rejects_untrusted_incomplete_records(defect: str) -> None
 
 
 @pytest.mark.parametrize(
-    "defect", [None, "tag", "mutable", "asset", "run", "version", "override", "workflow"]
+    "defect",
+    [
+        None,
+        "tag",
+        "moved_tag",
+        "draft",
+        "asset",
+        "changed_asset",
+        "pin",
+        "run",
+        "version",
+        "override",
+        "workflow",
+    ],
 )
 def test_admission_binds_selected_graph_release_and_producer(
     tmp_path: Path, defect: str | None
@@ -347,14 +316,22 @@ def test_admission_binds_selected_graph_release_and_producer(
     write_json(asset, record())
     provider = Provider()
     provider.sha = SHA
+    provider.published_bytes = asset.read_bytes()
     selected = {"Path": MODULE, "Version": "v0.1.0", "Sum": SUM, "GoModSum": SUM}
     trusted = CONTROL
+    pinned = release.digest(asset.read_bytes())
     if defect == "tag":
         provider.sha = "e" * 40
-    elif defect == "mutable":
-        provider.immutable = False
+    elif defect == "moved_tag":
+        provider.move_tag_after_attestation = True
+    elif defect == "draft":
+        provider.published_draft = True
     elif defect == "asset":
         provider.attested = False
+    elif defect == "changed_asset":
+        provider.published_bytes = b"changed qualification asset"
+    elif defect == "pin":
+        pinned = "f" * 64
     elif defect == "run":
         provider.success = False
     elif defect == "version":
@@ -366,10 +343,10 @@ def test_admission_binds_selected_graph_release_and_producer(
     # when / then
     if defect:
         with pytest.raises(SharedError):
-            release.verify_admission(provider, asset, "v0.1.0", SHA, selected, trusted)
+            release.verify_admission(provider, asset, "v0.1.0", SHA, selected, trusted, pinned)
     else:
-        release.verify_admission(provider, asset, "v0.1.0", SHA, selected, trusted)
-        assert any(c[:2] == ["release", "verify-asset"] for c in provider.commands)
+        release.verify_admission(provider, asset, "v0.1.0", SHA, selected, trusted, pinned)
+        assert any(c[:2] == ["release", "download"] for c in provider.commands)
         assert any("--signer-digest" in c and CONTROL in c for c in provider.commands)
 
 
@@ -429,7 +406,7 @@ def test_public_verification_bounds_failure_and_cleans_owned_image(
         assert not any(command[0] == "docker" for command in commands)
 
 
-def test_same_source_qualification_retry_reuses_prior_immutable_asset(tmp_path: Path) -> None:
+def test_same_source_qualification_retry_reuses_prior_attested_asset(tmp_path: Path) -> None:
     # given
     previous = record()
     current = copy.deepcopy(previous)
@@ -441,7 +418,6 @@ def test_same_source_qualification_retry_reuses_prior_immutable_asset(tmp_path: 
         def api(self, path, method="GET", body=None, absent=False):
             if path.startswith("releases/"):
                 return {
-                    "immutable": True,
                     "draft": False,
                     "assets": [{"name": "qualification.json"}],
                 }
@@ -450,6 +426,8 @@ def test_same_source_qualification_retry_reuses_prior_immutable_asset(tmp_path: 
         def command(self, args):
             if args[:2] == ["release", "download"]:
                 write_json(Path(args[args.index("--dir") + 1]) / "qualification.json", previous)
+                self.commands.append(args)
+                return ""
             return super().command(args)
 
     provider = Published()
@@ -460,3 +438,48 @@ def test_same_source_qualification_retry_reuses_prior_immutable_asset(tmp_path: 
     assert not any(
         command[:2] in (["release", "upload"], ["release", "edit"]) for command in provider.commands
     )
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_publication_reads_back_published_qualification_bytes(
+    tmp_path: Path, changed: bool
+) -> None:
+    asset = tmp_path / "qualification.json"
+    write_json(asset, record())
+
+    class Publication(Provider):
+        def __init__(self):
+            super().__init__()
+            self.created = False
+            self.published_draft = True
+
+        def api(self, path, method="GET", body=None, absent=False):
+            if path.startswith("releases/"):
+                if not self.created:
+                    return None
+                return {
+                    "draft": self.published_draft,
+                    "assets": ([{"name": "qualification.json"}] if self.published_bytes else []),
+                }
+            return super().api(path, method, body, absent)
+
+        def command(self, args):
+            if args[:2] == ["release", "create"]:
+                self.created = True
+            elif args[:2] == ["release", "upload"]:
+                self.published_bytes = Path(args[3]).read_bytes()
+            elif args[:2] == ["release", "edit"]:
+                self.published_draft = False
+                if changed:
+                    self.published_bytes = b"changed after upload"
+            return super().command(args)
+
+    provider = Publication()
+    provider.sha = SHA
+    if changed:
+        with pytest.raises(SharedError, match="published qualification asset differs"):
+            release.publish_qualification(provider, asset, "v0.1.0", SHA)
+    else:
+        release.publish_qualification(provider, asset, "v0.1.0", SHA)
+        assert provider.published_bytes == asset.read_bytes()
+        assert any(command[:2] == ["attestation", "verify"] for command in provider.commands)

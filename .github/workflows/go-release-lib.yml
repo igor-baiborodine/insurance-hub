@@ -1,16 +1,11 @@
 name: Go Library Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Exact stable v0 version (first release v0.1.0)
-        type: string
-        required: true
-      source_sha:
-        description: Full independently reviewed commit merged into main
-        type: string
-        required: true
+  push:
+    branches:
+      - main
+    paths:
+      - 'libs/servicekit/**'
 
 permissions:
   contents: read
@@ -22,15 +17,16 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_VERSION: ${{ inputs.version }}
-  RELEASE_SHA: ${{ inputs.source_sha }}
+  RELEASE_SHA: ${{ github.sha }}
 
 jobs:
   validate:
     name: Validate Go library release
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'igor-baiborodine/insurance-hub' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    outputs:
+      version: ${{ steps.monotag.outputs.version }}
     steps:
       - name: Checkout triggering source revision
         uses: actions/checkout@v6
@@ -38,6 +34,33 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Set up Node.js 24.13.0
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.13.0'
+
+      - name: Calculate next scoped library version
+        id: monotag
+        shell: bash
+        run: |
+          set -euo pipefail
+          metadata_dir="$RUNNER_TEMP/servicekit-release"
+          mkdir -p "$metadata_dir"
+          npx -y monotag@1.26.0 tag \
+            --repo-dir . \
+            --path libs/servicekit \
+            --prefix libs/servicekit/v \
+            --tag-file "$metadata_dir/tag.txt" \
+            --version-file "$metadata_dir/version.txt" \
+            --notes-file "$metadata_dir/notes.md" \
+            --min-version 0.1.0 \
+            --max-version 0.999.999
+          release_tag="$(cat "$metadata_dir/tag.txt")"
+          release_version="$(cat "$metadata_dir/version.txt")"
+          [[ "$release_version" =~ ^0\.[0-9]+\.[0-9]+$ ]]
+          [[ "$release_tag" == "libs/servicekit/v$release_version" ]]
+          echo "version=v$release_version" >> "$GITHUB_OUTPUT"
 
       - name: Set up uv 0.13.1
         uses: astral-sh/setup-uv@v7
@@ -53,9 +76,10 @@ jobs:
           go-version-file: libs/servicekit/go.mod
           cache: false
 
-      - name: Validate reviewed library source and consumers
+      - name: Validate merged library source and consumers
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
         run: make go-library-release-validate
 
       - name: Upload library validation results
@@ -69,7 +93,8 @@ jobs:
   publish-tag:
     name: Publish Go library tag
     needs: validate
-    environment: servicekit-release
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
     permissions:
       contents: write
       actions: read
@@ -101,12 +126,13 @@ jobs:
       - name: Create scoped library source tag
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_INSPECTION_TOKEN: ${{ secrets.SERVICEKIT_RELEASE_INSPECTION_TOKEN }}
         run: make go-library-release-tag
 
   verify:
     name: Verify published Go library
-    needs: publish-tag
+    needs: [validate, publish-tag]
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -151,8 +177,9 @@ jobs:
 
   publish-notes:
     name: Publish Go library release
-    needs: verify
-    environment: servicekit-release
+    needs: [validate, verify]
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
     permissions:
       contents: write
       actions: read
@@ -196,5 +223,4 @@ jobs:
       - name: Create qualified GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_INSPECTION_TOKEN: ${{ secrets.SERVICEKIT_RELEASE_INSPECTION_TOKEN }}
         run: make go-library-release-publish

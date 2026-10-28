@@ -1,4 +1,4 @@
-# Root-owned orchestration; source changes and publication remain separate operations.
+# Root-owned orchestration for validated, automatic library publication.
 GO_SHARED_TOOL := $(ROOT_DIR)scripts/go/shared_cli.py
 GO_SHARED_ACTIONLINT ?= $(ROOT_DIR)services/product-service/.tools/bin/actionlint
 export PYTHON
@@ -29,14 +29,14 @@ go-shared-test: python-toolchain-check ## Test shared registration, selection, g
 go-shared-test-integration: python-toolchain-check ## Exercise disposable candidate and process boundaries
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -m integration scripts/go/test_shared_*.py
 
-go-library-release-validate: python-runtime-check ## Read-only exact-source validation for an authorized main dispatch
+go-library-release-validate: python-runtime-check ## Read-only exact-source validation for a main push
 	@"$(PYTHON)" "$(GO_SHARED_TOOL)" release-validate
 
-go-library-release-tag: python-runtime-check ## Publish an immutable prefixed tag; requires separate release authorization
+go-library-release-tag: python-runtime-check ## Publish the prefixed tag at the validated main push SHA
 	@"$(PYTHON)" "$(GO_SHARED_TOOL)" release-tag
 
 go-library-release-verify: python-runtime-check ## Verify public checksums and fresh standalone/container resolution
 	@"$(PYTHON)" "$(GO_SHARED_TOOL)" release-verify
 
-go-library-release-publish: python-runtime-check ## Publish an attested immutable qualification asset after verification
+go-library-release-publish: python-runtime-check ## Publish and read back an attested qualification asset
 	@"$(PYTHON)" "$(GO_SHARED_TOOL)" release-publish
