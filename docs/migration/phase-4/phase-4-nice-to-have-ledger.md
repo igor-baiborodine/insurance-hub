@@ -28,6 +28,11 @@
       - [issue-156-N03 Module move and identity correlation](#issue-156-n03-module-move-and-identity-correlation)
     - [Issue 174 Standardize auxiliary tooling on Python](#issue-174-standardize-auxiliary-tooling-on-python)
       - [issue-174-N01 Python static-check CI workflow](#issue-174-n01-python-static-check-ci-workflow)
+  - [Sub-epic 4.3 Shared Go runtime and further service migrations](#sub-epic-43-shared-go-runtime-and-further-service-migrations)
+    - [Issue 214 Share Go service runtime foundations](#issue-214-share-go-service-runtime-foundations)
+      - [issue-214-N01 gRPC deadline and drain helpers](#issue-214-n01-grpc-deadline-and-drain-helpers)
+      - [issue-214-N02 Shared disposable test support](#issue-214-n02-shared-disposable-test-support)
+      - [issue-214-N03 Shared integration client configuration](#issue-214-n03-shared-integration-client-configuration)
   - [Ad hoc repository improvements](#ad-hoc-repository-improvements)
     - [Commit-message policy enforcement](#commit-message-policy-enforcement)
       - [adhoc-commit-msg-N01 Commit-message hook](#adhoc-commit-msg-n01-commit-message-hook)
@@ -496,6 +501,74 @@ nor executed, including through setup or transitive Make dependencies; no test c
 infrastructure startup occurs. Checks leave source files unchanged. Document enforced rules,
 rules reserved for review or runtime tests, and measured workflow duration; existing Go, legacy,
 and release workflow behavior remains unchanged.
+
+## Sub-epic 4.3 Shared Go runtime and further service migrations
+
+Parent: [issue 215](https://github.com/igor-baiborodine/insurance-hub/issues/215).
+Issue 214 is its only currently scoped child; later service migrations will be assessed separately.
+
+### Issue 214 Share Go service runtime foundations
+
+Origin: reuse assessment N01–N03, initially assessed as ad hoc work and assigned to issue 214
+on 2026-10-28. The source IDs remain N01–N03; their ledger-qualified IDs are issue-214-N01–N03.
+The user requested retention here without promoting these items into mandatory delivery.
+
+Source ticket: [issue 214](https://github.com/igor-baiborodine/insurance-hub/issues/214).
+Local assessment: `ai/artifacts/epic-4.3/issue-214/issue-214-requirements.md` (ignored local evidence).
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-214-N01](#issue-214-n01-grpc-deadline-and-drain-helpers) | gRPC, deadline and drain helpers | Deferred | Unassigned |
+| [issue-214-N02](#issue-214-n02-shared-disposable-test-support) | Shared disposable test support | Deferred | Unassigned |
+| [issue-214-N03](#issue-214-n03-shared-integration-client-configuration) | Shared integration/client configuration | Deferred | Unassigned |
+
+#### issue-214-N01 gRPC deadline and drain helpers
+
+**Requirement:** Extract narrowly reusable gRPC setup, request deadline or server-drain mechanics
+where multiple consumers demonstrate the same contract. Preserve service-owned registration,
+business error mapping, final transport status, cancellation and resource ownership.
+
+**Why deferred:** Transport and lifecycle implementations have materially different responsibilities.
+Extracting them now risks changing final-status or cleanup behavior and is not necessary to share
+configuration, logging, telemetry providers and health handlers.
+
+**Reconsider when:** Core runtime adoption is stable and another consumer demonstrates the same
+bounded transport or lifecycle helper requirement.
+
+**Acceptance evidence:** Real transport tests in all affected consumers preserve final status,
+including decoding and response-size failures, caller deadlines and cancellation, and bounded
+graceful/forced shutdown. The helper neither imports a business service nor takes implicit
+ownership of its resources.
+
+#### issue-214-N02 Shared disposable test support
+
+**Requirement:** Share PostgreSQL or OTLP collector test-support mechanics when repeated fixture
+setup has a stable cross-consumer contract, keeping provisioning outside production imports.
+
+**Why deferred:** Existing service and SDK fixtures have different ownership and assumptions.
+Current mandatory tests remain required; this entry concerns reuse of their support code only.
+
+**Reconsider when:** Multiple consumers repeat equivalent test setup and a small shared interface
+can preserve their independent assertions and fixture provenance.
+
+**Acceptance evidence:** Disposable tests remain isolated, bounded and reproducible, clean up on
+success and failure, and use no shared/live data. Dependency inspection proves test provisioning
+does not enter production packages or executables; independent consumer behavior checks remain.
+
+#### issue-214-N03 Shared integration client configuration
+
+**Requirement:** Reuse configuration or client-construction mechanics for storage, messaging or
+search integrations only where actual Java-to-Go migrations establish matching requirements.
+
+**Why deferred:** Product does not establish future services' persistence, transaction, replay,
+security or integration contracts. A speculative abstraction could impose the wrong behavior.
+
+**Reconsider when:** Two migrations provide compatible requirements and independently captured
+parity fixtures for the same integration boundary.
+
+**Acceptance evidence:** Each consumer's success, failure, timeout, cancellation, replay and
+security cases pass against its own baseline. Shared code preserves service ownership and safe
+configuration without introducing shared business models or forcing a persistence-stack change.
 
 ## Ad hoc repository improvements
 
