@@ -443,14 +443,25 @@ func TestInstallDiagnostics_FirstInstallationDetachesLogger(t *testing.T) {
 		if bytes.Contains(output, []byte(marker)) {
 			t.Fatalf("post-cleanup diagnostic exposed private marker: %s", output)
 		}
+		if !bytes.Contains(output, []byte("telemetry export failed")) {
+			t.Fatalf(
+				"post-cleanup diagnostic did not use the fixed fallback: %s",
+				output,
+			)
+		}
 		return
 	}
 
 	initial := otel.GetErrorHandler()
 	var firstOutput bytes.Buffer
 	restore := InstallDiagnostics(slog.New(slog.NewJSONHandler(&firstOutput, nil)))
-	otel.Handle(errors.New("private-during-installation-marker"))
-	if !bytes.Contains(firstOutput.Bytes(), []byte("telemetry export failed")) ||
+	otel.Handle(
+		errors.Join(
+			errors.New("private-during-installation-marker"),
+			errSpanQueueSaturated,
+		),
+	)
+	if !bytes.Contains(firstOutput.Bytes(), []byte("telemetry span queue saturated")) ||
 		bytes.Contains(firstOutput.Bytes(), []byte("private-during-installation-marker")) {
 		t.Fatalf("installed diagnostic was not safe: %s", firstOutput.String())
 	}
@@ -458,8 +469,8 @@ func TestInstallDiagnostics_FirstInstallationDetachesLogger(t *testing.T) {
 	if otel.GetErrorHandler() != initial {
 		t.Fatal("first cleanup did not restore the original handler identity")
 	}
-	otel.Handle(errors.New(marker))
-	if bytes.Count(firstOutput.Bytes(), []byte("telemetry export failed")) != 1 {
+	otel.Handle(errors.Join(errors.New(marker), errSpanQueueSaturated))
+	if bytes.Count(firstOutput.Bytes(), []byte("telemetry span queue saturated")) != 1 {
 		t.Fatalf("first logger received post-cleanup diagnostic: %s", firstOutput.String())
 	}
 	var secondOutput bytes.Buffer

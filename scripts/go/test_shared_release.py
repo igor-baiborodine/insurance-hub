@@ -161,7 +161,12 @@ def test_reviewed_source_requires_merged_ancestor_and_current_independent_approv
     main, side = disposable_history(tmp_path)
     provider = ReviewAPI(tmp_path, main)
     source = side if defect == "unmerged" else main
-    if defect == "no_pull":
+    if defect == "unmerged":
+        # The PR evidence otherwise qualifies, isolating the real Git ancestry guard.
+        provider.pulls[0]["merge_commit_sha"] = side
+        provider.pulls[0]["head"]["sha"] = side
+        provider.reviews[0]["commit_id"] = side
+    elif defect == "no_pull":
         provider.pulls = []
     elif defect == "unreviewed":
         provider.reviews = []
@@ -179,7 +184,10 @@ def test_reviewed_source_requires_merged_ancestor_and_current_independent_approv
         )
 
     # when / then: every denied path stops before any publication request.
-    if defect:
+    if defect == "unmerged":
+        with pytest.raises(RuntimeError, match="inspect Git failed with status 1"):
+            release.reviewed_source(provider, tmp_path, source)
+    elif defect:
         with pytest.raises(RuntimeError):
             release.reviewed_source(provider, tmp_path, source)
     else:
