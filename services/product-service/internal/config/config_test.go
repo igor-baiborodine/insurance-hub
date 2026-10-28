@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -583,5 +584,55 @@ func assertSettingError(t *testing.T, err error, setting string) {
 	t.Helper()
 	if err == nil || !strings.Contains(err.Error(), setting) {
 		t.Fatalf("error = %v, want safe diagnostic naming %s", err, setting)
+	}
+}
+
+func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
+	// given
+	_, validation := load(
+		mapLookup(
+			map[string]string{
+				databaseURLSetting:    testDatabaseURL,
+				requestTimeoutSetting: "0s",
+			},
+		),
+	)
+	if validation == nil {
+		t.Fatal("invalid duration accepted")
+	}
+	cases := []struct {
+		name            string
+		err             error
+		setting, reason string
+	}{
+		{"invalid duration", validation, "REQUEST_TIMEOUT", "must be a positive duration"},
+		{
+			"wrapped validation",
+			fmt.Errorf("private-wrapper: %w", validation),
+			"REQUEST_TIMEOUT",
+			"must be a positive duration",
+		},
+		{
+			"unknown error",
+			errors.New("private-marker"),
+			"unknown",
+			"could not load configuration",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			setting, reason := ErrorDetails(test.err)
+			// then
+			if setting != test.setting || reason != test.reason {
+				t.Errorf(
+					"safe details = (%q, %q), want (%q, %q)",
+					setting,
+					reason,
+					test.setting,
+					test.reason,
+				)
+			}
+		})
 	}
 }

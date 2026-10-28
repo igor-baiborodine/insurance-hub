@@ -226,7 +226,9 @@ func outcomeFromStatus(status string) string {
 		return "success"
 	case "404", "NOT_FOUND":
 		return "not_found"
-	case "400", "405", "INVALID_ARGUMENT", "RESOURCE_EXHAUSTED":
+	case "400", "405", "INVALID_ARGUMENT", "RESOURCE_EXHAUSTED", "ALREADY_EXISTS",
+		"PERMISSION_DENIED", "FAILED_PRECONDITION", "ABORTED", "OUT_OF_RANGE",
+		"UNIMPLEMENTED", "UNAUTHENTICATED":
 		return "invalid_request"
 	case "CANCELLED":
 		return "cancelled"

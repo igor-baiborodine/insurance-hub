@@ -2,6 +2,7 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
 - [Product catalog read service](#product-catalog-read-service)
+  - [Reusable foundation parity](#reusable-foundation-parity)
   - [Runtime contracts and boundaries](#runtime-contracts-and-boundaries)
     - [Interim security validation](#interim-security-validation)
   - [Product catalog architecture](#product-catalog-architecture)
@@ -321,6 +322,32 @@ all listeners before readiness becomes true. `/livez` is process-only; `/readyz`
 read-access check, treats an empty table as healthy, returns `503` during dependency loss or drain,
 and recovers without changing schema or permissions. The composition root closes the singleton pool
 after partial startup or process shutdown.
+
+
+## Reusable foundation parity
+
+Product and the [Go scaffold](../../templates/go-service/README.md) independently own their
+runtime code. Changes to either foundation should review the other against this inventory;
+the scaffold's `check-foundations` target detects common version drift only. There is no runtime
+import between modules. Bare `make` prints help; tool installation requires explicit
+`make bootstrap-tools`.
+
+| Boundary | Aligned behavior | Intentional Product adaptation |
+| --- | --- | --- |
+| [Config](internal/config/config.go) and [startup](cmd/server/main.go) | Typed validator-owned `setting`/`reason` diagnostics; raw errors and arbitrary wrappers remain redacted; unknown errors use constant fallback fields. | Three listeners, database URL/pool validation and linked timeout budgets; QA SHA/Pod UID and generated test UUID identity; enabled exporter timeout stays 2s. |
+| [Logger](internal/logger/logger.go) | UTC JSON, six-field identity, trace correlation, recursive redaction and completion records independent of diagnostic threshold. | Product completion message and service identity. |
+| [Health](internal/health/health.go) | Bounded dependency probes recheck cancellation and lifecycle readiness after success; withdrawal during a probe returns 503; liveness stays independent. | PostgreSQL read-access probe supplied by composition. |
+| [gRPC](internal/grpc/server.go) | Known methods begin observation before decoding and finish once at the final stats event. All 17 canonical status names remain distinct; invalid codes normalize to UNKNOWN. Pre-handler rejection and send-size failure appear in completion logs and metrics. Unknown methods do not create Product observations or arbitrary method labels. | ListProducts/GetProduct contracts, Product validation/mapping and bounded list/get operation labels. |
+| [Request telemetry](internal/telemetry/request.go) | Final status, bounded outcome labels, request counter/duration and safe completion logging. | Product metric names, application child spans, HTTP status handling, and domain outcomes including `not_found`, `storage_unavailable` and `invalid_data`. |
+| [Providers](internal/telemetry/telemetry.go), [runtime metrics](internal/telemetry/runtime.go) and [diagnostics](internal/telemetry/diagnostics.go) | Cumulative OTLP metrics, process runtime instruments, safe exporter diagnostics and bounded cleanup including partial startup. | HTTP W3C/B3 compatibility, gRPC W3C-only propagation, database histogram views and fixed 2s export/retry budgets. |
+| [Lifecycle](internal/service/service.go) | Composition owns resource acquisition, readiness withdrawal, drain and cleanup. | Product startup/read-access verification, singleton pool, three listeners, parallel drains and two-second forced-cleanup reserve. |
+| [Make](Makefile) | Help is the non-mutating default; shared pins and explicit setup/check commands retain their owners. | SQL generation, migration/seed executables, PostgreSQL integration and Product deployment targets. |
+
+The config/startup, health and gRPC regression tests exercise these shared invariants. Real gRPC
+cases cover unsupported compression, malformed protobuf, receive/send limits and preserved Product
+domain outcomes. Existing HTTP/Brave continuity, identity, database and lifecycle suites cover the
+service adaptations. Future alignment should preserve these contracts rather than replace Product
+files wholesale with scaffold files.
 
 ## Runtime contracts and boundaries
 

@@ -4,14 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/trace/noop"
-	grpcgo "google.golang.org/grpc"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
@@ -29,11 +28,12 @@ func (passthroughStatsHandler) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) 
 
 func (passthroughStatsHandler) HandleRPC(context.Context, stats.RPCStats) {}
 
-func TestRequestInterceptor_FinalRPCStatusControlsCompletion(t *testing.T) {
+func TestRequestStats_FinalRPCStatusControlsCompletion(t *testing.T) {
 	// given
 	var logs bytes.Buffer
 	reader := sdkmetric.NewManualReader()
 	metrics := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = metrics.Shutdown(context.Background()) })
 	observer, err := telemetry.NewRequestObserver(
 		logger.New(&logs, "product-service", 0),
 		noop.NewTracerProvider(), metrics, propagation.TraceContext{},
@@ -41,7 +41,7 @@ func TestRequestInterceptor_FinalRPCStatusControlsCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	statsHandler := &requestStatsHandler{Handler: passthroughStatsHandler{}}
+	statsHandler := &requestStatsHandler{Handler: passthroughStatsHandler{}, observer: observer}
 	cases := []struct {
 		name, method, outcome, status string
 		endError                      error
@@ -108,17 +108,6 @@ func TestRequestInterceptor_FinalRPCStatusControlsCompletion(t *testing.T) {
 			ctx := statsHandler.TagRPC(context.Background(), &stats.RPCTagInfo{
 				FullMethodName: test.method,
 			})
-			called := false
-			_, err := requestInterceptor(observer)(
-				ctx, nil, &grpcgo.UnaryServerInfo{FullMethod: test.method},
-				func(context.Context, any) (any, error) {
-					called = true
-					return nil, nil
-				},
-			)
-			if err != nil || !called {
-				t.Fatalf("interceptor handler called=%t error=%v", called, err)
-			}
 			statsHandler.HandleRPC(ctx, &stats.End{Error: test.endError})
 		})
 	}
@@ -167,26 +156,19 @@ func TestRequestInterceptor_FinalRPCStatusControlsCompletion(t *testing.T) {
 	}
 }
 
-func TestRequestInterceptor_WithoutObserverPreservesHandler(t *testing.T) {
+func TestRequestStats_WithoutObserver(t *testing.T) {
 	// given
-	want := errors.New("handler failure")
-	called := false
-
+	handler := &requestStatsHandler{Handler: passthroughStatsHandler{}}
 	// when
-	_, err := requestInterceptor(nil)(
+	ctx := handler.TagRPC(
 		context.Background(),
-		nil,
-		&grpcgo.UnaryServerInfo{
-			FullMethod: productv1.ProductService_ListProducts_FullMethodName,
-		},
-		func(context.Context, any) (any, error) {
-			called = true
-			return nil, want
+		&stats.RPCTagInfo{
+			FullMethodName: productv1.ProductService_ListProducts_FullMethodName,
 		},
 	)
-
+	handler.HandleRPC(ctx, &stats.End{})
 	// then
-	if !called || !errors.Is(err, want) {
-		t.Fatalf("handler called=%t error=%v, want original error", called, err)
+	if ctx.Value(requestStateKey{}) != nil {
+		t.Fatal("observation created without observer")
 	}
 }

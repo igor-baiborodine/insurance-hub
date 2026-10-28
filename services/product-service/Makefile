@@ -1,4 +1,4 @@
-.DEFAULT_GOAL := bootstrap-tools
+.DEFAULT_GOAL := help
 
 GO ?= go
 DOCKER ?= docker
@@ -306,3 +306,10 @@ check-ci: python-runtime-check ## Validate Go workflow permissions, triggers, sy
 	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/go-release-svc.yml \
 		../../.github/workflows/go-pr-mod.yml ../../.github/workflows/go-report-card.yml
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/check_ci.py
+
+.PHONY: help
+help: ## Show explicit setup and validation entry points without installing tools
+	@printf '%s\n' 'Product service commands (see README.md for the full interface):' \
+		'  make bootstrap-tools  Install pinned local tools explicitly' \
+		'  make check            Validate the module without source mutation' \
+		'  make run              Start Product with environment configuration'

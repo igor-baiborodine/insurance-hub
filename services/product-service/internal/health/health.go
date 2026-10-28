@@ -52,7 +52,7 @@ func (state *State) checkReady(ctx context.Context) bool {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, state.timeout)
 	defer cancel()
-	return state.check(probeCtx) == nil
+	return state.check(probeCtx) == nil && probeCtx.Err() == nil && state.Ready()
 }
 
 // NewHandler returns management-only HTTP routes with constant, non-sensitive responses.
