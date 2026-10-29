@@ -52,13 +52,9 @@ jobs:
           go-version-file: libs/servicekit/go.mod
           cache: false
 
-      - name: Set up pinned library tools for candidate integration tests
-        if: steps.plan.outputs.root_checks == 'true'
-        run: make -C libs/servicekit bootstrap-go-tools
-
       - name: Check shared tooling and Go topology
         if: steps.plan.outputs.root_checks == 'true'
-        run: make python-shared-tooling-check python-shared-tooling-test-integration go-topology-check go-topology-test
+        run: make python-shared-tooling-check go-topology-check go-topology-test
 
       - name: Upload shared validation plan
         uses: actions/upload-artifact@v6

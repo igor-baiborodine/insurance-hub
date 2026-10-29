@@ -19,6 +19,7 @@ from shared_support import (
     cli_entry,
     environment,
     extract,
+    git,
     manifest_digest,
     read_json,
     require,
@@ -28,8 +29,52 @@ from shared_support import (
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def expected_plan() -> dict:
-    return shared_registration.plan(ROOT, os.environ["PR_BASE"], os.environ["PR_HEAD"])
+def expected_plan(profile: str = "ci") -> dict:
+    return shared_registration.plan(ROOT, os.environ["PR_BASE"], os.environ["PR_HEAD"], profile)
+
+
+def local_full_validation() -> None:
+    require(
+        git(ROOT, "rev-parse", "HEAD").strip() == os.environ["PR_HEAD"],
+        "PR_HEAD is not checkout HEAD",
+    )
+    require(
+        not git(ROOT, "status", "--porcelain"), "local full validation requires a clean checkout"
+    )
+    expected = expected_plan("full")
+    budget = Budget(6000)
+    if expected["root_checks"]:
+        budget.run(
+            ["make", "-C", str(ROOT / DIRECTORY), "bootstrap-go-tools"],
+            ROOT,
+            "prepare library tools",
+            environment(PYTHON=os.environ["PYTHON"]),
+        )
+        budget.run(
+            [
+                "make",
+                "python-shared-tooling-check",
+                "python-shared-tooling-test-integration",
+                "go-topology-check",
+                "go-topology-test",
+            ],
+            ROOT,
+            "full root tooling and topology checks",
+            environment(PYTHON=os.environ["PYTHON"]),
+        )
+    reports = []
+    for module in sorted({item["module"] for item in expected["obligations"]}):
+        budget.run(
+            ["make", "-C", str(ROOT / module), "bootstrap-go-tools"],
+            ROOT,
+            "prepare module tools",
+            environment(PYTHON=os.environ["PYTHON"]),
+        )
+        reports.extend(
+            shared_candidate.validate(ROOT, expected, module, ROOT / module / ".tools/bin")
+        )
+    shared_registration.reconcile(expected, reports)
+    print(f"validated {len(reports)} full local obligations at {expected['head']}")
 
 
 def release_validation(version: str, sha: str) -> dict:
@@ -124,6 +169,7 @@ def main() -> int:
             "plan",
             "validate",
             "results",
+            "local-full",
             "phase",
             "release-validate",
             "release-tag",
@@ -134,6 +180,8 @@ def main() -> int:
     work = ROOT / ".work/servicekit"
     if args.action.startswith("release-"):
         release_command(args.action, work)
+    elif args.action == "local-full":
+        local_full_validation()
     elif args.action == "phase":
         if directory := os.environ.get("SERVICEKIT_PHASE_DIR"):
             os.chdir(Path(directory).resolve(strict=True))
