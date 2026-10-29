@@ -3,6 +3,7 @@ package config
 import (
 	"log/slog"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
@@ -52,7 +53,7 @@ func ValidateRuntime(settings Runtime) error {
 	return nil
 }
 
-// GRPC contains message-size bounds. Service loaders choose permitted ranges.
+// GRPC contains message-size bounds. LoadGRPC applies common limits; local loaders may choose others.
 type GRPC struct {
 	MaxReceiveBytes int
 	MaxSendBytes    int
@@ -61,6 +62,25 @@ type GRPC struct {
 // DefaultGRPC returns the existing consumer message-size defaults.
 func DefaultGRPC() GRPC {
 	return GRPC{MaxReceiveBytes: 1048576, MaxSendBytes: 8388608}
+}
+
+// LoadGRPC reads the common gRPC message limits from an explicit lookup.
+// Services with different bounds can use LoadBoundedInt in their local loader.
+func LoadGRPC(lookup Lookup) (GRPC, error) {
+	defaults := DefaultGRPC()
+	receiveBytes, err := LoadBoundedInt(
+		lookup, EnvGRPCMaxReceiveBytes, strconv.Itoa(defaults.MaxReceiveBytes), 1, 16777216,
+	)
+	if err != nil {
+		return GRPC{}, err
+	}
+	sendBytes, err := LoadBoundedInt(
+		lookup, EnvGRPCMaxSendBytes, strconv.Itoa(defaults.MaxSendBytes), 1, 67108864,
+	)
+	if err != nil {
+		return GRPC{}, err
+	}
+	return GRPC{MaxReceiveBytes: receiveBytes, MaxSendBytes: sendBytes}, nil
 }
 
 // HTTPServer contains business HTTP server time bounds.
@@ -77,6 +97,42 @@ func DefaultHTTPServer() HTTPServer {
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second,
 	}
+}
+
+// LoadHTTPServer reads business HTTP timeouts from an explicit lookup.
+// Listener addresses and timeout relationships remain service-owned.
+func LoadHTTPServer(lookup Lookup) (HTTPServer, error) {
+	defaults := DefaultHTTPServer()
+	readHeaderTimeout, err := LoadPositiveDuration(
+		lookup, EnvHTTPReadHeaderTimeout, defaults.ReadHeaderTimeout.String(),
+	)
+	if err != nil {
+		return HTTPServer{}, err
+	}
+	readTimeout, err := LoadPositiveDuration(
+		lookup, EnvHTTPReadTimeout, defaults.ReadTimeout.String(),
+	)
+	if err != nil {
+		return HTTPServer{}, err
+	}
+	writeTimeout, err := LoadPositiveDuration(
+		lookup, EnvHTTPWriteTimeout, defaults.WriteTimeout.String(),
+	)
+	if err != nil {
+		return HTTPServer{}, err
+	}
+	idleTimeout, err := LoadPositiveDuration(
+		lookup, EnvHTTPIdleTimeout, defaults.IdleTimeout.String(),
+	)
+	if err != nil {
+		return HTTPServer{}, err
+	}
+	return HTTPServer{
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}, nil
 }
 
 // Telemetry contains optional OTLP/gRPC export settings and caller-validated identity.

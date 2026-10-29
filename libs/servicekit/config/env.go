@@ -20,6 +20,14 @@ const (
 	EnvGRPCMaxReceiveBytes = "GRPC_MAX_RECV_BYTES"
 	// EnvGRPCMaxSendBytes names the gRPC send limit setting.
 	EnvGRPCMaxSendBytes = "GRPC_MAX_SEND_BYTES"
+	// EnvHTTPReadHeaderTimeout names the business HTTP header-read timeout setting.
+	EnvHTTPReadHeaderTimeout = "HTTP_READ_HEADER_TIMEOUT"
+	// EnvHTTPReadTimeout names the business HTTP read timeout setting.
+	EnvHTTPReadTimeout = "HTTP_READ_TIMEOUT"
+	// EnvHTTPWriteTimeout names the business HTTP write timeout setting.
+	EnvHTTPWriteTimeout = "HTTP_WRITE_TIMEOUT"
+	// EnvHTTPIdleTimeout names the business HTTP idle timeout setting.
+	EnvHTTPIdleTimeout = "HTTP_IDLE_TIMEOUT"
 
 	// EnvServiceName names the service identity setting.
 	EnvServiceName = "SERVICE_NAME"
