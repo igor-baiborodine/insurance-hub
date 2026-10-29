@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 import select_pr_module
+import shared_cli
 import shared_registration as registration
 import topology
 from shared_support import DIRECTORY, MODULE, SharedError, write_json
@@ -27,7 +28,9 @@ def fixture_tree(root: Path, active_count: int = 0) -> dict:
         (path / "go.mod").write_text(f"module {module['modulePath']}\n\ngo 1.27.3\n")
         (path / "go.sum").touch()
         (path / "main.go").write_text("package fixture\n")
-        (path / "Makefile").write_text("check-go-pr:\n\t@true\nshared-check:\n\t@true\n")
+        (path / "Makefile").write_text(
+            "check-go-pr:\n\t@true\nshared-check:\n\t@true\nshared-fast:\n\t@true\n"
+        )
         workflow = root / module["ciWorkflow"]
         workflow.parent.mkdir(parents=True, exist_ok=True)
         workflow.write_text("jobs:\n  validate:\n    runs-on: ubuntu-24.04\n")
@@ -45,7 +48,13 @@ def fixture_tree(root: Path, active_count: int = 0) -> dict:
                 "workflows": [{"path": module["ciWorkflow"], "job": "validate"}],
                 "candidate_phases": phases,
                 "phase_bindings": {
-                    p: {"target": "shared-check", "modes": ["normal", "candidate"]} for p in phases
+                    p: {
+                        "target": "shared-fast"
+                        if p in registration.CI_CANDIDATE_PHASES
+                        else "shared-check",
+                        "modes": ["normal", "candidate"],
+                    }
+                    for p in phases
                 },
                 "applicability": {},
             }
@@ -80,8 +89,87 @@ def test_shared_change_selects_exact_unchanged_consumer_obligations(
     )
 
 
+@pytest.mark.parametrize("count", [0, 1, 2])
+def test_ci_shared_code_change_selects_fast_candidate_phases(tmp_path: Path, count: int) -> None:
+    fixture_tree(tmp_path / "base", count)
+    fixture_tree(tmp_path / "head", count)
+    result = registration.plan_trees(
+        tmp_path / "base",
+        tmp_path / "head",
+        [DIRECTORY + "/health/doc.go"],
+        "a" * 40,
+        "b" * 40,
+        "a" * 40,
+        "ci",
+    )
+    candidates = [item for item in result["obligations"] if item["mode"] == "candidate"]
+    assert result["profile"] == "ci"
+    assert len(candidates) == count * len(registration.CI_CANDIDATE_PHASES)
+    assert {item["phase"] for item in candidates} == (
+        set(registration.CI_CANDIDATE_PHASES) if count else set()
+    )
+    assert len(result["obligations"]) == len(registration.LIBRARY_PHASES) + len(candidates)
+
+
+@pytest.mark.parametrize("path", [DIRECTORY + "/README.md", "scripts/go/shared_candidate.py"])
+def test_ci_non_code_inputs_do_not_fan_out_to_consumers(tmp_path: Path, path: str) -> None:
+    fixture_tree(tmp_path / "base", 2)
+    fixture_tree(tmp_path / "head", 2)
+    result = registration.plan_trees(
+        tmp_path / "base", tmp_path / "head", [path], "a" * 40, "b" * 40, "a" * 40, "ci"
+    )
+    assert {item["module"] for item in result["obligations"]} == (
+        {DIRECTORY} if path.startswith(DIRECTORY) else set()
+    )
+    assert result["root_checks"] == path.startswith("scripts/")
+
+
+def test_ci_changed_consumer_keeps_normal_gate(tmp_path: Path) -> None:
+    fixture_tree(tmp_path / "base")
+    fixture_tree(tmp_path / "head")
+    result = registration.plan_trees(
+        tmp_path / "base",
+        tmp_path / "head",
+        ["templates/go-service/main.go"],
+        "a" * 40,
+        "b" * 40,
+        "a" * 40,
+        "ci",
+    )
+    assert result["obligations"] == [
+        {
+            "module": "templates/go-service",
+            "phase": "gate",
+            "mode": "normal",
+            "target": "check-go-pr",
+        }
+    ]
+
+
+@pytest.mark.parametrize("head_matches,clean", [(False, True), (True, False)])
+def test_local_full_refuses_noncommitted_source(
+    monkeypatch, head_matches: bool, clean: bool
+) -> None:
+    head = "b" * 40
+    monkeypatch.setenv("PR_HEAD", head)
+    monkeypatch.setattr(
+        shared_cli,
+        "git",
+        lambda _root, *args: (
+            (head if head_matches else "a" * 40)
+            if args == ("rev-parse", "HEAD")
+            else ""
+            if clean
+            else " M libs/servicekit/health/doc.go\n"
+        ),
+    )
+    with pytest.raises(SharedError, match="checkout HEAD|clean checkout"):
+        shared_cli.local_full_validation()
+
+
 @pytest.mark.parametrize(
-    "defect", ["missing", "downgrade", "duplicate", "phase", "target", "workflow", "unknown"]
+    "defect",
+    ["missing", "downgrade", "duplicate", "phase", "target", "fast-target", "workflow", "unknown"],
 )
 def test_registration_cannot_hide_actual_dependency(tmp_path: Path, defect: str) -> None:
     # given
@@ -97,6 +185,8 @@ def test_registration_cannot_hide_actual_dependency(tmp_path: Path, defect: str)
         item["candidate_phases"].remove("race")
     elif defect == "target":
         item["phase_bindings"]["unit"]["target"] = "absent"
+    elif defect == "fast-target":
+        item["phase_bindings"]["unit"]["target"] = "shared-check"
     elif defect == "workflow":
         item["workflows"][0]["job"] = "absent"
     else:
@@ -259,27 +349,21 @@ def test_installed_workflow_contracts() -> None:
         assert all("GH_INSPECTION_TOKEN" not in step.get("env", {}) for step in job["steps"])
 
 
-def test_shared_planner_prepares_tools_before_real_candidate_integration() -> None:
-    # given: the integration suite runs real formatting, lint and vulnerability phases.
+def test_shared_planner_runs_fast_root_checks_without_candidate_integration() -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/go-pr-shared.yml").read_text())
     steps = workflow["jobs"]["plan"]["steps"]
-    # when
-    setup = next(
-        index
-        for index, step in enumerate(steps)
-        if step.get("run") == "make -C libs/servicekit bootstrap-go-tools"
+    root_check = next(
+        step for step in steps if step.get("name") == "Check shared tooling and Go topology"
     )
-    integration = next(
-        index
-        for index, step in enumerate(steps)
-        if "python-shared-tooling-test-integration" in step.get("run", "")
+    go_setup = next(step for step in steps if "actions/setup-go@" in step.get("uses", ""))
+    assert steps.index(go_setup) < steps.index(root_check)
+    assert (
+        root_check["run"] == "make python-shared-tooling-check go-topology-check go-topology-test"
     )
-    go = next(
-        index for index, step in enumerate(steps) if "actions/setup-go@" in step.get("uses", "")
+    assert root_check["if"] == "steps.plan.outputs.root_checks == 'true'"
+    assert all(
+        "python-shared-tooling-test-integration" not in step.get("run", "") for step in steps
     )
-    # then
-    assert go < setup < integration
-    assert steps[setup]["if"] == steps[integration]["if"]
 
 
 def test_unknown_inventory_schema_is_rejected(tmp_path: Path) -> None:

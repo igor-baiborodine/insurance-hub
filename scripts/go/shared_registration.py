@@ -40,6 +40,7 @@ PHASES = frozenset(
 )
 REQUIRED = PHASES - {"generated", "breaking", "integration", "copy", "image"}
 LIBRARY_PHASES = sorted(REQUIRED)
+CI_CANDIDATE_PHASES = ("build", "unit")
 ROOT_INPUTS = (
     "scripts/go/",
     "scripts/python/",
@@ -214,6 +215,16 @@ def registration_check(root: Path, inventory: dict[str, Any]) -> list[dict[str, 
             require(
                 topology.target_present(makefile, binding["target"]), "missing owning phase target"
             )
+        fast_targets = {record["phase_bindings"][phase]["target"] for phase in CI_CANDIDATE_PHASES}
+        require(
+            not fast_targets
+            & {
+                binding["target"]
+                for phase, binding in record["phase_bindings"].items()
+                if phase not in CI_CANDIDATE_PHASES
+            },
+            "fast candidate phases must have dedicated owning targets",
+        )
         for binding in record["workflows"]:
             path = root / binding["path"]
             require(
@@ -277,8 +288,15 @@ def roots_at(root: Path, inventory: dict[str, Any]) -> set[str]:
 
 
 def plan_trees(
-    base: Path, head: Path, paths: list[str], base_sha: str, head_sha: str, merge_base: str
+    base: Path,
+    head: Path,
+    paths: list[str],
+    base_sha: str,
+    head_sha: str,
+    merge_base: str,
+    profile: str = "full",
 ) -> dict[str, Any]:
+    require(profile in {"ci", "full"}, "unknown validation profile")
     old = topology.load_inventory(base / "go-module-topology.json")
     new = topology.load_inventory(head / "go-module-topology.json")
     require(
@@ -311,16 +329,25 @@ def plan_trees(
     root_work = any(
         any(p == prefix or p.startswith(prefix) for prefix in ROOT_INPUTS) for p in paths
     )
+    library_code_changed = any(
+        p.startswith(DIRECTORY + "/") and not p.endswith(".md") for p in paths
+    )
     obligations = []
     for module in new["modules"]:
         directory = module["directory"]
         record = next((r for r in active if r["directory"] == directory), None)
-        candidate = DIRECTORY in changed and record is not None
-        if not (directory in changed or candidate or root_work):
+        candidate = (
+            DIRECTORY in changed
+            and record is not None
+            and (profile == "full" or library_code_changed)
+        )
+        if not (directory in changed or candidate or (root_work and profile == "full")):
             continue
         mode = "candidate" if candidate else "normal"
         phases = (
-            record["candidate_phases"]
+            list(CI_CANDIDATE_PHASES)
+            if candidate and profile == "ci"
+            else record["candidate_phases"]
             if record
             else LIBRARY_PHASES
             if directory == DIRECTORY
@@ -342,6 +369,7 @@ def plan_trees(
     }
     return {
         "schema": 1,
+        "profile": profile,
         "base": base_sha,
         "head": head_sha,
         "merge_base": merge_base,
@@ -356,7 +384,7 @@ def plan_trees(
     }
 
 
-def plan(root: Path, base: str, head: str) -> dict[str, Any]:
+def plan(root: Path, base: str, head: str, profile: str = "full") -> dict[str, Any]:
     verify_sha(root, base)
     verify_sha(root, head)
     merge_base, paths = select_pr_module.changed_paths(root, base, head)
@@ -364,7 +392,9 @@ def plan(root: Path, base: str, head: str) -> dict[str, Any]:
         directory = Path(temporary)
         extract(root, base, directory / "base")
         extract(root, head, directory / "head")
-        return plan_trees(directory / "base", directory / "head", paths, base, head, merge_base)
+        return plan_trees(
+            directory / "base", directory / "head", paths, base, head, merge_base, profile
+        )
 
 
 def reconcile(expected: dict[str, Any], reports: list[dict[str, Any]]) -> None:

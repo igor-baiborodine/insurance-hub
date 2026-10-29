@@ -223,6 +223,16 @@ process for future modules or workspaces.
 #### Change-Based Local Validation
 
 **Go Module PR Check** runs only for qualifying module inputs and validates one selected module.
+**Go Shared Runtime PR Check** runs the library gate and candidate build/unit phases for active
+consumers when servicekit code changes. Its root tooling checks are fast; unchanged modules are
+not selected for root-only or library documentation changes. Before submitting a shared code
+change, run `make go-shared-local-full PR_BASE=<full-base-sha> PR_HEAD=<full-head-sha>` from a
+clean checkout after committing the proposed change. That command runs all registered candidate
+phases and affected normal module gates, including full root integration checks when root tooling
+changed. It requires the managed Python toolchain and pinned Go tools; it bootstraps module Go
+tools locally. The command validates only the specified committed head, so rerun it after changing
+the commit. Record its output and exact SHAs in the PR description.
+
 Auxiliary scripts, Makefiles, documentation, workflow configuration, topology metadata, deployment
 assets, database-role tooling, images, and the combined Product security boundary remain local review
 responsibilities. Select checks from the changed behavior; do not run every command for every pull
@@ -230,7 +240,7 @@ request or treat a local result as hosted evidence.
 
 | Changed behavior | Local commands from the repository root | Prerequisites and review evidence |
 | --- | --- | --- |
-| Go topology, inventory, ownership, resolution, or shared module tooling | `make python-shared-tooling-check`; `make python-shared-tooling-test-integration`; `make go-topology-check`; `make go-topology-test`; bootstrap affected module tools, then `make go-modules-check FORMAT_SCOPE=all` when the aggregate is applicable | Managed CPython 3.14.8, exact module Go/tool pins, and Docker for Product integration. Record affected modules, standalone resolution, and controlled failures. |
+| Go topology, inventory, ownership, resolution, or shared module tooling | `make python-shared-tooling-check`; `make python-shared-tooling-test-integration`; `make go-topology-check`; `make go-topology-test`; `make go-shared-local-full PR_BASE=<full-base-sha> PR_HEAD=<full-head-sha>` after committing when full PR obligations are relevant | Managed CPython 3.14.8, exact module Go/tool pins, and Docker for Product integration. Record affected modules, standalone resolution, and controlled failures. |
 | Scaffold or Product validation tooling | `make python-scaffold-tooling-check`; `make go-scaffold-test-tooling`; `make python-product-tooling-check`; `make go-product-test-tooling` | Provision the managed Python environment and bootstrap the corresponding Go tools. Record fast Python behavior, controlled defects, bounded child handling, and fixture/source cleanup. |
 | Scaffold reuse or copy behavior | `make go-scaffold-check-copy` | Provision and bootstrap scaffold tools. Record renamed-copy identity, repository Python/Go tooling resolution, generation, validation, deadlines, and cleanup. |
 | Go PR, release, report-card, or service-dispatch workflow tooling | `make -C services/product-service bootstrap-ci-tools`; `make -C services/product-service check-ci`; `make go-svc-release-test`; `make go-svc-dispatch-test`; `make python-shared-tooling-check` | Managed CPython 3.14.8, pinned local workflow clients, and any documented public downloads. Record configuration validation separately from any actual hosted run. |

@@ -3,7 +3,7 @@ GO_SHARED_TOOL := $(ROOT_DIR)scripts/go/shared_cli.py
 GO_SHARED_ACTIONLINT ?= $(ROOT_DIR)services/product-service/.tools/bin/actionlint
 export PYTHON
 
-.PHONY: go-shared-plan go-shared-validate go-shared-results-check go-shared-phase \
+.PHONY: go-shared-plan go-shared-validate go-shared-results-check go-shared-local-full go-shared-phase \
 	go-shared-test go-shared-test-integration go-library-release-validate \
 	go-library-release-tag go-library-release-verify go-shared-check-ci
 
@@ -19,6 +19,9 @@ go-shared-validate: python-runtime-check ## Validate MODULE_DIR against recomput
 
 go-shared-results-check: python-runtime-check ## Reconcile every required module/phase/mode result
 	@"$(PYTHON)" "$(GO_SHARED_TOOL)" results
+
+go-shared-local-full: python-runtime-check ## Run full checks for committed PR_BASE/PR_HEAD SHAs on a clean checkout (bootstraps Go tools)
+	@"$(PYTHON)" "$(GO_SHARED_TOOL)" local-full
 
 go-shared-phase: python-runtime-check ## Run SERVICEKIT_PHASE through a live candidate controller
 	@"$(PYTHON)" "$(GO_SHARED_TOOL)" phase
