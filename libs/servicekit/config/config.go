@@ -41,9 +41,9 @@ func ValidateRuntime(settings Runtime) error {
 		name  string
 		value time.Duration
 	}{
-		{"REQUEST_TIMEOUT", settings.RequestTimeout},
-		{"PROBE_TIMEOUT", settings.ProbeTimeout},
-		{"SHUTDOWN_TIMEOUT", settings.ShutdownTimeout},
+		{EnvRequestTimeout, settings.RequestTimeout},
+		{EnvProbeTimeout, settings.ProbeTimeout},
+		{EnvShutdownTimeout, settings.ShutdownTimeout},
 	} {
 		if field.value <= 0 {
 			return Invalid(field.name, "must be a positive duration")
@@ -95,17 +95,17 @@ func DefaultTelemetry() Telemetry { return Telemetry{ExporterTimeout: 2 * time.S
 // identity or impose Product's enabled exactly-2s timeout or service drain budget.
 func ValidateTelemetry(settings Telemetry) error {
 	if settings.ExporterTimeout <= 0 {
-		return Invalid("OTEL_EXPORTER_OTLP_TIMEOUT", "must be a positive duration")
+		return Invalid(EnvOTELExporterOTLPTimeout, "must be a positive duration")
 	}
 	if settings.ExporterEndpoint == nil {
 		if settings.Enabled {
 			return Invalid(
-				"OTEL_EXPORTER_OTLP_ENDPOINT",
+				EnvOTELExporterOTLPEndpoint,
 				"is required when telemetry is enabled",
 			)
 		}
 		return nil
 	}
-	_, err := ParseEndpoint("OTEL_EXPORTER_OTLP_ENDPOINT", settings.ExporterEndpoint.String())
+	_, err := ParseEndpoint(EnvOTELExporterOTLPEndpoint, settings.ExporterEndpoint.String())
 	return err
 }
