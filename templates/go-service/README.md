@@ -273,7 +273,7 @@ using the same six identity dimensions as logs. Disabled mode creates neither ex
 no collector. W3C trace context is propagated at the registered gRPC boundary; arbitrary methods
 are excluded. There is no business HTTP API or B3 propagation requirement in this scaffold.
 
-The pinned `libs/servicekit` `v0.1.1` provider owns a nonblocking trace queue (2048 spans, 256-span batches, one-second batch delay),
+The pinned `libs/servicekit` `v0.2.0` provider owns a nonblocking trace queue (2048 spans, 256-span batches, one-second batch delay),
 a ten-second periodic metric reader, and Go runtime instruments for memory, allocations, GC,
 goroutines and processor limit. Exporter initialization, retries, flush and shutdown use bounded
 contexts. Safe export diagnostics are rate-limited to once per 30 seconds; queue saturation has a
@@ -286,8 +286,9 @@ these safe fields and duration even when the diagnostic log threshold is higher.
 raw errors, client-selected methods and instance IDs are not metric labels. Service identity stays
 on the resource. The service lifecycle owns provider shutdown within the overall shutdown budget; `internal/config.Load` and scaffold identity policy remain local.
 `Config` embeds the shared `Runtime`, `GRPC`, and `Telemetry` setting groups. The local identity
-type embeds `servicekit/identity.Identity` and adds scaffold validation. Loading explicitly calls
-shared parsers and validators, then applies local identity, listener and shutdown-budget rules.
+type embeds `servicekit/identity.Identity` and adds scaffold validation. Loading uses the shared
+environment keys and `LoadGRPC` at the scaffold's existing lookup position, then applies local
+identity, listener and shutdown-budget rules. The development identity uses the shared constructor.
 Embedding does not load environment variables or automatically validate settings. The telemetry
 provider embeds the shared provider and uses its promoted methods directly.
 All 17 canonical gRPC statuses remain distinct in completion logs and request metrics; unsupported
@@ -355,7 +356,7 @@ must define their own contracts, persistence, authorization, exposure and deploy
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
 | Request observation and limits | `internal/grpc/server.go`, `internal/telemetry/request.go` | Fixed Echo operation, generic service metric names, final transport outcomes, configurable request/message bounds. |
-| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Shared dependency-aware readiness; local listener ownership and cleanup, with no database dependency. |
+| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Shared dependency-aware readiness and management server defaults; local listener ownership and cleanup, with no database dependency. |
 | Business architecture | Product application-owned catalog ports and injected adapters | Echo remains a small injected function. Add domain/application/repository packages when a real migration requires them. |
 
 Run `make check-foundations` when maintaining the source template; its version comparison also runs in the source template's aggregate check. It does not certify semantic runtime parity or update copies automatically.

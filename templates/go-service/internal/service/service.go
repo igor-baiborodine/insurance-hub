@@ -22,11 +22,6 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
 )
 
-const (
-	managementReadHeaderTimeout = 5 * time.Second
-	managementIdleTimeout       = 30 * time.Second
-)
-
 // Run starts the configured service and blocks until cancellation or an unexpected serving error.
 func Run(ctx context.Context, settings config.Config, logger *slog.Logger) error {
 	return run(ctx, settings, logger, productionDependencies())
@@ -103,11 +98,7 @@ func productionDependencies() dependencies {
 			)
 		},
 		newManagement: func(state *health.State) managementServer {
-			return &http.Server{
-				Handler:           health.NewHandler(state),
-				ReadHeaderTimeout: managementReadHeaderTimeout,
-				IdleTimeout:       managementIdleTimeout,
-			}
+			return health.NewManagementServer(state)
 		},
 		readiness: func(ctx context.Context) error { return ctx.Err() },
 		echo:      transport.IdentityEcho,

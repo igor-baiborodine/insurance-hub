@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"strings"
 	"sync"
@@ -27,6 +28,50 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
 )
+
+func TestProductionManagement_PreservesProbeContract(t *testing.T) {
+	// given
+	state, err := health.NewState(time.Second, func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// when
+	management := productionDependencies().newManagement(state)
+
+	// then
+	server, ok := management.(*http.Server)
+	if !ok {
+		t.Fatalf("management type = %T, want *http.Server", management)
+	}
+	if server.ReadHeaderTimeout != 5*time.Second || server.IdleTimeout != 30*time.Second ||
+		server.ReadTimeout != 0 || server.WriteTimeout != 0 {
+		t.Errorf("management timeouts = (%v, %v, %v, %v)", server.ReadHeaderTimeout,
+			server.IdleTimeout, server.ReadTimeout, server.WriteTimeout)
+	}
+	for _, test := range []struct {
+		method string
+		path   string
+		want   int
+	}{
+		{http.MethodGet, "/livez", http.StatusOK},
+		{http.MethodGet, "/readyz", http.StatusServiceUnavailable},
+		{http.MethodPost, "/livez", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/unknown", http.StatusNotFound},
+	} {
+		recorder := httptest.NewRecorder()
+		server.Handler.ServeHTTP(recorder, httptest.NewRequest(test.method, test.path, nil))
+		if recorder.Code != test.want {
+			t.Errorf(
+				"%s %s = %d, want %d",
+				test.method,
+				test.path,
+				recorder.Code,
+				test.want,
+			)
+		}
+	}
+}
 
 func TestRun_WithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
 	// given

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -12,24 +11,6 @@ import (
 
 // DefaultServiceName identifies startup diagnostics until configuration has been validated.
 const DefaultServiceName = "go-service"
-
-const (
-	requestTimeoutSetting      = "REQUEST_TIMEOUT"
-	probeTimeoutSetting        = "PROBE_TIMEOUT"
-	grpcMaxReceiveBytesSetting = "GRPC_MAX_RECV_BYTES"
-	grpcMaxSendBytesSetting    = "GRPC_MAX_SEND_BYTES"
-	environmentSetting         = "DEPLOYMENT_ENVIRONMENT"
-	serviceVersionSetting      = "SERVICE_VERSION"
-	serviceInstanceSetting     = "SERVICE_INSTANCE_ID"
-	serviceNameSetting         = "SERVICE_NAME"
-	grpcAddressSetting         = "GRPC_ADDR"
-	healthAddressSetting       = "HEALTH_ADDR"
-	logLevelSetting            = "LOG_LEVEL"
-	shutdownTimeoutSetting     = "SHUTDOWN_TIMEOUT"
-	otelEnabledSetting         = "OTEL_ENABLED"
-	otelEndpointSetting        = "OTEL_EXPORTER_OTLP_ENDPOINT"
-	otelTimeoutSetting         = "OTEL_EXPORTER_OTLP_TIMEOUT"
-)
 
 // Config contains settings parsed and validated once during process startup.
 type Config struct {
@@ -55,16 +36,7 @@ type Telemetry = kitconfig.Telemetry
 
 // DevelopmentIdentity labels local startup diagnostics before configuration is validated.
 func DevelopmentIdentity(serviceName string) Identity {
-	return Identity{
-		Identity: kitidentity.Identity{
-			ServiceNamespace: "insurance-hub",
-			ServiceName:      serviceName,
-			ServiceVersion:   "development",
-			ServiceInstance:  fmt.Sprintf("local-%d", os.Getpid()),
-			Environment:      "development",
-			Implementation:   "go",
-		},
-	}
+	return Identity{Identity: kitidentity.DevelopmentIdentity(serviceName, os.Getpid())}
 }
 
 // Load reads configuration from the process environment.
@@ -76,23 +48,26 @@ type lookupEnv = kitconfig.Lookup
 
 func load(lookup lookupEnv) (Config, error) {
 	runtimeDefaults := kitconfig.DefaultRuntime()
-	grpcDefaults := kitconfig.DefaultGRPC()
 	telemetryDefaults := kitconfig.DefaultTelemetry()
 
-	serviceName, err := kitconfig.ValueOrDefault(lookup, serviceNameSetting, DefaultServiceName)
+	serviceName, err := kitconfig.ValueOrDefault(
+		lookup,
+		kitconfig.EnvServiceName,
+		DefaultServiceName,
+	)
 	if err != nil {
 		return Config{}, err
 	}
 
 	grpcAddress, err := kitconfig.LoadAddress(
-		lookup, grpcAddressSetting, kitconfig.DefaultGRPCAddress,
+		lookup, kitconfig.EnvGRPCAddress, kitconfig.DefaultGRPCAddress,
 	)
 	if err != nil {
 		return Config{}, err
 	}
 
 	healthAddress, err := kitconfig.LoadAddress(
-		lookup, healthAddressSetting, kitconfig.DefaultHealthAddress,
+		lookup, kitconfig.EnvHealthAddress, kitconfig.DefaultHealthAddress,
 	)
 	if err != nil {
 		return Config{}, err
@@ -100,43 +75,49 @@ func load(lookup lookupEnv) (Config, error) {
 
 	logLevelValue, err := kitconfig.ValueOrDefault(
 		lookup,
-		logLevelSetting,
+		kitconfig.EnvLogLevel,
 		runtimeDefaults.LogLevel.String(),
 	)
 	if err != nil {
 		return Config{}, err
 	}
-	logLevel, err := kitconfig.ParseLogLevel(logLevelSetting, logLevelValue)
+	logLevel, err := kitconfig.ParseLogLevel(kitconfig.EnvLogLevel, logLevelValue)
 	if err != nil {
 		return Config{}, err
 	}
 
 	shutdownTimeout, err := kitconfig.LoadPositiveDuration(
-		lookup, shutdownTimeoutSetting, runtimeDefaults.ShutdownTimeout.String(),
+		lookup, kitconfig.EnvShutdownTimeout, runtimeDefaults.ShutdownTimeout.String(),
 	)
 	if err != nil {
 		return Config{}, err
 	}
 
 	otelEnabledValue, err := kitconfig.ValueOrDefault(
-		lookup, otelEnabledSetting, strconv.FormatBool(telemetryDefaults.Enabled),
+		lookup, kitconfig.EnvOTELEnabled, strconv.FormatBool(telemetryDefaults.Enabled),
 	)
 	if err != nil {
 		return Config{}, err
 	}
-	otelEnabled, err := kitconfig.ParseBool(otelEnabledSetting, otelEnabledValue)
+	otelEnabled, err := kitconfig.ParseBool(kitconfig.EnvOTELEnabled, otelEnabledValue)
 	if err != nil {
 		return Config{}, err
 	}
 
 	otelTimeout, err := kitconfig.LoadPositiveDuration(
-		lookup, otelTimeoutSetting, telemetryDefaults.ExporterTimeout.String(),
+		lookup,
+		kitconfig.EnvOTELExporterOTLPTimeout,
+		telemetryDefaults.ExporterTimeout.String(),
 	)
 	if err != nil {
 		return Config{}, err
 	}
 
-	otelEndpoint, err := kitconfig.OptionalEndpoint(lookup, otelEndpointSetting, otelEnabled)
+	otelEndpoint, err := kitconfig.OptionalEndpoint(
+		lookup,
+		kitconfig.EnvOTELExporterOTLPEndpoint,
+		otelEnabled,
+	)
 	if err != nil {
 		return Config{}, err
 	}
@@ -146,34 +127,18 @@ func load(lookup lookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	requestTimeout, err := kitconfig.LoadPositiveDuration(
-		lookup, requestTimeoutSetting, runtimeDefaults.RequestTimeout.String(),
+		lookup, kitconfig.EnvRequestTimeout, runtimeDefaults.RequestTimeout.String(),
 	)
 	if err != nil {
 		return Config{}, err
 	}
 	probeTimeout, err := kitconfig.LoadPositiveDuration(
-		lookup, probeTimeoutSetting, runtimeDefaults.ProbeTimeout.String(),
+		lookup, kitconfig.EnvProbeTimeout, runtimeDefaults.ProbeTimeout.String(),
 	)
 	if err != nil {
 		return Config{}, err
 	}
-	receiveBytes, err := kitconfig.LoadBoundedInt(
-		lookup,
-		grpcMaxReceiveBytesSetting,
-		strconv.Itoa(grpcDefaults.MaxReceiveBytes),
-		1,
-		16777216,
-	)
-	if err != nil {
-		return Config{}, err
-	}
-	sendBytes, err := kitconfig.LoadBoundedInt(
-		lookup,
-		grpcMaxSendBytesSetting,
-		strconv.Itoa(grpcDefaults.MaxSendBytes),
-		1,
-		67108864,
-	)
+	grpc, err := kitconfig.LoadGRPC(lookup)
 	if err != nil {
 		return Config{}, err
 	}
@@ -197,20 +162,20 @@ func load(lookup lookupEnv) (Config, error) {
 	}
 	if otelTimeout > runtime.ShutdownTimeout {
 		return Config{}, kitconfig.Invalid(
-			otelTimeoutSetting,
+			kitconfig.EnvOTELExporterOTLPTimeout,
 			"must not exceed SHUTDOWN_TIMEOUT",
 		)
 	}
 	if grpcAddress.Port() != 0 && grpcAddress.String() == healthAddress.String() {
 		return Config{}, kitconfig.Invalid(
-			healthAddressSetting,
+			kitconfig.EnvHealthAddress,
 			"must be distinct from GRPC_ADDR",
 		)
 	}
 
 	return Config{
 		Runtime:       runtime,
-		GRPC:          GRPC{MaxReceiveBytes: receiveBytes, MaxSendBytes: sendBytes},
+		GRPC:          grpc,
 		ServiceName:   serviceName,
 		GRPCAddress:   grpcAddress,
 		HealthAddress: healthAddress,
@@ -224,9 +189,9 @@ func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity,
 		name  string
 		value *string
 	}{
-		{environmentSetting, &identity.Environment},
-		{serviceVersionSetting, &identity.ServiceVersion},
-		{serviceInstanceSetting, &identity.ServiceInstance},
+		{kitconfig.EnvDeploymentEnvironment, &identity.Environment},
+		{kitconfig.EnvServiceVersion, &identity.ServiceVersion},
+		{kitconfig.EnvServiceInstanceID, &identity.ServiceInstance},
 	}
 	for _, field := range fields {
 		fallback := *field.value
@@ -254,10 +219,10 @@ func (identity Identity) Validate(enabled bool) error {
 		)
 	}
 	for _, field := range []struct{ name, value string }{
-		{serviceNameSetting, identity.ServiceName},
-		{environmentSetting, identity.Environment},
-		{serviceVersionSetting, identity.ServiceVersion},
-		{serviceInstanceSetting, identity.ServiceInstance},
+		{kitconfig.EnvServiceName, identity.ServiceName},
+		{kitconfig.EnvDeploymentEnvironment, identity.Environment},
+		{kitconfig.EnvServiceVersion, identity.ServiceVersion},
+		{kitconfig.EnvServiceInstanceID, identity.ServiceInstance},
 	} {
 		if !validIdentityValue(field.value) {
 			return kitconfig.Invalid(
