@@ -2,7 +2,7 @@ package identity
 
 // Identity contains application-owned resource and log fields. Collectors can add
 // infrastructure fields. This value neither loads settings nor validates policy:
-// the service owns namespace, implementation, environment, version and instance rules.
+// the service selects any validation policy explicitly.
 type Identity struct {
 	ServiceNamespace string
 	ServiceName      string

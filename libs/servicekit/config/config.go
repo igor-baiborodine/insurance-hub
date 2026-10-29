@@ -3,6 +3,7 @@ package config
 import (
 	"log/slog"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
@@ -41,9 +42,9 @@ func ValidateRuntime(settings Runtime) error {
 		name  string
 		value time.Duration
 	}{
-		{"REQUEST_TIMEOUT", settings.RequestTimeout},
-		{"PROBE_TIMEOUT", settings.ProbeTimeout},
-		{"SHUTDOWN_TIMEOUT", settings.ShutdownTimeout},
+		{EnvRequestTimeout, settings.RequestTimeout},
+		{EnvProbeTimeout, settings.ProbeTimeout},
+		{EnvShutdownTimeout, settings.ShutdownTimeout},
 	} {
 		if field.value <= 0 {
 			return Invalid(field.name, "must be a positive duration")
@@ -52,7 +53,7 @@ func ValidateRuntime(settings Runtime) error {
 	return nil
 }
 
-// GRPC contains message-size bounds. Service loaders choose permitted ranges.
+// GRPC contains message-size bounds. LoadGRPC applies common limits; local loaders may choose others.
 type GRPC struct {
 	MaxReceiveBytes int
 	MaxSendBytes    int
@@ -61,6 +62,25 @@ type GRPC struct {
 // DefaultGRPC returns the existing consumer message-size defaults.
 func DefaultGRPC() GRPC {
 	return GRPC{MaxReceiveBytes: 1048576, MaxSendBytes: 8388608}
+}
+
+// LoadGRPC reads the common gRPC message limits from an explicit lookup.
+// Services with different bounds can use LoadBoundedInt in their local loader.
+func LoadGRPC(lookup Lookup) (GRPC, error) {
+	defaults := DefaultGRPC()
+	receiveBytes, err := LoadBoundedInt(
+		lookup, EnvGRPCMaxReceiveBytes, strconv.Itoa(defaults.MaxReceiveBytes), 1, 16777216,
+	)
+	if err != nil {
+		return GRPC{}, err
+	}
+	sendBytes, err := LoadBoundedInt(
+		lookup, EnvGRPCMaxSendBytes, strconv.Itoa(defaults.MaxSendBytes), 1, 67108864,
+	)
+	if err != nil {
+		return GRPC{}, err
+	}
+	return GRPC{MaxReceiveBytes: receiveBytes, MaxSendBytes: sendBytes}, nil
 }
 
 // HTTPServer contains business HTTP server time bounds.
@@ -79,6 +99,42 @@ func DefaultHTTPServer() HTTPServer {
 	}
 }
 
+// LoadHTTPServer reads business HTTP timeouts from an explicit lookup.
+// Listener addresses and timeout relationships remain service-owned.
+func LoadHTTPServer(lookup Lookup) (HTTPServer, error) {
+	defaults := DefaultHTTPServer()
+	readHeaderTimeout, err := LoadPositiveDuration(
+		lookup, EnvHTTPReadHeaderTimeout, defaults.ReadHeaderTimeout.String(),
+	)
+	if err != nil {
+		return HTTPServer{}, err
+	}
+	readTimeout, err := LoadPositiveDuration(
+		lookup, EnvHTTPReadTimeout, defaults.ReadTimeout.String(),
+	)
+	if err != nil {
+		return HTTPServer{}, err
+	}
+	writeTimeout, err := LoadPositiveDuration(
+		lookup, EnvHTTPWriteTimeout, defaults.WriteTimeout.String(),
+	)
+	if err != nil {
+		return HTTPServer{}, err
+	}
+	idleTimeout, err := LoadPositiveDuration(
+		lookup, EnvHTTPIdleTimeout, defaults.IdleTimeout.String(),
+	)
+	if err != nil {
+		return HTTPServer{}, err
+	}
+	return HTTPServer{
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}, nil
+}
+
 // Telemetry contains optional OTLP/gRPC export settings and caller-validated identity.
 // Treat settings, including ExporterEndpoint, as immutable after startup validation.
 type Telemetry struct {
@@ -95,17 +151,17 @@ func DefaultTelemetry() Telemetry { return Telemetry{ExporterTimeout: 2 * time.S
 // identity or impose Product's enabled exactly-2s timeout or service drain budget.
 func ValidateTelemetry(settings Telemetry) error {
 	if settings.ExporterTimeout <= 0 {
-		return Invalid("OTEL_EXPORTER_OTLP_TIMEOUT", "must be a positive duration")
+		return Invalid(EnvOTELExporterOTLPTimeout, "must be a positive duration")
 	}
 	if settings.ExporterEndpoint == nil {
 		if settings.Enabled {
 			return Invalid(
-				"OTEL_EXPORTER_OTLP_ENDPOINT",
+				EnvOTELExporterOTLPEndpoint,
 				"is required when telemetry is enabled",
 			)
 		}
 		return nil
 	}
-	_, err := ParseEndpoint("OTEL_EXPORTER_OTLP_ENDPOINT", settings.ExporterEndpoint.String())
+	_, err := ParseEndpoint(EnvOTELExporterOTLPEndpoint, settings.ExporterEndpoint.String())
 	return err
 }

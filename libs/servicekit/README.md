@@ -25,7 +25,7 @@ mechanics are implemented. Neither Product nor the scaffold currently depends on
 | Public package | Intended responsibility | Remains with the consumer |
 | --- | --- | --- |
 | `config` | Explicit parsing and safe validation of neutral setting groups | Environment loader, required database settings, policy and startup validation |
-| `identity` | Neutral identity values | Product QA/test and scaffold identity policies |
+| `identity` | Neutral identity values, development defaults and opt-in deployment validation | Identity loading, test-instance generation and the scaffold's separate policy |
 | `logger` | JSON handlers, recursive attribute redaction and trace correlation | Completion status, severity, route and business classification |
 | `telemetry` | Explicit provider construction, runtime instruments and bounded cleanup | Scope/view/propagation selection, process-global installation, transport and business spans |
 | `health` | State and bounded injected readiness checks | Dependencies, readiness transition and resource lifetime |
@@ -51,6 +51,14 @@ The address defaults are business HTTP `127.0.0.1:8080`, health `127.0.0.1:8081`
 preserves explicit overrides, IPv6 and port zero; callers use `Address.Port` to apply their own
 collision policy. Scaffold adoption will change its existing health default in its separate PR.
 
+`ValidHost` exposes the host-syntax check used by listener and OTLP endpoint parsing. Pass an
+unbracketed host without a port or URL text. It accepts IP literals and ASCII DNS-style names
+with labels up to 63 bytes and a total length up to 253 bytes; it rejects empty hosts, ASCII
+space/tab/CR/LF, empty labels, leading or trailing label hyphens and other characters. It
+returns a boolean without including rejected input in diagnostics and performs no DNS lookup.
+Product's PostgreSQL URL parsing and credential-redaction policy remain in Product; its later
+adoption calls this predicate only for the URL host.
+
 `ValueOrDefault` uses a fallback only when a value is absent; an explicitly empty value fails.
 `LoadPositiveDuration`, `LoadBoundedInt`, `ParseLogLevel` and `ParseBool` retain the consumer
 parsing semantics. `OptionalEndpoint` is the deliberate exception: absent or empty means no
@@ -63,8 +71,16 @@ to `Invalid` must be trusted schema text, never environment values or raw parser
 `ErrorDetails` extracts those fields through wrappers and returns a constant category for unknown
 errors; it never renders the wrapper. It is not a general sanitizer for arbitrary message text.
 
+`identity.ValidateDeployment` is an explicit policy for services using the Product deployment
+identity rules. It validates the caller's expected name when telemetry is enabled, accepts
+development only with telemetry disabled, and test identities under their existing rules. It applies
+a SHA-version and UUID-shaped instance rule to every other valid lowercase environment name.
+It does not load or generate values. Identity failures expose fixed setting/reason fields through
+`identity.ValidationError`; `config.ErrorDetails` extracts them through wrappers without
+rendering arbitrary error text. The scaffold retains its own identity policy.
+
 `identity.Identity` is a plain value containing namespace, service, version, instance, environment
-and implementation. It has no identity validator or generator. `ValidateTelemetry` checks a
+and implementation. It has no promoted validator or instance generator. `ValidateTelemetry` checks a
 positive timeout and endpoint mechanics, without constraining identity or enforcing Product's
 enabled exactly-2s timeout. Product retains required database settings and credential redaction,
 pool bounds, QA/test identity, timeout relationships and listener collision rules. The scaffold
@@ -91,6 +107,11 @@ The standard HTTP mux provides method/path rejection. Dependency errors are neve
 responses. Listener creation, authentication/exposure policy, startup rollback and the overall
 shutdown budget remain with the service composition root.
 
+`health.NewManagementServer(state)` optionally returns a fresh, unstarted `*http.Server` with
+the same probe handler, a 5-second header timeout and a 30-second idle timeout. Read and write
+timeouts remain zero. A service may set different timeout fields before serving; it still owns
+the listener address and exposure, readiness transitions, serving and shutdown.
+
 ## Logging and telemetry
 
 `logger.New` creates a JSON logger with a short service label. `logger.NewIdentity` binds the six
@@ -100,10 +121,13 @@ Errors and unsupported structured values are replaced with `[REDACTED]`. Bound a
 sanitized when the logger is derived. Attribute redaction does not inspect or rewrite arbitrary
 message strings; callers must keep messages safe.
 
-`logger.LogRequired` bypasses the diagnostic threshold for a caller-owned contract record. Its
-message, severity and classification remain explicit arguments, so completion wording and
-Product/route/business policy stay in the consumer. Logs are written only to the supplied writer;
-executables select stdout or stderr.
+`logger.LogRequired` bypasses the diagnostic threshold for a caller-owned contract record when
+the logger comes from `logger.New` or `logger.NewIdentity`, including `With` and `WithGroup`
+derivatives. A logger using another `slog.Handler` may filter the record. Its message, severity and
+classification remain explicit arguments, so completion wording and Product/route/business
+policy stay in the consumer. Migrate a consumer's logger constructor and required-record call
+together to retain the bypass. Logs are written only to the supplied writer; executables select
+stdout or stderr.
 
 `telemetry.New` accepts caller-validated `config.Telemetry` and explicit `telemetry.Options`.
 `RuntimeScope` is required. HTTP/gRPC propagators, metric views and the trace sampler are caller

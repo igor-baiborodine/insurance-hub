@@ -39,8 +39,10 @@ func NewIdentity(
 	)
 }
 
-// LogRequired writes a caller-defined contract record independently of the diagnostic threshold.
-// The caller retains ownership of the record's message, severity and classification attributes.
+// LogRequired writes a caller-defined contract record independently of the diagnostic threshold
+// when log comes from New or NewIdentity, including a With or WithGroup derivative. A logger
+// using another slog.Handler may filter the record. The caller owns its message, severity and
+// attributes.
 func LogRequired(
 	ctx context.Context,
 	log *slog.Logger,
