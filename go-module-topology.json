@@ -128,5 +128,111 @@
       "reason": "The scaffold reuse proof creates this disposable copy temporarily."
     }
   ],
-  "activeConsumers": []
+  "activeConsumers": [
+    {
+      "module": "github.com/igor-baiborodine/insurance-hub/templates/go-service",
+      "directory": "templates/go-service",
+      "owner": "insurance-hub repository maintainers",
+      "status": "active",
+      "required_dependency": "github.com/igor-baiborodine/insurance-hub/libs/servicekit",
+      "workflows": [
+        {
+          "path": ".github/workflows/go-pr-mod.yml",
+          "job": "validate"
+        },
+        {
+          "path": ".github/workflows/go-pr-shared.yml",
+          "job": "validate"
+        }
+      ],
+      "candidate_phases": [
+        "format",
+        "lint",
+        "unit",
+        "race",
+        "build",
+        "dependency",
+        "vulnerability",
+        "generated",
+        "breaking",
+        "copy"
+      ],
+      "phase_bindings": {
+        "format": {
+          "target": "shared-candidate-format",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "lint": {
+          "target": "shared-candidate-lint",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "unit": {
+          "target": "shared-fast-unit",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "race": {
+          "target": "shared-candidate-race",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "build": {
+          "target": "shared-fast-build",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "dependency": {
+          "target": "shared-candidate-dependency",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "vulnerability": {
+          "target": "shared-candidate-vulnerability",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "generated": {
+          "target": "shared-candidate-generated",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "breaking": {
+          "target": "shared-candidate-breaking",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "copy": {
+          "target": "shared-candidate-copy",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        }
+      },
+      "applicability": {
+        "integration": "Scaffold has no external database or integration target beyond its owned copy proof.",
+        "image": "Scaffold publishes no service image; the renamed-copy proof covers normal build."
+      }
+    }
+  ]
 }

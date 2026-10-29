@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"strings"
 	"sync"
@@ -21,11 +22,56 @@ import (
 	grpcgo "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
+
 	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/health"
 )
+
+func TestProductionManagement_PreservesProbeContract(t *testing.T) {
+	// given
+	state, err := health.NewState(time.Second, func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// when
+	management := productionDependencies().newManagement(state)
+
+	// then
+	server, ok := management.(*http.Server)
+	if !ok {
+		t.Fatalf("management type = %T, want *http.Server", management)
+	}
+	if server.ReadHeaderTimeout != 5*time.Second || server.IdleTimeout != 30*time.Second ||
+		server.ReadTimeout != 0 || server.WriteTimeout != 0 {
+		t.Errorf("management timeouts = (%v, %v, %v, %v)", server.ReadHeaderTimeout,
+			server.IdleTimeout, server.ReadTimeout, server.WriteTimeout)
+	}
+	for _, test := range []struct {
+		method string
+		path   string
+		want   int
+	}{
+		{http.MethodGet, "/livez", http.StatusOK},
+		{http.MethodGet, "/readyz", http.StatusServiceUnavailable},
+		{http.MethodPost, "/livez", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/unknown", http.StatusNotFound},
+	} {
+		recorder := httptest.NewRecorder()
+		server.Handler.ServeHTTP(recorder, httptest.NewRequest(test.method, test.path, nil))
+		if recorder.Code != test.want {
+			t.Errorf(
+				"%s %s = %d, want %d",
+				test.method,
+				test.path,
+				recorder.Code,
+				test.want,
+			)
+		}
+	}
+}
 
 func TestRun_WithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
 	// given
@@ -354,15 +400,17 @@ func TestRun_BoundsSlowCleanupToOverallShutdownBudget(t *testing.T) {
 }
 
 func testConfig(timeout time.Duration) config.Config {
-	return config.Config{
-		ServiceName:     "go-service",
-		ShutdownTimeout: timeout,
-		RequestTimeout:  time.Second, ProbeTimeout: time.Second,
-		GRPC: config.GRPC{MaxReceiveBytes: 1048576, MaxSendBytes: 8388608},
+	settings := config.Config{
+		ServiceName: "go-service",
+		GRPC:        config.GRPC{MaxReceiveBytes: 1048576, MaxSendBytes: 8388608},
 		Telemetry: config.Telemetry{
 			ExporterTimeout: time.Second,
 		},
 	}
+	settings.ShutdownTimeout = timeout
+	settings.RequestTimeout = time.Second
+	settings.ProbeTimeout = time.Second
+	return settings
 }
 
 func discardLogger() *slog.Logger {
@@ -466,7 +514,7 @@ func (provider *fakeTelemetryProvider) TracerProvider() trace.TracerProvider {
 	return noop.NewTracerProvider()
 }
 
-func (provider *fakeTelemetryProvider) Propagator() propagation.TextMapPropagator {
+func (provider *fakeTelemetryProvider) GRPCPropagator() propagation.TextMapPropagator {
 	return propagation.TraceContext{}
 }
 

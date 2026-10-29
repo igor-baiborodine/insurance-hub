@@ -2,20 +2,15 @@ package telemetry
 
 import (
 	"context"
-	"errors"
 	"net"
 	"testing"
 	"time"
 
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	collectormetric "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	common "go.opentelemetry.io/proto/otlp/common/v1"
 	metricpb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	"google.golang.org/grpc"
-
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 )
 
 type traceReceiver struct {
@@ -144,29 +139,5 @@ func assertResourceIdentity(t *testing.T, attributes []*common.KeyValue) {
 		if got[key] != want {
 			t.Errorf("resource %s = %s, want %s", key, got[key], want)
 		}
-	}
-}
-
-func TestProvider_MetricInitializationFailureClosesTraceExporter(t *testing.T) {
-	// given
-	exporter := newRecordingExporter()
-	cause := errors.New("private-marker")
-	// when
-	_, err := newProvider(
-		context.Background(),
-		"go-service",
-		testTelemetrySettings(time.Second),
-		func(context.Context, config.Telemetry) (sdktrace.SpanExporter, error) { return exporter, nil },
-		func(context.Context, config.Telemetry) (sdkmetric.Reader, error) { return nil, cause },
-	)
-	// then
-	if !errors.Is(err, cause) ||
-		err.Error() != "initialize telemetry: OTLP metric exporter failed" {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	select {
-	case <-exporter.shutdown:
-	default:
-		t.Error("trace exporter leaked")
 	}
 }

@@ -21,6 +21,8 @@ WORKFLOW_SECONDS = 2_400
 TEARDOWN_SECONDS = 15
 SOURCE_MODULE = "github.com/igor-baiborodine/insurance-hub/templates/go-service"
 COPY_MODULE = "github.com/igor-baiborodine/insurance-hub/services/example-copy"
+SHARED_MODULE = "github.com/igor-baiborodine/insurance-hub/libs/servicekit"
+SHARED_VERSION = "v0.2.0"
 IDENTITY_REPLACEMENTS = (
     (SOURCE_MODULE, COPY_MODULE),
     ("templates/go-service", "services/example-copy"),
@@ -52,6 +54,7 @@ class Configuration:
     selected_python: Path
     go: str
     uv: str
+    candidate_library: Path | None = None
 
 
 def require(condition: bool, message: str) -> None:
@@ -81,6 +84,11 @@ def configuration() -> Configuration:
     require((repository_path / "uv.lock").is_file(), "repository uv.lock is missing")
     require(common_path.is_dir(), f"shared Go tooling directory is missing: {common_path}")
     require(python_path.is_file(), f"selected Python is missing: {python_path}")
+    candidate = os.environ.get("SERVICEKIT_CANDIDATE_LIBRARY")
+    if os.environ.get("SERVICEKIT_CONTEXT_SOCKET"):
+        require(bool(candidate), "candidate copy library is required")
+    else:
+        require(not candidate, "candidate copy requires a live owner context")
     return Configuration(
         module_root=module_root,
         repository_root=repository_path,
@@ -89,6 +97,7 @@ def configuration() -> Configuration:
         selected_python=python_path,
         go=os.environ.get("GO", "go"),
         uv=os.environ.get("UV", "uv"),
+        candidate_library=Path(candidate).resolve(strict=True) if candidate else None,
     )
 
 
@@ -158,9 +167,16 @@ def rewrite_readme(content: str) -> str:
 
 def remove_scaffold_only_surface(copy_root: Path) -> None:
     makefile = copy_root / "Makefile"
+    content = (copy_root / "Makefile").read_text(encoding="utf-8")
+    content, count = re.subn(
+        r"(?ms)^# BEGIN SOURCE-SCAFFOLD CANDIDATE PHASES\n.*?^# END SOURCE-SCAFFOLD CANDIDATE PHASES\n",
+        "",
+        content,
+    )
+    require(count == 1, "source scaffold candidate phase block is missing")
     makefile.write_text(
         remove_make_target(
-            remove_make_target(makefile.read_text(encoding="utf-8"), "check-copy"),
+            remove_make_target(content, "check-copy"),
             "check-foundations",
         ),
         encoding="utf-8",
@@ -170,6 +186,7 @@ def remove_scaffold_only_surface(copy_root: Path) -> None:
         "scripts/test_check_copy.py",
         "scripts/check_foundations.py",
         "scripts/test_check_foundations.py",
+        "scripts/shared_phase.py",
     ):
         (copy_root / relative).unlink()
     readme = copy_root / "README.md"
@@ -260,8 +277,16 @@ def validate_copy_surface(copy_root: Path) -> None:
         == f"module {COPY_MODULE}",
         "copied module identity differs",
     )
+    require(
+        f"{SHARED_MODULE} {SHARED_VERSION}" in (copy_root / "go.mod").read_text(encoding="utf-8"),
+        "copied module lost its exact shared dependency",
+    )
     config_go = (copy_root / "internal" / "config" / "config.go").read_text(encoding="utf-8")
     require('const DefaultServiceName = "example-copy"' in config_go, "service identity differs")
+    require(
+        "kitconfig.DefaultHealthAddress" in config_go,
+        "copied management listener lost the shared 8081 default",
+    )
     proto_paths = (
         copy_root / "api" / "examplecopy" / "v1" / "example_service.proto",
         copy_root
@@ -302,10 +327,16 @@ def run_copy_make(
     *variables: str,
     maximum_seconds: float = 600,
     log_path: Path | None = None,
+    candidate: bool = False,
 ) -> None:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise CopyError(f"{activity} could not start before the overall deadline")
+    child_env = command_environment(config)
+    if candidate:
+        require(config.candidate_library is not None, "candidate library is required")
+        child_env["GOFLAGS"] = f"-mod=readonly -modfile={copy_root / 'candidate.mod'}"
+        child_env["SERVICEKIT_CANDIDATE_LIBRARY"] = str(config.candidate_library)
     run_command(
         [
             *config.make_arguments,
@@ -319,7 +350,7 @@ def run_copy_make(
             f"INSURANCE_HUB_ROOT={config.repository_root}",
         ],
         cwd=copy_root,
-        env=command_environment(config),
+        env=child_env,
         timeout_seconds=min(maximum_seconds, remaining),
         teardown_seconds=TEARDOWN_SECONDS,
         activity=activity,
@@ -377,6 +408,31 @@ def execute(config: Configuration) -> None:
         )
 
         copy_before = inventory(copy_root)
+        if config.candidate_library is not None:
+            require(
+                (copy_root / "candidate.mod").is_file() and (copy_root / "candidate.sum").is_file(),
+                "copied candidate manifests are missing",
+            )
+            for activity, target in (
+                ("verifying copied candidate selection", "check-candidate-servicekit"),
+                ("testing renamed copy against candidate", "test-race"),
+                ("building renamed copy against candidate", "build"),
+            ):
+                run_copy_make(
+                    config,
+                    copy_root,
+                    deadline,
+                    f"check-copy {activity}",
+                    target,
+                    maximum_seconds=600,
+                    candidate=True,
+                )
+            require(
+                copy_before == inventory(copy_root), "candidate validation changed copied content"
+            )
+            require(source_before == inventory(config.module_root), "candidate copy changed source")
+            print("check-copy: renamed copy selected and tested the servicekit candidate")
+            return
         run_copy_make(
             config,
             copy_root,

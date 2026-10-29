@@ -24,9 +24,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
+	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
+
 	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
 	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
 )
 
 func TestExampleService_GeneratedIdentity(t *testing.T) {

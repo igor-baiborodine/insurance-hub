@@ -20,9 +20,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
+
 	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
 	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
 )
 

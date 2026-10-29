@@ -238,7 +238,7 @@ do not repeat its supplied value.
 |-------------------------------|------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `SERVICE_NAME`                | `go-service`     | 1–128 ASCII letters, digits, dots, underscores or hyphens; change it when copying the scaffold.                                                                                                                                                                                  |
 | `GRPC_ADDR`                   | `127.0.0.1:9090` | Valid host and numeric port; port `0` is available for tests.                                                                                                                                                                    |
-| `HEALTH_ADDR`                 | `127.0.0.1:8080` | Valid host and numeric port; port `0` is available for tests.                                                                                                                                                                    |
+| `HEALTH_ADDR`                 | `127.0.0.1:8081` | Valid host and numeric port; port `0` is available for tests.                                                                                                                                                                    |
 | `LOG_LEVEL`                   | `info`           | A level accepted by `slog.Level`, such as `debug`, `info`, `warn`, `error`, or a documented level offset.                                                                                                                        |
 | `REQUEST_TIMEOUT` | `8s` | Positive duration bounding application work; never extends a shorter caller deadline. |
 | `PROBE_TIMEOUT` | `2s` | Positive duration passed to the readiness dependency check. |
@@ -264,26 +264,33 @@ attribute keys are redacted recursively, and error objects are redacted entirely
 still select safe fields and keep sensitive data out of messages and ordinary string attributes.
 Configuration failures include validator-owned `setting` and `reason` fields alongside the redacted
 error. Unrecognized errors use constant fallback fields and never contribute their raw text.
-The lightweight `logger.New` constructor remains available for tests; process wiring uses
-`logger.NewIdentity`.
+The shared `servicekit/logger.New` constructor is available for tests; process wiring uses
+`servicekit/logger.NewIdentity`. The local logger package owns the required `request completed`
+record and delegates its redaction and threshold handling to the shared logger.
 
 Enabled telemetry exports traces and cumulative metrics over OTLP/gRPC to the configured collector,
 using the same six identity dimensions as logs. Disabled mode creates neither exporter and needs
 no collector. W3C trace context is propagated at the registered gRPC boundary; arbitrary methods
 are excluded. There is no business HTTP API or B3 propagation requirement in this scaffold.
 
-The provider owns a nonblocking trace queue (2048 spans, 256-span batches, one-second batch delay),
+The pinned `libs/servicekit` `v0.2.0` provider owns a nonblocking trace queue (2048 spans, 256-span batches, one-second batch delay),
 a ten-second periodic metric reader, and Go runtime instruments for memory, allocations, GC,
 goroutines and processor limit. Exporter initialization, retries, flush and shutdown use bounded
 contexts. Safe export diagnostics are rate-limited to once per 30 seconds; queue saturation has a
-separate safe warning. The executable installs the diagnostic handler before enabled providers.
+separate safe warning. The executable installs the shared diagnostic handler before enabled providers and restores the previous handler after service exit.
 
 `insurance_hub.service.requests` and `insurance_hub.service.request.duration` record the fixed
 `echo` operation, `grpc` transport, bounded outcome and final RPC status. The stats End event
 captures decode and send-size failures as well as application results. Completion logs retain
 these safe fields and duration even when the diagnostic log threshold is higher. Request payloads,
 raw errors, client-selected methods and instance IDs are not metric labels. Service identity stays
-on the resource. The service lifecycle owns provider shutdown within the overall shutdown budget.
+on the resource. The service lifecycle owns provider shutdown within the overall shutdown budget; `internal/config.Load` and scaffold identity policy remain local.
+`Config` embeds the shared `Runtime`, `GRPC`, and `Telemetry` setting groups. The local identity
+type embeds `servicekit/identity.Identity` and adds scaffold validation. Loading uses the shared
+environment keys and `LoadGRPC` at the scaffold's existing lookup position, then applies local
+identity, listener and shutdown-budget rules. The development identity uses the shared constructor.
+Embedding does not load environment variables or automatically validate settings. The telemetry
+provider embeds the shared provider and uses its promoted methods directly.
 All 17 canonical gRPC statuses remain distinct in completion logs and request metrics; unsupported
 compression returns and records `UNIMPLEMENTED`. Unknown status values normalize to `UNKNOWN`.
 
@@ -306,7 +313,7 @@ GRPC_ADDR=127.0.0.1:0 HEALTH_ADDR=127.0.0.1:0 make run
 ```
 
 The default gRPC listener is `127.0.0.1:9090`. The separate management listener on
-`127.0.0.1:8080` exposes only `GET /livez` and `GET /readyz`. Liveness returns 200 while the
+`127.0.0.1:8081` exposes only `GET /livez` and `GET /readyz`. Liveness returns 200 while the
 management server accepts requests. Readiness returns 200 after both listeners start and 503 once
 shutdown begins. It combines lifecycle state with a dependency check bounded by `PROBE_TIMEOUT`. The composition
 root supplies a no-dependency check for Echo. A future service supplies checks for its required
@@ -346,10 +353,10 @@ must define their own contracts, persistence, authorization, exposure and deploy
 | --- | --- | --- |
 | Go and shared libraries/tools | `go.mod`, `Makefile` | Exact matching shared pins; independent manifests and tool caches. |
 | Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; general environment/version/instance validation instead of Product QA release rules. Existing loopback ports preserved. |
-| Safe structured logs | `internal/logger/logger.go` | UTC, recursive redaction, redacted error objects, trace correlation and safe completion records; generic completion message. |
-| Trace/metric lifecycle | `internal/telemetry/telemetry.go`, `runtime.go`, `diagnostics.go` | Owned providers, bounded queue/export/cleanup and process instruments; configurable timeout, no Product database views or HTTP B3 compatibility. |
+| Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
+| Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
 | Request observation and limits | `internal/grpc/server.go`, `internal/telemetry/request.go` | Fixed Echo operation, generic service metric names, final transport outcomes, configurable request/message bounds. |
-| Health and lifecycle | `internal/health/health.go`, `internal/service/service.go` | Dependency-aware readiness and owned cleanup; two listeners and no database dependency. |
+| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Shared dependency-aware readiness and management server defaults; local listener ownership and cleanup, with no database dependency. |
 | Business architecture | Product application-owned catalog ports and injected adapters | Echo remains a small injected function. Add domain/application/repository packages when a real migration requires them. |
 
 Run `make check-foundations` when maintaining the source template; its version comparison also runs in the source template's aggregate check. It does not certify semantic runtime parity or update copies automatically.
@@ -365,7 +372,9 @@ proof. Existing services adopt later fixes through their own reviewed changes.
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct and inject provider, observer, Echo handler, readiness check and listeners; own partial-start cleanup and drain. |
 | `internal/grpc` | Generated Echo registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
-| `internal/config`, `internal/logger`, `internal/health`, `internal/telemetry` | Typed operational settings, safe logs, probes, and owned observability. |
+| `internal/config` | Compose shared setting groups, load the environment and apply scaffold identity and cross-setting policy. |
+| `internal/logger`, `internal/telemetry` | Completion-log and Echo signal contracts; shared provider construction with local policy and metric views. |
+| `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/scaffold/v1`, `gen/scaffold/v1` | Editable protobuf contract and generated bindings; compatibility baseline remains separate. |
 
 This component diagram shows source dependencies; construction and runtime dispatch are described
@@ -375,17 +384,20 @@ below it.
 flowchart TD
     entry["cmd/server"] --> composition["internal/service"]
     entry --> config["internal/config"]
-    entry --> logger["internal/logger"]
-    entry --> telemetry["internal/telemetry"]
+    entry --> sharedLogger["servicekit/logger"]
+    entry --> sharedTelemetry["servicekit/telemetry"]
     composition --> grpc["internal/grpc"]
-    composition --> health["internal/health"]
-    composition --> telemetry
+    composition --> health["servicekit/health"]
+    composition --> telemetry["internal/telemetry"]
     composition --> config
     grpc --> telemetry
     grpc --> generated["gen/scaffold/v1"]
     telemetry --> config
-    telemetry --> logger
-    logger --> config
+    telemetry --> logger["internal/logger"]
+    telemetry --> sharedTelemetry
+    logger --> sharedLogger
+    config --> sharedConfig["servicekit/config"]
+    config --> sharedIdentity["servicekit/identity"]
 ```
 
 At startup, composition injects the provider, request observer and Echo function into the gRPC

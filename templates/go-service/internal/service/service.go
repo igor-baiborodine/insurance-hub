@@ -15,15 +15,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	grpcgo "google.golang.org/grpc"
 
+	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
+
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/health"
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
-)
-
-const (
-	managementReadHeaderTimeout = 5 * time.Second
-	managementIdleTimeout       = 30 * time.Second
 )
 
 // Run starts the configured service and blocks until cancellation or an unexpected serving error.
@@ -34,7 +30,7 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) error
 type telemetryProvider interface {
 	MeterProvider() metric.MeterProvider
 	TracerProvider() trace.TracerProvider
-	Propagator() propagation.TextMapPropagator
+	GRPCPropagator() propagation.TextMapPropagator
 	Shutdown(context.Context) error
 }
 
@@ -102,11 +98,7 @@ func productionDependencies() dependencies {
 			)
 		},
 		newManagement: func(state *health.State) managementServer {
-			return &http.Server{
-				Handler:           health.NewHandler(state),
-				ReadHeaderTimeout: managementReadHeaderTimeout,
-				IdleTimeout:       managementIdleTimeout,
-			}
+			return health.NewManagementServer(state)
 		},
 		readiness: func(ctx context.Context) error { return ctx.Err() },
 		echo:      transport.IdentityEcho,
@@ -145,11 +137,11 @@ func run(
 	server, err := deps.newGRPCServer(
 		logger,
 		provider.TracerProvider(),
-		provider.Propagator(),
+		provider.GRPCPropagator(),
 		transport.Settings{
 			RequestTimeout:  settings.RequestTimeout,
-			MaxReceiveBytes: settings.GRPC.MaxReceiveBytes,
-			MaxSendBytes:    settings.GRPC.MaxSendBytes,
+			MaxReceiveBytes: settings.MaxReceiveBytes,
+			MaxSendBytes:    settings.MaxSendBytes,
 			Observer:        observer,
 		},
 		deps.echo,

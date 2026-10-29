@@ -10,7 +10,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"google.golang.org/grpc/codes"
 
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
+	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
+
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
 )
 

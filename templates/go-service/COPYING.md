@@ -29,6 +29,8 @@ creating a real service, then use the same replacement categories consistently.
 | Schema/generated path          | `scaffold/v1`                                                    | `examplecopy/v1`                                                  |
 | Generated Go package           | `scaffoldv1`                                                     | `examplecopyv1`                                                   |
 
+Retain the exact published `libs/servicekit` version and its checksums in the renamed copy; never replace it with a sibling checkout. The management HTTP default is `127.0.0.1:8081`, while gRPC remains `127.0.0.1:9090`.
+
 Use a valid Protobuf identifier without a hyphen. The generic `ExampleService`, `EchoRequest`,
 `EchoResponse`, `Echo`, and `cmd/server` names may remain until the service defines a real contract.
 
@@ -123,7 +125,13 @@ awk '
   { skipping = 0; print }
 ' Makefile > Makefile.copy
 mv Makefile.copy Makefile
-rm scripts/check_copy.py scripts/test_check_copy.py scripts/check_foundations.py scripts/test_check_foundations.py
+awk '
+  /^# BEGIN SOURCE-SCAFFOLD CANDIDATE PHASES$/ { skipping = 1; next }
+  /^# END SOURCE-SCAFFOLD CANDIDATE PHASES$/ { skipping = 0; next }
+  !skipping { print }
+' Makefile > Makefile.copy
+mv Makefile.copy Makefile
+rm scripts/check_copy.py scripts/test_check_copy.py scripts/check_foundations.py scripts/test_check_foundations.py scripts/shared_phase.py
 
 sed -i \
   -e '/check-foundations/d' \

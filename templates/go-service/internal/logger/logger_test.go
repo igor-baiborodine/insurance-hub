@@ -11,14 +11,16 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
+	kitlogger "github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
+
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
 )
 
 func TestNew_WritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
 	// given
 	var output bytes.Buffer
-	log := logger.New(&output, "go-service", slog.LevelInfo)
+	log := kitlogger.New(&output, "go-service", slog.LevelInfo)
 
 	// when
 	log.DebugContext(context.Background(), "filtered")
@@ -52,7 +54,7 @@ func TestNew_AddsTraceCorrelationFromContext(t *testing.T) {
 	var output bytes.Buffer
 
 	// when
-	logger.New(&output, "go-service", slog.LevelInfo).InfoContext(ctx, "correlated")
+	kitlogger.New(&output, "go-service", slog.LevelInfo).InfoContext(ctx, "correlated")
 
 	// then
 	entries := decodeEntries(t, output.String())
@@ -68,7 +70,7 @@ func TestNew_RedactsSensitiveAttributesAtEveryLevel(t *testing.T) {
 	// given
 	const privateMarker = "private-marker"
 	var output bytes.Buffer
-	log := logger.New(&output, "go-service", slog.LevelDebug).With(
+	log := kitlogger.New(&output, "go-service", slog.LevelDebug).With(
 		slog.String("accessToken", privateMarker),
 	)
 	levels := []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}
@@ -112,7 +114,7 @@ func TestNew_RedactsSensitiveKeysInsideAnyValues(t *testing.T) {
 		Safe        string           `json:"safe"`
 	}
 	var output bytes.Buffer
-	log := logger.New(&output, "go-service", slog.LevelInfo).With(
+	log := kitlogger.New(&output, "go-service", slog.LevelInfo).With(
 		slog.Any("bound_details", map[string]any{
 			"credential": privateMarker,
 			"safe":       "bound-safe",
@@ -211,7 +213,7 @@ func decodeEntries(t *testing.T, output string) []map[string]any {
 func TestNewIdentity_RedactsErrorsAndUsesUTC(t *testing.T) {
 	// given
 	var output bytes.Buffer
-	identity := config.Identity{
+	serviceIdentity := identity.Identity{
 		ServiceNamespace: "insurance-hub",
 		ServiceName:      "go-service",
 		ServiceVersion:   "sha-1234567",
@@ -219,7 +221,7 @@ func TestNewIdentity_RedactsErrorsAndUsesUTC(t *testing.T) {
 		Environment:      "staging",
 		Implementation:   "go",
 	}
-	log := logger.NewIdentity(&output, identity, slog.LevelError)
+	log := kitlogger.NewIdentity(&output, serviceIdentity, slog.LevelError)
 	// when
 	logger.LogCompletion(
 		context.Background(),
