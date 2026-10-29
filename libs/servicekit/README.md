@@ -25,7 +25,7 @@ mechanics are implemented. Neither Product nor the scaffold currently depends on
 | Public package | Intended responsibility | Remains with the consumer |
 | --- | --- | --- |
 | `config` | Explicit parsing and safe validation of neutral setting groups | Environment loader, required database settings, policy and startup validation |
-| `identity` | Neutral identity values | Product QA/test and scaffold identity policies |
+| `identity` | Neutral identity values, development defaults and opt-in deployment validation | Identity loading, test-instance generation and the scaffold's separate policy |
 | `logger` | JSON handlers, recursive attribute redaction and trace correlation | Completion status, severity, route and business classification |
 | `telemetry` | Explicit provider construction, runtime instruments and bounded cleanup | Scope/view/propagation selection, process-global installation, transport and business spans |
 | `health` | State and bounded injected readiness checks | Dependencies, readiness transition and resource lifetime |
@@ -63,8 +63,16 @@ to `Invalid` must be trusted schema text, never environment values or raw parser
 `ErrorDetails` extracts those fields through wrappers and returns a constant category for unknown
 errors; it never renders the wrapper. It is not a general sanitizer for arbitrary message text.
 
+`identity.ValidateDeployment` is an explicit policy for services using the Product deployment
+identity rules. It validates the caller's expected name when telemetry is enabled, accepts
+development only with telemetry disabled, and test identities under their existing rules. It applies
+a SHA-version and UUID-shaped instance rule to every other valid lowercase environment name.
+It does not load or generate values. Identity failures expose fixed setting/reason fields through
+`identity.ValidationError`; `config.ErrorDetails` extracts them through wrappers without
+rendering arbitrary error text. The scaffold retains its own identity policy.
+
 `identity.Identity` is a plain value containing namespace, service, version, instance, environment
-and implementation. It has no identity validator or generator. `ValidateTelemetry` checks a
+and implementation. It has no promoted validator or instance generator. `ValidateTelemetry` checks a
 positive timeout and endpoint mechanics, without constraining identity or enforcing Product's
 enabled exactly-2s timeout. Product retains required database settings and credential redaction,
 pool bounds, QA/test identity, timeout relationships and listener collision rules. The scaffold
