@@ -25,23 +25,20 @@ from shared_support import (
     digest,
     environment,
     exact,
-    git,
     manifest_digest,
     require,
-    verify_sha,
 )
 
 BUILDER = "docker.io/library/golang:1.27.3-alpine3.23@sha256:0208a74017e3ce41f779876f3c6e9ad5d4030904e8ac6e91b9c5d7711c48362a"
 VERSION = re.compile(r"v0\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 API_VERSION = "2026-03-10"
-PR_EVIDENCE_API_VERSION = "2022-11-28"
 
 
 def release_identity(version: str, sha: str) -> str:
     require(
         VERSION.fullmatch(version) and version != "v0.0.0", "expected canonical stable v0 version"
     )
-    require(SHA.fullmatch(sha), "expected full merged source SHA")
+    require(SHA.fullmatch(sha), "expected full source SHA")
     return f"libs/servicekit/{version}"
 
 
@@ -58,13 +55,11 @@ class GitHub:
         method: str = "GET",
         body: Any = None,
         absent: bool = False,
-        *,
-        api_version: str = API_VERSION,
     ) -> Any:
         url = f"https://api.github.com/repos/{REPOSITORY}/{suffix}"
         headers = {
             "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": api_version,
+            "X-GitHub-Api-Version": API_VERSION,
             "Content-Type": "application/json",
         }
         token = os.environ.get("GH_TOKEN")
@@ -112,24 +107,6 @@ class GitHub:
             require(obj["type"] == "tag", "unexpected tag object")
             obj = self.api("git/tags/" + obj["sha"])["object"]
         raise SharedError("tag nesting exceeds limit")
-
-
-def merged_source(provider: GitHub, root: Path, sha: str) -> None:
-    verify_sha(root, sha)
-    main = provider.api("git/ref/heads/main")["object"]["sha"]
-    verify_sha(root, main)
-    git(root, "merge-base", "--is-ancestor", sha, main)
-    # The newer API response omits merge_commit_sha, which binds a squash merge to the push SHA.
-    pulls = provider.api(f"commits/{sha}/pulls?per_page=100", api_version=PR_EVIDENCE_API_VERSION)
-    candidates = [
-        p
-        for p in pulls
-        if p.get("merged_at")
-        and p.get("merge_commit_sha") == sha
-        and p["base"]["ref"] == "main"
-        and p["base"]["repo"]["full_name"] == REPOSITORY
-    ]
-    require(candidates, "source lacks merged PR evidence")
 
 
 def publish_tag(provider: GitHub, version: str, sha: str) -> None:
@@ -374,7 +351,7 @@ def public_verify(root: Path, version: str, sha: str, source_digest: str) -> dic
         )
         require(
             manifest_digest(Path(download["Dir"])) == source_digest,
-            "public module content does not match merged source",
+            "public module content does not match release source",
         )
         budget.run(["go", "mod", "tidy"], consumer, "resolve smoke consumer", env)
         selected = json.loads(

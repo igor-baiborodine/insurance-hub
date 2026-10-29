@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import io
 import json
-import subprocess
 import time
 from pathlib import Path
 
@@ -101,137 +100,6 @@ class Provider:
         return ""
 
 
-def disposable_history(root: Path) -> tuple[str, str]:
-    def git(*args: str) -> str:
-        result = subprocess.run(
-            ["git", *args], cwd=root, check=True, capture_output=True, text=True, timeout=5
-        )
-        return result.stdout.strip()
-
-    git("init", "-q", "-b", "main")
-    git("config", "user.name", "Release Test")
-    git("config", "user.email", "release-test@example.invalid")
-    (root / "source.txt").write_text("base\n")
-    git("add", "source.txt")
-    git("commit", "-qm", "base")
-    base = git("rev-parse", "HEAD")
-    (root / "source.txt").write_text("merged\n")
-    git("commit", "-qam", "merged source")
-    main = git("rev-parse", "HEAD")
-    git("checkout", "-qb", "unmerged", base)
-    (root / "source.txt").write_text("unmerged\n")
-    git("commit", "-qam", "unmerged source")
-    side = git("rev-parse", "HEAD")
-    git("checkout", "-q", "main")
-    assert git("rev-parse", "HEAD") == main
-    return main, side
-
-
-class MergeAPI(release.GitHub):
-    def __init__(self, root: Path, sha: str):
-        super().__init__(root)
-        self.sha = sha
-        self.pulls = [
-            {
-                "merged_at": "2026-01-01T00:00:00Z",
-                "merge_commit_sha": sha,
-                "base": {"ref": "main", "repo": {"full_name": REPOSITORY}},
-                "head": {"sha": sha},
-                "user": {"login": "author"},
-                "number": 7,
-            }
-        ]
-        self.calls = []
-
-    def api(
-        self, suffix, method="GET", body=None, absent=False, *, api_version=release.API_VERSION
-    ):
-        self.calls.append((method, suffix, api_version))
-        if suffix == "git/ref/heads/main":
-            return {"object": {"sha": self.sha}}
-        if suffix.startswith("commits/") and suffix.endswith("/pulls?per_page=100"):
-            return self.pulls
-        raise AssertionError(suffix)
-
-
-@pytest.mark.parametrize(
-    "defect",
-    [None, "unmerged", "no_pull", "wrong_merge", "wrong_base", "wrong_repo"],
-)
-def test_merged_source_requires_merged_ancestor_and_exact_pr_evidence(
-    tmp_path: Path, defect: str | None
-) -> None:
-    # given: main and an unmerged branch are real disposable Git history.
-    main, side = disposable_history(tmp_path)
-    provider = MergeAPI(tmp_path, main)
-    source = side if defect == "unmerged" else main
-    if defect == "unmerged":
-        # The PR evidence otherwise qualifies, isolating the real Git ancestry guard.
-        provider.pulls[0]["merge_commit_sha"] = side
-        provider.pulls[0]["head"]["sha"] = side
-    elif defect == "no_pull":
-        provider.pulls = []
-    elif defect == "wrong_merge":
-        provider.pulls[0]["merge_commit_sha"] = side
-    elif defect == "wrong_base":
-        provider.pulls[0]["base"]["ref"] = "release"
-    elif defect == "wrong_repo":
-        provider.pulls[0]["base"]["repo"]["full_name"] = "example/other"
-
-    # when / then: every denied path stops before any publication request.
-    if defect == "unmerged":
-        with pytest.raises(RuntimeError, match="inspect Git failed with status 1"):
-            release.merged_source(provider, tmp_path, source)
-    elif defect:
-        with pytest.raises(SharedError, match="merged PR evidence"):
-            release.merged_source(provider, tmp_path, source)
-    else:
-        release.merged_source(provider, tmp_path, source)
-    assert all(method == "GET" for method, _, _ in provider.calls)
-    if defect != "unmerged":
-        assert provider.calls[-1] == (
-            "GET",
-            f"commits/{source}/pulls?per_page=100",
-            release.PR_EVIDENCE_API_VERSION,
-        )
-
-
-def test_merged_source_requests_pr_response_with_exact_merge_sha(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # given: GitHub's newer response lacks merge_commit_sha for an otherwise merged PR.
-    main, _ = disposable_history(tmp_path)
-    versions = []
-
-    def urlopen(request, timeout):
-        assert 0 < timeout <= 30
-        version = {key.lower(): value for key, value in request.header_items()}[
-            "x-github-api-version"
-        ]
-        versions.append(version)
-        if request.full_url.endswith("/git/ref/heads/main"):
-            response = {"object": {"sha": main}}
-        elif request.full_url.endswith(f"/commits/{main}/pulls?per_page=100"):
-            response = [
-                {
-                    "merged_at": "2026-10-28T23:56:16Z",
-                    "base": {"ref": "main", "repo": {"full_name": REPOSITORY}},
-                    **({"merge_commit_sha": main} if version == "2022-11-28" else {}),
-                }
-            ]
-        else:
-            raise AssertionError(request.full_url)
-        return io.BytesIO(json.dumps(response).encode())
-
-    monkeypatch.setattr(release.urllib.request, "urlopen", urlopen)
-
-    # when: the production GitHub adapter validates the real Git ancestry and API response.
-    release.merged_source(release.GitHub(tmp_path), tmp_path, main)
-
-    # then: exact merge evidence uses the compatible REST version only for the PR request.
-    assert versions == [release.API_VERSION, "2022-11-28"]
-
-
 def test_release_producer_requires_main_push_at_exact_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -244,12 +112,20 @@ def test_release_producer_requires_main_push_at_exact_source(
     monkeypatch.setenv("GITHUB_RUN_ID", "42")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
 
-    # when / then: a push qualifies; manual dispatch and mismatched sources do not.
+    # when / then: a main push qualifies without PR evidence; other triggers and sources do not.
     assert release.producer()["workflow_sha"] == SHA
     monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
     with pytest.raises(SharedError, match="main push"):
         release.producer()
     monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/release")
+    with pytest.raises(SharedError, match="main push"):
+        release.producer()
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "example/other")
+    with pytest.raises(SharedError, match="main push"):
+        release.producer()
+    monkeypatch.setenv("GITHUB_REPOSITORY", REPOSITORY)
     monkeypatch.setenv("RELEASE_SHA", "b" * 40)
     with pytest.raises(SharedError, match="push revision"):
         release.producer()
