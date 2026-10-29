@@ -51,6 +51,14 @@ The address defaults are business HTTP `127.0.0.1:8080`, health `127.0.0.1:8081`
 preserves explicit overrides, IPv6 and port zero; callers use `Address.Port` to apply their own
 collision policy. Scaffold adoption will change its existing health default in its separate PR.
 
+`ValidHost` exposes the host-syntax check used by listener and OTLP endpoint parsing. Pass an
+unbracketed host without a port or URL text. It accepts IP literals and ASCII DNS-style names
+with labels up to 63 bytes and a total length up to 253 bytes; it rejects empty hosts, ASCII
+space/tab/CR/LF, empty labels, leading or trailing label hyphens and other characters. It
+returns a boolean without including rejected input in diagnostics and performs no DNS lookup.
+Product's PostgreSQL URL parsing and credential-redaction policy remain in Product; its later
+adoption calls this predicate only for the URL host.
+
 `ValueOrDefault` uses a fallback only when a value is absent; an explicitly empty value fails.
 `LoadPositiveDuration`, `LoadBoundedInt`, `ParseLogLevel` and `ParseBool` retain the consumer
 parsing semantics. `OptionalEndpoint` is the deliberate exception: absent or empty means no

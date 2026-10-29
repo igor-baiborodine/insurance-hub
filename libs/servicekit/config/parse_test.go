@@ -94,6 +94,67 @@ func TestParseAddress_RejectsMalformedOrSecretValues(t *testing.T) {
 	}
 }
 
+func TestValidHost_AcceptsIPAndDNSStyleNames(t *testing.T) {
+	// given: these are literal compatibility expectations, including the DNS-style fallback.
+	for _, test := range []struct {
+		name string
+		host string
+	}{
+		{name: "single label", host: "localhost"},
+		{name: "qualified lowercase", host: "db.example"},
+		{name: "mixed case and hyphen", host: "Db-01.Example"},
+		{name: "ipv4", host: "127.0.0.1"},
+		{name: "ipv6", host: "2001:db8::1"},
+		{name: "ip shaped dns fallback", host: "127.0.0.999"},
+		{name: "longest label", host: strings.Repeat("a", 63)},
+		{name: "longest host", host: strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 61)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			got := config.ValidHost(test.host)
+			// then
+			if !got {
+				t.Error("ValidHost rejected a supported host")
+			}
+		})
+	}
+}
+
+func TestValidHost_RejectsMalformedOrCredentialBearingText(t *testing.T) {
+	// given: rejected values never become error text because the predicate returns only bool.
+	for _, test := range []struct {
+		name string
+		host string
+	}{
+		{name: "empty", host: ""},
+		{name: "space", host: "db .example"},
+		{name: "tab", host: "db\t.example"},
+		{name: "carriage return", host: "db\r.example"},
+		{name: "newline", host: "db\n.example"},
+		{name: "empty label", host: "db..example"},
+		{name: "trailing dot", host: "db.example."},
+		{name: "leading hyphen", host: "-db.example"},
+		{name: "trailing hyphen", host: "db-.example"},
+		{name: "label too long", host: strings.Repeat("a", 64)},
+		{name: "host too long", host: strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 62)},
+		{name: "underscore", host: "db_name.example"},
+		{name: "unicode", host: "db.éxample"},
+		{name: "bracketed ipv6", host: "[2001:db8::1]"},
+		{name: "port", host: "db.example:5432"},
+		{name: "url", host: "postgres://db.example"},
+		{name: "userinfo", host: "user:secret-marker@db.example"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			got := config.ValidHost(test.host)
+			// then
+			if got {
+				t.Error("ValidHost accepted malformed or credential-bearing text")
+			}
+		})
+	}
+}
+
 func TestParseValues_PreservesTypedOverrides(t *testing.T) {
 	// given
 	values := lookup(map[string]string{"TIMEOUT": "750ms", "LIMIT": "16"})
