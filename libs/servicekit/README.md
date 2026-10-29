@@ -107,6 +107,11 @@ The standard HTTP mux provides method/path rejection. Dependency errors are neve
 responses. Listener creation, authentication/exposure policy, startup rollback and the overall
 shutdown budget remain with the service composition root.
 
+`health.NewManagementServer(state)` optionally returns a fresh, unstarted `*http.Server` with
+the same probe handler, a 5-second header timeout and a 30-second idle timeout. Read and write
+timeouts remain zero. A service may set different timeout fields before serving; it still owns
+the listener address and exposure, readiness transitions, serving and shutdown.
+
 ## Logging and telemetry
 
 `logger.New` creates a JSON logger with a short service label. `logger.NewIdentity` binds the six
