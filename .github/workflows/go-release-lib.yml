@@ -10,7 +10,6 @@ on:
 permissions:
   contents: read
   actions: read
-  pull-requests: read
 
 concurrency:
   group: go-library-release-servicekit
@@ -76,9 +75,8 @@ jobs:
           go-version-file: libs/servicekit/go.mod
           cache: false
 
-      - name: Validate merged library source and consumers
+      - name: Validate library push source and consumers
         env:
-          GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
         run: make go-library-release-validate
 
@@ -98,7 +96,6 @@ jobs:
     permissions:
       contents: write
       actions: read
-      pull-requests: read
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -183,7 +180,6 @@ jobs:
     permissions:
       contents: write
       actions: read
-      pull-requests: read
       id-token: write
       attestations: write
     runs-on: ubuntu-24.04

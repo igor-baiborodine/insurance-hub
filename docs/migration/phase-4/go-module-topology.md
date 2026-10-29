@@ -178,7 +178,7 @@ Library changes validate all active consumers against the exact candidate; root 
 conservatively validate every module. Its aggregate recomputes phase obligations and checks source,
 lockfile and candidate identities. The empty active-consumer set is an explicit initial state.
 Branch protection requires separate repository configuration; adding YAML does not establish it.
-The `go-release-lib.yml` workflow runs on library changes merged to `main` and owns scoped
+The `go-release-lib.yml` workflow runs on library changes pushed to `main` and owns scoped
 source-tag and qualified-release publication.
 
 ## Import and consumer policy

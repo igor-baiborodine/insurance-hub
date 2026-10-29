@@ -200,13 +200,15 @@ are stored under ignored `.work/servicekit`; temporary overrides never live ther
 
 ## Release and qualification
 
-The **Go Library Release** workflow runs after a `libs/servicekit` change merges to `main`.
+The **Go Library Release** workflow runs after a `libs/servicekit` change is pushed to `main`,
+including a direct push.
 Monotag calculates a scoped stable v0 version from conventional commits and existing library
 tags, starting at `v0.1.0`. Because the Go module is in `libs/servicekit`, its tags must use
 `libs/servicekit/vX.Y.Z`; a shorter `servicekit/vX.Y.Z` tag does not provide a normal Go module
-version. The workflow fixes control tooling and source to the triggering merge SHA, verifies main
-ancestry and merged-PR evidence without an approving-review requirement, and validates the exact
-source plus active consumers. A direct push to `main` cannot qualify as a library release.
+version. The workflow fixes control tooling and source to the triggering push SHA. Its release
+command requires a push event from this repository's `main` branch with that exact SHA, then
+validates the source plus active consumers. It does not inspect PRs or require approval. If a
+release run fails before tagging, a corrected library-changing push starts a fresh automatic run.
 
 The automatic workflow needs no repository release-immutability setting, inspection secret,
 separate reviewer or protected release environment. CI requires GitHub CLI with release download
