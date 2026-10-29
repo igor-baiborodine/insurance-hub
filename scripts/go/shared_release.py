@@ -1,4 +1,4 @@
-"""Servicekit release identity, exact publication and qualification admission."""
+"""Servicekit release identity, tag publication and public module verification."""
 
 from __future__ import annotations
 
@@ -15,16 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from shared_support import (
-    DIGEST,
     MODULE,
     REPOSITORY,
     SHA,
-    WORKFLOW,
     Budget,
     SharedError,
     digest,
     environment,
-    exact,
     manifest_digest,
     require,
 )
@@ -84,18 +81,6 @@ class GitHub:
         except urllib.error.URLError:
             raise SharedError("GitHub request unavailable") from None
 
-    def command(self, arguments: list[str]) -> str:
-        env = environment()
-        if os.environ.get("GH_TOKEN"):
-            env["GH_TOKEN"] = os.environ["GH_TOKEN"]
-        return self.budget.run(
-            ["gh", *arguments, "--repo", REPOSITORY],
-            self.root,
-            "verify/publish library release",
-            env,
-            60,
-        )
-
     def tag_sha(self, tag: str) -> str | None:
         ref = self.api("git/ref/tags/" + urllib.parse.quote(tag, safe=""), absent=True)
         if ref is None:
@@ -125,168 +110,20 @@ def publish_tag(provider: GitHub, version: str, sha: str) -> None:
     require(provider.tag_sha(tag) == sha, "tag readback mismatch")
 
 
-def verify_run_jobs(provider: GitHub, run_id: int, attempt: int) -> None:
-    response = provider.api(f"actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
-    require(response.get("total_count", 101) <= 100, "release jobs pagination is unsupported")
-    # The jobs API reports display names, not the workflow's job IDs.
-    for name in ("Validate Go library release", "Verify published Go library"):
-        matches = [job for job in response["jobs"] if job["name"] == name]
-        require(
-            len(matches) == 1 and matches[0].get("conclusion") == "success",
-            "release required job missing or unsuccessful",
-        )
-
-
-def qualification(record: Any, version: str, sha: str) -> None:
-    exact(
-        record,
-        {
-            "schema",
-            "module",
-            "version",
-            "tag",
-            "source_sha",
-            "source_manifest",
-            "checksums",
-            "producer",
-            "validation",
-            "public_resolution",
-        },
-        "qualification",
-    )
-    require(
-        record["schema"] == 1
-        and record["module"] == MODULE
-        and record["version"] == version
-        and record["source_sha"] == sha
-        and record["tag"] == release_identity(version, sha),
-        "qualification identity mismatch",
-    )
-    require(DIGEST.fullmatch(record["source_manifest"]), "invalid source manifest digest")
-    exact(record["checksums"], {"module", "go_mod"}, "checksums")
-    require(
-        all(
-            isinstance(v, str) and re.fullmatch(r"h1:[A-Za-z0-9+/]{43}=", v)
-            for v in record["checksums"].values()
-        ),
-        "invalid module checksum identities",
-    )
-    producer = record["producer"]
-    exact(producer, {"repository", "workflow", "workflow_sha", "run_id", "run_attempt"}, "producer")
-    require(
-        producer["repository"] == REPOSITORY
-        and producer["workflow"] == WORKFLOW
-        and producer["workflow_sha"] == sha,
-        "untrusted qualification producer",
-    )
-    require(
-        all(isinstance(producer[k], int) and producer[k] > 0 for k in ("run_id", "run_attempt")),
-        "invalid producer run identity",
-    )
-    for key, names in (
-        ("validation", {"library", "consumers"}),
-        ("public_resolution", {"proxy", "checksums", "standalone", "container"}),
-    ):
-        exact(record[key], names, key)
-        for result in record[key].values():
-            exact(result, {"status", "identity"}, "result")
-            require(
-                result["status"] == "passed" and DIGEST.fullmatch(result["identity"]),
-                "failed or incomplete qualification",
-            )
-
-
-def producer() -> dict[str, Any]:
+def release_source() -> str:
     require(
         os.environ.get("GITHUB_REPOSITORY") == REPOSITORY
         and os.environ.get("GITHUB_REF") == "refs/heads/main"
         and os.environ.get("GITHUB_EVENT_NAME") == "push",
         "release requires a main push",
     )
-    workflow_sha = os.environ.get("GITHUB_SHA", "")
-    require(SHA.fullmatch(workflow_sha), "missing trusted workflow revision")
-    require(
-        os.environ.get("RELEASE_SHA") == workflow_sha, "release source must equal push revision"
-    )
-    return {
-        "repository": REPOSITORY,
-        "workflow": WORKFLOW,
-        "workflow_sha": workflow_sha,
-        "run_id": int(os.environ["GITHUB_RUN_ID"]),
-        "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
-    }
+    sha = os.environ.get("GITHUB_SHA", "")
+    require(SHA.fullmatch(sha), "missing triggering push revision")
+    require(os.environ.get("RELEASE_SHA") == sha, "release source must equal push revision")
+    return sha
 
 
-def verify_admission(
-    provider: GitHub,
-    asset: Path,
-    version: str,
-    sha: str,
-    selected: dict[str, Any],
-    trusted_workflow_sha: str,
-    expected_asset_digest: str,
-) -> None:
-    require(DIGEST.fullmatch(expected_asset_digest), "invalid pinned qualification digest")
-    asset_bytes = asset.read_bytes()
-    require(digest(asset_bytes) == expected_asset_digest, "pinned qualification digest mismatch")
-    record = json.loads(asset_bytes)
-    qualification(record, version, sha)
-    require(
-        record["producer"]["workflow_sha"] == trusted_workflow_sha,
-        "qualification workflow revision is not approved",
-    )
-    require(
-        selected.get("Path") == MODULE
-        and selected.get("Version") == version
-        and not selected.get("Replace")
-        and selected.get("Sum") == record["checksums"]["module"]
-        and selected.get("GoModSum") == record["checksums"]["go_mod"],
-        "selected graph/checksum mismatch",
-    )
-    tag = record["tag"]
-    require(provider.tag_sha(tag) == sha, "release tag/source mismatch")
-    release = provider.api("releases/tags/" + urllib.parse.quote(tag, safe=""))
-    require(not release.get("draft"), "qualification release is still a draft")
-    require(
-        sum(item.get("name") == "qualification.json" for item in release.get("assets", [])) == 1,
-        "published qualification asset missing or ambiguous",
-    )
-    with tempfile.TemporaryDirectory(prefix="servicekit-admission-") as temporary:
-        provider.command(
-            ["release", "download", tag, "--pattern", "qualification.json", "--dir", temporary]
-        )
-        published = Path(temporary) / "qualification.json"
-        require(published.read_bytes() == asset_bytes, "published qualification asset changed")
-        provider.command(
-            [
-                "attestation",
-                "verify",
-                str(published),
-                "--signer-workflow",
-                REPOSITORY + "/" + WORKFLOW,
-                "--signer-digest",
-                trusted_workflow_sha,
-                "--source-digest",
-                trusted_workflow_sha,
-                "--source-ref",
-                "refs/heads/main",
-                "--deny-self-hosted-runners",
-            ]
-        )
-    run_id = record["producer"]["run_id"]
-    run = provider.api(f"actions/runs/{run_id}")
-    require(
-        run.get("path") == WORKFLOW
-        and run.get("head_sha") == trusted_workflow_sha
-        and run.get("event") == "push"
-        and run.get("status") == "completed",
-        "untrusted or unfinished release run",
-    )
-    verify_run_jobs(provider, run_id, record["producer"]["run_attempt"])
-    require(provider.tag_sha(tag) == sha, "release tag changed during admission")
-
-
-def public_verify(root: Path, version: str, sha: str, source_digest: str) -> dict[str, Any]:
+def public_verify(root: Path, version: str, sha: str, source_digest: str) -> None:
     release_identity(version, sha)
     budget = Budget(900)
     url = f"https://proxy.golang.org/{MODULE}/@v/{version}.info"
@@ -364,7 +201,7 @@ def public_verify(root: Path, version: str, sha: str, source_digest: str) -> dic
             "wrong public selection",
         )
         budget.run(["go", "run", "-mod=readonly", "."], consumer, "standalone smoke", env)
-        image = "servicekit-qualification-" + digest(temporary.encode())[:16]
+        image = "servicekit-release-" + digest(temporary.encode())[:16]
         (consumer / "Dockerfile").write_text(
             f"FROM {BUILDER}\nWORKDIR /src\nCOPY . .\n"
             "ENV GOWORK=off GOENV=off GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org\n"
@@ -390,131 +227,3 @@ def public_verify(root: Path, version: str, sha: str, source_digest: str) -> dic
                 if not failed:
                     raise
                 print("owned smoke image cleanup failed after validation failure", file=sys.stderr)
-        evidence = {
-            "version": version,
-            "source_sha": sha,
-            "checksums": {"module": download["Sum"], "go_mod": download["GoModSum"]},
-            "builder": BUILDER,
-            "smoke_manifest": manifest_digest(consumer),
-        }
-        identity = digest(json.dumps(evidence, sort_keys=True).encode())
-        return {
-            **evidence,
-            "results": {
-                name: {"status": "passed", "identity": identity}
-                for name in ("proxy", "checksums", "standalone", "container")
-            },
-        }
-
-
-def publish_qualification(provider: GitHub, asset: Path, version: str, sha: str) -> None:
-    record = json.loads(asset.read_text())
-    qualification(record, version, sha)
-    verify_run_jobs(provider, record["producer"]["run_id"], record["producer"]["run_attempt"])
-    tag = release_identity(version, sha)
-    require(provider.tag_sha(tag) == sha, "tag changed before qualification")
-    provider.command(
-        [
-            "attestation",
-            "verify",
-            str(asset),
-            "--signer-workflow",
-            REPOSITORY + "/" + WORKFLOW,
-            "--signer-digest",
-            record["producer"]["workflow_sha"],
-            "--source-ref",
-            "refs/heads/main",
-        ]
-    )
-    release = provider.api("releases/tags/" + urllib.parse.quote(tag, safe=""), absent=True)
-    if release and release.get("assets"):
-        with tempfile.TemporaryDirectory(prefix="servicekit-resume-") as temporary:
-            provider.command(
-                ["release", "download", tag, "--pattern", "qualification.json", "--dir", temporary]
-            )
-            previous_asset = Path(temporary) / "qualification.json"
-            previous = json.loads(previous_asset.read_text())
-            qualification(previous, version, sha)
-            require(
-                previous["source_manifest"] == record["source_manifest"]
-                and previous["checksums"] == record["checksums"]
-                and previous["producer"]["workflow_sha"] == record["producer"]["workflow_sha"],
-                "existing qualification has different source/checksums or control revision",
-            )
-            verify_run_jobs(
-                provider, previous["producer"]["run_id"], previous["producer"]["run_attempt"]
-            )
-            provider.command(
-                [
-                    "attestation",
-                    "verify",
-                    str(previous_asset),
-                    "--signer-workflow",
-                    REPOSITORY + "/" + WORKFLOW,
-                    "--signer-digest",
-                    record["producer"]["workflow_sha"],
-                    "--source-ref",
-                    "refs/heads/main",
-                ]
-            )
-            require(provider.tag_sha(tag) == sha, "tag changed before resume")
-            if release.get("draft"):
-                provider.command(["release", "edit", tag, "--draft=false"])
-            final = provider.api("releases/tags/" + urllib.parse.quote(tag, safe=""))
-            require(not final.get("draft"), "resume did not publish release")
-            require(provider.tag_sha(tag) == sha, "tag changed during resume publication")
-        return
-    require(release is None or release.get("draft"), "published release lacks qualification asset")
-    if release is None:
-        provider.command(
-            [
-                "release",
-                "create",
-                tag,
-                "--draft",
-                "--verify-tag",
-                "--title",
-                tag,
-                "--notes",
-                f"Qualified servicekit {version} at {sha}. See qualification.json for checksums, source and validation identities.",
-            ]
-        )
-    # Recheck an uncertain creation; never overwrite assets from a competing operation.
-    release = provider.api("releases/tags/" + urllib.parse.quote(tag, safe=""))
-    if release.get("assets"):
-        with tempfile.TemporaryDirectory(prefix="servicekit-existing-") as temporary:
-            provider.command(
-                ["release", "download", tag, "--pattern", "qualification.json", "--dir", temporary]
-            )
-            require(
-                (Path(temporary) / "qualification.json").read_bytes() == asset.read_bytes(),
-                "existing qualification asset differs; inspect prior publication",
-            )
-    else:
-        provider.command(["release", "upload", tag, str(asset)])
-    require(provider.tag_sha(tag) == sha, "tag changed during qualification")
-    provider.command(["release", "edit", tag, "--draft=false"])
-    release = provider.api("releases/tags/" + urllib.parse.quote(tag, safe=""))
-    require(not release.get("draft"), "publication readback found a draft")
-    with tempfile.TemporaryDirectory(prefix="servicekit-publication-") as temporary:
-        provider.command(
-            ["release", "download", tag, "--pattern", "qualification.json", "--dir", temporary]
-        )
-        published = Path(temporary) / "qualification.json"
-        require(
-            published.read_bytes() == asset.read_bytes(), "published qualification asset differs"
-        )
-        provider.command(
-            [
-                "attestation",
-                "verify",
-                str(published),
-                "--signer-workflow",
-                REPOSITORY + "/" + WORKFLOW,
-                "--signer-digest",
-                record["producer"]["workflow_sha"],
-                "--source-ref",
-                "refs/heads/main",
-            ]
-        )
-    require(provider.tag_sha(tag) == sha, "tag changed after qualification publication")

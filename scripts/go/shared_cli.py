@@ -17,7 +17,6 @@ from shared_support import (
     MODULE,
     Budget,
     cli_entry,
-    digest,
     environment,
     extract,
     manifest_digest,
@@ -34,8 +33,7 @@ def expected_plan() -> dict:
 
 
 def release_validation(version: str, sha: str) -> dict:
-    producer = shared_release.producer()
-    # Source code runs only in the read-only validation job.
+    require(shared_release.release_source() == sha, "release source mismatch")
     with tempfile.TemporaryDirectory(prefix="servicekit-release-validation-") as temporary:
         checkout = Path(temporary) / "source"
         extract(ROOT, sha, checkout)
@@ -90,57 +88,32 @@ def release_validation(version: str, sha: str) -> dict:
             )
             results.extend(shared_candidate.validate(ROOT, expected, module, tools))
         shared_registration.reconcile(expected, results)
-        identity = digest(json.dumps(results, sort_keys=True).encode())
         return {
             "version": version,
             "source_sha": sha,
             "source_manifest": manifest_digest(checkout / DIRECTORY),
-            "producer": producer,
-            "results": {
-                name: {"status": "passed", "identity": identity}
-                for name in ("library", "consumers")
-            },
-            "phases": results,
         }
 
 
 def release_command(action: str, work: Path) -> None:
     version, sha = os.environ["RELEASE_VERSION"], os.environ["RELEASE_SHA"]
     tag = shared_release.release_identity(version, sha)
-    producer = shared_release.producer()
+    require(shared_release.release_source() == sha, "release source mismatch")
     if action == "release-validate":
         write_json(work / "validation.json", release_validation(version, sha))
         return
     provider = shared_release.GitHub(ROOT)
     validation = read_json(work / "validation.json")
     require(
-        validation["version"] == version
-        and validation["source_sha"] == sha
-        and validation["producer"] == producer,
-        "validation artifact identity mismatch",
+        validation["version"] == version and validation["source_sha"] == sha,
+        "validation source identity mismatch",
     )
     if action == "release-tag":
         shared_release.publish_tag(provider, version, sha)
     elif action == "release-verify":
         require(provider.tag_sha(tag) == sha, "public verification tag mismatch")
-        resolution = shared_release.public_verify(ROOT, version, sha, validation["source_manifest"])
+        shared_release.public_verify(ROOT, version, sha, validation["source_manifest"])
         require(provider.tag_sha(tag) == sha, "tag changed during public verification")
-        record = {
-            "schema": 1,
-            "module": MODULE,
-            "version": version,
-            "tag": tag,
-            "source_sha": sha,
-            "source_manifest": validation["source_manifest"],
-            "producer": producer,
-            "checksums": resolution["checksums"],
-            "validation": validation["results"],
-            "public_resolution": resolution["results"],
-        }
-        shared_release.qualification(record, version, sha)
-        write_json(work / "qualification.json", record)
-    else:
-        shared_release.publish_qualification(provider, work / "qualification.json", version, sha)
 
 
 def main() -> int:
@@ -155,7 +128,6 @@ def main() -> int:
             "release-validate",
             "release-tag",
             "release-verify",
-            "release-publish",
         ),
     )
     args = parser.parse_args()

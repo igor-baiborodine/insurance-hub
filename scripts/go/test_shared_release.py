@@ -1,8 +1,7 @@
-"""E15/E17 fake-provider evidence; these tests never publish remotely."""
+"""E15 fake-provider evidence; these tests never publish remotely."""
 
 from __future__ import annotations
 
-import copy
 import io
 import json
 import time
@@ -12,47 +11,16 @@ import pytest
 import yaml
 
 import shared_release as release
-from shared_support import MODULE, REPOSITORY, WORKFLOW, SharedError, write_json
+from shared_support import MODULE, REPOSITORY, WORKFLOW, SharedError
 
 SHA = "a" * 40
-CONTROL = SHA
 SUM = "h1:" + "A" * 43 + "="
-
-
-def record() -> dict:
-    result = {"status": "passed", "identity": "d" * 64}
-    return {
-        "schema": 1,
-        "module": MODULE,
-        "version": "v0.1.0",
-        "tag": "libs/servicekit/v0.1.0",
-        "source_sha": SHA,
-        "source_manifest": "c" * 64,
-        "checksums": {"module": SUM, "go_mod": SUM},
-        "producer": {
-            "repository": REPOSITORY,
-            "workflow": WORKFLOW,
-            "workflow_sha": CONTROL,
-            "run_id": 42,
-            "run_attempt": 1,
-        },
-        "validation": {k: copy.deepcopy(result) for k in ("library", "consumers")},
-        "public_resolution": {
-            k: copy.deepcopy(result) for k in ("proxy", "checksums", "standalone", "container")
-        },
-    }
 
 
 class Provider:
     def __init__(self):
         self.sha = None
         self.creates = 0
-        self.commands = []
-        self.attested = True
-        self.success = True
-        self.move_tag_after_attestation = False
-        self.published_draft = False
-        self.published_bytes = None
 
     def tag_sha(self, _tag):
         return self.sha
@@ -66,100 +34,36 @@ class Provider:
             self.sha = body["sha"]
             self.creates += 1
             return None
-        if path.startswith("releases/"):
-            return {"draft": self.published_draft, "assets": [{"name": "qualification.json"}]}
-        if "/jobs?" in path:
-            return {
-                "total_count": 2,
-                "jobs": [
-                    {"name": name, "conclusion": "success" if self.success else "failure"}
-                    for name in ("Validate Go library release", "Verify published Go library")
-                ],
-            }
-        if path.startswith("actions/runs/"):
-            return {
-                "path": WORKFLOW,
-                "head_sha": CONTROL,
-                "event": "push",
-                "status": "completed",
-                "conclusion": "success" if self.success else "failure",
-            }
         raise AssertionError(path)
 
-    def command(self, args):
-        self.commands.append(args)
-        if args[:2] == ["release", "download"]:
-            assert self.published_bytes is not None
-            (Path(args[args.index("--dir") + 1]) / "qualification.json").write_bytes(
-                self.published_bytes
-            )
-        if not self.attested:
-            raise SharedError("invalid attestation")
-        if args[:2] == ["attestation", "verify"] and self.move_tag_after_attestation:
-            self.sha = "e" * 40
-        return ""
 
-
-def test_release_producer_requires_main_push_at_exact_source(
+def test_release_source_requires_main_push_at_exact_sha(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # given: the canonical repository, main ref and a single triggering push SHA.
+    # given: the canonical repository, main ref and triggering push SHA.
     monkeypatch.setenv("GITHUB_REPOSITORY", REPOSITORY)
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
     monkeypatch.setenv("GITHUB_SHA", SHA)
     monkeypatch.setenv("RELEASE_SHA", SHA)
-    monkeypatch.setenv("GITHUB_RUN_ID", "42")
-    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
 
-    # when / then: a main push qualifies without PR evidence; other triggers and sources do not.
-    assert release.producer()["workflow_sha"] == SHA
+    # when / then: a main push passes; other triggers and sources do not.
+    assert release.release_source() == SHA
     monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
     with pytest.raises(SharedError, match="main push"):
-        release.producer()
+        release.release_source()
     monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
     monkeypatch.setenv("GITHUB_REF", "refs/heads/release")
     with pytest.raises(SharedError, match="main push"):
-        release.producer()
+        release.release_source()
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     monkeypatch.setenv("GITHUB_REPOSITORY", "example/other")
     with pytest.raises(SharedError, match="main push"):
-        release.producer()
+        release.release_source()
     monkeypatch.setenv("GITHUB_REPOSITORY", REPOSITORY)
     monkeypatch.setenv("RELEASE_SHA", "b" * 40)
     with pytest.raises(SharedError, match="push revision"):
-        release.producer()
-
-
-@pytest.mark.parametrize("defect", [None, "job_ids", "missing", "duplicate", "failed"])
-def test_release_job_verification_matches_installed_workflow_names(defect: str | None) -> None:
-    # given: GitHub returns the configured display names for the required jobs.
-    root = Path(__file__).resolve().parents[2]
-    workflow = yaml.safe_load((root / WORKFLOW).read_text())
-    jobs = [
-        {"name": workflow["jobs"][job_id]["name"], "conclusion": "success"}
-        for job_id in ("validate", "verify")
-    ]
-    if defect == "job_ids":
-        jobs = [{"name": name, "conclusion": "success"} for name in ("validate", "verify")]
-    elif defect == "missing":
-        jobs.pop()
-    elif defect == "duplicate":
-        jobs.append(copy.deepcopy(jobs[0]))
-    elif defect == "failed":
-        jobs[1]["conclusion"] = "failure"
-
-    class JobsProvider:
-        def api(self, path):
-            assert path == "actions/runs/42/attempts/1/jobs?per_page=100"
-            return {"total_count": len(jobs), "jobs": jobs}
-
-    # when / then
-    if defect:
-        with pytest.raises(SharedError, match="required job"):
-            release.verify_run_jobs(JobsProvider(), 42, 1)
-    else:
-        release.verify_run_jobs(JobsProvider(), 42, 1)
+        release.release_source()
 
 
 def test_tag_create_and_same_sha_resume_never_move_tag() -> None:
@@ -181,93 +85,6 @@ def test_tag_create_and_same_sha_resume_never_move_tag() -> None:
 def test_release_version_rejects_unapproved_forms(version: str) -> None:
     with pytest.raises(SharedError):
         release.release_identity(version, SHA)
-
-
-@pytest.mark.parametrize(
-    "defect",
-    ["schema", "module", "sha", "producer", "producer_sha", "missing", "failed", "checksum"],
-)
-def test_qualification_rejects_untrusted_incomplete_records(defect: str) -> None:
-    # given
-    value = record()
-    release.qualification(value, "v0.1.0", SHA)
-    if defect == "schema":
-        value["schema"] = 2
-    elif defect == "module":
-        value["module"] = "example.com/other"
-    elif defect == "sha":
-        value["source_sha"] = "e" * 40
-    elif defect == "producer":
-        value["producer"]["workflow"] = ".github/workflows/untrusted.yml"
-    elif defect == "producer_sha":
-        value["producer"]["workflow_sha"] = "b" * 40
-    elif defect == "missing":
-        del value["public_resolution"]["container"]
-    elif defect == "failed":
-        value["public_resolution"]["checksums"]["status"] = "failed"
-    else:
-        value["checksums"]["module"] = "unknown"
-    # when / then
-    with pytest.raises(SharedError):
-        release.qualification(value, "v0.1.0", SHA)
-
-
-@pytest.mark.parametrize(
-    "defect",
-    [
-        None,
-        "tag",
-        "moved_tag",
-        "draft",
-        "asset",
-        "changed_asset",
-        "pin",
-        "run",
-        "version",
-        "override",
-        "workflow",
-    ],
-)
-def test_admission_binds_selected_graph_release_and_producer(
-    tmp_path: Path, defect: str | None
-) -> None:
-    # given
-    asset = tmp_path / "qualification.json"
-    write_json(asset, record())
-    provider = Provider()
-    provider.sha = SHA
-    provider.published_bytes = asset.read_bytes()
-    selected = {"Path": MODULE, "Version": "v0.1.0", "Sum": SUM, "GoModSum": SUM}
-    trusted = CONTROL
-    pinned = release.digest(asset.read_bytes())
-    if defect == "tag":
-        provider.sha = "e" * 40
-    elif defect == "moved_tag":
-        provider.move_tag_after_attestation = True
-    elif defect == "draft":
-        provider.published_draft = True
-    elif defect == "asset":
-        provider.attested = False
-    elif defect == "changed_asset":
-        provider.published_bytes = b"changed qualification asset"
-    elif defect == "pin":
-        pinned = "f" * 64
-    elif defect == "run":
-        provider.success = False
-    elif defect == "version":
-        selected["Version"] = "v0.0.1"
-    elif defect == "override":
-        selected["Replace"] = {"Path": "../library"}
-    elif defect == "workflow":
-        trusted = "f" * 40
-    # when / then
-    if defect:
-        with pytest.raises(SharedError):
-            release.verify_admission(provider, asset, "v0.1.0", SHA, selected, trusted, pinned)
-    else:
-        release.verify_admission(provider, asset, "v0.1.0", SHA, selected, trusted, pinned)
-        assert any(c[:2] == ["release", "download"] for c in provider.commands)
-        assert any("--signer-digest" in c and CONTROL in c for c in provider.commands)
 
 
 @pytest.mark.parametrize("defect", [None, "checksum", "source", "container", "timeout"])
@@ -316,8 +133,9 @@ def test_public_verification_bounds_failure_and_cleans_owned_image(
                 tmp_path, "v0.1.0", SHA, ("e" if defect == "source" else "d") * 64
             )
     else:
-        result = release.public_verify(tmp_path, "v0.1.0", SHA, "d" * 64)
-        assert set(result["results"]) == {"proxy", "checksums", "standalone", "container"}
+        assert release.public_verify(tmp_path, "v0.1.0", SHA, "d" * 64) is None
+        assert any(command[:3] == ["go", "mod", "download"] for command in commands)
+        assert any(command[:2] == ["docker", "build"] for command in commands)
     assert len(requests) == (0 if defect == "timeout" else 1)
     assert all(timeout <= 30 for _, timeout in requests)
     if defect in {None, "container"}:
@@ -326,80 +144,23 @@ def test_public_verification_bounds_failure_and_cleans_owned_image(
         assert not any(command[0] == "docker" for command in commands)
 
 
-def test_same_source_qualification_retry_reuses_prior_attested_asset(tmp_path: Path) -> None:
-    # given
-    previous = record()
-    current = copy.deepcopy(previous)
-    current["producer"]["run_id"] = 43
-    asset = tmp_path / "qualification.json"
-    write_json(asset, current)
+def test_library_release_uses_service_release_action_after_public_verification() -> None:
+    # given: the service release publishes with a non-draft, Latest action.
+    root = Path(__file__).resolve().parents[2]
+    service = yaml.safe_load((root / ".github/workflows/go-release-svc.yml").read_text())
+    service_action = service["jobs"]["release"]["steps"][-1]
+    library = yaml.safe_load((root / WORKFLOW).read_text())
+    assert list(library["jobs"]) == ["release"]
+    steps = library["jobs"]["release"]["steps"]
 
-    class Published(Provider):
-        def api(self, path, method="GET", body=None, absent=False):
-            if path.startswith("releases/"):
-                return {
-                    "draft": False,
-                    "assets": [{"name": "qualification.json"}],
-                }
-            return super().api(path, method, body, absent)
+    # when: the library workflow publishes after checking public module resolution.
+    action = steps[-1]
 
-        def command(self, args):
-            if args[:2] == ["release", "download"]:
-                write_json(Path(args[args.index("--dir") + 1]) / "qualification.json", previous)
-                self.commands.append(args)
-                return ""
-            return super().command(args)
-
-    provider = Published()
-    provider.sha = SHA
-    # when
-    release.publish_qualification(provider, asset, "v0.1.0", SHA)
-    # then
-    assert not any(
-        command[:2] in (["release", "upload"], ["release", "edit"]) for command in provider.commands
-    )
-
-
-@pytest.mark.parametrize("changed", [False, True])
-def test_publication_reads_back_published_qualification_bytes(
-    tmp_path: Path, changed: bool
-) -> None:
-    asset = tmp_path / "qualification.json"
-    write_json(asset, record())
-
-    class Publication(Provider):
-        def __init__(self):
-            super().__init__()
-            self.created = False
-            self.published_draft = True
-
-        def api(self, path, method="GET", body=None, absent=False):
-            if path.startswith("releases/"):
-                if not self.created:
-                    return None
-                return {
-                    "draft": self.published_draft,
-                    "assets": ([{"name": "qualification.json"}] if self.published_bytes else []),
-                }
-            return super().api(path, method, body, absent)
-
-        def command(self, args):
-            if args[:2] == ["release", "create"]:
-                self.created = True
-            elif args[:2] == ["release", "upload"]:
-                self.published_bytes = Path(args[3]).read_bytes()
-            elif args[:2] == ["release", "edit"]:
-                self.published_draft = False
-                if changed:
-                    self.published_bytes = b"changed after upload"
-            return super().command(args)
-
-    provider = Publication()
-    provider.sha = SHA
-    if changed:
-        with pytest.raises(SharedError, match="published qualification asset differs"):
-            release.publish_qualification(provider, asset, "v0.1.0", SHA)
-    else:
-        release.publish_qualification(provider, asset, "v0.1.0", SHA)
-        assert provider.published_bytes == asset.read_bytes()
-        assert any(command[:2] == ["attestation", "verify"] for command in provider.commands)
+    # then: release creation uses the same action and settings as the service workflow.
+    assert steps[-2]["run"] == "make go-library-release-verify"
+    assert action["uses"] == service_action["uses"] == "ncipollo/release-action@v1"
+    for setting in ("allowUpdates", "draft", "makeLatest", "name", "tag", "bodyFile"):
+        assert action["with"][setting] == service_action["with"][setting]
+    assert "artifacts" not in action["with"]
+    assert not any(step.get("uses", "").startswith("actions/attest@") for step in steps)
+    assert action["with"]["tag"] == action["with"]["name"]
