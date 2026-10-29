@@ -8,7 +8,7 @@
   - [Logging and telemetry](#logging-and-telemetry)
   - [Owning commands](#owning-commands)
   - [Resolution and registration](#resolution-and-registration)
-  - [Release and qualification](#release-and-qualification)
+  - [Release](#release)
   - [Compatibility and handoff](#compatibility-and-handoff)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -163,8 +163,8 @@ otelgrpc v0.71.0 in each service because transport instrumentation remains local
 Normal resolution is standalone with `GOWORK=off`, exact version requirements, checked-in checksums
 and no servicekit replacement. The library owner and shared workflow inspect effective workspace
 and caller/persistent flags before setting standalone flags; alternate manifests and servicekit
-replacements fail. The existing consumers gain their own normal-admission hooks in their adoption
-PRs. A tag alone is not eligible for adoption.
+replacements fail. The existing consumers gain exact-version and normal checksum checks in their
+adoption PRs. A tag alone is not eligible for adoption.
 
 Topology schema 2 retains one module inventory and adds `activeConsumers`. The library's
 `consumers` allowlist permits future Product and scaffold adoption; `activeConsumers: []` records
@@ -198,59 +198,42 @@ expected obligations and rejects missing, duplicate, unexpected, failed, cancell
 misidentified results. Zero consumers is explicit and is not adoption coverage. Planning/results
 are stored under ignored `.work/servicekit`; temporary overrides never live there.
 
-## Release and qualification
+## Release
 
-The **Go Library Release** workflow runs after a `libs/servicekit` change is pushed to `main`,
-including a direct push.
-Monotag calculates a scoped stable v0 version from conventional commits and existing library
-tags, starting at `v0.1.0`. Because the Go module is in `libs/servicekit`, its tags must use
-`libs/servicekit/vX.Y.Z`; a shorter `servicekit/vX.Y.Z` tag does not provide a normal Go module
-version. The workflow fixes control tooling and source to the triggering push SHA. Its release
-command requires a push event from this repository's `main` branch with that exact SHA, then
-validates the source plus active consumers. It does not inspect PRs or require approval. If a
-release run fails before tagging, a corrected library-changing push starts a fresh automatic run.
+The **Go Library Release** workflow runs after a `libs/servicekit` change is pushed to
+`main`, including a direct push. Monotag calculates a scoped stable v0 version from
+conventional commits and existing library tags, starting at `v0.1.0`. Because the Go
+module is in `libs/servicekit`, its tag uses `libs/servicekit/vX.Y.Z`. The single release
+job validates the triggering source SHA and active consumers, creates the scoped tag, verifies
+public Go proxy and checksum resolution with fresh standalone and container builds, then
+creates a non-draft GitHub Release with notes marked Latest. Release creation uses the same
+action and settings as Go service releases.
 
-The automatic workflow needs no repository release-immutability setting, inspection secret,
-separate reviewer or protected release environment. CI requires GitHub CLI with release download
-and artifact-attestation verification (locally qualified with 2.103.0).
+The workflow needs no separate approval, release-immutability setting, qualification asset,
+attestation, package upload, consumer pin edit or service-image release. Its job has
+`contents: write` and module-wide concurrency without cancellation. Tag creation is
+create-if-absent with exact SHA readback; a collision fails, while the same source may resume
+verification. A corrected source uses a new version.
 
-Only tag/qualification jobs receive `contents: write`; the qualification job also needs
-OIDC and attestation permissions. Module-wide concurrency disables cancellation. Tags use
-create-if-absent and exact readback; collisions fail, and an identical source resumes verification.
-No Packages upload, consumer pin update or service-image release occurs.
-
-Public verification uses an empty dependency/build cache, `proxy.golang.org`, `sum.golang.org`,
-exact selected-version and source-content checks, and a standalone plus fresh-container smoke
-build. Its overall limit is 15 minutes, proxy requests are bounded to 30 seconds, and image cleanup
-has a separate 30-second budget. Only transient proxy availability is retried; checksum failure
-is fatal. An unqualified tag may remain downloadable after failure, but cannot be adopted.
-
-After verification, the workflow attests `qualification.json`, uploads it to a draft Release,
-then publishes the Release and reads back the asset bytes and tag SHA. The schema binds module,
-version, tag/SHA, source digest, both Go checksums, trusted workflow revision/run/attempt and
-validation/public-resolution identities. Admission checks actual selected graph/checksums,
-current tag/source binding, the qualification asset's SHA-256 digest pinned by the consumer PR,
-artifact attestation and successful required jobs. The caller supplies a trusted workflow revision;
-a record cannot approve itself. Network or verification failure does not disable admission.
-Offline cached-record admission is not implemented and therefore fails closed. GitHub can later
-change or remove the tag or asset; subsequent admission checks detect changed identity and fail,
-but cannot guarantee permanent availability. Local fake-provider tests do not establish hosted
-publication or a qualified release.
-
-Provider checks use GitHub's [artifact provenance verification](https://cli.github.com/manual/gh_attestation_verify).
-Consumer admission integration is required in each adoption PR. A library-changing merge starts
-the release, but local checks and a tag alone do not establish qualification.
+Public verification uses an empty dependency/build cache, `proxy.golang.org`,
+`sum.golang.org`, exact selected-version and source-content checks, and standalone plus
+fresh-container smoke builds. Its overall limit is 15 minutes, proxy requests are bounded
+to 30 seconds and image cleanup has a separate 30-second budget. Only transient proxy
+availability is retried; checksum failure is fatal. A tag may remain downloadable after
+a failed run. Before adoption, inspect the hosted run, tag/source SHA and public module
+resolution. Consumers pin exact versions, retain normal Go checksums and run their owning
+build/test gates. Local tests do not establish hosted publication.
 
 ## Compatibility and handoff
 
 Library versions are independent of service images. During v0, patch versions preserve API and
 documented behavior. Breaking minor releases require maintainer-reviewed migration notes naming
 old/new versions, affected settings/APIs/consumers, before/after behavior, required checks and a
-qualified rollback target with reversal limits. Consumers explicitly pin and verify exact
-qualified versions; automatic minor upgrades are unsupported. Rollback restores a qualified pin
+previously working rollback target with reversal limits. Consumers explicitly pin and verify exact
+versions; automatic minor upgrades are unsupported. Rollback restores the previous pin
 and necessary source/configuration changes in that consumer's own PR and reruns its full gate.
 The release workflow never moves a tag. Review v1 readiness after both real consumers complete compatibility
-qualification; publishing v1 needs separate approval.
+validation; publishing v1 needs separate approval.
 
 Root validation owners are `go-shared-test`, `go-shared-test-integration`, `go-shared-check-ci`,
 `go-topology-check`, `go-topology-test` and the existing Python shared-tooling suites. The additive

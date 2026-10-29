@@ -179,7 +179,7 @@ conservatively validate every module. Its aggregate recomputes phase obligations
 lockfile and candidate identities. The empty active-consumer set is an explicit initial state.
 Branch protection requires separate repository configuration; adding YAML does not establish it.
 The `go-release-lib.yml` workflow runs on library changes pushed to `main` and owns scoped
-source-tag and qualified-release publication.
+source-tag publication and a non-draft GitHub Release marked Latest.
 
 ## Import and consumer policy
 

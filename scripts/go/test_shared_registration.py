@@ -237,18 +237,24 @@ def test_installed_workflow_contracts() -> None:
     assert triggers["push"]["paths"] == ["libs/servicekit/**"]
     assert workflow["concurrency"]["cancel-in-progress"] is False
     assert workflow["env"]["RELEASE_SHA"] == "${{ github.sha }}"
-    assert workflow["jobs"]["validate"]["outputs"]["version"] == (
-        "${{ steps.monotag.outputs.version }}"
-    )
+    assert list(workflow["jobs"]) == ["release"]
+    steps = workflow["jobs"]["release"]["steps"]
+    assert [
+        step.get("run")
+        for step in steps
+        if step.get("run", "").startswith("make go-library-release-")
+    ] == [
+        "make go-library-release-validate",
+        "make go-library-release-tag",
+        "make go-library-release-verify",
+    ]
     for name, job in workflow["jobs"].items():
         permissions = job.get("permissions", workflow["permissions"])
         assert "packages" not in permissions
         if permissions.get("contents") == "write":
-            assert name in {"publish-tag", "publish-notes"}
+            assert name == "release"
         assert "environment" not in job
         assert job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
-    assert workflow["jobs"]["verify"]["needs"] == ["validate", "publish-tag"]
-    assert workflow["jobs"]["publish-notes"]["needs"] == ["validate", "verify"]
     for job in workflow["jobs"].values():
         assert all("GH_INSPECTION_TOKEN" not in step.get("env", {}) for step in job["steps"])
 

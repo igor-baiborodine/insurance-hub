@@ -5,7 +5,7 @@ export PYTHON
 
 .PHONY: go-shared-plan go-shared-validate go-shared-results-check go-shared-phase \
 	go-shared-test go-shared-test-integration go-library-release-validate \
-	go-library-release-tag go-library-release-verify go-library-release-publish go-shared-check-ci
+	go-library-release-tag go-library-release-verify go-shared-check-ci
 
 go-shared-check-ci: python-runtime-check ## Lint additive shared workflows using the existing pinned CI tool
 	@"$(GO_SHARED_ACTIONLINT)" -shellcheck= -pyflakes= \
@@ -37,6 +37,3 @@ go-library-release-tag: python-runtime-check ## Publish the prefixed tag at the 
 
 go-library-release-verify: python-runtime-check ## Verify public checksums and fresh standalone/container resolution
 	@"$(PYTHON)" "$(GO_SHARED_TOOL)" release-verify
-
-go-library-release-publish: python-runtime-check ## Publish and read back an attested qualification asset
-	@"$(PYTHON)" "$(GO_SHARED_TOOL)" release-publish
