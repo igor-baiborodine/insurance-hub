@@ -121,10 +121,13 @@ Errors and unsupported structured values are replaced with `[REDACTED]`. Bound a
 sanitized when the logger is derived. Attribute redaction does not inspect or rewrite arbitrary
 message strings; callers must keep messages safe.
 
-`logger.LogRequired` bypasses the diagnostic threshold for a caller-owned contract record. Its
-message, severity and classification remain explicit arguments, so completion wording and
-Product/route/business policy stay in the consumer. Logs are written only to the supplied writer;
-executables select stdout or stderr.
+`logger.LogRequired` bypasses the diagnostic threshold for a caller-owned contract record when
+the logger comes from `logger.New` or `logger.NewIdentity`, including `With` and `WithGroup`
+derivatives. A logger using another `slog.Handler` may filter the record. Its message, severity and
+classification remain explicit arguments, so completion wording and Product/route/business
+policy stay in the consumer. Migrate a consumer's logger constructor and required-record call
+together to retain the bypass. Logs are written only to the supplied writer; executables select
+stdout or stderr.
 
 `telemetry.New` accepts caller-validated `config.Telemetry` and explicit `telemetry.Options`.
 `RuntimeScope` is required. HTTP/gRPC propagators, metric views and the trace sampler are caller

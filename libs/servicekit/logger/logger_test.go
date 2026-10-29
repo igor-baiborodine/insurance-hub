@@ -33,22 +33,88 @@ func TestNew_WritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
 	}
 }
 
-func TestLogRequired_PreservesCallerContractBelowDiagnosticThreshold(t *testing.T) {
-	var output bytes.Buffer
-	log := logger.NewIdentity(&output, testIdentity(), slog.LevelError)
+func TestLogRequired_SupportedConstructorsBypassThreshold(t *testing.T) {
+	constructors := []struct {
+		name   string
+		newLog func(*bytes.Buffer, slog.Level) *slog.Logger
+	}{
+		{
+			name: "New",
+			newLog: func(output *bytes.Buffer, level slog.Level) *slog.Logger {
+				return logger.New(output, "go-service", level)
+			},
+		},
+		{
+			name: "NewIdentity",
+			newLog: func(output *bytes.Buffer, level slog.Level) *slog.Logger {
+				return logger.NewIdentity(output, testIdentity(), level)
+			},
+		},
+	}
+	thresholds := []struct {
+		name  string
+		level slog.Level
+	}{
+		{name: "warn", level: slog.LevelWarn},
+		{name: "error", level: slog.LevelError},
+	}
+	for _, constructor := range constructors {
+		t.Run(constructor.name, func(t *testing.T) {
+			for _, threshold := range thresholds {
+				t.Run(threshold.name, func(t *testing.T) {
+					// given
+					var output bytes.Buffer
+					log := constructor.newLog(&output, threshold.level)
 
+					// when
+					log.InfoContext(context.Background(), "diagnostic info")
+					logger.LogRequired(
+						context.Background(),
+						log,
+						slog.LevelInfo,
+						"contract record",
+						slog.String("classification", "client_error"),
+					)
+
+					// then
+					entries := decodeEntries(t, output.String())
+					if len(entries) != 1 ||
+						entries[0]["msg"] != "contract record" ||
+						entries[0]["level"] != "INFO" ||
+						entries[0]["classification"] != "client_error" {
+						t.Fatalf(
+							"required record at %s threshold = %#v",
+							threshold.name,
+							entries,
+						)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestLogRequired_DerivedLoggerBypassesThreshold(t *testing.T) {
+	// given
+	var output bytes.Buffer
+	log := logger.NewIdentity(&output, testIdentity(), slog.LevelError).
+		With(slog.String("component", "test")).WithGroup("completion")
+
+	// when
 	logger.LogRequired(
-		context.Background(),
-		log,
-		slog.LevelInfo,
-		"Product request completed",
-		slog.String("classification", "client_error"),
+		context.Background(), log, slog.LevelInfo, "contract record",
+		slog.String("classification", "success"),
 	)
 
+	// then
 	entries := decodeEntries(t, output.String())
-	if len(entries) != 1 || entries[0]["msg"] != "Product request completed" ||
-		entries[0]["level"] != "INFO" || entries[0]["classification"] != "client_error" {
-		t.Fatalf("unexpected required record: %#v", entries)
+	if len(entries) != 1 || entries[0]["msg"] != "contract record" ||
+		entries[0]["level"] != "INFO" || entries[0]["component"] != "test" {
+		t.Fatalf("derived required record = %#v", entries)
+	}
+	completion, ok := entries[0]["completion"].(map[string]any)
+	if !ok || completion["classification"] != "success" {
+		t.Fatalf("derived required attributes = %#v", entries[0]["completion"])
 	}
 }
 
