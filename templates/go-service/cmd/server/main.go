@@ -8,10 +8,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
+	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
+	kittelemetry "github.com/igor-baiborodine/insurance-hub/libs/servicekit/telemetry"
+
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/service"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
 )
 
 func main() {
@@ -38,11 +40,13 @@ func runWith(
 	runService func(context.Context, config.Config, *slog.Logger) error,
 ) error {
 	bootstrapLogger := logger.NewIdentity(
-		output, config.DevelopmentIdentity(config.DefaultServiceName), slog.LevelInfo,
+		output,
+		config.DevelopmentIdentity(config.DefaultServiceName).Identity,
+		slog.LevelInfo,
 	)
 	settings, err := loadConfig()
 	if err != nil {
-		setting, reason := config.ErrorDetails(err)
+		setting, reason := kitconfig.ErrorDetails(err)
 		bootstrapLogger.ErrorContext(
 			context.Background(),
 			"configuration failed",
@@ -52,9 +56,9 @@ func runWith(
 		)
 		return err
 	}
-	serviceLogger := logger.NewIdentity(output, settings.Telemetry.Identity, settings.LogLevel)
-	if settings.Telemetry.Enabled {
-		telemetry.InstallDiagnostics(serviceLogger)
+	serviceLogger := logger.NewIdentity(output, settings.Identity, settings.LogLevel)
+	if settings.Enabled {
+		defer kittelemetry.InstallDiagnostics(serviceLogger)()
 	}
 	if err := runService(ctx, settings, serviceLogger); err != nil {
 		serviceLogger.ErrorContext(

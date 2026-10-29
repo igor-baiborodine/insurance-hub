@@ -1,4 +1,4 @@
-package health_test
+package service_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/health"
+	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
 )
 
 func TestHandler_ReflectsLifecycleState(t *testing.T) {

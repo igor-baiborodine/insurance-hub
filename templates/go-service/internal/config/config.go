@@ -1,15 +1,13 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"log/slog"
-	"net"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
-	"time"
+
+	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
+	kitidentity "github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
 )
 
 // DefaultServiceName identifies startup diagnostics until configuration has been validated.
@@ -35,61 +33,38 @@ const (
 
 // Config contains settings parsed and validated once during process startup.
 type Config struct {
-	RequestTimeout  time.Duration
-	ProbeTimeout    time.Duration
-	GRPC            GRPC
-	ServiceName     string
-	GRPCAddress     Address
-	HealthAddress   Address
-	LogLevel        slog.Level
-	ShutdownTimeout time.Duration
-	Telemetry       Telemetry
+	kitconfig.Runtime
+	kitconfig.GRPC
+	kitconfig.Telemetry
+	ServiceName   string
+	GRPCAddress   Address
+	HealthAddress Address
 }
 
-// Address is a validated TCP listen address with a host and numeric port.
-type Address struct {
-	host string
-	port uint16
-}
+// Address uses the shared TCP address parser and preserves ephemeral ports.
+type Address = kitconfig.Address
 
-func (address Address) String() string {
-	return net.JoinHostPort(address.host, strconv.FormatUint(uint64(address.port), 10))
-}
+// GRPC is the shared message-size group; the scaffold owns its permitted ranges.
+type GRPC = kitconfig.GRPC
 
-// GRPC contains business gRPC message-size bounds.
-type GRPC struct {
-	MaxReceiveBytes int
-	MaxSendBytes    int
-}
+// Identity adds scaffold validation policy to the shared resource and log fields.
+type Identity struct{ kitidentity.Identity }
 
-// Identity is the application-owned resource and log identity. Collectors add infrastructure fields.
-type Identity struct {
-	ServiceNamespace string
-	ServiceName      string
-	ServiceVersion   string
-	ServiceInstance  string
-	Environment      string
-	Implementation   string
-}
+// Telemetry is the shared exporter settings group. Identity policy stays in this package.
+type Telemetry = kitconfig.Telemetry
 
 // DevelopmentIdentity labels local startup diagnostics before configuration is validated.
 func DevelopmentIdentity(serviceName string) Identity {
 	return Identity{
-		ServiceNamespace: "insurance-hub",
-		ServiceName:      serviceName,
-		ServiceVersion:   "development",
-		ServiceInstance:  fmt.Sprintf("local-%d", os.Getpid()),
-		Environment:      "development",
-		Implementation:   "go",
+		Identity: kitidentity.Identity{
+			ServiceNamespace: "insurance-hub",
+			ServiceName:      serviceName,
+			ServiceVersion:   "development",
+			ServiceInstance:  fmt.Sprintf("local-%d", os.Getpid()),
+			Environment:      "development",
+			Implementation:   "go",
+		},
 	}
-}
-
-// Telemetry contains optional OTLP trace and metric export configuration.
-type Telemetry struct {
-	Identity         Identity
-	Enabled          bool
-	ExporterEndpoint *url.URL
-	ExporterTimeout  time.Duration
 }
 
 // Load reads configuration from the process environment.
@@ -97,69 +72,71 @@ func Load() (Config, error) {
 	return load(os.LookupEnv)
 }
 
-type lookupEnv func(string) (string, bool)
+type lookupEnv = kitconfig.Lookup
 
 func load(lookup lookupEnv) (Config, error) {
-	serviceName, err := valueOrDefault(lookup, serviceNameSetting, DefaultServiceName)
+	runtimeDefaults := kitconfig.DefaultRuntime()
+	grpcDefaults := kitconfig.DefaultGRPC()
+	telemetryDefaults := kitconfig.DefaultTelemetry()
+
+	serviceName, err := kitconfig.ValueOrDefault(lookup, serviceNameSetting, DefaultServiceName)
 	if err != nil {
 		return Config{}, err
 	}
 
-	grpcAddressValue, err := valueOrDefault(lookup, grpcAddressSetting, "127.0.0.1:9090")
-	if err != nil {
-		return Config{}, err
-	}
-	grpcAddress, err := parseAddress(grpcAddressSetting, grpcAddressValue)
-	if err != nil {
-		return Config{}, err
-	}
-
-	healthAddressValue, err := valueOrDefault(lookup, healthAddressSetting, "127.0.0.1:8080")
-	if err != nil {
-		return Config{}, err
-	}
-	healthAddress, err := parseAddress(healthAddressSetting, healthAddressValue)
+	grpcAddress, err := kitconfig.LoadAddress(
+		lookup, grpcAddressSetting, kitconfig.DefaultGRPCAddress,
+	)
 	if err != nil {
 		return Config{}, err
 	}
 
-	logLevelValue, err := valueOrDefault(lookup, logLevelSetting, "info")
-	if err != nil {
-		return Config{}, err
-	}
-	logLevel, err := parseLogLevel(logLevelValue)
-	if err != nil {
-		return Config{}, err
-	}
-
-	shutdownTimeoutValue, err := valueOrDefault(lookup, shutdownTimeoutSetting, "10s")
-	if err != nil {
-		return Config{}, err
-	}
-	shutdownTimeout, err := parsePositiveDuration(shutdownTimeoutSetting, shutdownTimeoutValue)
+	healthAddress, err := kitconfig.LoadAddress(
+		lookup, healthAddressSetting, kitconfig.DefaultHealthAddress,
+	)
 	if err != nil {
 		return Config{}, err
 	}
 
-	otelEnabledValue, err := valueOrDefault(lookup, otelEnabledSetting, "false")
+	logLevelValue, err := kitconfig.ValueOrDefault(
+		lookup,
+		logLevelSetting,
+		runtimeDefaults.LogLevel.String(),
+	)
 	if err != nil {
 		return Config{}, err
 	}
-	otelEnabled, err := strconv.ParseBool(otelEnabledValue)
-	if err != nil {
-		return Config{}, invalid(otelEnabledSetting, "must be a boolean")
-	}
-
-	otelTimeoutValue, err := valueOrDefault(lookup, otelTimeoutSetting, "2s")
-	if err != nil {
-		return Config{}, err
-	}
-	otelTimeout, err := parsePositiveDuration(otelTimeoutSetting, otelTimeoutValue)
+	logLevel, err := kitconfig.ParseLogLevel(logLevelSetting, logLevelValue)
 	if err != nil {
 		return Config{}, err
 	}
 
-	otelEndpoint, err := parseOptionalEndpoint(lookup, otelEnabled)
+	shutdownTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup, shutdownTimeoutSetting, runtimeDefaults.ShutdownTimeout.String(),
+	)
+	if err != nil {
+		return Config{}, err
+	}
+
+	otelEnabledValue, err := kitconfig.ValueOrDefault(
+		lookup, otelEnabledSetting, strconv.FormatBool(telemetryDefaults.Enabled),
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	otelEnabled, err := kitconfig.ParseBool(otelEnabledSetting, otelEnabledValue)
+	if err != nil {
+		return Config{}, err
+	}
+
+	otelTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup, otelTimeoutSetting, telemetryDefaults.ExporterTimeout.String(),
+	)
+	if err != nil {
+		return Config{}, err
+	}
+
+	otelEndpoint, err := kitconfig.OptionalEndpoint(lookup, otelEndpointSetting, otelEnabled)
 	if err != nil {
 		return Config{}, err
 	}
@@ -168,220 +145,77 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	requestTimeout, err := loadPositiveDuration(lookup, requestTimeoutSetting, "8s")
+	requestTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup, requestTimeoutSetting, runtimeDefaults.RequestTimeout.String(),
+	)
 	if err != nil {
 		return Config{}, err
 	}
-	probeTimeout, err := loadPositiveDuration(lookup, probeTimeoutSetting, "2s")
+	probeTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup, probeTimeoutSetting, runtimeDefaults.ProbeTimeout.String(),
+	)
 	if err != nil {
 		return Config{}, err
 	}
-	receiveBytes, err := loadBoundedInt(
+	receiveBytes, err := kitconfig.LoadBoundedInt(
 		lookup,
 		grpcMaxReceiveBytesSetting,
-		"1048576",
+		strconv.Itoa(grpcDefaults.MaxReceiveBytes),
 		1,
 		16777216,
 	)
 	if err != nil {
 		return Config{}, err
 	}
-	sendBytes, err := loadBoundedInt(lookup, grpcMaxSendBytesSetting, "8388608", 1, 67108864)
+	sendBytes, err := kitconfig.LoadBoundedInt(
+		lookup,
+		grpcMaxSendBytesSetting,
+		strconv.Itoa(grpcDefaults.MaxSendBytes),
+		1,
+		67108864,
+	)
 	if err != nil {
 		return Config{}, err
 	}
-	if otelTimeout > shutdownTimeout {
-		return Config{}, invalid(otelTimeoutSetting, "must not exceed SHUTDOWN_TIMEOUT")
+	runtime := kitconfig.Runtime{
+		RequestTimeout:  requestTimeout,
+		ProbeTimeout:    probeTimeout,
+		ShutdownTimeout: shutdownTimeout,
+		LogLevel:        logLevel,
 	}
-	if grpcAddress.port != 0 && grpcAddress.String() == healthAddress.String() {
-		return Config{}, invalid(healthAddressSetting, "must be distinct from GRPC_ADDR")
+	if err := kitconfig.ValidateRuntime(runtime); err != nil {
+		return Config{}, err
+	}
+	telemetry := kitconfig.Telemetry{
+		Identity:         identity.Identity,
+		Enabled:          otelEnabled,
+		ExporterEndpoint: otelEndpoint,
+		ExporterTimeout:  otelTimeout,
+	}
+	if err := kitconfig.ValidateTelemetry(telemetry); err != nil {
+		return Config{}, err
+	}
+	if otelTimeout > runtime.ShutdownTimeout {
+		return Config{}, kitconfig.Invalid(
+			otelTimeoutSetting,
+			"must not exceed SHUTDOWN_TIMEOUT",
+		)
+	}
+	if grpcAddress.Port() != 0 && grpcAddress.String() == healthAddress.String() {
+		return Config{}, kitconfig.Invalid(
+			healthAddressSetting,
+			"must be distinct from GRPC_ADDR",
+		)
 	}
 
 	return Config{
-		RequestTimeout: requestTimeout, ProbeTimeout: probeTimeout,
-		GRPC:            GRPC{MaxReceiveBytes: receiveBytes, MaxSendBytes: sendBytes},
-		ServiceName:     serviceName,
-		GRPCAddress:     grpcAddress,
-		HealthAddress:   healthAddress,
-		LogLevel:        logLevel,
-		ShutdownTimeout: shutdownTimeout,
-		Telemetry: Telemetry{
-			Identity:         identity,
-			Enabled:          otelEnabled,
-			ExporterEndpoint: otelEndpoint,
-			ExporterTimeout:  otelTimeout,
-		},
+		Runtime:       runtime,
+		GRPC:          GRPC{MaxReceiveBytes: receiveBytes, MaxSendBytes: sendBytes},
+		ServiceName:   serviceName,
+		GRPCAddress:   grpcAddress,
+		HealthAddress: healthAddress,
+		Telemetry:     telemetry,
 	}, nil
-}
-
-func valueOrDefault(lookup lookupEnv, name, fallback string) (string, error) {
-	value, exists := lookup(name)
-	if !exists {
-		return fallback, nil
-	}
-	if value == "" {
-		return "", invalid(name, "must not be empty")
-	}
-	return value, nil
-}
-
-func parseAddress(name, value string) (Address, error) {
-	host, port, err := net.SplitHostPort(value)
-	if err != nil || !validHost(host) || port == "" {
-		return Address{}, invalid(name, "must include a valid host and numeric port")
-	}
-	portNumber, err := strconv.ParseUint(port, 10, 16)
-	if err != nil {
-		return Address{}, invalid(name, "must include a valid host and numeric port")
-	}
-	return Address{host: host, port: uint16(portNumber)}, nil
-}
-
-func parseLogLevel(value string) (slog.Level, error) {
-	var level slog.Level
-	if err := level.UnmarshalText([]byte(value)); err != nil {
-		return 0, invalid(logLevelSetting, "must be a supported slog level")
-	}
-	return level, nil
-}
-
-func parsePositiveDuration(name, value string) (time.Duration, error) {
-	duration, err := time.ParseDuration(value)
-	if err != nil || duration <= 0 {
-		return 0, invalid(name, "must be a positive duration")
-	}
-	return duration, nil
-}
-
-func parseOptionalEndpoint(lookup lookupEnv, enabled bool) (*url.URL, error) {
-	value, exists := lookup(otelEndpointSetting)
-	if !exists {
-		if enabled {
-			return nil, invalid(
-				otelEndpointSetting,
-				"is required when telemetry is enabled",
-			)
-		}
-		return nil, nil
-	}
-	if value == "" {
-		if enabled {
-			return nil, invalid(
-				otelEndpointSetting,
-				"is required when telemetry is enabled",
-			)
-		}
-		return nil, nil
-	}
-
-	endpoint, err := url.Parse(value)
-	if err != nil || endpoint.Opaque != "" || endpoint.User != nil || endpoint.RawQuery != "" ||
-		endpoint.Fragment != "" {
-		return nil, invalid(otelEndpointSetting, "must be an HTTP or HTTPS OTLP/gRPC URL")
-	}
-	if endpoint.Scheme != "http" && endpoint.Scheme != "https" {
-		return nil, invalid(otelEndpointSetting, "must use the http or https scheme")
-	}
-	if endpoint.Path != "" && endpoint.Path != "/" {
-		return nil, invalid(otelEndpointSetting, "must not include an OTLP/HTTP path")
-	}
-
-	host := endpoint.Hostname()
-	port := endpoint.Port()
-	if !validHost(host) || port == "" {
-		return nil, invalid(
-			otelEndpointSetting,
-			"must include a valid host and numeric port",
-		)
-	}
-	portNumber, err := strconv.ParseUint(port, 10, 16)
-	if err != nil || portNumber == 0 {
-		return nil, invalid(
-			otelEndpointSetting,
-			"must include a valid host and numeric port",
-		)
-	}
-
-	endpoint.Path = ""
-	return endpoint, nil
-}
-
-func validHost(host string) bool {
-	if host == "" || strings.ContainsAny(host, " \t\r\n") {
-		return false
-	}
-	if net.ParseIP(host) != nil {
-		return true
-	}
-	if len(host) > 253 {
-		return false
-	}
-	for _, label := range strings.Split(host, ".") {
-		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, character := range label {
-			if (character < 'a' || character > 'z') &&
-				(character < 'A' || character > 'Z') &&
-				(character < '0' || character > '9') &&
-				character != '-' {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func invalid(name, problem string) error {
-	return &validationError{setting: name, problem: problem}
-}
-
-// validationError contains only validator-owned setting names and reasons, never input values.
-type validationError struct {
-	setting string
-	problem string
-}
-
-func (err *validationError) Error() string {
-	return fmt.Sprintf("invalid %s: %s", err.setting, err.problem)
-}
-
-// ErrorDetails exposes safe configuration diagnostics without rendering arbitrary errors.
-// Unknown errors retain a constant category; wrappers cannot contribute text to the log fields.
-func ErrorDetails(err error) (setting, reason string) {
-	if validation, ok := errors.AsType[*validationError](err); ok {
-		return validation.setting, validation.problem
-	}
-	return "unknown", "could not load configuration"
-}
-
-func loadBoundedInt(
-	lookup lookupEnv,
-	name string,
-	fallback string,
-	minimum int,
-	maximum int,
-) (int, error) {
-	value, err := valueOrDefault(lookup, name, fallback)
-	if err != nil {
-		return 0, err
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed < minimum || parsed > maximum {
-		return 0, invalid(
-			name,
-			fmt.Sprintf("must be an integer from %d through %d", minimum, maximum),
-		)
-	}
-	return parsed, nil
-}
-
-func loadPositiveDuration(lookup lookupEnv, name, fallback string) (time.Duration, error) {
-	value, err := valueOrDefault(lookup, name, fallback)
-	if err != nil {
-		return 0, err
-	}
-	return parsePositiveDuration(name, value)
 }
 
 func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity, error) {
@@ -399,7 +233,7 @@ func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity,
 		if enabled {
 			fallback = ""
 		}
-		value, err := valueOrDefault(lookup, field.name, fallback)
+		value, err := kitconfig.ValueOrDefault(lookup, field.name, fallback)
 		if err != nil {
 			return Identity{}, err
 		}
@@ -414,7 +248,7 @@ func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity,
 // Validate rejects incomplete identity without echoing supplied values.
 func (identity Identity) Validate(enabled bool) error {
 	if identity.ServiceNamespace != "insurance-hub" || identity.Implementation != "go" {
-		return invalid(
+		return kitconfig.Invalid(
 			"telemetry identity",
 			"must use the insurance-hub namespace and Go implementation",
 		)
@@ -426,7 +260,7 @@ func (identity Identity) Validate(enabled bool) error {
 		{serviceInstanceSetting, identity.ServiceInstance},
 	} {
 		if !validIdentityValue(field.value) {
-			return invalid(
+			return kitconfig.Invalid(
 				field.name,
 				"must contain 1 through 128 ASCII letters, digits, dots, underscores or hyphens",
 			)
@@ -434,7 +268,7 @@ func (identity Identity) Validate(enabled bool) error {
 	}
 	if enabled &&
 		(identity.Environment == "development" || identity.ServiceVersion == "development" || strings.HasPrefix(identity.ServiceInstance, "local-")) {
-		return invalid(
+		return kitconfig.Invalid(
 			"telemetry identity",
 			"must use explicit non-development environment, version and instance when enabled",
 		)

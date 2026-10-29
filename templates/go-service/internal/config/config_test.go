@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 )
 
 func TestLoad_Defaults(t *testing.T) {
@@ -26,8 +28,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if got.GRPCAddress.String() != "127.0.0.1:9090" {
 		t.Errorf("GRPCAddress = %q, want 127.0.0.1:9090", got.GRPCAddress)
 	}
-	if got.HealthAddress.String() != "127.0.0.1:8080" {
-		t.Errorf("HealthAddress = %q, want 127.0.0.1:8080", got.HealthAddress)
+	if got.HealthAddress.String() != "127.0.0.1:8081" {
+		t.Errorf("HealthAddress = %q, want 127.0.0.1:8081", got.HealthAddress)
 	}
 	if got.LogLevel != slog.LevelInfo {
 		t.Errorf("LogLevel = %v, want INFO", got.LogLevel)
@@ -35,17 +37,27 @@ func TestLoad_Defaults(t *testing.T) {
 	if got.ShutdownTimeout != 10*time.Second {
 		t.Errorf("ShutdownTimeout = %v, want 10s", got.ShutdownTimeout)
 	}
-	if got.Telemetry.Enabled {
-		t.Error("Telemetry.Enabled = true, want false")
-	}
-	if got.Telemetry.ExporterEndpoint != nil {
+	if got.RequestTimeout != 8*time.Second || got.ProbeTimeout != 2*time.Second {
 		t.Errorf(
-			"Telemetry.ExporterEndpoint = %v, want nil",
-			got.Telemetry.ExporterEndpoint,
+			"runtime timeouts = (%v, %v), want (8s, 2s)",
+			got.RequestTimeout,
+			got.ProbeTimeout,
 		)
 	}
-	if got.Telemetry.ExporterTimeout != 2*time.Second {
-		t.Errorf("Telemetry.ExporterTimeout = %v, want 2s", got.Telemetry.ExporterTimeout)
+	if got.MaxReceiveBytes != 1048576 || got.MaxSendBytes != 8388608 {
+		t.Errorf("gRPC limits = %+v, want 1048576 receive and 8388608 send", got.GRPC)
+	}
+	if got.Enabled {
+		t.Error("Telemetry.Enabled = true, want false")
+	}
+	if got.ExporterEndpoint != nil {
+		t.Errorf(
+			"Telemetry.ExporterEndpoint = %v, want nil",
+			got.ExporterEndpoint,
+		)
+	}
+	if got.ExporterTimeout != 2*time.Second {
+		t.Errorf("Telemetry.ExporterTimeout = %v, want 2s", got.ExporterTimeout)
 	}
 }
 
@@ -80,10 +92,10 @@ func TestLoad_ValidOverrides(t *testing.T) {
 		t.Errorf("LogLevel = %v, want DEBUG+2", got.LogLevel)
 	}
 	if got.ShutdownTimeout != 15*time.Second ||
-		got.Telemetry.ExporterTimeout != 750*time.Millisecond {
+		got.ExporterTimeout != 750*time.Millisecond {
 		t.Errorf("unexpected durations: %+v", got)
 	}
-	if !got.Telemetry.Enabled || got.Telemetry.ExporterEndpoint.String() !=
+	if !got.Enabled || got.ExporterEndpoint.String() !=
 		"https://alloy.monitoring.svc:4317" {
 		t.Errorf("unexpected telemetry: %+v", got.Telemetry)
 	}
@@ -241,10 +253,10 @@ func TestLoad_AllowsEmptyEndpointWhenTelemetryIsDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load disabled telemetry: %v", err)
 	}
-	if got.Telemetry.ExporterEndpoint != nil {
+	if got.ExporterEndpoint != nil {
 		t.Errorf(
 			"Telemetry.ExporterEndpoint = %v, want nil",
-			got.Telemetry.ExporterEndpoint,
+			got.ExporterEndpoint,
 		)
 	}
 }
@@ -288,8 +300,8 @@ func TestLoad_RuntimeBoundsAndIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Telemetry.Identity.Environment != "staging" || got.RequestTimeout != 3*time.Second ||
-		got.ProbeTimeout != 250*time.Millisecond || got.GRPC.MaxReceiveBytes != 2048 || got.GRPC.MaxSendBytes != 4096 {
+	if got.Identity.Environment != "staging" || got.RequestTimeout != 3*time.Second ||
+		got.ProbeTimeout != 250*time.Millisecond || got.MaxReceiveBytes != 2048 || got.MaxSendBytes != 4096 {
 		t.Fatalf("unexpected runtime configuration: %+v", got)
 	}
 	for _, test := range cases {
@@ -338,7 +350,7 @@ func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			// when
-			setting, reason := ErrorDetails(test.err)
+			setting, reason := kitconfig.ErrorDetails(test.err)
 			// then
 			if setting != test.setting || reason != test.reason {
 				t.Errorf(

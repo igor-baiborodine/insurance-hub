@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 )
 
@@ -102,5 +104,36 @@ func TestRun_LogsUnknownConfigurationFailureSafely(t *testing.T) {
 	if entry["setting"] != "unknown" || entry["reason"] != "could not load configuration" ||
 		entry["error"] != "[REDACTED]" {
 		t.Errorf("unsafe or incomplete diagnostic: %#v", entry)
+	}
+}
+
+func TestRun_RestoresTelemetryDiagnosticsAfterServiceFailure(t *testing.T) {
+	// given
+	previous := otel.GetErrorHandler()
+	cause := errors.New("service failed")
+	settings := config.Config{
+		ServiceName: "go-service",
+		Telemetry: config.Telemetry{
+			Enabled:  true,
+			Identity: config.DevelopmentIdentity("go-service").Identity,
+		},
+	}
+	load := func() (config.Config, error) { return settings, nil }
+	runService := func(context.Context, config.Config, *slog.Logger) error {
+		if otel.GetErrorHandler() == previous {
+			t.Error("telemetry diagnostics were not installed")
+		}
+		return cause
+	}
+
+	// when
+	err := runWith(context.Background(), &bytes.Buffer{}, load, runService)
+
+	// then
+	if !errors.Is(err, cause) {
+		t.Fatalf("original service cause lost: %v", err)
+	}
+	if otel.GetErrorHandler() != previous {
+		t.Error("telemetry diagnostics were not restored")
 	}
 }

@@ -21,10 +21,11 @@ import (
 	grpcgo "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
+
 	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/health"
 )
 
 func TestRun_WithdrawsReadinessWhileGracefullyDraining(t *testing.T) {
@@ -354,15 +355,17 @@ func TestRun_BoundsSlowCleanupToOverallShutdownBudget(t *testing.T) {
 }
 
 func testConfig(timeout time.Duration) config.Config {
-	return config.Config{
-		ServiceName:     "go-service",
-		ShutdownTimeout: timeout,
-		RequestTimeout:  time.Second, ProbeTimeout: time.Second,
-		GRPC: config.GRPC{MaxReceiveBytes: 1048576, MaxSendBytes: 8388608},
+	settings := config.Config{
+		ServiceName: "go-service",
+		GRPC:        config.GRPC{MaxReceiveBytes: 1048576, MaxSendBytes: 8388608},
 		Telemetry: config.Telemetry{
 			ExporterTimeout: time.Second,
 		},
 	}
+	settings.ShutdownTimeout = timeout
+	settings.RequestTimeout = time.Second
+	settings.ProbeTimeout = time.Second
+	return settings
 }
 
 func discardLogger() *slog.Logger {
@@ -466,7 +469,7 @@ func (provider *fakeTelemetryProvider) TracerProvider() trace.TracerProvider {
 	return noop.NewTracerProvider()
 }
 
-func (provider *fakeTelemetryProvider) Propagator() propagation.TextMapPropagator {
+func (provider *fakeTelemetryProvider) GRPCPropagator() propagation.TextMapPropagator {
 	return propagation.TraceContext{}
 }
 

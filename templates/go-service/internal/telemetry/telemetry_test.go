@@ -2,436 +2,114 @@ package telemetry
 
 import (
 	"context"
-	"errors"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
+
 	"go.opentelemetry.io/otel/propagation"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
 )
 
-func TestNew_DisabledDoesNotCreateExporter(t *testing.T) {
-	// given
-	settings := config.Telemetry{Enabled: false, ExporterTimeout: time.Second}
-
-	// when
-	provider, err := New(
-		context.Background(),
-		"go-service",
-		settings,
-	)
-	// then
-	if err != nil {
-		t.Fatalf("new disabled provider: %v", err)
+func TestNew_DisabledProviderAndW3CPropagation(t *testing.T) {
+	settings := config.Telemetry{
+		Identity:        config.DevelopmentIdentity("go-service").Identity,
+		ExporterTimeout: time.Second,
 	}
-
-	// when
+	provider, err := New(context.Background(), "go-service", settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 	_, span := provider.TracerProvider().Tracer("test").Start(context.Background(), "disabled")
-
-	// then
 	if span.IsRecording() {
-		t.Error("disabled span is recording")
+		t.Error("disabled provider records spans")
 	}
-
-	// when
 	span.End()
-	shutdownErr := provider.Shutdown(context.Background())
-
-	// then
-	if shutdownErr != nil {
-		t.Errorf("shutdown disabled provider: %v", shutdownErr)
-	}
-}
-
-func TestProvider_ExportsSpansWithServiceIdentity(t *testing.T) {
-	// given
-	exporter := newRecordingExporter()
-	provider := enabledProvider(t, exporter, time.Second)
-
-	// when
-	ctx, span := provider.TracerProvider().
-		Tracer("test").
-		Start(context.Background(), "exported")
-
-	// then
-	if !span.IsRecording() {
-		t.Fatal("enabled span is not recording")
-	}
-
-	// when
-	span.End()
-	flushErr := provider.ForceFlush(ctx)
-	exported := receiveSpans(t, exporter.exported)
-
-	// then
-	if flushErr != nil {
-		t.Fatalf("force flush: %v", flushErr)
-	}
-	if len(exported) != 1 || exported[0].Name() != "exported" {
-		t.Fatalf("unexpected exported spans: %#v", exported)
-	}
-	serviceName := ""
-	for _, attribute := range exported[0].Resource().Attributes() {
-		if string(attribute.Key) == "service.name" {
-			serviceName = attribute.Value.AsString()
-		}
-	}
-	if serviceName != "go-service" {
-		t.Errorf("service.name = %q, want go-service", serviceName)
-	}
-
-	// when
-	shutdownErr := provider.Shutdown(context.Background())
-
-	// then
-	if shutdownErr != nil {
-		t.Fatalf("shutdown: %v", shutdownErr)
-	}
-	select {
-	case <-exporter.shutdown:
-	default:
-		t.Error("exporter shutdown was not called")
-	}
-}
-
-func TestProvider_PropagatesW3CTraceContext(t *testing.T) {
-	// given
-	provider, err := newProvider(
+	traceID := trace.TraceID{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	spanID := trace.SpanID{17, 18, 19, 20, 21, 22, 23, 24}
+	ctx := trace.ContextWithSpanContext(
 		context.Background(),
-		"go-service",
-		config.Telemetry{Enabled: false, ExporterTimeout: time.Second},
-		func(context.Context, config.Telemetry) (sdktrace.SpanExporter, error) {
-			return nil, errors.New("unexpected exporter call")
-		},
-		testMetricReader,
+		trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID: traceID, SpanID: spanID, TraceFlags: trace.FlagsSampled,
+		}),
 	)
-	if err != nil {
-		t.Fatalf("new provider: %v", err)
-	}
-	traceID := trace.TraceID{
-		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-	}
-	spanID := trace.SpanID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18}
-	spanContext := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    traceID,
-		SpanID:     spanID,
-		TraceFlags: trace.FlagsSampled,
-	})
-	ctx := trace.ContextWithSpanContext(context.Background(), spanContext)
 	carrier := propagation.MapCarrier{}
-
-	// when
-	provider.Propagator().Inject(ctx, carrier)
+	provider.GRPCPropagator().Inject(ctx, carrier)
 	extracted := trace.SpanContextFromContext(
-		provider.Propagator().Extract(context.Background(), carrier),
+		provider.GRPCPropagator().Extract(context.Background(), carrier),
 	)
-
-	// then
-	wantHeader := "00-" + traceID.String() + "-" + spanID.String() + "-01"
-	if carrier.Get("traceparent") != wantHeader {
-		t.Fatalf("traceparent = %q, want %q", carrier.Get("traceparent"), wantHeader)
-	}
-	if extracted.TraceID() != traceID || extracted.SpanID() != spanID || !extracted.IsRemote() {
-		t.Errorf("unexpected extracted span context: %v", extracted)
+	if carrier.Get("traceparent") != "00-"+traceID.String()+"-"+spanID.String()+"-01" ||
+		extracted.TraceID() != traceID ||
+		!extracted.IsRemote() {
+		t.Errorf("gRPC trace context was not preserved: %v", carrier)
 	}
 }
 
-func TestProvider_BoundsExporterInitializationAndHidesCauseDetails(t *testing.T) {
+func TestNew_RejectsScaffoldIdentityAndExporterSettings(t *testing.T) {
 	// given
-	const privateMarker = "private-marker"
-	cause := errors.New(privateMarker)
-	settings := testTelemetrySettings(25 * time.Millisecond)
-	started := make(chan struct{})
-
-	// when
-	start := time.Now()
-	_, err := newProvider(
-		context.Background(),
-		"go-service",
-		settings,
-		func(ctx context.Context, _ config.Telemetry) (sdktrace.SpanExporter, error) {
-			close(started)
-			<-ctx.Done()
-			return nil, cause
-		},
-		testMetricReader,
-	)
-	elapsed := time.Since(start)
-
-	// then
-	if err == nil {
-		t.Fatal("new provider returned nil error")
+	valid := config.Telemetry{
+		Enabled:          true,
+		Identity:         enabledIdentity(),
+		ExporterTimeout:  time.Second,
+		ExporterEndpoint: mustURL("http://127.0.0.1:4317"),
 	}
-	select {
-	case <-started:
-	default:
-		t.Error("exporter initialization did not start")
-	}
-	if !errors.Is(err, cause) {
-		t.Errorf("error does not preserve cause: %v", err)
-	}
-	if strings.Contains(err.Error(), privateMarker) {
-		t.Errorf("error exposes private marker: %v", err)
-	}
-	if elapsed < settings.ExporterTimeout || elapsed > time.Second {
-		t.Errorf(
-			"initialization elapsed %v, want between %v and 1s",
-			elapsed,
-			settings.ExporterTimeout,
-		)
-	}
-}
-
-func TestProvider_Shutdown_IsBoundedWhenExporterIsUnavailable(t *testing.T) {
-	// given
-	exporter := &blockingExporter{
-		started:  make(chan struct{}),
-		shutdown: make(chan struct{}),
-	}
-	provider := enabledProvider(t, exporter, time.Second)
-	_, span := provider.TracerProvider().Tracer("test").Start(context.Background(), "blocked")
-	span.End()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	result := make(chan error, 1)
-
-	// when
-	go func() {
-		result <- provider.Shutdown(ctx)
-	}()
-
-	// then
-	select {
-	case <-exporter.started:
-	case <-time.After(time.Second):
-		t.Fatal("export did not start")
-	}
-	select {
-	case err := <-result:
-		if err == nil {
-			t.Fatal("shutdown returned nil error")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("shutdown exceeded failure bound")
-	}
-	select {
-	case <-exporter.shutdown:
-	default:
-		t.Error("exporter shutdown was not attempted")
-	}
-}
-
-func TestProvider_DoesNotBlockSpanCompletionDuringExporterOutage(t *testing.T) {
-	// given
-	exporter := &blockingExporter{
-		started:  make(chan struct{}),
-		shutdown: make(chan struct{}),
-	}
-	provider := enabledProvider(t, exporter, time.Second)
-	tracer := provider.TracerProvider().Tracer("test")
-	_, firstSpan := tracer.Start(context.Background(), "first")
-	firstSpan.End()
-
-	flushContext, cancelFlush := context.WithCancel(context.Background())
-	flushResult := make(chan error, 1)
-
-	// when
-	go func() {
-		flushResult <- provider.ForceFlush(flushContext)
-	}()
-
-	// then
-	select {
-	case <-exporter.started:
-	case <-time.After(time.Second):
-		t.Fatal("export did not start")
-	}
-
-	// when
-	spanEnded := make(chan struct{})
-	go func() {
-		_, secondSpan := tracer.Start(context.Background(), "second")
-		secondSpan.End()
-		close(spanEnded)
-	}()
-
-	// then
-	select {
-	case <-spanEnded:
-	case <-time.After(time.Second):
-		t.Fatal("span completion blocked on unavailable exporter")
-	}
-
-	// when
-	cancelFlush()
-
-	// then
-	select {
-	case <-flushResult:
-	case <-time.After(time.Second):
-		t.Fatal("force flush exceeded cancellation bound")
-	}
-
-	// when
-	shutdownContext, cancelShutdown := context.WithTimeout(
-		context.Background(),
-		50*time.Millisecond,
-	)
-	defer cancelShutdown()
-	shutdownErr := provider.Shutdown(shutdownContext)
-
-	// then
-	if shutdownErr == nil {
-		t.Fatal("shutdown returned nil error")
-	}
-}
-
-func TestNew_RejectsInvalidEnabledSettings(t *testing.T) {
-	// given
-	tests := []struct {
+	for _, test := range []struct {
 		name        string
+		mutate      func(*config.Telemetry)
 		serviceName string
-		settings    config.Telemetry
 	}{
-		{
-			name:     "empty service name",
-			settings: testTelemetrySettings(time.Second),
-		},
-		{
-			name:        "missing endpoint",
-			serviceName: "go-service",
-			settings:    config.Telemetry{Enabled: true, ExporterTimeout: time.Second},
-		},
-		{
-			name:        "non-positive timeout",
-			serviceName: "go-service",
-			settings: config.Telemetry{
-				Enabled:          true,
-				ExporterEndpoint: mustURL("http://127.0.0.1:4317"),
-			},
-		},
-	}
-	for _, test := range tests {
+		{"missing service", func(*config.Telemetry) {}, ""},
+		{"service mismatch", func(*config.Telemetry) {}, "other"},
+		{"missing endpoint", func(s *config.Telemetry) { s.ExporterEndpoint = nil }, "go-service"},
+		{"development identity", func(s *config.Telemetry) {
+			s.Identity = config.DevelopmentIdentity("go-service").Identity
+		}, "go-service"},
+		{"wrong namespace", func(s *config.Telemetry) { s.Identity.ServiceNamespace = "other" }, "go-service"},
+		{"wrong implementation", func(s *config.Telemetry) { s.Identity.Implementation = "java" }, "go-service"},
+		{"invalid instance", func(s *config.Telemetry) { s.Identity.ServiceInstance = "private-marker\n" }, "go-service"},
+		{"zero exporter timeout", func(s *config.Telemetry) { s.ExporterTimeout = 0 }, "go-service"},
+	} {
 		t.Run(test.name, func(t *testing.T) {
 			// given
-			newExporter := func(
-				context.Context,
-				config.Telemetry,
-			) (sdktrace.SpanExporter, error) {
-				t.Fatal("invalid settings created an exporter")
-				return nil, nil
-			}
-
+			settings := valid
+			test.mutate(&settings)
 			// when
-			_, err := newProvider(
+			_, err := New(
 				context.Background(),
 				test.serviceName,
-				test.settings,
-				newExporter,
-				testMetricReader,
+				settings,
 			)
-
 			// then
 			if err == nil {
-				t.Fatal("new provider returned nil error")
+				t.Fatal("invalid settings accepted")
+			}
+			if strings.Contains(err.Error(), "private-marker") {
+				t.Fatalf("configuration value disclosed: %v", err)
 			}
 		})
 	}
 }
 
-type recordingExporter struct {
-	exported chan []sdktrace.ReadOnlySpan
-	shutdown chan struct{}
-	once     sync.Once
-}
-
-func newRecordingExporter() *recordingExporter {
-	return &recordingExporter{
-		exported: make(chan []sdktrace.ReadOnlySpan, 1),
-		shutdown: make(chan struct{}),
+func enabledIdentity() identity.Identity {
+	return identity.Identity{
+		ServiceNamespace: "insurance-hub",
+		ServiceName:      "go-service",
+		ServiceVersion:   "test-revision",
+		ServiceInstance:  "test-instance",
+		Environment:      "test",
+		Implementation:   "go",
 	}
-}
-
-func (exporter *recordingExporter) ExportSpans(
-	ctx context.Context,
-	spans []sdktrace.ReadOnlySpan,
-) error {
-	copied := append([]sdktrace.ReadOnlySpan(nil), spans...)
-	select {
-	case exporter.exported <- copied:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (exporter *recordingExporter) Shutdown(context.Context) error {
-	exporter.once.Do(func() { close(exporter.shutdown) })
-	return nil
-}
-
-type blockingExporter struct {
-	started      chan struct{}
-	shutdown     chan struct{}
-	startOnce    sync.Once
-	shutdownOnce sync.Once
-}
-
-func (exporter *blockingExporter) ExportSpans(
-	ctx context.Context,
-	_ []sdktrace.ReadOnlySpan,
-) error {
-	exporter.startOnce.Do(func() { close(exporter.started) })
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-func (exporter *blockingExporter) Shutdown(context.Context) error {
-	exporter.shutdownOnce.Do(func() { close(exporter.shutdown) })
-	return nil
-}
-
-func enabledProvider(
-	t *testing.T,
-	exporter sdktrace.SpanExporter,
-	timeout time.Duration,
-) *Provider {
-	t.Helper()
-	provider, err := newProvider(
-		context.Background(),
-		"go-service",
-		testTelemetrySettings(timeout),
-		func(context.Context, config.Telemetry) (sdktrace.SpanExporter, error) {
-			return exporter, nil
-		},
-		testMetricReader,
-	)
-	if err != nil {
-		t.Fatalf("new provider: %v", err)
-	}
-	return provider
 }
 
 func testTelemetrySettings(timeout time.Duration) config.Telemetry {
 	return config.Telemetry{
-		Enabled: true,
-		Identity: config.Identity{
-			ServiceNamespace: "insurance-hub",
-			ServiceName:      "go-service",
-			ServiceVersion:   "test-revision",
-			ServiceInstance:  "test-instance",
-			Environment:      "test",
-			Implementation:   "go",
-		},
+		Enabled:          true,
+		Identity:         enabledIdentity(),
 		ExporterEndpoint: mustURL("http://127.0.0.1:4317"),
 		ExporterTimeout:  timeout,
 	}
@@ -443,19 +121,4 @@ func mustURL(value string) *url.URL {
 		panic(err)
 	}
 	return parsed
-}
-
-func receiveSpans(t *testing.T, spans <-chan []sdktrace.ReadOnlySpan) []sdktrace.ReadOnlySpan {
-	t.Helper()
-	select {
-	case exported := <-spans:
-		return exported
-	case <-time.After(time.Second):
-		t.Fatal("span export timed out")
-		return nil
-	}
-}
-
-func testMetricReader(context.Context, config.Telemetry) (sdkmetric.Reader, error) {
-	return sdkmetric.NewManualReader(), nil
 }
