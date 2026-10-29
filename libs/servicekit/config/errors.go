@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+
+	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
 )
 
 // Invalid creates a configuration error from trusted schema names and fixed reasons.
@@ -24,6 +26,9 @@ func (err *validationError) Error() string {
 func ErrorDetails(err error) (setting, reason string) {
 	if validation, ok := errors.AsType[*validationError](err); ok {
 		return validation.setting, validation.reason
+	}
+	if validation, ok := errors.AsType[*identity.ValidationError](err); ok {
+		return validation.Setting(), validation.Reason()
 	}
 	return "unknown", "could not load configuration"
 }

@@ -349,6 +349,26 @@ def test_installed_workflow_contracts() -> None:
         assert all("GH_INSPECTION_TOKEN" not in step.get("env", {}) for step in job["steps"])
 
 
+@pytest.mark.parametrize(
+    "step_name",
+    ["Generate servicekit coverage", "Upload servicekit coverage to Codecov"],
+)
+def test_shared_workflow_rejects_missing_library_coverage(tmp_path: Path, step_name: str) -> None:
+    # given
+    workflow = yaml.safe_load((ROOT / ".github/workflows/go-pr-shared.yml").read_text())
+    steps = workflow["jobs"]["validate"]["steps"]
+    workflow["jobs"]["validate"]["steps"] = [
+        step for step in steps if step.get("name") != step_name
+    ]
+    path = tmp_path / ".github/workflows/go-pr-shared.yml"
+    path.parent.mkdir(parents=True)
+    path.write_text(yaml.safe_dump(workflow))
+
+    # when / then
+    with pytest.raises(SharedError, match="missing or misordered servicekit coverage"):
+        registration.shared_ci_contract(tmp_path, ".github/workflows/go-pr-shared.yml")
+
+
 def test_shared_planner_runs_fast_root_checks_without_candidate_integration() -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/go-pr-shared.yml").read_text())
     steps = workflow["jobs"]["plan"]["steps"]

@@ -68,7 +68,7 @@ func LoadAddress(lookup Lookup, name, fallback string) (Address, error) {
 // ParseAddress accepts a host and numeric port, including ephemeral port zero.
 func ParseAddress(name, value string) (Address, error) {
 	host, port, err := net.SplitHostPort(value)
-	if err != nil || !validHost(host) || port == "" {
+	if err != nil || !ValidHost(host) || port == "" {
 		return Address{}, Invalid(name, "must include a valid host and numeric port")
 	}
 	portNumber, err := strconv.ParseUint(port, 10, 16)
@@ -150,7 +150,7 @@ func ParseEndpoint(name, value string) (*url.URL, error) {
 
 	host := endpoint.Hostname()
 	port := endpoint.Port()
-	if !validHost(host) || port == "" {
+	if !ValidHost(host) || port == "" {
 		return nil, Invalid(
 			name,
 			"must include a valid host and numeric port",
@@ -168,7 +168,9 @@ func ParseEndpoint(name, value string) (*url.URL, error) {
 	return endpoint, nil
 }
 
-func validHost(host string) bool {
+// ValidHost reports whether an unbracketed host is an IP literal or an ASCII DNS-style name.
+// It rejects empty hosts, whitespace, ports and URL text without resolving the name.
+func ValidHost(host string) bool {
 	if host == "" || strings.ContainsAny(host, " \t\r\n") {
 		return false
 	}
