@@ -143,8 +143,10 @@ class MergeAPI(release.GitHub):
         ]
         self.calls = []
 
-    def api(self, suffix, method="GET", body=None, absent=False):
-        self.calls.append((method, suffix))
+    def api(
+        self, suffix, method="GET", body=None, absent=False, *, api_version=release.API_VERSION
+    ):
+        self.calls.append((method, suffix, api_version))
         if suffix == "git/ref/heads/main":
             return {"object": {"sha": self.sha}}
         if suffix.startswith("commits/") and suffix.endswith("/pulls?per_page=100"):
@@ -185,7 +187,49 @@ def test_merged_source_requires_merged_ancestor_and_exact_pr_evidence(
             release.merged_source(provider, tmp_path, source)
     else:
         release.merged_source(provider, tmp_path, source)
-    assert all(method == "GET" for method, _ in provider.calls)
+    assert all(method == "GET" for method, _, _ in provider.calls)
+    if defect != "unmerged":
+        assert provider.calls[-1] == (
+            "GET",
+            f"commits/{source}/pulls?per_page=100",
+            release.PR_EVIDENCE_API_VERSION,
+        )
+
+
+def test_merged_source_requests_pr_response_with_exact_merge_sha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given: GitHub's newer response lacks merge_commit_sha for an otherwise merged PR.
+    main, _ = disposable_history(tmp_path)
+    versions = []
+
+    def urlopen(request, timeout):
+        assert 0 < timeout <= 30
+        version = {key.lower(): value for key, value in request.header_items()}[
+            "x-github-api-version"
+        ]
+        versions.append(version)
+        if request.full_url.endswith("/git/ref/heads/main"):
+            response = {"object": {"sha": main}}
+        elif request.full_url.endswith(f"/commits/{main}/pulls?per_page=100"):
+            response = [
+                {
+                    "merged_at": "2026-10-28T23:56:16Z",
+                    "base": {"ref": "main", "repo": {"full_name": REPOSITORY}},
+                    **({"merge_commit_sha": main} if version == "2022-11-28" else {}),
+                }
+            ]
+        else:
+            raise AssertionError(request.full_url)
+        return io.BytesIO(json.dumps(response).encode())
+
+    monkeypatch.setattr(release.urllib.request, "urlopen", urlopen)
+
+    # when: the production GitHub adapter validates the real Git ancestry and API response.
+    release.merged_source(release.GitHub(tmp_path), tmp_path, main)
+
+    # then: exact merge evidence uses the compatible REST version only for the PR request.
+    assert versions == [release.API_VERSION, "2022-11-28"]
 
 
 def test_release_producer_requires_main_push_at_exact_source(

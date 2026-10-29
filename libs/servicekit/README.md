@@ -207,6 +207,10 @@ tags, starting at `v0.1.0`. Because the Go module is in `libs/servicekit`, its t
 version. The workflow fixes control tooling and source to the triggering merge SHA, verifies main
 ancestry and merged-PR evidence without an approving-review requirement, and validates the exact
 source plus active consumers. A direct push to `main` cannot qualify as a library release.
+The merged-PR lookup requests GitHub REST API version `2022-11-28` because the newer
+`2026-03-10` response omits the exact `merge_commit_sha` required by this guard. A future API
+version change must recheck that response contract before use. If a release run fails before
+tagging, a corrected library-changing merge starts a fresh automatic run.
 
 The automatic workflow needs no repository release-immutability setting, inspection secret,
 separate reviewer or protected release environment. CI requires GitHub CLI with release download

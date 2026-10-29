@@ -33,6 +33,8 @@ from shared_support import (
 
 BUILDER = "docker.io/library/golang:1.27.3-alpine3.23@sha256:0208a74017e3ce41f779876f3c6e9ad5d4030904e8ac6e91b9c5d7711c48362a"
 VERSION = re.compile(r"v0\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
+API_VERSION = "2026-03-10"
+PR_EVIDENCE_API_VERSION = "2022-11-28"
 
 
 def release_identity(version: str, sha: str) -> str:
@@ -50,11 +52,19 @@ class GitHub:
         self.root = root
         self.budget = Budget(600)
 
-    def api(self, suffix: str, method: str = "GET", body: Any = None, absent: bool = False) -> Any:
+    def api(
+        self,
+        suffix: str,
+        method: str = "GET",
+        body: Any = None,
+        absent: bool = False,
+        *,
+        api_version: str = API_VERSION,
+    ) -> Any:
         url = f"https://api.github.com/repos/{REPOSITORY}/{suffix}"
         headers = {
             "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2026-03-10",
+            "X-GitHub-Api-Version": api_version,
             "Content-Type": "application/json",
         }
         token = os.environ.get("GH_TOKEN")
@@ -109,7 +119,8 @@ def merged_source(provider: GitHub, root: Path, sha: str) -> None:
     main = provider.api("git/ref/heads/main")["object"]["sha"]
     verify_sha(root, main)
     git(root, "merge-base", "--is-ancestor", sha, main)
-    pulls = provider.api(f"commits/{sha}/pulls?per_page=100")
+    # The newer API response omits merge_commit_sha, which binds a squash merge to the push SHA.
+    pulls = provider.api(f"commits/{sha}/pulls?per_page=100", api_version=PR_EVIDENCE_API_VERSION)
     candidates = [
         p
         for p in pulls
