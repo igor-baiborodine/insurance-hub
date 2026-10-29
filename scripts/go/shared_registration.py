@@ -260,6 +260,44 @@ def shared_ci_contract(root: Path, path: str) -> None:
         ("result", "go-shared-results-check"),
     ):
         require(target in json.dumps(workflow["jobs"][job]), "missing shared owner command")
+    steps = workflow["jobs"]["validate"]["steps"]
+    validation = next(
+        (i for i, step in enumerate(steps) if step.get("run") == "make go-shared-validate"), -1
+    )
+    coverage = next(
+        (
+            i
+            for i, step in enumerate(steps)
+            if step.get("run") == "make -C libs/servicekit coverage"
+        ),
+        -1,
+    )
+    upload = next(
+        (i for i, step in enumerate(steps) if step.get("uses") == "codecov/codecov-action@v7"),
+        -1,
+    )
+    require(
+        validation >= 0 and validation < coverage < upload,
+        "missing or misordered servicekit coverage",
+    )
+    require(
+        steps[coverage].get("if") == "matrix.module == 'libs/servicekit'",
+        "servicekit coverage must run only for the library",
+    )
+    require(
+        steps[upload].get("if") == "success() && matrix.module == 'libs/servicekit'"
+        and steps[upload].get("with")
+        == {
+            "token": "${{ secrets.CODECOV_TOKEN }}",
+            "files": "libs/servicekit/coverage.txt",
+            "flags": "servicekit",
+            "name": "servicekit",
+            "disable_search": True,
+            "handle_no_reports_found": False,
+            "fail_ci_if_error": True,
+        },
+        "servicekit Codecov upload contract",
+    )
 
 
 def roots_at(root: Path, inventory: dict[str, Any]) -> set[str]:

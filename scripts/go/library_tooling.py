@@ -179,6 +179,15 @@ def execute(action: str, root: Path, go: str, tools: Path) -> None:
             "lint": [str(tools / "golangci-lint"), "run", "./..."],
             "test": [go, "test", "-mod=readonly", "-count=1", *packages],
             "test-race": [go, "test", "-mod=readonly", "-count=1", "-race", "./..."],
+            "coverage": [
+                go,
+                "test",
+                "-mod=readonly",
+                "-count=1",
+                "-race",
+                "-coverprofile=coverage.txt",
+                "./...",
+            ],
             "build": [go, "build", "-mod=readonly", "./..."],
             "vulncheck": [str(tools / "govulncheck"), "./..."],
         }
@@ -199,6 +208,7 @@ def main() -> int:
             "lint",
             "test",
             "test-race",
+            "coverage",
             "build",
             "check-deps",
             "update-deps",
