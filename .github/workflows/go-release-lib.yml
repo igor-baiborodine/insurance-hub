@@ -8,7 +8,7 @@ on:
       - 'libs/servicekit/**'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: go-library-release-servicekit
@@ -18,21 +18,86 @@ env:
   RELEASE_SHA: ${{ github.sha }}
 
 jobs:
-  release:
-    name: Release Go library
+  plan:
+    name: Plan Go library release validation
     if: github.repository == 'igor-baiborodine/insurance-hub' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 15
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - name: Checkout triggering source revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
+      - name: Plan exact-source module validation
+        id: plan
+        run: make go-library-release-plan
+
+  validate:
+    name: Validate release module (${{ matrix.module }})
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout triggering source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.1'
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
+      - name: Set up module Go version
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache: false
+
+      - name: Validate exact-source module obligations
+        env:
+          MODULE_DIR: ${{ matrix.module }}
+        run: make go-library-release-validate
+
+  publish:
+    name: Publish Go library release
+    needs: [plan, validate]
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout triggering source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Node.js 24.13.0
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.13.0'
 
@@ -61,7 +126,7 @@ jobs:
           echo "notes=$metadata_dir/notes.md" >> "$GITHUB_OUTPUT"
 
       - name: Set up uv 0.13.1
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: '0.13.1'
 
@@ -69,15 +134,15 @@ jobs:
         run: make python-toolchain-setup
 
       - name: Set up selected Go version
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: libs/servicekit/go.mod
           cache: false
 
-      - name: Validate library push source and consumers
+      - name: Prepare validated release identity
         env:
           RELEASE_VERSION: ${{ steps.monotag.outputs.version }}
-        run: make go-library-release-validate
+        run: make go-library-release-prepare
 
       - name: Create scoped library source tag
         env:
@@ -92,7 +157,7 @@ jobs:
         run: make go-library-release-verify
 
       - name: Create GitHub Release
-        uses: ncipollo/release-action@v1
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
         with:
           allowUpdates: false
           draft: false

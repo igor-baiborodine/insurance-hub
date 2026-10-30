@@ -154,25 +154,25 @@ def test_public_verification_bounds_failure_and_cleans_owned_image(
         assert not any(command[0] == "docker" for command in commands)
 
 
-def test_library_release_uses_service_release_action_after_public_verification() -> None:
+def test_library_release_uses_service_release_settings_after_public_verification() -> None:
     # given: the service release publishes with a non-draft, Latest action.
     root = Path(__file__).resolve().parents[2]
     service = yaml.safe_load((root / ".github/workflows/go-release-svc.yml").read_text())
     service_action = service["jobs"]["release"]["steps"][-1]
     library = yaml.safe_load((root / WORKFLOW).read_text())
-    assert list(library["jobs"]) == ["release"]
-    steps = library["jobs"]["release"]["steps"]
+    assert list(library["jobs"]) == ["plan", "validate", "publish"]
+    steps = library["jobs"]["publish"]["steps"]
     calculation = next(step["run"] for step in steps if step.get("id") == "monotag")
 
     # when: the library workflow publishes after checking public module resolution.
     action = steps[-1]
 
-    # then: release creation uses the same action and settings as the service workflow.
+    # then: release creation uses the approved settings and an immutable action reference.
     assert steps[-2]["run"] == "make go-library-release-verify"
     assert "--min-version 1.0.0" in calculation
     assert "--max-version 1.999.999" in calculation
     assert '[[ "$release_version" =~ ^1\\.' in calculation
-    assert action["uses"] == service_action["uses"] == "ncipollo/release-action@v1"
+    assert action["uses"] == ("ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd")
     for setting in ("allowUpdates", "draft", "makeLatest", "name", "tag", "bodyFile"):
         assert action["with"][setting] == service_action["with"][setting]
     assert "artifacts" not in action["with"]

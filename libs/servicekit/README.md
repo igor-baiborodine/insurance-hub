@@ -230,16 +230,27 @@ The **Go Library Release** workflow runs after a `libs/servicekit` change is pus
 `main`, including a direct push. Monotag calculates a scoped stable v1 version from
 conventional commits and existing library tags, beginning at `v1.0.0`. Because the Go
 module is in `libs/servicekit`, its tag uses `libs/servicekit/vX.Y.Z`. The single release
-job validates the triggering source SHA and active consumers, creates the scoped tag, verifies
-public Go proxy and checksum resolution with fresh standalone and container builds, then
-creates a non-draft GitHub Release with notes marked Latest. Release creation uses the same
-action and settings as Go service releases.
+workflow plans the exact triggering source, validates the library and every active consumer in
+an independently reconciled matrix, then creates the scoped tag. At most four validation jobs run
+at once. The publication job verifies public Go proxy and checksum resolution with fresh standalone
+and container builds, then creates a non-draft GitHub Release with notes marked Latest. Release
+creation uses the same settings as Go service releases.
 
 The workflow needs no separate approval, release-immutability setting, qualification asset,
-attestation, package upload, consumer pin edit or service-image release. Its job has
-`contents: write` and module-wide concurrency without cancellation. Tag creation is
-create-if-absent with exact SHA readback; a collision fails, while the same source may resume
-verification. A corrected source uses a new version.
+attestation, package upload, consumer pin edit or service-image release. Planning and validation
+have read-only repository access; only the publication job has `contents: write`. Module-wide
+concurrency does not cancel an in-progress release. Tag creation is create-if-absent with exact
+SHA readback; a collision fails, while the same source may resume verification. A corrected source
+uses a new version.
+
+The serial baseline on GitHub-hosted `ubuntu-24.04` runners was captured on 2026-10-30 with the
+library and two active consumers. Release `v0.2.2` took 12 minutes 26 seconds, including 10 minutes
+49 seconds for validation; release `v1.0.0` took 13 minutes 27 seconds, including 11 minutes
+48 seconds for validation. Splitting validation by module removes the sum of every module from a
+single job's critical path. Wall-clock time is instead bounded by the slowest module in each
+four-job wave, while total runner minutes still grow with every consumer. The four-job cap limits
+concurrent runner use. A move to a paid provider such as Harness must reassess this concurrency,
+its billing unit and available capacity from measured runs before preserving or changing the cap.
 
 Public verification uses an empty dependency/build cache, `proxy.golang.org`,
 `sum.golang.org`, exact selected-version and source-content checks, and standalone plus

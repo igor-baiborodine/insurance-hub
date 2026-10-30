@@ -77,76 +77,138 @@ def local_full_validation() -> None:
     print(f"validated {len(reports)} full local obligations at {expected['head']}")
 
 
-def release_validation(version: str, sha: str) -> dict:
+def release_expected(checkout: Path, sha: str) -> dict:
+    inventory = topology.load_inventory(checkout / "go-module-topology.json")
+    active = shared_registration.registration_check(checkout, inventory)
+    require(
+        (checkout / DIRECTORY / "go.mod").read_text().splitlines()[0] == "module " + MODULE,
+        "release module identity mismatch",
+    )
+    obligations = [
+        {"module": DIRECTORY, "phase": phase, "mode": "normal", "target": "check-go-pr"}
+        for phase in shared_registration.LIBRARY_PHASES
+    ]
+    for consumer in active:
+        for phase in consumer["candidate_phases"]:
+            obligations.append(
+                {
+                    "module": consumer["directory"],
+                    "phase": phase,
+                    "mode": "candidate",
+                    "target": consumer["phase_bindings"][phase]["target"],
+                }
+            )
+    return {
+        "base": sha,
+        "head": sha,
+        "active_consumers": len(active),
+        "obligations": obligations,
+        "inputs": {
+            module: {
+                "source_manifest": manifest_digest(checkout / module),
+                "original_locks": shared_candidate.locks(checkout / module),
+            }
+            for module in {item["module"] for item in obligations}
+        },
+        "candidate_manifest": manifest_digest(checkout / DIRECTORY),
+    }
+
+
+def release_matrix(expected: dict) -> dict:
+    modules = sorted({item["module"] for item in expected["obligations"]})
+    return {"include": [{"module": module} for module in modules]}
+
+
+def release_module_expected(expected: dict, module: str) -> dict:
+    obligations = [item for item in expected["obligations"] if item["module"] == module]
+    require(obligations, "unplanned release module")
+    return {
+        **expected,
+        "obligations": obligations,
+        "inputs": {module: expected["inputs"][module]},
+    }
+
+
+def release_plan(sha: str) -> None:
+    require(shared_release.release_source() == sha, "release source mismatch")
+    with tempfile.TemporaryDirectory(prefix="servicekit-release-plan-") as temporary:
+        checkout = Path(temporary) / "source"
+        extract(ROOT, sha, checkout)
+        expected = release_expected(checkout, sha)
+        matrix = release_matrix(expected)
+    if output := os.environ.get("GITHUB_OUTPUT"):
+        with Path(output).open("a") as stream:
+            stream.write("matrix=" + json.dumps(matrix) + "\n")
+    print(
+        json.dumps(
+            {
+                "source_sha": sha,
+                "active_consumers": expected["active_consumers"],
+                "matrix": matrix,
+            },
+            indent=2,
+        )
+    )
+
+
+def release_validation(sha: str, module: str) -> dict:
     require(shared_release.release_source() == sha, "release source mismatch")
     with tempfile.TemporaryDirectory(prefix="servicekit-release-validation-") as temporary:
         checkout = Path(temporary) / "source"
         extract(ROOT, sha, checkout)
-        inventory = topology.load_inventory(checkout / "go-module-topology.json")
-        active = shared_registration.registration_check(checkout, inventory)
-        require(
-            (checkout / DIRECTORY / "go.mod").read_text().splitlines()[0] == "module " + MODULE,
-            "release module identity mismatch",
+        expected = release_module_expected(release_expected(checkout, sha), module)
+        tools = checkout / module / ".tools/bin"
+        Budget().run(
+            [
+                "make",
+                "-C",
+                str(checkout / module),
+                "bootstrap-go-tools",
+                f"PYTHON={os.environ['PYTHON']}",
+            ],
+            ROOT,
+            "prepare source tools",
+            environment(PYTHON=os.environ["PYTHON"]),
         )
-        obligations = [
-            {"module": DIRECTORY, "phase": phase, "mode": "normal", "target": "check-go-pr"}
-            for phase in shared_registration.LIBRARY_PHASES
-        ]
-        for consumer in active:
-            for phase in consumer["candidate_phases"]:
-                obligations.append(
-                    {
-                        "module": consumer["directory"],
-                        "phase": phase,
-                        "mode": "candidate",
-                        "target": consumer["phase_bindings"][phase]["target"],
-                    }
-                )
-        expected = {
-            "base": sha,
-            "head": sha,
-            "obligations": obligations,
-            "inputs": {
-                m: {
-                    "source_manifest": manifest_digest(checkout / m),
-                    "original_locks": shared_candidate.locks(checkout / m),
-                }
-                for m in {r["module"] for r in obligations}
-            },
-            "candidate_manifest": manifest_digest(checkout / DIRECTORY),
-        }
-        results = []
-        budget = Budget(3000)
-        for module in sorted({r["module"] for r in obligations}):
-            tools = checkout / module / ".tools/bin"
-            budget.run(
-                [
-                    "make",
-                    "-C",
-                    str(checkout / module),
-                    "bootstrap-go-tools",
-                    f"PYTHON={os.environ['PYTHON']}",
-                ],
-                ROOT,
-                "prepare source tools",
-                environment(PYTHON=os.environ["PYTHON"]),
-            )
-            results.extend(shared_candidate.validate(ROOT, expected, module, tools))
+        results = shared_candidate.validate(ROOT, expected, module, tools)
         shared_registration.reconcile(expected, results)
+        return {
+            "source_sha": sha,
+            "module": module,
+            "obligations": len(results),
+        }
+
+
+def release_preparation(version: str, sha: str) -> dict:
+    shared_release.release_identity(version, sha)
+    require(shared_release.release_source() == sha, "release source mismatch")
+    with tempfile.TemporaryDirectory(prefix="servicekit-release-prepare-") as temporary:
+        checkout = Path(temporary) / "source"
+        extract(ROOT, sha, checkout)
+        expected = release_expected(checkout, sha)
         return {
             "version": version,
             "source_sha": sha,
-            "source_manifest": manifest_digest(checkout / DIRECTORY),
+            "source_manifest": expected["candidate_manifest"],
+            "planned_modules": [item["module"] for item in release_matrix(expected)["include"]],
         }
 
 
 def release_command(action: str, work: Path) -> None:
-    version, sha = os.environ["RELEASE_VERSION"], os.environ["RELEASE_SHA"]
+    sha = os.environ["RELEASE_SHA"]
+    if action == "release-plan":
+        release_plan(sha)
+        return
+    if action == "release-validate":
+        result = release_validation(sha, os.environ["MODULE_DIR"])
+        print(json.dumps(result, indent=2))
+        return
+    version = os.environ["RELEASE_VERSION"]
+    if action == "release-prepare":
+        write_json(work / "validation.json", release_preparation(version, sha))
+        return
     tag = shared_release.release_identity(version, sha)
     require(shared_release.release_source() == sha, "release source mismatch")
-    if action == "release-validate":
-        write_json(work / "validation.json", release_validation(version, sha))
-        return
     provider = shared_release.GitHub(ROOT)
     validation = read_json(work / "validation.json")
     require(
@@ -171,7 +233,9 @@ def main() -> int:
             "results",
             "local-full",
             "phase",
+            "release-plan",
             "release-validate",
+            "release-prepare",
             "release-tag",
             "release-verify",
         ),
