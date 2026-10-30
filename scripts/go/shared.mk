@@ -4,7 +4,8 @@ GO_SHARED_ACTIONLINT ?= $(ROOT_DIR)services/product-service/.tools/bin/actionlin
 export PYTHON
 
 .PHONY: go-shared-plan go-shared-validate go-shared-results-check go-shared-local-full go-shared-phase \
-	go-shared-test go-shared-test-integration go-library-release-validate \
+	go-shared-test go-shared-test-integration go-library-release-plan go-library-release-validate \
+	go-library-release-prepare \
 	go-library-release-tag go-library-release-verify go-shared-check-ci
 
 go-shared-check-ci: python-runtime-check ## Lint additive shared workflows using the existing pinned CI tool
@@ -32,8 +33,14 @@ go-shared-test: python-toolchain-check ## Test shared registration, selection, g
 go-shared-test-integration: python-toolchain-check ## Exercise disposable candidate and process boundaries
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -m integration scripts/go/test_shared_*.py
 
-go-library-release-validate: python-runtime-check ## Read-only exact-source validation for a main push
+go-library-release-plan: python-runtime-check ## Plan exact-source release validation by module
+	@"$(PYTHON)" "$(GO_SHARED_TOOL)" release-plan
+
+go-library-release-validate: python-runtime-check ## Validate MODULE_DIR against the exact release source
 	@"$(PYTHON)" "$(GO_SHARED_TOOL)" release-validate
+
+go-library-release-prepare: python-runtime-check ## Recheck the validated source identity before publication
+	@"$(PYTHON)" "$(GO_SHARED_TOOL)" release-prepare
 
 go-library-release-tag: python-runtime-check ## Publish the prefixed tag at the validated main push SHA
 	@"$(PYTHON)" "$(GO_SHARED_TOOL)" release-tag

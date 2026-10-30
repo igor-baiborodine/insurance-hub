@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -186,6 +187,29 @@ def test_local_full_refuses_noncommitted_source(
         shared_cli.local_full_validation()
 
 
+def test_release_plan_splits_full_obligations_by_module(tmp_path: Path) -> None:
+    # given: the library and two registered consumers at one release source.
+    fixture_tree(tmp_path, 2)
+
+    # when: release obligations are planned and split for matrix execution.
+    expected = shared_cli.release_expected(tmp_path, "a" * 40)
+    matrix = shared_cli.release_matrix(expected)
+
+    # then: every module keeps its complete, independently reconcilable obligation set.
+    modules = [item["module"] for item in matrix["include"]]
+    assert modules == [DIRECTORY, "services/product-service", "templates/go-service"]
+    assert len(expected["obligations"]) == len(registration.LIBRARY_PHASES) + 2 * len(
+        registration.PHASES
+    )
+    for module in modules:
+        selected = shared_cli.release_module_expected(expected, module)
+        assert {item["module"] for item in selected["obligations"]} == {module}
+        assert set(selected["inputs"]) == {module}
+        assert selected["candidate_manifest"] == expected["candidate_manifest"]
+    with pytest.raises(SharedError, match="unplanned release module"):
+        shared_cli.release_module_expected(expected, "services/unregistered-service")
+
+
 @pytest.mark.parametrize(
     "defect",
     ["missing", "downgrade", "duplicate", "phase", "target", "fast-target", "workflow", "unknown"],
@@ -346,24 +370,54 @@ def test_installed_workflow_contracts() -> None:
     assert triggers["push"]["paths"] == ["libs/servicekit/**"]
     assert workflow["concurrency"]["cancel-in-progress"] is False
     assert workflow["env"]["RELEASE_SHA"] == "${{ github.sha }}"
-    assert list(workflow["jobs"]) == ["release"]
-    steps = workflow["jobs"]["release"]["steps"]
+    assert workflow["permissions"] == {"contents": "read"}
+    assert list(workflow["jobs"]) == ["plan", "validate", "publish"]
+    plan = workflow["jobs"]["plan"]
+    validate = workflow["jobs"]["validate"]
+    publish = workflow["jobs"]["publish"]
+    assert plan["timeout-minutes"] == 15
+    assert plan["outputs"]["matrix"] == "${{ steps.plan.outputs.matrix }}"
+    assert validate["needs"] == "plan"
+    assert validate["timeout-minutes"] == 60
+    assert validate["strategy"] == {
+        "fail-fast": False,
+        "max-parallel": 4,
+        "matrix": "${{ fromJSON(needs.plan.outputs.matrix) }}",
+    }
+    assert publish["needs"] == ["plan", "validate"]
+    assert publish["timeout-minutes"] == 30
+    assert publish["permissions"] == {"contents": "write"}
     assert [
         step.get("run")
-        for step in steps
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
         if step.get("run", "").startswith("make go-library-release-")
     ] == [
+        "make go-library-release-plan",
         "make go-library-release-validate",
+        "make go-library-release-prepare",
         "make go-library-release-tag",
         "make go-library-release-verify",
     ]
+    setup_go = next(
+        step for step in validate["steps"] if "actions/setup-go@" in step.get("uses", "")
+    )
+    assert setup_go["with"]["go-version-file"] == "${{ matrix.module }}/go.mod"
     for name, job in workflow["jobs"].items():
         permissions = job.get("permissions", workflow["permissions"])
         assert "packages" not in permissions
         if permissions.get("contents") == "write":
-            assert name == "release"
+            assert name == "publish"
         assert "environment" not in job
+        assert "name" in job
+        assert "timeout-minutes" in job
         assert job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
+        assert all("name" in step for step in job["steps"])
+        assert all(
+            re.fullmatch(r"[^@]+@[0-9a-f]{40}", step["uses"])
+            for step in job["steps"]
+            if "uses" in step
+        )
     for job in workflow["jobs"].values():
         assert all("GH_INSPECTION_TOKEN" not in step.get("env", {}) for step in job["steps"])
 
