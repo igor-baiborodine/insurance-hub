@@ -117,15 +117,74 @@ spec:
     name: qa-product-init-cbc1f828fca51a28-a1
     namespace: qa-svc
 ---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: qa-product-release-48195d51a9b0d96f
+  namespace: flux-system
+  annotations:
+    insurance-hub.io/release-identity: 48195d51a9b0d96fb16be0d81bb134d8c715c645cb98d202c5bce276987db594
+    insurance-hub.io/source-revision: 62cdb21fac6813dbcb729e71a4dd52663ea64161
+    insurance-hub.io/image-digest: sha256:faa716e5327f2cc1e206aa46962e4346ee26417cff96852ab4717fa7184bf679
+    insurance-hub.io/asset-hashes: '{"catalog": "a42eca3c26ebd504c6ce3cf3eb037698e575592ef564e64b3c262da0b8d449b4",
+      "migration": "5328b42ef8bfb59ee48cb146f84506b86cb322ccca7da3307b1b5e56e2ff23f4"}'
+    insurance-hub.io/target-revision: '1'
+    insurance-hub.io/credential-revision: '1'
+    insurance-hub.io/migration-timeout: 120s
+spec:
+  interval: 5m
+  url: https://github.com/igor-baiborodine/insurance-hub
+  ref:
+    commit: 62cdb21fac6813dbcb729e71a4dd52663ea64161
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: qa-product-init-48195d51a9b0d96f-a1
+  namespace: flux-system
+  annotations:
+    insurance-hub.io/release-identity: 48195d51a9b0d96fb16be0d81bb134d8c715c645cb98d202c5bce276987db594
+    insurance-hub.io/source-revision: 62cdb21fac6813dbcb729e71a4dd52663ea64161
+    insurance-hub.io/image-digest: sha256:faa716e5327f2cc1e206aa46962e4346ee26417cff96852ab4717fa7184bf679
+    insurance-hub.io/asset-hashes: '{"catalog": "a42eca3c26ebd504c6ce3cf3eb037698e575592ef564e64b3c262da0b8d449b4",
+      "migration": "5328b42ef8bfb59ee48cb146f84506b86cb322ccca7da3307b1b5e56e2ff23f4"}'
+    insurance-hub.io/target-revision: '1'
+    insurance-hub.io/credential-revision: '1'
+    insurance-hub.io/migration-timeout: 120s
+spec:
+  interval: 5m
+  timeout: 6m
+  prune: true
+  wait: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: qa-product-release-48195d51a9b0d96f
+  path: ./k8s/overlays/qa/svc/product/administration
+  images:
+  - name: insurance-hub-product-api
+    newName: ghcr.io/igor-baiborodine/insurance-hub/product-api
+    digest: sha256:faa716e5327f2cc1e206aa46962e4346ee26417cff96852ab4717fa7184bf679
+  retryInterval: 1m
+  nameSuffix: -48195d51a9b0d96f-a1
+  postBuild:
+    substitute:
+      MIGRATION_TIMEOUT: 120s
+  healthChecks:
+  - apiVersion: batch/v1
+    kind: Job
+    name: qa-product-init-48195d51a9b0d96f-a1
+    namespace: qa-svc
+---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
   name: qa-product-api
   namespace: flux-system
   annotations:
-    insurance-hub.io/release-identity: cbc1f828fca51a2845510dccbd1da56f8a79895abf481cdf215b34be624e71f8
-    insurance-hub.io/source-revision: d81ce9232f1fd21653e96141d7615f288e195af0
-    insurance-hub.io/image-digest: sha256:086986dd164781d333cb53a11e6b60af85142c8bf60dd28bb71093a0db61cdc9
+    insurance-hub.io/release-identity: 48195d51a9b0d96fb16be0d81bb134d8c715c645cb98d202c5bce276987db594
+    insurance-hub.io/source-revision: 62cdb21fac6813dbcb729e71a4dd52663ea64161
+    insurance-hub.io/image-digest: sha256:faa716e5327f2cc1e206aa46962e4346ee26417cff96852ab4717fa7184bf679
     insurance-hub.io/asset-hashes: '{"catalog": "a42eca3c26ebd504c6ce3cf3eb037698e575592ef564e64b3c262da0b8d449b4",
       "migration": "5328b42ef8bfb59ee48cb146f84506b86cb322ccca7da3307b1b5e56e2ff23f4"}'
     insurance-hub.io/target-revision: '1'
@@ -139,11 +198,11 @@ spec:
   force: false
   sourceRef:
     kind: GitRepository
-    name: qa-product-release-cbc1f828fca51a28
+    name: qa-product-release-48195d51a9b0d96f
   path: ./k8s/overlays/qa/svc/product
   images:
   - name: insurance-hub-product-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/product-api
-    digest: sha256:086986dd164781d333cb53a11e6b60af85142c8bf60dd28bb71093a0db61cdc9
+    digest: sha256:faa716e5327f2cc1e206aa46962e4346ee26417cff96852ab4717fa7184bf679
   dependsOn:
-  - name: qa-product-init-cbc1f828fca51a28-a1
+  - name: qa-product-init-48195d51a9b0d96f-a1
