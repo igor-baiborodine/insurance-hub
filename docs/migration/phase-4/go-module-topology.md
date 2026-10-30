@@ -174,12 +174,16 @@ workflows remain historical evidence.
 
 The additive `go-pr-shared.yml` runs on every PR to `main`. Its planner examines complete base/head
 ownership, both rename endpoints, discovered modules and active registration before Go/tool setup.
-Library changes validate all active consumers against the exact candidate; root tooling changes
-conservatively validate every module. Its aggregate recomputes phase obligations and checks source,
-lockfile and candidate identities. The empty active-consumer set is an explicit initial state.
-Branch protection requires separate repository configuration; adding YAML does not establish it.
-The `go-release-lib.yml` workflow runs on library changes pushed to `main` and owns scoped
-source-tag publication and a non-draft GitHub Release marked Latest.
+Library changes validate the library and every active consumer against the exact candidate. Hosted
+consumer-only changes rely on `go-pr-mod.yml` for their normal module gate and create no duplicate
+shared module obligation. Root tooling changes run the shared tooling and topology checks; the full
+local profile additionally validates every module. When hosted planning creates no module work, the
+planner completes the workflow without validation or result-reconciliation runners. For plans with
+module work, the aggregate recomputes phase obligations and checks source, lockfile and candidate
+identities. The empty active-consumer set is an explicit initial state. Branch protection requires
+separate repository configuration; adding YAML does not establish it. The `go-release-lib.yml`
+workflow runs on library changes pushed to `main` and owns scoped source-tag publication and a
+non-draft GitHub Release marked Latest.
 
 ## Import and consumer policy
 

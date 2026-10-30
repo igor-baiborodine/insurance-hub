@@ -201,10 +201,11 @@ applicable generated, breaking, copy, integration and image phases. Unsupported 
 From the repository root, `go-shared-plan` takes full `PR_BASE` and `PR_HEAD` SHAs and checks the
 complete diff, including both ends of renames and the union of base/head module roots. More than
 one changed module fails before setup. Shared changes select every active consumer against the
-candidate; root tooling changes conservatively select all modules normally. The supplemental
-workflow also validates auxiliary module edits. The original Go PR and Report Card workflows
-remain unchanged. The supplemental gate currently repeats a normal gate if both workflows are
-triggered; it never substitutes an unverified external workflow result for a required phase.
+candidate. Hosted consumer-only changes rely on the selected-module workflow for their normal
+gate, so the supplemental workflow does not repeat it. Root tooling changes run the shared tooling
+and topology checks; full local validation additionally selects all modules normally. A hosted plan
+with no module obligations completes without starting validation or result-reconciliation runners.
+The original Go PR and Report Card workflows remain unchanged.
 
 `go-shared-validate` uses a verified Git extraction in a private temporary directory, with
 alternate manifests only in disposable copies. A live private socket issues phase contexts;

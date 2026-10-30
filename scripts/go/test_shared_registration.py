@@ -122,9 +122,12 @@ def test_ci_non_code_inputs_do_not_fan_out_to_consumers(tmp_path: Path, path: st
     assert result["root_checks"] == path.startswith("scripts/")
 
 
-def test_ci_changed_consumer_with_library_readme_keeps_normal_gate(tmp_path: Path) -> None:
-    fixture_tree(tmp_path / "base")
-    fixture_tree(tmp_path / "head")
+def test_ci_changed_consumer_with_library_readme_relies_on_module_gate(tmp_path: Path) -> None:
+    # given
+    fixture_tree(tmp_path / "base", 1)
+    fixture_tree(tmp_path / "head", 1)
+
+    # when
     result = registration.plan_trees(
         tmp_path / "base",
         tmp_path / "head",
@@ -134,15 +137,32 @@ def test_ci_changed_consumer_with_library_readme_keeps_normal_gate(tmp_path: Pat
         "a" * 40,
         "ci",
     )
-    assert result["obligations"] == [
-        {
-            "module": "templates/go-service",
-            "phase": "gate",
-            "mode": "normal",
-            "target": "check-go-pr",
-        }
-    ]
+
+    # then
+    assert result["obligations"] == []
     assert result["changed"] == ["templates/go-service"]
+
+
+def test_full_profile_keeps_changed_consumer_normal_gate(tmp_path: Path) -> None:
+    # given
+    fixture_tree(tmp_path / "base", 1)
+    fixture_tree(tmp_path / "head", 1)
+
+    # when
+    result = registration.plan_trees(
+        tmp_path / "base",
+        tmp_path / "head",
+        ["templates/go-service/main.go"],
+        "a" * 40,
+        "b" * 40,
+        "a" * 40,
+        "full",
+    )
+
+    # then
+    assert {item["module"] for item in result["obligations"]} == {"templates/go-service"}
+    assert {item["mode"] for item in result["obligations"]} == {"normal"}
+    assert len(result["obligations"]) == len(registration.PHASES)
 
 
 @pytest.mark.parametrize("head_matches,clean", [(False, True), (True, False)])
@@ -383,6 +403,11 @@ def test_shared_planner_runs_fast_root_checks_without_candidate_integration() ->
     assert all(
         "python-shared-tooling-test-integration" not in step.get("run", "") for step in steps
     )
+
+
+def test_shared_result_job_runs_only_for_planned_module_work() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/go-pr-shared.yml").read_text())
+    assert workflow["jobs"]["result"]["if"] == "always() && needs.plan.outputs.has_work == 'true'"
 
 
 def test_unknown_inventory_schema_is_rejected(tmp_path: Path) -> None:
