@@ -33,6 +33,19 @@
       - [issue-214-N01 gRPC deadline and drain helpers](#issue-214-n01-grpc-deadline-and-drain-helpers)
       - [issue-214-N02 Shared disposable test support](#issue-214-n02-shared-disposable-test-support)
       - [issue-214-N03 Shared integration client configuration](#issue-214-n03-shared-integration-client-configuration)
+    - [Issue 215 Migrate policy-search along the shared Go runtime](#issue-215-migrate-policy-search-along-the-shared-go-runtime)
+      - [issue-215-N01 Search pagination and streaming](#issue-215-n01-search-pagination-and-streaming)
+      - [issue-215-N03 Search relevance and user experience](#issue-215-n03-search-relevance-and-user-experience)
+      - [issue-215-N04 Per-agent policy-search authorization](#issue-215-n04-per-agent-policy-search-authorization)
+      - [issue-215-N05 Dashboard migration using policy-search lessons](#issue-215-n05-dashboard-migration-using-policy-search-lessons)
+      - [issue-215-N06 Remaining business-service migrations](#issue-215-n06-remaining-business-service-migrations)
+      - [issue-215-N07 Evidence-based persistence evolution](#issue-215-n07-evidence-based-persistence-evolution)
+      - [issue-215-N08 Bounded search caching](#issue-215-n08-bounded-search-caching)
+      - [issue-215-N09 Phase 5 identity and edge modernization](#issue-215-n09-phase-5-identity-and-edge-modernization)
+      - [issue-215-N10 Compatibility-driven platform and dependency upgrades](#issue-215-n10-compatibility-driven-platform-and-dependency-upgrades)
+      - [issue-215-N11 Durable policy event publication](#issue-215-n11-durable-policy-event-publication)
+      - [issue-215-N12 Additional guarded search administration automation](#issue-215-n12-additional-guarded-search-administration-automation)
+      - [issue-215-N13 Java policy-search retirement](#issue-215-n13-java-policy-search-retirement)
   - [Ad hoc repository improvements](#ad-hoc-repository-improvements)
     - [Commit-message policy enforcement](#commit-message-policy-enforcement)
       - [adhoc-commit-msg-N01 Commit-message hook](#adhoc-commit-msg-n01-commit-message-hook)
@@ -505,7 +518,10 @@ and release workflow behavior remains unchanged.
 ## Sub-epic 4.3 Shared Go runtime and further service migrations
 
 Parent: [issue 215](https://github.com/igor-baiborodine/insurance-hub/issues/215).
-Issue 214 is its only currently scoped child; later service migrations will be assessed separately.
+Issue 214 supplies the shared runtime foundation. The issue-215 requirements assessment selects
+policy-search migration, including separately gated cutover and subsequent Java policy-search
+retirement. The revised parent specification and numbered child issues now record this scope;
+delivery remains separately gated.
 
 ### Issue 214 Share Go service runtime foundations
 
@@ -569,6 +585,281 @@ parity fixtures for the same integration boundary.
 **Acceptance evidence:** Each consumer's success, failure, timeout, cancellation, replay and
 security cases pass against its own baseline. Shared code preserves service ownership and safe
 configuration without introducing shared business models or forcing a persistence-stack change.
+
+### Issue 215 Migrate policy-search along the shared Go runtime
+
+Origin: issue-215 requirements N01/N03–N13 and the user's 2026-10-30 requests to retain
+per-agent visibility and turn useful migration exclusions into deferred future work. N04 retains
+the previously accepted access-model decision. The user subsequently promoted N13 into issue
+215's mandatory retirement scope on 2026-10-30; the other deferred entries do not expand its
+mandatory delivery scope.
+
+Source ticket: [issue 215](https://github.com/igor-baiborodine/insurance-hub/issues/215).
+Local assessment: `ai/artifacts/epic-4.3/issue-215-requirements.md`, optional requirements and
+accepted Q04/Q05 (ignored local evidence).
+
+Related requirement N02 reuses [issue-214-N02](#issue-214-n02-shared-disposable-test-support)
+and [issue-214-N03](#issue-214-n03-shared-integration-client-configuration). No duplicate shared
+client or test-support entry is created. Other-service and Phase 5 items below are deferred
+relative to issue 215; existing roadmap commitments keep their own priority and required gates.
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-215-N01](#issue-215-n01-search-pagination-and-streaming) | Search pagination and streaming | Deferred | Unassigned; select through a separately accepted receiving scope |
+| [issue-215-N03](#issue-215-n03-search-relevance-and-user-experience) | Search relevance and user experience | Deferred | Unassigned; select through a separately accepted receiving scope |
+| [issue-215-N04](#issue-215-n04-per-agent-policy-search-authorization) | Per-agent policy-search authorization | Deferred | Unassigned; select through a separately accepted receiving scope |
+| [issue-215-N05](#issue-215-n05-dashboard-migration-using-policy-search-lessons) | Dashboard migration using policy-search lessons | Deferred | Unassigned; select through a separately accepted receiving scope |
+| [issue-215-N06](#issue-215-n06-remaining-business-service-migrations) | Remaining business-service migrations | Deferred | Unassigned; select through a separately accepted receiving scope |
+| [issue-215-N07](#issue-215-n07-evidence-based-persistence-evolution) | Evidence-based persistence evolution | Deferred | Unassigned; select through a separately accepted receiving scope |
+| [issue-215-N08](#issue-215-n08-bounded-search-caching) | Bounded search caching | Deferred | Unassigned; select through a separately accepted receiving scope |
+| [issue-215-N09](#issue-215-n09-phase-5-identity-and-edge-modernization) | Phase 5 identity and edge modernization | Deferred | Unassigned; select through a separately accepted receiving scope |
+| [issue-215-N10](#issue-215-n10-compatibility-driven-platform-and-dependency-upgrades) | Compatibility-driven platform and dependency upgrades | Deferred | Unassigned; select through a separately accepted receiving scope |
+| [issue-215-N11](#issue-215-n11-durable-policy-event-publication) | Durable policy event publication | Deferred | Unassigned; select through a separately accepted receiving scope |
+| [issue-215-N12](#issue-215-n12-additional-guarded-search-administration-automation) | Additional guarded search administration automation | Deferred | Unassigned; select through a separately accepted receiving scope |
+| [issue-215-N13](#issue-215-n13-java-policy-search-retirement) | Java policy-search retirement | Scheduled | Promoted on 2026-10-30 into [issue 215](https://github.com/igor-baiborodine/insurance-hub/issues/215): mandatory M17, child [#236](https://github.com/igor-baiborodine/insurance-hub/issues/236) (C09); not delivered |
+
+#### issue-215-N01 Search pagination and streaming
+
+**Requirement:** Provide an explicitly versioned way to retrieve more than the current 100 search
+hits. Select stable cursor/PIT pagination first when it meets the consumer need; add streaming only
+for a demonstrated bulk-consumption use case, with defined ordering, framing, cancellation and
+backpressure.
+
+**Why deferred:** Accepted D01 keeps a relevance-first 100-hit limit but introduces explicit
+date/number tie-breakers as a migration difference. Retrieval beyond that cap changes result
+membership, ordering and client behavior and is independently deliverable.
+
+**Reconsider when:** Users need access to results beyond the cap, or measured payload/workload
+evidence justifies a bulk interface.
+
+**Acceptance evidence:** Independent fixtures cover more than 100 matches, page boundaries,
+concurrent index updates, cursor expiry and missing/duplicate results. Gateway and browser clients
+implement the agreed contract; any stream proves bounded memory, cancellation and slow-reader
+handling. Preserve the legacy route until its replacement is explicitly accepted.
+
+#### issue-215-N03 Search relevance and user experience
+
+**Requirement:** Improve relevance, query construction and the policy-search UI through an
+explicitly accepted product contract. Candidate improvements include structured filters, safer query
+input and clearer ranking; select individual changes based on user needs. Accepted D01 already
+requires a visible search-unavailable error in place of the gateway's empty-result fallback, so
+that error behavior is mandatory migration scope rather than a deferred option.
+
+**Why deferred:** The remaining relevance, query-construction and UI candidates change observable
+behavior beyond the accepted D01 migration contract. Backend error visibility and privacy remain
+mandatory during the Java-to-Go transition.
+
+**Reconsider when:** User feedback identifies poor results, confusing query syntax or outages
+mistaken for an empty result set.
+
+**Acceptance evidence:** Approved before/after request/result/error fixtures and a representative
+search corpus establish expected relevance and query semantics. Mandatory D01 browser/gateway
+tests distinguish no matches from failures; any later UI change preserves accessibility and safe
+rendering. Verify that query text or policy data does not leak through telemetry.
+
+#### issue-215-N04 Per-agent policy-search authorization
+
+**Requirement:** If policy visibility is to be restricted to an agent's own policies, define
+explicit authorization rules and any permitted supervisor or shared-access exceptions. Propagate
+trusted caller identity to each applicable search boundary, supply authoritative ownership data
+in the search projection, and enforce the accepted visibility rules consistently through HTTP
+and gRPC. Define ownership backfill, reassignment and event replay behavior; do not trust a
+caller-supplied agent identifier as authorization evidence.
+
+**Why deferred:** The accepted migration preserves authenticated Java gateway access, internal-only
+Go endpoints and existing search results without adding role or per-agent filtering. Restricting
+results changes business behavior and requires identity and ownership contracts beyond query
+parity. Existing authentication, internal exposure controls, privacy and dependency permissions
+remain mandatory; this deferral does not weaken those safeguards.
+
+**Reconsider when:** The product/security owner requests own-policy visibility or an applicable
+access requirement establishes that restriction. Accept the policy and receiving ticket's scope
+before implementation; an applicable mandatory protection must not remain optional merely because
+it was originally recorded here.
+
+**Acceptance evidence:** Independent fixtures prove an agent can find permitted policies but
+cannot retrieve another agent's policies through either reachable transport, including wildcard
+and crafted queries. Tests reject missing or forged identity and spoofed agent headers, verify
+any explicitly authorized exceptions, and define safe denial for missing/unknown ownership.
+Backfill, ownership changes and replay preserve correct visibility without broadening access;
+direct backend calls cannot bypass the accepted authorization policy.
+
+#### issue-215-N05 Dashboard migration using policy-search lessons
+
+**Requirement:** Assess and separately scope migration of dashboard-service to Go using the
+validated Elasticsearch, event-processing and runtime lessons from policy-search. Capture
+dashboard-specific aggregation, bucket-limit, date/timezone, rounding and attribution behavior
+before selecting reusable mechanics.
+
+**Why deferred:** Dashboard is the next recommended service in the Phase 4 review, but its analytics
+contract and read model are independent of policy-search. Deferral is relative to issue 215, not a
+cancellation or optional reclassification of the wider migration roadmap.
+
+**Reconsider when:** Policy-search qualification provides reusable evidence and the roadmap owner
+selects the dashboard migration.
+
+**Acceptance evidence:** A receiving requirements/specification set identifies independent Java
+oracles, policy_stats ownership, isolated event consumption and dashboard consumers. Its eventual
+delivery proves aggregation/rounding/timezone parity, recovery, access controls and separately gated
+cutover; passing policy-search tests alone does not qualify dashboard.
+
+#### issue-215-N06 Remaining business-service migrations
+
+**Requirement:** Scope the remaining Go migrations as independent service initiatives, including
+policy creation/details/termination, pricing, payments, documents and other selected business
+services. Preserve service-owned business rules and producer/consumer contracts while applying
+proven runtime and operational patterns.
+
+**Why deferred:** These services introduce separate write, monetary, expression, document/storage or
+realtime responsibilities. They cannot be delivered or qualified as extensions of the policy-search
+query migration; existing roadmap commitments retain their own priority.
+
+**Reconsider when:** The roadmap owner selects a service and its Phase 4 adoption prerequisites can
+be assessed.
+
+**Acceptance evidence:** Each receiving ticket records source-specific behavior, affected callers,
+state/event ownership, mandatory safeguards, measurable acceptance and rollback gates. Compatibility
+fixtures cover interactions with migrated policy-search, including policy events; no blanket
+business-rule redesign or automatic migration of every service follows from this entry.
+
+#### issue-215-N07 Evidence-based persistence evolution
+
+**Requirement:** Evaluate PostgreSQL ownership changes or an alternative relational search
+projection only for a demonstrated operational or product need. Compare the existing Elasticsearch
+design with bounded alternatives using representative data and queries before proposing a storage
+change.
+
+**Why deferred:** Policy-search currently owns a derived Elasticsearch view, not the authoritative
+policy database. Introducing a relational store or transferring PostgreSQL ownership has no
+established need in issue 215.
+
+**Reconsider when:** Measured cost, recovery, query limitations or a separately accepted service
+migration creates a concrete persistence requirement.
+
+**Acceptance evidence:** A decision record compares query semantics, relevance, latency, freshness,
+recovery and operating cost against the existing store. Any selected change has an identified
+schema/data owner, migration and consistency strategy, least-privilege access, representative parity
+tests and a reversible handoff; an inconclusive comparison does not authorize replacement.
+
+#### issue-215-N08 Bounded search caching
+
+**Requirement:** Add a bounded cache for approved search operations only when it reduces measured
+load or latency. Define freshness/TTL, invalidation after registration and termination, capacity
+limits, bypass behavior and cache-key isolation appropriate to the accepted access model.
+
+**Why deferred:** Caching creates an additional stale-state and data-isolation boundary without
+evidence that the existing bounded query path needs it.
+
+**Reconsider when:** Representative workloads miss accepted latency or capacity objectives and
+profiling identifies repeated cacheable queries as a material cause.
+
+**Acceptance evidence:** Before/after measurements demonstrate the benefit. Tests cover termination
+visibility, expiration/invalidation, concurrent updates, eviction, cold starts, backend failure and
+bypass without treating cached success as proof of fresh indexing. Keys/results respect any future
+ownership policy and avoid sensitive telemetry.
+
+#### issue-215-N09 Phase 5 identity and edge modernization
+
+**Requirement:** Assess and separately adopt the Phase 5 identity provider, edge translation and
+service-mesh/workload-trust changes where selected by that phase. Give each transition explicit
+user/workload identity, route, credential and mixed Java/Go compatibility contracts.
+
+**Why deferred:** Issue 215 retains the Java gateway and accepted search access behavior. Platform
+replacement is a separate migration; current authentication, verified trust and internal exposure
+controls remain mandatory.
+
+**Reconsider when:** Phase 5 owners approve a concrete identity, gateway or mesh adoption scope and
+its interoperability prerequisites are available.
+
+**Acceptance evidence:** Positive/negative identity and direct-backend tests, credential lifecycle
+and mixed-peer trust tests, HTTP/gRPC mapping parity and independently rehearsed rollback qualify
+each selected transition. Coordinate with issue-215-N04 if per-agent authorization is selected;
+workload identity alone does not establish policy ownership.
+
+#### issue-215-N10 Compatibility-driven platform and dependency upgrades
+
+**Requirement:** Plan justified Elasticsearch, Kafka, shared runtime/library and tool upgrades
+separately from search migration, with an explicit compatibility matrix and affected-consumer scope.
+Select releases for a documented support, security or capability need rather than upgrading
+unrelated dependencies opportunistically.
+
+**Why deferred:** Unrelated version churn obscures migration evidence. Selecting compatible, secure
+initial pins and satisfying required vulnerability checks are already mandatory.
+
+**Reconsider when:** Support policy, an advisory, incompatibility or an accepted capability
+requirement calls for an upgrade.
+
+**Acceptance evidence:** Exact version and dependency identities, relevant advisory assessment and
+all affected query/event/runtime/consumer gates pass. Platform data/configuration compatibility and
+rollback or supported forward recovery are demonstrated. If an upgrade is required for safe
+delivery, promote it to a mandatory prerequisite instead of leaving it deferred.
+
+#### issue-215-N11 Durable policy event publication
+
+**Requirement:** Strengthen policy-service publication with a transactional outbox or another
+explicitly justified durable publication mechanism when the desired guarantee exceeds the accepted
+producer baseline. Define publication atomicity, relay ownership, event identity/order, retries,
+deduplication and reconciliation while retaining Java/Go consumer compatibility.
+
+**Why deferred:** The policy producer belongs to another service. Search consumer retries cannot
+repair events that were never published, but a producer redesign is not automatically required when
+accepted recovery objectives are already met.
+
+**Reconsider when:** Baseline analysis finds an unacceptable DB-to-broker loss window, or a later
+requirement demands stronger publication guarantees.
+
+**Acceptance evidence:** Fault injection covers process crashes before/after DB commit, broker
+failure, ambiguous sends, relay restart and duplicate delivery; every committed eligible policy
+change eventually reaches the required consumers under the accepted guarantee. The design records
+schema/relay ownership and rollout/rollback. If issue 215's accepted recovery objectives require
+this, it becomes a separately scoped mandatory dependency before ownership transfer.
+
+#### issue-215-N12 Additional guarded search administration automation
+
+**Requirement:** Add operator conveniences beyond the mandatory migration runbooks: previewable
+index maintenance, controlled replay/offset administration, and reusable deployment or
+route-transition orchestration where repeated operations justify them. Give each operation explicit
+targets, permissions, resource ownership, preconditions and recovery behavior.
+
+**Why deferred:** Baseline index provisioning, complete rebuild/replay, deployment, cutover and
+rollback remain covered by M08–M15/C05/C07/C08. This entry covers only additional reusable
+automation; it does not defer those capabilities or make destructive actions a feature by
+themselves.
+
+**Reconsider when:** Repeated maintenance or release operations expose a concrete automation gap
+after the required migration procedures work.
+
+**Acceptance evidence:** Disposable tests prove target guards, a non-mutating preview, least
+privilege, interruption/partial-failure recovery and preservation of unrelated indices/groups. Any
+deletion or offset change requires a reviewed recovery/retention contract. Live execution still
+needs its own scope and authorization; an optional tool or ledger entry grants neither.
+
+#### issue-215-N13 Java policy-search retirement
+
+**Disposition:** Scheduled. On 2026-10-30 the user explicitly included Java policy-search
+retirement in issue 215. The parent specification promotes this item to mandatory M17 and child
+[#236](https://github.com/igor-baiborodine/insurance-hub/issues/236) (C09), after separately gated
+cutover child [#235](https://github.com/igor-baiborodine/insurance-hub/issues/235) (C08). No
+retirement has been executed or verified.
+This entry retains its original ID as promotion history and is no longer deferred optional work.
+
+**Requirement:** Retire the legacy policy-search workload and obsolete service-specific
+configuration only after Go cutover and the accepted rollback window close. Inventory remaining
+callers, consumer groups, routes, secrets and retained index/history requirements; distinguish
+stopping a workload from destructive resource/data cleanup.
+
+**Why originally deferred:** Java remains a rollback option during qualification and cutover;
+accepting C08 alone did not select retirement. The user's subsequent instruction explicitly
+includes retirement within issue 215.
+
+**Execution gate:** Go meets the agreed cutover observation/rollback criteria, the rollback
+window closes, and the service/release owner verifies the retirement resource inventory and
+recovery/retention responsibilities. Scope selection does not authorize live deletion or cleanup.
+
+**Acceptance evidence:** Fresh inventory proves no required Java callers or active legacy consumers
+remain. Go-only query/event operation and restart/recovery pass; retention/archive/restore
+responsibilities and the final recovery path are accepted. Remove only approved resources,
+preserving shared topics, indices, secrets and other services' dependencies.
 
 ## Ad hoc repository improvements
 
