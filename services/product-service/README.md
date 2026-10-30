@@ -3,6 +3,7 @@
 
 - [Product catalog read service](#product-catalog-read-service)
   - [Reusable foundation parity](#reusable-foundation-parity)
+    - [ServiceKit upgrades and reversion](#servicekit-upgrades-and-reversion)
   - [Runtime contracts and boundaries](#runtime-contracts-and-boundaries)
     - [Interim security validation](#interim-security-validation)
   - [Product catalog architecture](#product-catalog-architecture)
@@ -283,11 +284,21 @@ parameter is rejected.
 | `OTEL_ENABLED`                | `false`           | Boolean; disabled mode requires no collector.                                                                           |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset             | HTTP(S) OTLP/gRPC URL, required only when telemetry is enabled.                                                         |
 | `OTEL_EXPORTER_OTLP_TIMEOUT`  | `2s`              | Positive; no greater than `SHUTDOWN_TIMEOUT`.                                                                           |
-| `DEPLOYMENT_ENVIRONMENT`      | `development`     | Enabled telemetry requires `qa` or `test`; normal local development remains disabled.                                   |
-| `SERVICE_VERSION`             | `development`     | QA requires an immutable `sha-<git-sha>`; disposable tests require `test-<revision>`.                                  |
-| `SERVICE_INSTANCE_ID`         | local process ID  | QA requires the Pod UID from the Downward API; enabled tests generate a UUIDv4 when unset.                              |
+| `DEPLOYMENT_ENVIRONMENT`      | `development`     | Enabled telemetry accepts `test` or a valid release environment such as `qa`, `staging`, `preprod` or `preview-42`; development remains disabled. |
+| `SERVICE_VERSION`             | `development`     | Release environments require `sha-` followed by 7–40 lowercase hexadecimal characters; disposable tests require `test-<revision>`. |
+| `SERVICE_INSTANCE_ID`         | local process ID  | Release environments require a UUID-shaped Pod UID; tests generate a UUIDv4 and reject a supplied instance. |
 
 Enabled telemetry fixes `SERVICE_NAME=product-service` and `OTEL_EXPORTER_OTLP_TIMEOUT=2s`.
+Product opts into ServiceKit's [deployment identity policy](../../libs/servicekit/identity/deployment.go)
+both during configuration loading and telemetry construction. Environment names contain 1–63
+lowercase ASCII letters, digits or hyphens, start with a letter, and end with a letter or digit.
+Every valid name other than `development` and `test` uses the release identity rule, whether
+telemetry is enabled or disabled; new release names need no registration. The UUID-shaped instance
+has 36 hexadecimal-and-dash characters in the standard positions, without a version/variant check;
+Kubernetes supplies it through the Pod UID Downward API. Development requires version `development`
+and a `local-` instance. Test versions match `^test-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.
+Invalid identities produce safe setting/reason diagnostics without echoing rejected values.
+
 The application supplies the six approved non-Kubernetes identity fields on trace and metric
 resources and on validated service logs. Alloy adds Kubernetes identity later. QA telemetry and
 its version/Pod UID wiring remain disabled until the separate QA activation step. The provider
@@ -326,28 +337,60 @@ after partial startup or process shutdown.
 
 ## Reusable foundation parity
 
-Product and the [Go scaffold](../../templates/go-service/README.md) independently own their
-runtime code. Changes to either foundation should review the other against this inventory;
-the scaffold's `check-foundations` target detects common version drift only. There is no runtime
-import between modules. Bare `make` prints help; tool installation requires explicit
-`make bootstrap-tools`.
+Product and the [Go scaffold](../../templates/go-service/README.md) consume the public
+[ServiceKit module](../../libs/servicekit/README.md) for shared configuration, identity, logging,
+health and telemetry mechanics. Product pins
+`github.com/igor-baiborodine/insurance-hub/libs/servicekit v0.2.1` in [go.mod](go.mod), with
+checksums in [go.sum](go.sum) and the matching `SERVICEKIT_VERSION` in [Makefile](Makefile).
+Normal builds resolve that published version with `GOWORK=off`, without a local replacement or
+a sibling checkout. Library versions are independent of Product image versions.
+
+Each consumer owns its configuration policy, transport behavior and resource composition; neither
+imports the other's private implementation. The inventory below distinguishes shared mechanics
+from Product policy and consumer-owned transport/lifecycle code. Bare `make` prints help; tool
+installation requires explicit `make bootstrap-tools`.
 
 | Boundary | Aligned behavior | Intentional Product adaptation |
 | --- | --- | --- |
-| [Config](internal/config/config.go) and [startup](cmd/server/main.go) | Typed validator-owned `setting`/`reason` diagnostics; raw errors and arbitrary wrappers remain redacted; unknown errors use constant fallback fields. | Three listeners, database URL/pool validation and linked timeout budgets; QA SHA/Pod UID and generated test UUID identity; enabled exporter timeout stays 2s. |
+| [Config](internal/config/config.go) and [startup](cmd/server/main.go) | ServiceKit value groups, parsing/host predicates and safe diagnostics; opt-in deployment identity validation. | Ordered loading, three listeners, database URL/pool validation and linked timeout budgets; release SHA/Pod UID and generated test UUID identity; enabled exporter timeout stays 2s. |
 | [Logger](internal/logger/logger.go) | UTC JSON, six-field identity, trace correlation, recursive redaction and completion records independent of diagnostic threshold. | Product completion message and service identity. |
 | [Health](internal/health/health.go) | Bounded dependency probes recheck cancellation and lifecycle readiness after success; withdrawal during a probe returns 503; liveness stays independent. | PostgreSQL read-access probe supplied by composition. |
 | [gRPC](internal/grpc/server.go) | Known methods begin observation before decoding and finish once at the final stats event. All 17 canonical status names remain distinct; invalid codes normalize to UNKNOWN. Pre-handler rejection and send-size failure appear in completion logs and metrics. Unknown methods do not create Product observations or arbitrary method labels. | ListProducts/GetProduct contracts, Product validation/mapping and bounded list/get operation labels. |
 | [Request telemetry](internal/telemetry/request.go) | Final status, bounded outcome labels, request counter/duration and safe completion logging. | Product metric names, application child spans, HTTP status handling, and domain outcomes including `not_found`, `storage_unavailable` and `invalid_data`. |
-| [Providers](internal/telemetry/telemetry.go), [runtime metrics](internal/telemetry/runtime.go) and [diagnostics](internal/telemetry/diagnostics.go) | Cumulative OTLP metrics, process runtime instruments, safe exporter diagnostics and bounded cleanup including partial startup. | HTTP W3C/B3 compatibility, gRPC W3C-only propagation, database histogram views and fixed 2s export/retry budgets. |
+| [Provider adapter](internal/telemetry/telemetry.go), shared [runtime metrics](../../libs/servicekit/telemetry/runtime.go) and [diagnostics](../../libs/servicekit/telemetry/diagnostics.go) | ServiceKit owns cumulative OTLP providers, runtime instruments, safe SDK diagnostics and bounded provider cleanup including partial startup. | Runtime scope `insurance-hub/product/runtime`, HTTP W3C/B3 compatibility, gRPC W3C-only propagation, request/database histogram views and fixed 2s export/retry budgets. |
 | [Lifecycle](internal/service/service.go) | Composition owns resource acquisition, readiness withdrawal, drain and cleanup. | Product startup/read-access verification, singleton pool, three listeners, parallel drains and two-second forced-cleanup reserve. |
 | [Make](Makefile) | Help is the non-mutating default; shared pins and explicit setup/check commands retain their owners. | SQL generation, migration/seed executables, PostgreSQL integration and Product deployment targets. |
 
 The config/startup, health and gRPC regression tests exercise these shared invariants. Real gRPC
 cases cover unsupported compression, malformed protobuf, receive/send limits and preserved Product
 domain outcomes. Existing HTTP/Brave continuity, identity, database and lifecycle suites cover the
-service adaptations. Future alignment should preserve these contracts rather than replace Product
-files wholesale with scaffold files.
+service adaptations. Shared changes must preserve both consumers' contracts while Product keeps
+its request classifications, business metrics and database behavior local.
+
+### ServiceKit upgrades and reversion
+
+Before an upgrade, verify the exact `libs/servicekit/vX.Y.Z` tag, source SHA, successful
+[library release workflow](../../.github/workflows/go-release-lib.yml), and public proxy/checksum
+resolution as described in the [library release contract](../../libs/servicekit/README.md#release).
+A tag alone does not establish a successful release. During v0, patch releases preserve API and
+documented behavior; breaking minor releases require migration notes and explicit consumer review.
+
+Change Product's `SERVICEKIT_VERSION` to the selected exact version, then run
+`make -C services/product-service update-deps` and review the complete `go.mod`/`go.sum` diff.
+That target resolves all Product dependency pins, so check for unrelated changes. Include any
+required Product adapter/configuration changes in the same consumer PR. Run
+`make -C services/product-service check-servicekit`, `check-go-pr FORMAT_SCOPE=all`,
+`test-telemetry-continuity`, `image-check` and `check-docs` through that same module owner, then
+complete the [shared validation workflow](../../.github/workflows/go-pr-shared.yml).
+The identity policy extension above is configuration support, not authorization to enable QA
+telemetry or change deployed traffic.
+
+For a later upgrade rollback, restore the previously validated Product pin, matching checksums,
+Make pin and any affected adapter/configuration changes together, then rerun those checks.
+`v0.2.1` is this adoption's baseline; `v0.2.0` lacks the final runtime-metric export fix and is
+not a pin-only rollback target for the adopted Product code. Reversing this first adoption instead
+requires restoring Product's pre-extraction implementations and removing its active-consumer
+registration together. Do not move a published library tag or change another consumer's pin.
 
 ## Runtime contracts and boundaries
 
@@ -479,8 +522,9 @@ The concrete package and file responsibilities are:
 | [`internal/http`](internal/http) | Owns direct URI behavior, legacy-compatible DTO/presence/decimal mapping, JSON responses, and HTTP error mapping. |
 | [`internal/grpc`](internal/grpc) | Owns generated-service registration, validation, domain-to-protobuf mapping, limits, tracing hooks, and status mapping. |
 | [`internal/config`](internal/config) | Parses and validates the bounded runtime settings and holds the database URL in a redacting type. |
-| [`internal/health`](internal/health) | Owns process liveness and bounded dependency-aware readiness. |
-| [`internal/logger`](internal/logger) / [`internal/telemetry`](internal/telemetry) | Own structured redaction/identity/context, the optional bounded trace and metric provider lifecycle, shared request classification/accounting, and Go runtime instruments. |
+| [`internal/health`](internal/health) | Exposes ServiceKit's liveness/readiness primitives; Product composition supplies its database probe, readiness transitions and management listener. |
+| [`internal/logger`](internal/logger) / [`internal/telemetry`](internal/telemetry) | Adapt ServiceKit logging/providers to Product identity, propagation, histogram views and runtime scope; retain Product request classification/accounting and completion behavior. |
+| [`libs/servicekit`](../../libs/servicekit/README.md) at `v0.2.1` | Owns reusable config/identity helpers, structured redaction and trace correlation, health primitives, OTLP provider lifecycle, runtime metrics and SDK diagnostics. Product composition owns installation and cleanup. |
 | [`api/product/v1`](api/product/v1) / [`gen/product/v1`](gen/product/v1) | Own the versioned protobuf source and generated Go boundary. |
 
 For a get-product request:
