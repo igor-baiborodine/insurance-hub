@@ -233,6 +233,118 @@
         "integration": "Scaffold has no external database or integration target beyond its owned copy proof.",
         "image": "Scaffold publishes no service image; the renamed-copy proof covers normal build."
       }
+    },
+    {
+      "module": "github.com/igor-baiborodine/insurance-hub/services/product-service",
+      "directory": "services/product-service",
+      "owner": "Product service maintainers",
+      "status": "active",
+      "required_dependency": "github.com/igor-baiborodine/insurance-hub/libs/servicekit",
+      "workflows": [
+        {
+          "path": ".github/workflows/go-pr-mod.yml",
+          "job": "validate"
+        },
+        {
+          "path": ".github/workflows/go-pr-shared.yml",
+          "job": "validate"
+        }
+      ],
+      "candidate_phases": [
+        "format",
+        "lint",
+        "unit",
+        "race",
+        "build",
+        "dependency",
+        "vulnerability",
+        "generated",
+        "breaking",
+        "integration",
+        "image"
+      ],
+      "phase_bindings": {
+        "format": {
+          "target": "shared-candidate-format",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "lint": {
+          "target": "shared-candidate-lint",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "unit": {
+          "target": "shared-fast-unit",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "race": {
+          "target": "shared-candidate-race",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "build": {
+          "target": "shared-fast-build",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "dependency": {
+          "target": "shared-candidate-dependency",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "vulnerability": {
+          "target": "shared-candidate-vulnerability",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "generated": {
+          "target": "shared-candidate-generated",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "breaking": {
+          "target": "shared-candidate-breaking",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "integration": {
+          "target": "shared-candidate-integration",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "image": {
+          "target": "shared-candidate-image",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        }
+      },
+      "applicability": {
+        "copy": "Product is an independently built service, not a reusable source scaffold."
+      }
     }
   ]
 }

@@ -34,6 +34,31 @@ def _python_executable(root: Path) -> str:
     return str(Path(os.environ.get("PYTHON", root / ".venv/bin/python")).absolute())
 
 
+def _checkout(root: Path, head: str, destination: Path, budget: Budget) -> None:
+    """Keep verified archive bytes with an independent, exact-head Git identity."""
+    extract(root, head, destination)
+    # Image owners verify HEAD and its commit time. Fetch into a private Git database,
+    # never borrow the caller's index/worktree or replace the verified archive bytes.
+    for arguments in (
+        ["init", "--quiet", "--template="],
+        ["fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--depth=1", str(root), head],
+        ["reset", "--quiet", "--mixed", head],
+    ):
+        budget.run(
+            ["git", "-c", "core.hooksPath=/dev/null", *arguments],
+            destination,
+            "prepare isolated Git identity",
+            limit=60,
+        )
+    observed = budget.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        destination,
+        "verify isolated Git identity",
+        limit=60,
+    )
+    require(observed.strip() == head, "isolated checkout has the wrong commit identity")
+
+
 def locks(root: Path, prefix: str = "go") -> dict[str, str]:
     return {suffix: digest((root / f"{prefix}.{suffix}").read_bytes()) for suffix in ("mod", "sum")}
 
@@ -225,7 +250,7 @@ def validate(
         with tempfile.TemporaryDirectory(prefix="servicekit-run-") as temporary:
             scratch = Path(temporary)
             checkout = scratch / "checkout"
-            extract(root, expected["head"], checkout)
+            _checkout(root, expected["head"], checkout, budget)
             target = checkout / module
             env = environment(PYTHON=_python_executable(root))
             arguments = [

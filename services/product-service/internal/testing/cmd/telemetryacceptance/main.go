@@ -146,7 +146,7 @@ func runServer(arguments []string) (runErr error) {
 		done <- service.Run(
 			serviceCtx,
 			settings,
-			logger.NewIdentity(os.Stdout, settings.Telemetry.Identity, settings.LogLevel),
+			logger.NewIdentity(os.Stdout, settings.Identity, settings.LogLevel),
 		)
 	}()
 	if err := waitReady(selected, done); err != nil {

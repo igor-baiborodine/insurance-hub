@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	kithealth "github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
 	"github.com/jackc/pgx/v5/pgxpool"
 	grpcgo "google.golang.org/grpc"
 
@@ -25,9 +26,7 @@ import (
 )
 
 const (
-	managementReadHeaderTimeout = 5 * time.Second
-	managementIdleTimeout       = 30 * time.Second
-	forcedCleanupReserve        = 2 * time.Second
+	forcedCleanupReserve = 2 * time.Second
 )
 
 // Run constructs the Product service, verifies its dependencies, serves all listeners, and owns
@@ -143,8 +142,8 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 		provider.GRPCPropagator(),
 		productgrpc.Settings{
 			RequestTimeout:  settings.RequestTimeout,
-			MaxReceiveBytes: settings.GRPC.MaxReceiveBytes,
-			MaxSendBytes:    settings.GRPC.MaxSendBytes,
+			MaxReceiveBytes: settings.MaxReceiveBytes,
+			MaxSendBytes:    settings.MaxSendBytes,
 			Observer:        observer,
 		},
 		list,
@@ -167,16 +166,12 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 
 	resources.httpServer = &http.Server{
 		Handler:           httpHandler,
-		ReadHeaderTimeout: settings.HTTPServer.ReadHeaderTimeout,
-		ReadTimeout:       settings.HTTPServer.ReadTimeout,
-		WriteTimeout:      settings.HTTPServer.WriteTimeout,
-		IdleTimeout:       settings.HTTPServer.IdleTimeout,
+		ReadHeaderTimeout: settings.ReadHeaderTimeout,
+		ReadTimeout:       settings.ReadTimeout,
+		WriteTimeout:      settings.WriteTimeout,
+		IdleTimeout:       settings.IdleTimeout,
 	}
-	resources.managementServer = &http.Server{
-		Handler:           health.NewHandler(healthState),
-		ReadHeaderTimeout: managementReadHeaderTimeout,
-		IdleTimeout:       managementIdleTimeout,
-	}
+	resources.managementServer = kithealth.NewManagementServer(healthState)
 
 	resources.httpListener, err = net.Listen("tcp", settings.HTTPAddress.String())
 	if err != nil {

@@ -9,86 +9,66 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
+	kitidentity "github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
 )
 
 // DefaultServiceName identifies startup diagnostics until configuration has been validated.
 const DefaultServiceName = "product-service"
 
 const (
-	serviceNameSetting           = "SERVICE_NAME"
+	serviceNameSetting           = kitconfig.EnvServiceName
 	httpAddressSetting           = "HTTP_ADDR"
-	grpcAddressSetting           = "GRPC_ADDR"
-	healthAddressSetting         = "HEALTH_ADDR"
+	grpcAddressSetting           = kitconfig.EnvGRPCAddress
+	healthAddressSetting         = kitconfig.EnvHealthAddress
 	databaseURLSetting           = "PRODUCT_DATABASE_URL"
 	databaseMaxConnsSetting      = "DB_MAX_CONNS"
 	databaseConnectSetting       = "DB_CONNECT_TIMEOUT"
 	databaseAcquireSetting       = "DB_ACQUIRE_TIMEOUT"
 	databaseQuerySetting         = "DB_QUERY_TIMEOUT"
 	startupTimeoutSetting        = "STARTUP_TIMEOUT"
-	requestTimeoutSetting        = "REQUEST_TIMEOUT"
-	probeTimeoutSetting          = "PROBE_TIMEOUT"
-	httpReadHeaderTimeoutSetting = "HTTP_READ_HEADER_TIMEOUT"
-	httpReadTimeoutSetting       = "HTTP_READ_TIMEOUT"
-	httpWriteTimeoutSetting      = "HTTP_WRITE_TIMEOUT"
-	httpIdleTimeoutSetting       = "HTTP_IDLE_TIMEOUT"
-	grpcMaxReceiveBytesSetting   = "GRPC_MAX_RECV_BYTES"
-	grpcMaxSendBytesSetting      = "GRPC_MAX_SEND_BYTES"
-	shutdownTimeoutSetting       = "SHUTDOWN_TIMEOUT"
-	logLevelSetting              = "LOG_LEVEL"
-	otelEnabledSetting           = "OTEL_ENABLED"
-	otelEndpointSetting          = "OTEL_EXPORTER_OTLP_ENDPOINT"
-	otelTimeoutSetting           = "OTEL_EXPORTER_OTLP_TIMEOUT"
-	environmentSetting           = "DEPLOYMENT_ENVIRONMENT"
-	serviceVersionSetting        = "SERVICE_VERSION"
-	serviceInstanceSetting       = "SERVICE_INSTANCE_ID"
-)
-
-var (
-	qaVersionPattern   = regexp.MustCompile(`^sha-[0-9a-f]{7,40}$`)
-	testVersionPattern = regexp.MustCompile(`^test-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	requestTimeoutSetting        = kitconfig.EnvRequestTimeout
+	probeTimeoutSetting          = kitconfig.EnvProbeTimeout
+	httpReadHeaderTimeoutSetting = kitconfig.EnvHTTPReadHeaderTimeout
+	httpReadTimeoutSetting       = kitconfig.EnvHTTPReadTimeout
+	httpWriteTimeoutSetting      = kitconfig.EnvHTTPWriteTimeout
+	httpIdleTimeoutSetting       = kitconfig.EnvHTTPIdleTimeout
+	grpcMaxReceiveBytesSetting   = kitconfig.EnvGRPCMaxReceiveBytes
+	grpcMaxSendBytesSetting      = kitconfig.EnvGRPCMaxSendBytes
+	shutdownTimeoutSetting       = kitconfig.EnvShutdownTimeout
+	logLevelSetting              = kitconfig.EnvLogLevel
+	otelEnabledSetting           = kitconfig.EnvOTELEnabled
+	otelEndpointSetting          = kitconfig.EnvOTELExporterOTLPEndpoint
+	otelTimeoutSetting           = kitconfig.EnvOTELExporterOTLPTimeout
+	environmentSetting           = kitconfig.EnvDeploymentEnvironment
+	serviceVersionSetting        = kitconfig.EnvServiceVersion
+	serviceInstanceSetting       = kitconfig.EnvServiceInstanceID
 )
 
 // Config contains the immutable settings parsed and validated during process startup.
 type Config struct {
-	ServiceName     string
-	HTTPAddress     Address
-	GRPCAddress     Address
-	HealthAddress   Address
-	Database        Database
-	StartupTimeout  time.Duration
-	RequestTimeout  time.Duration
-	ProbeTimeout    time.Duration
-	HTTPServer      HTTPServer
-	GRPC            GRPC
-	ShutdownTimeout time.Duration
-	LogLevel        slog.Level
-	Telemetry       Telemetry
+	kitconfig.Runtime
+	ServiceName    string
+	HTTPAddress    Address
+	GRPCAddress    Address
+	HealthAddress  Address
+	Database       Database
+	StartupTimeout time.Duration
+	kitconfig.HTTPServer
+	kitconfig.GRPC
+	kitconfig.Telemetry
 }
 
 // Identity is the application-owned resource and log identity. Kubernetes fields are added by Alloy.
-type Identity struct {
-	ServiceNamespace string
-	ServiceName      string
-	ServiceVersion   string
-	ServiceInstance  string
-	Environment      string
-	Implementation   string
-}
+type Identity = kitidentity.Identity
 
 // DevelopmentIdentity labels startup diagnostics before configuration is validated.
 func DevelopmentIdentity(serviceName string) Identity {
-	return Identity{
-		ServiceNamespace: "insurance-hub",
-		ServiceName:      serviceName,
-		ServiceVersion:   "development",
-		ServiceInstance:  fmt.Sprintf("local-%d", os.Getpid()),
-		Environment:      "development",
-		Implementation:   "go",
-	}
+	return kitidentity.DevelopmentIdentity(serviceName, os.Getpid())
 }
 
 // Address is a validated TCP listen address with a host and numeric port.
@@ -129,33 +109,20 @@ func (DatabaseURL) GoString() string {
 }
 
 // HTTPServer contains business HTTP server time bounds.
-type HTTPServer struct {
-	ReadHeaderTimeout time.Duration
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
-}
+type HTTPServer = kitconfig.HTTPServer
 
 // GRPC contains business gRPC message-size bounds.
-type GRPC struct {
-	MaxReceiveBytes int
-	MaxSendBytes    int
-}
+type GRPC = kitconfig.GRPC
 
 // Telemetry contains the optional OTLP trace and metric export configuration.
-type Telemetry struct {
-	Enabled          bool
-	ExporterEndpoint *url.URL
-	ExporterTimeout  time.Duration
-	Identity         Identity
-}
+type Telemetry = kitconfig.Telemetry
 
 // Load reads configuration from the process environment.
 func Load() (Config, error) {
 	return load(os.LookupEnv)
 }
 
-type lookupEnv func(string) (string, bool)
+type lookupEnv = kitconfig.Lookup
 
 func load(lookup lookupEnv) (Config, error) {
 	serviceName, err := valueOrDefault(lookup, serviceNameSetting, DefaultServiceName)
@@ -233,44 +200,12 @@ func load(lookup lookupEnv) (Config, error) {
 		return Config{}, err
 	}
 
-	httpReadHeaderTimeout, err := loadPositiveDuration(
-		lookup,
-		httpReadHeaderTimeoutSetting,
-		"5s",
-	)
-	if err != nil {
-		return Config{}, err
-	}
-	httpReadTimeout, err := loadPositiveDuration(lookup, httpReadTimeoutSetting, "10s")
-	if err != nil {
-		return Config{}, err
-	}
-	httpWriteTimeout, err := loadPositiveDuration(lookup, httpWriteTimeoutSetting, "10s")
-	if err != nil {
-		return Config{}, err
-	}
-	httpIdleTimeout, err := loadPositiveDuration(lookup, httpIdleTimeoutSetting, "30s")
+	httpServer, err := kitconfig.LoadHTTPServer(lookup)
 	if err != nil {
 		return Config{}, err
 	}
 
-	grpcMaxReceiveBytes, err := loadBoundedInt(
-		lookup,
-		grpcMaxReceiveBytesSetting,
-		"1048576",
-		1,
-		16777216,
-	)
-	if err != nil {
-		return Config{}, err
-	}
-	grpcMaxSendBytes, err := loadBoundedInt(
-		lookup,
-		grpcMaxSendBytesSetting,
-		"8388608",
-		1,
-		67108864,
-	)
+	grpc, err := kitconfig.LoadGRPC(lookup)
 	if err != nil {
 		return Config{}, err
 	}
@@ -295,11 +230,17 @@ func load(lookup lookupEnv) (Config, error) {
 		startup:         startupTimeout,
 		request:         requestTimeout,
 		probe:           probeTimeout,
-		httpReadHeader:  httpReadHeaderTimeout,
-		httpRead:        httpReadTimeout,
-		httpWrite:       httpWriteTimeout,
+		httpReadHeader:  httpServer.ReadHeaderTimeout,
+		httpRead:        httpServer.ReadTimeout,
+		httpWrite:       httpServer.WriteTimeout,
 		shutdown:        shutdownTimeout,
 		otelExporter:    telemetrySettings.ExporterTimeout,
+	}); err != nil {
+		return Config{}, err
+	}
+	if err := kitconfig.ValidateRuntime(kitconfig.Runtime{
+		RequestTimeout: requestTimeout, ProbeTimeout: probeTimeout,
+		ShutdownTimeout: shutdownTimeout, LogLevel: logLevel,
 	}); err != nil {
 		return Config{}, err
 	}
@@ -310,8 +251,12 @@ func load(lookup lookupEnv) (Config, error) {
 		GRPCAddress:    grpcAddress,
 		HealthAddress:  healthAddress,
 		StartupTimeout: startupTimeout,
-		RequestTimeout: requestTimeout,
-		ProbeTimeout:   probeTimeout,
+		Runtime: kitconfig.Runtime{
+			RequestTimeout:  requestTimeout,
+			ProbeTimeout:    probeTimeout,
+			ShutdownTimeout: shutdownTimeout,
+			LogLevel:        logLevel,
+		},
 		Database: Database{
 			URL:            databaseURL,
 			MaxConnections: int32(databaseMaxConnections),
@@ -319,19 +264,9 @@ func load(lookup lookupEnv) (Config, error) {
 			AcquireTimeout: databaseAcquireTimeout,
 			QueryTimeout:   databaseQueryTimeout,
 		},
-		HTTPServer: HTTPServer{
-			ReadHeaderTimeout: httpReadHeaderTimeout,
-			ReadTimeout:       httpReadTimeout,
-			WriteTimeout:      httpWriteTimeout,
-			IdleTimeout:       httpIdleTimeout,
-		},
-		GRPC: GRPC{
-			MaxReceiveBytes: grpcMaxReceiveBytes,
-			MaxSendBytes:    grpcMaxSendBytes,
-		},
-		ShutdownTimeout: shutdownTimeout,
-		LogLevel:        logLevel,
-		Telemetry:       telemetrySettings,
+		HTTPServer: httpServer,
+		GRPC:       grpc,
+		Telemetry:  telemetrySettings,
 	}, nil
 }
 
@@ -356,7 +291,7 @@ func loadAddress(lookup lookupEnv, name, fallback string) (Address, error) {
 
 func parseAddress(name, value string) (Address, error) {
 	host, port, err := net.SplitHostPort(value)
-	if err != nil || !validHost(host) || port == "" {
+	if err != nil || !kitconfig.ValidHost(host) || port == "" {
 		return Address{}, invalid(name, "must include a valid host and numeric port")
 	}
 	portNumber, err := strconv.ParseUint(port, 10, 16)
@@ -392,7 +327,7 @@ func loadDatabaseURL(lookup lookupEnv) (DatabaseURL, error) {
 	}
 	parsed, err := url.Parse(value)
 	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") ||
-		!validHost(parsed.Hostname()) || parsed.User == nil ||
+		!kitconfig.ValidHost(parsed.Hostname()) || parsed.User == nil ||
 		strings.TrimSpace(parsed.User.Username()) == "" || parsed.Fragment != "" ||
 		parsed.Path == "" || parsed.Path == "/" {
 		return DatabaseURL{}, invalid(databaseURLSetting, "must be a PostgreSQL URL")
@@ -488,12 +423,16 @@ func loadTelemetry(lookup lookupEnv, serviceName string) (Telemetry, error) {
 	if err != nil {
 		return Telemetry{}, err
 	}
-	return Telemetry{
+	settings := Telemetry{
 		Enabled:          enabled,
 		ExporterEndpoint: endpoint,
 		ExporterTimeout:  timeout,
 		Identity:         identity,
-	}, nil
+	}
+	if err := kitconfig.ValidateTelemetry(settings); err != nil {
+		return Telemetry{}, err
+	}
+	return settings, nil
 }
 
 func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity, error) {
@@ -535,75 +474,14 @@ func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity,
 		Environment:      environment,
 		Implementation:   "go",
 	}
-	if err := identity.Validate(enabled); err != nil {
+	if err := kitidentity.ValidateDeployment(
+		identity,
+		DefaultServiceName,
+		enabled,
+	); err != nil {
 		return Identity{}, err
 	}
 	return identity, nil
-}
-
-// Validate rejects an incomplete or conflicting telemetry identity without echoing its values.
-func (identity Identity) Validate(enabled bool) error {
-	if identity.ServiceNamespace != "insurance-hub" || identity.Implementation != "go" {
-		return invalid(
-			"telemetry identity",
-			"must use the Product namespace and Go implementation",
-		)
-	}
-	if identity.ServiceName == "" ||
-		strings.TrimSpace(identity.ServiceName) != identity.ServiceName {
-		return invalid(serviceNameSetting, "must not be blank or padded")
-	}
-	if enabled && identity.ServiceName != DefaultServiceName {
-		return invalid(
-			serviceNameSetting,
-			"must be product-service when telemetry is enabled",
-		)
-	}
-	switch identity.Environment {
-	case "qa":
-		if !qaVersionPattern.MatchString(identity.ServiceVersion) {
-			return invalid(
-				serviceVersionSetting,
-				"must be an immutable sha version in QA",
-			)
-		}
-		if !validUUID(identity.ServiceInstance) {
-			return invalid(serviceInstanceSetting, "must be a Pod UID in QA")
-		}
-	case "test":
-		if !testVersionPattern.MatchString(identity.ServiceVersion) {
-			return invalid(serviceVersionSetting, "must be a test revision")
-		}
-		if !validUUID(identity.ServiceInstance) {
-			return invalid(serviceInstanceSetting, "must be a UUID in test mode")
-		}
-	case "development":
-		if enabled {
-			return invalid(
-				environmentSetting,
-				"must be qa or test when telemetry is enabled",
-			)
-		}
-		if identity.ServiceVersion != "development" ||
-			!strings.HasPrefix(identity.ServiceInstance, "local-") {
-			return invalid(
-				"telemetry identity",
-				"must use development identity when disabled locally",
-			)
-		}
-	default:
-		return invalid(environmentSetting, "must be qa, test, or disabled development")
-	}
-	return nil
-}
-
-func validUUID(value string) bool {
-	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' ||
-		value[23] != '-' {
-		return false
-	}
-	_, err := hex.DecodeString(strings.ReplaceAll(value, "-", ""))
-	return err == nil
 }
 
 func randomInstanceID() (string, error) {
@@ -644,7 +522,7 @@ func parseOptionalEndpoint(lookup lookupEnv, enabled bool) (*url.URL, error) {
 
 	host := endpoint.Hostname()
 	port := endpoint.Port()
-	if !validHost(host) || port == "" {
+	if !kitconfig.ValidHost(host) || port == "" {
 		return nil, invalid(
 			otelEndpointSetting,
 			"must include a valid host and numeric port",
@@ -698,32 +576,6 @@ func validateTimeoutRelationships(timeouts timeoutRelationships) error {
 	return nil
 }
 
-func validHost(host string) bool {
-	if host == "" || strings.ContainsAny(host, " \t\r\n") {
-		return false
-	}
-	if net.ParseIP(host) != nil {
-		return true
-	}
-	if len(host) > 253 {
-		return false
-	}
-	for _, label := range strings.Split(host, ".") {
-		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, character := range label {
-			if (character < 'a' || character > 'z') &&
-				(character < 'A' || character > 'Z') &&
-				(character < '0' || character > '9') &&
-				character != '-' {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 func invalid(name, problem string) error {
 	return &validationError{setting: name, problem: problem}
 }
@@ -744,5 +596,5 @@ func ErrorDetails(err error) (setting, reason string) {
 	if validation, ok := errors.AsType[*validationError](err); ok {
 		return validation.setting, validation.problem
 	}
-	return "unknown", "could not load configuration"
+	return kitconfig.ErrorDetails(err)
 }

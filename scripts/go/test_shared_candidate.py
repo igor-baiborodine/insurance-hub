@@ -193,6 +193,119 @@ def committed_fixture(root: Path, body: str) -> str:
 
 
 @pytest.mark.integration
+def test_isolated_checkout_keeps_requested_identity_without_caller_changes(tmp_path: Path) -> None:
+    # given: the requested commit differs from both caller HEAD and dirty source.
+    root = tmp_path / "original"
+    sha = committed_fixture(root, "true")
+    created = subprocess.check_output(
+        ["git", "show", "-s", "--format=%cI", sha], cwd=root, text=True, timeout=10
+    ).strip()
+    original_content = (root / "consumer/value_test.go").read_bytes()
+    source = root / "consumer/value_test.go"
+    source.write_text("committed later\n")
+    subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True, timeout=10)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "later",
+        ],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    source.write_text("caller dirty source\n")
+    original = candidate.source_manifest(root)
+    index = (root / ".git/index").read_bytes()
+    head = (root / ".git/HEAD").read_bytes()
+    destination = tmp_path / "checkout"
+    # when
+    candidate._checkout(root, sha, destination, Budget(60))
+    # then: source, full SHA, short version and commit time belong to the requested commit.
+    assert (destination / "consumer/value_test.go").read_bytes() == original_content
+    identity = subprocess.check_output(
+        ["git", "show", "-s", "--format=%H%n%cI", "HEAD"],
+        cwd=destination,
+        text=True,
+        timeout=10,
+    ).splitlines()
+    assert identity == [sha, created]
+    assert (destination / ".git").is_dir()
+    assert not (destination / ".git/objects/info/alternates").exists()
+    assert candidate.source_manifest(root) == original
+    assert (root / ".git/index").read_bytes() == index
+    assert (root / ".git/HEAD").read_bytes() == head
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("mode", ["normal", "candidate"])
+def test_controller_phases_receive_exact_git_image_identity(
+    tmp_path: Path, monkeypatch, mode: str
+) -> None:
+    # given: an image owner asks Git for the same identity that Product's Makefile uses.
+    monkeypatch.setenv("GOPROXY", "off")
+    monkeypatch.setenv("GOSUMDB", "off")
+    root = tmp_path / "original"
+    marker = tmp_path / "identity"
+    command = f"git show -s --format='%H%n%cI' HEAD > '{marker}'"
+    if mode == "candidate":
+        command += f'\n\tSERVICEKIT_PHASE=unit "$(PYTHON)" "{ROOT}/scripts/go/shared_cli.py" phase'
+    sha = committed_fixture(root, command)
+    if mode == "normal":
+        # A standalone offline consumer needs no published module to exercise this boundary.
+        (root / "consumer/go.mod").write_text("module example.com/consumer\n\ngo 1.27.3\n")
+        (root / "consumer/value_test.go").write_text("package consumer\n")
+        subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True, timeout=10)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                "standalone",
+            ],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=root, text=True, timeout=10
+        ).strip()
+    expected_identity = subprocess.check_output(
+        ["git", "show", "-s", "--format=%H%n%cI", sha], cwd=root, text=True, timeout=10
+    )
+    expected = {
+        "base": sha,
+        "head": sha,
+        "obligations": [
+            {"module": "consumer", "phase": "unit", "mode": mode, "target": "shared-unit"}
+        ],
+    }
+    original = candidate.source_manifest(root)
+    # when
+    reports = candidate.validate(root, expected, "consumer", tmp_path / "tools")
+    # then
+    assert marker.read_text() == expected_identity
+    assert reports[0]["head"] == sha
+    assert reports[0]["status"] == "passed"
+    assert candidate.source_manifest(root) == original
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("failure", [False, True])
 def test_controller_issues_real_phase_receipt_and_cleans_on_failure(
     tmp_path: Path, monkeypatch, failure: bool

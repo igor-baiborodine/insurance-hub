@@ -49,6 +49,7 @@ X_NET_VERSION := v0.60.0
 PGX_VERSION := v5.11.0
 GOOSE_VERSION := v3.27.0
 TESTCONTAINERS_VERSION := v0.44.0
+SERVICEKIT_VERSION := v0.2.1
 MOBY_GO_ARCHIVE_VERSION := v0.3.0
 MERMAID_CLI_VERSION := 11.14.0
 PUPPETEER_VERSION := 24.43.1
@@ -102,7 +103,11 @@ pilot-test-json: ## Report selected uncached test execution as JSON for framewor
 	coverage-validate coverage-check test-integration test-telemetry-continuity \
 	build build-security-harness build-security-verifier build-qualification-client build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
-	deploy-test-flux vulncheck \
+	deploy-test-flux vulncheck check-servicekit check-candidate-servicekit \
+	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
+	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
+	shared-candidate-generated shared-candidate-breaking shared-candidate-integration \
+	shared-candidate-image \
 	bootstrap-doc-tools check-docs preview-docs check-go-pr check test-tooling run
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
@@ -200,6 +205,7 @@ update-deps:
 		github.com/testcontainers/testcontainers-go/modules/postgres@$(TESTCONTAINERS_VERSION) \
 		github.com/moby/go-archive@$(MOBY_GO_ARCHIVE_VERSION) \
 		golang.org/x/net@$(X_NET_VERSION)
+	GOWORK=off $(GO) get github.com/igor-baiborodine/insurance-hub/libs/servicekit@$(SERVICEKIT_VERSION)
 	GOWORK=off $(GO) mod tidy
 
 .PHONY: update-goose-dependency check-schema-adoption
@@ -282,9 +288,54 @@ test-telemetry-continuity: python-runtime-check ## Exercise disposable Brave Jav
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \
-	check-deps check-proto-drift check-sql-drift check-proto-breaking vulncheck
+	check-deps check-proto-drift check-sql-drift check-proto-breaking vulncheck check-servicekit
+
+check-servicekit:
+	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
+	@case " $${GOFLAGS:-} " in *-modfile*) echo 'check-servicekit: alternate module file rejected' >&2; exit 1;; esac
+	@test "$$(GOWORK=off $(GO) list -mod=readonly -m -f '{{.Version}}{{if .Replace}} replaced{{end}}' github.com/igor-baiborodine/insurance-hub/libs/servicekit)" = "$(SERVICEKIT_VERSION)" || { echo 'check-servicekit: selected version or source differs' >&2; exit 1; }
+	@GOWORK=off $(GO) mod verify
+	@echo "check-servicekit: selected public servicekit $(SERVICEKIT_VERSION) with verified modules"
+
+check-candidate-servicekit:
+	@test -n "$${SERVICEKIT_CANDIDATE_LIBRARY:-}" && test -d "$$SERVICEKIT_CANDIDATE_LIBRARY" || { echo 'check-candidate-servicekit: candidate library missing' >&2; exit 1; }
+	@test "$$(GOWORK=off $(GO) list -m -f '{{.Replace.Dir}}' github.com/igor-baiborodine/insurance-hub/libs/servicekit)" = "$$SERVICEKIT_CANDIDATE_LIBRARY" || { echo 'check-candidate-servicekit: wrong library source selected' >&2; exit 1; }
+	@echo 'check-candidate-servicekit: selected verified candidate directory'
 
 check: check-go-pr check-docs
+
+shared-fast-build:
+	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
+		SERVICEKIT_PHASE=build PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)/scripts/go" "$(PYTHON)" "$(PRODUCT_REPOSITORY_ROOT)/scripts/go/shared_cli.py" phase; \
+	else $(MAKE) --no-print-directory build; fi
+
+shared-fast-unit:
+	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
+		SERVICEKIT_PHASE=unit PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)/scripts/go" "$(PYTHON)" "$(PRODUCT_REPOSITORY_ROOT)/scripts/go/shared_cli.py" phase; \
+	else $(MAKE) --no-print-directory test; fi
+
+shared-candidate-format:
+shared-candidate-lint:
+shared-candidate-race:
+shared-candidate-dependency:
+shared-candidate-vulnerability:
+shared-candidate-format shared-candidate-lint shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability:
+	@phase="$(@:shared-candidate-%=%)"; \
+	if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
+		SERVICEKIT_PHASE="$$phase" PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)/scripts/go" "$(PYTHON)" "$(PRODUCT_REPOSITORY_ROOT)/scripts/go/shared_cli.py" phase; \
+	else case "$$phase" in format) target=format-check;; race) target=test-race;; dependency) target=check-deps;; vulnerability) target=vulncheck;; *) target="$$phase";; esac; \
+		$(MAKE) --no-print-directory "$$target"; fi
+
+shared-candidate-generated:
+shared-candidate-breaking:
+shared-candidate-integration:
+shared-candidate-image:
+shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image:
+	@phase="$(@:shared-candidate-%=%)"; \
+	if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
+		PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)/scripts/go:$(CURDIR)/scripts" "$(PYTHON)" scripts/shared_phase.py "$$phase"; \
+	else case "$$phase" in generated) target=check-proto-drift;; breaking) target=check-proto-breaking;; integration) target=test-integration;; image) target=image-check;; esac; \
+		$(MAKE) --no-print-directory "$$target"; fi
 
 test-tooling: python-toolchain-check verify-tools
 	@MODULE_ROOT="$(CURDIR)" COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \

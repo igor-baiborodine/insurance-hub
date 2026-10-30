@@ -14,8 +14,9 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
+	kitlogger "github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
+
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
-	productlogger "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
 )
 
 const (
@@ -207,7 +208,9 @@ func (state *Request) Finish(ctx context.Context, statusKey, statusValue string)
 	case "cancelled", "deadline_exceeded":
 		level = slog.LevelWarn
 	}
-	productlogger.LogProductCompletion(ctx, state.observer.logger, level, logAttrs...)
+	kitlogger.LogRequired(
+		ctx, state.observer.logger, level, "Product request completed", logAttrs...,
+	)
 	if state.ownedSpan {
 		state.span.End()
 	}
