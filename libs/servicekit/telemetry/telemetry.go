@@ -120,6 +120,13 @@ func (provider *Provider) Shutdown(ctx context.Context) error {
 	provider.shutdownOnce.Do(func() {
 		shutdownContext, cancel := context.WithTimeout(ctx, provider.exporterTimeout)
 		defer cancel()
+		provider.shutdownErr = errors.Join(
+			provider.shutdownErr,
+			provider.sdkProvider.Shutdown(shutdownContext),
+			provider.sdkMeterProvider.Shutdown(shutdownContext),
+		)
+		// The meter provider collects once more during shutdown. Keep the runtime
+		// callbacks registered until that final collection has completed.
 		if provider.runtimeRegistration != nil {
 			provider.shutdownErr = errors.Join(
 				provider.shutdownErr,
@@ -128,8 +135,6 @@ func (provider *Provider) Shutdown(ctx context.Context) error {
 		}
 		provider.shutdownErr = errors.Join(
 			provider.shutdownErr,
-			provider.sdkProvider.Shutdown(shutdownContext),
-			provider.sdkMeterProvider.Shutdown(shutdownContext),
 			provider.exporter.Shutdown(shutdownContext),
 		)
 	})
