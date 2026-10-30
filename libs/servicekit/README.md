@@ -18,7 +18,8 @@
 `github.com/igor-baiborodine/insurance-hub/libs/servicekit` is the independently versioned
 runtime library owned by Insurance Hub repository maintainers. Igor Baiborodine is the initial
 accountable release maintainer. Configuration, neutral identity, health, logging and telemetry
-mechanics are implemented. Neither Product nor the scaffold currently depends on this module.
+mechanics are implemented. Product and the scaffold are active consumers that pin published
+releases with normal Go checksums and no filesystem replacement.
 
 ## Package boundary
 
@@ -49,15 +50,15 @@ initializes process state on import.
 The address defaults are business HTTP `127.0.0.1:8080`, health `127.0.0.1:8081` and gRPC
 `127.0.0.1:9090`. Address constants do not create listeners or a business API. `LoadAddress`
 preserves explicit overrides, IPv6 and port zero; callers use `Address.Port` to apply their own
-collision policy. Scaffold adoption will change its existing health default in its separate PR.
+collision policy. The scaffold uses the shared health default.
 
 `ValidHost` exposes the host-syntax check used by listener and OTLP endpoint parsing. Pass an
 unbracketed host without a port or URL text. It accepts IP literals and ASCII DNS-style names
 with labels up to 63 bytes and a total length up to 253 bytes; it rejects empty hosts, ASCII
 space/tab/CR/LF, empty labels, leading or trailing label hyphens and other characters. It
 returns a boolean without including rejected input in diagnostics and performs no DNS lookup.
-Product's PostgreSQL URL parsing and credential-redaction policy remain in Product; its later
-adoption calls this predicate only for the URL host.
+Product's PostgreSQL URL parsing and credential-redaction policy remain in Product; it calls this
+predicate only for the URL host.
 
 `ValueOrDefault` uses a fallback only when a value is absent; an explicitly empty value fails.
 `LoadPositiveDuration`, `LoadBoundedInt`, `ParseLogLevel` and `ParseBool` retain the consumer
@@ -179,32 +180,32 @@ resource/scope/view preservation, disabled mode, bounded export queues and parti
 Identity is a value-only package. These checks do not establish consumer adoption, transport
 final-status behavior or complete service startup/shutdown behavior.
 
-The OTel packages are pinned at v1.46.0, matching current consumers. Consumer adoption retains
-otelgrpc v0.71.0 in each service because transport instrumentation remains local.
+The OTel packages are pinned at v1.46.0, matching current consumers. Both consumers retain
+otelgrpc v0.71.0 because transport instrumentation remains local.
 
 ## Resolution and registration
 
 Normal resolution is standalone with `GOWORK=off`, exact version requirements, checked-in checksums
 and no servicekit replacement. The library owner and shared workflow inspect effective workspace
 and caller/persistent flags before setting standalone flags; alternate manifests and servicekit
-replacements fail. The existing consumers gain exact-version and normal checksum checks in their
-adoption PRs. A tag alone is not eligible for adoption.
+replacements fail. The active consumers enforce exact versions and normal checksums. A tag alone
+is not eligible for a consumer upgrade.
 
 Topology schema 2 retains one module inventory and adds `activeConsumers`. The library's
-`consumers` allowlist permits future Product and scaffold adoption; `activeConsumers: []` records
-that neither is adopted. Registration cross-checks requirements/imports, owner/directory identity,
-workflow jobs, unique phases and explicit Make bindings. A still-required/imported dependency
-cannot be hidden by deleting or downgrading its record. Each adoption PR must implement every
-baseline phase adapter before registration, including generated/breaking checks and applicable
-copy, integration and image phases. Unsupported phases fail closed.
+`consumers` allowlist and `activeConsumers` registry include Product and the scaffold. Registration
+cross-checks requirements/imports, owner/directory identity, workflow jobs, unique phases and
+explicit Make bindings. A still-required/imported dependency cannot be hidden by deleting or
+downgrading its record. Every active registration implements the baseline phase adapters plus its
+applicable generated, breaking, copy, integration and image phases. Unsupported phases fail closed.
 
 From the repository root, `go-shared-plan` takes full `PR_BASE` and `PR_HEAD` SHAs and checks the
 complete diff, including both ends of renames and the union of base/head module roots. More than
 one changed module fails before setup. Shared changes select every active consumer against the
-candidate; root tooling changes conservatively select all modules normally. The supplemental
-workflow also validates auxiliary module edits. The original Go PR and Report Card workflows
-remain unchanged. The supplemental gate currently repeats a normal gate if both workflows are
-triggered; it never substitutes an unverified external workflow result for a required phase.
+candidate. Hosted consumer-only changes rely on the selected-module workflow for their normal
+gate, so the supplemental workflow does not repeat it. Root tooling changes run the shared tooling
+and topology checks; full local validation additionally selects all modules normally. A hosted plan
+with no module obligations completes without starting validation or result-reconciliation runners.
+The original Go PR and Report Card workflows remain unchanged.
 
 `go-shared-validate` uses a verified Git extraction in a private temporary directory, with
 alternate manifests only in disposable copies. A live private socket issues phase contexts;
@@ -212,8 +213,9 @@ normal flags or a copied context file cannot enable candidate mode. Each simple 
 uses the actual selected graph before/after execution. Composite owning targets may report
 several distinct phases in one invocation. Original manifests/source, alternate files, source
 content and full candidate SHA are checked. The controller removes its temporary tree on success,
-failure and handled interruption. Hard-killed runners require disposal. Consumer-specific
-generation, integration, copy and image adapters remain adoption work and cannot pass yet.
+failure and handled interruption. Hard-killed runners require disposal. The scaffold supplies its
+generated, breaking and copy adapters; Product supplies generated, breaking, integration and image
+adapters. Both registrations declare why their inapplicable phase is omitted.
 
 The module work budget is 40 minutes; child processes have 30-second progress heartbeats and
 10-second teardown, with separate controller shutdown. Reports retain original/alternate lockfile
@@ -244,7 +246,7 @@ Public verification uses an empty dependency/build cache, `proxy.golang.org`,
 fresh-container smoke builds. Its overall limit is 15 minutes, proxy requests are bounded
 to 30 seconds and image cleanup has a separate 30-second budget. Only transient proxy
 availability is retried; checksum failure is fatal. A tag may remain downloadable after
-a failed run. Before adoption, inspect the hosted run, tag/source SHA and public module
+a failed run. Before a consumer upgrade, inspect the hosted run, tag/source SHA and public module
 resolution. Consumers pin exact versions, retain normal Go checksums and run their owning
 build/test gates. Local tests do not establish hosted publication.
 
@@ -256,11 +258,11 @@ old/new versions, affected settings/APIs/consumers, before/after behavior, requi
 previously working rollback target with reversal limits. Consumers explicitly pin and verify exact
 versions; automatic minor upgrades are unsupported. Rollback restores the previous pin
 and necessary source/configuration changes in that consumer's own PR and reruns its full gate.
-The release workflow never moves a tag. Review v1 readiness after both real consumers complete compatibility
-validation; publishing v1 needs separate approval.
+The release workflow never moves a tag. Both active consumers have completed compatibility
+validation; a v1 readiness review and v1 publication still require separate approval.
 
 Root validation owners are `go-shared-test`, `go-shared-test-integration`, `go-shared-check-ci`,
 `go-topology-check`, `go-topology-test` and the existing Python shared-tooling suites. The additive
 workflow syntax check uses Product's existing pinned Actionlint 1.7.7 binary; prepare it through
-`make -C services/product-service bootstrap-ci-tools` when absent. Actual hosted release and
-normal consumer/image qualification remain the later library handoff gate.
+`make -C services/product-service bootstrap-ci-tools` when absent. Future releases repeat the
+applicable hosted release and normal consumer/image qualification gates.

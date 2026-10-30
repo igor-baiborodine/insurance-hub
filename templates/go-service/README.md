@@ -273,7 +273,7 @@ using the same six identity dimensions as logs. Disabled mode creates neither ex
 no collector. W3C trace context is propagated at the registered gRPC boundary; arbitrary methods
 are excluded. There is no business HTTP API or B3 propagation requirement in this scaffold.
 
-The pinned `libs/servicekit` `v0.2.0` provider owns a nonblocking trace queue (2048 spans, 256-span batches, one-second batch delay),
+The pinned `libs/servicekit` `v0.2.1` provider owns a nonblocking trace queue (2048 spans, 256-span batches, one-second batch delay),
 a ten-second periodic metric reader, and Go runtime instruments for memory, allocations, GC,
 goroutines and processor limit. Exporter initialization, retries, flush and shutdown use bounded
 contexts. Safe export diagnostics are rate-limited to once per 30 seconds; queue saturation has a

@@ -133,7 +133,7 @@ jobs:
 
   result:
     name: Check shared runtime validation results
-    if: always()
+    if: always() && needs.plan.outputs.has_work == 'true'
     needs: [plan, validate]
     runs-on: ubuntu-24.04
     timeout-minutes: 10

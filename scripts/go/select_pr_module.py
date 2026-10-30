@@ -28,8 +28,19 @@ def classify_module(path_value: str) -> str | None:
     return None
 
 
+def is_validation_relevant_module_path(path_value: str) -> bool:
+    """Return whether a module-owned path requires Go module validation."""
+    return PurePosixPath(path_value).suffix.lower() != ".md"
+
+
 def selection_outputs(paths: list[str], merge_base: str) -> dict[str, str]:
-    modules = sorted({module for path in paths if (module := classify_module(path))})
+    modules = sorted(
+        {
+            module
+            for path in paths
+            if is_validation_relevant_module_path(path) and (module := classify_module(path))
+        }
+    )
     if not modules:
         return {"module_dir": ""}
     if len(modules) > 1:

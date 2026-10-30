@@ -22,7 +22,7 @@ TEARDOWN_SECONDS = 15
 SOURCE_MODULE = "github.com/igor-baiborodine/insurance-hub/templates/go-service"
 COPY_MODULE = "github.com/igor-baiborodine/insurance-hub/services/example-copy"
 SHARED_MODULE = "github.com/igor-baiborodine/insurance-hub/libs/servicekit"
-SHARED_VERSION = "v0.2.0"
+SHARED_VERSION = "v0.2.1"
 IDENTITY_REPLACEMENTS = (
     (SOURCE_MODULE, COPY_MODULE),
     ("templates/go-service", "services/example-copy"),

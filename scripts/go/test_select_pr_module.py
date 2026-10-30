@@ -12,7 +12,12 @@ import select_pr_module
     [
         ([], {"module_dir": ""}),
         (["docs/readme.md"], {"module_dir": ""}),
+        (["libs/servicekit/README.md"], {"module_dir": ""}),
         (["templates/go-service/cmd/server/main.go"], {"module_dir": "templates/go-service"}),
+        (
+            ["libs/servicekit/README.md", "templates/go-service/go.mod"],
+            {"module_dir": "templates/go-service"},
+        ),
         (["services/product-service/internal/app.go"], {"module_dir": "services/product-service"}),
     ],
 )

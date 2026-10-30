@@ -253,7 +253,10 @@ def shared_ci_contract(root: Path, path: str) -> None:
         workflow["jobs"]["validate"]["strategy"]["fail-fast"] is False,
         "required consumers must run independently",
     )
-    require(workflow["jobs"]["result"]["if"] == "always()", "aggregate must run after failure")
+    require(
+        workflow["jobs"]["result"]["if"] == "always() && needs.plan.outputs.has_work == 'true'",
+        "aggregate must run after planned validation, including failure",
+    )
     for job, target in (
         ("plan", "go-shared-plan"),
         ("validate", "go-shared-validate"),
@@ -355,7 +358,15 @@ def plan_trees(
                 set(old_record["candidate_phases"]) <= set(record["candidate_phases"]),
                 "active consumer phase downgrade requires baseline review",
             )
-    changed = {r for r in roots if any(p == r or p.startswith(r + "/") for p in paths)}
+    changed = {
+        root
+        for root in roots
+        if any(
+            select_pr_module.is_validation_relevant_module_path(path)
+            and (path == root or path.startswith(root + "/"))
+            for path in paths
+        )
+    }
     require(len(changed) <= 1, "multiple Go modules changed; split the PR")
     for path in paths:
         classified = select_pr_module.classify_module(path)
@@ -380,6 +391,11 @@ def plan_trees(
             and (profile == "full" or library_code_changed)
         )
         if not (directory in changed or candidate or (root_work and profile == "full")):
+            continue
+        if profile == "ci" and directory in changed and directory != DIRECTORY:
+            # The selected-module workflow owns normal hosted consumer validation. Shared CI owns
+            # the library and exact-candidate compatibility; the full local profile retains every
+            # normal consumer phase for standalone qualification.
             continue
         mode = "candidate" if candidate else "normal"
         phases = (
