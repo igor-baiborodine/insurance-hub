@@ -18,16 +18,17 @@ SUM = "h1:" + "A" * 43 + "="
 
 
 class Provider:
-    def __init__(self):
+    def __init__(self, has_history: bool = True):
         self.sha = None
         self.creates = 0
+        self.has_history = has_history
 
     def tag_sha(self, _tag):
         return self.sha
 
     def api(self, path, method="GET", body=None, absent=False):
         if path == "git/matching-refs/tags/libs/servicekit/":
-            return []
+            return [{"ref": "refs/tags/libs/servicekit/v0.2.2"}] if self.has_history else []
         if method == "POST":
             assert path == "git/refs"
             assert self.sha is None
@@ -70,17 +71,26 @@ def test_tag_create_and_same_sha_resume_never_move_tag() -> None:
     # given
     provider = Provider()
     # when
-    release.publish_tag(provider, "v0.1.0", SHA)
-    release.publish_tag(provider, "v0.1.0", SHA)
+    release.publish_tag(provider, "v1.0.0", SHA)
+    release.publish_tag(provider, "v1.0.0", SHA)
     # then
     assert provider.creates == 1
     with pytest.raises(SharedError, match="collision"):
-        release.publish_tag(provider, "v0.1.0", "c" * 40)
+        release.publish_tag(provider, "v1.0.0", "c" * 40)
     assert provider.sha == SHA
 
 
+def test_v1_release_requires_existing_library_history() -> None:
+    # given
+    provider = Provider(has_history=False)
+
+    # when / then
+    with pytest.raises(SharedError, match="existing library release history"):
+        release.publish_tag(provider, "v1.0.0", SHA)
+
+
 @pytest.mark.parametrize(
-    "version", ["v1.0.0", "v0.01.0", "v0.1.0-rc1", "0.1.0", "v0.0.0", "v0.1.0/evil"]
+    "version", ["v0.2.2", "v1.01.0", "v1.0.0-rc1", "1.0.0", "v2.0.0", "v1.0.0/evil"]
 )
 def test_release_version_rejects_unapproved_forms(version: str) -> None:
     with pytest.raises(SharedError):
@@ -107,21 +117,21 @@ def test_public_verification_bounds_failure_and_cleans_owned_image(
                 return json.dumps(
                     {
                         "Path": MODULE,
-                        "Version": "v0.1.0",
+                        "Version": "v1.0.0",
                         "Dir": str(tmp_path),
                         "Sum": SUM,
                         "GoModSum": SUM,
                     }
                 )
             if arguments[:2] == ["go", "list"]:
-                return json.dumps({"Version": "v0.1.0"})
+                return json.dumps({"Version": "v1.0.0"})
             if arguments[:2] == ["docker", "build"] and defect == "container":
                 raise SharedError("container failure")
             return ""
 
     def open_proxy(url, timeout):
         requests.append((url, timeout))
-        return io.BytesIO(b'{"Version":"v0.1.0"}')
+        return io.BytesIO(b'{"Version":"v1.0.0"}')
 
     monkeypatch.setattr(release, "Budget", Commands)
     monkeypatch.setattr(release.urllib.request, "urlopen", open_proxy)
@@ -130,10 +140,10 @@ def test_public_verification_bounds_failure_and_cleans_owned_image(
     if defect:
         with pytest.raises(SharedError):
             release.public_verify(
-                tmp_path, "v0.1.0", SHA, ("e" if defect == "source" else "d") * 64
+                tmp_path, "v1.0.0", SHA, ("e" if defect == "source" else "d") * 64
             )
     else:
-        assert release.public_verify(tmp_path, "v0.1.0", SHA, "d" * 64) is None
+        assert release.public_verify(tmp_path, "v1.0.0", SHA, "d" * 64) is None
         assert any(command[:3] == ["go", "mod", "download"] for command in commands)
         assert any(command[:2] == ["docker", "build"] for command in commands)
     assert len(requests) == (0 if defect == "timeout" else 1)
@@ -152,12 +162,16 @@ def test_library_release_uses_service_release_action_after_public_verification()
     library = yaml.safe_load((root / WORKFLOW).read_text())
     assert list(library["jobs"]) == ["release"]
     steps = library["jobs"]["release"]["steps"]
+    calculation = next(step["run"] for step in steps if step.get("id") == "monotag")
 
     # when: the library workflow publishes after checking public module resolution.
     action = steps[-1]
 
     # then: release creation uses the same action and settings as the service workflow.
     assert steps[-2]["run"] == "make go-library-release-verify"
+    assert "--min-version 1.0.0" in calculation
+    assert "--max-version 1.999.999" in calculation
+    assert '[[ "$release_version" =~ ^1\\.' in calculation
     assert action["uses"] == service_action["uses"] == "ncipollo/release-action@v1"
     for setting in ("allowUpdates", "draft", "makeLatest", "name", "tag", "bodyFile"):
         assert action["with"][setting] == service_action["with"][setting]

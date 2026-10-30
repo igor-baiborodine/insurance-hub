@@ -227,8 +227,8 @@ are stored under ignored `.work/servicekit`; temporary overrides never live ther
 ## Release
 
 The **Go Library Release** workflow runs after a `libs/servicekit` change is pushed to
-`main`, including a direct push. Monotag calculates a scoped stable v0 version from
-conventional commits and existing library tags, starting at `v0.1.0`. Because the Go
+`main`, including a direct push. Monotag calculates a scoped stable v1 version from
+conventional commits and existing library tags, beginning at `v1.0.0`. Because the Go
 module is in `libs/servicekit`, its tag uses `libs/servicekit/vX.Y.Z`. The single release
 job validates the triggering source SHA and active consumers, creates the scoped tag, verifies
 public Go proxy and checksum resolution with fresh standalone and container builds, then
@@ -252,14 +252,17 @@ build/test gates. Local tests do not establish hosted publication.
 
 ## Compatibility and handoff
 
-Library versions are independent of service images. During v0, patch versions preserve API and
-documented behavior. Breaking minor releases require maintainer-reviewed migration notes naming
-old/new versions, affected settings/APIs/consumers, before/after behavior, required checks and a
-previously working rollback target with reversal limits. Consumers explicitly pin and verify exact
-versions; automatic minor upgrades are unsupported. Rollback restores the previous pin
-and necessary source/configuration changes in that consumer's own PR and reruns its full gate.
-The release workflow never moves a tag. Both active consumers have completed compatibility
-validation; a v1 readiness review and v1 publication still require separate approval.
+Library versions are independent of service images. Version `v1.0.0` declares the current
+Servicekit API and documented behavior stable without changing runtime behavior. The module path
+remains unchanged because Go requires a major-version path suffix only from v2. During v1, minor
+and patch releases preserve backward compatibility; a breaking change requires a separately
+reviewed major release with migration notes naming old/new versions, affected settings/APIs/
+consumers, before/after behavior, required checks and a previously working rollback target with
+reversal limits. Consumers explicitly pin and verify exact versions; automatic upgrades are
+unsupported. Rollback restores the previous pin and necessary source/configuration changes in
+that consumer's own PR and reruns its full gate. The release workflow never moves a tag. Both
+active consumers completed compatibility validation against the current API; adopting v1.0.0 in
+each consumer remains separate module-scoped work after publication.
 
 Root validation owners are `go-shared-test`, `go-shared-test-integration`, `go-shared-check-ci`,
 `go-topology-check`, `go-topology-test` and the existing Python shared-tooling suites. The additive
