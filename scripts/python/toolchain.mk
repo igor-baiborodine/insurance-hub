@@ -114,6 +114,7 @@ PYTHON_PRODUCT_TOOLING_FILES := \
 	services/product-service/scripts/integration_test.py \
 	services/product-service/scripts/image_check.py \
 	services/product-service/scripts/product_process.py \
+	services/product-service/scripts/shared_phase.py \
 	services/product-service/scripts/telemetry_continuity_test.py \
 	services/product-service/scripts/test_deployment_checks.py \
 	services/product-service/scripts/test_deployment_lifecycle.py \

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"testing"
-	"time"
 
 	"go.opentelemetry.io/otel/baggage"
 	"go.opentelemetry.io/otel/propagation"
@@ -13,7 +12,7 @@ import (
 
 func TestHTTPPropagation_ExtractsLegacyAndModernParents(t *testing.T) {
 	// given
-	provider := enabledProvider(t, newRecordingExporter(), time.Second)
+	provider := enabledProvider(t)
 	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 	const w3cTrace = "11111111111111111111111111111111"
 	const b3Trace = "22222222222222222222222222222222"
@@ -137,7 +136,7 @@ func TestHTTPPropagation_ExtractsLegacyAndModernParents(t *testing.T) {
 
 func TestHTTPPropagation_InjectsW3CAndB3MultiFromOneContext(t *testing.T) {
 	// given
-	provider := enabledProvider(t, newRecordingExporter(), time.Second)
+	provider := enabledProvider(t)
 	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 	_, span := provider.TracerProvider().
 		Tracer("continuity-test").
@@ -179,7 +178,7 @@ func TestHTTPPropagation_InjectsW3CAndB3MultiFromOneContext(t *testing.T) {
 
 func TestGRPCPropagation_KeepsW3COnly(t *testing.T) {
 	// given
-	provider := enabledProvider(t, newRecordingExporter(), time.Second)
+	provider := enabledProvider(t)
 	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 	const traceID = "11111111111111111111111111111111"
 	const spanID = "2222222222222222"

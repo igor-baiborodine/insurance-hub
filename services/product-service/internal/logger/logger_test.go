@@ -12,6 +12,8 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
+	kitlogger "github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
+
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
 )
 
@@ -36,7 +38,7 @@ func TestNew_WritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
 	}
 }
 
-func TestLogProductCompletion_PreservesSeverityAboveDiagnosticThreshold(t *testing.T) {
+func TestNew_RequiredCompletionPreservesSeverityAboveDiagnosticThreshold(t *testing.T) {
 	const privateMarker = "private-completion-marker"
 	traceID := trace.TraceID{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	spanID := trace.SpanID{1, 2, 3, 4, 5, 6, 7, 8}
@@ -62,7 +64,7 @@ func TestLogProductCompletion_PreservesSeverityAboveDiagnosticThreshold(t *testi
 			log.WarnContext(ctx, "diagnostic warn")
 			log.ErrorContext(ctx, "diagnostic error")
 			for _, level := range []slog.Level{slog.LevelInfo, slog.LevelWarn, slog.LevelError} {
-				logger.LogProductCompletion(ctx, log, level,
+				kitlogger.LogRequired(ctx, log, level, "Product request completed",
 					slog.String("operation", "list"),
 					slog.String("accessToken", privateMarker),
 				)

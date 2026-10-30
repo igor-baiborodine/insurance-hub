@@ -52,9 +52,9 @@ func runWith(
 		)
 		return err
 	}
-	serviceLogger := logger.NewIdentity(output, settings.Telemetry.Identity, settings.LogLevel)
-	if settings.Telemetry.Enabled {
-		telemetry.InstallDiagnostics(serviceLogger)
+	serviceLogger := logger.NewIdentity(output, settings.Identity, settings.LogLevel)
+	if settings.Enabled {
+		defer telemetry.InstallDiagnostics(serviceLogger)()
 	}
 	if err := runService(ctx, settings, serviceLogger); err != nil {
 		serviceLogger.ErrorContext(

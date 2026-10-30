@@ -56,6 +56,7 @@ type metricCollector struct {
 	collectormetric.UnimplementedMetricsServiceServer
 	reject   atomic.Bool
 	accepted chan struct{}
+	exports  chan *collectormetric.ExportMetricsServiceRequest
 }
 
 func (collector *metricCollector) Export(
@@ -68,6 +69,12 @@ func (collector *metricCollector) Export(
 	if len(request.ResourceMetrics) != 0 && collector.accepted != nil {
 		select {
 		case collector.accepted <- struct{}{}:
+		default:
+		}
+	}
+	if collector.exports != nil {
+		select {
+		case collector.exports <- request:
 		default:
 		}
 	}

@@ -3,12 +3,17 @@ package config
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 )
 
 const testDatabaseURL = "postgresql://product_reader:reader-password@127.0.0.1:5432/product"
+
+var testUUIDPattern = regexp.MustCompile(
+	`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
+)
 
 func TestLoad_Defaults(t *testing.T) {
 	// given
@@ -50,11 +55,11 @@ func TestLoad_Defaults(t *testing.T) {
 	if settings.GRPC != (GRPC{MaxReceiveBytes: 1048576, MaxSendBytes: 8388608}) {
 		t.Errorf("unexpected gRPC defaults: %#v", settings.GRPC)
 	}
-	if settings.Telemetry.Enabled || settings.Telemetry.ExporterEndpoint != nil ||
-		settings.Telemetry.ExporterTimeout != 2*time.Second {
+	if settings.Enabled || settings.ExporterEndpoint != nil ||
+		settings.ExporterTimeout != 2*time.Second {
 		t.Errorf("unexpected telemetry defaults: %#v", settings.Telemetry)
 	}
-	identity := settings.Telemetry.Identity
+	identity := settings.Identity
 	if identity.ServiceNamespace != "insurance-hub" ||
 		identity.ServiceName != "product-service" ||
 		identity.ServiceVersion != "development" ||
@@ -119,24 +124,24 @@ func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 		settings.ShutdownTimeout != 12*time.Second {
 		t.Errorf("unexpected operation overrides: %#v", settings)
 	}
-	if settings.HTTPServer.ReadHeaderTimeout != 6*time.Second ||
-		settings.HTTPServer.ReadTimeout != 12*time.Second ||
-		settings.HTTPServer.WriteTimeout != 12*time.Second ||
-		settings.HTTPServer.IdleTimeout != 45*time.Second {
+	if settings.ReadHeaderTimeout != 6*time.Second ||
+		settings.ReadTimeout != 12*time.Second ||
+		settings.WriteTimeout != 12*time.Second ||
+		settings.IdleTimeout != 45*time.Second {
 		t.Errorf("unexpected HTTP overrides: %#v", settings.HTTPServer)
 	}
-	if settings.GRPC.MaxReceiveBytes != 2097152 || settings.GRPC.MaxSendBytes != 16777216 {
+	if settings.MaxReceiveBytes != 2097152 || settings.MaxSendBytes != 16777216 {
 		t.Errorf("unexpected gRPC overrides: %#v", settings.GRPC)
 	}
-	if !settings.Telemetry.Enabled ||
-		settings.Telemetry.ExporterEndpoint.String() != "https://collector.internal:4317" ||
-		settings.Telemetry.ExporterTimeout != 2*time.Second {
+	if !settings.Enabled ||
+		settings.ExporterEndpoint.String() != "https://collector.internal:4317" ||
+		settings.ExporterTimeout != 2*time.Second {
 		t.Errorf("unexpected telemetry overrides: %#v", settings.Telemetry)
 	}
-	if identity := settings.Telemetry.Identity; identity.ServiceNamespace != "insurance-hub" ||
+	if identity := settings.Identity; identity.ServiceNamespace != "insurance-hub" ||
 		identity.ServiceName != "product-service" || identity.ServiceVersion != "test-config-overrides" ||
 		identity.Environment != "test" || identity.Implementation != "go" ||
-		!validUUID(identity.ServiceInstance) {
+		!testUUIDPattern.MatchString(identity.ServiceInstance) {
 		t.Errorf("unexpected test telemetry identity: %#v", identity)
 	}
 }
@@ -188,6 +193,18 @@ func TestLoad_RejectsDatabaseURLWithoutExplicitUser(t *testing.T) {
 			// then
 			assertSettingError(t, err, databaseURLSetting)
 		})
+	}
+}
+
+func TestLoad_RejectsDatabaseURLWithInvalidHostSyntax(t *testing.T) {
+	const privateMarker = "private-password-marker"
+	_, err := load(mapLookup(map[string]string{
+		databaseURLSetting: "postgresql://product_reader:" + privateMarker +
+			"@bad_host:5432/product",
+	}))
+	assertSettingError(t, err, databaseURLSetting)
+	if strings.Contains(err.Error(), privateMarker) {
+		t.Errorf("database URL error exposed credential: %v", err)
 	}
 }
 
@@ -372,10 +389,10 @@ func TestLoad_AllowsDisabledTelemetryWithoutEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load with disabled telemetry: %v", err)
 	}
-	if settings.Telemetry.ExporterEndpoint != nil {
+	if settings.ExporterEndpoint != nil {
 		t.Errorf(
 			"disabled exporter endpoint = %v, want nil",
-			settings.Telemetry.ExporterEndpoint,
+			settings.ExporterEndpoint,
 		)
 	}
 }
@@ -421,17 +438,76 @@ func TestLoad_AcceptsQAIdentityAndGeneratesDistinctTestInstances(t *testing.T) {
 	if qaErr != nil || firstErr != nil || secondErr != nil {
 		t.Fatalf("load identities: qa=%v first=%v second=%v", qaErr, firstErr, secondErr)
 	}
-	if qa.Telemetry.Identity.ServiceInstance != qaValues[serviceInstanceSetting] ||
-		qa.Telemetry.Identity.Environment != "qa" ||
-		qa.Telemetry.Identity.ServiceVersion != qaValues[serviceVersionSetting] {
-		t.Errorf("unexpected QA identity: %#v", qa.Telemetry.Identity)
+	if qa.Identity.ServiceInstance != qaValues[serviceInstanceSetting] ||
+		qa.Identity.Environment != "qa" ||
+		qa.Identity.ServiceVersion != qaValues[serviceVersionSetting] {
+		t.Errorf("unexpected QA identity: %#v", qa.Identity)
 	}
-	firstID := first.Telemetry.Identity.ServiceInstance
-	secondID := second.Telemetry.Identity.ServiceInstance
-	if !validUUID(firstID) || !validUUID(secondID) || firstID == secondID ||
-		firstID[14] != '4' || secondID[14] != '4' {
+	firstID := first.Identity.ServiceInstance
+	secondID := second.Identity.ServiceInstance
+	if !testUUIDPattern.MatchString(firstID) || !testUUIDPattern.MatchString(secondID) ||
+		firstID == secondID ||
+		firstID[14] != '4' ||
+		secondID[14] != '4' {
 		t.Errorf("test instances are not distinct UUIDv4 values: %q, %q", firstID, secondID)
 	}
+}
+
+func TestLoad_ReleaseEnvironmentsUseSharedDeploymentPolicy(t *testing.T) {
+	// given
+	base := map[string]string{
+		databaseURLSetting:     testDatabaseURL,
+		otelEnabledSetting:     "true",
+		otelEndpointSetting:    "http://collector.internal:4317",
+		serviceVersionSetting:  "sha-6c4669c81d3a",
+		serviceInstanceSetting: "123e4567-e89b-42d3-a456-426614174000",
+	}
+	for _, environment := range []string{"staging", "preprod", "preview-42"} {
+		t.Run(environment, func(t *testing.T) {
+			values := mapLookupValues(base)
+			values[environmentSetting] = environment
+			// when
+			settings, err := load(mapLookup(values))
+			// then
+			if err != nil || settings.Identity.Environment != environment {
+				t.Errorf(
+					"release environment %q: settings=%+v err=%v",
+					environment,
+					settings.Identity,
+					err,
+				)
+			}
+		})
+	}
+	for _, scenario := range []struct {
+		name, setting, value string
+	}{
+		{"malformed environment", environmentSetting, "Preview_42"},
+		{"mutable version", serviceVersionSetting, "latest"},
+		{"local instance", serviceInstanceSetting, "local-123"},
+		{"wrong enabled service", serviceNameSetting, "other-service"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			values := mapLookupValues(base)
+			values[environmentSetting] = "preview-42"
+			values[scenario.setting] = scenario.value
+			// when
+			_, err := load(mapLookup(values))
+			// then
+			assertSettingError(t, err, scenario.setting)
+			if strings.Contains(err.Error(), scenario.value) {
+				t.Error("identity failure disclosed rejected value")
+			}
+		})
+	}
+}
+
+func mapLookupValues(values map[string]string) map[string]string {
+	copy := make(map[string]string, len(values))
+	for key, value := range values {
+		copy[key] = value
+	}
+	return copy
 }
 
 func TestLoad_RejectsSuppliedTestInstance(t *testing.T) {
@@ -600,6 +676,15 @@ func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
 	if validation == nil {
 		t.Fatal("invalid duration accepted")
 	}
+	_, identityValidation := load(mapLookup(map[string]string{
+		databaseURLSetting:  testDatabaseURL,
+		otelEnabledSetting:  "true",
+		otelEndpointSetting: "http://collector.internal:4317",
+		environmentSetting:  "Preview_42",
+	}))
+	if identityValidation == nil {
+		t.Fatal("invalid deployment environment accepted")
+	}
 	cases := []struct {
 		name            string
 		err             error
@@ -611,6 +696,12 @@ func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
 			fmt.Errorf("private-wrapper: %w", validation),
 			"REQUEST_TIMEOUT",
 			"must be a positive duration",
+		},
+		{
+			"wrapped shared identity validation",
+			fmt.Errorf("private-wrapper: %w", identityValidation),
+			"DEPLOYMENT_ENVIRONMENT",
+			"must be a valid lowercase environment name",
 		},
 		{
 			"unknown error",
