@@ -118,19 +118,17 @@ def test_ci_non_code_inputs_do_not_fan_out_to_consumers(tmp_path: Path, path: st
     result = registration.plan_trees(
         tmp_path / "base", tmp_path / "head", [path], "a" * 40, "b" * 40, "a" * 40, "ci"
     )
-    assert {item["module"] for item in result["obligations"]} == (
-        {DIRECTORY} if path.startswith(DIRECTORY) else set()
-    )
+    assert {item["module"] for item in result["obligations"]} == set()
     assert result["root_checks"] == path.startswith("scripts/")
 
 
-def test_ci_changed_consumer_keeps_normal_gate(tmp_path: Path) -> None:
+def test_ci_changed_consumer_with_library_readme_keeps_normal_gate(tmp_path: Path) -> None:
     fixture_tree(tmp_path / "base")
     fixture_tree(tmp_path / "head")
     result = registration.plan_trees(
         tmp_path / "base",
         tmp_path / "head",
-        ["templates/go-service/main.go"],
+        [DIRECTORY + "/README.md", "templates/go-service/main.go"],
         "a" * 40,
         "b" * 40,
         "a" * 40,
@@ -144,6 +142,7 @@ def test_ci_changed_consumer_keeps_normal_gate(tmp_path: Path) -> None:
             "target": "check-go-pr",
         }
     ]
+    assert result["changed"] == ["templates/go-service"]
 
 
 @pytest.mark.parametrize("head_matches,clean", [(False, True), (True, False)])
@@ -210,7 +209,7 @@ def test_import_without_requirement_is_not_hidden(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "paths",
     [
-        [DIRECTORY + "/README.md", "templates/go-service/README.md"],
+        [DIRECTORY + "/health/doc.go", "templates/go-service/main.go"],
         ["services/product-service/old.go", "templates/go-service/new.go"],
         ["libs/unregistered/go.mod"],
     ],

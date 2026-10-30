@@ -355,7 +355,15 @@ def plan_trees(
                 set(old_record["candidate_phases"]) <= set(record["candidate_phases"]),
                 "active consumer phase downgrade requires baseline review",
             )
-    changed = {r for r in roots if any(p == r or p.startswith(r + "/") for p in paths)}
+    changed = {
+        root
+        for root in roots
+        if any(
+            select_pr_module.is_validation_relevant_module_path(path)
+            and (path == root or path.startswith(root + "/"))
+            for path in paths
+        )
+    }
     require(len(changed) <= 1, "multiple Go modules changed; split the PR")
     for path in paths:
         classified = select_pr_module.classify_module(path)
