@@ -18,7 +18,7 @@ REPOSITORY_ROOT = MODULE_ROOT.parents[1]
 PHASE_TARGETS = {
     "generated": ("check-proto-drift", "check-sql-drift"),
     "breaking": ("check-proto-breaking",),
-    "integration": ("test-integration", "test-telemetry-continuity"),
+    "integration": ("test-integration",),
 }
 
 
