@@ -42,11 +42,11 @@ public class TerminatePolicyHandler
         return TerminatePolicyResult.success(policy.getNumber());
     }
 
-    private PolicyTerminatedEvent createEvent(Policy policy) {
+    static PolicyTerminatedEvent createEvent(Policy policy) {
         return new PolicyTerminatedEvent(new PolicyDto(
                 policy.getNumber(),
-                policy.versions().lastVersion().getVersionValidityPeriod().getFrom(),
-                policy.versions().lastVersion().getVersionValidityPeriod().getTo(),
+                policy.versions().lastVersion().getCoverPeriod().getFrom(),
+                policy.versions().lastVersion().getCoverPeriod().getTo(),
                 policy.versions().lastVersion().getPolicyHolder().getFullName(),
                 policy.versions().lastVersion().getProductCode(),
                 policy.versions().lastVersion().getTotalPremiumAmount(),
