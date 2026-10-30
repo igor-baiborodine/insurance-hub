@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import signal
@@ -18,6 +19,38 @@ import pytest
 from product_process import CAPTURE_LIMIT, ProductCommandError, run
 
 import check_docs
+
+
+def test_candidate_integration_runs_go_suite_without_retired_java_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "scripts/go"))
+    shared_phase = importlib.import_module("shared_phase")
+    requests: list[tuple[str, str]] = []
+    commands: list[list[str]] = []
+
+    def fake_context_request(operation: str, phase: str) -> dict[str, object]:
+        requests.append((operation, phase))
+        return {"environment": {}}
+
+    def fake_run(arguments: list[str], **_kwargs: object) -> str:
+        commands.append(arguments)
+        return ""
+
+    monkeypatch.setattr(shared_phase, "context_request", fake_context_request)
+    monkeypatch.setattr(shared_phase, "run", fake_run)
+
+    # when
+    status = shared_phase.main(["integration"])
+
+    # then
+    assert status == 0
+    assert requests == [("begin", "integration"), ("end", "integration")]
+    assert commands == [
+        ["make", "--no-print-directory", "check-candidate-servicekit"],
+        ["make", "--no-print-directory", "test-integration"],
+    ]
 
 
 def configure_doc_paths(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
