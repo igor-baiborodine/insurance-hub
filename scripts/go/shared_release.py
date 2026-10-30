@@ -27,14 +27,12 @@ from shared_support import (
 )
 
 BUILDER = "docker.io/library/golang:1.27.3-alpine3.23@sha256:0208a74017e3ce41f779876f3c6e9ad5d4030904e8ac6e91b9c5d7711c48362a"
-VERSION = re.compile(r"v0\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
+VERSION = re.compile(r"v1\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 API_VERSION = "2026-03-10"
 
 
 def release_identity(version: str, sha: str) -> str:
-    require(
-        VERSION.fullmatch(version) and version != "v0.0.0", "expected canonical stable v0 version"
-    )
+    require(VERSION.fullmatch(version), "expected canonical stable v1 version")
     require(SHA.fullmatch(sha), "expected full source SHA")
     return f"libs/servicekit/{version}"
 
@@ -99,7 +97,7 @@ def publish_tag(provider: GitHub, version: str, sha: str) -> None:
     existing = provider.tag_sha(tag)
     if existing is None:
         tags = provider.api("git/matching-refs/tags/libs/servicekit/")
-        require(tags or version == "v0.1.0", "first library release must be v0.1.0")
+        require(tags, "v1 release requires existing library release history")
     require(existing in {None, sha}, "tag collision")
     if existing is None:
         try:
