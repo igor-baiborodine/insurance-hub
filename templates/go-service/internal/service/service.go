@@ -64,14 +64,15 @@ type gatewayConnection interface {
 }
 
 type dependencies struct {
-	listen        func(string, string) (net.Listener, error)
-	newTelemetry  func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newGRPCServer func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
-	newConnection func(string, telemetryProvider, config.Config) (gatewayConnection, error)
-	newGateway    func(scaffoldv1.ExampleServiceClient, gateway.Settings) (http.Handler, error)
-	newBusiness   func(http.Handler, config.Config) httpServer
-	newManagement func(*health.State) httpServer
-	echo          transport.Echo
+	listen         func(string, string) (net.Listener, error)
+	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
+	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
+	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
+	newGateway     func(scaffoldv1.ExampleServiceClient, gateway.Settings) (http.Handler, error)
+	newUnavailable func(gateway.Settings) (http.Handler, error)
+	newBusiness    func(http.Handler, config.Config) httpServer
+	newManagement  func(*health.State) httpServer
+	echo           transport.Echo
 }
 
 func productionDependencies() dependencies {
@@ -83,8 +84,9 @@ func productionDependencies() dependencies {
 		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, echo transport.Echo) (grpcServer, error) {
 			return transport.NewServer(logger, tracer, propagator, settings, echo)
 		},
-		newConnection: newGatewayConnection,
-		newGateway:    gateway.NewHandler,
+		newConnection:  newGatewayConnection,
+		newGateway:     gateway.NewHandler,
+		newUnavailable: gateway.NewUnavailableHandler,
 		newBusiness: func(handler http.Handler, settings config.Config) httpServer {
 			return &http.Server{
 				Handler:           handler,
@@ -227,21 +229,26 @@ func run(
 		return fail(fmt.Errorf("run service: %w", err))
 	}
 	runtime.state = state
+	gatewaySettings := gateway.Settings{
+		RequestTimeout: settings.RequestTimeout,
+		MaxBodyBytes:   settings.HTTPMaxBodyBytes,
+		TracerProvider: provider.TracerProvider(),
+		MeterProvider:  provider.MeterProvider(),
+		Propagator:     provider.HTTPPropagator(),
+		Observer:       observer,
+	}
 	handler, err := deps.newGateway(
 		scaffoldv1.NewExampleServiceClient(runtime.connection),
-		gateway.Settings{
-			RequestTimeout: settings.RequestTimeout,
-			MaxBodyBytes:   settings.HTTPMaxBodyBytes,
-			TracerProvider: provider.TracerProvider(),
-			MeterProvider:  provider.MeterProvider(),
-			Propagator:     provider.HTTPPropagator(),
-			Observer:       observer,
-		},
+		gatewaySettings,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
 	}
-	runtime.tracker = newHandlerTracker(handler)
+	unavailable, err := deps.newUnavailable(gatewaySettings)
+	if err != nil {
+		return fail(fmt.Errorf("run service: %w", err))
+	}
+	runtime.tracker = newHandlerTracker(handler, unavailable)
 	runtime.businessServer = deps.newBusiness(runtime.tracker, settings)
 	runtime.managementServer = deps.newManagement(state)
 	businessResult := make(chan error, 1)
@@ -430,19 +437,22 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 }
 
 type handlerTracker struct {
-	next     http.Handler
-	mu       sync.Mutex
-	draining bool
-	active   sync.WaitGroup
+	next        http.Handler
+	unavailable http.Handler
+	mu          sync.Mutex
+	draining    bool
+	active      sync.WaitGroup
 }
 
-func newHandlerTracker(next http.Handler) *handlerTracker { return &handlerTracker{next: next} }
+func newHandlerTracker(next, unavailable http.Handler) *handlerTracker {
+	return &handlerTracker{next: next, unavailable: unavailable}
+}
 
 func (tracker *handlerTracker) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	tracker.mu.Lock()
 	if tracker.draining {
 		tracker.mu.Unlock()
-		writer.WriteHeader(http.StatusServiceUnavailable)
+		tracker.unavailable.ServeHTTP(writer, request)
 		return
 	}
 	tracker.active.Add(1)

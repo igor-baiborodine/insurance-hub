@@ -41,9 +41,7 @@ type Settings struct {
 
 // NewHandler registers the generated client while retaining a strict HTTP contract.
 func NewHandler(client scaffoldv1.ExampleServiceClient, settings Settings) (http.Handler, error) {
-	if client == nil || settings.RequestTimeout <= 0 || settings.MaxBodyBytes <= 0 ||
-		settings.TracerProvider == nil || settings.MeterProvider == nil ||
-		settings.Propagator == nil || settings.Observer == nil {
+	if client == nil || !validSettings(settings) {
 		return nil, errors.New("create gateway: all dependencies and limits are required")
 	}
 	marshaler := &runtime.JSONPb{
@@ -73,6 +71,33 @@ func NewHandler(client scaffoldv1.ExampleServiceClient, settings Settings) (http
 		http.HandlerFunc(handler.serveUnmatched),
 	)
 	return handler, nil
+}
+
+// NewUnavailableHandler creates the instrumented fixed-envelope response used after drain starts.
+func NewUnavailableHandler(settings Settings) (http.Handler, error) {
+	if !validSettings(settings) {
+		return nil, errors.New(
+			"create unavailable gateway handler: all dependencies and limits are required",
+		)
+	}
+	handler := &Handler{settings: settings}
+	return handler.instrument(
+		"unmatched",
+		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writeError(
+				writer,
+				http.StatusServiceUnavailable,
+				codes.Unavailable,
+				"service unavailable",
+			)
+		}),
+	), nil
+}
+
+func validSettings(settings Settings) bool {
+	return settings.RequestTimeout > 0 && settings.MaxBodyBytes > 0 &&
+		settings.TracerProvider != nil && settings.MeterProvider != nil &&
+		settings.Propagator != nil && settings.Observer != nil
 }
 
 type Handler struct {

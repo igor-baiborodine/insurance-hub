@@ -526,6 +526,57 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	}
 }
 
+func TestUnavailableHandler_WritesFixedEnvelopeAndTelemetry(t *testing.T) {
+	// given
+	var logs bytes.Buffer
+	reader := sdkmetric.NewManualReader()
+	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	spanRecorder := tracetest.NewSpanRecorder()
+	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
+	observer, err := telemetry.NewRequestObserver(
+		slog.New(slog.NewJSONHandler(&logs, nil)), meterProvider,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewUnavailableHandler(Settings{
+		RequestTimeout: time.Second, MaxBodyBytes: 4096,
+		TracerProvider: tracerProvider, MeterProvider: meterProvider,
+		Propagator: propagation.TraceContext{}, Observer: observer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+
+	// when
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/example/echo", nil))
+
+	// then
+	if recorder.Code != http.StatusServiceUnavailable ||
+		recorder.Header().Get("Content-Type") != "application/json" ||
+		recorder.Body.String() != errorBody(int(codes.Unavailable), "service unavailable") {
+		t.Fatalf(
+			"unavailable response = (%d, %q, %q)",
+			recorder.Code,
+			recorder.Header().Get("Content-Type"),
+			recorder.Body.String(),
+		)
+	}
+	var metrics metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &metrics); err != nil {
+		t.Fatal(err)
+	}
+	combined := logs.String() + fmt.Sprint(metrics)
+	for _, span := range spanRecorder.Ended() {
+		combined += span.Name() + fmt.Sprint(span.Attributes())
+	}
+	if !strings.Contains(combined, "unmatched") ||
+		!strings.Contains(combined, "insurance_hub.service.requests") {
+		t.Errorf("missing drain-rejection telemetry: %s", combined)
+	}
+}
+
 func newTestHandler(
 	t *testing.T,
 	client scaffoldv1.ExampleServiceClient,

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -287,6 +288,34 @@ func TestGatewayConnectionIdleTimeout_Disabled(t *testing.T) {
 	// then
 	if got != want {
 		t.Fatalf("gateway connection idle timeout = %v, want disabled", got)
+	}
+}
+
+func TestHandlerTracker_UsesUnavailableHandlerAfterDrain(t *testing.T) {
+	// given
+	nextCalled := false
+	unavailableCalled := false
+	tracker := newHandlerTracker(
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { nextCalled = true }),
+		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			unavailableCalled = true
+			writer.WriteHeader(http.StatusServiceUnavailable)
+		}),
+	)
+	tracker.beginDrain()
+	recorder := httptest.NewRecorder()
+
+	// when
+	tracker.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	// then
+	if nextCalled || !unavailableCalled || recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf(
+			"drain routing = (next %t, unavailable %t, status %d)",
+			nextCalled,
+			unavailableCalled,
+			recorder.Code,
+		)
 	}
 }
 
