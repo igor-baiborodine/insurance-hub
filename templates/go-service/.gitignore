@@ -1,1 +1,2 @@
-/.tools/
+/.tools/bin/
+/.tools/ruff-cache/
