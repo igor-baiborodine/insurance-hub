@@ -71,6 +71,7 @@ func TestLoad_Defaults(t *testing.T) {
 }
 
 func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) {
+	// given
 	tests := []struct {
 		name    string
 		values  map[string]string
@@ -119,7 +120,9 @@ func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) 
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// when
 			_, err := load(mapLookup(test.values))
+			// then
 			if err == nil {
 				t.Fatal("invalid settings accepted")
 			}
@@ -129,12 +132,16 @@ func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) 
 			}
 		})
 	}
+	// given
 	values := map[string]string{
 		EnvHTTPAddress:             "127.0.0.1:0",
 		kitconfig.EnvGRPCAddress:   "127.0.0.1:0",
 		kitconfig.EnvHealthAddress: "127.0.0.1:0",
 	}
-	if _, err := load(mapLookup(values)); err != nil {
+	// when
+	_, err := load(mapLookup(values))
+	// then
+	if err != nil {
 		t.Fatalf("port-zero listeners rejected: %v", err)
 	}
 }

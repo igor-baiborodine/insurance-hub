@@ -39,6 +39,7 @@ import (
 )
 
 func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *testing.T) {
+	// given
 	settings := testConfig(t)
 	deps := productionDependencies()
 	addresses := make(chan string, 3)
@@ -78,6 +79,7 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 	client := &http.Client{Timeout: time.Second}
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
+	// when
 	request, err := http.NewRequest(
 		http.MethodPost,
 		"http://"+httpAddress+"/v1/example/echo",
@@ -94,6 +96,7 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	// then
 	assertResponse(t, response, http.StatusOK, `{"message":"hello"}`)
 	assertNoIdentityMetadata(t, <-metadataSeen)
 	assertOversizedHeaderRejected(t, httpAddress, settings.HTTPMaxHeaderBytes+5000)
@@ -120,6 +123,7 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 	)
 	assertNoIdentityMetadata(t, <-metadataSeen)
 
+	// when
 	connection, err := grpc.NewClient(
 		grpcAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -132,6 +136,7 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 		context.Background(),
 		&scaffoldv1.EchoRequest{Message: "direct"},
 	)
+	// then
 	if err != nil || direct.GetMessage() != "direct" {
 		t.Fatalf("direct Echo = (%v, %v)", direct, err)
 	}
@@ -150,6 +155,7 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 		t.Fatalf("direct oversized status = %v, want invalid argument", status.Code(err))
 	}
 
+	// when
 	drainResult := make(chan *http.Response, 1)
 	drainError := make(chan error, 1)
 	go func() {
@@ -171,6 +177,7 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 		drainResult <- result
 	}()
 	receiveSignal(t, handlerStarted, "gateway request did not reach RPC")
+	// then
 	cancel()
 	waitForHTTPStatus(
 		t,
@@ -235,12 +242,13 @@ func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) 
 	}
 	validMessages = append(validMessages, "é", strings.Repeat("é", 64))
 
-	// when / then
+	// when
 	for _, message := range validMessages {
 		response, callErr := directClient.Echo(
 			context.Background(),
 			&scaffoldv1.EchoRequest{Message: message},
 		)
+		// then
 		if callErr != nil || response.GetMessage() != message {
 			t.Fatalf(
 				"direct differential Echo(%d bytes) = (%q, %v)",
@@ -293,6 +301,7 @@ func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) 
 }
 
 func TestRun_UnavailableGatewayNeverBecomesReadyAndCleansUp(t *testing.T) {
+	// given
 	settings := testConfig(t)
 	settings.ProbeTimeout = 30 * time.Millisecond
 	closed, err := net.Listen("tcp", "127.0.0.1:0")
@@ -312,7 +321,9 @@ func TestRun_UnavailableGatewayNeverBecomesReadyAndCleansUp(t *testing.T) {
 		return originalManagement(state)
 	}
 
+	// when
 	err = run(context.Background(), settings, discardLogger(), deps)
+	// then
 	if err == nil || !strings.Contains(err.Error(), "gateway connection not ready") {
 		t.Fatalf("run error = %v", err)
 	}
@@ -416,6 +427,7 @@ func TestHandlerTracker_UsesUnavailableHandlerAfterDrain(t *testing.T) {
 }
 
 func TestRun_CorrelatesHTTPClientAndServerSpans(t *testing.T) {
+	// given
 	settings := testConfig(t)
 	deps := productionDependencies()
 	recorder := tracetest.NewSpanRecorder()
@@ -443,6 +455,7 @@ func TestRun_CorrelatesHTTPClientAndServerSpans(t *testing.T) {
 	healthAddress := receiveString(t, addresses)
 	client := &http.Client{Timeout: time.Second}
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
+	// when
 	request, err := http.NewRequest(
 		http.MethodPost,
 		"http://"+httpAddress+"/v1/example/echo",
@@ -463,6 +476,7 @@ func TestRun_CorrelatesHTTPClientAndServerSpans(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// then
 	var httpSpan, clientSpan, serverSpan sdktrace.ReadOnlySpan
 	for _, span := range recorder.Ended() {
 		if span.SpanContext().TraceID().String() != "11111111111111111111111111111111" {
@@ -657,10 +671,13 @@ func TestRun_EnforcesGatewayClientReceiveLimit(t *testing.T) {
 	client := &http.Client{Timeout: time.Second}
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
-	// when / then
+	// when
+	response := postEcho(t, client, httpAddress, "a")
+
+	// then
 	assertResponse(
 		t,
-		postEcho(t, client, httpAddress, "a"),
+		response,
 		http.StatusInternalServerError,
 		`{"code":13,"message":"internal error","details":[]}`,
 	)
@@ -800,6 +817,7 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
 }
 
 func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
+	// given
 	settings := testConfig(t)
 	settings.RequestTimeout = 50 * time.Millisecond
 	settings.ShutdownTimeout = 200 * time.Millisecond
@@ -828,6 +846,7 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 	healthAddress := receiveString(t, addresses)
 	client := &http.Client{Timeout: time.Second}
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
+	// when
 	requestDone := make(chan struct{})
 	go func() {
 		defer close(requestDone)
@@ -843,6 +862,7 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 		}
 	}()
 	receiveSignal(t, started, "stalled RPC did not start")
+	// then
 	shutdownStarted := time.Now()
 	cancel()
 	err := receiveError(t, runResult, "forced shutdown did not complete")
@@ -862,6 +882,7 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 }
 
 func TestRun_PartialBindFailureClosesEarlierListeners(t *testing.T) {
+	// given
 	settings := testConfig(t)
 	deps := productionDependencies()
 	bindFailure := errors.New("management bind failed")
@@ -876,7 +897,9 @@ func TestRun_PartialBindFailureClosesEarlierListeners(t *testing.T) {
 		}
 		return listener, err
 	}
+	// when
 	err := run(context.Background(), settings, discardLogger(), deps)
+	// then
 	if !errors.Is(err, bindFailure) {
 		t.Fatalf("run error = %v", err)
 	}
@@ -888,12 +911,15 @@ func TestRun_PartialBindFailureClosesEarlierListeners(t *testing.T) {
 }
 
 func TestInternalDialTarget_NormalizesWildcardFamilies(t *testing.T) {
+	// given
 	for _, test := range []struct{ input, want string }{
 		{"0.0.0.0:1234", "127.0.0.1:1234"},
 		{"[::]:1234", "[::1]:1234"},
 		{"127.0.0.2:1234", "127.0.0.2:1234"},
 	} {
+		// when
 		got, err := internalDialTarget(testAddress(test.input))
+		// then
 		if err != nil || got != test.want {
 			t.Errorf(
 				"internalDialTarget(%q) = (%q, %v), want %q",

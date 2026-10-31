@@ -31,6 +31,7 @@ import (
 )
 
 func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
+	// given
 	tests := []struct {
 		name, method, path, body, contentType, accept string
 		wantStatus, wantCalls                         int
@@ -229,7 +230,9 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 				request.Header.Set("Accept", test.accept)
 			}
 			recorder := httptest.NewRecorder()
+			// when
 			handler.ServeHTTP(recorder, request)
+			// then
 			if recorder.Code != test.wantStatus ||
 				recorder.Body.String() != test.wantBody {
 				t.Errorf(
@@ -252,6 +255,7 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 }
 
 func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
+	// given
 	privateMarker := "private-upstream-marker"
 	for _, test := range []struct {
 		name string
@@ -276,7 +280,9 @@ func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
 			)
 			request.Header.Set("Content-Type", "application/json")
 			recorder := httptest.NewRecorder()
+			// when
 			handler.ServeHTTP(recorder, request)
+			// then
 			if recorder.Code != test.want || recorder.Body.String() != test.body ||
 				strings.Contains(recorder.Body.String(), privateMarker) {
 				t.Errorf(
@@ -290,6 +296,7 @@ func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
 }
 
 func TestHandler_PreservesMessageByteBoundaries(t *testing.T) {
+	// given
 	for _, test := range []struct {
 		name    string
 		message string
@@ -310,7 +317,9 @@ func TestHandler_PreservesMessageByteBoundaries(t *testing.T) {
 			)
 			request.Header.Set("Content-Type", "application/json")
 			recorder := httptest.NewRecorder()
+			// when
 			handler.ServeHTTP(recorder, request)
+			// then
 			if recorder.Code != test.status || client.callCount() != 1 {
 				t.Errorf(
 					"result = (status %d, calls %d), want (%d, 1)",
@@ -328,6 +337,7 @@ func TestHandler_PreservesMessageByteBoundaries(t *testing.T) {
 }
 
 func TestHandler_UsesShorterOfCallerAndServiceDeadline(t *testing.T) {
+	// given
 	for _, test := range []struct {
 		name          string
 		callerTimeout time.Duration
@@ -351,7 +361,9 @@ func TestHandler_UsesShorterOfCallerAndServiceDeadline(t *testing.T) {
 			request.Header.Set("Grpc-Timeout", "999H")
 			recorder := httptest.NewRecorder()
 			started := time.Now()
+			// when
 			handler.ServeHTTP(recorder, request)
+			// then
 			if recorder.Code != http.StatusGatewayTimeout {
 				t.Errorf("status = %d, want 504", recorder.Code)
 			}
@@ -367,6 +379,7 @@ func TestHandler_UsesShorterOfCallerAndServiceDeadline(t *testing.T) {
 }
 
 func TestHandler_PropagatesCallerCancellation(t *testing.T) {
+	// given
 	started := make(chan struct{})
 	client := &fakeClient{waitForContext: true, started: started}
 	handler := newTestHandlerWithTimeout(t, client, time.Second)
@@ -376,6 +389,7 @@ func TestHandler_PropagatesCallerCancellation(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
+	// when
 	go func() {
 		handler.ServeHTTP(recorder, request)
 		close(done)
@@ -386,6 +400,7 @@ func TestHandler_PropagatesCallerCancellation(t *testing.T) {
 		t.Fatal("RPC did not start")
 	}
 	cancel()
+	// then
 	select {
 	case <-done:
 	case <-time.After(time.Second):
@@ -397,6 +412,7 @@ func TestHandler_PropagatesCallerCancellation(t *testing.T) {
 }
 
 func TestHandler_StripsIdentityAndTimeoutHeaders(t *testing.T) {
+	// given
 	client := &fakeClient{}
 	handler := newTestHandler(t, client, 4096)
 	request := httptest.NewRequest(
@@ -413,7 +429,9 @@ func TestHandler_StripsIdentityAndTimeoutHeaders(t *testing.T) {
 	request.Header.Set("X-Forwarded-Host", "private.example")
 	request.Header.Set("X-Real-IP", "203.0.113.44")
 	recorder := httptest.NewRecorder()
+	// when
 	handler.ServeHTTP(recorder, request)
+	// then
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d", recorder.Code)
 	}
@@ -429,11 +447,13 @@ func TestHandler_StripsIdentityAndTimeoutHeaders(t *testing.T) {
 }
 
 func TestClearApplicationMetadata_DropsAllApplicationValues(t *testing.T) {
+	// given
 	ctx := metadata.NewOutgoingContext(
 		context.Background(),
 		metadata.Pairs("authorization", "private", "principal", "forged"),
 	)
 	called := false
+	// when
 	err := ClearApplicationMetadata(
 		ctx,
 		"/example",
@@ -449,12 +469,14 @@ func TestClearApplicationMetadata_DropsAllApplicationValues(t *testing.T) {
 			return nil
 		},
 	)
+	// then
 	if err != nil || !called {
 		t.Fatalf("interceptor = (%t, %v)", called, err)
 	}
 }
 
 func TestHandler_DeniesUpstreamHeadersAndTrailers(t *testing.T) {
+	// given
 	client := &fakeClient{responseMetadata: metadata.Pairs("private-header", "private-value")}
 	handler := newTestHandler(t, client, 4096)
 	request := httptest.NewRequest(
@@ -465,7 +487,9 @@ func TestHandler_DeniesUpstreamHeadersAndTrailers(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("TE", "trailers")
 	recorder := httptest.NewRecorder()
+	// when
 	handler.ServeHTTP(recorder, request)
+	// then
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d", recorder.Code)
 	}
@@ -478,6 +502,7 @@ func TestHandler_DeniesUpstreamHeadersAndTrailers(t *testing.T) {
 }
 
 func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *testing.T) {
+	// given
 	const marker = "private-sensitive-marker"
 	var logs bytes.Buffer
 	reader := sdkmetric.NewManualReader()
@@ -500,6 +525,7 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	}
 	unknown := httptest.NewRequest(http.MethodGet, "/"+marker+"?value="+marker, nil)
 	unknown.Header.Set("X-Custom", marker)
+	// when
 	handler.ServeHTTP(httptest.NewRecorder(), unknown)
 	malformed := httptest.NewRequest(
 		http.MethodPost,
@@ -509,6 +535,7 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	malformed.Header.Set("Content-Type", "application/json")
 	handler.ServeHTTP(httptest.NewRecorder(), malformed)
 
+	// then
 	var metrics metricdata.ResourceMetrics
 	if err := reader.Collect(context.Background(), &metrics); err != nil {
 		t.Fatal(err)
