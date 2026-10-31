@@ -23,12 +23,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/gateway"
 )
 
 func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *testing.T) {
@@ -219,6 +221,72 @@ func TestRun_UnavailableGatewayNeverBecomesReadyAndCleansUp(t *testing.T) {
 	}
 	if managementCreated {
 		t.Error("management server was created before gateway readiness")
+	}
+}
+
+func TestRun_ReportsDynamicGatewayReadinessLossAndRecovery(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	deps := productionDependencies()
+	connection := newStatefulGatewayConnection(connectivity.Ready)
+	deps.newConnection = func(string, telemetryProvider, config.Config) (gatewayConnection, error) {
+		return connection, nil
+	}
+	deps.newGateway = func(scaffoldv1.ExampleServiceClient, gateway.Settings) (http.Handler, error) {
+		return http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.WriteHeader(http.StatusNoContent)
+		}), nil
+	}
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
+	_ = receiveString(t, addresses)
+	_ = receiveString(t, addresses)
+	healthAddress := receiveString(t, addresses)
+	client := &http.Client{Timeout: time.Second}
+	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
+
+	// when
+	connection.setState(connectivity.TransientFailure)
+
+	// then
+	waitForHTTPStatus(
+		t,
+		client,
+		"http://"+healthAddress+"/readyz",
+		http.StatusServiceUnavailable,
+	)
+	waitForHTTPStatus(t, client, "http://"+healthAddress+"/livez", http.StatusOK)
+
+	// when
+	connection.setState(connectivity.Ready)
+
+	// then
+	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
+	cancel()
+	if err := receiveError(t, runResult, "service did not stop"); err != nil {
+		t.Fatalf("run service: %v", err)
+	}
+}
+
+func TestGatewayConnectionIdleTimeout_Disabled(t *testing.T) {
+	// given
+	want := time.Duration(0)
+
+	// when
+	got := gatewayConnectionIdleTimeout
+
+	// then
+	if got != want {
+		t.Fatalf("gateway connection idle timeout = %v, want disabled", got)
 	}
 }
 
@@ -568,6 +636,72 @@ func (address testAddress) String() string { return string(address) }
 type recordingProvider struct {
 	tracerProvider *sdktrace.TracerProvider
 	meterProvider  metric.MeterProvider
+}
+
+type statefulGatewayConnection struct {
+	mu      sync.Mutex
+	state   connectivity.State
+	changed chan struct{}
+}
+
+func newStatefulGatewayConnection(state connectivity.State) *statefulGatewayConnection {
+	return &statefulGatewayConnection{state: state, changed: make(chan struct{})}
+}
+
+func (*statefulGatewayConnection) Invoke(
+	context.Context,
+	string,
+	any,
+	any,
+	...grpc.CallOption,
+) error {
+	return errors.New("unexpected RPC invocation")
+}
+
+func (*statefulGatewayConnection) NewStream(
+	context.Context,
+	*grpc.StreamDesc,
+	string,
+	...grpc.CallOption,
+) (grpc.ClientStream, error) {
+	return nil, errors.New("unexpected RPC stream")
+}
+
+func (*statefulGatewayConnection) Connect() {}
+
+func (connection *statefulGatewayConnection) GetState() connectivity.State {
+	connection.mu.Lock()
+	defer connection.mu.Unlock()
+	return connection.state
+}
+
+func (connection *statefulGatewayConnection) WaitForStateChange(
+	ctx context.Context,
+	source connectivity.State,
+) bool {
+	connection.mu.Lock()
+	if connection.state != source {
+		connection.mu.Unlock()
+		return true
+	}
+	changed := connection.changed
+	connection.mu.Unlock()
+	select {
+	case <-changed:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (connection *statefulGatewayConnection) Close() error { return nil }
+
+func (connection *statefulGatewayConnection) setState(state connectivity.State) {
+	connection.mu.Lock()
+	connection.state = state
+	close(connection.changed)
+	connection.changed = make(chan struct{})
+	connection.mu.Unlock()
 }
 
 func (provider *recordingProvider) MeterProvider() metric.MeterProvider {

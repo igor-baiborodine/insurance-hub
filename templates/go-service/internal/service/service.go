@@ -28,6 +28,8 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
 )
 
+const gatewayConnectionIdleTimeout time.Duration = 0
+
 // Run starts the configured service and blocks until cancellation or an unexpected serving error.
 func Run(ctx context.Context, settings config.Config, logger *slog.Logger) error {
 	return run(ctx, settings, logger, productionDependencies())
@@ -112,7 +114,7 @@ func newGatewayConnection(
 			otelgrpc.WithPropagators(provider.GRPCPropagator()),
 		)),
 		grpcgo.WithUnaryInterceptor(gateway.ClearApplicationMetadata),
-		grpcgo.WithIdleTimeout(0),
+		grpcgo.WithIdleTimeout(gatewayConnectionIdleTimeout),
 		grpcgo.WithDefaultCallOptions(
 			grpcgo.MaxCallSendMsgSize(settings.MaxReceiveBytes),
 			grpcgo.MaxCallRecvMsgSize(settings.MaxSendBytes),
