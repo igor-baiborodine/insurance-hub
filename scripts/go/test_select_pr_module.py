@@ -14,6 +14,11 @@ import select_pr_module
         (["docs/readme.md"], {"module_dir": ""}),
         (["libs/servicekit/README.md"], {"module_dir": ""}),
         (["templates/go-service/cmd/server/main.go"], {"module_dir": "templates/go-service"}),
+        (["templates/go-service/README.md"], {"module_dir": "templates/go-service"}),
+        (
+            ["templates/go-service/gen/openapiv2/scaffold/v1/example_service.swagger.json"],
+            {"module_dir": "templates/go-service"},
+        ),
         (
             ["libs/servicekit/README.md", "templates/go-service/go.mod"],
             {"module_dir": "templates/go-service"},

@@ -141,6 +141,34 @@ def test_copy_rejects_missing_shared_dependency(tmp_path: Path) -> None:
         check_copy.validate_copy_surface(copy_root)
 
 
+def test_generated_output_requires_gateway_openapi_and_renamed_identity(tmp_path: Path) -> None:
+    # given
+    for relative in check_copy.GENERATED_OUTPUTS:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("package examplecopyv1\n", encoding="utf-8")
+
+    # when / then
+    check_copy.validate_generated_output(tmp_path)
+    stale = tmp_path / "gen/openapiv2/examplecopy/v1/example_service.swagger.json"
+    stale.write_text('{"package":"scaffold.v1"}\n', encoding="utf-8")
+    with pytest.raises(check_copy.CopyError, match="stale active scaffold identity"):
+        check_copy.validate_generated_output(tmp_path)
+
+
+def test_generated_output_rejects_missing_gateway(tmp_path: Path) -> None:
+    # given
+    for relative in check_copy.GENERATED_OUTPUTS:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("renamed\n", encoding="utf-8")
+    (tmp_path / "gen/examplecopy/v1/example_service.pb.gw.go").unlink()
+
+    # when / then
+    with pytest.raises(check_copy.CopyError, match="generated output path set differs"):
+        check_copy.validate_generated_output(tmp_path)
+
+
 def test_run_copy_make_forwards_selected_tool_overrides(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -175,6 +203,37 @@ def test_run_copy_make_forwards_selected_tool_overrides(
     # then
     assert "GO=/controlled/go" in captured["arguments"]
     assert "UV=/controlled/uv" in captured["arguments"]
+
+
+def test_run_copy_make_propagates_failed_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    config = check_copy.Configuration(
+        module_root=tmp_path,
+        repository_root=tmp_path,
+        common_tooling_dir=tmp_path,
+        make_arguments=("make",),
+        selected_python=Path(__file__).absolute(),
+        go="go",
+        uv="uv",
+    )
+
+    def fail(_arguments: list[str], **_options: object) -> None:
+        raise check_copy.CommandError("controlled child failure")
+
+    monkeypatch.setattr(check_copy, "run_command", fail)
+
+    # when / then
+    with pytest.raises(check_copy.CommandError, match="controlled child failure"):
+        check_copy.run_copy_make(
+            config,
+            tmp_path,
+            time.monotonic() + 10,
+            "controlled Make",
+            "check",
+        )
 
 
 def test_run_copy_make_selects_copied_candidate_manifest(

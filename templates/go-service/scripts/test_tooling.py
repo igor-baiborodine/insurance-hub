@@ -224,6 +224,17 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
             encoding="utf-8",
         )
         return "check-gateway-contract", "paths must contain only /v1/example/changed", ()
+    if case == "gateway-startup":
+        path = fixture / "internal" / "service" / "service.go"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "go func() { businessResult <- runtime.businessServer.Serve(runtime.businessListener) }()",
+                "go func() { businessResult <- nil }()",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        return "test", ": test] Error", ("TEST_PACKAGES=./internal/service",)
     generated = fixture / GENERATED_PACKAGE
     if case == "generated-modified":
         path = generated / "example_service.pb.go"
@@ -255,7 +266,7 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
             encoding="utf-8",
         )
         return "check-proto-drift", "stale generated output is no longer declared", ()
-    openapi = fixture / "gen" / "openapiv2" / "scaffold" / "v1"
+    openapi = fixture / "gen/openapiv2/scaffold/v1"
     if case == "generated-openapi-modified":
         path = openapi / "example_service.swagger.json"
         path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
@@ -291,6 +302,7 @@ def test_non_race_test_target_passes_without_mutation(tooling: Tooling) -> None:
         "proto-lint",
         "proto-breaking",
         "gateway-contract",
+        "gateway-startup",
         "generated-modified",
         "generated-unexpected",
         "generated-missing",

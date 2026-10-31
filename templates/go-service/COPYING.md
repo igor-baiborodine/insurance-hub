@@ -29,7 +29,9 @@ creating a real service, then use the same replacement categories consistently.
 | Schema/generated path          | `scaffold/v1`                                                    | `examplecopy/v1`                                                  |
 | Generated Go package           | `scaffoldv1`                                                     | `examplecopyv1`                                                   |
 
-Retain the exact published `libs/servicekit` version and its checksums in the renamed copy; never replace it with a sibling checkout. The management HTTP default is `127.0.0.1:8081`, while gRPC remains `127.0.0.1:9090`.
+Retain the exact published `libs/servicekit` version and its checksums in the renamed copy; never
+replace it with a sibling checkout. Business HTTP, management HTTP and gRPC retain the private
+defaults `127.0.0.1:8080`, `127.0.0.1:8081` and `127.0.0.1:9090`.
 
 Use a valid Protobuf identifier without a hyphen. The generic `ExampleService`, `EchoRequest`,
 `EchoResponse`, `Echo`, and `cmd/server` names may remain until the service defines a real contract.
@@ -163,9 +165,9 @@ together.
 
 Review `README.md` and replace the template introduction with the real service purpose when it is
 known. Update any service-specific ports or configuration defaults required by the service ticket.
-The replacements above update the two Makefile-owned generated paths. The `buf.gen.yaml` output
-root remains identity-neutral; do not change it unless the schema layout or tooling contract
-changes.
+The replacements above update the Makefile-owned Go, gateway and Swagger paths. The `buf.gen.yaml`
+output roots remain identity-neutral; do not change them unless the schema layout or tooling
+contract changes.
 
 ## 3. Bootstrap tools and regenerate owned content
 
@@ -184,7 +186,9 @@ Generation must create only:
 
 ```text
 gen/examplecopy/v1/example_service.pb.go
+gen/examplecopy/v1/example_service.pb.gw.go
 gen/examplecopy/v1/example_service_grpc.pb.go
+gen/openapiv2/examplecopy/v1/example_service.swagger.json
 ```
 
 `bootstrap-tools` uses the repository's root `.python-version`, `pyproject.toml`, `uv.lock`, and
@@ -215,13 +219,16 @@ test "$(sed -n '1s/^module //p' go.mod)" = \
   'github.com/igor-baiborodine/insurance-hub/services/example-copy'
 test -f api/examplecopy/v1/example_service.proto
 test -f gen/examplecopy/v1/example_service.pb.go
+test -f gen/examplecopy/v1/example_service.pb.gw.go
 test -f gen/examplecopy/v1/example_service_grpc.pb.go
+test -f gen/openapiv2/examplecopy/v1/example_service.swagger.json
 ```
 
-The generated-identity test inspects the runtime descriptor package, file path, `go_package`,
-service name, and full RPC method. Logger and configuration tests capture and assert the renamed
-`example-copy` identity. These checks prevent a mutually consistent but stale client and server from
-hiding an incomplete rename.
+The generated-identity checks inspect the runtime descriptor package, file path, `go_package`,
+gateway registration, Swagger definitions and paths, service name, and full RPC method. Logger and
+configuration tests capture and assert the renamed `example-copy` identity. These checks prevent a
+mutually consistent but stale HTTP client, RPC server or OpenAPI document from hiding an incomplete
+rename.
 
 ## 5. Validate the independent module without mutation
 
@@ -239,6 +246,8 @@ trap 'rm -f "$inventory_before" "$inventory_after"' EXIT
 find . -type f ! -path './.tools/*' -print0 |
   sort -z | xargs -0 sha256sum >"$inventory_before"
 
+GOWORK=off make test \
+  TEST_PACKAGES='./internal/service -run ^TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst$'
 GOWORK=off make test
 GOWORK=off make check FORMAT_SCOPE=all
 
@@ -257,10 +266,11 @@ complete repository onboarding before claiming root aggregate or hosted coverage
 When changing the source scaffold or this procedure, run the owning proof from the original module.
 It creates a temporary `services/example-copy`, applies every identity replacement above, verifies
 that the copy uses the repository Python environment and shared Go tooling, bootstraps its pinned Go
-tools, regenerates its bindings, runs `test` and the complete non-mutating `check`, verifies that
-scaffold-only copy tooling and coverage claims were removed, compares inventories, and removes the
-temporary tree. Its finite phases report 30-second heartbeats, share a 40-minute work deadline, and
-use a separate 15-second process-group teardown budget.
+tools, regenerates all Go/gateway/Swagger output, and runs explicit copied HTTP→RPC, direct-RPC and
+health acceptance before `test` and the complete non-mutating `check`. It rejects stale generated
+identity, removes scaffold-only copy tooling and coverage claims, compares inventories, and removes
+the temporary tree. Its finite phases report 30-second heartbeats, share a 40-minute work deadline,
+and use a separate 15-second process-group teardown budget.
 
 ```sh
 make check-copy

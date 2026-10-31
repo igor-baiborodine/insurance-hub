@@ -12,7 +12,7 @@ import pytest
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 CONTRACT = MODULE_ROOT / "testdata" / "http-contract.json"
-SWAGGER = MODULE_ROOT / "gen" / "openapiv2" / "scaffold" / "v1" / "example_service.swagger.json"
+SWAGGER = MODULE_ROOT / "gen/openapiv2/scaffold/v1/example_service.swagger.json"
 
 
 def test_current_generated_swagger_matches_contract() -> None:

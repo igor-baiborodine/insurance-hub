@@ -677,6 +677,15 @@ def ci_check(root: Path, inventory: dict[str, Any]) -> None:
                     f"{directory}/go.sum",
                     f"{directory}/**/testdata/**",
                 }
+                if module["role"] == "service-scaffold":
+                    expected.update(
+                        {
+                            f"{directory}/Makefile",
+                            f"{directory}/README.md",
+                            f"{directory}/gen/openapiv2/**/*.json",
+                            f"{directory}/scripts/**/*.py",
+                        }
+                    )
                 require(
                     f"{directory}/**" not in triggers,
                     f"workflow {workflow} contains forbidden pull_request path trigger for broad inventory module trigger {directory}: {directory}/**",
@@ -687,6 +696,22 @@ def ci_check(root: Path, inventory: dict[str, Any]) -> None:
                     f"workflow {workflow} is missing pull_request path trigger for "
                     f"{directory}: {missing[0]}"
                 )
+        if any(
+            item["ciWorkflow"] == workflow and item["role"] == "service-scaffold"
+            for item in inventory["modules"]
+        ):
+            require_literal(
+                text,
+                workflow,
+                "if: success() && steps.select.outputs.module_role == 'service-scaffold'",
+                "separate scaffold copy validation",
+            )
+            require_literal(
+                text,
+                workflow,
+                'run: make -C "$MODULE_DIR" check-copy',
+                "separate scaffold copy validation",
+            )
         for forbidden in (
             "actions/setup-java@",
             "actions/setup-node@",
