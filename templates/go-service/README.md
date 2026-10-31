@@ -176,9 +176,10 @@ and Product-specific delegates are documented in the topology guide.
 
 [Go PR Module Validation](../../.github/workflows/go-pr-mod.yml) runs only on pull requests to
 `main` when qualifying Go source, generated Go or Swagger output, module metadata, Protobuf
-contracts, contract baselines, lint/generator configuration, the scaffold Makefile, or Python
-tooling changes. Immediate `services/*-service` modules retain their narrower module-owned triggers.
-README-only changes remain documentation-local and do not select a Go module validation job.
+contracts, contract baselines, or lint/generator configuration changes. Its explicit
+`**/*-service` suffix matrix covers the scaffold and immediate Go services while excluding legacy
+and nested service-shaped directories. Makefile, Python-tooling and README-only changes remain in
+the local development workflow and do not select a Go module validation job.
 
 After workflow filtering, the job maps the complete pull-request diff to the scaffold or
 conventionally named service roots. It validates one selected module, reports a successful no-op for
