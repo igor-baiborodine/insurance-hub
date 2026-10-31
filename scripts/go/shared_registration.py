@@ -362,7 +362,11 @@ def plan_trees(
         root
         for root in roots
         if any(
-            select_pr_module.is_validation_relevant_module_path(path)
+            (
+                select_pr_module.is_validation_relevant_module_path(path)
+                if root == DIRECTORY
+                else select_pr_module.is_go_pr_qualifying_module_path(path)
+            )
             and (path == root or path.startswith(root + "/"))
             for path in paths
         )

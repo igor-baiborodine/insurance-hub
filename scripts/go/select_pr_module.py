@@ -11,6 +11,17 @@ import sys
 from pathlib import Path, PurePosixPath
 
 SHA = re.compile(r"[0-9a-f]{40}")
+GO_PR_ROOT_FILES = frozenset(
+    {
+        ".golangci.yml",
+        "buf.gen.yaml",
+        "buf.lock",
+        "buf.yaml",
+        "go.mod",
+        "go.sum",
+        "sqlc.yaml",
+    }
+)
 
 
 class SelectionError(RuntimeError):
@@ -33,12 +44,39 @@ def is_validation_relevant_module_path(path_value: str) -> bool:
     return PurePosixPath(path_value).suffix.lower() != ".md"
 
 
+def is_go_pr_qualifying_module_path(path_value: str) -> bool:
+    """Return whether a path is an explicit Go service PR workflow input."""
+    module = classify_module(path_value)
+    if module is None or not module.endswith("-service"):
+        return False
+    relative = PurePosixPath(path_value).relative_to(module)
+    parts = relative.parts
+    if not parts:
+        return False
+    if relative.suffix == ".go":
+        return True
+    if len(parts) == 1 and parts[0] in GO_PR_ROOT_FILES:
+        return True
+    if parts[0] == "api" and relative.suffix == ".proto":
+        return True
+    if parts[:2] == ("gen", "openapiv2") and relative.suffix == ".json":
+        return True
+    if len(parts) == 4 and parts[:3] == ("internal", "postgres", "sql"):
+        return relative.suffix == ".sql"
+    return "testdata" in parts[:-1]
+
+
 def selection_outputs(paths: list[str], merge_base: str) -> dict[str, str]:
     modules = sorted(
         {
             module
             for path in paths
-            if is_validation_relevant_module_path(path) and (module := classify_module(path))
+            if (module := classify_module(path))
+            and (
+                is_validation_relevant_module_path(path)
+                if module.startswith("libs/")
+                else is_go_pr_qualifying_module_path(path)
+            )
         }
     )
     if not modules:

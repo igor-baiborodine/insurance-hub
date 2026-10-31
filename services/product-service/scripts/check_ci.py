@@ -452,6 +452,15 @@ def exercise_selection(selector: dict) -> None:
             "services/product-service",
         ),
         (
+            "scaffold plus Product-local CI helper",
+            {
+                "templates/go-service/main.go": "package main\n",
+                "services/product-service/scripts/check_ci.py": "# fixture\n",
+            },
+            0,
+            "templates/go-service",
+        ),
+        (
             "qualifying plus second-module auxiliary",
             {
                 "services/product-service/main.go": "package main\n",
