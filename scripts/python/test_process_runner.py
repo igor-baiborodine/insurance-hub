@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import sys
 import time
 from pathlib import Path
@@ -92,3 +93,67 @@ def test_timeout_kills_term_resistant_descendant_after_leader_exits(tmp_path: Pa
     pid = int(descendant_pid.read_text(encoding="utf-8"))
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+def test_run_captures_success_and_merges_log_streams(tmp_path: Path) -> None:
+    # given
+    log = tmp_path / "child.log"
+
+    # when
+    output = process_runner.run(
+        [sys.executable, "-c", "print('captured')"],
+        cwd=tmp_path,
+        env=os.environ,
+        timeout_seconds=5,
+        activity="capture child",
+        capture=True,
+    )
+    process_runner.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; print('out', flush=True); print('err', file=sys.stderr)",
+        ],
+        cwd=tmp_path,
+        env=os.environ,
+        timeout_seconds=5,
+        activity="log child",
+        log_path=log,
+    )
+
+    # then
+    assert output == "captured\n"
+    assert log.read_text(encoding="utf-8").splitlines() == ["out", "err"]
+
+
+def test_run_terminates_timed_out_process_group(tmp_path: Path) -> None:
+    # given
+    started = time.monotonic()
+
+    # when / then
+    with pytest.raises(process_runner.CommandError, match="deadline"):
+        process_runner.run(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=tmp_path,
+            env=os.environ,
+            timeout_seconds=0.1,
+            teardown_seconds=2,
+            activity="timed child",
+            capture=True,
+        )
+    assert time.monotonic() - started < 3
+
+
+def test_run_cli_maps_handled_signal_to_shell_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    # given
+    def interrupted() -> int:
+        raise process_runner.CommandSignal(signal.SIGTERM)
+
+    monkeypatch.setattr(signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(signal, "getsignal", lambda _signum: signal.SIG_DFL)
+
+    # when
+    status = process_runner.run_cli(interrupted, name="fixture")
+
+    # then
+    assert status == 143

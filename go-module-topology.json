@@ -69,13 +69,15 @@
         "FORMAT_SCOPE",
         "FORMAT_BASE"
       ],
-      "packageScope": "all current Policy search foundation packages under ./..., the server executable, module dependency metadata, and foundation coverage; HTTP contract, real Elasticsearch integration, and runtime image gates remain pending issue-229 Step 4",
+      "packageScope": "all current Policy search packages under ./..., the server executable, disposable Elasticsearch foundation suite, runtime image, module dependency metadata, and unit/integration coverage; direct HTTP handler parity remains assigned to later issue-229 steps",
       "prerequisites": [
         "Go 1.27.3",
         "managed CPython 3.14.8",
         "pinned Policy search Go tools installed by make -C services/policy-search-service bootstrap-go-tools",
-        "GCC for race-enabled coverage",
-        "public module, tool, and vulnerability services unless cached"
+        "GCC for race-enabled unit and integration tests",
+        "Docker Engine with daemon and buildx access for disposable integration and image checks",
+        "pinned Elasticsearch 8.19.6 image digest available locally or from its public registry",
+        "public module, tool, vulnerability and container services unless cached"
       ],
       "consumers": [
         "github.com/igor-baiborodine/insurance-hub/services/policy-search-service"

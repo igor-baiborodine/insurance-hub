@@ -11,16 +11,16 @@
 
 This standalone Go module is the HTTP foundation for the internal policy search migration.
 The Java `GET /policies` behavior and error baseline are recorded in issue #229; the Go search
-handler, OpenAPI contract, and real Elasticsearch integration arrive in later delivery steps.
-There is no gRPC API or Echo example in this service.
+handler arrives in a later delivery step. There is no gRPC API, separately maintained OpenAPI
+contract, or Echo example in this service.
 
 The module is derived from committed `templates/go-service` tree
 `201064d910fc63cabad86fd7be8ff9c36f635a9f` at repository commit
 `7fd0cf563dcccd703fdf9f03748a83932d66354d`. It retains the published
 `libs/servicekit` `v1.0.1` dependency and shared runtime conventions. The root Go module
 inventory now registers this foundation so repository planning and selected-module CI can
-validate it. HTTP contract, real Elasticsearch integration, image, and shared-candidate gates
-remain assigned to Step 4. No workspace or filesystem replacement is used.
+validate it. The module owns a disposable Elasticsearch foundation suite, runtime image, and
+applicable shared-candidate gates. No workspace or filesystem replacement is used.
 
 ## Product and Servicekit alignment
 
@@ -67,11 +67,21 @@ wire its owned Elasticsearch client without changing these process boundaries.
 
 Run commands from this directory. `make` lists the current interface. `make update-deps` owns
 manifest changes; `make format`, `make format-check`, `make test`, `make build`, and
-`make check-servicekit` own their respective checks. The aggregate `make check-go-pr` validates
-the current foundation with formatting, lint, race-enabled coverage, build, dependency,
-vulnerability, and Servicekit checks. It does not certify the absent HTTP contract, real
-Elasticsearch integration, or runtime image; Step 4 adds those gates. All Go commands use
-standalone `GOWORK=off` module resolution.
+`make check-servicekit` own their respective checks. `make test-integration` starts pinned
+disposable Elasticsearch and writes `integration-coverage.txt`; `make image-check` separately
+builds and exercises the pinned nonroot runtime image. Image build, base identity/lifecycle checks,
+Servicekit candidate phases, and bounded child-process ownership use repository tooling under
+`scripts/go/service` and `scripts/python`, configured by `go-service-tooling.json`. The shared
+interfaces are service-neutral; this change adopts them only in Policy Search, leaving Product
+Service adoption to a separate PR. The aggregate `make check-go-pr` runs the integration suite
+with formatting, lint, race-enabled `coverage.txt`, build, dependency, vulnerability, and
+Servicekit checks. All Go commands use standalone `GOWORK=off` module resolution.
+
+The current Elasticsearch integration proves owned container startup, synthetic index lifecycle,
+client read/write behavior, race execution, test discovery, coverage, and cleanup. Query semantics,
+the direct HTTP contract, and end-to-end handler parity remain assigned to later steps and will be
+verified through the real handler and integration suite. Until the dependency-backed handler is
+installed, the image check uses `/livez`; `/readyz` remains unavailable by design.
 
 The process reads typed environment settings. `SERVICE_NAME` defaults to
 `policy-search-service`; `HTTP_ADDR` defaults to `127.0.0.1:8080`; `HEALTH_ADDR` defaults to
