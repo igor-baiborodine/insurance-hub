@@ -51,7 +51,7 @@ def test_integration_rejects_ambient_elasticsearch_before_start(
     # then
     assert status == 1
     assert "runner owns Elasticsearch" in capsys.readouterr().err
-    assert commands == [["docker", "rm", "--force", f"policy-search-step4-{os.getpid()}"]]
+    assert commands == [["docker", "rm", "--force", f"policy-search-integration-{os.getpid()}"]]
 
 
 def test_shared_candidate_integration_uses_owned_target(monkeypatch: pytest.MonkeyPatch) -> None:

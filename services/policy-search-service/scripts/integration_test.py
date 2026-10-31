@@ -60,7 +60,7 @@ def main() -> int:
     image = os.environ.get("ELASTICSEARCH_IMAGE", "")
     suite = os.environ.get("INTEGRATION_SUITE", "")
     coverage = os.environ.get("INTEGRATION_COVERAGE_FILE", "")
-    name = f"policy-search-step4-{os.getpid()}"
+    name = f"policy-search-integration-{os.getpid()}"
     environment = dict(os.environ)
     status = 0
     try:
@@ -150,9 +150,13 @@ def main() -> int:
             )
             sys.stdout.write(result.read_text(encoding="utf-8"))
             discovered = passed_tests(result)
+            expected = {
+                "TestElasticsearchFoundation_IndexesAndReadsSyntheticDocument",
+                "TestElasticsearchFoundation_SearchesLegacyFieldsAndCapsSelectedHits",
+            }
             require(
-                "TestElasticsearchFoundation_IndexesAndReadsSyntheticDocument" in discovered,
-                f"foundation suite selected zero expected tests; passed={sorted(discovered)}",
+                expected <= discovered,
+                f"foundation suite missed expected tests; passed={sorted(discovered)}",
             )
             require(coverage_path.is_file(), "integration coverage profile was not produced")
     except (IntegrationError, CommandError, OSError) as error:
@@ -173,7 +177,7 @@ def main() -> int:
             status = 1
     if status:
         return status
-    print("test-integration: suite=foundation selected=1 cleanup=passed")
+    print("test-integration: suite=foundation selected=2 cleanup=passed")
     return 0
 
 
