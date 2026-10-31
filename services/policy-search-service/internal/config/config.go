@@ -3,8 +3,11 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 	kitidentity "github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
@@ -13,17 +16,45 @@ import (
 // DefaultServiceName identifies startup diagnostics until configuration has been validated.
 const DefaultServiceName = "policy-search-service"
 
-const httpAddressSetting = "HTTP_ADDR"
+const (
+	httpAddressSetting             = "HTTP_ADDR"
+	elasticsearchURLSetting        = "ELASTICSEARCH_URL"
+	elasticsearchUsernameSetting   = "ELASTICSEARCH_USERNAME"
+	elasticsearchPasswordSetting   = "ELASTICSEARCH_PASSWORD"
+	elasticsearchCACertFileSetting = "ELASTICSEARCH_CA_CERT_FILE"
+	elasticsearchTimeoutSetting    = "ELASTICSEARCH_TIMEOUT"
+	startupTimeoutSetting          = "STARTUP_TIMEOUT"
+)
 
 // Config contains the immutable settings parsed and validated during process startup.
 type Config struct {
 	kitconfig.Runtime
-	ServiceName   string
-	HTTPAddress   Address
-	HealthAddress Address
+	ServiceName    string
+	HTTPAddress    Address
+	HealthAddress  Address
+	Elasticsearch  Elasticsearch
+	StartupTimeout time.Duration
 	kitconfig.HTTPServer
 	kitconfig.Telemetry
 }
+
+// Elasticsearch contains the verified endpoint, credentials, trust roots and request bound.
+type Elasticsearch struct {
+	URL      string
+	Username string
+	Password Secret
+	CACert   []byte
+	Timeout  time.Duration
+}
+
+// Secret prevents credentials from being exposed through ordinary formatting.
+type Secret struct{ value string }
+
+// Value returns the credential only to the runtime composition boundary.
+func (secret Secret) Value() string { return secret.value }
+
+func (Secret) String() string   { return "[REDACTED]" }
+func (Secret) GoString() string { return "[REDACTED]" }
 
 // Address is a validated TCP listen address with a host and numeric port.
 type Address = kitconfig.Address
@@ -71,6 +102,16 @@ func load(lookup lookupEnv) (Config, error) {
 
 	healthAddress, err := kitconfig.LoadAddress(
 		lookup, kitconfig.EnvHealthAddress, kitconfig.DefaultHealthAddress,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	elasticsearchSettings, err := loadElasticsearch(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	startupTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup, startupTimeoutSetting, "10s",
 	)
 	if err != nil {
 		return Config{}, err
@@ -195,12 +236,94 @@ func load(lookup lookupEnv) (Config, error) {
 	}
 
 	return Config{
-		Runtime:       runtime,
-		HTTPServer:    httpServer,
-		ServiceName:   serviceName,
-		HTTPAddress:   httpAddress,
-		HealthAddress: healthAddress,
-		Telemetry:     telemetry,
+		Runtime:        runtime,
+		HTTPServer:     httpServer,
+		ServiceName:    serviceName,
+		HTTPAddress:    httpAddress,
+		HealthAddress:  healthAddress,
+		Elasticsearch:  elasticsearchSettings,
+		StartupTimeout: startupTimeout,
+		Telemetry:      telemetry,
+	}, nil
+}
+
+func loadElasticsearch(lookup lookupEnv) (Elasticsearch, error) {
+	endpoint, err := kitconfig.ValueOrDefault(
+		lookup, elasticsearchURLSetting, "http://127.0.0.1:9200",
+	)
+	if err != nil {
+		return Elasticsearch{}, err
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed == nil || parsed.Opaque != "" || parsed.User != nil ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		!kitconfig.ValidHost(parsed.Hostname()) || parsed.Port() == "" ||
+		parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return Elasticsearch{}, kitconfig.Invalid(
+			elasticsearchURLSetting,
+			"must be an HTTP or HTTPS URL with a host and numeric port",
+		)
+	}
+	port, err := strconv.ParseUint(parsed.Port(), 10, 16)
+	if err != nil || port == 0 {
+		return Elasticsearch{}, kitconfig.Invalid(
+			elasticsearchURLSetting,
+			"must be an HTTP or HTTPS URL with a host and numeric port",
+		)
+	}
+	username, usernameSet := lookup(elasticsearchUsernameSetting)
+	password, passwordSet := lookup(elasticsearchPasswordSetting)
+	if usernameSet && strings.TrimSpace(username) == "" {
+		return Elasticsearch{}, kitconfig.Invalid(
+			elasticsearchUsernameSetting, "must not be blank",
+		)
+	}
+	if passwordSet && password == "" {
+		return Elasticsearch{}, kitconfig.Invalid(
+			elasticsearchPasswordSetting, "must not be empty",
+		)
+	}
+	if usernameSet != passwordSet {
+		return Elasticsearch{}, kitconfig.Invalid(
+			elasticsearchUsernameSetting,
+			"must be supplied together with ELASTICSEARCH_PASSWORD",
+		)
+	}
+	timeout, err := kitconfig.LoadPositiveDuration(
+		lookup, elasticsearchTimeoutSetting, "5s",
+	)
+	if err != nil {
+		return Elasticsearch{}, err
+	}
+	var caCert []byte
+	if path, exists := lookup(elasticsearchCACertFileSetting); exists {
+		if strings.TrimSpace(path) == "" {
+			return Elasticsearch{}, kitconfig.Invalid(
+				elasticsearchCACertFileSetting, "must not be blank",
+			)
+		}
+		caCert, err = os.ReadFile(path)
+		if err != nil {
+			return Elasticsearch{}, kitconfig.Invalid(
+				elasticsearchCACertFileSetting,
+				"must be a readable certificate file",
+			)
+		}
+		if len(caCert) == 0 {
+			return Elasticsearch{}, kitconfig.Invalid(
+				elasticsearchCACertFileSetting, "must not be empty",
+			)
+		}
+		if parsed.Scheme != "https" {
+			return Elasticsearch{}, kitconfig.Invalid(
+				elasticsearchCACertFileSetting,
+				"requires an HTTPS Elasticsearch URL",
+			)
+		}
+	}
+	return Elasticsearch{
+		URL: endpoint, Username: username, Password: Secret{value: password},
+		CACert: caCert, Timeout: timeout,
 	}, nil
 }
 

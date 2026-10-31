@@ -30,11 +30,11 @@ type Searcher struct{ client *elasticsearchapi.Client }
 
 var _ application.PolicySearcher = (*Searcher)(nil)
 
-func NewSearcher(client *elasticsearchapi.Client) (*Searcher, error) {
-	if client == nil {
+func NewSearcher(client *Client) (*Searcher, error) {
+	if client == nil || client.Client == nil {
 		return nil, ErrClientRequired
 	}
-	return &Searcher{client: client}, nil
+	return &Searcher{client: client.Client}, nil
 }
 
 func (searcher *Searcher) SearchPolicies(

@@ -13,22 +13,32 @@ import (
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
 
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/domain"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/elasticsearch"
+	policyhttp "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/http"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/telemetry"
 )
 
 const forcedCleanupReserve = 2 * time.Second
 
-// Run constructs the policy search foundation, serves its listeners, and owns bounded cleanup.
+// Run constructs policy search, serves its listeners, and owns bounded dependency cleanup.
 func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runErr error) {
 	if logger == nil {
 		return errors.New("run service: logger is required")
+	}
+	if settings.StartupTimeout <= 0 {
+		return errors.New("run service: startup timeout must be positive")
 	}
 	if settings.ShutdownTimeout <= 0 {
 		return errors.New("run service: shutdown timeout must be positive")
 	}
 
-	provider, err := telemetry.New(ctx, settings.ServiceName, settings.Telemetry)
+	startupCtx, cancelStartup := context.WithTimeout(ctx, settings.StartupTimeout)
+	defer cancelStartup()
+
+	provider, err := telemetry.New(startupCtx, settings.ServiceName, settings.Telemetry)
 	if err != nil {
 		return fmt.Errorf("run service: initialize telemetry: %w", err)
 	}
@@ -42,17 +52,63 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 			)
 		}
 	}()
+	elasticsearchClient, err := elasticsearch.New(elasticsearch.Config{
+		Endpoint: settings.Elasticsearch.URL,
+		Username: settings.Elasticsearch.Username,
+		Password: settings.Elasticsearch.Password.Value(),
+		CACert:   settings.Elasticsearch.CACert,
+		Timeout:  settings.Elasticsearch.Timeout,
+	})
+	if err != nil {
+		return fmt.Errorf("run service: initialize elasticsearch: %w", err)
+	}
+	resources.elasticsearchClient = elasticsearchClient
+	searcher, err := elasticsearch.NewSearcher(elasticsearchClient)
+	if err != nil {
+		return fmt.Errorf("run service: initialize policy search adapter: %w", err)
+	}
+	searchPolicies, err := application.NewSearchPolicies(searcher)
+	if err != nil {
+		return fmt.Errorf("run service: initialize policy search use case: %w", err)
+	}
+	observer, err := telemetry.NewRequestObserver(
+		logger,
+		provider.TracerProvider(),
+		provider.MeterProvider(),
+		provider.HTTPPropagator(),
+	)
+	if err != nil {
+		return fmt.Errorf("run service: initialize request telemetry: %w", err)
+	}
+	search := func(ctx context.Context, query string) (policies []domain.Policy, err error) {
+		err = observer.Application(ctx, func(ctx context.Context) error {
+			policies, err = searchPolicies.Execute(ctx, query)
+			return err
+		})
+		return policies, err
+	}
+	httpHandler, err := policyhttp.NewHandler(
+		logger,
+		policyhttp.Settings{
+			RequestTimeout: settings.RequestTimeout,
+			Observer:       observer,
+		},
+		search,
+	)
+	if err != nil {
+		return fmt.Errorf("run service: initialize policy search HTTP: %w", err)
+	}
 
 	resources.healthState, err = health.NewState(
 		settings.ProbeTimeout,
-		func(context.Context) error {
-			return errors.New("policy search handler not installed")
+		func(probeCtx context.Context) error {
+			return elasticsearchClient.Check(probeCtx)
 		},
 	)
 	if err != nil {
 		return fmt.Errorf("run service: initialize health: %w", err)
 	}
-	resources.httpServer = newBusinessServer(settings.HTTPServer)
+	resources.httpServer = newBusinessServer(settings.HTTPServer, httpHandler)
 	resources.managementServer = health.NewManagementServer(resources.healthState)
 
 	resources.httpListener, err = net.Listen("tcp", settings.HTTPAddress.String())
@@ -62,6 +118,12 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 	resources.managementListener, err = net.Listen("tcp", settings.HealthAddress.String())
 	if err != nil {
 		return fmt.Errorf("run service: listen for management HTTP: %w", err)
+	}
+	if err := startupCtx.Err(); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("run service: startup: %w", err)
 	}
 
 	serveResults := make(chan serveResult, 2)
@@ -89,9 +151,9 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) (runE
 	return finishRun(logger, serveErr, shutdownErr, telemetryErr)
 }
 
-func newBusinessServer(bounds config.HTTPServer) *http.Server {
+func newBusinessServer(bounds config.HTTPServer, handler http.Handler) *http.Server {
 	return &http.Server{
-		Handler:           http.NotFoundHandler(),
+		Handler:           handler,
 		ReadHeaderTimeout: bounds.ReadHeaderTimeout,
 		ReadTimeout:       bounds.ReadTimeout,
 		WriteTimeout:      bounds.WriteTimeout,
@@ -117,12 +179,13 @@ func waitForRunStop(ctx context.Context, results <-chan serveResult) error {
 }
 
 type runtimeResources struct {
-	provider           *telemetry.Provider
-	healthState        *health.State
-	httpServer         *http.Server
-	managementServer   *http.Server
-	httpListener       net.Listener
-	managementListener net.Listener
+	provider            *telemetry.Provider
+	elasticsearchClient *elasticsearch.Client
+	healthState         *health.State
+	httpServer          *http.Server
+	managementServer    *http.Server
+	httpListener        net.Listener
+	managementListener  net.Listener
 }
 
 func (resources *runtimeResources) closeAfterStartupFailure(timeout time.Duration) error {
@@ -130,6 +193,9 @@ func (resources *runtimeResources) closeAfterStartupFailure(timeout time.Duratio
 	defer cancel()
 	closeListener(resources.managementListener)
 	closeListener(resources.httpListener)
+	if resources.elasticsearchClient != nil {
+		resources.elasticsearchClient.CloseIdleConnections()
+	}
 	if resources.provider == nil {
 		return nil
 	}
@@ -180,6 +246,7 @@ func (resources *runtimeResources) shutdown(timeout time.Duration) (error, error
 			shutdownErr = errors.Join(shutdownErr, err)
 		}
 	}
+	resources.elasticsearchClient.CloseIdleConnections()
 	telemetryErr := resources.provider.Shutdown(shutdownCtx)
 	return shutdownErr, telemetryErr
 }

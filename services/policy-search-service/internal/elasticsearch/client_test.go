@@ -1,6 +1,7 @@
 package elasticsearch
 
 import (
+	"context"
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
@@ -102,5 +103,44 @@ func TestNew_UsesVerifiedCustomCA(t *testing.T) {
 	// then
 	if response.IsError() {
 		t.Errorf("verified TLS request returned %d", response.StatusCode)
+	}
+}
+
+func TestClientCheck_RejectsUntrustedTLSWithoutEndpointDetails(t *testing.T) {
+	server := httptest.NewTLSServer(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("X-Elastic-Product", "Elasticsearch")
+			_, _ = w.Write([]byte(`{"version":{"number":"8.19.6"}}`))
+		}),
+	)
+	defer server.Close()
+	client, err := New(Config{Endpoint: server.URL, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = client.Check(context.Background())
+
+	if err == nil || strings.Contains(err.Error(), server.URL) {
+		t.Fatalf("untrusted TLS check error = %v", err)
+	}
+}
+
+func TestClientCheck_RejectsUpstreamStatusWithoutResponseDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Elastic-Product", "Elasticsearch")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"private":"marker"}`))
+	}))
+	defer server.Close()
+	client, err := New(Config{Endpoint: server.URL, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = client.Check(context.Background())
+
+	if err == nil || strings.Contains(err.Error(), "private") {
+		t.Fatalf("upstream status check error = %v", err)
 	}
 }

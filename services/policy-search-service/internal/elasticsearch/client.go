@@ -2,10 +2,12 @@
 package elasticsearch
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,6 +15,12 @@ import (
 
 	elasticsearch "github.com/elastic/go-elasticsearch/v8"
 )
+
+// Client owns the official API client and its reusable HTTP connection pool.
+type Client struct {
+	*elasticsearch.Client
+	transport *http.Transport
+}
 
 // Config keeps endpoint credentials separate from the URL and requires bounded transport waits.
 type Config struct {
@@ -25,7 +33,7 @@ type Config struct {
 
 // New constructs the official 8.19 client without performing network or index operations.
 // The existing gateway owns retries, so the Elasticsearch client's retry layer is disabled.
-func New(settings Config) (*elasticsearch.Client, error) {
+func New(settings Config) (*Client, error) {
 	endpoint, err := url.Parse(settings.Endpoint)
 	if err != nil || endpoint == nil ||
 		(endpoint.Scheme != "http" && endpoint.Scheme != "https") ||
@@ -75,5 +83,31 @@ func New(settings Config) (*elasticsearch.Client, error) {
 	if err != nil {
 		return nil, errors.New("configure elasticsearch: client initialization failed")
 	}
-	return client, nil
+	return &Client{Client: client, transport: transport}, nil
+}
+
+// Check verifies that Elasticsearch accepts a bounded request without changing cluster state.
+func (client *Client) Check(ctx context.Context) error {
+	if client == nil || client.Client == nil {
+		return errors.New("check elasticsearch: client is required")
+	}
+	response, err := client.Info(client.Info.WithContext(ctx))
+	if err != nil {
+		return errors.New("check elasticsearch: request failed")
+	}
+	defer func() { _ = response.Body.Close() }()
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		return errors.New("check elasticsearch: invalid response")
+	}
+	if response.IsError() {
+		return errors.New("check elasticsearch: unsuccessful response")
+	}
+	return nil
+}
+
+// CloseIdleConnections releases pooled connections during shutdown or startup rollback.
+func (client *Client) CloseIdleConnections() {
+	if client != nil && client.transport != nil {
+		client.transport.CloseIdleConnections()
+	}
 }

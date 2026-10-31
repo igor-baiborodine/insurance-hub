@@ -9,10 +9,9 @@
 
 # Policy search service
 
-This standalone Go module is the HTTP foundation for the internal policy search migration.
-The Java `GET /policies` behavior and error baseline are recorded in issue #229; the Go search
-handler arrives in a later delivery step. There is no gRPC API, separately maintained OpenAPI
-contract, or Echo example in this service.
+This standalone Go module implements the internal policy search migration. It exposes the recorded
+Java-compatible `GET /policies` behavior over Elasticsearch. There is no gRPC API, separately
+maintained OpenAPI contract, or Echo example in this service.
 
 The module is derived from committed `templates/go-service` tree
 `201064d910fc63cabad86fd7be8ff9c36f635a9f` at repository commit
@@ -30,9 +29,9 @@ API. The policy-search module does not import `product-service/internal` package
 | Boundary | Shared implementation | Intentional policy-search difference |
 | --- | --- | --- |
 | Configuration | Servicekit address, runtime, HTTP timeout, telemetry, and validation helpers; Product deployment-identity validation and test-instance generation | `httpAddressSetting` remains a private local name because Servicekit v1.0.1 publishes `DefaultHTTPAddress` but no `EnvHTTPAddress`; no duplicate HTTP default is declared |
-| HTTP and health | Product's business-server timeout fields and Servicekit management server/state | The business handler is a temporary 404 until the Java-derived policy contract is implemented; Product's private handler and malformed-URI mapping are Product contract code |
-| Lifecycle | Product's concrete runtime-resource ownership, expected server-stop handling, readiness withdrawal, concurrent HTTP drain, forced-cleanup reserve, and separate telemetry shutdown diagnostics | There is no PostgreSQL pool or business gRPC server to acquire or close |
-| Logging and telemetry | Servicekit identity logger/provider, Product's W3C plus B3-multiple HTTP propagation policy, and the same safe enabled-export validation | Signal names use the policy-search identity; propagation middleware is completed with the real HTTP handler |
+| HTTP and health | Product's business-server timeout fields and Servicekit management server/state | Policy Search owns its Java-compatible query binding, DTO/error mapping, and Elasticsearch readiness check |
+| Lifecycle | Product's concrete runtime-resource ownership, expected server-stop handling, readiness withdrawal, concurrent HTTP drain, forced-cleanup reserve, and separate telemetry shutdown diagnostics | The reusable Elasticsearch transport replaces Product's PostgreSQL pool; there is no business gRPC server |
+| Logging and telemetry | Servicekit identity logger/provider, Product's W3C plus B3-multiple HTTP propagation policy, and the same safe enabled-export validation | Policy Search uses bounded search/request outcome labels and never records query, policy, credential, URL, or upstream payload values |
 | gRPC | Servicekit remains available for shared OTLP exporter mechanics | Policy search exposes no business gRPC API, so it has no gRPC listener, limits, generated contract, or interceptors |
 
 Comments on shared configuration aliases deliberately match Product. Comments differ where the
@@ -44,26 +43,29 @@ name mechanically.
 | Path | Current responsibility |
 | --- | --- |
 | `cmd/server` | Loads configuration, installs signal cancellation and logging, then delegates lifecycle ownership |
-| `internal/config` | Composes Servicekit settings with the policy-search service name and HTTP listener policy |
-| `internal/service` | Owns business and management listeners, readiness state, telemetry, and bounded shutdown |
-| `internal/telemetry` | Selects policy-search resource identity and signal names over the Servicekit provider |
-| `internal/elasticsearch` | Constructs a verified, bounded, non-retrying Elasticsearch client; query behavior is not implemented yet |
+| `internal/config` | Composes Servicekit settings with typed listener, Elasticsearch, startup, trust, and credential policy |
+| `internal/service` | Injects Elasticsearch into the search use case and HTTP handler; owns listeners, readiness, telemetry, pooled connections, and bounded shutdown |
+| `internal/http` | Preserves direct query binding, field/date omission, status, and framework-shaped error behavior |
+| `internal/telemetry` | Selects policy-search resource identity and bounded request signal names over the Servicekit provider |
+| `internal/elasticsearch` | Constructs the verified, bounded, non-retrying client and implements the legacy search query |
 
 ```mermaid
 flowchart LR
     entry["cmd/server"] --> service["internal/service"]
-    service --> business["business HTTP: temporary 404"]
+    service --> business["GET /policies HTTP adapter"]
+    business --> usecase["SearchPolicies use case"]
+    usecase --> elastic["Elasticsearch adapter"]
     service --> health["Servicekit management HTTP"]
     service --> telemetry["Servicekit telemetry provider"]
     config["internal/config"] --> entry
-    elastic["internal/elasticsearch: client constructor"]
+    service --> elastic
 ```
 
-Arrows show construction and lifecycle calls. The Elasticsearch constructor is intentionally not
-wired into readiness or request handling yet. A current business request reaches the configured
-HTTP server and returns 404; a management request reaches Servicekit's `/livez` or `/readyz`
-handler. Later steps replace the temporary business handler with the policy search use case and
-wire its owned Elasticsearch client without changing these process boundaries.
+Arrows show construction and lifecycle calls. Readiness performs a bounded, non-mutating
+Elasticsearch check while liveness remains available during dependency loss. Requests use one
+reusable verified client and propagate cancellation through the HTTP adapter, application use case,
+and Elasticsearch request. Shutdown withdraws readiness, drains HTTP, closes idle Elasticsearch
+connections, and flushes telemetry within the configured bound.
 
 Run commands from this directory. `make` lists the current interface. `make update-deps` owns
 manifest changes; `make format`, `make format-check`, `make test`, `make build`, and
@@ -78,10 +80,10 @@ with formatting, lint, race-enabled `coverage.txt`, build, dependency, vulnerabi
 Servicekit checks. All Go commands use standalone `GOWORK=off` module resolution.
 
 The current Elasticsearch integration proves owned container startup, synthetic index lifecycle,
-client read/write behavior, race execution, test discovery, coverage, and cleanup. Query semantics,
-the direct HTTP contract, and end-to-end handler parity remain assigned to later steps and will be
-verified through the real handler and integration suite. Until the dependency-backed handler is
-installed, the image check uses `/livez`; `/readyz` remains unavailable by design.
+client read/write behavior, query fields and cap, race execution, test discovery, coverage, and
+cleanup. Focused handler and composition tests cover the direct HTTP response matrix, binding,
+failure sanitization, cancellation, startup verification, readiness, and shutdown. The later parity
+step replays the full Java scenarios through disposable real HTTP and Elasticsearch boundaries.
 
 The process reads typed environment settings. `SERVICE_NAME` defaults to
 `policy-search-service`; `HTTP_ADDR` defaults to `127.0.0.1:8080`; `HEALTH_ADDR` defaults to
@@ -92,12 +94,20 @@ The business listener loads `HTTP_READ_HEADER_TIMEOUT` (default `5s`), `HTTP_REA
 Product does. The read-header timeout cannot exceed the read timeout, and the request timeout
 cannot exceed the write timeout. The management listener retains Servicekit's separate probe
 server defaults.
-The management listener exposes `GET /livez` and `GET /readyz`. The business HTTP listener has
-no `/policies` handler yet; requests return 404 until the specified HTTP mapping is implemented.
-Do not route traffic to this incomplete service.
+The management listener exposes `GET /livez` and dependency-backed `GET /readyz`. The business
+listener exposes only `GET /policies`. `q` is required by the direct service; present empty and
+whitespace values remain valid, and duplicate values use the first entry for Java compatibility.
+
+`ELASTICSEARCH_URL` defaults to `http://127.0.0.1:9200`. Optional paired
+`ELASTICSEARCH_USERNAME` and `ELASTICSEARCH_PASSWORD` settings keep credentials outside the URL.
+`ELASTICSEARCH_CA_CERT_FILE` supplies an additional PEM trust root for HTTPS, and
+`ELASTICSEARCH_TIMEOUT` defaults to `5s`. `STARTUP_TIMEOUT` defaults to `10s`. A dependency failure
+keeps `/livez` available, makes `/readyz` unavailable, and maps a search failure to the sanitized
+direct-service `500` contract.
 
 The selected Elasticsearch client is `github.com/elastic/go-elasticsearch/v8` `v8.19.7`, for
 the tested Elasticsearch 8.19 line. Its built-in retry is disabled by the owned constructor;
 the existing Java gateway alone owns application retries and fallback. The client constructor
-uses verified TLS, optional custom CA, bounded transport timeouts, and no implicit connection
-or index mutation. Query construction and real dependency readiness are added in later steps.
+uses verified TLS, an optional custom CA, bounded transport timeouts, and no implicit connection
+or index mutation. Readiness uses `GET /`; search uses `policy-views/_search`. Neither path retries
+in the Go service.

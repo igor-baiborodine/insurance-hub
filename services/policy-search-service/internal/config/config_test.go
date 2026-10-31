@@ -1,7 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +35,93 @@ func TestLoad_DefaultsForHTTPOnlyService(t *testing.T) {
 	}
 	if got.HTTPServer != kitconfig.DefaultHTTPServer() {
 		t.Errorf("unexpected HTTP timeouts: %+v", got.HTTPServer)
+	}
+	if got.Elasticsearch.URL != "http://127.0.0.1:9200" ||
+		got.Elasticsearch.Timeout != 5*time.Second || got.StartupTimeout != 10*time.Second {
+		t.Errorf("unexpected Elasticsearch/startup defaults: %+v", got)
+	}
+}
+
+func TestLoad_AcceptsTypedElasticsearchSettingsAndRedactsPassword(t *testing.T) {
+	certificatePath := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(certificatePath, []byte("certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const password = "private-password-marker"
+	got, err := load(mapLookup(map[string]string{
+		elasticsearchURLSetting:        "https://elastic.example.test:9200",
+		elasticsearchUsernameSetting:   "policy-reader",
+		elasticsearchPasswordSetting:   password,
+		elasticsearchCACertFileSetting: certificatePath,
+		elasticsearchTimeoutSetting:    "3s",
+		startupTimeoutSetting:          "7s",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Elasticsearch.Username != "policy-reader" ||
+		got.Elasticsearch.Password.Value() != password ||
+		string(got.Elasticsearch.CACert) != "certificate" ||
+		got.Elasticsearch.Timeout != 3*time.Second || got.StartupTimeout != 7*time.Second {
+		t.Fatalf("unexpected Elasticsearch settings: %+v", got.Elasticsearch)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", got), password) ||
+		strings.Contains(got.Elasticsearch.Password.String(), password) {
+		t.Fatal("configuration formatting exposed the Elasticsearch password")
+	}
+}
+
+func TestLoad_RejectsInvalidElasticsearchSettingsWithoutEchoingInput(t *testing.T) {
+	const private = "private-marker"
+	missingPath := filepath.Join(t.TempDir(), private)
+	certificatePath := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(certificatePath, []byte("certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name    string
+		values  map[string]string
+		setting string
+	}{
+		{"credential in URL", map[string]string{
+			elasticsearchURLSetting: "https://user:" + private + "@example.test:9200",
+		}, elasticsearchURLSetting},
+		{"URL path", map[string]string{
+			elasticsearchURLSetting: "https://example.test:9200/" + private,
+		}, elasticsearchURLSetting},
+		{"username only", map[string]string{
+			elasticsearchUsernameSetting: private,
+		}, elasticsearchUsernameSetting},
+		{"password only", map[string]string{
+			elasticsearchPasswordSetting: private,
+		}, elasticsearchUsernameSetting},
+		{"missing CA file", map[string]string{
+			elasticsearchURLSetting:        "https://example.test:9200",
+			elasticsearchCACertFileSetting: missingPath,
+		}, elasticsearchCACertFileSetting},
+		{"CA with HTTP", map[string]string{
+			elasticsearchCACertFileSetting: certificatePath,
+		}, elasticsearchCACertFileSetting},
+		{"zero timeout", map[string]string{
+			elasticsearchTimeoutSetting: "0s",
+		}, elasticsearchTimeoutSetting},
+		{"zero startup timeout", map[string]string{
+			startupTimeoutSetting: "0s",
+		}, startupTimeoutSetting},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := load(mapLookup(test.values))
+			if err == nil {
+				t.Fatal("invalid Elasticsearch configuration accepted")
+			}
+			setting, _ := kitconfig.ErrorDetails(err)
+			if setting != test.setting {
+				t.Fatalf("setting = %q, want %q: %v", setting, test.setting, err)
+			}
+			if strings.Contains(err.Error(), private) {
+				t.Fatalf("configuration error exposed private input: %v", err)
+			}
+		})
 	}
 }
 

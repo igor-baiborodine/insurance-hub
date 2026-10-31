@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -44,8 +45,34 @@ func foundationSettings(t *testing.T) config.Config {
 
 func loadFoundationSettings(t *testing.T, httpAddress, healthAddress string) config.Config {
 	t.Helper()
+	elasticsearchServer := httptest.NewServer(http.HandlerFunc(
+		func(writer http.ResponseWriter, request *http.Request) {
+			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
+			writer.Header().Set("Content-Type", "application/json")
+			switch request.URL.Path {
+			case "/":
+				_, _ = writer.Write([]byte(`{"version":{"number":"8.19.6"}}`))
+			case "/policy-views/_search":
+				_, _ = writer.Write([]byte(`{"hits":{"hits":[]}}`))
+			default:
+				http.NotFound(writer, request)
+			}
+		},
+	))
+	t.Cleanup(elasticsearchServer.Close)
+	return loadSettingsForElasticsearch(t, httpAddress, healthAddress, elasticsearchServer.URL)
+}
+
+func loadSettingsForElasticsearch(
+	t *testing.T,
+	httpAddress string,
+	healthAddress string,
+	elasticsearchURL string,
+) config.Config {
+	t.Helper()
 	t.Setenv("HTTP_ADDR", httpAddress)
 	t.Setenv("HEALTH_ADDR", healthAddress)
+	t.Setenv("ELASTICSEARCH_URL", elasticsearchURL)
 	t.Setenv("OTEL_ENABLED", "false")
 	settings, err := config.Load()
 	if err != nil {
@@ -53,6 +80,117 @@ func loadFoundationSettings(t *testing.T, httpAddress, healthAddress string) con
 	}
 	settings.ShutdownTimeout = time.Second
 	return settings
+}
+
+func TestRun_ComposesElasticsearchUseCaseAndHTTPMapping(t *testing.T) {
+	elasticsearchServer := httptest.NewServer(http.HandlerFunc(
+		func(writer http.ResponseWriter, request *http.Request) {
+			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
+			writer.Header().Set("Content-Type", "application/json")
+			switch request.URL.Path {
+			case "/":
+				_, _ = writer.Write([]byte(`{"version":{"number":"8.19.6"}}`))
+			case "/policy-views/_search":
+				_, _ = writer.Write([]byte(`{"hits":{"hits":[{"_source":{` +
+					`"number":"POL-229","dateFrom":"2024-02-29",` +
+					`"policyHolder":"Synthetic Holder"}}]}}`))
+			default:
+				http.NotFound(writer, request)
+			}
+		},
+	))
+	t.Cleanup(elasticsearchServer.Close)
+	settings := loadSettingsForElasticsearch(
+		t, reserveAddress(t), reserveAddress(t), elasticsearchServer.URL,
+	)
+	handler := &startSignalHandler{started: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- Run(ctx, settings, slog.New(handler)) }()
+	select {
+	case <-handler.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("service did not start")
+	}
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-result:
+		case <-time.After(2 * time.Second):
+			t.Error("service did not stop")
+		}
+	})
+
+	response, err := http.Get(
+		"http://" + settings.HTTPAddress.String() + "/policies?q=number%3A%22POL-229%22",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"policies":[{"number":"POL-229","dateFrom":"2024-02-29",` +
+		`"policyHolder":"Synthetic Holder"}]}`
+	if response.StatusCode != http.StatusOK || string(body) != want {
+		t.Fatalf(
+			"composed HTTP response = (%d, %q), want (200, %q)",
+			response.StatusCode,
+			body,
+			want,
+		)
+	}
+}
+
+func TestRun_RemainsLiveAndUnreadyWhenElasticsearchIsUnavailable(t *testing.T) {
+	elasticsearchAddress := reserveAddress(t)
+	settings := loadSettingsForElasticsearch(
+		t, reserveAddress(t), reserveAddress(t), "http://"+elasticsearchAddress,
+	)
+	settings.Elasticsearch.Timeout = 20 * time.Millisecond
+	handler := &startSignalHandler{started: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- Run(ctx, settings, slog.New(handler)) }()
+	select {
+	case <-handler.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("service did not start")
+	}
+
+	liveStatus := getStatus(t, "http://"+settings.HealthAddress.String()+"/livez")
+	readyStatus := getStatus(t, "http://"+settings.HealthAddress.String()+"/readyz")
+	response, err := http.Get("http://" + settings.HTTPAddress.String() + "/policies?q=*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if liveStatus != http.StatusOK || readyStatus != http.StatusServiceUnavailable ||
+		response.StatusCode != http.StatusInternalServerError ||
+		strings.Contains(string(body), elasticsearchAddress) {
+		t.Fatalf(
+			"dependency-loss responses = live %d ready %d search (%d, %q)",
+			liveStatus,
+			readyStatus,
+			response.StatusCode,
+			body,
+		)
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("service did not stop")
+	}
 }
 
 func reserveAddress(t *testing.T) string {
@@ -92,7 +230,7 @@ func TestNewBusinessServer_UsesConfiguredBounds(t *testing.T) {
 	}
 
 	// when
-	server := newBusinessServer(bounds)
+	server := newBusinessServer(bounds, http.NotFoundHandler())
 
 	// then
 	if server.ReadHeaderTimeout != bounds.ReadHeaderTimeout ||
@@ -103,7 +241,7 @@ func TestNewBusinessServer_UsesConfiguredBounds(t *testing.T) {
 	}
 }
 
-func TestRun_ServesOnlyHTTPFoundationAndWithdrawsOnCancel(t *testing.T) {
+func TestRun_ServesPolicySearchAndWithdrawsOnCancel(t *testing.T) {
 	// given
 	settings := foundationSettings(t)
 	handler := &startSignalHandler{started: make(chan struct{})}
@@ -118,22 +256,22 @@ func TestRun_ServesOnlyHTTPFoundationAndWithdrawsOnCancel(t *testing.T) {
 	}
 
 	// when
-	businessStatus := getStatus(t, "http://"+settings.HTTPAddress.String()+"/policies")
+	businessStatus := getStatus(t, "http://"+settings.HTTPAddress.String()+"/policies?q=")
 	liveStatus := getStatus(t, "http://"+settings.HealthAddress.String()+"/livez")
 	readyStatus := getStatus(t, "http://"+settings.HealthAddress.String()+"/readyz")
 	cancel()
 
 	// then
-	if businessStatus != http.StatusNotFound || liveStatus != http.StatusOK ||
-		readyStatus != http.StatusServiceUnavailable {
+	if businessStatus != http.StatusOK || liveStatus != http.StatusOK ||
+		readyStatus != http.StatusOK {
 		t.Errorf(
 			"foundation statuses = (%d, %d, %d), want (%d, %d, %d)",
 			businessStatus,
 			liveStatus,
 			readyStatus,
-			http.StatusNotFound,
 			http.StatusOK,
-			http.StatusServiceUnavailable,
+			http.StatusOK,
+			http.StatusOK,
 		)
 	}
 	select {
