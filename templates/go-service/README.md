@@ -331,8 +331,9 @@ HTTP_ADDR=127.0.0.1:0 GRPC_ADDR=127.0.0.1:0 HEALTH_ADDR=127.0.0.1:0 make run
 The business HTTP, gRPC and management defaults are `127.0.0.1:8080`, `127.0.0.1:9090` and
 `127.0.0.1:8081`. Management exposes only `GET /livez` and `GET /readyz`. Startup marks readiness
 only after the actual gRPC server is accepting the owned gateway connection and all listeners are
-serving. Each readiness request rechecks that the connection remains `READY` within
-`PROBE_TIMEOUT`; liveness stays independent of that dependency.
+serving. The owned same-process connection disables grpc-go channel idleness so an inactive but
+healthy gateway cannot become permanently unready. Each readiness request rechecks that the
+connection remains `READY` within `PROBE_TIMEOUT`; liveness stays independent of that dependency.
 
 An interrupt or `SIGTERM` withdraws readiness, stops new business HTTP admission and lets accepted
 HTTP handlers finish before closing the gateway connection. It then gracefully or forcibly stops

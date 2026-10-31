@@ -32,6 +32,8 @@ creating a real service, then use the same replacement categories consistently.
 Retain the exact published `libs/servicekit` version and its checksums in the renamed copy; never
 replace it with a sibling checkout. Business HTTP, management HTTP and gRPC retain the private
 defaults `127.0.0.1:8080`, `127.0.0.1:8081` and `127.0.0.1:9090`.
+The copied service also retains the explicitly owned same-process gateway connection with grpc-go
+channel idleness disabled. Do not generalize that lifetime choice to remote client connections.
 
 Use a valid Protobuf identifier without a hyphen. The generic `ExampleService`, `EchoRequest`,
 `EchoResponse`, `Echo`, and `cmd/server` names may remain until the service defines a real contract.

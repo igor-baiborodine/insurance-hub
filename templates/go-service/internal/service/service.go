@@ -112,6 +112,7 @@ func newGatewayConnection(
 			otelgrpc.WithPropagators(provider.GRPCPropagator()),
 		)),
 		grpcgo.WithUnaryInterceptor(gateway.ClearApplicationMetadata),
+		grpcgo.WithIdleTimeout(0),
 		grpcgo.WithDefaultCallOptions(
 			grpcgo.MaxCallSendMsgSize(settings.MaxReceiveBytes),
 			grpcgo.MaxCallRecvMsgSize(settings.MaxSendBytes),
