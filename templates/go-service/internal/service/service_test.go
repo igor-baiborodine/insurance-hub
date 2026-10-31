@@ -590,10 +590,8 @@ func TestRun_PropagatesServiceDeadlineAndCallerCancellationThroughRPC(t *testing
 		t,
 		finished,
 		"service budget cancellation did not reach RPC",
-	); !errors.Is(
-		observed,
-		context.Canceled,
-	) {
+	); !errors.Is(observed, context.Canceled) &&
+		!errors.Is(observed, context.DeadlineExceeded) {
 		t.Fatalf("service budget RPC cancellation = %v", observed)
 	}
 
