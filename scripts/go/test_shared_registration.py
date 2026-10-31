@@ -282,7 +282,26 @@ def test_root_tooling_conservatively_selects_all_modules(tmp_path: Path) -> None
         DIRECTORY,
         "templates/go-service",
         "services/product-service",
+        "services/policy-search-service",
     }
+
+
+def test_policy_search_foundation_has_registered_module_and_active_consumer() -> None:
+    # given
+    inventory = topology.load_inventory(ROOT / "go-module-topology.json")
+
+    # when
+    consumers = registration.registration_check(ROOT, inventory)
+    policy_search = next(
+        module
+        for module in inventory["modules"]
+        if module["directory"] == "services/policy-search-service"
+    )
+
+    # then
+    assert policy_search["validationTarget"] == "check-go-pr"
+    assert policy_search["ciWorkflow"] == ".github/workflows/go-pr-mod.yml"
+    assert any(item["module"] == policy_search["modulePath"] for item in consumers)
 
 
 @pytest.mark.parametrize(
