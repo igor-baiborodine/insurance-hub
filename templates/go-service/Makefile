@@ -47,6 +47,7 @@ PROTOVALIDATE_GO_VERSION := v1.4.0
 PROTOVALIDATE_SCHEMA_GO_VERSION := v1.36.12-20260825204119-511051f7f437.1
 OTEL_VERSION := v1.46.0
 OTEL_GRPC_VERSION := v0.71.0
+OTEL_HTTP_VERSION := v0.70.0
 X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.0.1
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
@@ -106,6 +107,7 @@ update-deps:
 		github.com/grpc-ecosystem/grpc-gateway/v2@$(GRPC_GATEWAY_VERSION) \
 		go.opentelemetry.io/otel@$(OTEL_VERSION) \
 		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
+		go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@$(OTEL_HTTP_VERSION) \
 		go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@$(OTEL_VERSION) \
 		go.opentelemetry.io/otel/sdk@$(OTEL_VERSION) \
 		go.opentelemetry.io/otel/sdk/metric@$(OTEL_VERSION) \

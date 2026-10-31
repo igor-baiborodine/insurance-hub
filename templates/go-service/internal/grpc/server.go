@@ -8,6 +8,7 @@ import (
 
 	"buf.build/go/protovalidate"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/metric"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
@@ -39,6 +40,7 @@ type Settings struct {
 	MaxReceiveBytes int
 	MaxSendBytes    int
 	Observer        *telemetry.RequestObserver
+	MeterProvider   metric.MeterProvider
 }
 
 // NewServer constructs the instrumented server and registers the generated ExampleService.
@@ -76,6 +78,10 @@ func NewServer(
 	if err != nil {
 		return nil, errors.New("create gRPC server: initialize request validation")
 	}
+	meterProvider := settings.MeterProvider
+	if meterProvider == nil {
+		meterProvider = metricnoop.NewMeterProvider()
+	}
 
 	server := grpcgo.NewServer(
 		grpcgo.MaxRecvMsgSize(settings.MaxReceiveBytes),
@@ -86,7 +92,7 @@ func NewServer(
 				Handler: otelgrpc.NewServerHandler(
 					otelgrpc.WithTracerProvider(tracerProvider),
 					otelgrpc.WithPropagators(propagator),
-					otelgrpc.WithMeterProvider(metricnoop.NewMeterProvider()),
+					otelgrpc.WithMeterProvider(meterProvider),
 					otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
 						return info.FullMethodName == scaffoldv1.ExampleService_Echo_FullMethodName
 					}),

@@ -12,14 +12,26 @@ import (
 // DefaultServiceName identifies startup diagnostics until configuration has been validated.
 const DefaultServiceName = "go-service"
 
+const (
+	EnvHTTPAddress        = "HTTP_ADDR"
+	EnvHTTPMaxHeaderBytes = "HTTP_MAX_HEADER_BYTES"
+	EnvHTTPMaxBodyBytes   = "HTTP_MAX_BODY_BYTES"
+	defaultMaxHeaderBytes = 16384
+	defaultMaxBodyBytes   = 4096
+)
+
 // Config contains settings parsed and validated once during process startup.
 type Config struct {
 	kitconfig.Runtime
 	kitconfig.GRPC
+	kitconfig.HTTPServer
 	kitconfig.Telemetry
-	ServiceName   string
-	GRPCAddress   Address
-	HealthAddress Address
+	ServiceName        string
+	HTTPAddress        Address
+	GRPCAddress        Address
+	HealthAddress      Address
+	HTTPMaxHeaderBytes int
+	HTTPMaxBodyBytes   int
 }
 
 // Address uses the shared TCP address parser and preserves ephemeral ports.
@@ -61,6 +73,12 @@ func load(lookup lookupEnv) (Config, error) {
 
 	grpcAddress, err := kitconfig.LoadAddress(
 		lookup, kitconfig.EnvGRPCAddress, kitconfig.DefaultGRPCAddress,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	httpAddress, err := kitconfig.LoadAddress(
+		lookup, EnvHTTPAddress, kitconfig.DefaultHTTPAddress,
 	)
 	if err != nil {
 		return Config{}, err
@@ -142,6 +160,22 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	httpServer, err := kitconfig.LoadHTTPServer(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	maxHeaderBytes, err := kitconfig.LoadBoundedInt(
+		lookup, EnvHTTPMaxHeaderBytes, strconv.Itoa(defaultMaxHeaderBytes), 1024, 1048576,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	maxBodyBytes, err := kitconfig.LoadBoundedInt(
+		lookup, EnvHTTPMaxBodyBytes, strconv.Itoa(defaultMaxBodyBytes), 1024, 1048576,
+	)
+	if err != nil {
+		return Config{}, err
+	}
 	runtime := kitconfig.Runtime{
 		RequestTimeout:  requestTimeout,
 		ProbeTimeout:    probeTimeout,
@@ -160,26 +194,61 @@ func load(lookup lookupEnv) (Config, error) {
 	if err := kitconfig.ValidateTelemetry(telemetry); err != nil {
 		return Config{}, err
 	}
-	if otelTimeout > runtime.ShutdownTimeout {
+	if httpServer.ReadHeaderTimeout > httpServer.ReadTimeout {
 		return Config{}, kitconfig.Invalid(
-			kitconfig.EnvOTELExporterOTLPTimeout,
-			"must not exceed SHUTDOWN_TIMEOUT",
+			kitconfig.EnvHTTPReadHeaderTimeout,
+			"must not exceed HTTP_READ_TIMEOUT",
 		)
 	}
-	if grpcAddress.Port() != 0 && grpcAddress.String() == healthAddress.String() {
+	if httpServer.ReadTimeout > httpServer.WriteTimeout {
 		return Config{}, kitconfig.Invalid(
-			kitconfig.EnvHealthAddress,
-			"must be distinct from GRPC_ADDR",
+			kitconfig.EnvHTTPReadTimeout,
+			"must not exceed HTTP_WRITE_TIMEOUT",
 		)
+	}
+	if runtime.RequestTimeout >= httpServer.WriteTimeout {
+		return Config{}, kitconfig.Invalid(
+			kitconfig.EnvRequestTimeout,
+			"must be less than HTTP_WRITE_TIMEOUT",
+		)
+	}
+	if runtime.ShutdownTimeout < runtime.RequestTimeout+otelTimeout {
+		return Config{}, kitconfig.Invalid(
+			kitconfig.EnvShutdownTimeout,
+			"must cover REQUEST_TIMEOUT plus OTEL_EXPORTER_OTLP_TIMEOUT",
+		)
+	}
+	listeners := []struct {
+		name    string
+		address Address
+	}{
+		{EnvHTTPAddress, httpAddress},
+		{kitconfig.EnvGRPCAddress, grpcAddress},
+		{kitconfig.EnvHealthAddress, healthAddress},
+	}
+	for left := range listeners {
+		for right := left + 1; right < len(listeners); right++ {
+			if listeners[left].address.Port() != 0 &&
+				listeners[left].address.String() == listeners[right].address.String() {
+				return Config{}, kitconfig.Invalid(
+					listeners[right].name,
+					"must be distinct from "+listeners[left].name,
+				)
+			}
+		}
 	}
 
 	return Config{
-		Runtime:       runtime,
-		GRPC:          grpc,
-		ServiceName:   serviceName,
-		GRPCAddress:   grpcAddress,
-		HealthAddress: healthAddress,
-		Telemetry:     telemetry,
+		Runtime:            runtime,
+		GRPC:               grpc,
+		HTTPServer:         httpServer,
+		ServiceName:        serviceName,
+		HTTPAddress:        httpAddress,
+		GRPCAddress:        grpcAddress,
+		HealthAddress:      healthAddress,
+		HTTPMaxHeaderBytes: maxHeaderBytes,
+		HTTPMaxBodyBytes:   maxBodyBytes,
+		Telemetry:          telemetry,
 	}, nil
 }
 

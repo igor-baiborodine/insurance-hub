@@ -49,13 +49,31 @@ func NewRequestObserver(
 }
 
 type Request struct {
-	observer *RequestObserver
-	started  time.Time
-	span     trace.Span
+	observer  *RequestObserver
+	started   time.Time
+	span      trace.Span
+	transport string
+	operation string
+	route     string
 }
 
 func (observer *RequestObserver) StartGRPC(ctx context.Context) *Request {
-	return &Request{observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx)}
+	return &Request{
+		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),
+		transport: "grpc", operation: "echo",
+	}
+}
+
+// StartHTTP begins a bounded HTTP transport observation after trace extraction.
+func (observer *RequestObserver) StartHTTP(ctx context.Context, route string) *Request {
+	operation := "unknown"
+	if route == "POST /v1/example/echo" {
+		operation = "echo"
+	}
+	return &Request{
+		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),
+		transport: "http", operation: operation, route: route,
+	}
 }
 
 // Finish runs at the transport End event, including decoding and response-size failures.
@@ -80,8 +98,8 @@ func (request *Request) Finish(ctx context.Context, status string) {
 	}
 	elapsed := time.Since(request.started)
 	attrs := []attribute.KeyValue{
-		attribute.String("insurance_hub.service.operation", "echo"),
-		attribute.String("insurance_hub.service.transport", "grpc"),
+		attribute.String("insurance_hub.service.operation", request.operation),
+		attribute.String("insurance_hub.service.transport", request.transport),
 		attribute.String("insurance_hub.service.outcome", outcome),
 		attribute.String("rpc.response.status_code", status),
 	}
@@ -92,9 +110,61 @@ func (request *Request) Finish(ctx context.Context, status string) {
 	}
 	request.observer.requests.Add(ctx, 1, metric.WithAttributes(attrs...))
 	request.observer.duration.Record(ctx, elapsed.Seconds(), metric.WithAttributes(attrs...))
-	servicelogger.LogCompletion(ctx, request.observer.logger, level,
-		slog.String("operation", "echo"), slog.String("transport", "grpc"),
-		slog.String("outcome", outcome), slog.String("rpc_status_code", status),
+	servicelogger.LogCompletion(
+		ctx,
+		request.observer.logger,
+		level,
+		slog.String(
+			"operation",
+			request.operation,
+		),
+		slog.String("transport", request.transport),
+		slog.String("outcome", outcome),
+		slog.String("rpc_status_code", status),
+		slog.Float64("duration_ms", float64(elapsed)/float64(time.Millisecond)),
+	)
+}
+
+// FinishHTTP records a fixed protocol outcome without attaching request data.
+func (request *Request) FinishHTTP(ctx context.Context, status int) {
+	outcome, level := "internal_error", slog.LevelError
+	switch {
+	case status >= 200 && status < 300:
+		outcome, level = "success", slog.LevelInfo
+	case status == 499:
+		outcome, level = "cancelled", slog.LevelWarn
+	case status == 504:
+		outcome, level = "deadline_exceeded", slog.LevelWarn
+	case status >= 400 && status < 500:
+		outcome, level = "invalid_request", slog.LevelInfo
+	}
+	elapsed := time.Since(request.started)
+	attrs := []attribute.KeyValue{
+		attribute.String("insurance_hub.service.operation", request.operation),
+		attribute.String("insurance_hub.service.transport", request.transport),
+		attribute.String("insurance_hub.service.route", request.route),
+		attribute.String("insurance_hub.service.outcome", outcome),
+		attribute.Int("http.response.status_code", status),
+	}
+	request.span.SetAttributes(attrs...)
+	if outcome != "success" {
+		request.span.SetAttributes(attribute.String("error.type", outcome))
+		request.span.SetStatus(codes.Error, "")
+	}
+	request.observer.requests.Add(ctx, 1, metric.WithAttributes(attrs...))
+	request.observer.duration.Record(ctx, elapsed.Seconds(), metric.WithAttributes(attrs...))
+	servicelogger.LogCompletion(
+		ctx,
+		request.observer.logger,
+		level,
+		slog.String(
+			"operation",
+			request.operation,
+		),
+		slog.String("transport", request.transport),
+		slog.String("route", request.route),
+		slog.String("outcome", outcome),
+		slog.Int("http_status_code", status),
 		slog.Float64("duration_ms", float64(elapsed)/float64(time.Millisecond)),
 	)
 }
