@@ -196,6 +196,98 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 	}
 }
 
+func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	deps := productionDependencies()
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
+	grpcAddress := receiveString(t, addresses)
+	httpAddress := receiveString(t, addresses)
+	healthAddress := receiveString(t, addresses)
+	httpClient := &http.Client{Timeout: time.Second}
+	waitForHTTPStatus(t, httpClient, "http://"+healthAddress+"/readyz", http.StatusOK)
+	connection, err := grpc.NewClient(
+		grpcAddress,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	directClient := scaffoldv1.NewExampleServiceClient(connection)
+	validMessages := make([]string, 0, 130)
+	for size := 1; size <= 128; size++ {
+		validMessages = append(validMessages, strings.Repeat("a", size))
+	}
+	validMessages = append(validMessages, "é", strings.Repeat("é", 64))
+
+	// when / then
+	for _, message := range validMessages {
+		response, callErr := directClient.Echo(
+			context.Background(),
+			&scaffoldv1.EchoRequest{Message: message},
+		)
+		if callErr != nil || response.GetMessage() != message {
+			t.Fatalf(
+				"direct differential Echo(%d bytes) = (%q, %v)",
+				len(message),
+				response.GetMessage(),
+				callErr,
+			)
+		}
+		assertResponse(
+			t,
+			postEcho(t, httpClient, httpAddress, message),
+			http.StatusOK,
+			`{"message":"`+message+`"}`,
+		)
+	}
+	for _, message := range []string{strings.Repeat("a", 129), strings.Repeat("é", 64) + "a"} {
+		_, callErr := directClient.Echo(
+			context.Background(),
+			&scaffoldv1.EchoRequest{Message: message},
+		)
+		if status.Code(callErr) != codes.InvalidArgument {
+			t.Fatalf(
+				"direct oversized status = %v, want invalid argument",
+				status.Code(callErr),
+			)
+		}
+		assertResponse(
+			t,
+			postEcho(t, httpClient, httpAddress, message),
+			http.StatusBadRequest,
+			`{"code":3,"message":"invalid request","details":[]}`,
+		)
+	}
+	for _, body := range []string{`{}`, `{"message":null}`, `{"message":""}`} {
+		assertResponse(
+			t,
+			postEchoBody(t, httpClient, httpAddress, body),
+			http.StatusBadRequest,
+			`{"code":3,"message":"invalid request","details":[]}`,
+		)
+	}
+	_, err = directClient.Echo(context.Background(), &scaffoldv1.EchoRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("direct empty status = %v, want invalid argument", status.Code(err))
+	}
+	cancel()
+	if err := receiveError(t, runResult, "service did not stop"); err != nil {
+		t.Fatalf("run service: %v", err)
+	}
+}
+
 func TestRun_UnavailableGatewayNeverBecomesReadyAndCleansUp(t *testing.T) {
 	settings := testConfig(t)
 	settings.ProbeTimeout = 30 * time.Millisecond
@@ -632,10 +724,15 @@ func assertOversizedHeaderRejected(t *testing.T, address string, size int) {
 
 func postEcho(t *testing.T, client *http.Client, address, message string) *http.Response {
 	t.Helper()
+	return postEchoBody(t, client, address, `{"message":"`+message+`"}`)
+}
+
+func postEchoBody(t *testing.T, client *http.Client, address, body string) *http.Response {
+	t.Helper()
 	request, err := http.NewRequest(
 		http.MethodPost,
 		"http://"+address+"/v1/example/echo",
-		strings.NewReader(`{"message":"`+message+`"}`),
+		strings.NewReader(body),
 	)
 	if err != nil {
 		t.Fatal(err)
