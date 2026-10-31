@@ -46,6 +46,7 @@
       - [issue-215-N11 Durable policy event publication](#issue-215-n11-durable-policy-event-publication)
       - [issue-215-N12 Additional guarded search administration automation](#issue-215-n12-additional-guarded-search-administration-automation)
       - [issue-215-N13 Java policy-search retirement](#issue-215-n13-java-policy-search-retirement)
+      - [issue-215-N14 Authoritative Go-era recovery](#issue-215-n14-authoritative-go-era-recovery)
   - [Ad hoc repository improvements](#ad-hoc-repository-improvements)
     - [Commit-message policy enforcement](#commit-message-policy-enforcement)
       - [adhoc-commit-msg-N01 Commit-message hook](#adhoc-commit-msg-n01-commit-message-hook)
@@ -617,6 +618,7 @@ relative to issue 215; existing roadmap commitments keep their own priority and 
 | [issue-215-N11](#issue-215-n11-durable-policy-event-publication) | Durable policy event publication | Deferred | Unassigned; select through a separately accepted receiving scope |
 | [issue-215-N12](#issue-215-n12-additional-guarded-search-administration-automation) | Additional guarded search administration automation | Deferred | Unassigned; select through a separately accepted receiving scope |
 | [issue-215-N13](#issue-215-n13-java-policy-search-retirement) | Java policy-search retirement | Scheduled | Promoted on 2026-10-30 into [issue 215](https://github.com/igor-baiborodine/insurance-hub/issues/215): mandatory M17, child [#236](https://github.com/igor-baiborodine/insurance-hub/issues/236) (C09); not delivered |
+| [issue-215-N14](#issue-215-n14-authoritative-go-era-recovery) | Authoritative Go-era recovery source and rebuild | Deferred | Unassigned; select only through a separately accepted future scope; does not gate #215 or #228–#236 |
 
 #### issue-215-N01 Search pagination and streaming
 
@@ -860,6 +862,32 @@ recovery/retention responsibilities. Scope selection does not authorize live del
 remain. Go-only query/event operation and restart/recovery pass; retention/archive/restore
 responsibilities and the final recovery path are accepted. Remove only approved resources,
 preserving shared topics, indices, secrets and other services' dependencies.
+
+#### issue-215-N14 Authoritative Go-era recovery
+
+**Requirement:** If a future recovery objective is accepted, establish a durable post-switch
+cohort, transaction-consistent policy and policy-version snapshot, coordinated source change-stream
+position and replay, retained-history limits, missing-publication repair, Go-owned projection and
+checkpoints, and isolated rebuild/restore. Issue 228's withdrawn D03/N14 inventory records the
+absent publication/slot and cohort marker in local development and the unexecuted C228-06
+experiment; it is historical evidence, not an approved design or migration prerequisite.
+
+**Why deferred:** Recovery, rebuild, reconciliation, backfill and historical-completeness work are
+explicitly excluded from the current as-is policy-search migration, including as indirect cutover
+or retirement prerequisites. The accepted migration preserves current documents and consumer
+progress through ordinary handover and retains shared data/history during retirement without
+adding a recovery subsystem.
+
+**Reconsider when:** A separately accepted product or operational requirement calls for
+authoritative rebuild, missing-publication repair or historical completeness beyond current
+behavior, or an index/history loss demonstrates that need. Do not select this work merely because
+the existing migration reaches cutover or Java retirement.
+
+**Acceptance evidence:** The future receiving ticket identifies source/cohort ownership and a
+retention contract, proves a consistent snapshot/replay boundary and isolated rebuild/restore,
+covers interrupted restart and missing-publication repair, and rejects history gaps or inconsistent
+watermarks. Preserve index isolation, permissions and data privacy. Kafka's current seven-day
+delete retention and PostgreSQL logical WAL setting alone do not establish this capability.
 
 ## Ad hoc repository improvements
 
