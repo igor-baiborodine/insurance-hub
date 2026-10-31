@@ -634,6 +634,17 @@ def expect_equal(label: str, expected: str, actual: str) -> None:
     )
 
 
+def parse_extra_tool_specification(specification: str) -> tuple[str, str, str, str]:
+    fields = [field.strip() for field in specification.split("|")]
+    require(len(fields) == 4 and all(fields), "verify-tools: malformed extra tool specification")
+    name, path, expected, version_argument = fields
+    require(
+        version_argument in {"version", "--version"},
+        f"verify-tools: unsupported extra tool version command: {version_argument}",
+    )
+    return name, path, expected, version_argument
+
+
 def verify_tools_command(_: argparse.Namespace) -> int:
     module_root = Path(required_environment("MODULE_ROOT")).resolve(strict=True)
     config_name = os.environ.get("GOLANGCI_CONFIG", ".golangci.yml")
@@ -696,23 +707,17 @@ def verify_tools_command(_: argparse.Namespace) -> int:
         match.group(1) if match else "",
     )
     for specification in filter(None, os.environ.get("EXTRA_TOOL_SPECS", "").split(";")):
-        fields = specification.split("|")
-        require(
-            len(fields) == 4 and all(fields), "verify-tools: malformed extra tool specification"
-        )
-        name, path, expected, version_command = fields
-        require(
-            version_command == "version",
-            f"verify-tools: unsupported extra tool version command: {version_command}",
-        )
+        name, path, expected, version_argument = parse_extra_tool_specification(specification)
         require(
             os.access(path, os.X_OK), f"verify-tools: {name} is missing; run 'make bootstrap-tools'"
         )
+        actual = command_output([path, version_argument], module_root, f"verify {name}")
         expect_equal(
             f"{name} version",
             expected,
-            command_output([path, "version"], module_root, f"verify {name}"),
+            actual,
         )
+        print(f"verified {name}: {actual}")
     run_command(
         [tools["golangci-lint"], "config", "verify", "--config", config_name],
         cwd=module_root,

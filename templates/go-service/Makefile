@@ -5,9 +5,11 @@ INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/check_foundations.py scripts/test_check_foundations.py scripts/check_copy.py scripts/scaffold_process.py scripts/shared_phase.py \
+	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_check_copy.py scripts/test_scaffold_process.py scripts/test_tooling.py \
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
-PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_foundations.py scripts/test_check_copy.py scripts/test_scaffold_process.py \
+PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_foundations.py scripts/test_check_gateway_contract.py \
+	scripts/test_check_copy.py scripts/test_scaffold_process.py \
 	scripts/test_tooling_runner.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
@@ -17,6 +19,8 @@ TOOLS_BIN := $(TOOLS_DIR)/bin
 BUF := $(TOOLS_BIN)/buf
 PROTOC_GEN_GO := $(TOOLS_BIN)/protoc-gen-go
 PROTOC_GEN_GO_GRPC := $(TOOLS_BIN)/protoc-gen-go-grpc
+PROTOC_GEN_GRPC_GATEWAY := $(TOOLS_BIN)/protoc-gen-grpc-gateway
+PROTOC_GEN_OPENAPIV2 := $(TOOLS_BIN)/protoc-gen-openapiv2
 GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 GOLANGCI_CONFIG := .golangci.yml
@@ -25,12 +29,15 @@ PROTO_SCHEMA := api/scaffold/v1/example_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := \
 	gen/scaffold/v1/example_service.pb.go \
-	gen/scaffold/v1/example_service_grpc.pb.go
+	gen/scaffold/v1/example_service.pb.gw.go \
+	gen/scaffold/v1/example_service_grpc.pb.go \
+	gen/openapiv2/scaffold/v1/example_service.swagger.json
 
 GO_VERSION := 1.27.3
 BUF_VERSION := v1.73.0
 PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
+GRPC_GATEWAY_VERSION := v2.30.0
 GOLANGCI_LINT_VERSION := v2.14.0
 GOVULNCHECK_VERSION := v1.8.0
 
@@ -42,7 +49,18 @@ OTEL_VERSION := v1.46.0
 OTEL_GRPC_VERSION := v0.71.0
 X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.0.1
+GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 TEST_PACKAGES ?= ./...
+
+EXTRA_TOOL_PACKAGES := \
+	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@$(GRPC_GATEWAY_VERSION) \
+	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@$(GRPC_GATEWAY_VERSION)
+VERIFY_EXTRA_TOOL_SPECS := \
+	protoc-gen-grpc-gateway|$(PROTOC_GEN_GRPC_GATEWAY)|Version $(GRPC_GATEWAY_VERSION), commit unknown, built at unknown|--version;\
+	protoc-gen-openapiv2|$(PROTOC_GEN_OPENAPIV2)|Version $(GRPC_GATEWAY_VERSION), commit unknown, built at unknown|--version
+PROTO_GENERATION_TOOLS := \
+	buf protoc-gen-go protoc-gen-go-grpc protoc-gen-grpc-gateway protoc-gen-openapiv2
+GENERATED_PROTO_PATTERN := gen/*
 
 COMMON_GO_TOOLING_DIR ?= $(INSURANCE_HUB_ROOT)/scripts/go/module
 COMMON_GO_TOOLING_DIR := $(abspath $(COMMON_GO_TOOLING_DIR))
@@ -51,7 +69,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 .PHONY: python-tooling-format-check python-tooling-lint-fix python-tooling-lint python-tooling-test-fast python-check \
 	bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto check-proto-drift lint test test-race coverage coverage-validate coverage-check \
+	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-copy check-foundations check-servicekit check-candidate-servicekit run \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
@@ -85,6 +103,7 @@ update-deps:
 	GOWORK=off $(GO) get \
 		buf.build/go/protovalidate@$(PROTOVALIDATE_GO_VERSION) \
 		buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go@$(PROTOVALIDATE_SCHEMA_GO_VERSION) \
+		github.com/grpc-ecosystem/grpc-gateway/v2@$(GRPC_GATEWAY_VERSION) \
 		go.opentelemetry.io/otel@$(OTEL_VERSION) \
 		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
 		go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@$(OTEL_VERSION) \
@@ -93,12 +112,18 @@ update-deps:
 		go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc@$(OTEL_VERSION) \
 		google.golang.org/grpc@$(GRPC_GO_VERSION) \
 		google.golang.org/protobuf@$(PROTOBUF_GO_VERSION) \
+		google.golang.org/genproto/googleapis/api@$(GENPROTO_GOOGLEAPIS_API_VERSION) \
 		golang.org/x/net@$(X_NET_VERSION)
 	GOWORK=off $(GO) get github.com/igor-baiborodine/insurance-hub/libs/servicekit@$(SERVICEKIT_VERSION)
 	GOWORK=off $(GO) mod tidy
 
 check-go-pr: verify-tools format-check format-proto-check lint lint-proto test-race build \
-	check-deps check-proto-drift check-proto-breaking vulncheck python-check check-foundations check-servicekit
+	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-foundations check-servicekit
+
+check-gateway-contract: python-runtime-check
+	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
+		--contract testdata/http-contract.json \
+		--swagger gen/openapiv2/scaffold/v1/example_service.swagger.json
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
