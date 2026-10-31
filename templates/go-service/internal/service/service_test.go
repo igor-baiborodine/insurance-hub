@@ -2,8 +2,10 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -19,6 +21,8 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -522,6 +526,276 @@ func TestRun_MapsGatewayClientResourceExhaustionToInternalError(t *testing.T) {
 	cancel()
 	if err := receiveError(t, runResult, "service did not stop"); err != nil {
 		t.Fatalf("run service: %v", err)
+	}
+}
+
+func TestRun_PropagatesServiceDeadlineAndCallerCancellationThroughRPC(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	settings.RequestTimeout = 80 * time.Millisecond
+	deps := productionDependencies()
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	started := make(chan string, 2)
+	finished := make(chan error, 2)
+	deps.echo = func(ctx context.Context, message string) (string, error) {
+		started <- message
+		<-ctx.Done()
+		finished <- ctx.Err()
+		return "", ctx.Err()
+	}
+	ctx, cancelService := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
+	_ = receiveString(t, addresses)
+	httpAddress := receiveString(t, addresses)
+	healthAddress := receiveString(t, addresses)
+	client := &http.Client{Timeout: time.Second}
+	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
+
+	// when
+	response := postEcho(t, client, httpAddress, "budget")
+
+	// then
+	if receiveString(t, started) != "budget" {
+		t.Fatal("service-budget request did not reach the RPC handler")
+	}
+	assertResponse(
+		t,
+		response,
+		http.StatusGatewayTimeout,
+		`{"code":4,"message":"deadline exceeded","details":[]}`,
+	)
+	if observed := receiveError(
+		t,
+		finished,
+		"service budget cancellation did not reach RPC",
+	); !errors.Is(
+		observed,
+		context.Canceled,
+	) {
+		t.Fatalf("service budget RPC cancellation = %v", observed)
+	}
+
+	// when
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	request, err := http.NewRequestWithContext(
+		requestCtx,
+		http.MethodPost,
+		"http://"+httpAddress+"/v1/example/echo",
+		strings.NewReader(`{"message":"caller"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	requestResult := make(chan error, 1)
+	go func() {
+		response, requestErr := client.Do(request)
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		requestResult <- requestErr
+	}()
+	if receiveString(t, started) != "caller" {
+		t.Fatal("caller-cancel request did not reach the RPC handler")
+	}
+	cancelRequest()
+
+	// then
+	if observed := receiveError(
+		t,
+		finished,
+		"caller cancellation did not reach RPC",
+	); !errors.Is(
+		observed,
+		context.Canceled,
+	) {
+		t.Fatalf("caller cancellation RPC error = %v", observed)
+	}
+	if err := receiveError(
+		t,
+		requestResult,
+		"canceled HTTP request did not finish",
+	); !errors.Is(
+		err,
+		context.Canceled,
+	) {
+		t.Fatalf("canceled HTTP request error = %v", err)
+	}
+	cancelService()
+	if err := receiveError(t, runResult, "service did not stop"); err != nil {
+		t.Fatalf("run service: %v", err)
+	}
+}
+
+func TestRun_EnforcesGatewayClientReceiveLimit(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	settings.MaxSendBytes = 1
+	deps := productionDependencies()
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
+	_ = receiveString(t, addresses)
+	httpAddress := receiveString(t, addresses)
+	healthAddress := receiveString(t, addresses)
+	client := &http.Client{Timeout: time.Second}
+	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
+
+	// when / then
+	assertResponse(
+		t,
+		postEcho(t, client, httpAddress, "a"),
+		http.StatusInternalServerError,
+		`{"code":13,"message":"internal error","details":[]}`,
+	)
+	cancel()
+	if err := receiveError(t, runResult, "service did not stop"); err != nil {
+		t.Fatalf("run service: %v", err)
+	}
+}
+
+func TestRun_BoundsSlowHTTPBodyWithReadTimeout(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	settings.ReadTimeout = 60 * time.Millisecond
+	deps := productionDependencies()
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
+	_ = receiveString(t, addresses)
+	httpAddress := receiveString(t, addresses)
+	healthAddress := receiveString(t, addresses)
+	waitForHTTPStatus(
+		t,
+		&http.Client{Timeout: time.Second},
+		"http://"+healthAddress+"/readyz",
+		http.StatusOK,
+	)
+	connection, err := net.DialTimeout("tcp", httpAddress, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	_ = connection.SetDeadline(time.Now().Add(time.Second))
+	started := time.Now()
+	_, err = io.WriteString(
+		connection,
+		"POST /v1/example/echo HTTP/1.1\r\nHost: example\r\n"+
+			"Content-Type: application/json\r\nContent-Length: 100\r\n\r\n{",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// when
+	response, readErr := http.ReadResponse(
+		bufio.NewReader(connection),
+		&http.Request{Method: http.MethodPost},
+	)
+
+	// then
+	if response != nil {
+		_ = response.Body.Close()
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("slow body completed in %v, want within read-timeout bound", elapsed)
+	}
+	if readErr == nil && response.StatusCode != http.StatusInternalServerError {
+		t.Fatalf(
+			"slow body status = %d, want bounded 500 or closed connection",
+			response.StatusCode,
+		)
+	}
+	cancel()
+	if err := receiveError(t, runResult, "service did not stop"); err != nil {
+		t.Fatalf("run service: %v", err)
+	}
+}
+
+func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
+	// given
+	const marker = "private-http-rpc-marker"
+	settings := testConfig(t)
+	deps := productionDependencies()
+	reader := sdkmetric.NewManualReader()
+	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	spanRecorder := tracetest.NewSpanRecorder()
+	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
+	provider := &recordingProvider{tracerProvider: tracerProvider, meterProvider: meterProvider}
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return provider, nil
+	}
+	deps.echo = func(context.Context, string) (string, error) { return "", errors.New(marker) }
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	var logs bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() { runResult <- run(ctx, settings, slog.New(slog.NewJSONHandler(&logs, nil)), deps) }()
+	_ = receiveString(t, addresses)
+	httpAddress := receiveString(t, addresses)
+	healthAddress := receiveString(t, addresses)
+	client := &http.Client{Timeout: time.Second}
+	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
+
+	// when
+	response := postEcho(t, client, httpAddress, "failure")
+	cancel()
+	if err := receiveError(t, runResult, "service did not stop"); err != nil {
+		t.Fatalf("run service: %v", err)
+	}
+
+	// then
+	assertResponse(
+		t,
+		response,
+		http.StatusInternalServerError,
+		`{"code":13,"message":"internal error","details":[]}`,
+	)
+	var metrics metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &metrics); err != nil {
+		t.Fatal(err)
+	}
+	combined := logs.String() + fmt.Sprint(metrics)
+	for _, span := range spanRecorder.Ended() {
+		combined += span.Name() + fmt.Sprint(span.Attributes(), span.Events())
+	}
+	if strings.Contains(combined, marker) {
+		t.Fatalf("private marker escaped into telemetry: %s", combined)
+	}
+	if !strings.Contains(combined, "POST /v1/example/echo") ||
+		!strings.Contains(combined, "insurance_hub.service.requests") {
+		t.Errorf("missing HTTP-to-RPC completion signals: %s", combined)
 	}
 }
 
