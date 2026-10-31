@@ -265,7 +265,7 @@ func safeGatewayError(
 	case codes.Unavailable:
 		writeError(writer, http.StatusServiceUnavailable, code, "service unavailable")
 	case codes.ResourceExhausted:
-		writeError(writer, http.StatusRequestEntityTooLarge, code, "request body too large")
+		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
 	default:
 		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
 	}

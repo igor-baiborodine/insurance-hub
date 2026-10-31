@@ -262,6 +262,7 @@ func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
 		{"unavailable", status.Error(codes.Unavailable, privateMarker), 503, errorBody(14, "service unavailable")},
 		{"deadline", status.Error(codes.DeadlineExceeded, privateMarker), 504, errorBody(4, "deadline exceeded")},
 		{"canceled", status.Error(codes.Canceled, privateMarker), 499, errorBody(1, "request canceled")},
+		{"resource exhausted", status.Error(codes.ResourceExhausted, privateMarker), 500, errorBody(13, "internal error")},
 		{"internal", status.Error(codes.Internal, privateMarker), 500, errorBody(13, "internal error")},
 		{"unknown", errors.New(privateMarker), 500, errorBody(13, "internal error")},
 	} {

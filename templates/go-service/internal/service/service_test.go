@@ -395,6 +395,44 @@ func TestRun_CorrelatesHTTPClientAndServerSpans(t *testing.T) {
 	}
 }
 
+func TestRun_MapsGatewayClientResourceExhaustionToInternalError(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	settings.MaxReceiveBytes = 1
+	deps := productionDependencies()
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
+	_ = receiveString(t, addresses)
+	httpAddress := receiveString(t, addresses)
+	healthAddress := receiveString(t, addresses)
+	client := &http.Client{Timeout: time.Second}
+	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
+
+	// when
+	response := postEcho(t, client, httpAddress, "a")
+
+	// then
+	assertResponse(
+		t,
+		response,
+		http.StatusInternalServerError,
+		`{"code":13,"message":"internal error","details":[]}`,
+	)
+	cancel()
+	if err := receiveError(t, runResult, "service did not stop"); err != nil {
+		t.Fatalf("run service: %v", err)
+	}
+}
+
 func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 	settings := testConfig(t)
 	settings.RequestTimeout = 50 * time.Millisecond
