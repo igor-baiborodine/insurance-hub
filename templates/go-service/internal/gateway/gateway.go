@@ -309,8 +309,9 @@ func acceptsJSON(value string) bool {
 		return true
 	}
 	for item := range strings.SplitSeq(value, ",") {
-		mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(item))
-		if err == nil && (mediaType == "application/json" || mediaType == "*/*") {
+		mediaType, parameters, err := mime.ParseMediaType(strings.TrimSpace(item))
+		if err == nil && len(parameters) == 0 &&
+			(mediaType == "application/json" || mediaType == "*/*") {
 			return true
 		}
 	}
