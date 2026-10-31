@@ -32,7 +32,11 @@ COMMON_GO_TOOLING_DIR ?= $(INSURANCE_HUB_ROOT)/scripts/go/module
 COMMON_GO_TOOLING_DIR := $(abspath $(COMMON_GO_TOOLING_DIR))
 include $(COMMON_GO_TOOLING_DIR)/common.mk
 
-.PHONY: update-deps check-servicekit check-go-pr check run help
+.PHONY: update-deps check-servicekit check-go-pr check run help \
+	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
+	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
+	shared-candidate-generated shared-candidate-breaking shared-candidate-integration \
+	shared-candidate-image
 
 update-deps: ## Pin runtime dependencies and tidy only this module's manifests
 	GOWORK=off $(GO) get \
@@ -49,11 +53,39 @@ check-servicekit: ## Verify published Servicekit version and module checksums
 	@GOWORK=off $(GO) mod verify
 	@echo "check-servicekit: selected public servicekit $(SERVICEKIT_VERSION) with verified modules"
 
-check-go-pr: ## Block aggregate acceptance until Step 4 owns HTTP contract checks
-	@echo 'check-go-pr: HTTP contract and integration gates pending issue-229 Step 4' >&2
-	@exit 1
+check-go-pr: verify-tools format-check lint coverage-check build check-deps vulncheck check-servicekit ## Validate the current service foundation without source mutation
 
-check: check-go-pr ## Full service validation becomes available in Step 4
+check: check-go-pr ## Alias for the current service foundation gate
+
+shared-fast-build:
+	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
+		SERVICEKIT_PHASE=build PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go" "$(PYTHON)" "$(INSURANCE_HUB_ROOT)/scripts/go/shared_cli.py" phase; \
+	else $(MAKE) --no-print-directory build; fi
+
+shared-fast-unit:
+	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
+		SERVICEKIT_PHASE=unit PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go" "$(PYTHON)" "$(INSURANCE_HUB_ROOT)/scripts/go/shared_cli.py" phase; \
+	else $(MAKE) --no-print-directory test; fi
+
+shared-candidate-format:
+shared-candidate-lint:
+shared-candidate-race:
+shared-candidate-dependency:
+shared-candidate-vulnerability:
+shared-candidate-format shared-candidate-lint shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability:
+	@phase="$(@:shared-candidate-%=%)"; \
+	if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
+		SERVICEKIT_PHASE="$$phase" PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go" "$(PYTHON)" "$(INSURANCE_HUB_ROOT)/scripts/go/shared_cli.py" phase; \
+	else case "$$phase" in format) target=format-check;; race) target=test-race;; dependency) target=check-deps;; vulnerability) target=vulncheck;; *) target="$$phase";; esac; \
+		$(MAKE) --no-print-directory "$$target"; fi
+
+shared-candidate-generated:
+shared-candidate-breaking:
+shared-candidate-integration:
+shared-candidate-image:
+shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image:
+	@echo '$@: HTTP contract, real Elasticsearch integration, and image gates pending issue-229 Step 4' >&2
+	@exit 1
 
 run: ## Run the HTTP service using readonly standalone modules
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
@@ -61,4 +93,4 @@ run: ## Run the HTTP service using readonly standalone modules
 help: ## List supported service targets without installing tools
 	@printf '%s\n' \
 		'policy-search-service: make update-deps, format, format-check, lint, test, test-race, build, check-servicekit' \
-		'check-go-pr/check are intentionally blocked until issue-229 Step 4 HTTP checks exist'
+		'check-go-pr/check validate the current foundation; HTTP contract and integration gates arrive in issue-229 Step 4'

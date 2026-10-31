@@ -18,8 +18,9 @@ The module is derived from committed `templates/go-service` tree
 `201064d910fc63cabad86fd7be8ff9c36f635a9f` at repository commit
 `7fd0cf563dcccd703fdf9f03748a83932d66354d`. It retains the published
 `libs/servicekit` `v1.0.1` dependency and shared runtime conventions. The root Go module
-inventory and CI onboarding are scheduled for Step 4. No workspace or filesystem replacement
-is used.
+inventory now registers this foundation so repository planning and selected-module CI can
+validate it. HTTP contract, real Elasticsearch integration, image, and shared-candidate gates
+remain assigned to Step 4. No workspace or filesystem replacement is used.
 
 ## Product and Servicekit alignment
 
@@ -66,9 +67,11 @@ wire its owned Elasticsearch client without changing these process boundaries.
 
 Run commands from this directory. `make` lists the current interface. `make update-deps` owns
 manifest changes; `make format`, `make format-check`, `make test`, `make build`, and
-`make check-servicekit` own their respective checks. The aggregate `make check` deliberately
-fails until Step 4 adds HTTP contract and integration checks, so it cannot certify an incomplete
-service. All Go commands use standalone `GOWORK=off` module resolution.
+`make check-servicekit` own their respective checks. The aggregate `make check-go-pr` validates
+the current foundation with formatting, lint, race-enabled coverage, build, dependency,
+vulnerability, and Servicekit checks. It does not certify the absent HTTP contract, real
+Elasticsearch integration, or runtime image; Step 4 adds those gates. All Go commands use
+standalone `GOWORK=off` module resolution.
 
 The process reads typed environment settings. `SERVICE_NAME` defaults to
 `policy-search-service`; `HTTP_ADDR` defaults to `127.0.0.1:8080`; `HEALTH_ADDR` defaults to
