@@ -176,17 +176,17 @@ and Product-specific delegates are documented in the topology guide.
 
 [Go PR Module Validation](../../.github/workflows/go-pr-mod.yml) runs only on pull requests to
 `main` when qualifying Go source, generated Go or Swagger output, module metadata, Protobuf
-contracts, contract baselines, lint/generator configuration, the scaffold Makefile, Python tooling,
-or the scaffold README changes. Immediate `services/*-service` modules retain their narrower
-module-owned triggers.
+contracts, contract baselines, lint/generator configuration, the scaffold Makefile, or Python
+tooling changes. Immediate `services/*-service` modules retain their narrower module-owned triggers.
+README-only changes remain documentation-local and do not select a Go module validation job.
 
 After workflow filtering, the job maps the complete pull-request diff to the scaffold or
 conventionally named service roots. It validates one selected module, reports a successful no-op for
 zero supported modules, and rejects a diff spanning multiple modules before installing tools. The
-scaffold runs `bootstrap-go-tools`, `check-go-pr`, and then `check-copy` as a separate scaffold-only
-step; its role excludes coverage collection, threshold enforcement, and Codecov upload. Pull
-requests use the explicit base SHA for `FORMAT_BASE`. README-only and generated-Swagger-only
-scaffold diffs select this same module path.
+scaffold runs `bootstrap-go-tools` and `check-go-pr`; its role excludes coverage collection,
+threshold enforcement, and Codecov upload. Pull requests use the explicit base SHA for
+`FORMAT_BASE`. Generated-Swagger-only scaffold diffs select this same module path. The longer
+source-maintainer `check-copy` proof remains part of the local validation sequence above.
 
 Topology, tooling-fixture, and scaffold-copy changes are validated locally as applicable:
 

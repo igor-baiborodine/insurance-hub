@@ -30,8 +30,7 @@ def classify_module(path_value: str) -> str | None:
 
 def is_validation_relevant_module_path(path_value: str) -> bool:
     """Return whether a module-owned path requires Go module validation."""
-    path = PurePosixPath(path_value)
-    return path.as_posix() == "templates/go-service/README.md" or path.suffix.lower() != ".md"
+    return PurePosixPath(path_value).suffix.lower() != ".md"
 
 
 def selection_outputs(paths: list[str], merge_base: str) -> dict[str, str]:

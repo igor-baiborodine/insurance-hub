@@ -213,15 +213,10 @@ def write_module(root: Path, record: dict[str, object], *, target_body: str = "@
 
 def workflow_text(directory: str = "templates/go-service") -> str:
     scaffold_paths = ""
-    scaffold_step = ""
     if directory == "templates/go-service":
         scaffold_paths = f"""      - '{directory}/Makefile'
-      - '{directory}/README.md'
       - '{directory}/gen/openapiv2/**/*.json'
       - '{directory}/scripts/**/*.py'
-"""
-        scaffold_step = """      - if: success() && steps.select.outputs.module_role == 'service-scaffold'
-        run: make -C "$MODULE_DIR" check-copy
 """
     return f"""name: Fixture
 on:
@@ -276,7 +271,6 @@ jobs:
           flags: ${{{{ steps.select.outputs.coverage_flag }}}}
           disable_search: true
           fail_ci_if_error: true
-{scaffold_step.rstrip()}
 """
 
 
@@ -426,7 +420,6 @@ def test_topology_reports_controlled_manifest_failures(
             "missing pull_request path trigger",
         ),
         ("      - 'templates/go-service/Makefile'\n", "", "missing pull_request path trigger"),
-        ("      - 'templates/go-service/README.md'\n", "", "missing pull_request path trigger"),
         (
             "      - 'templates/go-service/gen/openapiv2/**/*.json'\n",
             "",
@@ -467,11 +460,6 @@ def test_topology_reports_controlled_manifest_failures(
             "selected-module validation contract",
         ),
         ('rm -f -- "$COVERAGE_FILE"\n', "", "selected-module validation contract"),
-        (
-            'run: make -C "$MODULE_DIR" check-copy',
-            "run: true",
-            "separate scaffold copy validation",
-        ),
         (
             "steps.select.outputs.module_role != 'service-scaffold'",
             "steps.select.outputs.module_dir != ''",

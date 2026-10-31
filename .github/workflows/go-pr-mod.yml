@@ -13,7 +13,6 @@ on:
       - 'templates/go-service/buf.lock'
       - 'templates/go-service/buf.gen.yaml'
       - 'templates/go-service/Makefile'
-      - 'templates/go-service/README.md'
       - 'templates/go-service/api/**/*.proto'
       - 'templates/go-service/gen/openapiv2/**/*.json'
       - 'templates/go-service/scripts/**/*.py'
@@ -122,9 +121,3 @@ jobs:
           name: ${{ steps.select.outputs.coverage_flag }}
           disable_search: true
           fail_ci_if_error: true
-
-      - name: Run renamed scaffold copy validation
-        if: success() && steps.select.outputs.module_role == 'service-scaffold'
-        env:
-          MODULE_DIR: ${{ steps.select.outputs.module_dir }}
-        run: make -C "$MODULE_DIR" check-copy
