@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 from copy import deepcopy
 from unittest.mock import Mock, patch
@@ -10,6 +11,7 @@ from unittest.mock import Mock, patch
 import policy_search_deployment_checks as checks
 import pytest
 from scripts.go.service import deployment as lifecycle
+from scripts.go.service import release as release_owner
 
 import deployment
 
@@ -146,6 +148,45 @@ def test_qa_render_image_guard_accepts_release_owner_semver(image: str, accepted
 
     # then
     assert actual is accepted
+
+
+def test_release_preparation_produces_valid_qa_render(tmp_path) -> None:
+    # given the real inactive Policy Search QA overlay and release catalog entry.
+    catalog = tmp_path / "scripts/go/service/catalog.json"
+    catalog.parent.mkdir(parents=True)
+    shutil.copy2(checks.ROOT / "scripts/go/service/catalog.json", catalog)
+    for relative in (
+        "k8s/apps/svc/policy-search/base",
+        "k8s/overlays/qa/svc/policy-search",
+    ):
+        shutil.copytree(checks.ROOT / relative, tmp_path / relative)
+    release_owner.prepare_release(
+        tmp_path,
+        "policy-search",
+        "igor-baiborodine/insurance-hub",
+        "1.27.305",
+        "a" * 40,
+        "sha256:" + "b" * 64,
+    )
+
+    # when the prepared overlay is rendered and checked by the deployment owner.
+    rendered = checks.run(
+        [
+            os.environ.get("KUBECTL", "kubectl"),
+            "kustomize",
+            str(tmp_path / "k8s/overlays/qa/svc/policy-search"),
+        ]
+    )
+    items = checks.validate_render("qa", rendered)
+
+    # then release and telemetry identities satisfy the same QA render contract.
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    config = next(item for item in items if item["kind"] == "ConfigMap")
+    assert (
+        deployment["spec"]["template"]["spec"]["containers"][0]["image"]
+        == "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:1.27.305"
+    )
+    assert config["data"]["SERVICE_VERSION"] == "git-aaaaaaaaaaaa"
 
 
 def test_live_state_accepts_api_server_normalized_resources() -> None:
