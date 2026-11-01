@@ -28,6 +28,19 @@ MAIN_COVERAGE_MODULES = (
     ("services/product-service", "business-service", "product-service"),
     ("services/policy-search-service", "business-service", "policy-search-service"),
 )
+MAIN_COVERAGE_PATHS = (
+    "libs/servicekit/**",
+    "services/*-service/**/*.go",
+    "services/*-service/go.mod",
+    "services/*-service/go.sum",
+    "services/*-service/Makefile",
+    "services/*-service/api/**/*.proto",
+    "services/*-service/gen/openapiv2/**/*.json",
+    "services/*-service/internal/postgres/sql/*.sql",
+    "services/*-service/**/testdata/**",
+    ".github/workflows/go-main-coverage.yml",
+    "codecov.yml",
+)
 ROLES = frozenset(
     {"service-scaffold", "business-service", "public-contract", "public-shared", "tool"}
 )
@@ -516,12 +529,12 @@ def topology_errors(root: Path, inventory: dict[str, Any]) -> tuple[list[str], l
     return errors, [f"excluded: {path} [{category}]" for path, category in ignored]
 
 
-def pull_request_paths(text: str) -> set[str]:
+def event_paths(text: str, event: str) -> set[str]:
     result: set[str] = set()
     inside = False
     inside_paths = False
     for line in text.splitlines():
-        if line == "  pull_request:":
+        if line == f"  {event}:":
             inside = True
             continue
         if inside and (line and not line[0].isspace() or re.fullmatch(r"  [A-Za-z_]+:", line)):
@@ -536,6 +549,10 @@ def pull_request_paths(text: str) -> set[str]:
             if match:
                 result.add(match.group(1))
     return result
+
+
+def pull_request_paths(text: str) -> set[str]:
+    return event_paths(text, "pull_request")
 
 
 def require_literal(text: str, workflow: str, literal: str, description: str) -> None:
@@ -595,6 +612,10 @@ def main_coverage_check(root: Path) -> None:
     ):
         require_literal(text, workflow, literal, description)
     require("  pull_request:" not in text, f"workflow {workflow} must not run on pull_request")
+    require(
+        event_paths(text, "push") == set(MAIN_COVERAGE_PATHS),
+        f"workflow {workflow} must use exact Go coverage path filters",
+    )
     modules = tuple(re.findall(r"^          - module: (\S+)$", text, flags=re.MULTILINE))
     require(
         modules == tuple(item[0] for item in MAIN_COVERAGE_MODULES),
