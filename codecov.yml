@@ -16,8 +16,13 @@ flag_management:
     - name: product-service
       paths:
         - services/product-service/
+    - name: policy-search-service
+      paths:
+        - services/policy-search-service/
 
 ignore:
   - "services/product-service/gen/**"
   - "services/product-service/internal/postgres/dbgen/**"
   - "services/product-service/internal/testing/**"
+  - "services/policy-search-service/gen/**"
+  - "services/policy-search-service/internal/testing/**"
