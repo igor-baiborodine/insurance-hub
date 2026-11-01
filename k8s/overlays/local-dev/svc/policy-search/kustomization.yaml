@@ -3,7 +3,7 @@ kind: Kustomization
 namespace: local-dev-all
 namePrefix: local-dev-
 labels:
-  - includeSelectors: true
+  - includeSelectors: false
     pairs:
       environment: local-dev
 resources:

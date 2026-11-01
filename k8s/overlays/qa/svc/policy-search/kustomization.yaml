@@ -3,7 +3,7 @@ kind: Kustomization
 namespace: qa-svc
 namePrefix: qa-
 labels:
-  - includeSelectors: true
+  - includeSelectors: false
     pairs:
       environment: qa
 resources:

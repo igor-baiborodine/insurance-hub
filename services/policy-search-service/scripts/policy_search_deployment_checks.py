@@ -170,6 +170,19 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     encoded_policy = json.dumps(policy, sort_keys=True)
     require(BUSINESS_CLIENT_LABEL in encoded_policy, "business caller label is missing")
     require(MANAGEMENT_CLIENT_LABEL in encoded_policy, "management caller label is missing")
+    peer_selectors = [
+        peer.get("podSelector", {}).get("matchLabels", {})
+        for rule in policy.get("ingress", [])
+        for peer in rule.get("from", [])
+    ]
+    require(
+        peer_selectors
+        == [
+            {BUSINESS_CLIENT_LABEL: "true"},
+            {MANAGEMENT_CLIENT_LABEL: "true"},
+        ],
+        "caller selectors differ",
+    )
     if environment == "local-dev":
         require(policy.get("egress") == [], "local-dev egress must be denied")
     else:
