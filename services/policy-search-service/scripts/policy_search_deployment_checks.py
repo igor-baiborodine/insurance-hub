@@ -298,7 +298,8 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "QA telemetry identity differs",
         )
         require(
-            labels.get("app.kubernetes.io/version") == data.get("SERVICE_VERSION"),
+            labels.get("environment") == "qa"
+            and labels.get("app.kubernetes.io/version") == data.get("SERVICE_VERSION"),
             "QA Pod and telemetry versions differ",
         )
     require(
@@ -519,11 +520,17 @@ class Target:
                 key: value
                 for key, value in desired_labels.items()
                 if key != "app.kubernetes.io/version"
+                and (require_deployment or key != "environment")
             }
             require(
                 labels_include(template_labels, stable_labels),
                 f"live Deployment/{name} pod identity differs",
             )
+            if not require_deployment and "environment" in desired_labels:
+                require(
+                    template_labels.get("environment") in (None, desired_labels["environment"]),
+                    f"live Deployment/{name} pod environment differs",
+                )
             if desired_labels.get("app.kubernetes.io/version") or previous_image:
                 actual_template_version = template_labels.get("app.kubernetes.io/version")
                 require(

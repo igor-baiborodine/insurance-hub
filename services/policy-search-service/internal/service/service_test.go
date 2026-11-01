@@ -809,7 +809,7 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
 		t.Fatalf("private marker escaped into telemetry: %s", combined)
 	}
 	if !strings.Contains(combined, "POST /v1/example/echo") ||
-		!strings.Contains(combined, "insurance_hub.service.requests") {
+		!strings.Contains(combined, "insurance_hub.policy_search.requests") {
 		t.Errorf("missing HTTP-to-RPC completion signals: %s", combined)
 	}
 }

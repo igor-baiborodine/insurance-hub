@@ -217,6 +217,7 @@ def test_release_preparation_produces_valid_qa_render(tmp_path) -> None:
         deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"]
         == "git-aaaaaaaaaaaa"
     )
+    assert deployment["spec"]["template"]["metadata"]["labels"]["environment"] == "qa"
     assert "OTEL_EXPORTER_OTLP_TIMEOUT" not in config["data"]
 
 
@@ -400,6 +401,26 @@ def test_live_state_allows_generated_config_transition_only_before_rollout() -> 
         # when / then only the generated name may transition before the rollout.
         target.live(items, require_deployment=False)
         with pytest.raises(checks.DeploymentError, match="container envFrom differs"):
+            target.live(items, require_deployment=True)
+
+
+def test_live_state_allows_environment_label_enrollment_only_before_rollout() -> None:
+    # given a previously accepted Pod template that predates the QA discovery label.
+    items = rendered_items()
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    deployment["spec"]["template"]["metadata"].setdefault("labels", {})["environment"] = "qa"
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    live_deployment = actual[("deployment", deployment["metadata"]["name"])]
+    live_deployment["spec"]["template"]["metadata"]["labels"].pop("environment")
+    target = object.__new__(checks.Target)
+    target.deployment = deployment["metadata"]["name"]
+    target.configuration = {"mode": "direct"}
+    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
+
+    with patch.dict(os.environ, {}, clear=True):
+        # when / then the missing label may be repaired, but cannot pass post-rollout status.
+        target.live(items, require_deployment=False)
+        with pytest.raises(checks.DeploymentError, match="pod identity differs"):
             target.live(items, require_deployment=True)
 
 
