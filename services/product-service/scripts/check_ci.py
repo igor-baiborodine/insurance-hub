@@ -394,6 +394,23 @@ def validate_report_card(workflow: dict) -> None:
             f"Go Report Card {event} qualifying path matrix differs from Go PR validation",
         )
         validate_trigger_examples(trigger["paths"])
+    command = step_named(
+        workflow["jobs"]["report-card"], "Check registered service modules and scaffold"
+    )["run"]
+    require(
+        '--topology "$GITHUB_WORKSPACE/go-module-topology.json"' in command,
+        "Go Report Card must select modules from the owned topology inventory",
+    )
+    topology = json.loads((ROOT / "go-module-topology.json").read_text(encoding="utf-8"))
+    eligible = [
+        item["directory"]
+        for item in topology["modules"]
+        if item["role"] in {"business-service", "service-scaffold"}
+    ]
+    require(
+        all(directory not in command for directory in eligible),
+        "Go Report Card workflow may not hard-code registered module directories",
+    )
 
 
 def parse_outputs(path: Path) -> dict[str, str]:
@@ -995,6 +1012,24 @@ def main(_argv: list[str] | None = None) -> int:
     report_card_corruptions = [
         lambda item: item["on"]["push"]["paths"].pop(),
         lambda item: item["on"]["pull_request"]["paths"].append("services/*-service/**"),
+        lambda item: step_named(
+            item["jobs"]["report-card"], "Check registered service modules and scaffold"
+        ).update(
+            run=step_named(
+                item["jobs"]["report-card"], "Check registered service modules and scaffold"
+            )["run"].replace(
+                '--topology "$GITHUB_WORKSPACE/go-module-topology.json"',
+                "services/product-service templates/go-service",
+            )
+        ),
+        lambda item: step_named(
+            item["jobs"]["report-card"], "Check registered service modules and scaffold"
+        ).update(
+            run=step_named(
+                item["jobs"]["report-card"], "Check registered service modules and scaffold"
+            )["run"]
+            + " services/product-service"
+        ),
     ]
     for corrupt in report_card_corruptions:
         bad_report_card = deepcopy(report_card)
@@ -1008,7 +1043,7 @@ def main(_argv: list[str] | None = None) -> int:
     print(
         "check-ci: generic release with thirty trigger cases, Go Report Card path parity, "
         "selected-module PR validation, eleven selection cases, one coverage path execution "
-        "case, and twenty-three controlled "
+        "case, and twenty-five controlled "
         "corruptions passed"
     )
     return 0

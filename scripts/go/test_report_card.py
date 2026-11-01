@@ -22,6 +22,18 @@ def report(*, average: float = 0.8, did_error: bool = False) -> dict[str, object
     }
 
 
+def topology(tmp_path: Path, modules: list[dict[str, str]] | None = None) -> Path:
+    selected = modules or [
+        {"directory": "templates/go-service", "role": "service-scaffold"},
+        {"directory": "services/product-service", "role": "business-service"},
+        {"directory": "services/policy-search-service", "role": "business-service"},
+        {"directory": "libs/servicekit", "role": "public-shared"},
+    ]
+    path = tmp_path / "go-module-topology.json"
+    path.write_text(json.dumps({"modules": selected}), encoding="utf-8")
+    return path
+
+
 def test_valid_report_generates_stable_summary_row() -> None:
     # given
     value = report()
@@ -54,6 +66,14 @@ def test_missing_required_field_is_rejected() -> None:
         )
 
 
+def test_topology_selection_rejects_an_omitted_eligible_module(tmp_path: Path) -> None:
+    with pytest.raises(report_card.ReportCardError, match="policy-search-service"):
+        report_card.select_modules(
+            topology(tmp_path),
+            ["templates/go-service", "services/product-service"],
+        )
+
+
 def test_main_runs_each_module_and_appends_summary(tmp_path: Path) -> None:
     # given
     calls: list[list[str]] = []
@@ -79,17 +99,18 @@ def test_main_runs_each_module_and_appends_summary(tmp_path: Path) -> None:
             str(report_root),
             "--go-bin",
             str(go_bin),
-            "services/product-service",
-            "templates/go-service",
+            "--topology",
+            str(topology(tmp_path)),
         ],
         runner=runner,
     )
 
     # then
     assert status == 0
-    assert len(calls) == 2
+    assert len(calls) == 3
     text = summary.read_text(encoding="utf-8")
     assert "| services/product-service | B | 80.0% | 2 |" in text
+    assert "| services/policy-search-service | B | 80.0% | 2 |" in text
     assert "| templates/go-service | B | 80.0% | 2 |" in text
 
 
@@ -127,7 +148,13 @@ def test_main_preserves_go_runtime_environment(
             str(report_root),
             "--go-bin",
             str(go_bin),
-            "services/product-service",
+            "--topology",
+            str(
+                topology(
+                    tmp_path,
+                    [{"directory": "services/product-service", "role": "business-service"}],
+                )
+            ),
         ],
         runner=runner,
     )
@@ -184,7 +211,13 @@ func main() {
             str(report_root),
             "--go-bin",
             str(Path(go_path).parent),
-            "services/product-service",
+            "--topology",
+            str(
+                topology(
+                    tmp_path,
+                    [{"directory": "services/product-service", "role": "business-service"}],
+                )
+            ),
         ]
     )
 
@@ -216,7 +249,13 @@ def test_main_accumulates_below_threshold_failure(tmp_path: Path) -> None:
             str(report_root),
             "--go-bin",
             str(go_bin),
-            "services/product-service",
+            "--topology",
+            str(
+                topology(
+                    tmp_path,
+                    [{"directory": "services/product-service", "role": "business-service"}],
+                )
+            ),
         ],
         runner=runner,
     )
