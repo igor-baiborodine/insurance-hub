@@ -10,10 +10,10 @@ from unittest.mock import Mock, patch
 
 import policy_search_deployment_checks as checks
 import pytest
-
-import deployment
 from scripts.go.service import deployment as lifecycle
 from scripts.go.service import release as release_owner
+
+import deployment
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:

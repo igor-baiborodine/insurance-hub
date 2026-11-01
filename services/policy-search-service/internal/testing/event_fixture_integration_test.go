@@ -1,0 +1,414 @@
+//go:build integration
+
+package testing_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"reflect"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/kmsg"
+
+	policyelasticsearch "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/elasticsearch"
+)
+
+const (
+	eventFixtureOwnership = "issue-230-disposable"
+	eventFixtureIndex     = "policy-views-issue-229"
+)
+
+type eventOracle struct {
+	SchemaVersion int             `json:"schemaVersion"`
+	Ownership     string          `json:"ownership"`
+	Resources     oracleResources `json:"resources"`
+	Events        oracleEvents    `json:"events"`
+	Cases         []oracleCase    `json:"cases"`
+}
+
+type oracleResources struct {
+	RegisteredTopic   string `json:"registeredTopic"`
+	TerminatedTopic   string `json:"terminatedTopic"`
+	ConsumerGroup     string `json:"consumerGroup"`
+	Index             string `json:"index"`
+	SyntheticIDPrefix string `json:"syntheticIdPrefix"`
+}
+
+type oracleEvents struct {
+	Registration oracleEvent `json:"registration"`
+	Termination  oracleEvent `json:"termination"`
+}
+
+type oracleEvent struct {
+	Key              string            `json:"key"`
+	Value            json.RawMessage   `json:"value"`
+	ExpectedDocument map[string]string `json:"expectedDocument"`
+}
+
+type oracleCase struct {
+	ID       string   `json:"id"`
+	Sequence []string `json:"sequence"`
+	Expected string   `json:"expected"`
+}
+
+type eventEnvironment struct {
+	Broker          string
+	Elasticsearch   string
+	RegisteredTopic string
+	TerminatedTopic string
+	ConsumerGroup   string
+}
+
+func TestEventFixture_OracleDefinesIndependentCases(t *testing.T) {
+	// given
+	oracle := loadEventOracle(t)
+	wantCases := []string{
+		"C230-01",
+		"C230-02",
+		"C230-03-duplicate",
+		"C230-03-reversed",
+		"C230-04-handler-failure",
+		"C230-04-malformed",
+		"C230-04-no-commit",
+		"C230-05",
+		"C230-06",
+		"C230-07",
+	}
+
+	// when
+	gotCases := make([]string, 0, len(oracle.Cases))
+	for _, scenario := range oracle.Cases {
+		gotCases = append(gotCases, scenario.ID)
+		if len(scenario.Sequence) == 0 || scenario.Expected == "" {
+			t.Fatalf(
+				"case %q has no independent sequence or expected outcome",
+				scenario.ID,
+			)
+		}
+	}
+	slices.Sort(gotCases)
+	slices.Sort(wantCases)
+
+	// then
+	if !slices.Equal(gotCases, wantCases) {
+		t.Fatalf("oracle cases = %v, want %v", gotCases, wantCases)
+	}
+	assertOracleProjection(t, oracle.Events.Registration)
+	assertOracleProjection(t, oracle.Events.Termination)
+	if oracle.Events.Registration.ExpectedDocument["dateTo"] != "2026-12-31" {
+		t.Fatal("registration fixture lost its independently expected received date")
+	}
+	if oracle.Events.Termination.ExpectedDocument["dateTo"] != "2026-06-30" {
+		t.Fatal("termination fixture lost its independently expected received date")
+	}
+}
+
+func TestEventFixture_RealKafkaAndElasticsearchResources(t *testing.T) {
+	// given
+	oracle := loadEventOracle(t)
+	environment := requireEventEnvironment(t, oracle)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	producer, err := kgo.NewClient(kgo.SeedBrokers(environment.Broker))
+	if err != nil {
+		t.Fatalf("construct fixture Kafka client: %v", err)
+	}
+	t.Cleanup(producer.Close)
+	waitForKafka(t, ctx, producer)
+	createEventTopics(
+		t,
+		ctx,
+		producer,
+		environment.RegisteredTopic,
+		environment.TerminatedTopic,
+	)
+	consumer, err := kgo.NewClient(
+		kgo.SeedBrokers(environment.Broker),
+		kgo.ClientID("issue-230-event-fixture"),
+		kgo.ConsumerGroup(environment.ConsumerGroup),
+		kgo.ConsumeTopics(environment.RegisteredTopic),
+		kgo.ConsumeStartOffset(kgo.NewOffset().AtStart()),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+		kgo.Balancers(kgo.RangeBalancer()),
+	)
+	if err != nil {
+		t.Fatalf("construct fixture Kafka group client: %v", err)
+	}
+	t.Cleanup(consumer.Close)
+	elasticsearchClient, err := policyelasticsearch.New(policyelasticsearch.Config{
+		Endpoint: environment.Elasticsearch,
+		Timeout:  5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("construct fixture Elasticsearch client: %v", err)
+	}
+	t.Cleanup(elasticsearchClient.CloseIdleConnections)
+	createPolicyIndex(t, ctx, elasticsearchClient)
+
+	// when
+	produceResult := producer.ProduceSync(ctx, &kgo.Record{
+		Topic: environment.RegisteredTopic,
+		Key:   []byte(oracle.Events.Registration.Key),
+		Value: oracle.Events.Registration.Value,
+	})
+	if err := produceResult.FirstErr(); err != nil {
+		t.Fatalf("produce registration fixture: %v", err)
+	}
+	fetches := consumer.PollRecords(ctx, 1)
+	if errors := fetches.Errors(); len(errors) != 0 {
+		t.Fatalf("consume registration fixture: %v", errors[0].Err)
+	}
+	records := fetches.Records()
+	indexFixtureDocument(t, ctx, environment.Elasticsearch, oracle.Events.Registration)
+	stored := readFixtureDocument(
+		t,
+		ctx,
+		environment.Elasticsearch,
+		oracle.Events.Registration.Key,
+	)
+
+	// then
+	if len(records) != 1 {
+		t.Fatalf("consumed records = %d, want 1", len(records))
+	}
+	if string(records[0].Key) != oracle.Events.Registration.Key ||
+		!bytes.Equal(records[0].Value, oracle.Events.Registration.Value) {
+		t.Fatal("Kafka fixture changed the independent key or envelope bytes")
+	}
+	if !reflect.DeepEqual(stored, oracle.Events.Registration.ExpectedDocument) {
+		t.Fatalf(
+			"stored fixture = %v, want %v",
+			stored,
+			oracle.Events.Registration.ExpectedDocument,
+		)
+	}
+}
+
+func loadEventOracle(t *testing.T) eventOracle {
+	t.Helper()
+	payload, err := os.ReadFile("../../testdata/events/oracle.json")
+	if err != nil {
+		t.Fatalf("read event oracle: %v", err)
+	}
+	var oracle eventOracle
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&oracle); err != nil {
+		t.Fatalf("decode event oracle: %v", err)
+	}
+	if oracle.SchemaVersion != 1 || oracle.Ownership != eventFixtureOwnership {
+		t.Fatalf(
+			"unexpected event oracle identity: version=%d ownership=%q",
+			oracle.SchemaVersion,
+			oracle.Ownership,
+		)
+	}
+	if oracle.Resources.RegisteredTopic != "policy-registered-issue-230" ||
+		oracle.Resources.TerminatedTopic != "policy-terminated-issue-230" ||
+		oracle.Resources.ConsumerGroup != "policy-search-service-issue-230" ||
+		oracle.Resources.Index != eventFixtureIndex ||
+		oracle.Resources.SyntheticIDPrefix != "SYN-230-" {
+		t.Fatalf(
+			"event oracle resources are not the accepted issue-230 isolation coordinates",
+		)
+	}
+	return oracle
+}
+
+func assertOracleProjection(t *testing.T, event oracleEvent) {
+	t.Helper()
+	var envelope struct {
+		Policy struct {
+			Number       string `json:"number"`
+			From         string `json:"from"`
+			To           string `json:"to"`
+			PolicyHolder string `json:"policyHolder"`
+		} `json:"policy"`
+	}
+	if err := json.Unmarshal(event.Value, &envelope); err != nil {
+		t.Fatalf("decode oracle envelope: %v", err)
+	}
+	projected := map[string]string{
+		"number":       envelope.Policy.Number,
+		"dateFrom":     envelope.Policy.From,
+		"dateTo":       envelope.Policy.To,
+		"policyHolder": envelope.Policy.PolicyHolder,
+	}
+	if event.Key != envelope.Policy.Number {
+		t.Fatalf(
+			"oracle key %q does not match policy number %q",
+			event.Key,
+			envelope.Policy.Number,
+		)
+	}
+	if !reflect.DeepEqual(projected, event.ExpectedDocument) {
+		t.Fatalf("oracle projection = %v, want %v", projected, event.ExpectedDocument)
+	}
+}
+
+func requireEventEnvironment(t *testing.T, oracle eventOracle) eventEnvironment {
+	t.Helper()
+	if os.Getenv("POLICY_SEARCH_TEST_EVENT_OWNERSHIP") != eventFixtureOwnership {
+		t.Fatal("POLICY_SEARCH_TEST_EVENT_OWNERSHIP must select issue-230-disposable")
+	}
+	environment := eventEnvironment{
+		Broker:          os.Getenv("POLICY_SEARCH_TEST_KAFKA_BROKERS"),
+		Elasticsearch:   os.Getenv("POLICY_SEARCH_TEST_ELASTICSEARCH_URL"),
+		RegisteredTopic: os.Getenv("POLICY_SEARCH_TEST_REGISTERED_TOPIC"),
+		TerminatedTopic: os.Getenv("POLICY_SEARCH_TEST_TERMINATED_TOPIC"),
+		ConsumerGroup:   os.Getenv("POLICY_SEARCH_TEST_CONSUMER_GROUP"),
+	}
+	host, _, err := net.SplitHostPort(environment.Broker)
+	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
+		t.Fatal("POLICY_SEARCH_TEST_KAFKA_BROKERS must be one loopback host:port")
+	}
+	elasticsearchURL, err := url.Parse(environment.Elasticsearch)
+	if err != nil || elasticsearchURL.Scheme != "http" || elasticsearchURL.User != nil ||
+		elasticsearchURL.Path != "" || net.ParseIP(elasticsearchURL.Hostname()) == nil ||
+		!net.ParseIP(elasticsearchURL.Hostname()).IsLoopback() {
+		t.Fatal(
+			"POLICY_SEARCH_TEST_ELASTICSEARCH_URL must be an unauthenticated loopback HTTP URL",
+		)
+	}
+	if environment.RegisteredTopic != oracle.Resources.RegisteredTopic ||
+		environment.TerminatedTopic != oracle.Resources.TerminatedTopic ||
+		environment.ConsumerGroup != oracle.Resources.ConsumerGroup {
+		t.Fatal("event integration resources differ from the accepted issue-230 oracle")
+	}
+	return environment
+}
+
+func waitForKafka(t *testing.T, ctx context.Context, client *kgo.Client) {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		attemptCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		err := client.Ping(attemptCtx)
+		cancel()
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			t.Fatalf("Kafka did not become ready: %T", err)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+func createEventTopics(t *testing.T, ctx context.Context, client *kgo.Client, topics ...string) {
+	t.Helper()
+	request := kmsg.NewPtrCreateTopicsRequest()
+	request.TimeoutMillis = 30_000
+	for _, topic := range topics {
+		request.Topics = append(request.Topics, kmsg.CreateTopicsRequestTopic{
+			Topic:             topic,
+			NumPartitions:     1,
+			ReplicationFactor: 1,
+		})
+	}
+	response, err := client.Request(ctx, request)
+	if err != nil {
+		t.Fatalf("create event topics: %v", err)
+	}
+	created, ok := response.(*kmsg.CreateTopicsResponse)
+	if !ok {
+		t.Fatalf("create event topics returned %T", response)
+	}
+	for _, topic := range created.Topics {
+		if topic.ErrorCode != 0 {
+			t.Fatalf(
+				"create owned topic %q returned Kafka error code %d",
+				topic.Topic,
+				topic.ErrorCode,
+			)
+		}
+	}
+}
+
+func indexFixtureDocument(
+	t *testing.T,
+	ctx context.Context,
+	elasticsearchURL string,
+	event oracleEvent,
+) {
+	t.Helper()
+	payload, err := json.Marshal(event.ExpectedDocument)
+	if err != nil {
+		t.Fatalf("encode fixture document: %v", err)
+	}
+	endpoint := fmt.Sprintf(
+		"%s/%s/_doc/%s?refresh=true",
+		elasticsearchURL,
+		eventFixtureIndex,
+		url.PathEscape(event.Key),
+	)
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPut,
+		endpoint,
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		t.Fatalf("build fixture index request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("index fixture document: %v", err)
+	}
+	assertElasticsearchResponseOK(
+		t,
+		response.StatusCode,
+		response.Body,
+		"index fixture document",
+	)
+}
+
+func readFixtureDocument(
+	t *testing.T,
+	ctx context.Context,
+	elasticsearchURL string,
+	id string,
+) map[string]string {
+	t.Helper()
+	endpoint := fmt.Sprintf(
+		"%s/%s/_doc/%s",
+		elasticsearchURL,
+		eventFixtureIndex,
+		url.PathEscape(id),
+	)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		t.Fatalf("build fixture read request: %v", err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("read fixture document: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		t.Fatalf(
+			"read fixture document returned status %d: %s",
+			response.StatusCode,
+			payload,
+		)
+	}
+	var result struct {
+		Source map[string]string `json:"_source"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatalf("decode fixture document: %v", err)
+	}
+	return result.Source
+}

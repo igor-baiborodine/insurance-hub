@@ -113,9 +113,10 @@ require `bootstrap-tools` to have been run explicitly.
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.3, readonly modules, and a C compiler.                                                                                                                                     |
 | `make coverage-check`       | Race-enabled unit coverage across `./...`, with generated bindings and the qualification client excluded from the 75% statement gate.                                                                                                                                     | Go 1.27.3, readonly modules, a C compiler, and managed Python.                                                                                                                      |
 | `make test-integration`     | Real-listener HTTP-to-RPC composition, byte and presence semantics, readiness loss and recovery, and graceful shutdown. `INTEGRATION_COVERAGE_FILE` optionally records the selected suite for hosted reporting.                                                          | Go 1.27.3, readonly modules, and a C compiler.                                                                                                                                     |
+| `make test-event-integration` | Independent event oracle and exact isolated resource ownership against disposable pinned Kafka 4.1.0 and Elasticsearch 8.19.6. The runner rejects ambient endpoints, creates only the `*-issue-230` topics/group and synthetic document, verifies required test discovery, and removes both containers on success, failure, timeout or interruption. | Docker, Go 1.27.3, readonly modules, a C compiler and image access unless both pinned images are cached. The target never contacts a shared Kafka or Elasticsearch endpoint. |
 | `make build`                | Every package under `./...` and an executable `server`, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.3; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
-| `make check`                | Tool/configuration verification, Go and Protobuf format and lint checks, 75% race-enabled unit coverage, real-listener integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, gateway contract, vulnerability, Python, and Servicekit checks. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts persistent services, or deploys. |
+| `make check`                | Tool/configuration verification, Go and Protobuf format and lint checks, 75% race-enabled unit coverage, real-listener, Elasticsearch and event-fixture integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, gateway contract, vulnerability, Python, and Servicekit checks. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts persistent services, or deploys. Disposable integration containers are always removed. |
 | `make test-tooling`         | Pytest-managed Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation. Child commands have 20-minute phase deadlines inside a 60-minute suite deadline, 30-second activity heartbeats, and bounded process-group cleanup. | Verified Python and Go tools; temporary storage and the network/cache prerequisites of nested checks. |
 
 The `test-tooling` runner handles SIGINT and SIGTERM, unwinds the active child process group, and
@@ -124,9 +125,13 @@ returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make repo
 the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
-Database/broker integration, mock generation and migrations are not applicable. The owned
-Elasticsearch target starts a disposable pinned node and exercises both the adapter and real
-HTTP-to-RPC runtime. Image and deployment owners include a disposable Kind-namespace check.
+The event-fixture target starts disposable pinned Kafka and Elasticsearch containers and runs only
+`TestEventFixture_*` from `internal/testing`. Its checked-in oracle owns C230-01–07 inputs and
+expected outcomes independently of the future consumer implementation. It fails when either image,
+Docker, exact test discovery or cleanup is unavailable; required integration never passes by skip.
+The existing Elasticsearch target separately exercises the query adapter and real HTTP-to-RPC
+runtime. Image and deployment owners include a disposable Kind-namespace check. Mock generation,
+database integration and migrations remain inapplicable.
 
 ### Go file selection
 
@@ -152,6 +157,7 @@ make update-proto-deps
 make gen-proto
 make update-deps
 make format FORMAT_SCOPE=all
+make test-event-integration
 ```
 
 Run normal non-mutating validation after tools are installed:
