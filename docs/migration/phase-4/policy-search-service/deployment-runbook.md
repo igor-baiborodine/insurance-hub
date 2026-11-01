@@ -75,12 +75,25 @@ operator's normal protected-file cleanup after retaining required evidence.
 
 ## Deploy and verify local-dev
 
+When replacing an existing accepted Policy Search image, capture its exact reference before
+preflight and keep it declared through the rollout:
+
+```sh
+export DEPLOY_PREVIOUS_IMAGE_REF="$(kubectl --context "$DEPLOY_CONTEXT" \
+  -n "$DEPLOY_SVC_NS" get deployment/local-dev-policy-search-api \
+  -o jsonpath='{.spec.template.spec.containers[0].image}')"
+```
+
+Leave `DEPLOY_PREVIOUS_IMAGE_REF` unset for the first deployment. The guard permits only that
+declared predecessor before apply and requires the new `DEPLOY_IMAGE_REF` after rollout.
+
 Run the guarded sequence:
 
 ```sh
 make go-svc-deploy-preflight SVC_NAME=policy-search
 make go-svc-image-load SVC_NAME=policy-search
 make go-svc-deploy SVC_NAME=policy-search
+unset DEPLOY_PREVIOUS_IMAGE_REF
 make go-svc-deploy-status SVC_NAME=policy-search
 make go-svc-deploy-verify SVC_NAME=policy-search
 ```
