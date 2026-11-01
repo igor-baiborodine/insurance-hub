@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Validate the Policy Search runtime image and its owned Echo lifecycle."""
+"""Validate the Policy Search image's service-specific Echo behavior."""
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -17,7 +16,7 @@ REPOSITORY_ROOT = Path(
 ).resolve()
 sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from scripts.python.process_runner import CommandError, run_command  # noqa: E402
+from scripts.python.process_runner import CommandError, run_command  # noqa: E402, I001
 
 from scaffold_process import child_environment  # noqa: E402
 
@@ -34,19 +33,7 @@ def require(condition: object, message: str) -> None:
 
 
 def environment() -> dict[str, str]:
-    return child_environment(
-        {
-            name: os.environ.get(name, "")
-            for name in (
-                "IMAGE_REF",
-                "SOURCE_CREATED",
-                "SOURCE_REPOSITORY",
-                "SOURCE_REVISION",
-                "SOURCE_VERSION",
-                "TARGET_PLATFORM",
-            )
-        }
-    )
+    return child_environment({"IMAGE_REF": os.environ.get("IMAGE_REF", "")})
 
 
 def command(arguments: list[str], activity: str, timeout: float = 30) -> str:
@@ -95,39 +82,9 @@ def main() -> int:
     docker = os.environ.get("DOCKER", "docker")
     image = os.environ.get("IMAGE_REF", "")
     container = ""
+    failed = False
     try:
-        required = {
-            name: os.environ.get(name, "")
-            for name in (
-                "SOURCE_CREATED",
-                "SOURCE_REPOSITORY",
-                "SOURCE_REVISION",
-                "SOURCE_VERSION",
-            )
-        }
         require(bool(image), "IMAGE_REF is required")
-        require(all(required.values()), "source identity is incomplete")
-        inspected = json.loads(command([docker, "image", "inspect", image], "inspect image"))
-        require(isinstance(inspected, list) and len(inspected) == 1, "image inspect differs")
-        record = inspected[0]
-        config = record.get("Config", {})
-        labels = config.get("Labels", {})
-        require(
-            record.get("Os") == "linux" and record.get("Architecture") == "amd64",
-            "image platform differs",
-        )
-        require(config.get("User") == "65532:65532", "runtime user differs")
-        require(config.get("Entrypoint") == ["/policy-search-service"], "entrypoint differs")
-        expected = {
-            "org.opencontainers.image.created": required["SOURCE_CREATED"],
-            "org.opencontainers.image.source": required["SOURCE_REPOSITORY"],
-            "org.opencontainers.image.revision": required["SOURCE_REVISION"],
-            "org.opencontainers.image.title": "Insurance Hub Policy Search API",
-            "org.opencontainers.image.version": required["SOURCE_VERSION"],
-        }
-        require(
-            all(labels.get(key) == value for key, value in expected.items()), "OCI identity differs"
-        )
         container = command(
             [
                 docker,
@@ -172,16 +129,18 @@ def main() -> int:
         require(time.monotonic() - started <= 15, "image shutdown exceeded the owned bound")
         logs = command([docker, "logs", container], "read runtime logs")
         require("configuration failed" not in logs, "runtime image reported configuration failure")
-        container = ""
-    except (ImageCheckError, CommandError, OSError, ValueError, json.JSONDecodeError) as error:
+    except (ImageCheckError, CommandError, OSError, ValueError) as error:
         print(f"policy-search-image-check: {error}", file=sys.stderr)
-        return 1
+        failed = True
     finally:
         if container:
             try:
                 command([docker, "rm", "--force", container], "remove runtime image container")
             except CommandError, OSError:
                 print("policy-search-image-check: container cleanup failed", file=sys.stderr)
+                failed = True
+    if failed:
+        return 1
     print(f"policy-search-image-check: image={image} echo=passed shutdown=passed")
     return 0
 

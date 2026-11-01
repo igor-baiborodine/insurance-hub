@@ -8,7 +8,7 @@ INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/deployment.py scripts/disposable_deployment.py scripts/image_check.py \
-	scripts/policy_search_deployment_checks.py scripts/scaffold_process.py scripts/shared_phase.py \
+	scripts/policy_search_deployment_checks.py scripts/scaffold_process.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_scaffold_process.py scripts/test_tooling.py \
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
@@ -71,6 +71,7 @@ SOURCE_VERSION ?= $(HEAD_VERSION)
 IMAGE_TAG ?= 1.0.0-local.$(HEAD_SHORT)
 IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
 TARGET_PLATFORM ?= linux/amd64
+GO_SERVICE_TOOLING_CONFIG := $(CURDIR)/go-service-tooling.json
 
 EXTRA_TOOL_PACKAGES := \
 	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@$(GRPC_GATEWAY_VERSION) \
@@ -101,24 +102,16 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
 image-build: python-runtime-check ## Build the pinned linux/amd64 Policy Search runtime image
-	@test "$(SOURCE_REVISION)" = "$(HEAD_REVISION)" || { echo 'SOURCE_REVISION must match HEAD' >&2; exit 1; }
-	@test "$(SOURCE_CREATED)" = "$(HEAD_CREATED)" || { echo 'SOURCE_CREATED must match HEAD' >&2; exit 1; }
-	@test "$(SOURCE_VERSION)" = "git-$$(printf '%s' '$(SOURCE_REVISION)' | cut -c1-12)" || { echo 'SOURCE_VERSION must match HEAD' >&2; exit 1; }
-	@test "$(IMAGE_TAG)" = "1.0.0-local.$$(printf '%s' '$(SOURCE_REVISION)' | cut -c1-12)" || { echo 'IMAGE_TAG must match the local source convention' >&2; exit 1; }
-	@test "$(IMAGE_REF)" = "$(IMAGE_NAME):$(IMAGE_TAG)" || { echo 'IMAGE_REF must use the selected name and tag' >&2; exit 1; }
-	@test "$(IMAGE_NAME)" = "insurance-hub-policy-search-api" || { echo 'IMAGE_NAME differs from the catalog identity' >&2; exit 1; }
-	@test "$(TARGET_PLATFORM)" = "linux/amd64" || { echo 'TARGET_PLATFORM must be linux/amd64' >&2; exit 1; }
-	$(DOCKER) buildx build --load --platform "$(TARGET_PLATFORM)" --provenance=false \
-		--build-arg "SOURCE_CREATED=$(SOURCE_CREATED)" \
-		--build-arg "SOURCE_REPOSITORY=$(SOURCE_REPOSITORY)" \
-		--build-arg "SOURCE_REVISION=$(SOURCE_REVISION)" \
-		--build-arg "SOURCE_VERSION=$(SOURCE_VERSION)" \
-		--tag "$(IMAGE_REF)" --file Dockerfile .
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
+		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" build
 
 image-check: image-build ## Build and validate image identity, contents, startup, Echo, and shutdown
 	@$(MAKE) --no-print-directory _image-check-existing
 
 _image-check-existing: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		DOCKER="$(DOCKER)" "$(PYTHON)" -m scripts.go.service.image \
+		--config "$(GO_SERVICE_TOOLING_CONFIG)" check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		DOCKER="$(DOCKER)" "$(PYTHON)" scripts/image_check.py
 
@@ -251,7 +244,9 @@ shared-candidate-image:
 shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image:
 	@phase="$(@:shared-candidate-%=%)"; \
 	if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
-		PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go:$(CURDIR)/scripts" "$(PYTHON)" scripts/shared_phase.py "$$phase"; \
+		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+			"$(PYTHON)" -m scripts.go.service.shared_phase \
+			--config "$(GO_SERVICE_TOOLING_CONFIG)" "$$phase"; \
 	else case "$$phase" in generated) target=check-proto-drift;; breaking) target=check-proto-breaking;; integration) target=test-integration;; image) target=image-check;; esac; \
 		$(MAKE) --no-print-directory "$$target"; fi
 

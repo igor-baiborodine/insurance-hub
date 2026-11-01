@@ -48,6 +48,14 @@ PYTHON_SHARED_TOOLING_FILES := \
 	scripts/go/test_topology.py \
 	scripts/go/module/module_tooling.py \
 	scripts/go/module/test_module_tooling.py \
+	scripts/go/service/image.py \
+	scripts/go/service/shared_phase.py \
+	scripts/go/service/tooling_config.py \
+	scripts/go/service/tooling_process.py \
+	scripts/go/service/test_image.py \
+	scripts/go/service/test_shared_phase.py \
+	scripts/go/service/test_tooling_config.py \
+	scripts/go/service/test_tooling_process.py \
 	scripts/go/service/release.py \
 	scripts/go/service/configuration.py \
 	scripts/go/service/deployment.py \
@@ -306,7 +314,10 @@ python-shared-tooling-test-fast: python-toolchain-check ## Run fast shared repos
 		scripts/go/test_report_card.py scripts/go/test_select_pr_module.py \
 		scripts/go/test_shared_*.py \
 		scripts/go/test_topology.py scripts/go/module/test_module_tooling.py \
-		scripts/go/service/test_dispatch.py scripts/go/service/test_release.py scripts/go/service/test_deployment.py
+		scripts/go/service/test_dispatch.py scripts/go/service/test_release.py \
+		scripts/go/service/test_deployment.py scripts/go/service/test_image.py \
+		scripts/go/service/test_shared_phase.py scripts/go/service/test_tooling_config.py \
+		scripts/go/service/test_tooling_process.py
 
 python-shared-tooling-test-integration: python-toolchain-check ## Run disposable shared tooling integration tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
