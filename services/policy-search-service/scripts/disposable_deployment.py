@@ -149,7 +149,9 @@ def probe(
 
     wait_for(cluster, f"probe {name}", finished, 45)
     status = completed["status"]["containerStatuses"][0]["state"]["terminated"]
-    require(status.get("exitCode") == 0, f"probe {name} failed")
+    if status.get("exitCode") != 0:
+        diagnostic = cluster.kubectl("logs", name).strip().replace("\n", " ")[:300]
+        raise CheckFailed(f"probe {name} failed: {diagnostic}")
 
 
 def endpoint_count(cluster: Cluster) -> int:

@@ -145,7 +145,8 @@ deploy-test: python-toolchain-check image-build ## Exercise the exact image in a
 
 build-qualification-client: ## Build the read-only disposable HTTP/gRPC qualification client
 	@test -n "$(strip $(QUALIFICATION_CLIENT_OUTPUT))" || { echo 'QUALIFICATION_CLIENT_OUTPUT is required' >&2; exit 1; }
-	GOWORK=off $(GO) build -mod=readonly -trimpath -o "$(QUALIFICATION_CLIENT_OUTPUT)" \
+	GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build \
+		-mod=readonly -trimpath -o "$(QUALIFICATION_CLIENT_OUTPUT)" \
 		./internal/testing/cmd/qualificationclient
 
 python-tooling-format-check: python-toolchain-check
