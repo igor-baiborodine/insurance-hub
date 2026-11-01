@@ -100,6 +100,19 @@ def matching_probe(actual: Any, expected: Any) -> bool:
     return actual == declared_with_defaults
 
 
+def matching_network_policy_spec(actual: Any, expected: Any) -> bool:
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    actual_normalized = dict(actual)
+    expected_normalized = dict(expected)
+    for field in ("ingress", "egress"):
+        if actual_normalized.get(field) == []:
+            actual_normalized.pop(field)
+        if expected_normalized.get(field) == []:
+            expected_normalized.pop(field)
+    return actual_normalized == expected_normalized
+
+
 def render(environment: str) -> str:
     record = service_record(ROOT, SERVICE)
     configuration = target_record(ROOT, record, environment)
@@ -437,7 +450,7 @@ class Target:
 
             if kind == "NetworkPolicy":
                 require(
-                    actual.get("spec") == desired.get("spec"),
+                    matching_network_policy_spec(actual.get("spec"), desired.get("spec")),
                     f"live NetworkPolicy/{name} differs from rendered policy",
                 )
                 continue

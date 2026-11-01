@@ -131,6 +131,37 @@ def test_image_source_guard_rejects_mismatched_revision() -> None:
             )
 
 
+def test_live_state_accepts_api_server_normalized_resources() -> None:
+    # given API server output with omitted empty lists and explicit defaults.
+    items = rendered_items()
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    policy = next(item for item in items if item["kind"] == "NetworkPolicy")
+    actual[("networkpolicy", policy["metadata"]["name"])]["spec"].pop("egress")
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    live_pod = actual[("deployment", deployment["metadata"]["name"])]["spec"]["template"]["spec"]
+    live_pod["serviceAccountName"] = "default"
+    for probe_name in ("startupProbe", "livenessProbe", "readinessProbe"):
+        live_pod["containers"][0][probe_name]["successThreshold"] = 1
+    target = object.__new__(checks.Target)
+    target.deployment = deployment["metadata"]["name"]
+    target.configuration = {"mode": "direct"}
+    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
+
+    # when live state is compared to the rendered contract.
+    with patch.dict(os.environ, {}, clear=True):
+        # then normalization preserves semantic equality.
+        target.live(items, require_deployment=True)
+
+        # given a security-relevant selector differs after normalization.
+        actual[("networkpolicy", policy["metadata"]["name"])]["spec"]["ingress"][0]["from"][0][
+            "podSelector"
+        ]["matchLabels"][checks.BUSINESS_CLIENT_LABEL] = "false"
+
+        # when / then the live-state guard still rejects the drift.
+        with pytest.raises(checks.DeploymentError, match="differs from rendered policy"):
+            target.live(items, require_deployment=True)
+
+
 def test_live_state_rejects_stale_deployment_after_rollout() -> None:
     items = rendered_items()
     deployment = next(item for item in items if item["kind"] == "Deployment")
