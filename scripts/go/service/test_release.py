@@ -249,7 +249,7 @@ def test_prepare_respects_target_capabilities(
         assert initialize["spec"]["healthChecks"][0]["namespace"] == environment + "-apps"
 
 
-def test_prepare_updates_optional_runtime_version_with_image_tag(tmp_path: Path) -> None:
+def test_prepare_updates_optional_runtime_version_with_source_commit(tmp_path: Path) -> None:
     # given
     create_service(tmp_path, "policy-search")
     overlay = tmp_path / "k8s/overlays/qa/svc/policy-search/kustomization.yaml"
@@ -269,7 +269,7 @@ def test_prepare_updates_optional_runtime_version_with_image_tag(tmp_path: Path)
     # then
     rendered = overlay.read_text()
     assert "newTag: 1.2.3" in rendered
-    assert "SERVICE_VERSION=1.2.3" in rendered
+    assert "SERVICE_VERSION=git-aaaaaaaaaaaa" in rendered
 
 
 def test_prepare_retains_prior_release_prerequisites_and_replaces_only_api(

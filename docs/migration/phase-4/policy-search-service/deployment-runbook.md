@@ -132,8 +132,9 @@ handoff.
 
 The QA overlay publishes
 `ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:<semantic-version>`. The generic release
-owner updates both the image tag and `SERVICE_VERSION` for a service without initialization. PR1
-keeps the overlay inactive; a later reviewed activation adds exactly `./policy-search` to
+owner updates the image tag from the semantic release version and sets `SERVICE_VERSION` to
+`git-<12-source-hex>` from the full release source commit for a service without initialization.
+PR1 keeps the overlay inactive; a later reviewed activation adds exactly `./policy-search` to
 `k8s/overlays/qa/svc/kustomization.yaml` after the immutable image is published and QA prerequisites
 are verified.
 

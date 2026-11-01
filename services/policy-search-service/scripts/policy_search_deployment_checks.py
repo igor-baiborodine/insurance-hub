@@ -258,7 +258,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             data.get("OTEL_ENABLED") == "true"
             and data.get("OTEL_EXPORTER_OTLP_ENDPOINT")
             == "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
-            and data.get("SERVICE_VERSION") == image.rsplit(":", 1)[1],
+            and bool(re.fullmatch(r"git-[0-9a-f]{12}", data.get("SERVICE_VERSION", ""))),
             "QA telemetry identity differs",
         )
     require(
