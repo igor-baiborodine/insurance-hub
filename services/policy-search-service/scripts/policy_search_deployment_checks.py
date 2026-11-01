@@ -113,6 +113,17 @@ def matching_network_policy_spec(actual: Any, expected: Any) -> bool:
     return actual_normalized == expected_normalized
 
 
+def staged_image_matches(environment: str, image: str) -> bool:
+    if environment == "local-dev":
+        return image == "insurance-hub-policy-search-api:1.0.0-local.000000000000"
+    return bool(
+        re.fullmatch(
+            r"ghcr\.io/igor-baiborodine/insurance-hub/policy-search-api:1\.[0-9]+\.[0-9]+",
+            image,
+        )
+    )
+
+
 def render(environment: str) -> str:
     record = service_record(ROOT, SERVICE)
     configuration = target_record(ROOT, record, environment)
@@ -159,12 +170,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     )
     container = containers[0]
     image = container.get("image", "")
-    expected_image = (
-        "insurance-hub-policy-search-api:1.0.0-local.000000000000"
-        if environment == "local-dev"
-        else "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:1.0.0"
-    )
-    require(image == expected_image, "staged image identity differs")
+    require(staged_image_matches(environment, image), "staged image identity differs")
     require(
         container.get("resources")
         == {

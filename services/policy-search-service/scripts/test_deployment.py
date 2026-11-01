@@ -131,6 +131,23 @@ def test_image_source_guard_rejects_mismatched_revision() -> None:
             )
 
 
+@pytest.mark.parametrize(
+    ("image", "accepted"),
+    [
+        ("ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:1.27.305", True),
+        ("ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:2.0.0", False),
+        ("ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:1.2.3-rc.1", False),
+        ("ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:latest", False),
+    ],
+)
+def test_qa_render_image_guard_accepts_release_owner_semver(image: str, accepted: bool) -> None:
+    # when
+    actual = checks.staged_image_matches("qa", image)
+
+    # then
+    assert actual is accepted
+
+
 def test_live_state_accepts_api_server_normalized_resources() -> None:
     # given API server output with omitted empty lists and explicit defaults.
     items = rendered_items()
