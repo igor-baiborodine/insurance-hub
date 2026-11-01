@@ -12,7 +12,7 @@ resources:
 images:
   - name: insurance-hub-policy-search-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/policy-search-api
-    newTag: 1.0.1
+    newTag: 1.1.0
 configMapGenerator:
   - name: policy-search-config
     behavior: merge
@@ -22,7 +22,7 @@ configMapGenerator:
       - ELASTICSEARCH_URL=https://qa-elasticsearch-es-http.qa-data.svc:9200
       - ELASTICSEARCH_CA_FILE=/etc/policy-search/elasticsearch/ca.crt
       - DEPLOYMENT_ENVIRONMENT=qa
-      - SERVICE_VERSION=git-7cbd9dd0d3a4
+      - SERVICE_VERSION=git-647fee226a4c
 patches:
   - path: deployment-patch.yaml
     target:

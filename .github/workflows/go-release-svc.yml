@@ -139,8 +139,16 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$RELEASE_TAG" -m "Release $MODULE_NAME $RELEASE_VERSION"
-          git push origin "$RELEASE_TAG"
+          existing_tag_commit="$(git rev-list -n 1 "$RELEASE_TAG" 2>/dev/null || true)"
+          if [[ -z "$existing_tag_commit" ]]; then
+            git tag -a "$RELEASE_TAG" -m "Release $MODULE_NAME $RELEASE_VERSION"
+            git push origin "$RELEASE_TAG"
+          elif [[ "$existing_tag_commit" != "$SOURCE_REVISION" ]]; then
+            echo "$RELEASE_TAG already resolves to unexpected commit $existing_tag_commit" >&2
+            exit 1
+          else
+            echo "$RELEASE_TAG already identifies $SOURCE_REVISION; resuming release."
+          fi
 
       - name: Prepare and commit configured release targets
         env:
@@ -161,7 +169,21 @@ jobs:
             echo "Configured release targets already use $RELEASE_VERSION."
           else
             git commit -m "chore(k8s): update $RELEASE_SERVICE Go release to $RELEASE_VERSION"
-            git push origin HEAD:main
+            release_pushed=false
+            for attempt in 1 2 3; do
+              echo "Release target push attempt $attempt of 3."
+              git fetch --no-tags origin main
+              if ! git merge-base --is-ancestor "$SOURCE_REVISION" origin/main; then
+                echo "Triggering source $SOURCE_REVISION is not an ancestor of current main." >&2
+                exit 1
+              fi
+              git rebase origin/main
+              if git push origin HEAD:main; then
+                release_pushed=true
+                break
+              fi
+            done
+            [[ "$release_pushed" == true ]]
           fi
 
       - name: Create GitHub Release
