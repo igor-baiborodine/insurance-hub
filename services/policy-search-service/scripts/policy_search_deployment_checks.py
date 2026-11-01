@@ -113,6 +113,17 @@ def matching_network_policy_spec(actual: Any, expected: Any) -> bool:
     return actual_normalized == expected_normalized
 
 
+def matching_echo_predecessor_network_policy(actual: Any, expected: Any) -> bool:
+    """Accept the Echo deny-all-egress policy before query dependencies are staged."""
+    if matching_network_policy_spec(actual, expected):
+        return True
+    if not isinstance(expected, dict):
+        return False
+    predecessor = dict(expected)
+    predecessor.pop("egress", None)
+    return matching_network_policy_spec(actual, predecessor)
+
+
 def matching_config_map_reference(actual: Any, expected: Any) -> bool:
     if actual == expected:
         return True
@@ -137,6 +148,17 @@ def matching_config_map_reference(actual: Any, expected: Any) -> bool:
         and actual_reference.get("optional") in (None, False)
         and expected_reference.get("optional") in (None, False)
     )
+
+
+def matching_echo_predecessor_environment(actual: Any, expected: Any) -> bool:
+    """Accept the reviewed Echo environment before its first query rollout only."""
+    if actual == expected:
+        return True
+    if not isinstance(actual, list) or not isinstance(expected, list):
+        return False
+    query_only = {"ELASTICSEARCH_USERNAME", "ELASTICSEARCH_PASSWORD"}
+    predecessor = [item for item in expected if item.get("name") not in query_only]
+    return actual == predecessor
 
 
 def staged_image_matches(environment: str, image: str) -> bool:
@@ -547,6 +569,14 @@ class Target:
                 continue
 
             if kind == "NetworkPolicy":
+                if previous_image and not require_deployment:
+                    require(
+                        matching_echo_predecessor_network_policy(
+                            actual.get("spec"), desired.get("spec")
+                        ),
+                        f"live NetworkPolicy/{name} differs from rendered policy",
+                    )
+                    continue
                 require(
                     matching_network_policy_spec(actual.get("spec"), desired.get("spec")),
                     f"live NetworkPolicy/{name} differs from rendered policy",
@@ -640,6 +670,14 @@ class Target:
                 if field == "envFrom" and not require_deployment:
                     require(
                         matching_config_map_reference(
+                            container.get(field), desired_container.get(field)
+                        ),
+                        f"live Deployment/{name} container {field} differs",
+                    )
+                    continue
+                if field == "env" and previous_image and not require_deployment:
+                    require(
+                        matching_echo_predecessor_environment(
                             container.get(field), desired_container.get(field)
                         ),
                         f"live Deployment/{name} container {field} differs",
