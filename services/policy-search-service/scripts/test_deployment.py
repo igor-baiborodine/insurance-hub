@@ -118,7 +118,7 @@ def test_render_rejects_weakened_termination_budget() -> None:
 
 
 def test_image_source_guard_rejects_mismatched_revision() -> None:
-    target = Mock()
+    target = Mock(configuration={"mode": "direct"}, environment="local-dev")
     with (
         patch.dict(os.environ, {"DOCKER": "docker"}, clear=True),
         patch.object(
@@ -131,6 +131,32 @@ def test_image_source_guard_rejects_mismatched_revision() -> None:
             checks.secret_and_image(
                 target, "insurance-hub-policy-search-api:1.0.0-local.123456789abc"
             )
+
+
+def test_qa_preflight_accepts_staged_registry_image_without_local_inspection() -> None:
+    # given
+    target = Mock(configuration={"mode": "flux"}, environment="qa")
+    command = Mock()
+
+    # when
+    with patch.object(checks, "run", command):
+        checks.secret_and_image(
+            target, "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:1.0.0"
+        )
+
+    # then
+    command.assert_not_called()
+
+
+def test_qa_preflight_rejects_unreleased_registry_image() -> None:
+    # given
+    target = Mock(configuration={"mode": "flux"}, environment="qa")
+
+    # when / then
+    with pytest.raises(checks.DeploymentError, match="image tag differs"):
+        checks.secret_and_image(
+            target, "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:latest"
+        )
 
 
 @pytest.mark.parametrize(

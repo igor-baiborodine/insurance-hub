@@ -590,6 +590,9 @@ def check_render() -> None:
 
 def secret_and_image(target: Target, image: str) -> None:
     require(not os.environ.get("DEPLOY_SECRET"), "Policy Search accepts no deployment Secret")
+    if target.configuration["mode"] == "flux":
+        require(staged_image_matches(target.environment, image), "image tag differs")
+        return
     require(
         bool(
             re.fullmatch(
