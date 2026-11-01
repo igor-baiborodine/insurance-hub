@@ -258,7 +258,7 @@ flush and shutdown use bounded contexts. Safe export diagnostics are rate-limite
 seconds; queue saturation has a separate safe warning. The executable installs the shared
 diagnostic handler before enabled providers and restores the previous handler after service exit.
 
-`insurance_hub.service.requests` and `insurance_hub.service.request.duration` separately record
+`insurance_hub.policy_search.requests` and `insurance_hub.policy_search.request.duration` separately record
 bounded HTTP and gRPC transport outcomes. HTTP labels use only `POST /v1/example/echo` or
 `unmatched`; gRPC records the fixed Echo operation and final status. Request paths, queries,
 payloads, raw errors, headers and instance IDs are not metric labels. The same provider connects

@@ -4,6 +4,7 @@ namespace: qa-svc
 namePrefix: qa-
 labels:
   - includeSelectors: false
+    includeTemplates: true
     pairs:
       environment: qa
 resources:

@@ -217,7 +217,7 @@ func assertRequestMetrics(
 		for _, measurement := range scope.Metrics {
 			switch data := measurement.Data.(type) {
 			case metricdata.Sum[int64]:
-				if measurement.Name != "insurance_hub.service.requests" ||
+				if measurement.Name != "insurance_hub.policy_search.requests" ||
 					measurement.Unit != "{request}" {
 					t.Errorf("unexpected counter: %#v", measurement)
 				}
@@ -226,7 +226,7 @@ func assertRequestMetrics(
 					counts[measurement.Name] += int(point.Value)
 				}
 			case metricdata.Histogram[float64]:
-				if measurement.Name != "insurance_hub.service.request.duration" ||
+				if measurement.Name != "insurance_hub.policy_search.request.duration" ||
 					measurement.Unit != "s" {
 					t.Errorf("unexpected histogram: %#v", measurement)
 				}
@@ -240,7 +240,7 @@ func assertRequestMetrics(
 			}
 		}
 	}
-	for _, name := range []string{"insurance_hub.service.requests", "insurance_hub.service.request.duration"} {
+	for _, name := range []string{"insurance_hub.policy_search.requests", "insurance_hub.policy_search.request.duration"} {
 		if counts[name] != want {
 			t.Errorf("%s observations = %d, want %d", name, counts[name], want)
 		}
@@ -250,9 +250,9 @@ func assertRequestMetrics(
 func assertMetricDimensions(t *testing.T, attributes attribute.Set, statusKey attribute.Key) {
 	t.Helper()
 	for _, key := range []attribute.Key{
-		"insurance_hub.service.operation",
-		"insurance_hub.service.transport",
-		"insurance_hub.service.outcome",
+		"insurance_hub.policy_search.operation",
+		"insurance_hub.policy_search.transport",
+		"insurance_hub.policy_search.outcome",
 		statusKey,
 	} {
 		if _, ok := attributes.Value(key); !ok {
@@ -272,7 +272,7 @@ func assertRequestSpans(
 	}
 	for index, span := range spans {
 		attrs := attribute.NewSet(span.Attributes()...)
-		outcome, ok := attrs.Value("insurance_hub.service.outcome")
+		outcome, ok := attrs.Value("insurance_hub.policy_search.outcome")
 		if !ok {
 			t.Errorf("span %d lacks outcome: %v", index, attrs)
 			continue
