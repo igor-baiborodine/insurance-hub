@@ -589,6 +589,11 @@ def test_main_coverage_contract_matches_repository() -> None:
     [
         ("  push:\n", "  pull_request:\n", "push-only event"),
         ("      - main\n", "      - develop\n", "main branch trigger"),
+        (
+            "      - 'services/*-service/**/*.go'\n",
+            "      - 'services/*-service/scripts/**'\n",
+            "exact Go coverage path filters",
+        ),
         ("permissions:\n  contents: read\n", "permissions:\n  contents: write\n", "read-only"),
         ("cancel-in-progress: true", "cancel-in-progress: false", "cancellation"),
         ("fail-fast: false", "fail-fast: true", "complete coverage matrix"),
