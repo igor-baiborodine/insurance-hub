@@ -28,9 +28,9 @@ document from `services/policy-search-service/` with workspace mode disabled. Th
 workspace, filesystem replacements, database, Kafka, or mandatory collector dependency.
 
 The service provides the versioned Policy Search contract through direct gRPC and a generated HTTP
-gateway. It owns generated Go and Swagger 2.0 artifacts, a read-only Elasticsearch adapter, typed
-configuration, safe structured logging, optional trace and metric export, dependency-aware health,
-and bounded signal-driven shutdown.
+gateway. It owns generated Go and Swagger 2.0 artifacts, Elasticsearch query and policy-projection
+adapters, typed configuration, safe structured logging, optional trace and metric export,
+dependency-aware health, and bounded signal-driven shutdown.
 
 ## Prerequisites
 
@@ -436,7 +436,7 @@ owns this contract, lifecycle, exposure and deployment configuration.
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
 | Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC search gateway, legacy HTTP mapping, bounded transport signals and configurable HTTP/gRPC limits. |
 | Health and lifecycle | `servicekit/health`, `internal/service/service.go` | RPC and Elasticsearch readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
-| Business architecture | Product application-owned catalog ports and injected adapters | `internal/application` owns the policy-search port and stable selected-window ordering; `internal/elasticsearch` implements it and runtime composition injects it into gRPC. |
+| Business architecture | Product application-owned catalog ports and injected adapters | `internal/application` owns the policy-search and policy-view writer ports, stable selected-window ordering and Java-compatible event mapping; `internal/elasticsearch` implements query and whole-document replacement adapters. Runtime composition owns separate query and projection clients. |
 
 Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
 fixes with behavior tests and update intentional differences explicitly. This service adopts later
@@ -453,8 +453,8 @@ source improvements through its own reviewed changes.
 | `internal/config` | Compose shared setting groups, load the environment and apply Policy Search identity and cross-setting policy. |
 | `internal/logger`, `internal/telemetry` | Safe request and Elasticsearch dependency signals; shared provider construction with local policy and metric views. |
 | `internal/domain` | Policy and strict calendar-date values without transport or datastore types. |
-| `internal/application` | Search port plus descending `dateFrom` ordering of the already selected hit window, preserving equal-date order and placing missing dates last. |
-| `internal/elasticsearch` | Official Elasticsearch 8.19 client configuration and the read-only adapter for the isolated `policy-views-issue-229` index. |
+| `internal/application` | Search and policy-view writer ports, descending `dateFrom` ordering of the already selected hit window, and event-to-read-model projection with received date presence preserved. |
+| `internal/elasticsearch` | Official Elasticsearch 8.19 client configuration, the query adapter, and whole-document number-keyed replacement for the isolated `policy-views-issue-229` index. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/policysearch/v1`, `gen/policysearch/v1`, `gen/openapiv2/policysearch/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 
@@ -471,12 +471,12 @@ flowchart TD
     composition --> gateway["internal/gateway"]
     composition --> health["servicekit/health"]
     composition --> telemetry["internal/telemetry"]
-    composition --> searchAdapter["internal/elasticsearch"]
+    composition --> elasticsearchAdapters["internal/elasticsearch"]
     composition --> config
     grpc --> telemetry
     grpc --> generated["gen/policysearch/v1"]
     gateway --> generated
-    searchAdapter --> application["internal/application"]
+    elasticsearchAdapters --> application["internal/application"]
     application --> domain["internal/domain"]
     telemetry --> config
     telemetry --> logger["internal/logger"]
@@ -493,5 +493,8 @@ and translates it through the generated client across the owned instrumented con
 server invokes the application port, which asks the official Elasticsearch adapter for the capped
 hit window and applies stable date ordering before mapping the response. The request retains the
 shorter caller deadline while HTTP, gRPC and dependency observations use fixed safe dimensions.
+The projection constructor separately binds the application writer port to a dedicated
+Elasticsearch client and performs full replacement under the policy-number document ID. Worker
+configuration and lifecycle do not activate that constructor until the event composition step.
 Shutdown withdraws readiness and drains accepted HTTP work before connection and gRPC teardown,
 closes dependency connections, then closes management and telemetry within the shared deadline.

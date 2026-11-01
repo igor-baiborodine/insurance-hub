@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -20,6 +21,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
 
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/domain"
 	policyelasticsearch "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/elasticsearch"
 )
 
@@ -192,6 +195,189 @@ func TestEventFixture_RealKafkaAndElasticsearchResources(t *testing.T) {
 			oracle.Events.Registration.ExpectedDocument,
 		)
 	}
+	verifyProjectionReplacement(t, ctx, elasticsearchClient, environment.Elasticsearch, oracle)
+}
+
+func verifyProjectionReplacement(
+	t *testing.T,
+	ctx context.Context,
+	client *policyelasticsearch.Client,
+	elasticsearchURL string,
+	oracle eventOracle,
+) {
+	t.Helper()
+	writer, err := policyelasticsearch.NewWriter(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	useCase, err := application.NewProjectPolicy(writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := oracleProjectionEvent(t, oracle.Events.Registration)
+	termination := oracleProjectionEvent(t, oracle.Events.Termination)
+	sequence := []struct {
+		name  string
+		event application.PolicyEvent
+		want  map[string]string
+	}{
+		{"registration", registration, oracle.Events.Registration.ExpectedDocument},
+		{"termination", termination, oracle.Events.Termination.ExpectedDocument},
+		{"duplicate termination", termination, oracle.Events.Termination.ExpectedDocument},
+		{
+			"registration after termination",
+			registration,
+			oracle.Events.Registration.ExpectedDocument,
+		},
+	}
+	for _, step := range sequence {
+		if step.name == "termination" {
+			indexStaleFixtureDocument(t, ctx, elasticsearchURL, registration)
+		}
+		if err := useCase.Execute(ctx, step.event); err != nil {
+			t.Fatalf("project %s: %v", step.name, err)
+		}
+		refreshPolicyIndex(t, ctx, client)
+		stored := readFixtureDocument(t, ctx, elasticsearchURL, step.event.Number)
+		if !reflect.DeepEqual(stored, step.want) {
+			t.Fatalf("%s document = %v, want %v", step.name, stored, step.want)
+		}
+	}
+	if count := countFixtureDocuments(t, ctx, elasticsearchURL); count != 1 {
+		t.Fatalf("projected document count = %d, want 1", count)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := useCase.Execute(canceled, termination); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled projection error = %v", err)
+	}
+}
+
+func indexStaleFixtureDocument(
+	t *testing.T,
+	ctx context.Context,
+	elasticsearchURL string,
+	event application.PolicyEvent,
+) {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{
+		"number":       event.Number,
+		"dateFrom":     event.From.String(),
+		"dateTo":       event.To.String(),
+		"policyHolder": event.PolicyHolder,
+		"stale":        "must-disappear-on-replacement",
+	})
+	if err != nil {
+		t.Fatalf("encode stale fixture document: %v", err)
+	}
+	endpoint := fmt.Sprintf(
+		"%s/%s/_doc/%s?refresh=true",
+		elasticsearchURL,
+		eventFixtureIndex,
+		url.PathEscape(event.Number),
+	)
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPut,
+		endpoint,
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		t.Fatalf("build stale fixture request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("index stale fixture document: %v", err)
+	}
+	assertElasticsearchResponseOK(
+		t,
+		response.StatusCode,
+		response.Body,
+		"index stale fixture document",
+	)
+}
+
+func oracleProjectionEvent(t *testing.T, event oracleEvent) application.PolicyEvent {
+	t.Helper()
+	var envelope struct {
+		Policy struct {
+			Number       string  `json:"number"`
+			From         *string `json:"from"`
+			To           *string `json:"to"`
+			PolicyHolder string  `json:"policyHolder"`
+		} `json:"policy"`
+	}
+	if err := json.Unmarshal(event.Value, &envelope); err != nil {
+		t.Fatalf("decode oracle projection event: %v", err)
+	}
+	return application.PolicyEvent{
+		Number:       envelope.Policy.Number,
+		From:         parseOracleDate(t, envelope.Policy.From),
+		To:           parseOracleDate(t, envelope.Policy.To),
+		PolicyHolder: envelope.Policy.PolicyHolder,
+	}
+}
+
+func parseOracleDate(t *testing.T, value *string) *domain.Date {
+	t.Helper()
+	if value == nil {
+		return nil
+	}
+	date, err := domain.ParseDate(*value)
+	if err != nil {
+		t.Fatalf("parse oracle date: %v", err)
+	}
+	return &date
+}
+
+func refreshPolicyIndex(
+	t *testing.T,
+	ctx context.Context,
+	client *policyelasticsearch.Client,
+) {
+	t.Helper()
+	response, err := client.Indices.Refresh(
+		client.Indices.Refresh.WithContext(ctx),
+		client.Indices.Refresh.WithIndex(policyelasticsearch.PolicyIndex),
+	)
+	if err != nil {
+		t.Fatalf("refresh policy index: %v", err)
+	}
+	assertElasticsearchResponseOK(t, response.StatusCode, response.Body, "refresh policy index")
+}
+
+func countFixtureDocuments(
+	t *testing.T,
+	ctx context.Context,
+	elasticsearchURL string,
+) int {
+	t.Helper()
+	endpoint := fmt.Sprintf("%s/%s/_count", elasticsearchURL, eventFixtureIndex)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		t.Fatalf("build fixture count request: %v", err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("count fixture documents: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		t.Fatalf(
+			"count fixture documents returned status %d: %s",
+			response.StatusCode,
+			payload,
+		)
+	}
+	var result struct {
+		Count int `json:"count"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatalf("decode fixture document count: %v", err)
+	}
+	return result.Count
 }
 
 func loadEventOracle(t *testing.T) eventOracle {
