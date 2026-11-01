@@ -6,5 +6,5 @@ spec:
   template:
     spec:
       containers:
-        - name: policy-search-service
+        - name: policy-search-api
           imagePullPolicy: Never

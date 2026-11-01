@@ -656,6 +656,15 @@ service_json_logs "product" {
   max_streams    = 8
 }
 
+// Policy Search service log policy registration.
+service_json_logs "policy_search" {
+  targets        = discovery.kubernetes.qa_service_pods.targets
+  container_name = "policy-search-api"
+  port_name      = "http"
+  service_name   = "policy-search-service"
+  max_streams    = 8
+}
+
 // Preserve the shared OTLP log destination independently of service-specific
 // container-log stream budgets.
 loki.write "qa_loki" {

@@ -113,6 +113,32 @@ def matching_network_policy_spec(actual: Any, expected: Any) -> bool:
     return actual_normalized == expected_normalized
 
 
+def matching_config_map_reference(actual: Any, expected: Any) -> bool:
+    if actual == expected:
+        return True
+    if not isinstance(actual, list) or not isinstance(expected, list):
+        return False
+    if len(actual) != 1 or len(expected) != 1:
+        return False
+    actual_reference = actual[0].get("configMapRef", {})
+    expected_reference = expected[0].get("configMapRef", {})
+    if set(actual[0]) != {"configMapRef"} or set(expected[0]) != {"configMapRef"}:
+        return False
+    actual_match = re.fullmatch(
+        r"(.+-policy-search-config)-[a-z0-9]{10}", actual_reference.get("name", "")
+    )
+    expected_match = re.fullmatch(
+        r"(.+-policy-search-config)-[a-z0-9]{10}", expected_reference.get("name", "")
+    )
+    return (
+        actual_match is not None
+        and expected_match is not None
+        and actual_match.group(1) == expected_match.group(1)
+        and actual_reference.get("optional") in (None, False)
+        and expected_reference.get("optional") in (None, False)
+    )
+
+
 def staged_image_matches(environment: str, image: str) -> bool:
     if environment == "local-dev":
         return image == "insurance-hub-policy-search-api:1.0.0-local.000000000000"
@@ -165,7 +191,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(labels.get("app.kubernetes.io/name") == "policy-search-api", "pod identity differs")
     containers = pod["spec"].get("containers", [])
     require(
-        len(containers) == 1 and containers[0].get("name") == "policy-search-service",
+        len(containers) == 1 and containers[0].get("name") == "policy-search-api",
         "container identity differs",
     )
     container = containers[0]
@@ -257,6 +283,10 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         all(data.get(key) == value for key, value in required_data.items()),
         "runtime budgets differ",
     )
+    require(
+        "OTEL_EXPORTER_OTLP_TIMEOUT" not in data,
+        "exporter timeout must use the application default",
+    )
     if environment == "local-dev":
         require(data.get("OTEL_ENABLED") == "false", "local telemetry must be disabled")
     else:
@@ -266,6 +296,10 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             == "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
             and bool(re.fullmatch(r"git-[0-9a-f]{12}", data.get("SERVICE_VERSION", ""))),
             "QA telemetry identity differs",
+        )
+        require(
+            labels.get("app.kubernetes.io/version") == data.get("SERVICE_VERSION"),
+            "QA Pod and telemetry versions differ",
         )
     require(
         not any(
@@ -416,9 +450,12 @@ class Target:
             )
             desired_metadata_version = metadata.get("labels", {}).get("app.kubernetes.io/version")
             if kind == "Deployment" and (desired_metadata_version or previous_image):
+                actual_metadata_version = actual_metadata.get("labels", {}).get(
+                    "app.kubernetes.io/version"
+                )
                 require(
-                    actual_metadata.get("labels", {}).get("app.kubernetes.io/version")
-                    in allowed_versions,
+                    actual_metadata_version in allowed_versions
+                    or (not require_deployment and actual_metadata_version is None),
                     f"live Deployment/{name} version identity differs",
                 )
 
@@ -488,8 +525,10 @@ class Target:
                 f"live Deployment/{name} pod identity differs",
             )
             if desired_labels.get("app.kubernetes.io/version") or previous_image:
+                actual_template_version = template_labels.get("app.kubernetes.io/version")
                 require(
-                    template_labels.get("app.kubernetes.io/version") in allowed_versions,
+                    actual_template_version in allowed_versions
+                    or (not require_deployment and actual_template_version is None),
                     f"live Deployment/{name} pod version identity differs",
                 )
             pod = template.get("spec", {})
@@ -528,6 +567,23 @@ class Target:
                 "volumeMounts",
                 "lifecycle",
             ):
+                if field == "name":
+                    allowed_names = {desired_container.get(field)}
+                    if not require_deployment:
+                        allowed_names.add("policy-search-service")
+                    require(
+                        container.get(field) in allowed_names,
+                        f"live Deployment/{name} container {field} differs",
+                    )
+                    continue
+                if field == "envFrom" and not require_deployment:
+                    require(
+                        matching_config_map_reference(
+                            container.get(field), desired_container.get(field)
+                        ),
+                        f"live Deployment/{name} container {field} differs",
+                    )
+                    continue
                 require(
                     container.get(field) == desired_container.get(field),
                     f"live Deployment/{name} container {field} differs",

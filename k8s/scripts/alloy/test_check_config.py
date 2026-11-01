@@ -39,6 +39,16 @@ def test_source_policy_requires_python_chart_injection_after_migration() -> None
         )
 
 
+def test_source_policy_registers_each_active_go_service_log_stream() -> None:
+    config = (REPOSITORY_ROOT / "k8s/overlays/qa/infra/alloy/config.alloy").read_text(
+        encoding="utf-8"
+    )
+
+    alloy_check.validate_service_log_registrations(config)
+    assert 'service_json_logs "product"' in config
+    assert 'service_json_logs "policy_search"' in config
+
+
 # Product data below is limited to the transitional legacy-Java contract. Shared Go
 # behavior uses neutral fixtures and is not extended when another service is added.
 PRODUCT_ROUTE_RULES = (
@@ -393,7 +403,7 @@ discovery.relabel "logs" {
 
     def test_log_policy_reuses_service_registrations(self) -> None:
         registration_config = """
-service_json_logs "multi-part" {
+service_json_logs "multi_part" {
   targets        = discovery.kubernetes.qa_service_pods.targets
   container_name = "multi-part-api"
   port_name      = "http"
