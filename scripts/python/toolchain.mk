@@ -58,6 +58,8 @@ PYTHON_SHARED_TOOLING_FILES := \
 PYTHON_SCAFFOLD_TOOLING_FILES := \
 	templates/go-service/scripts/check_copy.py \
 	templates/go-service/scripts/check_foundations.py \
+	templates/go-service/scripts/check_gateway_contract.py \
+	templates/go-service/scripts/test_check_gateway_contract.py \
 	templates/go-service/scripts/test_check_foundations.py \
 	templates/go-service/scripts/scaffold_process.py \
 	templates/go-service/scripts/test_check_copy.py \

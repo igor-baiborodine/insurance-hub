@@ -29,26 +29,21 @@ RELEASE_PATHS = [
 ]
 
 QUALIFYING_PATHS = [
-    "templates/go-service/**/*.go",
-    "templates/go-service/go.mod",
-    "templates/go-service/go.sum",
-    "templates/go-service/.golangci.yml",
-    "templates/go-service/buf.yaml",
-    "templates/go-service/buf.lock",
-    "templates/go-service/buf.gen.yaml",
-    "templates/go-service/api/**/*.proto",
-    "templates/go-service/**/testdata/**",
-    "services/*-service/**/*.go",
-    "services/*-service/go.mod",
-    "services/*-service/go.sum",
-    "services/*-service/.golangci.yml",
-    "services/*-service/buf.yaml",
-    "services/*-service/buf.lock",
-    "services/*-service/buf.gen.yaml",
-    "services/*-service/sqlc.yaml",
-    "services/*-service/api/**/*.proto",
-    "services/*-service/internal/postgres/sql/*.sql",
-    "services/*-service/**/testdata/**",
+    "**/*-service/**/*.go",
+    "**/*-service/go.mod",
+    "**/*-service/go.sum",
+    "**/*-service/.golangci.yml",
+    "**/*-service/buf.yaml",
+    "**/*-service/buf.lock",
+    "**/*-service/buf.gen.yaml",
+    "**/*-service/sqlc.yaml",
+    "**/*-service/api/**/*.proto",
+    "**/*-service/gen/openapiv2/**/*.json",
+    "**/*-service/internal/postgres/sql/*.sql",
+    "**/*-service/**/testdata/**",
+    "!legacy/**",
+    "!services/*/*-service/**",
+    "!templates/*/*-service/**",
 ]
 
 
@@ -326,6 +321,7 @@ def validate_trigger_examples(patterns: list[str]) -> None:
         "templates/go-service/buf.lock",
         "templates/go-service/buf.gen.yaml",
         "templates/go-service/api/scaffold/v1/example_service.proto",
+        "templates/go-service/gen/openapiv2/scaffold/v1/example_service.swagger.json",
         "templates/go-service/testdata/contract-baseline/buf.yaml",
         "templates/go-service/internal/catalog/testdata/case.json",
         "services/product-service/internal/testing/fixture_test.go",
@@ -338,6 +334,7 @@ def validate_trigger_examples(patterns: list[str]) -> None:
         "services/product-service/buf.gen.yaml",
         "services/product-service/sqlc.yaml",
         "services/product-service/api/product/v1/product_service.proto",
+        "services/product-service/gen/openapiv2/product/v1/product_service.swagger.json",
         "services/product-service/internal/postgres/sql/schema.sql",
         "services/product-service/testdata/contract-baseline/buf.yaml",
         "services/product-service/internal/catalog/testdata/case.json",
@@ -369,11 +366,13 @@ def validate_trigger_examples(patterns: list[str]) -> None:
         "services/claims/incorrect.go",
         "services/group/claims-service/incorrect.go",
         "services/claims-service-tools/incorrect.go",
+        "templates/group/claims-service/incorrect.go",
         "scripts/go/module/common.mk",
         "go-module-topology.json",
         "codecov.yml",
         ".github/workflows/go-pr-mod.yml",
         "legacy/product-service/src/test/resources/product-read-baseline/qa-products.json",
+        "legacy/product-service/internal/incorrect.go",
         "k8s/apps/svc/product/base/deployment.yaml",
     ]
     for path in qualifying:
@@ -453,13 +452,22 @@ def exercise_selection(selector: dict) -> None:
             "services/product-service",
         ),
         (
+            "scaffold plus Product-local CI helper",
+            {
+                "templates/go-service/main.go": "package main\n",
+                "services/product-service/scripts/check_ci.py": "# fixture\n",
+            },
+            0,
+            "templates/go-service",
+        ),
+        (
             "qualifying plus second-module auxiliary",
             {
                 "services/product-service/main.go": "package main\n",
                 "templates/go-service/README.md": "fixture\n",
             },
-            1,
-            None,
+            0,
+            "services/product-service",
         ),
         (
             "scaffold and business service",
@@ -476,8 +484,8 @@ def exercise_selection(selector: dict) -> None:
                 "services/product-service/main.go": "package main\n",
                 "services/claims-service/README.md": "fixture\n",
             },
-            1,
-            None,
+            0,
+            "services/product-service",
         ),
     ]
     with tempfile.TemporaryDirectory(prefix="insurance-hub-go-pr-select-") as temporary:

@@ -29,6 +29,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if got.GRPCAddress.String() != "127.0.0.1:9090" {
 		t.Errorf("GRPCAddress = %q, want 127.0.0.1:9090", got.GRPCAddress)
 	}
+	if got.HTTPAddress.String() != "127.0.0.1:8080" {
+		t.Errorf("HTTPAddress = %q, want 127.0.0.1:8080", got.HTTPAddress)
+	}
 	if got.HealthAddress.String() != "127.0.0.1:8081" {
 		t.Errorf("HealthAddress = %q, want 127.0.0.1:8081", got.HealthAddress)
 	}
@@ -48,6 +51,11 @@ func TestLoad_Defaults(t *testing.T) {
 	if got.MaxReceiveBytes != 1048576 || got.MaxSendBytes != 8388608 {
 		t.Errorf("gRPC limits = %+v, want 1048576 receive and 8388608 send", got.GRPC)
 	}
+	if got.HTTPMaxHeaderBytes != 16384 || got.HTTPMaxBodyBytes != 4096 ||
+		got.ReadHeaderTimeout != 5*time.Second || got.ReadTimeout != 10*time.Second ||
+		got.WriteTimeout != 10*time.Second || got.IdleTimeout != 30*time.Second {
+		t.Errorf("HTTP settings = %+v", got)
+	}
 	if got.Enabled {
 		t.Error("Telemetry.Enabled = true, want false")
 	}
@@ -59,6 +67,82 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if got.ExporterTimeout != 2*time.Second {
 		t.Errorf("Telemetry.ExporterTimeout = %v, want 2s", got.ExporterTimeout)
+	}
+}
+
+func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) {
+	// given
+	tests := []struct {
+		name    string
+		values  map[string]string
+		setting string
+	}{
+		{
+			"header bound",
+			map[string]string{EnvHTTPMaxHeaderBytes: "1023"},
+			EnvHTTPMaxHeaderBytes,
+		},
+		{
+			"body bound",
+			map[string]string{EnvHTTPMaxBodyBytes: "1048577"},
+			EnvHTTPMaxBodyBytes,
+		},
+		{
+			"header after read",
+			map[string]string{kitconfig.EnvHTTPReadHeaderTimeout: "11s"},
+			kitconfig.EnvHTTPReadHeaderTimeout,
+		},
+		{
+			"read after write",
+			map[string]string{kitconfig.EnvHTTPReadTimeout: "11s"},
+			kitconfig.EnvHTTPReadTimeout,
+		},
+		{
+			"request reaches write",
+			map[string]string{kitconfig.EnvRequestTimeout: "10s"},
+			kitconfig.EnvRequestTimeout,
+		},
+		{
+			"shutdown omits exporter reserve",
+			map[string]string{kitconfig.EnvShutdownTimeout: "9s"},
+			kitconfig.EnvShutdownTimeout,
+		},
+		{
+			"HTTP and gRPC collide",
+			map[string]string{EnvHTTPAddress: "127.0.0.1:9090"},
+			kitconfig.EnvGRPCAddress,
+		},
+		{
+			"HTTP and health collide",
+			map[string]string{EnvHTTPAddress: "127.0.0.1:8081"},
+			kitconfig.EnvHealthAddress,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			_, err := load(mapLookup(test.values))
+			// then
+			if err == nil {
+				t.Fatal("invalid settings accepted")
+			}
+			setting, _ := kitconfig.ErrorDetails(err)
+			if setting != test.setting {
+				t.Errorf("setting = %q, want %q: %v", setting, test.setting, err)
+			}
+		})
+	}
+	// given
+	values := map[string]string{
+		EnvHTTPAddress:             "127.0.0.1:0",
+		kitconfig.EnvGRPCAddress:   "127.0.0.1:0",
+		kitconfig.EnvHealthAddress: "127.0.0.1:0",
+	}
+	// when
+	_, err := load(mapLookup(values))
+	// then
+	if err != nil {
+		t.Fatalf("port-zero listeners rejected: %v", err)
 	}
 }
 

@@ -122,6 +122,35 @@ def test_format_selection_excludes_generated_files(tmp_path: Path) -> None:
     assert selected is None
 
 
+@pytest.mark.parametrize("version_argument", ["version", "--version"])
+def test_extra_tool_specification_accepts_supported_version_arguments(
+    version_argument: str,
+) -> None:
+    # when
+    result = module_tooling.parse_extra_tool_specification(
+        f" controlled-tool|/tools/controlled|v1.2.3|{version_argument} "
+    )
+
+    # then
+    assert result == ("controlled-tool", "/tools/controlled", "v1.2.3", version_argument)
+
+
+@pytest.mark.parametrize(
+    ("specification", "message"),
+    [
+        ("controlled-tool|/tools/controlled|v1.2.3", "malformed extra tool specification"),
+        (
+            "controlled-tool|/tools/controlled|v1.2.3|-version",
+            "unsupported extra tool version command",
+        ),
+    ],
+)
+def test_extra_tool_specification_rejects_invalid_input(specification: str, message: str) -> None:
+    # when / then
+    with pytest.raises(module_tooling.ToolingError, match=message):
+        module_tooling.parse_extra_tool_specification(specification)
+
+
 def make_fixture(tmp_path: Path, tooling: Path) -> Path:
     fixture = tmp_path / "orders-service"
     fixture.mkdir()

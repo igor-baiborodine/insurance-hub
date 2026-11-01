@@ -60,5 +60,6 @@
 
 # Go coverage reports
 /.work/servicekit/
+/services/*-service/.tools/
 /services/*-service/coverage.txt
 /services/*-service/integration-coverage.txt

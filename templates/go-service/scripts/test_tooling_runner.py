@@ -170,7 +170,15 @@ def test_launcher_sigterm_cleans_active_command_and_resistant_descendant(
     )
     tools_bin = tmp_path / "tools"
     tools_bin.mkdir()
-    for tool in ("buf", "protoc-gen-go", "protoc-gen-go-grpc", "golangci-lint", "govulncheck"):
+    for tool in (
+        "buf",
+        "protoc-gen-go",
+        "protoc-gen-go-grpc",
+        "protoc-gen-grpc-gateway",
+        "protoc-gen-openapiv2",
+        "golangci-lint",
+        "govulncheck",
+    ):
         (tools_bin / tool).write_text("controlled tool\n", encoding="utf-8")
 
     leader_pid = tmp_path / "leader.pid"

@@ -32,6 +32,16 @@ IDENTITY_REPLACEMENTS = (
     ("go-service", "example-copy"),
 )
 IGNORED_DIRECTORIES = {".git", ".tools", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+GENERATED_OUTPUTS = (
+    "gen/examplecopy/v1/example_service.pb.go",
+    "gen/examplecopy/v1/example_service.pb.gw.go",
+    "gen/examplecopy/v1/example_service_grpc.pb.go",
+    "gen/openapiv2/examplecopy/v1/example_service.swagger.json",
+)
+STALE_IDENTITY = re.compile(
+    r"github\.com/igor-baiborodine/insurance-hub/templates/go-service|"
+    r"templates/go-service|go-service|scaffold\.v1|scaffold_v1|scaffoldv1|scaffold/v1"
+)
 
 
 class CopyError(RuntimeError):
@@ -219,10 +229,6 @@ def create_copy(config: Configuration, temporary_root: Path) -> Path:
 
 
 def validate_copy_surface(copy_root: Path) -> None:
-    stale = re.compile(
-        r"github\.com/igor-baiborodine/insurance-hub/templates/go-service|"
-        r"templates/go-service|go-service|scaffold\.v1|scaffold_v1|scaffoldv1|scaffold/v1"
-    )
     for path in sorted(copy_root.rglob("*")):
         relative = path.relative_to(copy_root)
         if not path.is_file() or relative == Path("COPYING.md"):
@@ -230,10 +236,9 @@ def validate_copy_surface(copy_root: Path) -> None:
         if any(part in IGNORED_DIRECTORIES for part in relative.parts):
             continue
         require(
-            not stale.search(path.read_text(encoding="utf-8")),
+            not STALE_IDENTITY.search(path.read_text(encoding="utf-8")),
             f"stale active scaffold identity found in {relative}",
         )
-
     makefile = (copy_root / "Makefile").read_text(encoding="utf-8")
     readme = (copy_root / "README.md").read_text(encoding="utf-8")
     require(not (copy_root / ".git").exists(), "copied service unexpectedly contains .git")
@@ -303,6 +308,20 @@ def validate_copy_surface(copy_root: Path) -> None:
         require(
             f"{COPY_MODULE}/gen/examplecopy/v1;examplecopyv1" in content,
             "copied go_package differs",
+        )
+
+
+def validate_generated_output(copy_root: Path) -> None:
+    generated = sorted(
+        path.relative_to(copy_root).as_posix()
+        for path in (copy_root / "gen").rglob("*")
+        if path.is_file()
+    )
+    require(generated == list(GENERATED_OUTPUTS), f"generated output path set differs: {generated}")
+    for relative in GENERATED_OUTPUTS:
+        require(
+            not STALE_IDENTITY.search((copy_root / relative).read_text(encoding="utf-8")),
+            f"stale active scaffold identity found in {relative}",
         )
 
 
@@ -393,19 +412,8 @@ def execute(config: Configuration) -> None:
                 maximum_seconds=budget,
             )
 
-        generated = sorted(
-            path.relative_to(copy_root).as_posix()
-            for path in (copy_root / "gen").rglob("*")
-            if path.is_file()
-        )
-        require(
-            generated
-            == [
-                "gen/examplecopy/v1/example_service.pb.go",
-                "gen/examplecopy/v1/example_service_grpc.pb.go",
-            ],
-            f"generated output path set differs: {generated}",
-        )
+        validate_generated_output(copy_root)
+        validate_copy_surface(copy_root)
 
         copy_before = inventory(copy_root)
         if config.candidate_library is not None:
@@ -433,6 +441,15 @@ def execute(config: Configuration) -> None:
             require(source_before == inventory(config.module_root), "candidate copy changed source")
             print("check-copy: renamed copy selected and tested the servicekit candidate")
             return
+        run_copy_make(
+            config,
+            copy_root,
+            deadline,
+            "check-copy running copied HTTP, direct RPC, and health acceptance",
+            "test",
+            "TEST_PACKAGES=./internal/service -run ^TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst$",
+            maximum_seconds=180,
+        )
         run_copy_make(
             config,
             copy_root,

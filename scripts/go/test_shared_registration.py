@@ -144,6 +144,30 @@ def test_ci_changed_consumer_with_library_readme_relies_on_module_gate(tmp_path:
     assert result["changed"] == ["templates/go-service"]
 
 
+def test_ci_ignores_nonqualifying_second_service_tooling_path(tmp_path: Path) -> None:
+    # given
+    fixture_tree(tmp_path / "base", 1)
+    fixture_tree(tmp_path / "head", 1)
+
+    # when
+    result = registration.plan_trees(
+        tmp_path / "base",
+        tmp_path / "head",
+        [
+            "services/product-service/scripts/check_ci.py",
+            "templates/go-service/main.go",
+        ],
+        "a" * 40,
+        "b" * 40,
+        "a" * 40,
+        "ci",
+    )
+
+    # then
+    assert result["obligations"] == []
+    assert result["changed"] == ["templates/go-service"]
+
+
 def test_full_profile_keeps_changed_consumer_normal_gate(tmp_path: Path) -> None:
     # given
     fixture_tree(tmp_path / "base", 1)

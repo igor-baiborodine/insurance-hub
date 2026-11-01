@@ -212,16 +212,29 @@ def write_module(root: Path, record: dict[str, object], *, target_body: str = "@
 
 
 def workflow_text(directory: str = "templates/go-service") -> str:
+    if directory == "templates/go-service" or (
+        directory.startswith("services/") and directory.endswith("-service")
+    ):
+        paths = """      - '**/*-service/**/*.go'
+      - '**/*-service/go.mod'
+      - '**/*-service/go.sum'
+      - '**/*-service/gen/openapiv2/**/*.json'
+      - '**/*-service/**/testdata/**'
+      - '!legacy/**'
+      - '!services/*/*-service/**'
+      - '!templates/*/*-service/**'"""
+    else:
+        paths = f"""      - '{directory}/**/*.go'
+      - '{directory}/go.mod'
+      - '{directory}/go.sum'
+      - '{directory}/**/testdata/**'"""
     return f"""name: Fixture
 on:
   pull_request:
     branches:
       - main
     paths:
-      - '{directory}/**/*.go'
-      - '{directory}/go.mod'
-      - '{directory}/go.sum'
-      - '{directory}/**/testdata/**'
+{paths}
 permissions:
   contents: read
 concurrency:
@@ -405,17 +418,27 @@ def test_topology_reports_controlled_manifest_failures(
     ("old", "new", "message"),
     [
         ("on:\n", "on:\n  push:\n", "must not run on push"),
-        ("      - 'templates/go-service/**/*.go'\n", "", "missing pull_request path trigger"),
-        ("      - 'templates/go-service/go.mod'\n", "", "missing pull_request path trigger"),
+        ("      - '**/*-service/**/*.go'\n", "", "missing pull_request path trigger"),
+        ("      - '**/*-service/go.mod'\n", "", "missing pull_request path trigger"),
         (
-            "      - 'templates/go-service/**/testdata/**'\n",
+            "      - '**/*-service/**/testdata/**'\n",
             "",
             "missing pull_request path trigger",
         ),
         (
-            "      - 'templates/go-service/go.sum'\n",
-            "      - 'templates/go-service/**'\n",
-            "forbidden pull_request path trigger",
+            "      - '**/*-service/gen/openapiv2/**/*.json'\n",
+            "",
+            "missing pull_request path trigger",
+        ),
+        (
+            "      - '!legacy/**'\n",
+            "",
+            "missing pull_request path trigger",
+        ),
+        (
+            "      - '!templates/*/*-service/**'\n",
+            "",
+            "missing pull_request path trigger",
         ),
         ("uses: astral-sh/setup-uv@v7", "uses: missing/setup@v1", "managed Python setup"),
         ("version: '0.13.1'", "version: latest", "pinned uv runtime"),

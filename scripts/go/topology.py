@@ -657,19 +657,27 @@ def ci_check(root: Path, inventory: dict[str, Any]) -> None:
             validate_selector_contract(module, workflow)
             if directory.startswith("services/") and directory.endswith("-service"):
                 expected = {
-                    "services/*-service/**/*.go",
-                    "services/*-service/go.mod",
-                    "services/*-service/go.sum",
-                    "services/*-service/**/testdata/**",
+                    "**/*-service/**/*.go",
+                    "**/*-service/go.mod",
+                    "**/*-service/go.sum",
+                    "**/*-service/**/testdata/**",
+                    "!legacy/**",
+                    "!services/*/*-service/**",
                 }
                 require(
                     module["role"] == "business-service",
                     f"standard service {directory} must use the business-service role",
                 )
-                require(
-                    "services/*-service/**" not in triggers,
-                    f"workflow {workflow} contains forbidden pull_request path trigger for broad generic service trigger: services/*-service/**",
-                )
+            elif module["role"] == "service-scaffold":
+                expected = {
+                    "**/*-service/**/*.go",
+                    "**/*-service/go.mod",
+                    "**/*-service/go.sum",
+                    "**/*-service/gen/openapiv2/**/*.json",
+                    "**/*-service/**/testdata/**",
+                    "!legacy/**",
+                    "!templates/*/*-service/**",
+                }
             else:
                 expected = {
                     f"{directory}/**/*.go",
