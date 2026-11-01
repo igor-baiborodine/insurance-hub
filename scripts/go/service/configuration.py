@@ -42,6 +42,14 @@ def service_record(root: Path, service: str) -> dict[str, Any]:
         require(
             bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9./_-]*", record[field])), f"invalid {field}"
         )
+    administration = record.get("administration")
+    if administration is not None:
+        require(isinstance(administration, dict), "invalid administration configuration")
+        assets = administration.get("assets")
+        require(isinstance(assets, dict) and bool(assets), "administration assets are missing")
+        for label, value in assets.items():
+            require(bool(re.fullmatch(r"[a-z][a-z0-9-]*", label)), "invalid asset label")
+            require(checkout_path(root, value).is_file(), "administration asset is missing")
     return record
 
 
@@ -99,6 +107,32 @@ def target_record(root: Path, record: dict[str, Any], name: str) -> dict[str, An
             <= administration["jobDeadlineSeconds"],
             "migration, seed and minimum reserve budgets exceed the Job deadline",
         )
+    fixture = target.get("fixtureAdministration")
+    if fixture is not None:
+        require(isinstance(fixture, dict), "invalid fixture administration configuration")
+        for field in ("service", "adminSecret", "workloadSecret"):
+            require(
+                bool(re.fullmatch(r"[a-z][a-z0-9-]{0,62}", fixture.get(field, ""))),
+                f"invalid fixture {field}",
+            )
+        for field in ("publicCASecret", "workloadCASecret"):
+            value = fixture.get(field)
+            if value is not None:
+                require(
+                    bool(re.fullmatch(r"[a-z][a-z0-9-]{0,62}", value)),
+                    f"invalid fixture {field}",
+                )
+        if fixture.get("publicCASecret"):
+            require(bool(fixture.get("workloadCASecret")), "workload CA Secret is missing")
+            require(
+                bool(
+                    re.fullmatch(
+                        r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?",
+                        fixture.get("serverName", ""),
+                    )
+                ),
+                "invalid fixture serverName",
+            )
     if target["mode"] == "flux":
         flux = target.get("flux", {})
         for field in ("namespace", "sourcePrefix", "apiName", "sharedSource", "sharedOwner"):

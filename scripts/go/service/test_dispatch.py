@@ -98,6 +98,26 @@ def test_product_supports_every_cataloged_capability() -> None:
     assert paths == ["services/product-service"] * len(capabilities)
 
 
+def test_policy_search_fixture_operations_use_the_existing_dispatch() -> None:
+    # given
+    script_dir = Path(resolve.__file__).resolve().parent
+    root = script_dir.parents[2]
+
+    # when
+    paths = [
+        resolve.resolve_service(
+            root,
+            script_dir / "catalog.json",
+            "policy-search",
+            capability,
+        )
+        for capability in ("fixture-setup", "fixture-verify", "fixture-retire")
+    ]
+
+    # then
+    assert paths == ["services/policy-search-service"] * 3
+
+
 @pytest.mark.parametrize("arguments", [[], ["deploy", "status"]])
 def test_dispatch_wrong_arity_preserves_failure_contract(arguments: list[str]) -> None:
     # when / then

@@ -20,6 +20,8 @@ import (
 	policysearchv1 "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/gen/policysearch/v1"
 )
 
+const maxHTTPResponseBytes = 1 << 20
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -62,10 +64,25 @@ func checkHTTP(ctx context.Context, address, query string) error {
 	if err != nil {
 		return err
 	}
-	var response policysearchv1.SearchPoliciesResponse
-	if statusCode != http.StatusOK || json.Unmarshal(body, &response) != nil ||
-		len(response.GetPolicies()) == 0 {
-		return fmt.Errorf("HTTP policy search differed")
+	var response struct {
+		Policies []json.RawMessage `json:"policies"`
+	}
+	if statusCode != http.StatusOK {
+		return fmt.Errorf("HTTP policy search returned %d", statusCode)
+	}
+	if json.Unmarshal(body, &response) != nil {
+		first := byte(0)
+		if len(body) > 0 {
+			first = body[0]
+		}
+		return fmt.Errorf(
+			"HTTP policy search response was malformed: bytes=%d first=%d",
+			len(body),
+			first,
+		)
+	}
+	if len(response.Policies) == 0 {
+		return fmt.Errorf("HTTP policy search returned no policies")
 	}
 	statusCode, _, err = request(ctx, address, "")
 	if err != nil {
@@ -92,13 +109,16 @@ func request(ctx context.Context, address, query string) (int, []byte, error) {
 	if err != nil {
 		return 0, nil, fmt.Errorf("send HTTP request: %w", err)
 	}
-	payload, err := io.ReadAll(io.LimitReader(response.Body, 4097))
+	payload, err := io.ReadAll(io.LimitReader(response.Body, maxHTTPResponseBytes+1))
 	if err != nil {
 		_ = response.Body.Close()
 		return 0, nil, fmt.Errorf("read HTTP response: %w", err)
 	}
 	if err := response.Body.Close(); err != nil {
 		return 0, nil, fmt.Errorf("close HTTP response: %w", err)
+	}
+	if len(payload) > maxHTTPResponseBytes {
+		return 0, nil, fmt.Errorf("HTTP response exceeded limit")
 	}
 	return response.StatusCode, payload, nil
 }

@@ -216,7 +216,46 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(pod_spec.get("automountServiceAccountToken") is False, "service-account token enabled")
     require(pod_spec.get("enableServiceLinks") is False, "service links enabled")
     require(pod_spec.get("terminationGracePeriodSeconds") == 30, "termination grace differs")
-    require(not pod_spec.get("volumes"), "Policy Search must not mount volumes")
+    volumes = pod_spec.get("volumes", [])
+    if environment == "local-dev":
+        require(not volumes, "local-dev must not mount volumes")
+    else:
+        require(
+            volumes
+            == [
+                {
+                    "name": "elasticsearch-ca",
+                    "secret": {
+                        "secretName": "qa-policy-search-elasticsearch-ca",
+                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                        "defaultMode": 0o444,
+                    },
+                }
+            ],
+            "QA Elasticsearch CA volume differs",
+        )
+        require(
+            container.get("volumeMounts")
+            == [
+                {
+                    "name": "elasticsearch-ca",
+                    "mountPath": "/etc/policy-search/elasticsearch",
+                    "readOnly": True,
+                }
+            ],
+            "QA Elasticsearch CA mount differs",
+        )
+    env = {item.get("name"): item for item in container.get("env", [])}
+    expected_secret = f"{environment}-policy-search-elasticsearch"
+    for name, key in (
+        ("ELASTICSEARCH_USERNAME", "username"),
+        ("ELASTICSEARCH_PASSWORD", "password"),
+    ):
+        require(
+            env.get(name, {}).get("valueFrom", {}).get("secretKeyRef")
+            == {"name": expected_secret, "key": key},
+            f"{name} Secret reference differs",
+        )
     for name, path, period, failures in (
         ("startupProbe", "/livez", 2, 30),
         ("livenessProbe", "/livez", 10, 3),
@@ -256,12 +295,18 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         ],
         "caller selectors differ",
     )
-    if environment == "local-dev":
-        require(policy.get("egress") == [], "local-dev egress must be denied")
-    else:
+    expected_data_namespace = "local-dev-all" if environment == "local-dev" else "qa-data"
+    expected_elasticsearch = f"{environment}-elasticsearch"
+    require(
+        "kube-system" in encoded_policy
+        and expected_data_namespace in encoded_policy
+        and expected_elasticsearch in encoded_policy,
+        "DNS or Elasticsearch egress differs",
+    )
+    if environment == "qa":
         require(
-            "qa-monitoring" in encoded_policy and "kube-system" in encoded_policy,
-            "QA egress differs",
+            "qa-monitoring" in encoded_policy and "qa-alloy" in encoded_policy,
+            "QA Alloy egress differs",
         )
     config_maps = [item for item in items if item.get("kind") == "ConfigMap"]
     require(len(config_maps) == 1, "overlay must own one ConfigMap")
@@ -278,6 +323,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "HTTP_MAX_BODY_BYTES": "4096",
         "GRPC_MAX_RECV_BYTES": "1048576",
         "GRPC_MAX_SEND_BYTES": "8388608",
+        "ELASTICSEARCH_TIMEOUT": "5s",
     }
     require(
         all(data.get(key) == value for key, value in required_data.items()),
@@ -288,7 +334,13 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "exporter timeout must use the application default",
     )
     if environment == "local-dev":
-        require(data.get("OTEL_ENABLED") == "false", "local telemetry must be disabled")
+        require(
+            data.get("OTEL_ENABLED") == "false"
+            and data.get("ELASTICSEARCH_URL")
+            == "http://local-dev-elasticsearch-es-http.local-dev-all.svc:9200"
+            and "ELASTICSEARCH_CA_FILE" not in data,
+            "local dependency configuration differs",
+        )
     else:
         require(
             data.get("OTEL_ENABLED") == "true"
@@ -298,16 +350,18 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "QA telemetry identity differs",
         )
         require(
+            data.get("ELASTICSEARCH_URL") == "https://qa-elasticsearch-es-http.qa-data.svc:9200"
+            and data.get("ELASTICSEARCH_CA_FILE") == "/etc/policy-search/elasticsearch/ca.crt",
+            "QA dependency configuration differs",
+        )
+        require(
             labels.get("environment") == "qa"
             and labels.get("app.kubernetes.io/version") == data.get("SERVICE_VERSION"),
             "QA Pod and telemetry versions differ",
         )
     require(
-        not any(
-            "elasticsearch" in json.dumps(item).lower() or "kafka" in json.dumps(item).lower()
-            for item in items
-        ),
-        "business dependency leaked into Echo deployment",
+        not any("kafka" in json.dumps(item).lower() for item in items),
+        "Kafka dependency leaked into query deployment",
     )
     return items
 
@@ -805,10 +859,14 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                 time.sleep(0.2)
         else:
             raise DeploymentError("deployed readiness was not reachable")
+        status, body = _http(f"http://127.0.0.1:{http_port}/policies?q=Synthetic%20Person")
+        try:
+            response = json.loads(body)
+        except json.JSONDecodeError as error:
+            raise DeploymentError("deployed search response is malformed") from error
         require(
-            _http(f"http://127.0.0.1:{http_port}/v1/example/echo", b'{"message":"hello"}')
-            == (200, b'{"message":"hello"}'),
-            "deployed Echo differs",
+            status == 200 and isinstance(response.get("policies"), list) and response["policies"],
+            "deployed search differs",
         )
     finally:
         for child in (process, management):
@@ -852,8 +910,8 @@ def main(argv: list[str] | None = None) -> int:
     if arguments[0] == "check":
         qa_root = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
         require(
-            "./policy-search" not in qa_root.get("resources", []),
-            "QA Policy Search overlay is already active",
+            "./policy-search" in qa_root.get("resources", []),
+            "active QA Policy Search overlay is missing",
         )
         print("policy-search-deployment-check: local-dev and QA renders passed")
     return 0

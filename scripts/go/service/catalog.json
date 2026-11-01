@@ -117,12 +117,23 @@
         "deploy",
         "deploy-verify",
         "stop",
+        "fixture-setup",
+        "fixture-verify",
+        "fixture-retire",
         "deploy-test-tooling",
         "deploy-test"
       ],
       "releaseTargets": [
         "qa"
       ],
+      "administration": {
+        "assets": {
+          "fixture": "services/policy-search-service/internal/administration/fixture.json"
+        },
+        "index": "policy-views-issue-229",
+        "role": "go_policy_search_reader",
+        "user": "go_policy_search_reader"
+      },
       "deploymentTargets": {
         "local-dev": {
           "mode": "direct",
@@ -130,14 +141,27 @@
           "namespace": "local-dev-all",
           "dataNamespace": "local-dev-all",
           "overlay": "k8s/overlays/local-dev/svc/policy-search",
+          "fixtureAdministration": {
+            "service": "local-dev-elasticsearch-es-http",
+            "adminSecret": "local-dev-elasticsearch-es-elastic-user",
+            "workloadSecret": "local-dev-policy-search-elasticsearch"
+          },
           "kindCluster": "local-dev-insurance-hub"
         },
         "qa": {
           "mode": "flux",
           "context": "qa-insurance-hub",
           "namespace": "qa-svc",
-          "dataNamespace": "qa-svc",
+          "dataNamespace": "qa-data",
           "overlay": "k8s/overlays/qa/svc/policy-search",
+          "fixtureAdministration": {
+            "service": "qa-elasticsearch-es-http",
+            "adminSecret": "qa-elasticsearch-es-elastic-user",
+            "workloadSecret": "qa-policy-search-elasticsearch",
+            "publicCASecret": "qa-elasticsearch-es-http-certs-public",
+            "workloadCASecret": "qa-policy-search-elasticsearch-ca",
+            "serverName": "qa-elasticsearch-es-http.qa-data.svc"
+          },
           "flux": {
             "namespace": "flux-system",
             "sourcePrefix": "qa-policy-search-release",

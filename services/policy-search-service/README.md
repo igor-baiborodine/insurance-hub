@@ -78,6 +78,9 @@ These operations are explicit and are never hidden inside `check`:
 | `make format-proto`      | Rewrites only `api/policysearch/v1/policy_search_service.proto` with pinned Buf.                                               | Verified pinned tools.                                                                         |
 | `make gen-proto`         | Removes and regenerates the exact declared Go/gateway/Swagger inventory under `gen/`.                                     | Pinned Buf and generators already installed; BSR access unless cached.                         |
 | `make run`               | Starts `./cmd/server`; it changes no repository file.                                                                      | Go 1.27.3; readonly modules; runtime settings below.                                           |
+| `make fixture-setup` | Idempotently creates only the issue-229 index, fixture, native reader role/user and workload-owned Secrets on the exact selected target. | Exact catalog coordinates, current Kubernetes context, ECK administrative Secret and `FIXTURE_CONFIRM=setup-policy-views-issue-229`. |
+| `make fixture-verify` | Reads the fixture and verifies the workload identity has the exact read privileges while writes, mapping/index administration, other indices and security administration remain denied. | Exact catalog coordinates and the workload Secret; no administrative credential. |
+| `make fixture-retire` | Removes only the issue-229 index, native reader role/user and workload-owned Secrets. | Exact catalog coordinates, ECK administrative Secret and `FIXTURE_CONFIRM=retire-policy-views-issue-229`. |
 
 Generated bindings must never be edited by hand. `gen-proto` owns only:
 
@@ -338,6 +341,11 @@ export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
 export DEPLOY_IMAGE_REF="insurance-hub-policy-search-api:1.0.0-local.$(git rev-parse --short=12 HEAD)"
 
+export FIXTURE_CONFIRM=setup-policy-views-issue-229
+make go-svc-fixture-setup SVC_NAME=policy-search
+unset FIXTURE_CONFIRM
+make go-svc-fixture-verify SVC_NAME=policy-search
+
 make go-svc-deploy-preflight SVC_NAME=policy-search
 make go-svc-image-load SVC_NAME=policy-search
 make go-svc-deploy SVC_NAME=policy-search
@@ -348,15 +356,20 @@ When replacing an existing local image, also export its exact reference as
 `DEPLOY_PREVIOUS_IMAGE_REF`. The preflight accepts that declared predecessor until apply; the
 post-rollout verification accepts only `DEPLOY_IMAGE_REF`.
 
-The disposable test builds the exact committed image, deploys it into a uniquely named namespace on
-the configured Kind cluster, exercises both transports and allowed/denied NetworkPolicy paths,
-restarts, scales to zero, restores, and removes that namespace and its qualification image.
+The disposable target first verifies the native reader permission boundary against a
+security-enabled Elasticsearch 8.19.6 Docker node. It then builds the exact committed image and
+creates a separate Elasticsearch 8.19.6 node and exact fixture in a uniquely named Kind namespace
+to exercise query HTTP/gRPC, allowed/denied NetworkPolicy paths, readiness loss and recovery,
+restart, scale-to-zero and restoration. It removes both Elasticsearch resources, the namespace and
+the qualification image.
 
 Commands never select an environment implicitly. Direct image load, apply and stop reject QA; QA
 is owned by Git and the shared Flux reconciliation. QA status and verification require both
 `DEPLOY_SOURCE_REVISION=<40-source-hex>` and `DEPLOY_IMAGE_DIGEST=sha256:<64-hex>`; the latter must
-match the running Policy Search container's runtime `imageID`. The QA overlay is staged outside the
-shared root until its activation PR. See the
+match the running Policy Search container's runtime `imageID`. The QA overlay remains active under
+the shared Flux root. Provision and verify the QA fixture and workload-owned Secrets before merging
+configuration that references them; the accepted Echo image ignores the added search settings but
+Kubernetes still requires each referenced Secret. See the
 [deployment runbook](../../docs/migration/phase-4/policy-search-service/deployment-runbook.md) for
 release, diagnostics, reachability, cleanup and restoration procedures.
 

@@ -8,6 +8,11 @@ labels:
       environment: local-dev
 resources:
   - ../../../../apps/svc/policy-search/base
+configMapGenerator:
+  - name: policy-search-config
+    behavior: merge
+    literals:
+      - ELASTICSEARCH_URL=http://local-dev-elasticsearch-es-http.local-dev-all.svc:9200
 images:
   - name: insurance-hub-policy-search-api
     newName: insurance-hub-policy-search-api
@@ -16,4 +21,8 @@ patches:
   - path: deployment-patch.yaml
     target:
       kind: Deployment
+      name: policy-search-api
+  - path: network-policy-patch.yaml
+    target:
+      kind: NetworkPolicy
       name: policy-search-api
