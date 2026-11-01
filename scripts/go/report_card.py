@@ -8,7 +8,7 @@ import json
 import os
 import sys
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 SCRIPT_ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +18,51 @@ from process_runner import CommandError, run_command  # noqa: E402
 
 class ReportCardError(RuntimeError):
     """A report-card result is malformed or below the required threshold."""
+
+
+REPORT_CARD_ROLES = {"business-service", "service-scaffold"}
+
+
+def select_modules(topology_path: Path, requested: list[str]) -> list[str]:
+    try:
+        topology = json.loads(topology_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ReportCardError("Go module topology is malformed JSON") from error
+    if not isinstance(topology, dict) or not isinstance(topology.get("modules"), list):
+        raise ReportCardError("Go module topology must contain a module inventory")
+    eligible: list[str] = []
+    for record in topology["modules"]:
+        if not isinstance(record, dict):
+            raise ReportCardError("Go module topology contains a malformed module record")
+        role = record.get("role")
+        directory = record.get("directory")
+        if not isinstance(role, str) or not isinstance(directory, str):
+            raise ReportCardError("Go module topology module identity is malformed")
+        path = PurePosixPath(directory)
+        if (
+            path.is_absolute()
+            or not directory
+            or not path.parts
+            or ".." in path.parts
+            or path.as_posix() != directory
+        ):
+            raise ReportCardError(f"Go module topology directory is unsafe: {directory}")
+        if role in REPORT_CARD_ROLES:
+            if directory in eligible:
+                raise ReportCardError(f"Go module topology repeats report-card module: {directory}")
+            eligible.append(directory)
+    if not eligible:
+        raise ReportCardError("Go module topology has no report-card modules")
+    if requested:
+        missing = sorted(set(eligible) - set(requested))
+        unexpected = sorted(set(requested) - set(eligible))
+        duplicates = sorted(module for module in set(requested) if requested.count(module) > 1)
+        if missing or unexpected or duplicates:
+            raise ReportCardError(
+                "explicit report-card modules differ from topology: "
+                f"missing={missing}, unexpected={unexpected}, duplicates={duplicates}"
+            )
+    return eligible
 
 
 def parse_report(value: str) -> dict[str, Any]:
@@ -93,7 +138,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--summary", required=True, type=Path)
     result.add_argument("--report-card-root", required=True, type=Path)
     result.add_argument("--go-bin", required=True, type=Path)
-    result.add_argument("modules", nargs="+")
+    result.add_argument("--topology", required=True, type=Path)
+    result.add_argument("modules", nargs="*")
     return result
 
 
@@ -102,13 +148,14 @@ def main(
     runner: Callable[..., Any] = run_command,
 ) -> int:
     arguments = parser().parse_args(argv)
+    modules = select_modules(arguments.topology, arguments.modules)
     environment = dict(os.environ)
     environment["PATH"] = f"{arguments.go_bin}:{environment.get('PATH', '')}"
     environment["GOWORK"] = "off"
     failed = False
     with arguments.summary.open("a", encoding="utf-8") as summary:
         summary.write("| Module | Grade | Score | Issues |\n| --- | --- | ---: | ---: |\n")
-        for module in arguments.modules:
+        for module in modules:
             result = runner(
                 [
                     "go",

@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: qa-svc
+namePrefix: qa-
+labels:
+  - includeSelectors: false
+    pairs:
+      environment: qa
+resources:
+  - ../../../../apps/svc/policy-search/base
+images:
+  - name: insurance-hub-policy-search-api
+    newName: ghcr.io/igor-baiborodine/insurance-hub/policy-search-api
+    newTag: 1.0.0
+configMapGenerator:
+  - name: policy-search-config
+    behavior: merge
+    literals:
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
+      - DEPLOYMENT_ENVIRONMENT=qa
+      - SERVICE_VERSION=git-000000000000
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: policy-search-api
+  - path: network-policy-patch.yaml
+    target:
+      kind: NetworkPolicy
+      name: policy-search-api

@@ -1,0 +1,207 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "policysearch/v1/example_service.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "ExampleService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/example/echo": {
+      "post": {
+        "operationId": "ExampleService_Echo",
+        "responses": {
+          "200": {
+            "description": "The unchanged Echo message.",
+            "schema": {
+              "$ref": "#/definitions/v1EchoResponse"
+            },
+            "examples": {
+              "application/json": {
+                "message": "hello"
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "invalid request",
+                "details": []
+              }
+            }
+          },
+          "406": {
+            "description": "The requested response media type is not available.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "not acceptable",
+                "details": []
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is too large.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 8,
+                "message": "request body too large",
+                "details": []
+              }
+            }
+          },
+          "415": {
+            "description": "The request media type is not supported.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "unsupported media type",
+                "details": []
+              }
+            }
+          },
+          "499": {
+            "description": "The request was canceled.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 1,
+                "message": "request canceled",
+                "details": []
+              }
+            }
+          },
+          "500": {
+            "description": "The request failed unexpectedly.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 13,
+                "message": "internal error",
+                "details": []
+              }
+            }
+          },
+          "503": {
+            "description": "The RPC service is unavailable.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 14,
+                "message": "service unavailable",
+                "details": []
+              }
+            }
+          },
+          "504": {
+            "description": "The RPC deadline was exceeded.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 4,
+                "message": "deadline exceeded",
+                "details": []
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1EchoRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ExampleService"
+        ],
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1EchoRequest": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "v1EchoResponse": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

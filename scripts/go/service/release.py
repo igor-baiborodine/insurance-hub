@@ -177,7 +177,13 @@ def changed_paths(root: Path, before: str, after: str) -> list[str]:
     return result.stdout.splitlines()
 
 
-def overlay_tag(root: Path, record: dict, target: dict, version: str) -> tuple[Path, str]:
+def overlay_tag(
+    root: Path,
+    record: dict,
+    target: dict,
+    version: str,
+    source_commit: str,
+) -> tuple[Path, str]:
     require(bool(VERSION.fullmatch(version)), "release version must be a 1.x semantic version")
     path = checkout_path(root, target["overlay"]) / "kustomization.yaml"
     require(path.is_file(), "target Kustomization is missing")
@@ -185,6 +191,17 @@ def overlay_tag(root: Path, record: dict, target: dict, version: str) -> tuple[P
     tag_index = image_entry(lines, record)
     newline = "\n" if lines[tag_index].endswith("\n") else ""
     lines[tag_index] = f"    newTag: {version}{newline}"
+    version_indices = [
+        index
+        for index, line in enumerate(lines)
+        if re.fullmatch(r"\s+- SERVICE_VERSION=\S+\n?", line)
+    ]
+    require(len(version_indices) <= 1, "target overlay has multiple SERVICE_VERSION literals")
+    if version_indices:
+        version_index = version_indices[0]
+        indent = lines[version_index].split("-", 1)[0]
+        newline = "\n" if lines[version_index].endswith("\n") else ""
+        lines[version_index] = f"{indent}- SERVICE_VERSION=git-{source_commit[:12]}{newline}"
     return path, "".join(lines)
 
 
@@ -527,7 +544,7 @@ def prepare_release(
         target = target_record(root, record, name)
         require(target["mode"] == "flux", "release target must be Flux owned")
         if target.get("initialization") is None:
-            path, content = overlay_tag(root, record, target, version)
+            path, content = overlay_tag(root, record, target, version, source_commit)
         else:
             release = service_release(root, service, name, source_commit, image_digest)
             path = checkout_path(root, target["flux"]["bundle"])

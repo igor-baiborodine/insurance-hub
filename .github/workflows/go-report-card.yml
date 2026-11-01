@@ -80,7 +80,7 @@ jobs:
       - name: Install archived report checks
         run: make -C .tools/goreportcard install
 
-      - name: Check Product Service and service scaffold
+      - name: Check registered service modules and scaffold
         run: |
           report_card_bin="$(dirname "$(command -v go)")"
           ./.venv/bin/python scripts/go/report_card.py \
@@ -88,4 +88,4 @@ jobs:
             --summary "$GITHUB_STEP_SUMMARY" \
             --report-card-root "$GITHUB_WORKSPACE/.tools/goreportcard" \
             --go-bin "$report_card_bin" \
-            services/product-service templates/go-service
+            --topology "$GITHUB_WORKSPACE/go-module-topology.json"

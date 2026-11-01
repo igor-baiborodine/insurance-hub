@@ -1,0 +1,16 @@
+*
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!gen/
+!gen/**
+!internal/
+!internal/**
+
+**/*_test.go
+.tools/
+scripts/
+testdata/
+coverage.txt
+integration-coverage.txt
