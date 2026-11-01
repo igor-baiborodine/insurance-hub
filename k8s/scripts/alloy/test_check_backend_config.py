@@ -265,6 +265,17 @@ spec:
         assert 'endpoint = "tempo:4317"' in config
         assert 'url = "http://prometheus:9090/api/v1/write"' in config
 
+    def test_disposable_config_supports_hyphenated_service_registration(self) -> None:
+        source = (Path(__file__).parents[2] / "overlays/qa/infra/alloy/config.alloy").read_text(
+            encoding="utf-8"
+        )
+
+        config = backend_harness.build_alloy_config(source, "policy-search", "/fixture/service.log")
+
+        assert 'service_json_logs "policy_search"' in config
+        assert "discovery.kubernetes.qa_service_pods.targets" not in config
+        assert "local.file_match.fixture_service_logs.targets" in config
+
     def test_synthetic_fixture_follows_service_conventions(self) -> None:
         payload = backend_harness.synthetic_metric_payload(7, 2_000_000_000)
         resource = payload["resourceMetrics"][0]["resource"]["attributes"]

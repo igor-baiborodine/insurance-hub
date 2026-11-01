@@ -278,13 +278,13 @@ def build_alloy_config(source: str, service_domain: str, log_path: str) -> str:
         file_targets,
     )
     config = config.replace('loki.source.kubernetes "logs"', 'loki.source.file "logs"')
-    registration_marker = f'service_json_logs "{service_domain}"'
-    start, end = block_range(config, registration_marker)
-    registration = config[start:end].replace(
+    registration_name = service_domain.replace("-", "_")
+    registration_marker = f'service_json_logs "{registration_name}"'
+    block_range(config, registration_marker)
+    config = config.replace(
         "discovery.kubernetes.qa_service_pods.targets",
         "local.file_match.fixture_service_logs.targets",
     )
-    config = config[:start] + registration + config[end:]
     replacements = {
         "qa-tempo.qa-monitoring.svc.cluster.local:4317": "tempo:4317",
         "qa-zipkin-bridge.qa-monitoring.svc.cluster.local:4317": "zipkin-bridge:4317",

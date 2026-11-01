@@ -37,7 +37,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: policy-search-service
+        - name: policy-search-api
           image: insurance-hub-policy-search-api:unconfigured
           imagePullPolicy: IfNotPresent
           securityContext:

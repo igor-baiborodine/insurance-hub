@@ -136,7 +136,7 @@ def validate_service_log_registrations(config: str) -> None:
         raise ValidationError("service log registration names must be unique")
 
     for name in names:
-        if not re.fullmatch(r"[a-z0-9-]+", name):
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", name):
             raise ValidationError(f"invalid service log registration name: {name}")
         block = _block(config, f'service_json_logs "{name}"')
         if not re.search(
@@ -150,10 +150,15 @@ def validate_service_log_registrations(config: str) -> None:
         container_name = _string_assignment(block, "container_name")
         port_name = _string_assignment(block, "port_name")
         service_name = _string_assignment(block, "service_name")
-        if container_name != f"{name}-api":
-            raise ValidationError(f"{name} log container is {container_name}, expected {name}-api")
-        if service_name != f"{name}-service":
-            raise ValidationError(f"{name} log service is {service_name}, expected {name}-service")
+        service_slug = name.replace("_", "-")
+        if container_name != f"{service_slug}-api":
+            raise ValidationError(
+                f"{name} log container is {container_name}, expected {service_slug}-api"
+            )
+        if service_name != f"{service_slug}-service":
+            raise ValidationError(
+                f"{name} log service is {service_name}, expected {service_slug}-service"
+            )
         if not re.fullmatch(r"[a-z][a-z0-9-]*", port_name):
             raise ValidationError(f"{name} log port name is invalid: {port_name}")
 

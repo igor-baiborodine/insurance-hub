@@ -213,6 +213,11 @@ def test_release_preparation_produces_valid_qa_render(tmp_path) -> None:
         == "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:1.27.305"
     )
     assert config["data"]["SERVICE_VERSION"] == "git-aaaaaaaaaaaa"
+    assert (
+        deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"]
+        == "git-aaaaaaaaaaaa"
+    )
+    assert "OTEL_EXPORTER_OTLP_TIMEOUT" not in config["data"]
 
 
 def test_live_state_accepts_api_server_normalized_resources() -> None:
@@ -279,7 +284,7 @@ def test_qa_live_state_requires_running_pod_digest(
             "phase": "Running",
             "conditions": [{"type": "Ready", "status": "True"}],
             "containerStatuses": [
-                {"name": "policy-search-service", "imageID": image_id},
+                {"name": "policy-search-api", "imageID": image_id},
             ],
         },
     }
@@ -329,6 +334,73 @@ def test_live_state_rejects_stale_deployment_after_rollout() -> None:
         pytest.raises(checks.DeploymentError, match="image differs"),
     ):
         target.live(items, require_deployment=True)
+
+
+def test_live_state_allows_version_label_enrollment_only_before_rollout() -> None:
+    # given a previously accepted Deployment that predates the required source-version labels.
+    items = rendered_items()
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    config = next(item for item in items if item["kind"] == "ConfigMap")
+    version = "git-123456789abc"
+    deployment["metadata"].setdefault("labels", {})["app.kubernetes.io/version"] = version
+    deployment["spec"]["template"]["metadata"].setdefault("labels", {})[
+        "app.kubernetes.io/version"
+    ] = version
+    config["data"]["SERVICE_VERSION"] = version
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    live_deployment = actual[("deployment", deployment["metadata"]["name"])]
+    live_deployment["metadata"]["labels"].pop("app.kubernetes.io/version")
+    live_deployment["spec"]["template"]["metadata"]["labels"].pop("app.kubernetes.io/version")
+    target = object.__new__(checks.Target)
+    target.deployment = deployment["metadata"]["name"]
+    target.configuration = {"mode": "direct"}
+    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
+
+    with patch.dict(os.environ, {}, clear=True):
+        # when / then the missing labels may be repaired, but cannot pass post-rollout status.
+        target.live(items, require_deployment=False)
+        with pytest.raises(checks.DeploymentError, match="version identity differs"):
+            target.live(items, require_deployment=True)
+
+
+def test_live_state_allows_container_identity_enrollment_only_before_rollout() -> None:
+    # given the previously accepted container name and otherwise identical desired state.
+    items = rendered_items()
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    live_deployment = actual[("deployment", deployment["metadata"]["name"])]
+    live_deployment["spec"]["template"]["spec"]["containers"][0]["name"] = "policy-search-service"
+    target = object.__new__(checks.Target)
+    target.deployment = deployment["metadata"]["name"]
+    target.configuration = {"mode": "direct"}
+    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
+
+    with patch.dict(os.environ, {}, clear=True):
+        # when / then the old name may be repaired, but cannot pass post-rollout status.
+        target.live(items, require_deployment=False)
+        with pytest.raises(checks.DeploymentError, match="container name differs"):
+            target.live(items, require_deployment=True)
+
+
+def test_live_state_allows_generated_config_transition_only_before_rollout() -> None:
+    # given the prior generated ConfigMap reference and otherwise identical desired state.
+    items = rendered_items()
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    live_deployment = actual[("deployment", deployment["metadata"]["name"])]
+    live_deployment["spec"]["template"]["spec"]["containers"][0]["envFrom"][0]["configMapRef"][
+        "name"
+    ] = "local-dev-policy-search-config-aaaaaaaaaa"
+    target = object.__new__(checks.Target)
+    target.deployment = deployment["metadata"]["name"]
+    target.configuration = {"mode": "direct"}
+    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
+
+    with patch.dict(os.environ, {}, clear=True):
+        # when / then only the generated name may transition before the rollout.
+        target.live(items, require_deployment=False)
+        with pytest.raises(checks.DeploymentError, match="container envFrom differs"):
+            target.live(items, require_deployment=True)
 
 
 def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:

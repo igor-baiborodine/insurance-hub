@@ -29,3 +29,17 @@ patches:
     target:
       kind: NetworkPolicy
       name: policy-search-api
+replacements:
+  - source:
+      kind: ConfigMap
+      name: policy-search-config
+      fieldPath: data.SERVICE_VERSION
+    targets:
+      - select:
+          kind: Deployment
+          name: policy-search-api
+        fieldPaths:
+          - metadata.labels.app\.kubernetes\.io/version
+          - spec.template.metadata.labels.app\.kubernetes\.io/version
+        options:
+          create: true
