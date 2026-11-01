@@ -162,9 +162,14 @@ def validate_release(workflow: dict) -> None:
         and 'git add --pathspec-from-file="$release_paths" --pathspec-file-nul' in commands
         and "git push origin HEAD:main" in commands
         and "git diff --cached --quiet" in commands
+        and "git fetch --no-tags origin main" in commands
+        and 'git merge-base --is-ancestor "$SOURCE_REVISION" origin/main' in commands
+        and "git rebase origin/main" in commands
+        and "for attempt in 1 2 3" in commands
+        and '[[ "$release_pushed" == true ]]' in commands
         and 'git tag -a "$RELEASE_TAG" -m' in commands
         and 'git push origin "$RELEASE_TAG"' in commands,
-        "release must stage only the configured release outputs",
+        "release must stage only configured outputs and retry safe non-fast-forward pushes",
     )
     release_text = json.dumps(workflow)
     require(
@@ -191,9 +196,11 @@ def validate_release(workflow: dict) -> None:
         'test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"' in tag_commands
         and 'git config user.name "github-actions[bot]"' in tag_commands
         and 'git config user.email "github-actions[bot]@users.noreply.github.com"' in tag_commands
+        and 'existing_tag_commit="$(git rev-list -n 1 "$RELEASE_TAG"' in tag_commands
+        and '[[ "$existing_tag_commit" != "$SOURCE_REVISION" ]]' in tag_commands
         and 'git tag -a "$RELEASE_TAG" -m "Release $MODULE_NAME $RELEASE_VERSION"' in tag_commands
         and 'git push origin "$RELEASE_TAG"' in tag_commands,
-        "release must tag the triggering source with the legacy Git commands",
+        "release must create or safely resume the scoped tag at the triggering source",
     )
     names = [step.get("name") for step in steps]
     require(
@@ -931,6 +938,13 @@ def main(_argv: list[str] | None = None) -> int:
         lambda item: item["jobs"]["release"].update({"if": "true"}),
         lambda item: step_named(item["jobs"]["release"], "Create scoped source tag").update(
             run='git tag -a "$RELEASE_TAG"'
+        ),
+        lambda item: step_named(
+            item["jobs"]["release"], "Prepare and commit configured release targets"
+        ).update(
+            run=step_named(
+                item["jobs"]["release"], "Prepare and commit configured release targets"
+            )["run"].replace("git rebase origin/main", ":")
         ),
         lambda item: step_named(
             item["jobs"]["release"], "Build once and push semantic and source tags"
