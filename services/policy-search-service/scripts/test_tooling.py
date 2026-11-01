@@ -49,7 +49,11 @@ def inventory(root: Path) -> dict[str, str]:
     result: dict[str, str] = {}
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
-        if not path.is_file() or any(part in IGNORED_DIRECTORIES for part in relative.parts):
+        if (
+            not path.is_file()
+            or path.name in IGNORED_FILES
+            or any(part in IGNORED_DIRECTORIES for part in relative.parts)
+        ):
             continue
         result[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
@@ -325,7 +329,7 @@ def test_controlled_defect_is_rejected_without_mutation(tooling: Tooling, case: 
     run_target(tooling, fixture, case, target, *variables, expect_failure=diagnostic)
 
 
-def test_policy_search_pr_check_passes_without_coverage(tooling: Tooling) -> None:
+def test_policy_search_pr_check_generates_hosted_coverage(tooling: Tooling) -> None:
     # given
     fixture = new_fixture(tooling, "policy-search-pr-check")
 
@@ -336,5 +340,7 @@ def test_policy_search_pr_check_passes_without_coverage(tooling: Tooling) -> Non
     log = (tooling.temporary_root / "logs" / "policy-search-pr-check.log").read_text(
         encoding="utf-8"
     )
-    assert "-coverprofile=" not in log
-    assert not (fixture / "coverage.txt").exists()
+    assert '-coverprofile="coverage.txt"' in log
+    assert '-coverprofile="integration-coverage.txt"' in log
+    assert (fixture / "coverage.txt").is_file()
+    assert (fixture / "integration-coverage.txt").is_file()

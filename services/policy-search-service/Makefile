@@ -56,6 +56,9 @@ X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.0.1
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 TEST_PACKAGES ?= ./...
+COVERAGE_MINIMUM ?= 75
+COVERAGE_EXCLUDE_PATHS := gen internal/testing
+INTEGRATION_COVERAGE_FILE ?=
 HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
@@ -120,7 +123,11 @@ _image-check-existing: python-runtime-check
 		DOCKER="$(DOCKER)" "$(PYTHON)" scripts/image_check.py
 
 test-integration: ## Exercise real HTTP-to-RPC composition and lifecycle on owned listeners
+	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
+		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
+	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./internal/service \
+		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)") \
 		-run '^(TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst|TestRun_ProductionCompositionEnforcesByteAndPresenceContract|TestRun_ReportsDynamicGatewayReadinessLossAndRecovery)$$'
 
 deploy-render: ## Render one Policy Search overlay without applying it
@@ -192,7 +199,8 @@ update-deps:
 	GOWORK=off $(GO) get github.com/igor-baiborodine/insurance-hub/libs/servicekit@$(SERVICEKIT_VERSION)
 	GOWORK=off $(GO) mod tidy
 
-check-go-pr: verify-tools format-check format-proto-check lint lint-proto test-race build \
+check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
+check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \
 	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
 
 check-gateway-contract: python-runtime-check
