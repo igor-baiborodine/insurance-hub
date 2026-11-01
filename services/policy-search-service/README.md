@@ -354,7 +354,11 @@ make go-svc-deploy-verify SVC_NAME=policy-search
 
 When replacing an existing local image, also export its exact reference as
 `DEPLOY_PREVIOUS_IMAGE_REF`. The preflight accepts that declared predecessor until apply; the
-post-rollout verification accepts only `DEPLOY_IMAGE_REF`.
+post-rollout verification accepts only `DEPLOY_IMAGE_REF`. For the accepted Echo predecessor, the
+preflight also recognizes its exact older environment and deny-all-egress policy: only the two
+Elasticsearch credential variables and the DNS/Elasticsearch egress rules may be absent. Apply
+stages those query settings with the new image. Extra variables, ingress drift and any stale
+post-rollout state remain errors.
 
 The disposable target first verifies the native reader permission boundary against a
 security-enabled Elasticsearch 8.19.6 Docker node. It then builds the exact committed image and
@@ -373,13 +377,21 @@ Kubernetes still requires each referenced Secret. See the
 [deployment runbook](../../docs/migration/phase-4/policy-search-service/deployment-runbook.md) for
 release, diagnostics, reachability, cleanup and restoration procedures.
 
+Local identity flows from the image's full OCI source revision to the
+`1.0.0-local.<12-source-hex>` tag and `git-<12-source-hex>` service version. QA instead maps the
+reviewed full release commit to a semantic registry tag, immutable runtime digest and the same
+short service version. Rollback always records both the desired image and the exact live image it
+replaces; changing only a mutable tag or a live selector is unsupported.
+
 ## Policy search RPC and HTTP gateway
 
 The generated `policysearch.v1.PolicySearchService` exposes unary `SearchPolicies`. Direct gRPC
 distinguishes an absent `q`, which returns `InvalidArgument`, from an explicitly empty value, which
 is passed to Elasticsearch. Cancellation and deadlines keep their gRPC status; unexpected search
 failures return `Internal` with the stable message `internal error`. The generated gateway exposes
-the operation as `GET /policies` and requires `q` at the HTTP boundary:
+the operation at the exact canonical route `GET /policies` and requires `q` at the HTTP boundary.
+The legacy Java client also binds this exact downstream route; `/policies/` is not canonical and
+returns `404`:
 
 ```sh
 curl --fail-with-body \
@@ -430,7 +442,7 @@ source improvements through its own reviewed changes.
 | --- | --- |
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
-| `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
+| `internal/gateway` | Strict canonical `/policies` HTTP contract, generated gRPC client registration, legacy JSON error mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated search registration, presence validation, deadlines, size limits, domain-to-protobuf mapping, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Policy Search identity and cross-setting policy. |
 | `internal/logger`, `internal/telemetry` | Safe request and Elasticsearch dependency signals; shared provider construction with local policy and metric views. |
@@ -469,10 +481,11 @@ flowchart TD
 ```
 
 At startup, composition binds all listeners, starts gRPC, derives the same-process client target
-from the bound address and waits for that channel and the exact Elasticsearch index. An HTTP search
-obtains a bounded HTTP server span, uses the generated client across the instrumented connection,
-obtains client and server spans, preserves the shorter deadline, and invokes the application use
-case through the official Elasticsearch client. HTTP, gRPC and dependency observations use fixed
-safe dimensions. Shutdown withdraws readiness and drains accepted HTTP work before connection and
-gRPC teardown, closes dependency connections, then closes management and telemetry within the
-shared deadline.
+from the bound address and waits for that channel and the exact Elasticsearch index. The external
+Java `/api/policies` controller calls exact downstream `GET /policies`; the Go gateway validates
+and translates it through the generated client across the owned instrumented connection. The gRPC
+server invokes the application port, which asks the official Elasticsearch adapter for the capped
+hit window and applies stable date ordering before mapping the response. The request retains the
+shorter caller deadline while HTTP, gRPC and dependency observations use fixed safe dimensions.
+Shutdown withdraws readiness and drains accepted HTTP work before connection and gRPC teardown,
+closes dependency connections, then closes management and telemetry within the shared deadline.

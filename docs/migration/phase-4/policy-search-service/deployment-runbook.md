@@ -114,7 +114,11 @@ export DEPLOY_PREVIOUS_IMAGE_REF="$(kubectl --context "$DEPLOY_CONTEXT" \
 ```
 
 Leave `DEPLOY_PREVIOUS_IMAGE_REF` unset for the first deployment. The guard permits only that
-declared predecessor before apply and requires the new `DEPLOY_IMAGE_REF` after rollout.
+declared predecessor before apply and requires the new `DEPLOY_IMAGE_REF` after rollout. When the
+declared predecessor is the accepted Echo release, preflight permits only its exact historical
+differences: the Elasticsearch username/password variables and the DNS/Elasticsearch egress rules
+may be absent. This lets the reviewed apply stage query configuration with the query image. Any
+extra environment value, ingress change or other resource drift still stops before mutation.
 
 Run the guarded sequence:
 
@@ -171,6 +175,30 @@ Verify that the Go endpoints disappear while the Deployment is scaled to zero, t
 `go-svc-deploy` and `go-svc-deploy-verify` to restore the accepted release. Compare Java UIDs before
 and after both operations. Leave the verified Go release running when acceptance requires a usable
 handoff.
+
+For an Echo rollback rehearsal, retain the accepted query and Echo image references and reverse
+the declared transition through the same owner:
+
+```sh
+export QUERY_IMAGE_REF="$DEPLOY_IMAGE_REF"
+export ECHO_IMAGE_REF="insurance-hub-policy-search-api:1.0.0-local.<echo-source-hex>"
+
+export DEPLOY_PREVIOUS_IMAGE_REF="$QUERY_IMAGE_REF"
+export DEPLOY_IMAGE_REF="$ECHO_IMAGE_REF"
+make go-svc-deploy-preflight SVC_NAME=policy-search
+make go-svc-image-load SVC_NAME=policy-search
+make go-svc-deploy SVC_NAME=policy-search
+unset DEPLOY_PREVIOUS_IMAGE_REF
+make go-svc-deploy-status SVC_NAME=policy-search
+```
+
+The normal `deploy-verify` probe is query-specific, so verify the rollback through the Echo HTTP
+and direct RPC contract plus `/livez` and `/readyz`; confirm `/policies` is absent and compare Java
+UIDs. The Echo process must remain healthy with the staged query Secret references and egress
+policy. Restore query by setting `DEPLOY_PREVIOUS_IMAGE_REF="$ECHO_IMAGE_REF"` and
+`DEPLOY_IMAGE_REF="$QUERY_IMAGE_REF"`, then run preflight, image-load, deploy, status and the normal
+query verify. Record both images' full OCI source revisions and leave the verified query image
+running.
 
 The accepted fixture stays in place across Echo/query rollback and restoration. Remove it only for
 an explicit abort or retirement after the workload no longer references its Secrets:
