@@ -13,7 +13,7 @@
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
   - [Build and operate the deployment](#build-and-operate-the-deployment)
-  - [Example RPC and HTTP gateway](#example-rpc-and-http-gateway)
+  - [Policy search RPC and HTTP gateway](#policy-search-rpc-and-http-gateway)
   - [Architecture and ownership](#architecture-and-ownership)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
 
@@ -25,12 +25,12 @@ This standalone module delivers the first private Go Policy Search capability al
 Java service. Its module identity is
 `github.com/igor-baiborodine/insurance-hub/services/policy-search-service`. Run every command in this
 document from `services/policy-search-service/` with workspace mode disabled. The module has no root
-workspace, filesystem replacements, database, Elasticsearch, Kafka, or collector dependency.
+workspace, filesystem replacements, database, Kafka, or mandatory collector dependency.
 
-This increment provides a temporary versioned Echo contract through direct gRPC and a generated
-HTTP gateway, generated Go and Swagger 2.0 artifacts, typed configuration, safe structured logging,
-optional trace and metric export, dependency-aware health, and bounded signal-driven shutdown.
-Issue #229 replaces Echo with the accepted search contract after this release is deployed.
+The service provides the versioned Policy Search contract through direct gRPC and a generated HTTP
+gateway. It owns generated Go and Swagger 2.0 artifacts, a read-only Elasticsearch adapter, typed
+configuration, safe structured logging, optional trace and metric export, dependency-aware health,
+and bounded signal-driven shutdown.
 
 ## Prerequisites
 
@@ -75,17 +75,20 @@ These operations are explicit and are never hidden inside `check`:
 | `make update-deps`       | Updates only `go.mod` and `go.sum` to the Makefile's pinned runtime/generated-code dependencies, then tidies.              | Go proxy and checksum access unless cached.                                                    |
 | `make update-proto-deps` | Updates only `buf.lock` for the schema dependency declared in `buf.yaml`.                                                  | Verified pinned Buf binary and BSR access unless cached.                                       |
 | `make format`            | Rewrites only the selected eligible handwritten Go files through gofumpt, goimports, then golines at 100 columns.          | Verified pinned tools; file selection is described below.                                      |
-| `make format-proto`      | Rewrites only `api/policysearch/v1/example_service.proto` with pinned Buf.                                                     | Verified pinned tools.                                                                         |
+| `make format-proto`      | Rewrites only `api/policysearch/v1/policy_search_service.proto` with pinned Buf.                                               | Verified pinned tools.                                                                         |
 | `make gen-proto`         | Removes and regenerates the exact declared Go/gateway/Swagger inventory under `gen/`.                                     | Pinned Buf and generators already installed; BSR access unless cached.                         |
 | `make run`               | Starts `./cmd/server`; it changes no repository file.                                                                      | Go 1.27.3; readonly modules; runtime settings below.                                           |
+| `make fixture-setup` | Idempotently creates only the issue-229 index, fixture, native reader role/user and workload-owned Secrets on the exact selected target. | Exact catalog coordinates, current Kubernetes context, ECK administrative Secret and `FIXTURE_CONFIRM=setup-policy-views-issue-229`. |
+| `make fixture-verify` | Reads the fixture and verifies the workload identity has the exact read privileges while writes, mapping/index administration, other indices and security administration remain denied. | Exact catalog coordinates and the workload Secret; no administrative credential. |
+| `make fixture-retire` | Removes only the issue-229 index, native reader role/user and workload-owned Secrets. | Exact catalog coordinates, ECK administrative Secret and `FIXTURE_CONFIRM=retire-policy-views-issue-229`. |
 
 Generated bindings must never be edited by hand. `gen-proto` owns only:
 
 ```text
-gen/policysearch/v1/example_service.pb.go
-gen/policysearch/v1/example_service.pb.gw.go
-gen/policysearch/v1/example_service_grpc.pb.go
-gen/openapiv2/policysearch/v1/example_service.swagger.json
+gen/policysearch/v1/policy_search_service.pb.go
+gen/policysearch/v1/policy_search_service.pb.gw.go
+gen/policysearch/v1/policy_search_service_grpc.pb.go
+gen/openapiv2/policysearch/v1/policy_search_service.swagger.json
 ```
 
 ### Non-mutating validation targets
@@ -121,9 +124,9 @@ returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make repo
 the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
-Database/broker integration, mock generation and migrations are not applicable to this Echo
-increment. The image and deployment owners below include a real disposable Kind-namespace check;
-no placeholder database or broker target is supplied.
+Database/broker integration, mock generation and migrations are not applicable. The owned
+Elasticsearch target starts a disposable pinned node and exercises both the adapter and real
+HTTP-to-RPC runtime. Image and deployment owners include a disposable Kind-namespace check.
 
 ### Go file selection
 
@@ -229,6 +232,11 @@ do not repeat its supplied value.
 | `OTEL_ENABLED` | `false` | Boolean. Disabled mode creates no exporter and needs no collector. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Required when telemetry is enabled. An `http` or `https` OTLP/gRPC URL with host and numeric port; credentials, query, fragment and HTTP path are rejected. |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | `2s` | Positive duration reserved at the end of `SHUTDOWN_TIMEOUT`. |
+| `ELASTICSEARCH_URL` | `http://127.0.0.1:9200` | An `http` or `https` origin without credentials, path, query or fragment. |
+| `ELASTICSEARCH_USERNAME` | unset | Optional workload username; must be set together with `ELASTICSEARCH_PASSWORD`. |
+| `ELASTICSEARCH_PASSWORD` | unset | Optional workload password; must be set together with `ELASTICSEARCH_USERNAME`. |
+| `ELASTICSEARCH_CA_FILE` | unset | Optional public CA file for HTTPS only. The file is read during startup. |
+| `ELASTICSEARCH_TIMEOUT` | `5s` | Positive duration no greater than five seconds; a shorter caller deadline remains authoritative. |
 
 Identity values use 1–128 ASCII letters, digits, dots, underscores or hyphens. The namespace
 `insurance-hub` and implementation `go` are fixed. Enabled telemetry requires explicit environment,
@@ -259,10 +267,13 @@ seconds; queue saturation has a separate safe warning. The executable installs t
 diagnostic handler before enabled providers and restores the previous handler after service exit.
 
 `insurance_hub.policy_search.requests` and `insurance_hub.policy_search.request.duration` separately record
-bounded HTTP and gRPC transport outcomes. HTTP labels use only `POST /v1/example/echo` or
-`unmatched`; gRPC records the fixed Echo operation and final status. Request paths, queries,
+bounded HTTP and gRPC transport outcomes. HTTP labels use only `GET /policies` or `unmatched`;
+gRPC records the fixed search operation and final status. Request paths, queries,
 payloads, raw errors, headers and instance IDs are not metric labels. The same provider connects
 the HTTP server, gRPC client and gRPC server trace. Service identity stays on the resource.
+`insurance_hub.policy_search.dependencies` and
+`insurance_hub.policy_search.dependency.duration` record only the fixed Elasticsearch/search
+dimensions and bounded outcomes; query text, returned policies and raw dependency errors are omitted.
 
 The service lifecycle owns provider shutdown within the overall shutdown budget.
 `Config` embeds the shared `Runtime`, `GRPC`, `HTTPServer`, and `Telemetry` setting groups. The local identity
@@ -294,14 +305,17 @@ HTTP_ADDR=127.0.0.1:0 GRPC_ADDR=127.0.0.1:0 HEALTH_ADDR=127.0.0.1:0 make run
 
 The business HTTP, gRPC and management defaults are `127.0.0.1:8080`, `127.0.0.1:9090` and
 `127.0.0.1:8081`. Management exposes only `GET /livez` and `GET /readyz`. Startup marks readiness
-only after the actual gRPC server is accepting the owned gateway connection and all listeners are
-serving. The owned same-process connection disables grpc-go channel idleness so an inactive but
+only after the actual gRPC server accepts the owned gateway connection, the exact Elasticsearch
+index is visible, and all listeners are serving. The owned same-process connection disables
+grpc-go channel idleness so an inactive but
 healthy gateway cannot become permanently unready. Each readiness request rechecks that the
-connection remains `READY` within `PROBE_TIMEOUT`; liveness stays independent of that dependency.
+connection remains `READY` and Elasticsearch can see the exact index within `PROBE_TIMEOUT`;
+liveness stays independent of those dependencies.
 
 An interrupt or `SIGTERM` withdraws readiness, stops new business HTTP admission and lets accepted
 HTTP handlers finish before closing the gateway connection. It then gracefully or forcibly stops
-gRPC, stops management HTTP and shuts down telemetry. HTTP, connection, gRPC and management cleanup
+gRPC, closes Elasticsearch idle connections, stops management HTTP and shuts down telemetry. HTTP,
+connection, gRPC and management cleanup
 share the cutoff at `SHUTDOWN_TIMEOUT - OTEL_EXPORTER_OTLP_TIMEOUT`; telemetry receives the final
 reserved interval within the one overall deadline.
 
@@ -327,6 +341,11 @@ export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
 export DEPLOY_IMAGE_REF="insurance-hub-policy-search-api:1.0.0-local.$(git rev-parse --short=12 HEAD)"
 
+export FIXTURE_CONFIRM=setup-policy-views-issue-229
+make go-svc-fixture-setup SVC_NAME=policy-search
+unset FIXTURE_CONFIRM
+make go-svc-fixture-verify SVC_NAME=policy-search
+
 make go-svc-deploy-preflight SVC_NAME=policy-search
 make go-svc-image-load SVC_NAME=policy-search
 make go-svc-deploy SVC_NAME=policy-search
@@ -335,40 +354,60 @@ make go-svc-deploy-verify SVC_NAME=policy-search
 
 When replacing an existing local image, also export its exact reference as
 `DEPLOY_PREVIOUS_IMAGE_REF`. The preflight accepts that declared predecessor until apply; the
-post-rollout verification accepts only `DEPLOY_IMAGE_REF`.
+post-rollout verification accepts only `DEPLOY_IMAGE_REF`. For the accepted Echo predecessor, the
+preflight also recognizes its exact older environment and deny-all-egress policy: only the two
+Elasticsearch credential variables and the DNS/Elasticsearch egress rules may be absent. Apply
+stages those query settings with the new image. Extra variables, ingress drift and any stale
+post-rollout state remain errors.
 
-The disposable test builds the exact committed image, deploys it into a uniquely named namespace on
-the configured Kind cluster, exercises both transports and allowed/denied NetworkPolicy paths,
-restarts, scales to zero, restores, and removes that namespace and its qualification image.
+The disposable target first verifies the native reader permission boundary against a
+security-enabled Elasticsearch 8.19.6 Docker node. It then builds the exact committed image and
+creates a separate Elasticsearch 8.19.6 node and exact fixture in a uniquely named Kind namespace
+to exercise query HTTP/gRPC, allowed/denied NetworkPolicy paths, readiness loss and recovery,
+restart, scale-to-zero and restoration. It removes both Elasticsearch resources, the namespace and
+the qualification image.
 
 Commands never select an environment implicitly. Direct image load, apply and stop reject QA; QA
 is owned by Git and the shared Flux reconciliation. QA status and verification require both
 `DEPLOY_SOURCE_REVISION=<40-source-hex>` and `DEPLOY_IMAGE_DIGEST=sha256:<64-hex>`; the latter must
-match the running Policy Search container's runtime `imageID`. The QA overlay is staged outside the
-shared root until its activation PR. See the
+match the running Policy Search container's runtime `imageID`. The QA overlay remains active under
+the shared Flux root. Provision and verify the QA fixture and workload-owned Secrets before merging
+configuration that references them; the accepted Echo image ignores the added search settings but
+Kubernetes still requires each referenced Secret. See the
 [deployment runbook](../../docs/migration/phase-4/policy-search-service/deployment-runbook.md) for
 release, diagnostics, reachability, cleanup and restoration procedures.
 
-## Example RPC and HTTP gateway
+Local identity flows from the image's full OCI source revision to the
+`1.0.0-local.<12-source-hex>` tag and `git-<12-source-hex>` service version. QA instead maps the
+reviewed full release commit to a semantic registry tag, immutable runtime digest and the same
+short service version. Rollback always records both the desired image and the exact live image it
+replaces; changing only a mutable tag or a live selector is unsupported.
 
-The generated `policysearch.v1.ExampleService` exposes unary `Echo`. A valid request contains a UTF-8
-message from 1 through 128 bytes, and the response returns the same bytes. Protovalidate enforces
-the schema at the gRPC boundary before the Echo handler runs. Empty or oversized input returns
-`InvalidArgument`; cancellation and deadlines keep their gRPC status; unexpected handler failures
-return `Internal` with the stable message `internal error`. The generated gateway exposes the same
-operation as `POST /v1/example/echo` with an `application/json` body:
+## Policy search RPC and HTTP gateway
+
+The generated `policysearch.v1.PolicySearchService` exposes unary `SearchPolicies`. Direct gRPC
+distinguishes an absent `q`, which returns `InvalidArgument`, from an explicitly empty value, which
+is passed to Elasticsearch. Cancellation and deadlines keep their gRPC status; unexpected search
+failures return `Internal` with the stable message `internal error`. The generated gateway exposes
+the operation at the exact canonical route `GET /policies` and requires `q` at the HTTP boundary.
+The legacy Java client also binds this exact downstream route; `/policies/` is not canonical and
+returns `404`:
 
 ```sh
 curl --fail-with-body \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"hello"}' \
-  http://127.0.0.1:8080/v1/example/echo
+  --get \
+  --data-urlencode 'q=Synthetic Person' \
+  http://127.0.0.1:8080/policies
 ```
 
-The response is `{"message":"hello"}`. Malformed, duplicate or unknown JSON members, a nonempty
-query, unsupported media, an unknown route and a wrong method receive fixed JSON error envelopes.
+The response contains an optional `policies` array. Each policy may contain `number`, `dateFrom`,
+`dateTo` and `policyHolder`; zero matches serialize as `{}`. The HTTP adapter uses the first
+duplicate `q`, preserves explicit empty and whitespace values, ignores unknown query parameters,
+and rejects absent or malformed query values before RPC. Unknown routes and wrong methods receive
+legacy JSON error envelopes; `POST /policies` also returns `Allow: GET`.
 The generated Swagger 2.0 document is
-`gen/openapiv2/policysearch/v1/example_service.swagger.json`; `testdata/http-contract.json` is the
+`gen/openapiv2/policysearch/v1/policy_search_service.swagger.json`;
+`testdata/http-contract.json` is the
 independent contract fixture checked by `make check-gateway-contract`.
 
 The transports log neither request/response bodies nor underlying failure details. HTTP identity,
@@ -389,9 +428,9 @@ owns this contract, lifecycle, exposure and deployment configuration.
 | Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; general environment/version/instance validation instead of Product QA release rules. Existing loopback ports preserved. |
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
-| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed Echo operation, bounded transport signals and configurable HTTP/gRPC limits. |
-| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup, with no database dependency. |
-| Business architecture | Product application-owned catalog ports and injected adapters | Echo remains a small injected function. Add domain/application/repository packages when a real migration requires them. |
+| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC search gateway, legacy HTTP mapping, bounded transport signals and configurable HTTP/gRPC limits. |
+| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | RPC and Elasticsearch readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
+| Business architecture | Product application-owned catalog ports and injected adapters | `internal/application` owns the policy-search port and stable selected-window ordering; `internal/elasticsearch` implements it and runtime composition injects it into gRPC. |
 
 Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
 fixes with behavior tests and update intentional differences explicitly. This service adopts later
@@ -403,10 +442,13 @@ source improvements through its own reviewed changes.
 | --- | --- |
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
-| `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
-| `internal/grpc` | Generated Echo registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
+| `internal/gateway` | Strict canonical `/policies` HTTP contract, generated gRPC client registration, legacy JSON error mapping, metadata policy and HTTP telemetry. |
+| `internal/grpc` | Generated search registration, presence validation, deadlines, size limits, domain-to-protobuf mapping, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Policy Search identity and cross-setting policy. |
-| `internal/logger`, `internal/telemetry` | Completion-log and Echo signal contracts; shared provider construction with local policy and metric views. |
+| `internal/logger`, `internal/telemetry` | Safe request and Elasticsearch dependency signals; shared provider construction with local policy and metric views. |
+| `internal/domain` | Policy and strict calendar-date values without transport or datastore types. |
+| `internal/application` | Search port plus descending `dateFrom` ordering of the already selected hit window, preserving equal-date order and placing missing dates last. |
+| `internal/elasticsearch` | Official Elasticsearch 8.19 client configuration and the read-only adapter for the isolated `policy-views-issue-229` index. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/policysearch/v1`, `gen/policysearch/v1`, `gen/openapiv2/policysearch/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 
@@ -423,10 +465,13 @@ flowchart TD
     composition --> gateway["internal/gateway"]
     composition --> health["servicekit/health"]
     composition --> telemetry["internal/telemetry"]
+    composition --> searchAdapter["internal/elasticsearch"]
     composition --> config
     grpc --> telemetry
     grpc --> generated["gen/policysearch/v1"]
     gateway --> generated
+    searchAdapter --> application["internal/application"]
+    application --> domain["internal/domain"]
     telemetry --> config
     telemetry --> logger["internal/logger"]
     telemetry --> sharedTelemetry
@@ -436,9 +481,11 @@ flowchart TD
 ```
 
 At startup, composition binds all listeners, starts gRPC, derives the same-process client target
-from the bound address and waits for that channel to become ready. An HTTP Echo obtains a bounded
-HTTP server span, uses the generated client across the instrumented connection, obtains client and
-server spans, passes protobuf validation and calls the injected function with the shorter deadline.
-HTTP and gRPC record separate bounded completion signals. Shutdown withdraws readiness and drains
-accepted HTTP work before connection and gRPC teardown, then closes management and telemetry within
-the shared deadline.
+from the bound address and waits for that channel and the exact Elasticsearch index. The external
+Java `/api/policies` controller calls exact downstream `GET /policies`; the Go gateway validates
+and translates it through the generated client across the owned instrumented connection. The gRPC
+server invokes the application port, which asks the official Elasticsearch adapter for the capped
+hit window and applies stable date ordering before mapping the response. The request retains the
+shorter caller deadline while HTTP, gRPC and dependency observations use fixed safe dimensions.
+Shutdown withdraws readiness and drains accepted HTTP work before connection and gRPC teardown,
+closes dependency connections, then closes management and telemetry within the shared deadline.

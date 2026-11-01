@@ -5,6 +5,7 @@
   - [Ownership and exposure](#ownership-and-exposure)
   - [Repository validation](#repository-validation)
   - [Select local-dev](#select-local-dev)
+  - [Set up and verify the local-dev fixture](#set-up-and-verify-the-local-dev-fixture)
   - [Deploy and verify local-dev](#deploy-and-verify-local-dev)
   - [Diagnostics and recovery](#diagnostics-and-recovery)
   - [Stop, remove and restore local-dev](#stop-remove-and-restore-local-dev)
@@ -18,14 +19,17 @@
 
 Policy Search runs beside the legacy Java workload. The Go owner creates only
 `<environment>-policy-search-api`, its business and management Services, ConfigMap and
-NetworkPolicy. It does not modify the Java `policy-search-api-legacy` Deployment or Service, create
-an Ingress, initialize data, or connect to Elasticsearch or Kafka.
+NetworkPolicy. A separate, explicitly selected fixture owner creates only
+`policy-views-issue-229`, native role/user `go_policy_search_reader` and the workload-owned
+Elasticsearch Secrets. Neither owner modifies the Java `policy-search-api-legacy` Deployment or
+Service, creates an Ingress, accesses shared application indices, or starts Kafka work.
 
 Business ports are reachable only from same-namespace Pods labeled
 `insurance-hub.io/policy-search-business-client=true`. Management port 8081 requires
 `insurance-hub.io/policy-search-management-client=true`; kubelet probe traffic follows Kubernetes
-node-origin semantics. Local-dev denies Pod egress. QA permits only kube-system DNS and OTLP/gRPC
-to the selected Alloy Pods in `qa-monitoring`.
+node-origin semantics. Egress permits cluster DNS and TCP 9200 only to the selected environment's
+ECK Elasticsearch Pods. QA additionally permits OTLP/gRPC only to the selected Alloy Pods in
+`qa-monitoring`.
 
 ## Repository validation
 
@@ -41,11 +45,14 @@ make go-svc-dispatch-test
 ```
 
 `deploy-check` renders local-dev and QA, checks workload security, resources, probes, runtime
-budgets, service exposure, telemetry and NetworkPolicy, and confirms the Go QA overlay is absent
-from the shared QA root. Rendering and fake-adapter tests do not prove admission, enforcement or
-signal delivery. `deploy-test` uses a uniquely named namespace on the configured Kind cluster and
-removes that namespace plus its scratch qualification image after transport, policy, restart and
-restoration checks. It leaves the reviewed runtime image loaded for the later local-dev operation.
+budgets, exact Secret/trust references, service exposure, telemetry and NetworkPolicy, and confirms
+the active Go QA overlay remains in the shared QA root. Rendering and fake-adapter tests do not
+prove admission, enforcement or signal delivery. `deploy-test` first uses a security-enabled
+Elasticsearch 8.19.6 Docker node to verify native reader permissions and actual denial responses.
+It then uses a uniquely named namespace on the configured Kind cluster, a separate Elasticsearch
+8.19.6 node and the exact synthetic fixture to verify search transports, policy, dependency
+recovery, restart and restoration. It removes the Docker node, Kind namespace and scratch
+qualification image, leaving the reviewed runtime image loaded for the later local-dev operation.
 
 ## Select local-dev
 
@@ -73,6 +80,28 @@ the required current context in that copy, and export its path through `KUBECONF
 operation. Do not change the shared kubeconfig implicitly. Remove the task-local copy through the
 operator's normal protected-file cleanup after retaining required evidence.
 
+## Set up and verify the local-dev fixture
+
+The setup operation reads the ECK `elastic` password only from
+`local-dev-elasticsearch-es-elastic-user` in `local-dev-all`. It sends credentials in process
+memory, never in command arguments or evidence. It idempotently creates the exact mapping and 108
+synthetic documents, the native reader role/user, and
+`local-dev-policy-search-elasticsearch`. Normal render, preflight, status and deployment checks do
+not run setup.
+
+With the exact target variables above and the required current context selected:
+
+```sh
+export FIXTURE_CONFIRM=setup-policy-views-issue-229
+make go-svc-fixture-setup SVC_NAME=policy-search
+unset FIXTURE_CONFIRM
+make go-svc-fixture-verify SVC_NAME=policy-search
+```
+
+Verification uses only the workload Secret. It proves `read` and `view_index_metadata` on
+`policy-views-issue-229`, no cluster privileges, and no write, mapping/index-management, other-index
+or security-administration access. A failure leaves the fixture for inspection and safe replay.
+
 ## Deploy and verify local-dev
 
 When replacing an existing accepted Policy Search image, capture its exact reference before
@@ -85,7 +114,11 @@ export DEPLOY_PREVIOUS_IMAGE_REF="$(kubectl --context "$DEPLOY_CONTEXT" \
 ```
 
 Leave `DEPLOY_PREVIOUS_IMAGE_REF` unset for the first deployment. The guard permits only that
-declared predecessor before apply and requires the new `DEPLOY_IMAGE_REF` after rollout.
+declared predecessor before apply and requires the new `DEPLOY_IMAGE_REF` after rollout. When the
+declared predecessor is the accepted Echo release, preflight permits only its exact historical
+differences: the Elasticsearch username/password variables and the DNS/Elasticsearch egress rules
+may be absent. This lets the reviewed apply stage query configuration with the query image. Any
+extra environment value, ingress change or other resource drift still stops before mutation.
 
 Run the guarded sequence:
 
@@ -101,7 +134,7 @@ make go-svc-deploy-verify SVC_NAME=policy-search
 Preflight checks target identity, Java resource UIDs, image/source identity and a server-side dry
 run before writes. Deploy applies only the rendered Go resources and waits up to the workload's
 180-second progress deadline. Verify checks the live inventory, absence of public routes, health
-and Echo over the business Service while confirming Java UIDs remain unchanged.
+and a synthetic query over the business Service while confirming Java UIDs remain unchanged.
 
 For independent in-cluster reachability, create short-lived probe Pods in `local-dev-all`. Label the
 allowed business probe and management probe with the exact labels above. An otherwise identical
@@ -126,7 +159,9 @@ An interrupted or failed apply may leave reviewed Go resources present. Inspect 
 same deploy command with the same source image; server-side apply and rollout are idempotent. A
 source/image mismatch requires rebuilding from the intended commit. Do not patch live selectors,
 disable NetworkPolicy, scale Java, or substitute a mutable image tag. Output and evidence must not
-contain credentials or request payloads; this increment accepts no deployment Secret.
+contain credentials or request payloads. Loss of Elasticsearch or the exact index makes readiness
+fail while liveness remains process-only; restoring the dependency recovers readiness without a
+Policy Search restart.
 
 ## Stop, remove and restore local-dev
 
@@ -141,15 +176,57 @@ Verify that the Go endpoints disappear while the Deployment is scaled to zero, t
 and after both operations. Leave the verified Go release running when acceptance requires a usable
 handoff.
 
+For an Echo rollback rehearsal, retain the accepted query and Echo image references and reverse
+the declared transition through the same owner:
+
+```sh
+export QUERY_IMAGE_REF="$DEPLOY_IMAGE_REF"
+export ECHO_IMAGE_REF="insurance-hub-policy-search-api:1.0.0-local.<echo-source-hex>"
+
+export DEPLOY_PREVIOUS_IMAGE_REF="$QUERY_IMAGE_REF"
+export DEPLOY_IMAGE_REF="$ECHO_IMAGE_REF"
+make go-svc-deploy-preflight SVC_NAME=policy-search
+make go-svc-image-load SVC_NAME=policy-search
+make go-svc-deploy SVC_NAME=policy-search
+unset DEPLOY_PREVIOUS_IMAGE_REF
+make go-svc-deploy-status SVC_NAME=policy-search
+```
+
+The normal `deploy-verify` probe is query-specific, so verify the rollback through the Echo HTTP
+and direct RPC contract plus `/livez` and `/readyz`; confirm `/policies` is absent and compare Java
+UIDs. The Echo process must remain healthy with the staged query Secret references and egress
+policy. Restore query by setting `DEPLOY_PREVIOUS_IMAGE_REF="$ECHO_IMAGE_REF"` and
+`DEPLOY_IMAGE_REF="$QUERY_IMAGE_REF"`, then run preflight, image-load, deploy, status and the normal
+query verify. Record both images' full OCI source revisions and leave the verified query image
+running.
+
+The accepted fixture stays in place across Echo/query rollback and restoration. Remove it only for
+an explicit abort or retirement after the workload no longer references its Secrets:
+
+```sh
+export FIXTURE_CONFIRM=retire-policy-views-issue-229
+make go-svc-fixture-retire SVC_NAME=policy-search
+unset FIXTURE_CONFIRM
+```
+
+Retirement deletes only `policy-views-issue-229`, `go_policy_search_reader` and the two possible
+workload-owned Secrets. It does not delete or inspect shared indices.
+
 ## Stage and activate QA
 
-The QA overlay publishes
+The QA overlay is active and publishes
 `ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:<semantic-version>`. The generic release
 owner updates the image tag from the semantic release version and sets `SERVICE_VERSION` to
-`git-<12-source-hex>` from the full release source commit for a service without initialization.
-PR1 keeps the overlay inactive; a later reviewed activation adds exactly `./policy-search` to
-`k8s/overlays/qa/svc/kustomization.yaml` after the immutable image is published and QA prerequisites
-are verified.
+`git-<12-source-hex>` from the full release source commit. Before PR1 merge or release, run the
+separately authorized setup and verification operations with `DEPLOY_ENV=qa`, context
+`qa-insurance-hub`, service namespace `qa-svc` and data namespace `qa-data`. Setup copies only
+`ca.crt` from `qa-elasticsearch-es-http-certs-public` into
+`qa-policy-search-elasticsearch-ca`; the administrative credential never enters `qa-svc`.
+
+Prove the staged endpoint, workload Secret, CA mount and egress policy remain compatible with the
+accepted Echo image before releasing the query image. The Echo process ignores the added settings,
+while Kubernetes requires both Secrets to exist. A failed compatibility gate stops the release and
+requires revising the PR allocation.
 
 Direct `image-load`, `deploy` and `stop` operations reject QA. Use the shared `qa-svc` Flux owner,
 observe its source revision and reconciliation, and export both the exact 40-character reconciled

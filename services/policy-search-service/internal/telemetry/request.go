@@ -14,7 +14,7 @@ import (
 	servicelogger "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/logger"
 )
 
-// RequestObserver records only the fixed Echo operation and bounded transport outcomes.
+// RequestObserver records only the fixed policy-search operation and bounded outcomes.
 type RequestObserver struct {
 	logger   *slog.Logger
 	requests metric.Int64Counter
@@ -60,15 +60,15 @@ type Request struct {
 func (observer *RequestObserver) StartGRPC(ctx context.Context) *Request {
 	return &Request{
 		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),
-		transport: "grpc", operation: "echo",
+		transport: "grpc", operation: "search",
 	}
 }
 
 // StartHTTP begins a bounded HTTP transport observation after trace extraction.
 func (observer *RequestObserver) StartHTTP(ctx context.Context, route string) *Request {
 	operation := "unknown"
-	if route == "POST /v1/example/echo" {
-		operation = "echo"
+	if route == "GET /policies" {
+		operation = "search"
 	}
 	return &Request{
 		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),

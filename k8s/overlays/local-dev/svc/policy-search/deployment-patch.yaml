@@ -8,3 +8,14 @@ spec:
       containers:
         - name: policy-search-api
           imagePullPolicy: Never
+          env:
+            - name: ELASTICSEARCH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-policy-search-elasticsearch
+                  key: username
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-policy-search-elasticsearch
+                  key: password

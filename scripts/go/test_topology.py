@@ -287,6 +287,23 @@ def write_workflow(root: Path, text: str | None = None) -> Path:
     return path
 
 
+def write_main_coverage_contract(
+    root: Path, *, workflow: str | None = None, codecov: str | None = None
+) -> None:
+    source_workflow = REPOSITORY_ROOT / topology.MAIN_COVERAGE_WORKFLOW
+    workflow_path = root / topology.MAIN_COVERAGE_WORKFLOW
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(
+        workflow if workflow is not None else source_workflow.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    source_codecov = REPOSITORY_ROOT / "codecov.yml"
+    (root / "codecov.yml").write_text(
+        codecov if codecov is not None else source_codecov.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+
 @pytest.mark.parametrize(
     "case",
     [
@@ -561,6 +578,79 @@ def test_ci_coverage_rejects_selector_coverage_output_drift(
         match=r"selector output mismatch.*coverage_files",
     ):
         topology.ci_check(tmp_path, loaded)
+
+
+def test_main_coverage_contract_matches_repository() -> None:
+    topology.main_coverage_check(REPOSITORY_ROOT)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("  push:\n", "  pull_request:\n", "push-only event"),
+        ("      - main\n", "      - develop\n", "main branch trigger"),
+        ("permissions:\n  contents: read\n", "permissions:\n  contents: write\n", "read-only"),
+        ("cancel-in-progress: true", "cancel-in-progress: false", "cancellation"),
+        ("fail-fast: false", "fail-fast: true", "complete coverage matrix"),
+        (
+            "          - module: libs/servicekit\n"
+            "            role: public-shared\n"
+            "            coverage_files: libs/servicekit/coverage.txt\n"
+            "            flag: servicekit\n",
+            "",
+            "complete coverage module matrix",
+        ),
+        (
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+            "actions/checkout@v7",
+            "immutable checkout action",
+        ),
+        (
+            'make -C "$MODULE_DIR" coverage-check',
+            'make -C "$MODULE_DIR" test',
+            "module coverage owner",
+        ),
+        (
+            '            make -C "$MODULE_DIR" coverage\n',
+            '            make -C "$MODULE_DIR" test\n',
+            "shared coverage owner",
+        ),
+        (
+            'run: make -C "$MODULE_DIR" bootstrap-go-tools',
+            'run: make -C "$MODULE_DIR" verify-tools',
+            "shared-tool bootstrap owner",
+        ),
+        (
+            'make -C "$MODULE_DIR" test-integration',
+            'make -C "$MODULE_DIR" test',
+            "business integration coverage owner",
+        ),
+        (
+            "token: ${{ secrets.CODECOV_TOKEN }}",
+            "token: controlled-placeholder",
+            "Codecov credential binding",
+        ),
+    ],
+)
+def test_main_coverage_contract_rejects_workflow_drift(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    workflow = (REPOSITORY_ROOT / topology.MAIN_COVERAGE_WORKFLOW).read_text(encoding="utf-8")
+    assert old in workflow
+    write_main_coverage_contract(tmp_path, workflow=workflow.replace(old, new, 1))
+
+    with pytest.raises(topology.TopologyError, match=message):
+        topology.main_coverage_check(tmp_path)
+
+
+def test_main_coverage_contract_rejects_missing_flag_ownership(tmp_path: Path) -> None:
+    codecov = (REPOSITORY_ROOT / "codecov.yml").read_text(encoding="utf-8")
+    record = "    - name: servicekit\n      paths:\n        - libs/servicekit/\n"
+    assert record in codecov
+    write_main_coverage_contract(tmp_path, codecov=codecov.replace(record, "", 1))
+
+    with pytest.raises(topology.TopologyError, match="servicekit flag ownership"):
+        topology.main_coverage_check(tmp_path)
 
 
 def test_ci_coverage_preserves_historical_path_arguments(
@@ -873,6 +963,7 @@ def test_root_aggregate_accepts_explicit_python_override(tmp_path: Path) -> None
     target = f'@printf "%s\\n%s\\n" "$(PYTHON)" "$(FORMAT_SCOPE)" > "{observed}"'
     write_module(tmp_path, value["modules"][0], target_body=target)
     write_workflow(tmp_path)
+    write_main_coverage_contract(tmp_path)
     inventory_path = write_inventory(tmp_path, value)
     (tmp_path / ".go-topology-test-fixture").touch()
     environment = {
@@ -911,6 +1002,7 @@ def test_topology_launcher_propagates_signal_and_preserves_fixture(tmp_path: Pat
     value = inventory()
     write_module(root, value["modules"][0])
     write_workflow(root)
+    write_main_coverage_contract(root)
     inventory_path = write_inventory(root, value)
     environment = fixture_environment(root, inventory_path)
     control = tmp_path / "control"
@@ -964,6 +1056,7 @@ def test_current_repository_topology_is_read_only() -> None:
     # when
     errors, _ = topology.topology_errors(root, loaded)
     topology.ci_check(root, loaded)
+    topology.main_coverage_check(root)
     topology.boundary_check(root, loaded)
 
     # then

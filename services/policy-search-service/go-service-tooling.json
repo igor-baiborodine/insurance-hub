@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "service": "policy-search",
+  "modulePath": "services/policy-search-service",
+  "image": {
+    "name": "insurance-hub-policy-search-api",
+    "title": "Insurance Hub Policy Search API",
+    "localTagPrefix": "1.0.0-local.",
+    "entrypoint": [
+      "/policy-search-service"
+    ],
+    "user": "65532:65532",
+    "platform": "linux/amd64",
+    "lifecycle": {
+      "containerPort": 8081,
+      "path": "/livez",
+      "expectedBody": "live\n",
+      "environment": {
+        "HTTP_ADDR": "0.0.0.0:8080",
+        "GRPC_ADDR": "0.0.0.0:9090",
+        "HEALTH_ADDR": "0.0.0.0:8081"
+      },
+      "stopSeconds": 10
+    }
+  },
+  "candidate": {
+    "copyPaths": [
+      "cmd",
+      "gen",
+      "internal"
+    ],
+    "excludePaths": [
+      "internal/testing/"
+    ],
+    "phaseTargets": {
+      "generated": [
+        "check-proto-drift"
+      ],
+      "breaking": [
+        "check-proto-breaking"
+      ],
+      "integration": [
+        "test-integration"
+      ]
+    },
+    "imageCheckTarget": "_image-check-existing"
+  }
+}

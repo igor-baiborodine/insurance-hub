@@ -13,6 +13,9 @@ flag_management:
         target: 75%
         threshold: 0%
   individual_flags:
+    - name: servicekit
+      paths:
+        - libs/servicekit/
     - name: product-service
       paths:
         - services/product-service/

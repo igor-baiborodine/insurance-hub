@@ -1,0 +1,94 @@
+name: Go Main Coverage
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-main-coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Publish coverage (${{ matrix.flag }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - module: libs/servicekit
+            role: public-shared
+            coverage_files: libs/servicekit/coverage.txt
+            flag: servicekit
+          - module: services/product-service
+            role: business-service
+            coverage_files: services/product-service/coverage.txt,services/product-service/integration-coverage.txt
+            flag: product-service
+          - module: services/policy-search-service
+            role: business-service
+            coverage_files: services/policy-search-service/coverage.txt,services/policy-search-service/integration-coverage.txt
+            flag: policy-search-service
+    steps:
+      - name: Checkout exact main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up uv 0.13.1
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.1'
+          enable-cache: true
+
+      - name: Set up managed Python 3.14.8
+        run: make python-toolchain-setup
+
+      - name: Set up selected Go version
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache: true
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: Bootstrap shared coverage tools
+        if: matrix.role == 'public-shared'
+        env:
+          MODULE_DIR: ${{ matrix.module }}
+        run: make -C "$MODULE_DIR" bootstrap-go-tools
+
+      - name: Generate module coverage
+        shell: bash
+        env:
+          COVERAGE_FILE: ${{ github.workspace }}/${{ matrix.module }}/coverage.txt
+          INTEGRATION_COVERAGE_FILE: ${{ github.workspace }}/${{ matrix.module }}/integration-coverage.txt
+          MODULE_DIR: ${{ matrix.module }}
+          MODULE_ROLE: ${{ matrix.role }}
+        run: |
+          set -euo pipefail
+          rm -f -- "$COVERAGE_FILE" "$INTEGRATION_COVERAGE_FILE"
+          if [[ "$MODULE_ROLE" == 'public-shared' ]]; then
+            make -C "$MODULE_DIR" coverage
+          elif [[ "$MODULE_ROLE" == 'business-service' ]]; then
+            make -C "$MODULE_DIR" coverage-check
+            make -C "$MODULE_DIR" test-integration \
+              INTEGRATION_COVERAGE_FILE="$INTEGRATION_COVERAGE_FILE"
+          else
+            printf 'unsupported coverage role: %s\n' "$MODULE_ROLE" >&2
+            exit 1
+          fi
+
+      - name: Upload module coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ matrix.coverage_files }}
+          flags: ${{ matrix.flag }}
+          name: ${{ matrix.flag }}-main
+          disable_search: true
+          fail_ci_if_error: true

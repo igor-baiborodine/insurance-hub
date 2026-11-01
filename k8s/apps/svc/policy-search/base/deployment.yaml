@@ -65,6 +65,16 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: metadata.uid
+            - name: ELASTICSEARCH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: policy-search-elasticsearch
+                  key: username
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: policy-search-elasticsearch
+                  key: password
           resources:
             requests:
               cpu: 100m

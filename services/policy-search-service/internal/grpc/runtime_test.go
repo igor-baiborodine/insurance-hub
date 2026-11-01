@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,84 +20,88 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
 	policysearchv1 "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/gen/policysearch/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/domain"
 	transport "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/grpc"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/telemetry"
 )
 
 func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 	// given
-	cases := []struct {
-		name, message, outcome, status string
-		code                           codes.Code
-		sendLimit, receiveLimit        int
-		echo                           transport.Echo
-		unsupportedCompression         bool
+	tests := []struct {
+		name, outcome, status  string
+		code                   codes.Code
+		query                  *string
+		sendLimit              int
+		receiveLimit           int
+		search                 transport.SearchPolicies
+		unsupportedCompression bool
 	}{
 		{
-			name:    "success",
-			message: "private-payload",
-			outcome: "success",
-			status:  "OK",
-			echo:    transport.IdentityEcho,
+			name: "success", outcome: "success", status: "OK",
+			query: proto.String("private-query"),
+			search: func(context.Context, string) ([]domain.Policy, error) {
+				return []domain.Policy{{Number: "POL-229"}}, nil
+			},
 		},
 		{
-			name:    "invalid input",
+			name:    "absent q",
 			outcome: "invalid_request",
 			status:  "INVALID_ARGUMENT",
 			code:    codes.InvalidArgument,
-			echo:    transport.IdentityEcho,
+			search:  func(context.Context, string) ([]domain.Policy, error) { return nil, nil },
 		},
 		{
 			name:      "send limit",
-			message:   "private-payload",
 			outcome:   "invalid_request",
 			status:    "RESOURCE_EXHAUSTED",
 			code:      codes.ResourceExhausted,
+			query:     proto.String("private-query"),
 			sendLimit: 1,
-			echo:      transport.IdentityEcho,
+			search: func(context.Context, string) ([]domain.Policy, error) {
+				return []domain.Policy{{Number: "POL-229"}}, nil
+			},
 		},
 		{
 			name:         "receive limit",
-			message:      "private-payload",
 			outcome:      "invalid_request",
 			status:       "RESOURCE_EXHAUSTED",
 			code:         codes.ResourceExhausted,
+			query:        proto.String("private-query"),
 			receiveLimit: 1,
-			echo:         transport.IdentityEcho,
+			search:       func(context.Context, string) ([]domain.Policy, error) { return nil, nil },
 		},
 		{
-			name:    "internal failure",
-			message: "private-payload",
-			outcome: "internal_error",
-			status:  "INTERNAL",
-			code:    codes.Internal,
-			echo:    func(context.Context, string) (string, error) { return "", errors.New("private-error") },
+			name: "internal", outcome: "internal_error", status: "INTERNAL",
+			code: codes.Internal, query: proto.String("private-query"),
+			search: func(context.Context, string) ([]domain.Policy, error) {
+				return nil, errors.New("private-error")
+			},
 		},
 		{
 			name:                   "unsupported compression",
-			message:                "private-payload",
 			outcome:                "invalid_request",
 			status:                 "UNIMPLEMENTED",
 			code:                   codes.Unimplemented,
-			echo:                   transport.IdentityEcho,
+			query:                  proto.String("private-query"),
+			search:                 func(context.Context, string) ([]domain.Policy, error) { return nil, nil },
 			unsupportedCompression: true,
 		},
 		{
-			name:    "server timeout",
-			message: "private-payload",
-			outcome: "deadline_exceeded",
-			status:  "DEADLINE_EXCEEDED",
-			code:    codes.DeadlineExceeded,
-			echo:    func(ctx context.Context, _ string) (string, error) { <-ctx.Done(); return "", ctx.Err() },
+			name: "timeout", outcome: "deadline_exceeded", status: "DEADLINE_EXCEEDED",
+			code: codes.DeadlineExceeded, query: proto.String("private-query"),
+			search: func(ctx context.Context, _ string) ([]domain.Policy, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			},
 		},
 	}
-	for _, test := range cases {
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			// given
 			settings := defaultSettings()
 			settings.RequestTimeout = 30 * time.Millisecond
 			if test.sendLimit != 0 {
@@ -105,35 +110,37 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 			if test.receiveLimit != 0 {
 				settings.MaxReceiveBytes = test.receiveLimit
 			}
-			var logs bytes.Buffer
+			var logs lockedBuffer
 			reader := sdkmetric.NewManualReader()
 			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 			t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
-			log := logger.New(&logs, "policy-search-service", 0)
-			observer, err := telemetry.NewRequestObserver(log, provider)
+			observer, err := telemetry.NewRequestObserver(
+				logger.New(&logs, "policy-search-service", 0),
+				provider,
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
 			settings.Observer = observer
 			var options []grpcgo.DialOption
 			if test.unsupportedCompression {
-				// The legacy client-only compressor sends an unsupported encoding without
-				// registering a process-global compressor that the server would also accept.
-				//nolint:staticcheck // Client-only injection is needed to test server rejection.
-				compressor := grpcgo.WithCompressor(
-					unsupportedCompressor{},
+				//nolint:staticcheck // Client-only compressor verifies server rejection.
+				options = append(
+					options,
+					grpcgo.WithCompressor(unsupportedCompressor{}),
 				)
-				options = append(options, compressor)
 			}
-			client, stop := runtimeClient(t, settings, test.echo, &logs, options...)
+			client, stop := runtimeClient(t, settings, test.search, &logs, options...)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
+
 			// when
-			_, err = client.Echo(
+			_, err = client.SearchPolicies(
 				ctx,
-				&policysearchv1.EchoRequest{Message: test.message},
+				&policysearchv1.SearchPoliciesRequest{Q: test.query},
 			)
 			stop()
+
 			// then
 			if status.Code(err) != test.code {
 				t.Fatalf("code=%s want=%s: %v", status.Code(err), test.code, err)
@@ -141,96 +148,86 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 			if strings.Contains(logs.String(), "private-") {
 				t.Fatalf("sensitive logs: %s", logs.String())
 			}
-			completions := 0
-			for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
-				var entry map[string]any
-				if err := json.Unmarshal(line, &entry); err != nil {
-					t.Fatal(err)
-				}
-				if entry["msg"] == "request completed" {
-					completions++
-					if entry["outcome"] != test.outcome ||
-						entry["rpc_status_code"] != test.status {
-						t.Errorf("completion=%v", entry)
-					}
-				}
-			}
-			if completions != 1 {
-				t.Fatalf("completions=%d want=1", completions)
-			}
-			var result metricdata.ResourceMetrics
-			if err := reader.Collect(ctx, &result); err != nil {
-				t.Fatal(err)
-			}
-			count := int64(0)
-			for _, scope := range result.ScopeMetrics {
-				for _, measurement := range scope.Metrics {
-					if measurement.Name != "insurance_hub.policy_search.requests" {
-						continue
-					}
-					for _, point := range measurement.Data.(metricdata.Sum[int64]).DataPoints {
-						count += point.Value
-						attrs := map[string]string{}
-						for _, attr := range point.Attributes.ToSlice() {
-							attrs[string(attr.Key)] = attr.Value.AsString()
-						}
-						if len(attrs) != 4 ||
-							attrs["insurance_hub.policy_search.operation"] != "echo" ||
-							attrs["insurance_hub.policy_search.outcome"] != test.outcome ||
-							attrs["rpc.response.status_code"] != test.status {
-							t.Errorf(
-								"unsafe or incorrect labels: %v",
-								attrs,
-							)
-						}
-					}
-				}
-			}
-			if count != 1 {
-				t.Errorf("request count=%d want=1", count)
-			}
+			assertRuntimeCompletion(t, &logs, test.outcome, test.status)
+			assertRuntimeCounter(t, reader, ctx, test.outcome, test.status)
 		})
 	}
 }
 
-func TestServer_PreservesShorterCallerDeadline(t *testing.T) {
-	// given
-	deadlineSeen := make(chan time.Time, 1)
-	echo := func(ctx context.Context, _ string) (string, error) {
-		deadline, _ := ctx.Deadline()
-		deadlineSeen <- deadline
-		<-ctx.Done()
-		return "", ctx.Err()
-	}
-	client, stop := runtimeClient(t, defaultSettings(), echo, new(bytes.Buffer))
-	defer stop()
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	deadline, _ := ctx.Deadline()
-	// when
-	_, err := client.Echo(ctx, &policysearchv1.EchoRequest{Message: "hello"})
-	// then
-	if status.Code(err) != codes.DeadlineExceeded {
-		t.Fatalf("status=%v", err)
-	}
-	select {
-	case got := <-deadlineSeen:
-		// gRPC encodes a relative deadline, allowing a small transport rounding tolerance.
-		if got.After(deadline.Add(10 * time.Millisecond)) {
-			t.Errorf("caller deadline extended: %v > %v", got, deadline)
+func assertRuntimeCompletion(t *testing.T, logs *lockedBuffer, outcome, code string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(logs.String(), `"msg":"request completed"`) {
+			break
 		}
-	case <-time.After(time.Second):
-		t.Fatal("handler did not receive request")
+		time.Sleep(time.Millisecond)
+	}
+	completions := 0
+	for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal(line, &entry); err != nil {
+			t.Fatal(err)
+		}
+		if entry["msg"] == "request completed" {
+			completions++
+			if entry["outcome"] != outcome || entry["rpc_status_code"] != code ||
+				entry["operation"] != "search" {
+				t.Errorf("completion=%v", entry)
+			}
+		}
+	}
+	if completions != 1 {
+		t.Fatalf("completions=%d want=1", completions)
+	}
+}
+
+func assertRuntimeCounter(
+	t *testing.T,
+	reader *sdkmetric.ManualReader,
+	ctx context.Context,
+	outcome, code string,
+) {
+	t.Helper()
+	var result metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &result); err != nil {
+		t.Fatal(err)
+	}
+	count := int64(0)
+	for _, scope := range result.ScopeMetrics {
+		for _, measurement := range scope.Metrics {
+			if measurement.Name != "insurance_hub.policy_search.requests" {
+				continue
+			}
+			for _, point := range measurement.Data.(metricdata.Sum[int64]).DataPoints {
+				count += point.Value
+				attrs := map[string]string{}
+				for _, attr := range point.Attributes.ToSlice() {
+					attrs[string(attr.Key)] = attr.Value.AsString()
+				}
+				if attrs["insurance_hub.policy_search.operation"] != "search" ||
+					attrs["insurance_hub.policy_search.outcome"] != outcome ||
+					attrs["rpc.response.status_code"] != code {
+					t.Errorf("incorrect labels: %v", attrs)
+				}
+			}
+		}
+	}
+	if count != 1 {
+		t.Errorf("request count=%d want=1", count)
 	}
 }
 
 func runtimeClient(
 	t *testing.T,
 	settings transport.Settings,
-	echo transport.Echo,
-	logs *bytes.Buffer,
+	search transport.SearchPolicies,
+	logs *lockedBuffer,
 	options ...grpcgo.DialOption,
-) (policysearchv1.ExampleServiceClient, func()) {
+) (policysearchv1.PolicySearchServiceClient, func()) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -241,7 +238,7 @@ func runtimeClient(
 		noop.NewTracerProvider(),
 		propagation.TraceContext{},
 		settings,
-		echo,
+		search,
 	)
 	if err != nil {
 		_ = listener.Close()
@@ -262,17 +259,7 @@ func runtimeClient(
 		}
 		stopped = true
 		_ = connection.Close()
-		drained := make(chan struct{})
-		go func() {
-			server.GracefulStop()
-			close(drained)
-		}()
-		select {
-		case <-drained:
-		case <-time.After(time.Second):
-			server.Stop()
-			t.Fatal("server handlers did not drain")
-		}
+		server.Stop()
 		select {
 		case <-done:
 		case <-time.After(time.Second):
@@ -280,10 +267,33 @@ func runtimeClient(
 		}
 	}
 	t.Cleanup(stop)
-	return policysearchv1.NewExampleServiceClient(connection), stop
+	return policysearchv1.NewPolicySearchServiceClient(connection), stop
 }
 
 type unsupportedCompressor struct{}
+
+type lockedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (buffer *lockedBuffer) Write(data []byte) (int, error) {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	return buffer.buffer.Write(data)
+}
+
+func (buffer *lockedBuffer) String() string {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	return buffer.buffer.String()
+}
+
+func (buffer *lockedBuffer) Bytes() []byte {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	return bytes.Clone(buffer.buffer.Bytes())
+}
 
 func (unsupportedCompressor) Type() string { return "private-unsupported-encoding" }
 

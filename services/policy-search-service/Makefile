@@ -8,12 +8,16 @@ INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/deployment.py scripts/disposable_deployment.py scripts/image_check.py \
-	scripts/policy_search_deployment_checks.py scripts/scaffold_process.py scripts/shared_phase.py \
+	scripts/elasticsearch_integration.py scripts/policy_search_deployment_checks.py scripts/scaffold_process.py \
+	scripts/fixture_administration.py scripts/fixture_administration_integration.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
-	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_scaffold_process.py scripts/test_tooling.py \
+	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_elasticsearch_integration.py \
+	scripts/test_fixture_administration.py \
+	scripts/test_scaffold_process.py scripts/test_tooling.py \
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
-	scripts/test_deployment.py scripts/test_scaffold_process.py \
+	scripts/test_deployment.py scripts/test_elasticsearch_integration.py scripts/test_fixture_administration.py \
+	scripts/test_scaffold_process.py \
 	scripts/test_tooling_runner.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
@@ -29,13 +33,13 @@ GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 GOLANGCI_CONFIG := .golangci.yml
 
-PROTO_SCHEMA := api/policysearch/v1/example_service.proto
+PROTO_SCHEMA := api/policysearch/v1/policy_search_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := \
-	gen/policysearch/v1/example_service.pb.go \
-	gen/policysearch/v1/example_service.pb.gw.go \
-	gen/policysearch/v1/example_service_grpc.pb.go \
-	gen/openapiv2/policysearch/v1/example_service.swagger.json
+	gen/policysearch/v1/policy_search_service.pb.go \
+	gen/policysearch/v1/policy_search_service.pb.gw.go \
+	gen/policysearch/v1/policy_search_service_grpc.pb.go \
+	gen/openapiv2/policysearch/v1/policy_search_service.swagger.json
 
 GO_VERSION := 1.27.3
 BUF_VERSION := v1.73.0
@@ -54,11 +58,14 @@ OTEL_GRPC_VERSION := v0.71.0
 OTEL_HTTP_VERSION := v0.70.0
 X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.0.1
+ELASTICSEARCH_CLIENT_VERSION := v8.19.7
+ELASTICSEARCH_IMAGE := docker.elastic.co/elasticsearch/elasticsearch:8.19.6@sha256:bfb2108076735fbfc5dcd5d49f12f5aa93fab9759034c55f7da3b4345606c903
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 TEST_PACKAGES ?= ./...
 COVERAGE_MINIMUM ?= 75
 COVERAGE_EXCLUDE_PATHS := gen internal/testing
 INTEGRATION_COVERAGE_FILE ?=
+ELASTICSEARCH_INTEGRATION_COVERAGE_FILE ?= elasticsearch-integration-coverage.txt
 HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
@@ -71,6 +78,7 @@ SOURCE_VERSION ?= $(HEAD_VERSION)
 IMAGE_TAG ?= 1.0.0-local.$(HEAD_SHORT)
 IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
 TARGET_PLATFORM ?= linux/amd64
+GO_SERVICE_TOOLING_CONFIG := $(CURDIR)/go-service-tooling.json
 
 EXTRA_TOOL_PACKAGES := \
 	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@$(GRPC_GATEWAY_VERSION) \
@@ -91,8 +99,9 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
-	image-build image-check _image-check-existing test-integration deploy-render deploy-check \
-	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
+	image-build image-check _image-check-existing test-integration test-elasticsearch-integration deploy-render deploy-check \
+	deploy-preflight deploy-status image-load deploy deploy-verify stop fixture-setup fixture-verify fixture-retire \
+	deploy-test-tooling deploy-test \
 	build-qualification-client \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
@@ -101,26 +110,19 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
 image-build: python-runtime-check ## Build the pinned linux/amd64 Policy Search runtime image
-	@test "$(SOURCE_REVISION)" = "$(HEAD_REVISION)" || { echo 'SOURCE_REVISION must match HEAD' >&2; exit 1; }
-	@test "$(SOURCE_CREATED)" = "$(HEAD_CREATED)" || { echo 'SOURCE_CREATED must match HEAD' >&2; exit 1; }
-	@test "$(SOURCE_VERSION)" = "git-$$(printf '%s' '$(SOURCE_REVISION)' | cut -c1-12)" || { echo 'SOURCE_VERSION must match HEAD' >&2; exit 1; }
-	@test "$(IMAGE_TAG)" = "1.0.0-local.$$(printf '%s' '$(SOURCE_REVISION)' | cut -c1-12)" || { echo 'IMAGE_TAG must match the local source convention' >&2; exit 1; }
-	@test "$(IMAGE_REF)" = "$(IMAGE_NAME):$(IMAGE_TAG)" || { echo 'IMAGE_REF must use the selected name and tag' >&2; exit 1; }
-	@test "$(IMAGE_NAME)" = "insurance-hub-policy-search-api" || { echo 'IMAGE_NAME differs from the catalog identity' >&2; exit 1; }
-	@test "$(TARGET_PLATFORM)" = "linux/amd64" || { echo 'TARGET_PLATFORM must be linux/amd64' >&2; exit 1; }
-	$(DOCKER) buildx build --load --platform "$(TARGET_PLATFORM)" --provenance=false \
-		--build-arg "SOURCE_CREATED=$(SOURCE_CREATED)" \
-		--build-arg "SOURCE_REPOSITORY=$(SOURCE_REPOSITORY)" \
-		--build-arg "SOURCE_REVISION=$(SOURCE_REVISION)" \
-		--build-arg "SOURCE_VERSION=$(SOURCE_VERSION)" \
-		--tag "$(IMAGE_REF)" --file Dockerfile .
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
+		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" build
 
-image-check: image-build ## Build and validate image identity, contents, startup, Echo, and shutdown
+image-check: image-build ## Build and validate image identity, search, dependency lifecycle, and shutdown
 	@$(MAKE) --no-print-directory _image-check-existing
 
 _image-check-existing: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		DOCKER="$(DOCKER)" "$(PYTHON)" scripts/image_check.py
+		DOCKER="$(DOCKER)" "$(PYTHON)" -m scripts.go.service.image \
+		--config "$(GO_SERVICE_TOOLING_CONFIG)" inspect
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		DOCKER="$(DOCKER)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
+		"$(PYTHON)" scripts/image_check.py
 
 test-integration: ## Exercise real HTTP-to-RPC composition and lifecycle on owned listeners
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
@@ -128,7 +130,13 @@ test-integration: ## Exercise real HTTP-to-RPC composition and lifecycle on owne
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./internal/service \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)") \
-		-run '^(TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst|TestRun_ProductionCompositionEnforcesByteAndPresenceContract|TestRun_ReportsDynamicGatewayReadinessLossAndRecovery)$$'
+		-run '^(TestRun_ProductionCompositionUsesActualRPCListenerAndGeneratedGateway|TestRun_ReadinessTracksElasticsearchAndRecovers|TestRun_FailsStartupWhenElasticsearchIsUnavailableAndCleansUp)$$'
+
+test-elasticsearch-integration: python-runtime-check ## Exercise the query adapter against owned disposable Elasticsearch
+	@DOCKER="$(DOCKER)" GO="$(GO)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
+		ELASTICSEARCH_INTEGRATION_COVERAGE_FILE="$(ELASTICSEARCH_INTEGRATION_COVERAGE_FILE)" \
+		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" scripts/elasticsearch_integration.py
 
 deploy-render: ## Render one Policy Search overlay without applying it
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
@@ -142,12 +150,20 @@ deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runt
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" scripts/deployment.py '$@'
 
+fixture-setup fixture-verify fixture-retire: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/fixture_administration.py '$(@:fixture-%=%)'
+
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed deployment guards without a cluster
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		"$(PYTHON)" -m pytest -q scripts/test_deployment.py
+		"$(PYTHON)" -m pytest -q scripts/test_deployment.py scripts/test_fixture_administration.py
 
 deploy-test: python-toolchain-check image-build ## Exercise the exact image in an owned disposable Kind namespace
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		DOCKER="$(DOCKER)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
+		"$(PYTHON)" scripts/fixture_administration_integration.py
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" \
+		ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_disposable_deployment.py
 
 build-qualification-client: ## Build the read-only disposable HTTP/gRPC qualification client
@@ -184,6 +200,7 @@ update-deps:
 	GOWORK=off $(GO) get \
 		buf.build/go/protovalidate@$(PROTOVALIDATE_GO_VERSION) \
 		buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go@$(PROTOVALIDATE_SCHEMA_GO_VERSION) \
+		github.com/elastic/go-elasticsearch/v8@$(ELASTICSEARCH_CLIENT_VERSION) \
 		github.com/grpc-ecosystem/grpc-gateway/v2@$(GRPC_GATEWAY_VERSION) \
 		go.opentelemetry.io/otel@$(OTEL_VERSION) \
 		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
@@ -200,13 +217,14 @@ update-deps:
 	GOWORK=off $(GO) mod tidy
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
-check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \
+check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration \
+	test-elasticsearch-integration build \
 	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
 
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
 		--contract testdata/http-contract.json \
-		--swagger gen/openapiv2/policysearch/v1/example_service.swagger.json
+		--swagger gen/openapiv2/policysearch/v1/policy_search_service.swagger.json
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
@@ -251,7 +269,9 @@ shared-candidate-image:
 shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image:
 	@phase="$(@:shared-candidate-%=%)"; \
 	if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
-		PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go:$(CURDIR)/scripts" "$(PYTHON)" scripts/shared_phase.py "$$phase"; \
+		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+			"$(PYTHON)" -m scripts.go.service.shared_phase \
+			--config "$(GO_SERVICE_TOOLING_CONFIG)" "$$phase"; \
 	else case "$$phase" in generated) target=check-proto-drift;; breaking) target=check-proto-breaking;; integration) target=test-integration;; image) target=image-check;; esac; \
 		$(MAKE) --no-print-directory "$$target"; fi
 

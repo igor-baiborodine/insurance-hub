@@ -66,13 +66,13 @@ type gatewayConnection interface {
 type dependencies struct {
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
+	newQuery       func(config.Elasticsearch, *telemetry.DependencyObserver) (queryRuntime, error)
+	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.SearchPolicies) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
-	newGateway     func(policysearchv1.ExampleServiceClient, gateway.Settings) (http.Handler, error)
+	newGateway     func(policysearchv1.PolicySearchServiceClient, gateway.Settings) (http.Handler, error)
 	newUnavailable func(gateway.Settings) (http.Handler, error)
 	newBusiness    func(http.Handler, config.Config) httpServer
 	newManagement  func(*health.State) httpServer
-	echo           transport.Echo
 }
 
 func productionDependencies() dependencies {
@@ -81,8 +81,9 @@ func productionDependencies() dependencies {
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
-		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, echo transport.Echo) (grpcServer, error) {
-			return transport.NewServer(logger, tracer, propagator, settings, echo)
+		newQuery: newProductionQuery,
+		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, search transport.SearchPolicies) (grpcServer, error) {
+			return transport.NewServer(logger, tracer, propagator, settings, search)
 		},
 		newConnection:  newGatewayConnection,
 		newGateway:     gateway.NewHandler,
@@ -98,7 +99,6 @@ func productionDependencies() dependencies {
 			}
 		},
 		newManagement: func(state *health.State) httpServer { return health.NewManagementServer(state) },
-		echo:          transport.IdentityEcho,
 	}
 }
 
@@ -131,6 +131,7 @@ func newGatewayConnection(
 type runningService struct {
 	state              *health.State
 	provider           telemetryProvider
+	query              queryRuntime
 	grpcServer         grpcServer
 	grpcListener       net.Listener
 	connection         gatewayConnection
@@ -171,6 +172,18 @@ func run(
 	if err != nil {
 		return fail(err)
 	}
+	dependencyObserver, err := telemetry.NewDependencyObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+	)
+	if err != nil {
+		return fail(err)
+	}
+	runtime.query, err = deps.newQuery(settings.Elasticsearch, dependencyObserver)
+	if err != nil {
+		return fail(fmt.Errorf("run service: %w", err))
+	}
 	runtime.grpcServer, err = deps.newGRPCServer(
 		logger, provider.TracerProvider(), provider.GRPCPropagator(),
 		transport.Settings{
@@ -179,7 +192,7 @@ func run(
 			MaxSendBytes:    settings.MaxSendBytes,
 			Observer:        observer,
 			MeterProvider:   provider.MeterProvider(),
-		}, deps.echo,
+		}, runtime.query.SearchPolicies,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize gRPC transport: %w", err))
@@ -219,12 +232,21 @@ func run(
 	if err != nil {
 		return fail(fmt.Errorf("run service: gateway connection not ready: %w", err))
 	}
-	state, err := health.NewState(settings.ProbeTimeout, func(context.Context) error {
-		if runtime.connection.GetState() != connectivity.Ready {
-			return errors.New("gateway connection is not ready")
-		}
-		return nil
-	})
+	dependencyContext, cancelDependency := context.WithTimeout(ctx, settings.ProbeTimeout)
+	err = runtime.query.Check(dependencyContext)
+	cancelDependency()
+	if err != nil {
+		return fail(fmt.Errorf("run service: Elasticsearch not ready: %w", err))
+	}
+	state, err := health.NewState(
+		settings.ProbeTimeout,
+		func(checkContext context.Context) error {
+			if runtime.connection.GetState() != connectivity.Ready {
+				return errors.New("gateway connection is not ready")
+			}
+			return runtime.query.Check(checkContext)
+		},
+	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
 	}
@@ -238,7 +260,7 @@ func run(
 		Observer:       observer,
 	}
 	handler, err := deps.newGateway(
-		policysearchv1.NewExampleServiceClient(runtime.connection),
+		policysearchv1.NewPolicySearchServiceClient(runtime.connection),
 		gatewaySettings,
 	)
 	if err != nil {
@@ -424,6 +446,9 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 		); err != nil {
 			shutdownErrors = append(shutdownErrors, err)
 		}
+	}
+	if runtime.query != nil {
+		runtime.query.CloseIdleConnections()
 	}
 	if runtime.provider != nil {
 		if err := runtime.provider.Shutdown(overall); err != nil {

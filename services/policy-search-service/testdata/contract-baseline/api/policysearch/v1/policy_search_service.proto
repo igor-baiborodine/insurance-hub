@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package policysearch.v1;
+
+option go_package = "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/gen/policysearch/v1;policysearchv1";
+
+service PolicySearchService {
+  rpc SearchPolicies(SearchPoliciesRequest) returns (SearchPoliciesResponse);
+}
+
+message SearchPoliciesRequest {
+  optional string q = 1;
+}
+
+message SearchPoliciesResponse {
+  repeated Policy policies = 1;
+}
+
+message Policy {
+  optional string number = 1;
+  optional string date_from = 2;
+  optional string date_to = 3;
+  optional string policy_holder = 4;
+}
+
+message LegacyError {
+  string message = 1;
+  optional string path = 2;
+  ErrorLinks links = 3 [json_name = "_links"];
+}
+
+message ErrorLinks {
+  ErrorLink self = 1;
+}
+
+message ErrorLink {
+  string href = 1;
+  bool templated = 2;
+}

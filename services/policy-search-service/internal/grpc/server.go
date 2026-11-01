@@ -19,21 +19,14 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	policysearchv1 "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/gen/policysearch/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/telemetry"
 )
 
 const internalMessage = "internal error"
 
-// Echo handles the example's single responsibility independently of transport details.
-type Echo func(context.Context, string) (string, error)
-
-// IdentityEcho returns the supplied message while preserving a canceled request context.
-func IdentityEcho(ctx context.Context, message string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	return message, nil
-}
+// SearchPolicies invokes the application use case without exposing transport types to it.
+type SearchPolicies func(context.Context, string) ([]domain.Policy, error)
 
 type Settings struct {
 	RequestTimeout  time.Duration
@@ -43,13 +36,13 @@ type Settings struct {
 	MeterProvider   metric.MeterProvider
 }
 
-// NewServer constructs the instrumented server and registers the generated ExampleService.
+// NewServer constructs the instrumented server and registers PolicySearchService.
 func NewServer(
 	logger *slog.Logger,
 	tracerProvider trace.TracerProvider,
 	propagator propagation.TextMapPropagator,
 	settings Settings,
-	echo Echo,
+	search SearchPolicies,
 ) (*grpcgo.Server, error) {
 	if logger == nil {
 		return nil, errors.New("create gRPC server: logger is required")
@@ -60,10 +53,9 @@ func NewServer(
 	if propagator == nil {
 		return nil, errors.New("create gRPC server: propagator is required")
 	}
-	if echo == nil {
-		return nil, errors.New("create gRPC server: echo handler is required")
+	if search == nil {
+		return nil, errors.New("create gRPC server: search handler is required")
 	}
-
 	if settings.RequestTimeout <= 0 || settings.MaxReceiveBytes <= 0 ||
 		settings.MaxSendBytes <= 0 {
 		return nil, errors.New(
@@ -72,7 +64,7 @@ func NewServer(
 	}
 
 	validator, err := protovalidate.New(
-		protovalidate.WithMessages(&policysearchv1.EchoRequest{}),
+		protovalidate.WithMessages(&policysearchv1.SearchPoliciesRequest{}),
 		protovalidate.WithDisableLazy(),
 	)
 	if err != nil {
@@ -82,7 +74,6 @@ func NewServer(
 	if meterProvider == nil {
 		meterProvider = metricnoop.NewMeterProvider()
 	}
-
 	server := grpcgo.NewServer(
 		grpcgo.MaxRecvMsgSize(settings.MaxReceiveBytes),
 		grpcgo.MaxSendMsgSize(settings.MaxSendBytes),
@@ -94,54 +85,85 @@ func NewServer(
 					otelgrpc.WithPropagators(propagator),
 					otelgrpc.WithMeterProvider(meterProvider),
 					otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
-						return info.FullMethodName == policysearchv1.ExampleService_Echo_FullMethodName
+						return info.FullMethodName ==
+							policysearchv1.PolicySearchService_SearchPolicies_FullMethodName
 					}),
 				),
 			},
 		),
 		grpcgo.UnaryInterceptor(validationInterceptor(logger, validator)),
 	)
-	policysearchv1.RegisterExampleServiceServer(server, &exampleServer{
+	policysearchv1.RegisterPolicySearchServiceServer(server, &policySearchServer{
 		logger:         logger,
 		requestTimeout: settings.RequestTimeout,
-		echo:           echo,
+		search:         search,
 	})
 	return server, nil
 }
 
-type exampleServer struct {
-	policysearchv1.UnimplementedExampleServiceServer
+type policySearchServer struct {
+	policysearchv1.UnimplementedPolicySearchServiceServer
 	logger         *slog.Logger
 	requestTimeout time.Duration
-	echo           Echo
+	search         SearchPolicies
 }
 
-func (server *exampleServer) Echo(
+func (server *policySearchServer) SearchPolicies(
 	ctx context.Context,
-	request *policysearchv1.EchoRequest,
-) (*policysearchv1.EchoResponse, error) {
+	request *policysearchv1.SearchPoliciesRequest,
+) (*policysearchv1.SearchPoliciesResponse, error) {
+	if request == nil || request.Q == nil {
+		return nil, status.Error(codes.InvalidArgument, "q is required")
+	}
 	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
 	defer cancel()
-	message, err := server.echo(requestCtx, request.GetMessage())
+	policies, err := server.search(requestCtx, request.GetQ())
 	if err == nil {
 		err = requestCtx.Err()
 	}
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		switch {
+		case errors.Is(err, context.Canceled):
 			return nil, status.Error(codes.Canceled, context.Canceled.Error())
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
+		case errors.Is(err, context.DeadlineExceeded):
 			return nil, status.Error(
 				codes.DeadlineExceeded,
 				context.DeadlineExceeded.Error(),
 			)
+		default:
+			server.logger.ErrorContext(ctx, "policy search failed",
+				slog.String(
+					"rpc",
+					policysearchv1.PolicySearchService_SearchPolicies_FullMethodName,
+				),
+			)
+			return nil, status.Error(codes.Internal, internalMessage)
 		}
-		server.logger.ErrorContext(ctx, "echo request failed",
-			slog.String("rpc", policysearchv1.ExampleService_Echo_FullMethodName),
-		)
-		return nil, status.Error(codes.Internal, internalMessage)
 	}
-	return &policysearchv1.EchoResponse{Message: message}, nil
+	response := &policysearchv1.SearchPoliciesResponse{
+		Policies: make([]*policysearchv1.Policy, len(policies)),
+	}
+	for index := range policies {
+		response.Policies[index] = policyMessage(policies[index])
+	}
+	return response, nil
+}
+
+func policyMessage(policy domain.Policy) *policysearchv1.Policy {
+	message := &policysearchv1.Policy{}
+	if policy.Number != "" {
+		message.Number = proto.String(policy.Number)
+	}
+	if policy.DateFrom != nil {
+		message.DateFrom = proto.String(policy.DateFrom.String())
+	}
+	if policy.DateTo != nil {
+		message.DateTo = proto.String(policy.DateTo.String())
+	}
+	if policy.PolicyHolder != "" {
+		message.PolicyHolder = proto.String(policy.PolicyHolder)
+	}
+	return message
 }
 
 func validationInterceptor(
@@ -156,7 +178,9 @@ func validationInterceptor(
 	) (any, error) {
 		message, ok := request.(proto.Message)
 		if !ok {
-			logger.ErrorContext(ctx, "request validation failed",
+			logger.ErrorContext(
+				ctx,
+				"request validation failed",
 				slog.String("rpc", info.FullMethod),
 			)
 			return nil, status.Error(codes.Internal, internalMessage)
@@ -165,7 +189,9 @@ func validationInterceptor(
 			if _, ok := errors.AsType[*protovalidate.ValidationError](err); ok {
 				return nil, status.Error(codes.InvalidArgument, "invalid request")
 			}
-			logger.ErrorContext(ctx, "request validation failed",
+			logger.ErrorContext(
+				ctx,
+				"request validation failed",
 				slog.String("rpc", info.FullMethod),
 			)
 			return nil, status.Error(codes.Internal, internalMessage)
@@ -187,7 +213,7 @@ func (handler *requestStatsHandler) TagRPC(
 ) context.Context {
 	ctx = handler.Handler.TagRPC(ctx, info)
 	if handler.observer != nil &&
-		info.FullMethodName == policysearchv1.ExampleService_Echo_FullMethodName {
+		info.FullMethodName == policysearchv1.PolicySearchService_SearchPolicies_FullMethodName {
 		return context.WithValue(ctx, requestStateKey{}, handler.observer.StartGRPC(ctx))
 	}
 	return ctx

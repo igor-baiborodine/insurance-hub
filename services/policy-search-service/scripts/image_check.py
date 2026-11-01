@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the Policy Search runtime image and its owned Echo lifecycle."""
+"""Validate the Policy Search image's search and dependency lifecycle."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ REPOSITORY_ROOT = Path(
 ).resolve()
 sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from scripts.python.process_runner import CommandError, run_command  # noqa: E402
+from scripts.python.process_runner import CommandError, run_command  # noqa: E402, I001
 
 from scaffold_process import child_environment  # noqa: E402
 
@@ -34,19 +34,7 @@ def require(condition: object, message: str) -> None:
 
 
 def environment() -> dict[str, str]:
-    return child_environment(
-        {
-            name: os.environ.get(name, "")
-            for name in (
-                "IMAGE_REF",
-                "SOURCE_CREATED",
-                "SOURCE_REPOSITORY",
-                "SOURCE_REVISION",
-                "SOURCE_VERSION",
-                "TARGET_PLATFORM",
-            )
-        }
-    )
+    return child_environment({"IMAGE_REF": os.environ.get("IMAGE_REF", "")})
 
 
 def command(arguments: list[str], activity: str, timeout: float = 30) -> str:
@@ -67,9 +55,8 @@ def mapped_port(docker: str, container: str, port: int) -> int:
     return int(value.rsplit(":", 1)[1])
 
 
-def request(url: str, body: bytes | None = None) -> tuple[int, bytes]:
+def request(url: str, body: bytes | None = None, method: str = "GET") -> tuple[int, bytes]:
     headers = {"Content-Type": "application/json"} if body is not None else {}
-    method = "POST" if body is not None else "GET"
     try:
         with urllib.request.urlopen(
             urllib.request.Request(url, data=body, headers=headers, method=method), timeout=2
@@ -79,60 +66,106 @@ def request(url: str, body: bytes | None = None) -> tuple[int, bytes]:
         return error.code, error.read()
 
 
-def wait_ready(url: str) -> None:
-    deadline = time.monotonic() + 30
+def wait_status(url: str, expected: int, description: str, seconds: int = 30) -> None:
+    deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         try:
-            if request(url) == (200, b"ready\n"):
+            if request(url)[0] == expected:
                 return
         except OSError:
             pass
         time.sleep(0.2)
-    raise ImageCheckError("runtime image did not become ready within 30 seconds")
+    raise ImageCheckError(f"{description} did not reach HTTP {expected} within {seconds} seconds")
+
+
+def create_fixture(endpoint: str) -> None:
+    mapping = {
+        "mappings": {
+            "dynamic": "strict",
+            "properties": {
+                "number": {"type": "keyword"},
+                "policyHolder": {"type": "text"},
+                "dateFrom": {"type": "date", "format": "strict_date"},
+                "dateTo": {"type": "date", "format": "strict_date"},
+            },
+        }
+    }
+    require(
+        request(
+            endpoint + "/policy-views-issue-229",
+            json.dumps(mapping).encode(),
+            "PUT",
+        )[0]
+        == 200,
+        "image fixture index creation failed",
+    )
+    document = {
+        "number": "POLICY-SYNTHETIC-001",
+        "policyHolder": "Synthetic Person",
+        "dateFrom": "2024-05-01",
+        "dateTo": "2025-04-30",
+    }
+    require(
+        request(
+            endpoint + "/policy-views-issue-229/_doc/accepted?refresh=true",
+            json.dumps(document).encode(),
+            "PUT",
+        )[0]
+        in {200, 201},
+        "image fixture document creation failed",
+    )
 
 
 def main() -> int:
     docker = os.environ.get("DOCKER", "docker")
     image = os.environ.get("IMAGE_REF", "")
+    elasticsearch_image = os.environ.get("ELASTICSEARCH_IMAGE", "")
     container = ""
+    elasticsearch = ""
+    network = ""
+    failed = False
     try:
-        required = {
-            name: os.environ.get(name, "")
-            for name in (
-                "SOURCE_CREATED",
-                "SOURCE_REPOSITORY",
-                "SOURCE_REVISION",
-                "SOURCE_VERSION",
-            )
-        }
         require(bool(image), "IMAGE_REF is required")
-        require(all(required.values()), "source identity is incomplete")
-        inspected = json.loads(command([docker, "image", "inspect", image], "inspect image"))
-        require(isinstance(inspected, list) and len(inspected) == 1, "image inspect differs")
-        record = inspected[0]
-        config = record.get("Config", {})
-        labels = config.get("Labels", {})
-        require(
-            record.get("Os") == "linux" and record.get("Architecture") == "amd64",
-            "image platform differs",
+        require(bool(elasticsearch_image), "ELASTICSEARCH_IMAGE is required")
+        suffix = f"{os.getpid()}-{time.monotonic_ns()}"
+        network = f"policy-search-image-{suffix}"
+        elasticsearch_name = f"policy-search-es-{suffix}"
+        command([docker, "network", "create", network], "create image-check network")
+        elasticsearch = command(
+            [
+                docker,
+                "run",
+                "--detach",
+                "--name",
+                elasticsearch_name,
+                "--network",
+                network,
+                "--publish",
+                "127.0.0.1::9200",
+                "--env",
+                "discovery.type=single-node",
+                "--env",
+                "xpack.security.enabled=false",
+                "--env",
+                "xpack.security.http.ssl.enabled=false",
+                "--env",
+                "ES_JAVA_OPTS=-Xms512m -Xmx512m",
+                elasticsearch_image,
+            ],
+            "start image-check Elasticsearch",
+            60,
         )
-        require(config.get("User") == "65532:65532", "runtime user differs")
-        require(config.get("Entrypoint") == ["/policy-search-service"], "entrypoint differs")
-        expected = {
-            "org.opencontainers.image.created": required["SOURCE_CREATED"],
-            "org.opencontainers.image.source": required["SOURCE_REPOSITORY"],
-            "org.opencontainers.image.revision": required["SOURCE_REVISION"],
-            "org.opencontainers.image.title": "Insurance Hub Policy Search API",
-            "org.opencontainers.image.version": required["SOURCE_VERSION"],
-        }
-        require(
-            all(labels.get(key) == value for key, value in expected.items()), "OCI identity differs"
-        )
+        elasticsearch_port = mapped_port(docker, elasticsearch, 9200)
+        elasticsearch_endpoint = f"http://127.0.0.1:{elasticsearch_port}"
+        wait_status(elasticsearch_endpoint, 200, "image-check Elasticsearch")
+        create_fixture(elasticsearch_endpoint)
         container = command(
             [
                 docker,
                 "run",
                 "--detach",
+                "--network",
+                network,
                 "--publish",
                 "127.0.0.1::8080",
                 "--publish",
@@ -143,6 +176,8 @@ def main() -> int:
                 "GRPC_ADDR=0.0.0.0:9090",
                 "--env",
                 "HEALTH_ADDR=0.0.0.0:8081",
+                "--env",
+                f"ELASTICSEARCH_URL=http://{elasticsearch_name}:9200",
                 image,
             ],
             "start runtime image",
@@ -150,39 +185,82 @@ def main() -> int:
         )
         http_port = mapped_port(docker, container, 8080)
         management_port = mapped_port(docker, container, 8081)
-        wait_ready(f"http://127.0.0.1:{management_port}/readyz")
+        wait_status(f"http://127.0.0.1:{management_port}/readyz", 200, "runtime readiness")
         require(
             request(f"http://127.0.0.1:{management_port}/livez") == (200, b"live\n"),
             "liveness differs",
         )
         require(
-            request(
-                f"http://127.0.0.1:{http_port}/v1/example/echo",
-                b'{"message":"hello"}',
-            )
-            == (200, b'{"message":"hello"}'),
-            "image Echo differs",
+            request(f"http://127.0.0.1:{http_port}/policies?q=Synthetic%20Person")[0] == 200,
+            "image search differs",
         )
         require(
-            request(f"http://127.0.0.1:{http_port}/v1/example/echo", b'{"message":""}')[0] == 400,
-            "image invalid Echo was accepted",
+            request(f"http://127.0.0.1:{http_port}/policies?q=")[0] == 200,
+            "image explicit empty query differs",
+        )
+        require(
+            request(f"http://127.0.0.1:{http_port}/policies")[0] == 400,
+            "image absent query was accepted",
+        )
+        command(
+            [docker, "network", "disconnect", network, elasticsearch],
+            "disconnect image-check dependency",
+        )
+        wait_status(
+            f"http://127.0.0.1:{management_port}/readyz",
+            503,
+            "runtime dependency-loss readiness",
+        )
+        require(
+            request(f"http://127.0.0.1:{management_port}/livez") == (200, b"live\n"),
+            "liveness failed with dependency loss",
+        )
+        command(
+            [docker, "network", "connect", network, elasticsearch],
+            "reconnect image-check dependency",
+        )
+        wait_status(
+            f"http://127.0.0.1:{management_port}/readyz",
+            200,
+            "runtime recovered readiness",
+            seconds=90,
         )
         started = time.monotonic()
         command([docker, "stop", "--time", "10", container], "stop runtime image", 20)
         require(time.monotonic() - started <= 15, "image shutdown exceeded the owned bound")
         logs = command([docker, "logs", container], "read runtime logs")
         require("configuration failed" not in logs, "runtime image reported configuration failure")
-        container = ""
-    except (ImageCheckError, CommandError, OSError, ValueError, json.JSONDecodeError) as error:
+    except (ImageCheckError, CommandError, OSError, ValueError) as error:
         print(f"policy-search-image-check: {error}", file=sys.stderr)
-        return 1
+        failed = True
     finally:
         if container:
             try:
                 command([docker, "rm", "--force", container], "remove runtime image container")
             except CommandError, OSError:
                 print("policy-search-image-check: container cleanup failed", file=sys.stderr)
-    print(f"policy-search-image-check: image={image} echo=passed shutdown=passed")
+                failed = True
+        if elasticsearch:
+            try:
+                command(
+                    [docker, "rm", "--force", elasticsearch],
+                    "remove image-check Elasticsearch",
+                )
+            except CommandError, OSError:
+                print("policy-search-image-check: Elasticsearch cleanup failed", file=sys.stderr)
+                failed = True
+        if network:
+            try:
+                command([docker, "network", "rm", network], "remove image-check network")
+            except CommandError, OSError:
+                print("policy-search-image-check: network cleanup failed", file=sys.stderr)
+                failed = True
+    if failed:
+        return 1
+    print(
+        f"policy-search-image-check: image={image} search=passed "
+        "dependency-lifecycle=passed shutdown=passed"
+    )
     return 0
 
 

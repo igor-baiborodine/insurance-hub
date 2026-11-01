@@ -22,6 +22,12 @@ COMMAND_TIMEOUT_SECONDS = 600
 TEARDOWN_TIMEOUT_SECONDS = 10
 HEARTBEAT_SECONDS = 30
 MODULE_TOOLING_VARIABLES = ("PYTHON",)
+MAIN_COVERAGE_WORKFLOW = ".github/workflows/go-main-coverage.yml"
+MAIN_COVERAGE_MODULES = (
+    ("libs/servicekit", "public-shared", "servicekit"),
+    ("services/product-service", "business-service", "product-service"),
+    ("services/policy-search-service", "business-service", "policy-search-service"),
+)
 ROLES = frozenset(
     {"service-scaffold", "business-service", "public-contract", "public-shared", "tool"}
 )
@@ -536,6 +542,85 @@ def require_literal(text: str, workflow: str, literal: str, description: str) ->
     require(literal in text, f"workflow {workflow} is missing {description}: {literal}")
 
 
+def main_coverage_check(root: Path) -> None:
+    workflow = MAIN_COVERAGE_WORKFLOW
+    path = root / workflow
+    require(path.is_file(), f"missing workflow: {workflow}")
+    text = path.read_text(encoding="utf-8")
+    for literal, description in (
+        ("  push:\n", "push-only event"),
+        ("      - main\n", "main branch trigger"),
+        ("permissions:\n  contents: read\n", "read-only permissions"),
+        ("group: go-main-coverage-${{ github.ref }}", "main coverage concurrency group"),
+        ("cancel-in-progress: true", "superseded-run cancellation"),
+        ("runs-on: ubuntu-24.04", "pinned runner family"),
+        ("timeout-minutes: 20", "bounded job duration"),
+        ("fail-fast: false", "complete coverage matrix"),
+        (
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+            "immutable checkout action",
+        ),
+        ("ref: ${{ github.sha }}", "exact pushed revision checkout"),
+        ("persist-credentials: false", "disabled checkout credentials"),
+        (
+            "astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3",
+            "immutable uv setup action",
+        ),
+        ("version: '0.13.1'", "pinned uv runtime"),
+        ("run: make python-toolchain-setup", "managed Python setup"),
+        (
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0",
+            "immutable Go setup action",
+        ),
+        ("go-version-file: ${{ matrix.module }}/go.mod", "module-owned Go version"),
+        ("if: matrix.role == 'public-shared'", "shared-tool bootstrap condition"),
+        ('run: make -C "$MODULE_DIR" bootstrap-go-tools', "shared-tool bootstrap owner"),
+        ('rm -f -- "$COVERAGE_FILE" "$INTEGRATION_COVERAGE_FILE"', "clean coverage inputs"),
+        ("if [[ \"$MODULE_ROLE\" == 'public-shared' ]]; then", "shared coverage selection"),
+        ('            make -C "$MODULE_DIR" coverage\n', "shared coverage owner"),
+        ("elif [[ \"$MODULE_ROLE\" == 'business-service' ]]; then", "business coverage selection"),
+        ('make -C "$MODULE_DIR" coverage-check', "module coverage owner"),
+        ('make -C "$MODULE_DIR" test-integration', "business integration coverage owner"),
+        ("unsupported coverage role", "fail-closed role selection"),
+        (
+            "codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1",
+            "immutable Codecov action",
+        ),
+        ("token: ${{ secrets.CODECOV_TOKEN }}", "Codecov credential binding"),
+        ("files: ${{ matrix.coverage_files }}", "matrix coverage files"),
+        ("flags: ${{ matrix.flag }}", "matrix coverage flag"),
+        ("name: ${{ matrix.flag }}-main", "main coverage upload name"),
+        ("disable_search: true", "explicit Codecov file selection"),
+        ("fail_ci_if_error: true", "fail-closed Codecov upload"),
+    ):
+        require_literal(text, workflow, literal, description)
+    require("  pull_request:" not in text, f"workflow {workflow} must not run on pull_request")
+    modules = tuple(re.findall(r"^          - module: (\S+)$", text, flags=re.MULTILINE))
+    require(
+        modules == tuple(item[0] for item in MAIN_COVERAGE_MODULES),
+        f"workflow {workflow} must publish the complete coverage module matrix",
+    )
+    for module, role, flag in MAIN_COVERAGE_MODULES:
+        coverage_files = f"{module}/coverage.txt"
+        if role == "business-service":
+            coverage_files += f",{module}/integration-coverage.txt"
+        record = (
+            f"          - module: {module}\n"
+            f"            role: {role}\n"
+            f"            coverage_files: {coverage_files}\n"
+            f"            flag: {flag}\n"
+        )
+        require(record in text, f"workflow {workflow} has invalid matrix record for {module}")
+
+    codecov_path = root / "codecov.yml"
+    require(codecov_path.is_file(), "missing Codecov configuration: codecov.yml")
+    codecov = codecov_path.read_text(encoding="utf-8")
+    require("    carryforward: false\n" in codecov, "Codecov flags must not carry forward")
+    for module, _role, flag in MAIN_COVERAGE_MODULES:
+        record = f"    - name: {flag}\n      paths:\n        - {module}/\n"
+        require(record in codecov, f"Codecov configuration is missing exact {flag} flag ownership")
+
+
 def expected_selector_outputs(module: dict[str, Any], merge_base: str) -> dict[str, str]:
     directory = module["directory"]
     coverage_file = f"{directory}/coverage.txt"
@@ -937,6 +1022,7 @@ def topology_check(root: Path, inventory: dict[str, Any]) -> None:
     if errors:
         raise TopologyError("\n".join(f"go-topology-check: {item}" for item in errors))
     ci_check(root, inventory)
+    main_coverage_check(root)
     boundary_check(root, inventory)
     print(f"Go module topology: {len(inventory['modules'])} module(s), 0 approved workspace(s)")
     for module in inventory["modules"]:
@@ -982,6 +1068,7 @@ def main(argv: list[str] | None = None) -> int:
         boundary_check(root, inventory)
     elif arguments.command == "ci-coverage":
         ci_check(root, inventory)
+        main_coverage_check(root)
     else:
         modules_check(root, inventory)
     return 0

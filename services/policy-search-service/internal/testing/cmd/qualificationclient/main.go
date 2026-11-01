@@ -2,7 +2,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -10,17 +9,18 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	policysearchv1 "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/gen/policysearch/v1"
 )
+
+const maxHTTPResponseBytes = 1 << 20
 
 func main() {
 	if err := run(); err != nil {
@@ -32,6 +32,11 @@ func main() {
 func run() error {
 	mode := flag.String("mode", "", "http, grpc, health, or tcp")
 	address := flag.String("address", "", "URL or host:port")
+	query := flag.String(
+		"query",
+		"Synthetic Person",
+		"policy query used by HTTP and gRPC checks",
+	)
 	expectDenied := flag.Bool("expect-denied", false, "require the TCP connection to fail")
 	flag.Parse()
 	if *address == "" {
@@ -42,9 +47,9 @@ func run() error {
 	defer cancel()
 	switch *mode {
 	case "http":
-		return checkHTTP(ctx, *address)
+		return checkHTTP(ctx, *address, *query)
 	case "grpc":
-		return checkGRPC(ctx, *address)
+		return checkGRPC(ctx, *address, *query)
 	case "health":
 		return checkHealth(ctx, *address)
 	case "tcp":
@@ -54,42 +59,57 @@ func run() error {
 	}
 }
 
-func checkHTTP(ctx context.Context, address string) error {
-	statusCode, body, err := request(ctx, address, []byte(`{"message":"hello"}`))
+func checkHTTP(ctx context.Context, address, query string) error {
+	statusCode, body, err := request(ctx, address, query)
 	if err != nil {
 		return err
 	}
-	var response map[string]string
-	if statusCode != http.StatusOK || json.Unmarshal(body, &response) != nil ||
-		response["message"] != "hello" {
-		return fmt.Errorf("valid HTTP Echo differed")
+	var response struct {
+		Policies []json.RawMessage `json:"policies"`
 	}
-	statusCode, _, err = request(ctx, address, []byte(`{"message":""}`))
+	if statusCode != http.StatusOK {
+		return fmt.Errorf("HTTP policy search returned %d", statusCode)
+	}
+	if json.Unmarshal(body, &response) != nil {
+		first := byte(0)
+		if len(body) > 0 {
+			first = body[0]
+		}
+		return fmt.Errorf(
+			"HTTP policy search response was malformed: bytes=%d first=%d",
+			len(body),
+			first,
+		)
+	}
+	if len(response.Policies) == 0 {
+		return fmt.Errorf("HTTP policy search returned no policies")
+	}
+	statusCode, _, err = request(ctx, address, "")
 	if err != nil {
 		return err
 	}
-	if statusCode != http.StatusBadRequest {
-		return fmt.Errorf("invalid HTTP Echo returned %d", statusCode)
+	if statusCode != http.StatusOK {
+		return fmt.Errorf("empty HTTP policy query returned %d", statusCode)
 	}
 	return nil
 }
 
-func request(ctx context.Context, address string, body []byte) (int, []byte, error) {
+func request(ctx context.Context, address, query string) (int, []byte, error) {
 	request, err := http.NewRequestWithContext(
 		ctx,
-		http.MethodPost,
-		address,
-		bytes.NewReader(body),
+		http.MethodGet,
+		address+"?q="+url.QueryEscape(query),
+		nil,
 	)
 	if err != nil {
 		return 0, nil, fmt.Errorf("create HTTP request: %w", err)
 	}
-	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		return 0, nil, fmt.Errorf("send HTTP request: %w", err)
 	}
-	payload, err := io.ReadAll(io.LimitReader(response.Body, 4097))
+	payload, err := io.ReadAll(io.LimitReader(response.Body, maxHTTPResponseBytes+1))
 	if err != nil {
 		_ = response.Body.Close()
 		return 0, nil, fmt.Errorf("read HTTP response: %w", err)
@@ -97,10 +117,13 @@ func request(ctx context.Context, address string, body []byte) (int, []byte, err
 	if err := response.Body.Close(); err != nil {
 		return 0, nil, fmt.Errorf("close HTTP response: %w", err)
 	}
+	if len(payload) > maxHTTPResponseBytes {
+		return 0, nil, fmt.Errorf("HTTP response exceeded limit")
+	}
 	return response.StatusCode, payload, nil
 }
 
-func checkGRPC(ctx context.Context, address string) error {
+func checkGRPC(ctx context.Context, address, query string) error {
 	connection, err := grpc.NewClient(
 		address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -109,14 +132,13 @@ func checkGRPC(ctx context.Context, address string) error {
 		return fmt.Errorf("create gRPC client: %w", err)
 	}
 	defer func() { _ = connection.Close() }()
-	client := policysearchv1.NewExampleServiceClient(connection)
-	response, err := client.Echo(ctx, &policysearchv1.EchoRequest{Message: "hello"})
-	if err != nil || response.GetMessage() != "hello" {
-		return fmt.Errorf("valid gRPC Echo differed: %w", err)
-	}
-	_, err = client.Echo(ctx, &policysearchv1.EchoRequest{Message: strings.Repeat("é", 65)})
-	if status.Code(err) != codes.InvalidArgument {
-		return fmt.Errorf("oversized gRPC Echo returned %s", status.Code(err))
+	client := policysearchv1.NewPolicySearchServiceClient(connection)
+	response, err := client.SearchPolicies(
+		ctx,
+		&policysearchv1.SearchPoliciesRequest{Q: proto.String(query)},
+	)
+	if err != nil || len(response.GetPolicies()) == 0 {
+		return fmt.Errorf("gRPC policy search differed: %w", err)
 	}
 	return nil
 }

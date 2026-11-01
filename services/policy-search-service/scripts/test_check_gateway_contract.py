@@ -1,4 +1,4 @@
-"""Independent fixtures for the generated Echo Swagger contract check."""
+"""Independent fixtures for the generated search Swagger contract check."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pytest
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 CONTRACT = MODULE_ROOT / "testdata" / "http-contract.json"
-SWAGGER = MODULE_ROOT / "gen/openapiv2/policysearch/v1/example_service.swagger.json"
+SWAGGER = MODULE_ROOT / "gen/openapiv2/policysearch/v1/policy_search_service.swagger.json"
 
 
 def test_current_generated_swagger_matches_contract() -> None:
@@ -21,17 +21,21 @@ def test_current_generated_swagger_matches_contract() -> None:
 
 
 def change_path(swagger: dict[str, Any]) -> None:
-    swagger["paths"]["/v1/example/changed"] = swagger["paths"].pop("/v1/example/echo")
+    swagger["paths"]["/changed"] = swagger["paths"].pop("/policies")
 
 
 def change_status_example(swagger: dict[str, Any]) -> None:
-    swagger["paths"]["/v1/example/echo"]["post"]["responses"]["503"]["examples"][
-        "application/json"
-    ]["message"] = "raw upstream failure"
+    swagger["paths"]["/policies"]["get"]["responses"]["503"]["examples"]["application/json"][
+        "message"
+    ] = "raw upstream failure"
 
 
 def add_response(swagger: dict[str, Any]) -> None:
-    swagger["paths"]["/v1/example/echo"]["post"]["responses"]["418"] = {"description": "unexpected"}
+    swagger["paths"]["/policies"]["get"]["responses"]["418"] = {"description": "unexpected"}
+
+
+def make_query_optional(swagger: dict[str, Any]) -> None:
+    swagger["paths"]["/policies"]["get"]["parameters"][0]["required"] = False
 
 
 @pytest.mark.parametrize(
@@ -40,6 +44,7 @@ def add_response(swagger: dict[str, Any]) -> None:
         (change_path, "paths must contain only"),
         (change_status_example, "response 503 example differs"),
         (add_response, "response status set differs"),
+        (make_query_optional, "query parameter required differs"),
     ],
 )
 def test_contract_check_rejects_controlled_swagger_drift(

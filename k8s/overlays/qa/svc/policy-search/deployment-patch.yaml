@@ -8,3 +8,26 @@ spec:
       containers:
         - name: policy-search-api
           imagePullPolicy: Always
+          env:
+            - name: ELASTICSEARCH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: qa-policy-search-elasticsearch
+                  key: username
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: qa-policy-search-elasticsearch
+                  key: password
+          volumeMounts:
+            - name: elasticsearch-ca
+              mountPath: /etc/policy-search/elasticsearch
+              readOnly: true
+      volumes:
+        - name: elasticsearch-ca
+          secret:
+            secretName: qa-policy-search-elasticsearch-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 292
