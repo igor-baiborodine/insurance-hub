@@ -7,10 +7,10 @@ DEPLOY_ENV ?=
 INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
-PYTHON_TOOLING_FILES := $(wildcard scripts/deployment.py scripts/image_check.py \
+PYTHON_TOOLING_FILES := $(wildcard scripts/deployment.py scripts/disposable_deployment.py scripts/image_check.py \
 	scripts/policy_search_deployment_checks.py scripts/scaffold_process.py scripts/shared_phase.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
-	scripts/test_deployment.py scripts/test_scaffold_process.py scripts/test_tooling.py \
+	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_scaffold_process.py scripts/test_tooling.py \
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_scaffold_process.py \
@@ -89,7 +89,8 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
 	image-build image-check _image-check-existing test-integration deploy-render deploy-check \
-	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling \
+	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
+	build-qualification-client \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
 	shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image
@@ -137,6 +138,15 @@ deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runt
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed deployment guards without a cluster
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" -m pytest -q scripts/test_deployment.py
+
+deploy-test: python-toolchain-check image-build ## Exercise the exact image in an owned disposable Kind namespace
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" \
+		"$(PYTHON)" -m pytest -q -m integration scripts/test_disposable_deployment.py
+
+build-qualification-client: ## Build the read-only disposable HTTP/gRPC qualification client
+	@test -n "$(strip $(QUALIFICATION_CLIENT_OUTPUT))" || { echo 'QUALIFICATION_CLIENT_OUTPUT is required' >&2; exit 1; }
+	GOWORK=off $(GO) build -mod=readonly -trimpath -o "$(QUALIFICATION_CLIENT_OUTPUT)" \
+		./internal/testing/cmd/qualificationclient
 
 python-tooling-format-check: python-toolchain-check
 	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \

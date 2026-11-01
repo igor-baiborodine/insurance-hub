@@ -75,7 +75,7 @@
         "managed CPython 3.14.8",
         "pinned Policy Search Go tools installed by make -C services/policy-search-service bootstrap-go-tools",
         "GCC for race-enabled tests",
-        "Docker Engine with buildx access for runtime image checks",
+        "Docker Engine, Kind and kubectl access for runtime image and disposable deployment checks",
         "public module, schema, tool, vulnerability and container services unless cached"
       ],
       "consumers": [

@@ -35,6 +35,7 @@ Run non-mutating checks from the repository root:
 make go-svc-image-check SVC_NAME=policy-search
 make go-svc-deploy-check SVC_NAME=policy-search
 make go-svc-deploy-test-tooling SVC_NAME=policy-search
+make go-svc-deploy-test SVC_NAME=policy-search
 make go-svc-release-test
 make go-svc-dispatch-test
 ```
@@ -42,7 +43,9 @@ make go-svc-dispatch-test
 `deploy-check` renders local-dev and QA, checks workload security, resources, probes, runtime
 budgets, service exposure, telemetry and NetworkPolicy, and confirms the Go QA overlay is absent
 from the shared QA root. Rendering and fake-adapter tests do not prove admission, enforcement or
-signal delivery. Use `go-svc-deploy-test` after its disposable owner is registered.
+signal delivery. `deploy-test` uses a uniquely named namespace on the configured Kind cluster and
+removes that namespace plus its scratch qualification image after transport, policy, restart and
+restoration checks. It leaves the reviewed runtime image loaded for the later local-dev operation.
 
 ## Select local-dev
 

@@ -17,7 +17,7 @@ from typing import Any
 
 import yaml
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 sys.path.insert(0, str(ROOT))
 
 from scripts.go.service.configuration import service_record, target_record  # noqa: E402

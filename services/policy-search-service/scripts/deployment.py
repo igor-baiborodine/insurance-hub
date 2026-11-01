@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import sys
 from pathlib import Path
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+REPOSITORY_ROOT = Path(
+    os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])
+).resolve()
 sys.path.insert(0, str(REPOSITORY_ROOT))
 
 import policy_search_deployment_checks as checks  # noqa: E402

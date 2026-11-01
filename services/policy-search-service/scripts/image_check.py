@@ -12,7 +12,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+REPOSITORY_ROOT = Path(
+    os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])
+).resolve()
 sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from scripts.python.process_runner import CommandError, run_command  # noqa: E402

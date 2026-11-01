@@ -120,8 +120,8 @@ the runner's numeric status. The runner disables pytest temporary-path retention
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
 Database/broker integration, mock generation and migrations are not applicable to this Echo
-increment. Image and deployment ownership are documented below as they are added; no placeholder
-database or broker target is supplied.
+increment. The image and deployment owners below include a real disposable Kind-namespace check;
+no placeholder database or broker target is supplied.
 
 ### Go file selection
 
@@ -312,6 +312,7 @@ root, validate the image and both isolated overlays without changing a cluster:
 make go-svc-image-check SVC_NAME=policy-search
 make go-svc-deploy-check SVC_NAME=policy-search
 make go-svc-deploy-test-tooling SVC_NAME=policy-search
+make go-svc-deploy-test SVC_NAME=policy-search
 ```
 
 The local-dev target uses context `kind-local-dev-insurance-hub` and namespace `local-dev-all`.
@@ -330,9 +331,13 @@ make go-svc-deploy SVC_NAME=policy-search
 make go-svc-deploy-verify SVC_NAME=policy-search
 ```
 
-These commands never select an environment implicitly. Direct image load, apply and stop reject QA;
-QA is owned by Git and the shared Flux reconciliation. The QA overlay is staged outside the shared
-root until its activation PR. See the
+The disposable test builds the exact committed image, deploys it into a uniquely named namespace on
+the configured Kind cluster, exercises both transports and allowed/denied NetworkPolicy paths,
+restarts, scales to zero, restores, and removes that namespace and its qualification image.
+
+Commands never select an environment implicitly. Direct image load, apply and stop reject QA; QA
+is owned by Git and the shared Flux reconciliation. The QA overlay is staged outside the shared root
+until its activation PR. See the
 [deployment runbook](../../docs/migration/phase-4/policy-search-service/deployment-runbook.md) for
 release, diagnostics, reachability, cleanup and restoration procedures.
 
