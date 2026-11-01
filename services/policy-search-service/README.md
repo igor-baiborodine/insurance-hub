@@ -342,8 +342,10 @@ the configured Kind cluster, exercises both transports and allowed/denied Networ
 restarts, scales to zero, restores, and removes that namespace and its qualification image.
 
 Commands never select an environment implicitly. Direct image load, apply and stop reject QA; QA
-is owned by Git and the shared Flux reconciliation. The QA overlay is staged outside the shared root
-until its activation PR. See the
+is owned by Git and the shared Flux reconciliation. QA status and verification require both
+`DEPLOY_SOURCE_REVISION=<40-source-hex>` and `DEPLOY_IMAGE_DIGEST=sha256:<64-hex>`; the latter must
+match the running Policy Search container's runtime `imageID`. The QA overlay is staged outside the
+shared root until its activation PR. See the
 [deployment runbook](../../docs/migration/phase-4/policy-search-service/deployment-runbook.md) for
 release, diagnostics, reachability, cleanup and restoration procedures.
 

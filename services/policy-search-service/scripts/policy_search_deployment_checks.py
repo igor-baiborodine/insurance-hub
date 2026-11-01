@@ -542,6 +542,47 @@ class Target:
                 f"live Deployment/{name} image differs; declare DEPLOY_PREVIOUS_IMAGE_REF for a local rollout",
             )
 
+        if require_deployment and self.configuration["mode"] == "flux":
+            self.require_running_image_digest(desired_deployment)
+
+    def require_running_image_digest(self, desired_deployment: dict[str, Any]) -> None:
+        expected = os.environ.get("DEPLOY_IMAGE_DIGEST", "")
+        require(
+            bool(re.fullmatch(r"sha256:[0-9a-f]{64}", expected)),
+            "DEPLOY_IMAGE_DIGEST is required for QA live verification",
+        )
+        selector = desired_deployment["spec"]["selector"]["matchLabels"]
+        label_selector = ",".join(f"{key}={value}" for key, value in sorted(selector.items()))
+        listing = self.json("get", "pods", "-l", label_selector)
+        pods = [
+            pod
+            for pod in listing.get("items", [])
+            if not pod.get("metadata", {}).get("deletionTimestamp")
+        ]
+        expected_replicas = desired_deployment["spec"]["replicas"]
+        require(
+            len(pods) == expected_replicas,
+            "running Policy Search Pod inventory differs",
+        )
+        container_name = desired_deployment["spec"]["template"]["spec"]["containers"][0]["name"]
+        for pod in pods:
+            conditions = pod.get("status", {}).get("conditions", [])
+            statuses = pod.get("status", {}).get("containerStatuses", [])
+            matches = [item for item in statuses if item.get("name") == container_name]
+            require(
+                pod.get("status", {}).get("phase") == "Running"
+                and any(
+                    item.get("type") == "Ready" and item.get("status") == "True"
+                    for item in conditions
+                )
+                and len(matches) == 1
+                and (
+                    matches[0].get("imageID") == expected
+                    or matches[0].get("imageID", "").endswith("@" + expected)
+                ),
+                "running Policy Search Pod image digest differs",
+            )
+
 
 def check_render() -> None:
     validate_render(os.environ.get("DEPLOY_ENV", ""), render(os.environ.get("DEPLOY_ENV", "")))

@@ -139,7 +139,9 @@ PR1 keeps the overlay inactive; a later reviewed activation adds exactly `./poli
 are verified.
 
 Direct `image-load`, `deploy` and `stop` operations reject QA. Use the shared `qa-svc` Flux owner,
-observe its source revision and reconciliation, and verify the exact image digest, Pod identity,
-Alloy signals and NetworkPolicy from the QA target. Removal and restoration require separate Git
-revisions so Flux can observe both states. Do not add an initialization Job or a service-specific
-Flux source.
+observe its source revision and reconciliation, and export both the exact 40-character reconciled
+commit as `DEPLOY_SOURCE_REVISION` and the published `sha256:<64-hex>` registry digest as
+`DEPLOY_IMAGE_DIGEST`. QA status and verify reject a missing digest or a running Policy Search Pod
+whose runtime `imageID` differs. Also verify Pod identity, Alloy signals and NetworkPolicy from the
+QA target. Removal and restoration require separate Git revisions so Flux can observe both states.
+Do not add an initialization Job or a service-specific Flux source.

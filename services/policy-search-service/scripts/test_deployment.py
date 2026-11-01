@@ -179,6 +179,70 @@ def test_live_state_accepts_api_server_normalized_resources() -> None:
             target.live(items, require_deployment=True)
 
 
+@pytest.mark.parametrize(
+    ("expected", "image_id", "message"),
+    [
+        (
+            "sha256:" + "a" * 64,
+            "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api@sha256:" + "a" * 64,
+            "",
+        ),
+        (
+            "sha256:" + "a" * 64,
+            "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api@sha256:" + "b" * 64,
+            "image digest differs",
+        ),
+        (
+            "",
+            "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api@sha256:" + "a" * 64,
+            "DEPLOY_IMAGE_DIGEST is required",
+        ),
+    ],
+)
+def test_qa_live_state_requires_running_pod_digest(
+    expected: str, image_id: str, message: str
+) -> None:
+    # given a ready QA Pod selected by the rendered Deployment.
+    items = rendered_items()
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    pod = {
+        "metadata": {"name": "qa-policy-search-api-abc"},
+        "status": {
+            "phase": "Running",
+            "conditions": [{"type": "Ready", "status": "True"}],
+            "containerStatuses": [
+                {"name": "policy-search-service", "imageID": image_id},
+            ],
+        },
+    }
+
+    def live_json(_operation, kind, *arguments):
+        if kind == "pods":
+            return {"items": [pod]}
+        return actual[(kind, arguments[0])]
+
+    target = object.__new__(checks.Target)
+    target.deployment = deployment["metadata"]["name"]
+    target.configuration = {"mode": "flux"}
+    target.json = Mock(side_effect=live_json)
+    environment = {"DEPLOY_IMAGE_DIGEST": expected} if expected else {}
+
+    # when / then live verification checks the runtime-resolved image identity.
+    with patch.dict(os.environ, environment, clear=True):
+        if message:
+            with pytest.raises(checks.DeploymentError, match=message):
+                target.live(items, require_deployment=True)
+        else:
+            target.live(items, require_deployment=True)
+            target.json.assert_any_call(
+                "get",
+                "pods",
+                "-l",
+                "app.kubernetes.io/component=api,app.kubernetes.io/name=policy-search-api",
+            )
+
+
 def test_live_state_rejects_stale_deployment_after_rollout() -> None:
     items = rendered_items()
     deployment = next(item for item in items if item["kind"] == "Deployment")
