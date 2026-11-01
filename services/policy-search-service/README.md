@@ -391,7 +391,7 @@ owns this contract, lifecycle, exposure and deployment configuration.
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
 | Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed Echo operation, bounded transport signals and configurable HTTP/gRPC limits. |
 | Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup, with no database dependency. |
-| Business architecture | Product application-owned catalog ports and injected adapters | Echo remains a small injected function. Add domain/application/repository packages when a real migration requires them. |
+| Business architecture | Product application-owned catalog ports and injected adapters | `internal/application` owns the policy-search port and stable selected-window ordering; `internal/elasticsearch` implements that port without entering the domain. Runtime composition is delivered separately. |
 
 Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
 fixes with behavior tests and update intentional differences explicitly. This service adopts later
@@ -407,6 +407,9 @@ source improvements through its own reviewed changes.
 | `internal/grpc` | Generated Echo registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Policy Search identity and cross-setting policy. |
 | `internal/logger`, `internal/telemetry` | Completion-log and Echo signal contracts; shared provider construction with local policy and metric views. |
+| `internal/domain` | Policy and strict calendar-date values without transport or datastore types. |
+| `internal/application` | Search port plus descending `dateFrom` ordering of the already selected hit window, preserving equal-date order and placing missing dates last. |
+| `internal/elasticsearch` | Official Elasticsearch 8.19 client configuration and the read-only adapter for the isolated `policy-views-issue-229` index. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/policysearch/v1`, `gen/policysearch/v1`, `gen/openapiv2/policysearch/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 
@@ -427,6 +430,8 @@ flowchart TD
     grpc --> telemetry
     grpc --> generated["gen/policysearch/v1"]
     gateway --> generated
+	searchAdapter["internal/elasticsearch"] --> application["internal/application"]
+	application --> domain["internal/domain"]
     telemetry --> config
     telemetry --> logger["internal/logger"]
     telemetry --> sharedTelemetry
@@ -434,6 +439,10 @@ flowchart TD
     config --> sharedConfig["servicekit/config"]
     config --> sharedIdentity["servicekit/identity"]
 ```
+
+The query core and Elasticsearch adapter are independently testable in this step. The executable
+does not construct them until the search RPC and runtime configuration are added by the next
+delivery step.
 
 At startup, composition binds all listeners, starts gRPC, derives the same-process client target
 from the bound address and waits for that channel to become ready. An HTTP Echo obtains a bounded
