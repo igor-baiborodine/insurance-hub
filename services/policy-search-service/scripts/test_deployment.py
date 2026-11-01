@@ -131,6 +131,88 @@ def test_image_source_guard_rejects_mismatched_revision() -> None:
             )
 
 
+def test_live_state_rejects_stale_deployment_after_rollout() -> None:
+    items = rendered_items()
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    actual[("deployment", deployment["metadata"]["name"])]["spec"]["template"]["spec"][
+        "containers"
+    ][0]["image"] = "insurance-hub-policy-search-api:1.0.0-local.ffffffffffff"
+    target = object.__new__(checks.Target)
+    target.deployment = deployment["metadata"]["name"]
+    target.configuration = {"mode": "direct"}
+    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
+
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        pytest.raises(checks.DeploymentError, match="image differs"),
+    ):
+        target.live(items, require_deployment=True)
+
+
+def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:
+    items = rendered_items()
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    config = next(item for item in items if item["kind"] == "ConfigMap")
+    desired_image = "insurance-hub-policy-search-api:1.0.0-local.123456789abc"
+    previous_image = "insurance-hub-policy-search-api:1.0.0-local.abcdef123456"
+    deployment["metadata"].setdefault("labels", {})["app.kubernetes.io/version"] = (
+        "git-123456789abc"
+    )
+    deployment["spec"]["template"]["metadata"].setdefault("labels", {})[
+        "app.kubernetes.io/version"
+    ] = "git-123456789abc"
+    deployment["spec"]["template"]["spec"]["containers"][0]["image"] = desired_image
+    config["data"]["SERVICE_VERSION"] = "git-123456789abc"
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    live_deployment = actual[("deployment", deployment["metadata"]["name"])]
+    live_deployment["metadata"]["labels"]["app.kubernetes.io/version"] = "git-abcdef123456"
+    live_deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"] = (
+        "git-abcdef123456"
+    )
+    live_deployment["spec"]["template"]["spec"]["containers"][0]["image"] = previous_image
+    actual[("configmap", config["metadata"]["name"])]["data"]["SERVICE_VERSION"] = (
+        "git-abcdef123456"
+    )
+    target = object.__new__(checks.Target)
+    target.deployment = deployment["metadata"]["name"]
+    target.configuration = {"mode": "direct"}
+    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
+
+    with patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True):
+        target.live(items, require_deployment=False)
+        with pytest.raises(checks.DeploymentError, match="differs from rendered configuration"):
+            target.live(items, require_deployment=True)
+
+
+def test_deploy_rejects_foreign_same_name_resource_before_apply() -> None:
+    items = rendered_items()
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    actual[("deployment", deployment["metadata"]["name"])]["metadata"]["labels"][
+        "app.kubernetes.io/instance"
+    ] = "foreign-policy-search"
+    target = object.__new__(checks.Target)
+    target.service = "policy-search"
+    target.environment = "local-dev"
+    target.deployment = deployment["metadata"]["name"]
+    target.configuration = {"mode": "direct"}
+    target.coordinates = Mock()
+    target.rendered = Mock(return_value=("rendered", items, "image"))
+    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
+
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch.object(checks, "Target", return_value=target),
+        patch.object(checks, "check_render"),
+        patch.object(checks, "secret_and_image"),
+        patch.object(lifecycle, "apply") as apply,
+        pytest.raises(checks.DeploymentError, match="identity differs"),
+    ):
+        lifecycle.execute(checks, ["deploy"])
+    apply.assert_not_called()
+
+
 def test_cli_preserves_interrupt_status() -> None:
     for requested, expected in ((signal.SIGINT, 130), (signal.SIGTERM, 143)):
 

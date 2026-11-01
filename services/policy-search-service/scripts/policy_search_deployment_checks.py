@@ -72,6 +72,34 @@ def documents(text: str) -> list[dict[str, Any]]:
     return [item for item in yaml.safe_load_all(text) if isinstance(item, dict)]
 
 
+def resource(items: list[dict[str, Any]], kind: str, name: str) -> dict[str, Any]:
+    matches = [
+        item
+        for item in items
+        if item.get("kind") == kind and item.get("metadata", {}).get("name") == name
+    ]
+    require(len(matches) == 1, f"expected exactly one {kind}/{name}")
+    return matches[0]
+
+
+def labels_include(actual: Any, expected: Any) -> bool:
+    return (
+        isinstance(actual, dict)
+        and isinstance(expected, dict)
+        and all(actual.get(key) == value for key, value in expected.items())
+    )
+
+
+def matching_probe(actual: Any, expected: Any) -> bool:
+    if actual == expected:
+        return True
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    declared_with_defaults = dict(expected)
+    declared_with_defaults.setdefault("successThreshold", 1)
+    return actual == declared_with_defaults
+
+
 def render(environment: str) -> str:
     record = service_record(ROOT, SERVICE)
     configuration = target_record(ROOT, record, environment)
@@ -314,12 +342,186 @@ class Target:
         return text, items, image
 
     def live(self, items: list[dict[str, Any]], *, require_deployment: bool) -> None:
-        for item in items:
-            kind = str(item.get("kind", "")).lower()
-            name = item.get("metadata", {}).get("name", "")
-            actual = self.json("get", kind, name, "--ignore-not-found")
-            if require_deployment:
-                require(actual.get("metadata", {}).get("name") == name, f"{kind}/{name} is absent")
+        desired_deployment = resource(items, "Deployment", self.deployment)
+        desired_container = desired_deployment["spec"]["template"]["spec"]["containers"][0]
+        desired_image = desired_container["image"]
+        previous_image = os.environ.get("DEPLOY_PREVIOUS_IMAGE_REF", "")
+        if previous_image:
+            require(
+                self.configuration["mode"] == "direct"
+                and bool(
+                    re.fullmatch(
+                        r"insurance-hub-policy-search-api:1\.[0-9]+\.[0-9]+-local\.[0-9a-f]{12}",
+                        previous_image,
+                    )
+                ),
+                "DEPLOY_PREVIOUS_IMAGE_REF is valid only for a direct local rollout",
+            )
+        allowed_images = {desired_image}
+        allowed_versions = {
+            desired_deployment.get("metadata", {})
+            .get("labels", {})
+            .get("app.kubernetes.io/version"),
+            next(item for item in items if item.get("kind") == "ConfigMap")
+            .get("data", {})
+            .get("SERVICE_VERSION"),
+        }
+        if previous_image and not require_deployment:
+            allowed_images.add(previous_image)
+            allowed_versions.add(f"git-{previous_image.rsplit('.', 1)[1]}")
+        allowed_versions.discard(None)
+
+        for desired in items:
+            kind = str(desired.get("kind", ""))
+            lower_kind = kind.lower()
+            metadata = desired.get("metadata", {})
+            name = metadata.get("name", "")
+            actual = self.json("get", lower_kind, name, "--ignore-not-found")
+            if not actual:
+                require(not require_deployment, f"{kind}/{name} is absent")
+                continue
+            require(actual.get("kind") == kind, f"live {kind}/{name} kind differs")
+            actual_metadata = actual.get("metadata", {})
+            expected_metadata_labels = metadata.get("labels", {})
+            if kind == "Deployment":
+                expected_metadata_labels = {
+                    key: value
+                    for key, value in expected_metadata_labels.items()
+                    if key != "app.kubernetes.io/version"
+                }
+            require(
+                actual_metadata.get("name") == name
+                and actual_metadata.get("namespace") == metadata.get("namespace")
+                and labels_include(actual_metadata.get("labels"), expected_metadata_labels),
+                f"live {kind}/{name} identity differs from rendered identity",
+            )
+            desired_metadata_version = metadata.get("labels", {}).get("app.kubernetes.io/version")
+            if kind == "Deployment" and (desired_metadata_version or previous_image):
+                require(
+                    actual_metadata.get("labels", {}).get("app.kubernetes.io/version")
+                    in allowed_versions,
+                    f"live Deployment/{name} version identity differs",
+                )
+
+            if kind == "ConfigMap":
+                desired_data = desired.get("data", {})
+                actual_data = actual.get("data", {})
+                require(
+                    {key: value for key, value in actual_data.items() if key != "SERVICE_VERSION"}
+                    == {
+                        key: value
+                        for key, value in desired_data.items()
+                        if key != "SERVICE_VERSION"
+                    }
+                    and actual_data.get("SERVICE_VERSION") in allowed_versions
+                    and not actual.get("binaryData")
+                    and actual.get("immutable") in (None, False),
+                    f"live ConfigMap/{name} differs from rendered configuration",
+                )
+                continue
+
+            if kind == "Service":
+                spec = actual.get("spec", {})
+                desired_spec = desired.get("spec", {})
+                require(
+                    spec.get("type") == "ClusterIP"
+                    and spec.get("selector") == desired_spec.get("selector")
+                    and spec.get("ports") == desired_spec.get("ports")
+                    and not any(
+                        field in spec for field in ("externalIPs", "loadBalancerIP", "externalName")
+                    )
+                    and all("nodePort" not in port for port in spec.get("ports", [])),
+                    f"live Service/{name} has drift or external exposure",
+                )
+                continue
+
+            if kind == "NetworkPolicy":
+                require(
+                    actual.get("spec") == desired.get("spec"),
+                    f"live NetworkPolicy/{name} differs from rendered policy",
+                )
+                continue
+
+            require(kind == "Deployment", f"unsupported live resource kind: {kind}")
+            spec = actual.get("spec", {})
+            desired_spec = desired["spec"]
+            require(
+                spec.get("selector") == desired_spec.get("selector")
+                and spec.get("minReadySeconds") == desired_spec.get("minReadySeconds")
+                and spec.get("progressDeadlineSeconds")
+                == desired_spec.get("progressDeadlineSeconds")
+                and spec.get("strategy") == desired_spec.get("strategy")
+                and spec.get("replicas")
+                in ({desired_spec.get("replicas")} if require_deployment else {0, 1}),
+                f"live Deployment/{name} rollout settings differ",
+            )
+            template = spec.get("template", {})
+            desired_template = desired_spec["template"]
+            template_labels = template.get("metadata", {}).get("labels", {})
+            desired_labels = desired_template.get("metadata", {}).get("labels", {})
+            stable_labels = {
+                key: value
+                for key, value in desired_labels.items()
+                if key != "app.kubernetes.io/version"
+            }
+            require(
+                labels_include(template_labels, stable_labels),
+                f"live Deployment/{name} pod identity differs",
+            )
+            if desired_labels.get("app.kubernetes.io/version") or previous_image:
+                require(
+                    template_labels.get("app.kubernetes.io/version") in allowed_versions,
+                    f"live Deployment/{name} pod version identity differs",
+                )
+            pod = template.get("spec", {})
+            desired_pod = desired_template["spec"]
+            require(
+                pod.get("automountServiceAccountToken") is False
+                and pod.get("enableServiceLinks") == desired_pod.get("enableServiceLinks")
+                and pod.get("securityContext") == desired_pod.get("securityContext")
+                and pod.get("terminationGracePeriodSeconds")
+                == desired_pod.get("terminationGracePeriodSeconds")
+                and pod.get("hostNetwork") is not True
+                and pod.get("hostPID") is not True
+                and pod.get("hostIPC") is not True
+                and pod.get("serviceAccountName") in (None, "default")
+                and not pod.get("initContainers")
+                and not pod.get("volumes"),
+                f"live Deployment/{name} pod security settings differ",
+            )
+            containers = pod.get("containers", [])
+            require(
+                len(containers) == 1,
+                f"live Deployment/{name} has an unexpected container inventory",
+            )
+            container = containers[0]
+            for field in (
+                "name",
+                "securityContext",
+                "ports",
+                "env",
+                "envFrom",
+                "resources",
+                "imagePullPolicy",
+                "command",
+                "args",
+                "workingDir",
+                "volumeMounts",
+                "lifecycle",
+            ):
+                require(
+                    container.get(field) == desired_container.get(field),
+                    f"live Deployment/{name} container {field} differs",
+                )
+            for field in ("startupProbe", "livenessProbe", "readinessProbe"):
+                require(
+                    matching_probe(container.get(field), desired_container.get(field)),
+                    f"live Deployment/{name} container {field} differs",
+                )
+            require(
+                container.get("image") in allowed_images,
+                f"live Deployment/{name} image differs; declare DEPLOY_PREVIOUS_IMAGE_REF for a local rollout",
+            )
 
 
 def check_render() -> None:

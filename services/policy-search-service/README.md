@@ -333,6 +333,10 @@ make go-svc-deploy SVC_NAME=policy-search
 make go-svc-deploy-verify SVC_NAME=policy-search
 ```
 
+When replacing an existing local image, also export its exact reference as
+`DEPLOY_PREVIOUS_IMAGE_REF`. The preflight accepts that declared predecessor until apply; the
+post-rollout verification accepts only `DEPLOY_IMAGE_REF`.
+
 The disposable test builds the exact committed image, deploys it into a uniquely named namespace on
 the configured Kind cluster, exercises both transports and allowed/denied NetworkPolicy paths,
 restarts, scales to zero, restores, and removes that namespace and its qualification image.
