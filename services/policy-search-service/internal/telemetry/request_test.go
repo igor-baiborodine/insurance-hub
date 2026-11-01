@@ -74,7 +74,7 @@ func TestRequestObserver_RecordsBoundedGRPCSignals(t *testing.T) {
 	}
 	for index, test := range testCases {
 		entry := entries[index]
-		assertCompletionFields(t, entry, "grpc", "echo", test.outcome, test.level)
+		assertCompletionFields(t, entry, "grpc", "search", test.outcome, test.level)
 		if entry["rpc_status_code"] != test.wantStatus {
 			t.Errorf(
 				"log %d status = %v, want %s",
@@ -98,11 +98,11 @@ func TestRequestObserver_RecordsBoundedHTTPSignals(t *testing.T) {
 		route, operation string
 		outcome, level   string
 	}{
-		{204, "POST /v1/example/echo", "echo", "success", "INFO"},
+		{200, "GET /policies", "search", "success", "INFO"},
 		{400, "unmatched", "unknown", "invalid_request", "INFO"},
-		{499, "POST /v1/example/echo", "echo", "cancelled", "WARN"},
-		{504, "POST /v1/example/echo", "echo", "deadline_exceeded", "WARN"},
-		{500, "POST /v1/example/echo", "echo", "internal_error", "ERROR"},
+		{499, "GET /policies", "search", "cancelled", "WARN"},
+		{504, "GET /policies", "search", "deadline_exceeded", "WARN"},
+		{500, "GET /policies", "search", "internal_error", "ERROR"},
 	}
 	observer, logs, reader, spans, cleanup := newRequestObserverTestFixture(t)
 	defer cleanup()

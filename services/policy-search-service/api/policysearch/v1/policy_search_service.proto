@@ -1,0 +1,188 @@
+syntax = "proto3";
+
+package policysearch.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/gen/policysearch/v1;policysearchv1";
+
+service PolicySearchService {
+  rpc SearchPolicies(SearchPoliciesRequest) returns (SearchPoliciesResponse) {
+    option (google.api.http) = {get: "/policies"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Search policies"
+      description: "Searches the isolated policy view. The HTTP boundary requires q; direct RPC preserves absent versus explicitly empty q."
+      produces: "application/json"
+      responses: {
+        key: "200"
+        value: {
+          description: "The selected policies. Zero matches serialize as an empty object."
+          schema: {
+            json_schema: {ref: ".policysearch.v1.SearchPoliciesResponse"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"policies\":[{\"number\":\"POL-229\",\"dateFrom\":\"2024-02-29\",\"policyHolder\":\"Synthetic Holder\"}]}"
+          }
+        }
+      }
+      responses: {
+        key: "400"
+        value: {
+          description: "The required q query value is absent or the query encoding is malformed."
+          schema: {
+            json_schema: {ref: ".policysearch.v1.LegacyError"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"message\":\"Required QueryValue [q] not specified\",\"path\":\"/queryText\",\"_links\":{\"self\":{\"href\":\"/policies\",\"templated\":false}}}"
+          }
+        }
+      }
+      responses: {
+        key: "404"
+        value: {
+          description: "The requested route does not exist."
+          schema: {
+            json_schema: {ref: ".policysearch.v1.LegacyError"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"message\":\"Not Found\",\"_links\":{\"self\":{\"href\":\"/unknown\",\"templated\":false}}}"
+          }
+        }
+      }
+      responses: {
+        key: "405"
+        value: {
+          description: "Only GET is allowed on /policies."
+          schema: {
+            json_schema: {ref: ".policysearch.v1.LegacyError"}
+          }
+          headers: {
+            key: "Allow"
+            value: {
+              type: "string"
+              default: "\"GET\""
+            }
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"message\":\"Method Not Allowed\",\"_links\":{\"self\":{\"href\":\"/policies\",\"templated\":false}}}"
+          }
+        }
+      }
+      responses: {
+        key: "499"
+        value: {
+          description: "The request was canceled."
+          schema: {
+            json_schema: {ref: ".policysearch.v1.LegacyError"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"message\":\"Request Canceled\",\"_links\":{\"self\":{\"href\":\"/policies\",\"templated\":false}}}"
+          }
+        }
+      }
+      responses: {
+        key: "500"
+        value: {
+          description: "The policy search failed."
+          schema: {
+            json_schema: {ref: ".policysearch.v1.LegacyError"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"message\":\"Internal Server Error\",\"_links\":{\"self\":{\"href\":\"/policies\",\"templated\":false}}}"
+          }
+        }
+      }
+      responses: {
+        key: "503"
+        value: {
+          description: "The internal RPC service is unavailable."
+          schema: {
+            json_schema: {ref: ".policysearch.v1.LegacyError"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"message\":\"Service Unavailable\",\"_links\":{\"self\":{\"href\":\"/policies\",\"templated\":false}}}"
+          }
+        }
+      }
+      responses: {
+        key: "504"
+        value: {
+          description: "The internal RPC deadline was exceeded."
+          schema: {
+            json_schema: {ref: ".policysearch.v1.LegacyError"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"message\":\"Gateway Timeout\",\"_links\":{\"self\":{\"href\":\"/policies\",\"templated\":false}}}"
+          }
+        }
+      }
+    };
+  }
+}
+
+message SearchPoliciesRequest {
+  optional string q = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Required at the HTTP boundary. Explicit empty and whitespace values remain valid."}
+  ];
+}
+
+message SearchPoliciesResponse {
+  repeated Policy policies = 1;
+}
+
+message Policy {
+  optional string number = 1;
+  optional string date_from = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "date"}];
+  optional string date_to = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "date"}];
+  optional string policy_holder = 4;
+}
+
+message LegacyError {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      required: [
+        "message",
+        "_links"
+      ]
+    }
+  };
+
+  string message = 1;
+  optional string path = 2;
+  ErrorLinks links = 3 [json_name = "_links"];
+}
+
+message ErrorLinks {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      required: ["self"]
+    }
+  };
+
+  ErrorLink self = 1;
+}
+
+message ErrorLink {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      required: [
+        "href",
+        "templated"
+      ]
+    }
+  };
+
+  string href = 1;
+  bool templated = 2;
+}

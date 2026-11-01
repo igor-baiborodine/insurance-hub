@@ -124,6 +124,7 @@ def main() -> int:
             [
                 go,
                 "test",
+                "-p=1",
                 "-mod=readonly",
                 "-count=1",
                 "-race",
@@ -133,8 +134,9 @@ def main() -> int:
                 f"-coverprofile={coverage}",
                 "-json",
                 "-run",
-                "^TestElasticsearchQuery_",
+                "^(TestElasticsearchQuery_|TestSearchRuntime_)",
                 "./internal/testing",
+                "./internal/service",
             ],
             cwd=MODULE_ROOT,
             env={
@@ -148,7 +150,10 @@ def main() -> int:
             capture=True,
         )
         sys.stdout.write(output)
-        expected = {"TestElasticsearchQuery_UsesAcceptedSelectionAndOrdering"}
+        expected = {
+            "TestElasticsearchQuery_UsesAcceptedSelectionAndOrdering",
+            "TestSearchRuntime_UsesRealRPCGatewayAndElasticsearch",
+        }
         discovered = passed_tests(output)
         require(
             expected <= discovered,
@@ -177,7 +182,7 @@ def main() -> int:
                 status = 1
     if status:
         return status
-    print("test-elasticsearch-integration: selected=1 cleanup=passed")
+    print("test-elasticsearch-integration: selected=2 cleanup=passed")
     return 0
 
 

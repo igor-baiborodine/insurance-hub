@@ -4,17 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	grpcgo "google.golang.org/grpc"
@@ -27,391 +23,195 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
 	policysearchv1 "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/gen/policysearch/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/domain"
 	transport "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/grpc"
 )
 
-func TestExampleService_GeneratedIdentity(t *testing.T) {
+func TestPolicySearchService_GeneratedIdentity(t *testing.T) {
 	// given
 	const (
-		wantFile       = "policysearch/v1/example_service.proto"
+		wantFile       = "policysearch/v1/policy_search_service.proto"
 		wantPackage    = "policysearch.v1"
 		wantModule     = "github.com/igor-baiborodine/insurance-hub/services/policy-search-service"
-		wantService    = "policysearch.v1.ExampleService"
-		wantFullMethod = "/policysearch.v1.ExampleService/Echo"
+		wantService    = "policysearch.v1.PolicySearchService"
+		wantFullMethod = "/policysearch.v1.PolicySearchService/SearchPolicies"
 	)
 	wantGoPackage := wantModule + "/gen/policysearch/v1;policysearchv1"
 
 	// when
-	descriptor := (&policysearchv1.EchoRequest{}).ProtoReflect().Descriptor().ParentFile()
+	descriptor := (&policysearchv1.SearchPoliciesRequest{}).ProtoReflect().
+		Descriptor().
+		ParentFile()
 
 	// then
 	if descriptor.Path() != wantFile || string(descriptor.Package()) != wantPackage {
-		t.Errorf(
-			"descriptor identity = (%q, %q), want (%q, %q)",
-			descriptor.Path(),
-			descriptor.Package(),
-			wantFile,
-			wantPackage,
-		)
+		t.Fatalf("descriptor identity = (%q, %q)", descriptor.Path(), descriptor.Package())
 	}
 	options, ok := descriptor.Options().(*descriptorpb.FileOptions)
-	if !ok {
-		t.Fatalf(
-			"descriptor options type = %T, want *descriptorpb.FileOptions",
-			descriptor.Options(),
-		)
+	if !ok || options.GetGoPackage() != wantGoPackage {
+		t.Fatalf("go_package = %v", descriptor.Options())
 	}
-	if options.GetGoPackage() != wantGoPackage {
-		t.Errorf("go_package = %q, want %q", options.GetGoPackage(), wantGoPackage)
-	}
-	service := descriptor.Services().ByName("ExampleService")
-	if service == nil || string(service.FullName()) != wantService {
-		t.Errorf("service descriptor = %v, want %q", service, wantService)
-	}
-	if policysearchv1.ExampleService_Echo_FullMethodName != wantFullMethod {
-		t.Errorf(
-			"full method = %q, want %q",
-			policysearchv1.ExampleService_Echo_FullMethodName,
-			wantFullMethod,
-		)
+	service := descriptor.Services().ByName("PolicySearchService")
+	if service == nil || string(service.FullName()) != wantService ||
+		policysearchv1.PolicySearchService_SearchPolicies_FullMethodName != wantFullMethod {
+		t.Fatalf("service identity = %v", service)
 	}
 }
 
-func TestExampleService_Echo_Boundaries(t *testing.T) {
+func TestPolicySearchService_SearchPolicies_PreservesPresenceAndMapsPolicies(t *testing.T) {
 	// given
-	var calls atomic.Int64
-	echo := func(ctx context.Context, message string) (string, error) {
-		calls.Add(1)
-		return transport.IdentityEcho(ctx, message)
+	dateFrom, err := domain.ParseDate("2024-02-29")
+	if err != nil {
+		t.Fatal(err)
 	}
-	client := newExampleClient(
-		t,
-		echo,
-		noop.NewTracerProvider(),
-		propagation.TraceContext{},
-		new(bytes.Buffer),
-	)
-	tests := []struct {
-		name     string
-		message  string
-		wantCode codes.Code
-		wantCall bool
-	}{
-		{name: "empty", message: "", wantCode: codes.InvalidArgument},
-		{name: "one ASCII byte", message: "a", wantCode: codes.OK, wantCall: true},
-		{name: "two-byte UTF-8", message: "é", wantCode: codes.OK, wantCall: true},
-		{
-			name:     "128 ASCII bytes",
-			message:  strings.Repeat("a", 128),
-			wantCode: codes.OK,
-			wantCall: true,
-		},
-		{
-			name:     "128 multibyte UTF-8 bytes",
-			message:  strings.Repeat("é", 64),
-			wantCode: codes.OK,
-			wantCall: true,
-		},
-		{
-			name:     "129 ASCII bytes",
-			message:  strings.Repeat("a", 129),
-			wantCode: codes.InvalidArgument,
-		},
-		{
-			name:     "129 bytes ending in ASCII after multibyte UTF-8",
-			message:  strings.Repeat("é", 64) + "a",
-			wantCode: codes.InvalidArgument,
-		},
+	dateTo, err := domain.ParseDate("2025-06-01")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// given
-			callsBefore := calls.Load()
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-
-			// when
-			response, err := client.Echo(
-				ctx,
-				&policysearchv1.EchoRequest{Message: test.message},
-			)
-
-			// then
-			if status.Code(err) != test.wantCode {
-				t.Fatalf(
-					"status = %v, want %v: %v",
-					status.Code(err),
-					test.wantCode,
-					err,
-				)
-			}
-			wantCalls := callsBefore
-			if test.wantCall {
-				wantCalls++
-			}
-			if calls.Load() != wantCalls {
-				t.Errorf("handler calls = %d, want %d", calls.Load(), wantCalls)
-			}
-			if test.wantCode != codes.OK {
-				if response != nil {
-					t.Errorf("response = %v, want nil", response)
-				}
-				if status.Convert(err).Message() != "invalid request" {
-					t.Errorf(
-						"message = %q, want invalid request",
-						status.Convert(err).Message(),
-					)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Echo: %v", err)
-			}
-			want := &policysearchv1.EchoResponse{Message: test.message}
-			if !proto.Equal(response, want) {
-				t.Errorf("response = %v, want byte-identical message", response)
-			}
-		})
+	queries := make(chan string, 2)
+	search := func(_ context.Context, query string) ([]domain.Policy, error) {
+		queries <- query
+		return []domain.Policy{
+			{
+				Number: "POL-229", DateFrom: &dateFrom, DateTo: &dateTo,
+				PolicyHolder: "Synthetic Holder",
+			},
+			{},
+		}, nil
 	}
-}
-
-func TestExampleService_Echo_PreservesCancellation(t *testing.T) {
-	// given
-	started := make(chan struct{})
-	echo := func(ctx context.Context, _ string) (string, error) {
-		close(started)
-		<-ctx.Done()
-		return "", ctx.Err()
-	}
-	client := newExampleClient(
-		t,
-		echo,
-		noop.NewTracerProvider(),
-		propagation.TraceContext{},
-		new(bytes.Buffer),
-	)
-	ctx, cancel := context.WithCancel(context.Background())
-	result := make(chan error, 1)
+	client := newPolicySearchClient(t, search, noop.NewTracerProvider(), new(bytes.Buffer))
 
 	// when
-	go func() {
-		_, err := client.Echo(ctx, &policysearchv1.EchoRequest{Message: "cancel"})
-		result <- err
-	}()
-
-	// then
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("handler did not start")
+	emptyResponse, err := client.SearchPolicies(
+		context.Background(),
+		&policysearchv1.SearchPoliciesRequest{Q: proto.String("")},
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// when
-	cancel()
-
+	response, err := client.SearchPolicies(
+		context.Background(),
+		&policysearchv1.SearchPoliciesRequest{Q: proto.String(`number:"POL-229"`)},
+	)
 	// then
-	select {
-	case err := <-result:
-		if status.Code(err) != codes.Canceled {
-			t.Fatalf("status = %v, want Canceled: %v", status.Code(err), err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("canceled RPC did not return")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if <-queries != "" || <-queries != `number:"POL-229"` || len(emptyResponse.Policies) != 2 {
+		t.Fatal("explicit empty or raw query was not preserved")
+	}
+	if len(response.Policies) != 2 {
+		t.Fatalf("policies = %d", len(response.Policies))
+	}
+	first := response.Policies[0]
+	if first.GetNumber() != "POL-229" || first.GetDateFrom() != "2024-02-29" ||
+		first.GetDateTo() != "2025-06-01" || first.GetPolicyHolder() != "Synthetic Holder" {
+		t.Fatalf("mapped policy = %+v", first)
+	}
+	if response.Policies[1].Number != nil || response.Policies[1].DateFrom != nil ||
+		response.Policies[1].DateTo != nil || response.Policies[1].PolicyHolder != nil {
+		t.Fatalf("empty fields gained presence: %+v", response.Policies[1])
 	}
 }
 
-func TestExampleService_Echo_PreservesDeadline(t *testing.T) {
+func TestPolicySearchService_SearchPolicies_RejectsAbsentQBeforeUseCase(t *testing.T) {
 	// given
-	started := make(chan struct{})
-	echo := func(ctx context.Context, _ string) (string, error) {
-		close(started)
-		<-ctx.Done()
-		return "", ctx.Err()
-	}
-	client := newExampleClient(
+	called := false
+	client := newPolicySearchClient(
 		t,
-		echo,
+		func(context.Context, string) ([]domain.Policy, error) {
+			called = true
+			return nil, nil
+		},
 		noop.NewTracerProvider(),
-		propagation.TraceContext{},
 		new(bytes.Buffer),
 	)
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	result := make(chan error, 1)
 
 	// when
-	go func() {
-		_, err := client.Echo(ctx, &policysearchv1.EchoRequest{Message: "deadline"})
-		result <- err
-	}()
+	response, err := client.SearchPolicies(
+		context.Background(),
+		&policysearchv1.SearchPoliciesRequest{},
+	)
 
 	// then
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("handler did not start")
-	}
-	select {
-	case err := <-result:
-		if status.Code(err) != codes.DeadlineExceeded {
-			t.Fatalf("status = %v, want DeadlineExceeded: %v", status.Code(err), err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("deadline RPC did not return")
+	if status.Code(err) != codes.InvalidArgument || response != nil || called {
+		t.Fatalf("absent q = (%v, %v, called=%t)", response, err, called)
 	}
 }
 
-func TestExampleService_Echo_MapsHandlerContextErrors(t *testing.T) {
+func TestPolicySearchService_SearchPolicies_PreservesContextAndSanitizesFailure(t *testing.T) {
 	// given
 	tests := []struct {
-		name       string
-		handlerErr error
-		wantCode   codes.Code
+		name string
+		err  error
+		code codes.Code
 	}{
-		{name: "canceled", handlerErr: context.Canceled, wantCode: codes.Canceled},
-		{
-			name:       "deadline exceeded",
-			handlerErr: context.DeadlineExceeded,
-			wantCode:   codes.DeadlineExceeded,
-		},
+		{"canceled", context.Canceled, codes.Canceled},
+		{"deadline", context.DeadlineExceeded, codes.DeadlineExceeded},
+		{"internal", errors.New("private-adapter-marker"), codes.Internal},
 	}
-
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			// given
-			handlerContextErr := make(chan error, 1)
-			echo := func(ctx context.Context, _ string) (string, error) {
-				handlerContextErr <- ctx.Err()
-				return "", test.handlerErr
-			}
-			client := newExampleClient(
+			var logs bytes.Buffer
+			client := newPolicySearchClient(
 				t,
-				echo,
+				func(context.Context, string) ([]domain.Policy, error) { return nil, test.err },
 				noop.NewTracerProvider(),
-				propagation.TraceContext{},
-				new(bytes.Buffer),
+				&logs,
 			)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 
 			// when
-			response, err := client.Echo(
-				ctx,
-				&policysearchv1.EchoRequest{Message: "handler context error"},
+			response, err := client.SearchPolicies(
+				context.Background(),
+				&policysearchv1.SearchPoliciesRequest{
+					Q: proto.String("private-query-marker"),
+				},
 			)
 
 			// then
-			if handlerErr := <-handlerContextErr; handlerErr != nil {
-				t.Errorf(
-					"handler context error before return = %v, want nil",
-					handlerErr,
-				)
+			if status.Code(err) != test.code || response != nil {
+				t.Fatalf("failure = (%v, %v)", response, err)
 			}
-			if ctx.Err() != nil {
-				t.Errorf(
-					"client context error after response = %v, want nil",
-					ctx.Err(),
-				)
+			if test.code == codes.Internal &&
+				status.Convert(err).Message() != "internal error" {
+				t.Fatalf("internal message = %q", status.Convert(err).Message())
 			}
-			if response != nil {
-				t.Errorf("response = %v, want nil", response)
-			}
-			if status.Code(err) != test.wantCode {
+			if strings.Contains(logs.String(), "private-") {
 				t.Fatalf(
-					"status = %v, want %v: %v",
-					status.Code(err),
-					test.wantCode,
-					err,
+					"logs disclosed query or adapter failure: %s",
+					logs.String(),
 				)
 			}
 		})
 	}
 }
 
-func TestExampleService_Echo_MapsInternalFailureAndPropagatesTrace(t *testing.T) {
+func TestPolicySearchService_SearchPolicies_DoesNotExtendCallerDeadline(t *testing.T) {
 	// given
-	const (
-		payloadMarker = "payload-marker"
-		privateMarker = "private-adapter-marker"
-	)
-	spanRecorder := tracetest.NewSpanRecorder()
-	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := tracerProvider.Shutdown(ctx); err != nil {
-			t.Errorf("shutdown tracer provider: %v", err)
-		}
-	})
-	handlerContext := make(chan trace.SpanContext, 1)
-	echo := func(ctx context.Context, _ string) (string, error) {
-		handlerContext <- trace.SpanContextFromContext(ctx)
-		return "", status.Error(codes.Unknown, privateMarker)
+	deadlineSeen := make(chan time.Time, 1)
+	search := func(ctx context.Context, _ string) ([]domain.Policy, error) {
+		deadline, _ := ctx.Deadline()
+		deadlineSeen <- deadline
+		<-ctx.Done()
+		return nil, ctx.Err()
 	}
-	var logs bytes.Buffer
-	propagator := propagation.TraceContext{}
-	client := newExampleClient(t, echo, tracerProvider, propagator, &logs)
-	parentCtx, parentSpan := tracerProvider.Tracer("test").Start(context.Background(), "parent")
-	parentSpanContext := parentSpan.SpanContext()
+	client := newPolicySearchClient(t, search, noop.NewTracerProvider(), new(bytes.Buffer))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	wantDeadline, _ := ctx.Deadline()
 
 	// when
-	response, err := client.Echo(parentCtx, &policysearchv1.EchoRequest{Message: payloadMarker})
-	parentSpan.End()
+	_, err := client.SearchPolicies(
+		ctx,
+		&policysearchv1.SearchPoliciesRequest{Q: proto.String("*")},
+	)
 
 	// then
-	if status.Code(err) != codes.Internal {
-		t.Fatalf("status = %v, want Internal: %v", status.Code(err), err)
+	if status.Code(err) != codes.DeadlineExceeded {
+		t.Fatalf("deadline status = %v", err)
 	}
-	if status.Convert(err).Message() != "internal error" {
-		t.Errorf("message = %q, want internal error", status.Convert(err).Message())
-	}
-	if response != nil {
-		t.Errorf("response = %v, want nil", response)
-	}
-	var serverSpanContext trace.SpanContext
-	select {
-	case serverSpanContext = <-handlerContext:
-	case <-time.After(time.Second):
-		t.Fatal("handler context was not captured")
-	}
-	if !serverSpanContext.IsValid() ||
-		serverSpanContext.TraceID() != parentSpanContext.TraceID() {
-		t.Errorf(
-			"server trace context = %v, parent = %v",
-			serverSpanContext,
-			parentSpanContext,
-		)
-	}
-	if strings.Contains(logs.String(), payloadMarker) ||
-		strings.Contains(logs.String(), privateMarker) {
-		t.Fatalf("logs expose request or error marker: %s", logs.String())
-	}
-	if !strings.Contains(logs.String(), `"service":"policy-search-service"`) ||
-		!strings.Contains(
-			logs.String(),
-			`"trace_id":"`+serverSpanContext.TraceID().String()+`"`,
-		) {
-		t.Errorf("logs lack service or trace identity: %s", logs.String())
-	}
-	var clientSpanFound, serverSpanFound bool
-	for _, span := range spanRecorder.Ended() {
-		if span.SpanContext().TraceID() != parentSpanContext.TraceID() {
-			continue
-		}
-		switch span.SpanKind() {
-		case trace.SpanKindClient:
-			clientSpanFound = true
-		case trace.SpanKindServer:
-			serverSpanFound = true
-		}
-	}
-	if !clientSpanFound || !serverSpanFound {
-		t.Errorf(
-			"request spans found: client=%t server=%t",
-			clientSpanFound,
-			serverSpanFound,
-		)
+	if got := <-deadlineSeen; got.After(wantDeadline.Add(10 * time.Millisecond)) {
+		t.Fatalf("caller deadline extended: %v > %v", got, wantDeadline)
 	}
 }
 
@@ -420,120 +220,79 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 	log := logger.New(new(bytes.Buffer), "policy-search-service", 0)
 	tracerProvider := noop.NewTracerProvider()
 	propagator := propagation.TraceContext{}
+	search := transport.SearchPolicies(
+		func(context.Context, string) ([]domain.Policy, error) { return nil, nil },
+	)
 	tests := []struct {
-		name              string
-		loggerMissing     bool
-		tracerMissing     bool
-		propagatorMissing bool
-		echoMissing       bool
+		name       string
+		logger     *slog.Logger
+		tracer     trace.TracerProvider
+		propagator propagation.TextMapPropagator
+		search     transport.SearchPolicies
 	}{
-		{name: "logger", loggerMissing: true},
-		{name: "tracer provider", tracerMissing: true},
-		{name: "propagator", propagatorMissing: true},
-		{name: "echo handler", echoMissing: true},
+		{"logger", nil, tracerProvider, propagator, search},
+		{"tracer", log, nil, propagator, search},
+		{"propagator", log, tracerProvider, nil, search},
+		{"search", log, tracerProvider, propagator, nil},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			// given
-			selectedLogger := log
-			selectedTracer := trace.TracerProvider(tracerProvider)
-			selectedPropagator := propagation.TextMapPropagator(propagator)
-			selectedEcho := transport.Echo(transport.IdentityEcho)
-			if test.loggerMissing {
-				selectedLogger = nil
-			}
-			if test.tracerMissing {
-				selectedTracer = nil
-			}
-			if test.propagatorMissing {
-				selectedPropagator = nil
-			}
-			if test.echoMissing {
-				selectedEcho = nil
-			}
-
-			// when
 			server, err := transport.NewServer(
-				selectedLogger,
-				selectedTracer,
-				selectedPropagator,
+				test.logger,
+				test.tracer,
+				test.propagator,
 				defaultSettings(),
-				selectedEcho,
+				test.search,
 			)
-
-			// then
 			if err == nil || server != nil {
-				t.Fatalf("NewServer() = (%v, %v), want (nil, error)", server, err)
+				t.Fatalf("NewServer() = (%v, %v)", server, err)
 			}
 		})
 	}
 }
 
-func newExampleClient(
+func newPolicySearchClient(
 	t *testing.T,
-	echo transport.Echo,
+	search transport.SearchPolicies,
 	tracerProvider trace.TracerProvider,
-	propagator propagation.TextMapPropagator,
 	logs *bytes.Buffer,
-) policysearchv1.ExampleServiceClient {
+) policysearchv1.PolicySearchServiceClient {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatal(err)
 	}
 	server, err := transport.NewServer(
 		logger.New(logs, "policy-search-service", 0),
 		tracerProvider,
-		propagator,
+		propagation.TraceContext{},
 		defaultSettings(),
-		echo,
+		search,
 	)
 	if err != nil {
 		_ = listener.Close()
-		t.Fatalf("new server: %v", err)
+		t.Fatal(err)
 	}
-	serveResult := make(chan error, 1)
-	go func() {
-		serveResult <- server.Serve(listener)
-	}()
+	go func() { _ = server.Serve(listener) }()
 	connection, err := grpcgo.NewClient(
 		listener.Addr().String(),
 		grpcgo.WithTransportCredentials(insecure.NewCredentials()),
-		grpcgo.WithStatsHandler(otelgrpc.NewClientHandler(
-			otelgrpc.WithTracerProvider(tracerProvider),
-			otelgrpc.WithPropagators(propagator),
-			otelgrpc.WithMeterProvider(metricnoop.NewMeterProvider()),
-		)),
 	)
 	if err != nil {
 		server.Stop()
-		_ = listener.Close()
-		t.Fatalf("new client: %v", err)
+		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := connection.Close(); err != nil {
-			t.Errorf("close client: %v", err)
-		}
+		_ = connection.Close()
 		server.Stop()
-		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			t.Errorf("close listener: %v", err)
-		}
-		select {
-		case err := <-serveResult:
-			if err != nil && !errors.Is(err, grpcgo.ErrServerStopped) {
-				t.Errorf("serve: %v", err)
-			}
-		case <-time.After(time.Second):
-			t.Error("server did not stop")
-		}
 	})
-	return policysearchv1.NewExampleServiceClient(connection)
+	return policysearchv1.NewPolicySearchServiceClient(connection)
 }
 
 func defaultSettings() transport.Settings {
 	return transport.Settings{
 		RequestTimeout:  time.Second,
-		MaxReceiveBytes: 1048576,
-		MaxSendBytes:    8388608,
+		MaxReceiveBytes: 1024 * 1024,
+		MaxSendBytes:    8 * 1024 * 1024,
 	}
 }

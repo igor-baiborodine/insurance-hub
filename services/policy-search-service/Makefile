@@ -30,13 +30,13 @@ GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 GOLANGCI_CONFIG := .golangci.yml
 
-PROTO_SCHEMA := api/policysearch/v1/example_service.proto
+PROTO_SCHEMA := api/policysearch/v1/policy_search_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := \
-	gen/policysearch/v1/example_service.pb.go \
-	gen/policysearch/v1/example_service.pb.gw.go \
-	gen/policysearch/v1/example_service_grpc.pb.go \
-	gen/openapiv2/policysearch/v1/example_service.swagger.json
+	gen/policysearch/v1/policy_search_service.pb.go \
+	gen/policysearch/v1/policy_search_service.pb.gw.go \
+	gen/policysearch/v1/policy_search_service_grpc.pb.go \
+	gen/openapiv2/policysearch/v1/policy_search_service.swagger.json
 
 GO_VERSION := 1.27.3
 BUF_VERSION := v1.73.0
@@ -125,7 +125,7 @@ test-integration: ## Exercise real HTTP-to-RPC composition and lifecycle on owne
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./internal/service \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)") \
-		-run '^(TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst|TestRun_ProductionCompositionEnforcesByteAndPresenceContract|TestRun_ReportsDynamicGatewayReadinessLossAndRecovery)$$'
+		-run '^(TestRun_ProductionCompositionUsesActualRPCListenerAndGeneratedGateway|TestRun_ReadinessTracksElasticsearchAndRecovers|TestRun_FailsStartupWhenElasticsearchIsUnavailableAndCleansUp)$$'
 
 test-elasticsearch-integration: python-runtime-check ## Exercise the query adapter against owned disposable Elasticsearch
 	@DOCKER="$(DOCKER)" GO="$(GO)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
@@ -211,7 +211,7 @@ check-go-pr: verify-tools format-check format-proto-check lint lint-proto covera
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
 		--contract testdata/http-contract.json \
-		--swagger gen/openapiv2/policysearch/v1/example_service.swagger.json
+		--swagger gen/openapiv2/policysearch/v1/policy_search_service.swagger.json
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac

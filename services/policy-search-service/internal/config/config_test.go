@@ -68,6 +68,11 @@ func TestLoad_Defaults(t *testing.T) {
 	if got.ExporterTimeout != 2*time.Second {
 		t.Errorf("Telemetry.ExporterTimeout = %v, want 2s", got.ExporterTimeout)
 	}
+	if got.Elasticsearch.URL != "http://127.0.0.1:9200" ||
+		got.Elasticsearch.Timeout != 5*time.Second || got.Elasticsearch.Username != "" ||
+		got.Elasticsearch.Password != "" || got.Elasticsearch.CAFile != "" {
+		t.Errorf("Elasticsearch defaults = %+v", got.Elasticsearch)
+	}
 }
 
 func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) {
@@ -195,6 +200,11 @@ func TestLoad_ValidOverrides(t *testing.T) {
 		kitconfig.EnvOTELEnabled:              "true",
 		kitconfig.EnvOTELExporterOTLPEndpoint: "https://alloy.monitoring.svc:4317/",
 		kitconfig.EnvOTELExporterOTLPTimeout:  "750ms",
+		EnvElasticsearchURL:                   "https://elasticsearch.example:9243",
+		EnvElasticsearchUsername:              "reader",
+		EnvElasticsearchPassword:              "private-password",
+		EnvElasticsearchCAFile:                "/var/run/ca.crt",
+		EnvElasticsearchTimeout:               "750ms",
 	}
 
 	// when
@@ -218,6 +228,81 @@ func TestLoad_ValidOverrides(t *testing.T) {
 	if !got.Enabled || got.ExporterEndpoint.String() !=
 		"https://alloy.monitoring.svc:4317" {
 		t.Errorf("unexpected telemetry: %+v", got.Telemetry)
+	}
+	if got.Elasticsearch.URL != "https://elasticsearch.example:9243" ||
+		got.Elasticsearch.Username != "reader" ||
+		got.Elasticsearch.Password != "private-password" ||
+		got.Elasticsearch.CAFile != "/var/run/ca.crt" ||
+		got.Elasticsearch.Timeout != 750*time.Millisecond {
+		t.Errorf("unexpected Elasticsearch settings: %+v", got.Elasticsearch)
+	}
+}
+
+func TestLoad_RejectsUnsafeElasticsearchSettingsWithoutValues(t *testing.T) {
+	const privateMarker = "private-marker"
+	tests := []struct {
+		name    string
+		values  map[string]string
+		setting string
+	}{
+		{
+			"URL credentials",
+			map[string]string{
+				EnvElasticsearchURL: "https://user:" + privateMarker + "@example:9200",
+			},
+			EnvElasticsearchURL,
+		},
+		{
+			"URL path",
+			map[string]string{
+				EnvElasticsearchURL: "https://example:9200/" + privateMarker,
+			},
+			EnvElasticsearchURL,
+		},
+		{
+			"unsupported scheme",
+			map[string]string{EnvElasticsearchURL: "ftp://" + privateMarker + ":9200"},
+			EnvElasticsearchURL,
+		},
+		{
+			"empty username",
+			map[string]string{EnvElasticsearchUsername: ""},
+			EnvElasticsearchUsername,
+		},
+		{
+			"unpaired username",
+			map[string]string{EnvElasticsearchUsername: privateMarker},
+			EnvElasticsearchUsername,
+		},
+		{
+			"unpaired password",
+			map[string]string{EnvElasticsearchPassword: privateMarker},
+			EnvElasticsearchUsername,
+		},
+		{
+			"CA over HTTP",
+			map[string]string{EnvElasticsearchCAFile: "/" + privateMarker},
+			EnvElasticsearchCAFile,
+		},
+		{
+			"oversized timeout",
+			map[string]string{EnvElasticsearchTimeout: "6s"},
+			EnvElasticsearchTimeout,
+		},
+		{
+			"empty timeout",
+			map[string]string{EnvElasticsearchTimeout: ""},
+			EnvElasticsearchTimeout,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := load(mapLookup(test.values))
+			if err == nil || !strings.Contains(err.Error(), test.setting) ||
+				strings.Contains(err.Error(), privateMarker) {
+				t.Fatalf("unsafe or absent rejection: %v", err)
+			}
+		})
 	}
 }
 

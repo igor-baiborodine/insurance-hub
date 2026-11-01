@@ -1,0 +1,264 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "policysearch/v1/policy_search_service.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "PolicySearchService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/policies": {
+      "get": {
+        "summary": "Search policies",
+        "description": "Searches the isolated policy view. The HTTP boundary requires q; direct RPC preserves absent versus explicitly empty q.",
+        "operationId": "PolicySearchService_SearchPolicies",
+        "responses": {
+          "200": {
+            "description": "The selected policies. Zero matches serialize as an empty object.",
+            "schema": {
+              "$ref": "#/definitions/v1SearchPoliciesResponse"
+            },
+            "examples": {
+              "application/json": {
+                "policies": [
+                  {
+                    "number": "POL-229",
+                    "dateFrom": "2024-02-29",
+                    "policyHolder": "Synthetic Holder"
+                  }
+                ]
+              }
+            }
+          },
+          "400": {
+            "description": "The required q query value is absent or the query encoding is malformed.",
+            "schema": {
+              "$ref": "#/definitions/v1LegacyError"
+            },
+            "examples": {
+              "application/json": {
+                "message": "Required QueryValue [q] not specified",
+                "path": "/queryText",
+                "_links": {
+                  "self": {
+                    "href": "/policies",
+                    "templated": false
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested route does not exist.",
+            "schema": {
+              "$ref": "#/definitions/v1LegacyError"
+            },
+            "examples": {
+              "application/json": {
+                "message": "Not Found",
+                "_links": {
+                  "self": {
+                    "href": "/unknown",
+                    "templated": false
+                  }
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Only GET is allowed on /policies.",
+            "schema": {
+              "$ref": "#/definitions/v1LegacyError"
+            },
+            "examples": {
+              "application/json": {
+                "message": "Method Not Allowed",
+                "_links": {
+                  "self": {
+                    "href": "/policies",
+                    "templated": false
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "type": "string",
+                "default": "GET"
+              }
+            }
+          },
+          "499": {
+            "description": "The request was canceled.",
+            "schema": {
+              "$ref": "#/definitions/v1LegacyError"
+            },
+            "examples": {
+              "application/json": {
+                "message": "Request Canceled",
+                "_links": {
+                  "self": {
+                    "href": "/policies",
+                    "templated": false
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The policy search failed.",
+            "schema": {
+              "$ref": "#/definitions/v1LegacyError"
+            },
+            "examples": {
+              "application/json": {
+                "message": "Internal Server Error",
+                "_links": {
+                  "self": {
+                    "href": "/policies",
+                    "templated": false
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The internal RPC service is unavailable.",
+            "schema": {
+              "$ref": "#/definitions/v1LegacyError"
+            },
+            "examples": {
+              "application/json": {
+                "message": "Service Unavailable",
+                "_links": {
+                  "self": {
+                    "href": "/policies",
+                    "templated": false
+                  }
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The internal RPC deadline was exceeded.",
+            "schema": {
+              "$ref": "#/definitions/v1LegacyError"
+            },
+            "examples": {
+              "application/json": {
+                "message": "Gateway Timeout",
+                "_links": {
+                  "self": {
+                    "href": "/policies",
+                    "templated": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "q",
+            "description": "Required at the HTTP boundary. Explicit empty and whitespace values remain valid.",
+            "in": "query",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "PolicySearchService"
+        ],
+        "produces": [
+          "application/json"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "v1ErrorLink": {
+      "type": "object",
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "templated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "href",
+        "templated"
+      ]
+    },
+    "v1ErrorLinks": {
+      "type": "object",
+      "properties": {
+        "self": {
+          "$ref": "#/definitions/v1ErrorLink"
+        }
+      },
+      "required": [
+        "self"
+      ]
+    },
+    "v1LegacyError": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "_links": {
+          "$ref": "#/definitions/v1ErrorLinks"
+        }
+      },
+      "required": [
+        "message",
+        "_links"
+      ]
+    },
+    "v1Policy": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "string"
+        },
+        "dateFrom": {
+          "type": "string",
+          "format": "date"
+        },
+        "dateTo": {
+          "type": "string",
+          "format": "date"
+        },
+        "policyHolder": {
+          "type": "string"
+        }
+      }
+    },
+    "v1SearchPoliciesResponse": {
+      "type": "object",
+      "properties": {
+        "policies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Policy"
+          }
+        }
+      }
+    }
+  }
+}

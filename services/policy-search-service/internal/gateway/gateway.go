@@ -7,9 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"mime"
 	"net/http"
-	"strconv"
+	"net/url"
 	"strings"
 	"time"
 
@@ -28,7 +27,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/telemetry"
 )
 
-const echoRoute = "POST /v1/example/echo"
+const searchRoute = "GET /policies"
 
 type Settings struct {
 	RequestTimeout time.Duration
@@ -39,17 +38,19 @@ type Settings struct {
 	Observer       *telemetry.RequestObserver
 }
 
-// NewHandler registers the generated client while retaining a strict HTTP contract.
+// NewHandler registers the generated client while retaining the accepted legacy HTTP contract.
 func NewHandler(
-	client policysearchv1.ExampleServiceClient,
+	client policysearchv1.PolicySearchServiceClient,
 	settings Settings,
 ) (http.Handler, error) {
 	if client == nil || !validSettings(settings) {
 		return nil, errors.New("create gateway: all dependencies and limits are required")
 	}
-	marshaler := &runtime.JSONPb{
-		MarshalOptions:   protojson.MarshalOptions{},
-		UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: false},
+	marshaler := &compactJSON{
+		JSONPb: runtime.JSONPb{
+			MarshalOptions:   protojson.MarshalOptions{},
+			UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: false},
+		},
 	}
 	mux := runtime.NewServeMux(
 		runtime.WithMarshalerOption(runtime.MIMEWildcard, marshaler),
@@ -60,7 +61,7 @@ func NewHandler(
 		runtime.WithDisableHTTPMethodOverride(),
 		runtime.WithDisablePathLengthFallback(),
 	)
-	if err := policysearchv1.RegisterExampleServiceHandlerClient(
+	if err := policysearchv1.RegisterPolicySearchServiceHandlerClient(
 		context.Background(),
 		mux,
 		client,
@@ -68,7 +69,7 @@ func NewHandler(
 		return nil, errors.New("create gateway: register generated handler")
 	}
 	handler := &Handler{mux: mux, settings: settings}
-	handler.echo = handler.instrument(echoRoute, http.HandlerFunc(handler.serveEcho))
+	handler.search = handler.instrument(searchRoute, http.HandlerFunc(handler.serveSearch))
 	handler.unmatched = handler.instrument(
 		"unmatched",
 		http.HandlerFunc(handler.serveUnmatched),
@@ -76,7 +77,32 @@ func NewHandler(
 	return handler, nil
 }
 
-// NewUnavailableHandler creates the instrumented fixed-envelope response used after drain starts.
+type compactJSON struct{ runtime.JSONPb }
+
+func (marshaler *compactJSON) Marshal(value any) ([]byte, error) {
+	data, err := marshaler.JSONPb.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, data); err != nil {
+		return nil, err
+	}
+	return compact.Bytes(), nil
+}
+
+func (marshaler *compactJSON) NewEncoder(writer io.Writer) runtime.Encoder {
+	return runtime.EncoderFunc(func(value any) error {
+		data, err := marshaler.Marshal(value)
+		if err != nil {
+			return err
+		}
+		_, err = writer.Write(append(data, '\n'))
+		return err
+	})
+}
+
+// NewUnavailableHandler creates the fixed response used after drain starts.
 func NewUnavailableHandler(settings Settings) (http.Handler, error) {
 	if !validSettings(settings) {
 		return nil, errors.New(
@@ -86,12 +112,13 @@ func NewUnavailableHandler(settings Settings) (http.Handler, error) {
 	handler := &Handler{settings: settings}
 	return handler.instrument(
 		"unmatched",
-		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-			writeError(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			writeLegacyError(
 				writer,
 				http.StatusServiceUnavailable,
-				codes.Unavailable,
-				"service unavailable",
+				"Service Unavailable",
+				"",
+				request.URL.Path,
 			)
 		}),
 	), nil
@@ -106,19 +133,17 @@ func validSettings(settings Settings) bool {
 type Handler struct {
 	mux       http.Handler
 	settings  Settings
-	echo      http.Handler
+	search    http.Handler
 	unmatched http.Handler
 }
 
-type requestFacts struct {
-	originalPath string
-	hadQuery     bool
-}
-
-type factsKey struct{}
+type (
+	requestFacts struct{ originalPath string }
+	factsKey     struct{}
+)
 
 func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	facts := requestFacts{originalPath: request.URL.Path, hadQuery: request.URL.RawQuery != ""}
+	facts := requestFacts{originalPath: request.URL.Path}
 	request = sanitizeRequest(
 		request.WithContext(context.WithValue(request.Context(), factsKey{}, facts)),
 	)
@@ -128,11 +153,10 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	)
 	defer cancel()
 	request = request.WithContext(requestCtx)
-	if facts.originalPath == "/v1/example/echo" && request.Method == http.MethodPost {
-		handler.echo.ServeHTTP(writer, request)
+	if facts.originalPath == "/policies" && request.Method == http.MethodGet {
+		handler.search.ServeHTTP(writer, request)
 		return
 	}
-	request.URL.Path = "/unmatched"
 	handler.unmatched.ServeHTTP(writer, request)
 }
 
@@ -153,63 +177,42 @@ func (handler *Handler) instrument(route string, next http.Handler) http.Handler
 	)
 }
 
-func (handler *Handler) serveEcho(writer http.ResponseWriter, request *http.Request) {
-	if facts, _ := request.Context().Value(factsKey{}).(requestFacts); facts.hadQuery {
-		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
-		return
-	}
-	if !acceptsJSON(request.Header.Get("Accept")) {
-		writeError(
-			writer,
-			http.StatusNotAcceptable,
-			codes.InvalidArgument,
-			"not acceptable",
-		)
-		return
-	}
-	if !isJSON(request.Header.Get("Content-Type")) {
-		writeError(
-			writer,
-			http.StatusUnsupportedMediaType,
-			codes.InvalidArgument,
-			"unsupported media type",
-		)
-		return
-	}
-	body, tooLarge, err := readBounded(request.Body, handler.settings.MaxBodyBytes)
+func (handler *Handler) serveSearch(writer http.ResponseWriter, request *http.Request) {
+	query, err := url.ParseQuery(request.URL.RawQuery)
 	if err != nil {
-		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
+		writeLegacyError(writer, http.StatusBadRequest, "Bad Request", "", "/policies")
 		return
 	}
-	if tooLarge {
-		writeError(
+	values, present := query["q"]
+	if !present || len(values) == 0 {
+		writeLegacyError(
 			writer,
-			http.StatusRequestEntityTooLarge,
-			codes.ResourceExhausted,
-			"request body too large",
+			http.StatusBadRequest,
+			"Required QueryValue [q] not specified",
+			"/queryText",
+			"/policies",
 		)
 		return
 	}
-	if !validRequestJSON(body) {
-		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
-		return
-	}
-	request.Body = io.NopCloser(bytes.NewReader(body))
+	query["q"] = values[:1]
+	request.URL.RawQuery = query.Encode()
 	handler.mux.ServeHTTP(writer, request)
 }
 
 func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http.Request) {
 	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
-	if facts.originalPath == "/v1/example/echo" {
-		writeError(
+	if facts.originalPath == "/policies" {
+		writer.Header().Set("Allow", http.MethodGet)
+		writeLegacyError(
 			writer,
 			http.StatusMethodNotAllowed,
-			codes.Unimplemented,
-			"method not allowed",
+			"Method Not Allowed",
+			"",
+			"/policies",
 		)
 		return
 	}
-	writeError(writer, http.StatusNotFound, codes.NotFound, "not found")
+	writeLegacyError(writer, http.StatusNotFound, "Not Found", "", facts.originalPath)
 }
 
 func sanitizeRequest(request *http.Request) *http.Request {
@@ -225,13 +228,12 @@ func sanitizeRequest(request *http.Request) *http.Request {
 	}
 	urlCopy := *request.URL
 	request.URL = &urlCopy
-	request.URL.RawQuery = ""
 	return request
 }
 
 func denyHeader(string) (string, bool) { return "", false }
 
-// ClearApplicationMetadata removes gateway-created application metadata before otelgrpc injects trace context.
+// ClearApplicationMetadata removes gateway-created metadata before otelgrpc injects trace context.
 func ClearApplicationMetadata(
 	ctx context.Context,
 	method string,
@@ -246,7 +248,8 @@ func ClearApplicationMetadata(
 		request,
 		reply,
 		connection,
-		options...)
+		options...,
+	)
 }
 
 func safeGatewayError(
@@ -254,96 +257,66 @@ func safeGatewayError(
 	_ *runtime.ServeMux,
 	_ runtime.Marshaler,
 	writer http.ResponseWriter,
-	_ *http.Request,
+	request *http.Request,
 	err error,
 ) {
-	code := status.Code(err)
-	switch code {
+	href := request.URL.Path
+	switch status.Code(err) {
 	case codes.InvalidArgument:
-		writeError(writer, http.StatusBadRequest, code, "invalid request")
+		writeLegacyError(writer, http.StatusBadRequest, "Bad Request", "", href)
 	case codes.Canceled:
-		writeError(writer, 499, code, "request canceled")
+		writeLegacyError(writer, 499, "Request Canceled", "", href)
 	case codes.DeadlineExceeded:
-		writeError(writer, http.StatusGatewayTimeout, code, "deadline exceeded")
+		writeLegacyError(writer, http.StatusGatewayTimeout, "Gateway Timeout", "", href)
 	case codes.Unavailable:
-		writeError(writer, http.StatusServiceUnavailable, code, "service unavailable")
-	case codes.ResourceExhausted:
-		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
+		writeLegacyError(
+			writer,
+			http.StatusServiceUnavailable,
+			"Service Unavailable",
+			"",
+			href,
+		)
 	default:
-		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
+		writeLegacyError(
+			writer,
+			http.StatusInternalServerError,
+			"Internal Server Error",
+			"",
+			href,
+		)
 	}
 }
 
-func writeError(writer http.ResponseWriter, httpStatus int, code codes.Code, message string) {
+type legacyError struct {
+	Message string      `json:"message"`
+	Path    string      `json:"path,omitempty"`
+	Links   legacyLinks `json:"_links"`
+}
+
+type legacyLinks struct {
+	Self legacyLink `json:"self"`
+}
+
+type legacyLink struct {
+	Href      string `json:"href"`
+	Templated bool   `json:"templated"`
+}
+
+func writeLegacyError(
+	writer http.ResponseWriter,
+	statusCode int,
+	message string,
+	path string,
+	href string,
+) {
+	payload, _ := json.Marshal(legacyError{
+		Message: message,
+		Path:    path,
+		Links:   legacyLinks{Self: legacyLink{Href: href}},
+	})
 	writer.Header().Set("Content-Type", "application/json")
-	writer.WriteHeader(httpStatus)
-	_, _ = io.WriteString(
-		writer,
-		`{"code":`+jsonNumber(int32(code))+`,"message":"`+message+`","details":[]}`,
-	)
-}
-
-func jsonNumber(value int32) string { return strconv.FormatInt(int64(value), 10) }
-
-func readBounded(body io.ReadCloser, maximum int) ([]byte, bool, error) {
-	defer func() { _ = body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(body, int64(maximum)+1))
-	return data, len(data) > maximum, err
-}
-
-func validRequestJSON(data []byte) bool {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	token, err := decoder.Token()
-	if err != nil || token != json.Delim('{') {
-		return false
-	}
-	seen := false
-	for decoder.More() {
-		name, err := decoder.Token()
-		if err != nil || name != "message" || seen {
-			return false
-		}
-		seen = true
-		var value any
-		if err := decoder.Decode(&value); err != nil {
-			return false
-		}
-		if value != nil {
-			if _, ok := value.(string); !ok {
-				return false
-			}
-		}
-	}
-	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
-		return false
-	}
-	_, err = decoder.Token()
-	return errors.Is(err, io.EOF)
-}
-
-func isJSON(value string) bool {
-	mediaType, parameters, err := mime.ParseMediaType(value)
-	if err != nil || mediaType != "application/json" {
-		return false
-	}
-	if len(parameters) == 0 {
-		return true
-	}
-	return len(parameters) == 1 && strings.EqualFold(parameters["charset"], "utf-8")
-}
-
-func acceptsJSON(value string) bool {
-	if value == "" {
-		return true
-	}
-	for item := range strings.SplitSeq(value, ",") {
-		mediaType, parameters, err := mime.ParseMediaType(strings.TrimSpace(item))
-		if err == nil && len(parameters) == 0 &&
-			(mediaType == "application/json" || mediaType == "*/*") {
-			return true
-		}
-	}
-	return false
+	writer.WriteHeader(statusCode)
+	_, _ = writer.Write(payload)
 }
 
 type statusWriter struct {
@@ -352,11 +325,11 @@ type statusWriter struct {
 	wrote  bool
 }
 
-func (writer *statusWriter) WriteHeader(status int) {
+func (writer *statusWriter) WriteHeader(statusCode int) {
 	if writer.wrote {
 		return
 	}
 	writer.wrote = true
-	writer.status = status
-	writer.ResponseWriter.WriteHeader(status)
+	writer.status = statusCode
+	writer.ResponseWriter.WriteHeader(statusCode)
 }
