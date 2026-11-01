@@ -29,6 +29,8 @@ from scripts.python.process_runner import CommandError, run_command  # noqa: E40
 SERVICE = "policy-search"
 EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
 JAVA_NAMES = {"policy-search-api-legacy"}
+BUSINESS_CLIENT_LABEL = "insurance-hub.io/policy-search-business-client"
+MANAGEMENT_CLIENT_LABEL = "insurance-hub.io/policy-search-management-client"
 
 
 class DeploymentError(RuntimeError):
@@ -83,13 +85,30 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(
         EXPECTED_KINDS <= {item.get("kind") for item in items}, "required resource kind is missing"
     )
+    require(
+        {item.get("kind") for item in items} <= EXPECTED_KINDS,
+        "overlay owns an unsupported resource kind",
+    )
     names = [item.get("metadata", {}).get("name", "") for item in items]
     prefix = environment + "-"
     require(all(name.startswith(prefix) for name in names), "resource prefix differs")
     require(not any(name.endswith("-legacy") for name in names), "Go overlay owns a Java resource")
     deployments = [item for item in items if item.get("kind") == "Deployment"]
     require(len(deployments) == 1, "overlay must own exactly one Deployment")
-    pod = deployments[0]["spec"]["template"]
+    deployment = deployments[0]
+    expected_namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
+    require(
+        deployment.get("metadata", {}).get("namespace") == expected_namespace, "namespace differs"
+    )
+    spec = deployment["spec"]
+    require(spec.get("replicas") == 1, "replica count differs")
+    require(spec.get("minReadySeconds") == 5, "minimum readiness differs")
+    require(spec.get("progressDeadlineSeconds") == 180, "progress deadline differs")
+    require(
+        spec.get("strategy", {}).get("rollingUpdate", {}).get("maxUnavailable") == 0,
+        "rolling availability differs",
+    )
+    pod = spec["template"]
     labels = pod["metadata"].get("labels", {})
     require(labels.get("app.kubernetes.io/name") == "policy-search-api", "pod identity differs")
     containers = pod["spec"].get("containers", [])
@@ -97,6 +116,97 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         len(containers) == 1 and containers[0].get("name") == "policy-search-service",
         "container identity differs",
     )
+    container = containers[0]
+    image = container.get("image", "")
+    expected_image = (
+        "insurance-hub-policy-search-api:1.0.0-local.000000000000"
+        if environment == "local-dev"
+        else "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:1.0.0"
+    )
+    require(image == expected_image, "staged image identity differs")
+    require(
+        container.get("resources")
+        == {
+            "requests": {"cpu": "100m", "memory": "64Mi"},
+            "limits": {"cpu": "300m", "memory": "256Mi"},
+        },
+        "container resources differ",
+    )
+    security = container.get("securityContext", {})
+    require(
+        security.get("allowPrivilegeEscalation") is False
+        and security.get("readOnlyRootFilesystem") is True
+        and security.get("capabilities", {}).get("drop") == ["ALL"],
+        "container restrictions differ",
+    )
+    pod_spec = pod["spec"]
+    require(pod_spec.get("automountServiceAccountToken") is False, "service-account token enabled")
+    require(pod_spec.get("enableServiceLinks") is False, "service links enabled")
+    require(pod_spec.get("terminationGracePeriodSeconds") == 30, "termination grace differs")
+    require(not pod_spec.get("volumes"), "Policy Search must not mount volumes")
+    for name, path, period, failures in (
+        ("startupProbe", "/livez", 2, 30),
+        ("livenessProbe", "/livez", 10, 3),
+        ("readinessProbe", "/readyz", 5, 2),
+    ):
+        probe = container.get(name, {})
+        require(
+            probe.get("httpGet", {}).get("path") == path
+            and probe.get("httpGet", {}).get("port") == "management"
+            and probe.get("periodSeconds") == period
+            and probe.get("timeoutSeconds") == 2
+            and probe.get("failureThreshold") == failures,
+            f"{name} differs",
+        )
+    services = [item for item in items if item.get("kind") == "Service"]
+    require(len(services) == 2, "overlay must own business and management Services")
+    require(
+        all(item.get("spec", {}).get("type") == "ClusterIP" for item in services),
+        "Service exposure differs",
+    )
+    policies = [item for item in items if item.get("kind") == "NetworkPolicy"]
+    require(len(policies) == 1, "overlay must own one NetworkPolicy")
+    policy = policies[0]["spec"]
+    encoded_policy = json.dumps(policy, sort_keys=True)
+    require(BUSINESS_CLIENT_LABEL in encoded_policy, "business caller label is missing")
+    require(MANAGEMENT_CLIENT_LABEL in encoded_policy, "management caller label is missing")
+    if environment == "local-dev":
+        require(policy.get("egress") == [], "local-dev egress must be denied")
+    else:
+        require(
+            "qa-monitoring" in encoded_policy and "kube-system" in encoded_policy,
+            "QA egress differs",
+        )
+    config_maps = [item for item in items if item.get("kind") == "ConfigMap"]
+    require(len(config_maps) == 1, "overlay must own one ConfigMap")
+    data = config_maps[0].get("data", {})
+    required_data = {
+        "SERVICE_NAME": "policy-search-service",
+        "HTTP_ADDR": "0.0.0.0:8080",
+        "GRPC_ADDR": "0.0.0.0:9090",
+        "HEALTH_ADDR": "0.0.0.0:8081",
+        "REQUEST_TIMEOUT": "8s",
+        "PROBE_TIMEOUT": "2s",
+        "SHUTDOWN_TIMEOUT": "10s",
+        "HTTP_MAX_HEADER_BYTES": "16384",
+        "HTTP_MAX_BODY_BYTES": "4096",
+        "GRPC_MAX_RECV_BYTES": "1048576",
+        "GRPC_MAX_SEND_BYTES": "8388608",
+    }
+    require(
+        all(data.get(key) == value for key, value in required_data.items()),
+        "runtime budgets differ",
+    )
+    if environment == "local-dev":
+        require(data.get("OTEL_ENABLED") == "false", "local telemetry must be disabled")
+    else:
+        require(
+            data.get("OTEL_ENABLED") == "true"
+            and data.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+            == "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
+            and data.get("SERVICE_VERSION") == image.rsplit(":", 1)[1],
+            "QA telemetry identity differs",
+        )
     require(
         not any(
             "elasticsearch" in json.dumps(item).lower() or "kafka" in json.dumps(item).lower()
@@ -167,7 +277,27 @@ class Target:
         image = deployment["spec"]["template"]["spec"]["containers"][0]["image"]
         requested = os.environ.get("DEPLOY_IMAGE_REF", "")
         if requested:
-            require(image == requested, "DEPLOY_IMAGE_REF differs from rendered image")
+            require(self.environment == "local-dev", "DEPLOY_IMAGE_REF is direct-local only")
+            require(
+                bool(
+                    re.fullmatch(
+                        r"insurance-hub-policy-search-api:1\.[0-9]+\.[0-9]+-local\.[0-9a-f]{12}",
+                        requested,
+                    )
+                ),
+                "DEPLOY_IMAGE_REF differs",
+            )
+            source_short = requested.rsplit(".", 1)[1]
+            version = f"git-{source_short}"
+            deployment["spec"]["template"]["spec"]["containers"][0]["image"] = requested
+            deployment["metadata"].setdefault("labels", {})["app.kubernetes.io/version"] = version
+            deployment["spec"]["template"]["metadata"].setdefault("labels", {})[
+                "app.kubernetes.io/version"
+            ] = version
+            config = next(item for item in items if item.get("kind") == "ConfigMap")
+            config["data"]["SERVICE_VERSION"] = version
+            text = yaml.safe_dump_all(items, explicit_start=True, sort_keys=False)
+            image = requested
         return text, items, image
 
     def live(self, items: list[dict[str, Any]], *, require_deployment: bool) -> None:
@@ -186,7 +316,11 @@ def check_render() -> None:
 def secret_and_image(target: Target, image: str) -> None:
     require(not os.environ.get("DEPLOY_SECRET"), "Policy Search accepts no deployment Secret")
     require(
-        bool(re.fullmatch(r"insurance-hub-policy-search-api:git-[0-9a-f]{12}", image)),
+        bool(
+            re.fullmatch(
+                r"insurance-hub-policy-search-api:1\.[0-9]+\.[0-9]+-local\.[0-9a-f]{12}", image
+            )
+        ),
         "image tag differs",
     )
     details = json.loads(run([os.environ.get("DOCKER", "docker"), "image", "inspect", image]))
@@ -194,7 +328,7 @@ def secret_and_image(target: Target, image: str) -> None:
     revision = (
         details[0].get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision", "")
     )
-    require(revision[:12] == image.rsplit("-", 1)[1], "image source revision differs")
+    require(revision[:12] == image.rsplit(".", 1)[1], "image source revision differs")
 
 
 def role_snapshot(target: Target) -> dict[str, Any]:
@@ -244,7 +378,21 @@ def check_requested_route(target: Target) -> None:
     for resource in ("ingresses.networking.k8s.io", "httproutes.gateway.networking.k8s.io"):
         if resource not in resources.splitlines():
             continue
-        listing = target.json("get", resource, "--all-namespaces")
+        listing = json.loads(
+            run(
+                [
+                    target.kubectl_binary,
+                    "--context",
+                    target.context,
+                    "get",
+                    resource,
+                    "--all-namespaces",
+                    "-o",
+                    "json",
+                ]
+            )
+            or "{}"
+        )
         encoded = json.dumps(listing)
         require(
             target.business not in encoded and target.management not in encoded,
@@ -361,6 +509,11 @@ def main(argv: list[str] | None = None) -> int:
         if arguments[0] == "render":
             sys.stdout.write(text)
     if arguments[0] == "check":
+        qa_root = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
+        require(
+            "./policy-search" not in qa_root.get("resources", []),
+            "QA Policy Search overlay is already active",
+        )
         print("policy-search-deployment-check: local-dev and QA renders passed")
     return 0
 

@@ -57,14 +57,15 @@ SERVICEKIT_VERSION := v1.0.1
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 TEST_PACKAGES ?= ./...
 HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
+HEAD_SHORT := $(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
-HEAD_VERSION := git-$(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
+HEAD_VERSION := git-$(HEAD_SHORT)
 IMAGE_NAME ?= insurance-hub-policy-search-api
 SOURCE_REVISION ?= $(HEAD_REVISION)
 SOURCE_CREATED ?= $(HEAD_CREATED)
 SOURCE_REPOSITORY ?= https://github.com/igor-baiborodine/insurance-hub
 SOURCE_VERSION ?= $(HEAD_VERSION)
-IMAGE_TAG ?= $(SOURCE_VERSION)
+IMAGE_TAG ?= 1.0.0-local.$(HEAD_SHORT)
 IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
 TARGET_PLATFORM ?= linux/amd64
 
@@ -99,7 +100,7 @@ image-build: python-runtime-check ## Build the pinned linux/amd64 Policy Search 
 	@test "$(SOURCE_REVISION)" = "$(HEAD_REVISION)" || { echo 'SOURCE_REVISION must match HEAD' >&2; exit 1; }
 	@test "$(SOURCE_CREATED)" = "$(HEAD_CREATED)" || { echo 'SOURCE_CREATED must match HEAD' >&2; exit 1; }
 	@test "$(SOURCE_VERSION)" = "git-$$(printf '%s' '$(SOURCE_REVISION)' | cut -c1-12)" || { echo 'SOURCE_VERSION must match HEAD' >&2; exit 1; }
-	@test "$(IMAGE_TAG)" = "$(SOURCE_VERSION)" || { echo 'IMAGE_TAG must match SOURCE_VERSION' >&2; exit 1; }
+	@test "$(IMAGE_TAG)" = "1.0.0-local.$$(printf '%s' '$(SOURCE_REVISION)' | cut -c1-12)" || { echo 'IMAGE_TAG must match the local source convention' >&2; exit 1; }
 	@test "$(IMAGE_REF)" = "$(IMAGE_NAME):$(IMAGE_TAG)" || { echo 'IMAGE_REF must use the selected name and tag' >&2; exit 1; }
 	@test "$(IMAGE_NAME)" = "insurance-hub-policy-search-api" || { echo 'IMAGE_NAME differs from the catalog identity' >&2; exit 1; }
 	@test "$(TARGET_PLATFORM)" = "linux/amd64" || { echo 'TARGET_PLATFORM must be linux/amd64' >&2; exit 1; }

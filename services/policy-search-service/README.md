@@ -12,6 +12,7 @@
     - [Repository topology](#repository-topology)
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
+  - [Build and operate the deployment](#build-and-operate-the-deployment)
   - [Example RPC and HTTP gateway](#example-rpc-and-http-gateway)
   - [Architecture and ownership](#architecture-and-ownership)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
@@ -301,6 +302,39 @@ HTTP handlers finish before closing the gateway connection. It then gracefully o
 gRPC, stops management HTTP and shuts down telemetry. HTTP, connection, gRPC and management cleanup
 share the cutoff at `SHUTDOWN_TIMEOUT - OTEL_EXPORTER_OTLP_TIMEOUT`; telemetry receives the final
 reserved interval within the one overall deadline.
+
+## Build and operate the deployment
+
+Docker, kubectl and Kind are required for image and local deployment commands. From the repository
+root, validate the image and both isolated overlays without changing a cluster:
+
+```sh
+make go-svc-image-check SVC_NAME=policy-search
+make go-svc-deploy-check SVC_NAME=policy-search
+make go-svc-deploy-test-tooling SVC_NAME=policy-search
+```
+
+The local-dev target uses context `kind-local-dev-insurance-hub` and namespace `local-dev-all`.
+The operator must export the exact catalog coordinates plus the image produced from current `HEAD`:
+
+```sh
+export DEPLOY_ENV=local-dev
+export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
+export DEPLOY_SVC_NS=local-dev-all
+export DEPLOY_DATA_NS=local-dev-all
+export DEPLOY_IMAGE_REF="insurance-hub-policy-search-api:1.0.0-local.$(git rev-parse --short=12 HEAD)"
+
+make go-svc-deploy-preflight SVC_NAME=policy-search
+make go-svc-image-load SVC_NAME=policy-search
+make go-svc-deploy SVC_NAME=policy-search
+make go-svc-deploy-verify SVC_NAME=policy-search
+```
+
+These commands never select an environment implicitly. Direct image load, apply and stop reject QA;
+QA is owned by Git and the shared Flux reconciliation. The QA overlay is staged outside the shared
+root until its activation PR. See the
+[deployment runbook](../../docs/migration/phase-4/policy-search-service/deployment-runbook.md) for
+release, diagnostics, reachability, cleanup and restoration procedures.
 
 ## Example RPC and HTTP gateway
 

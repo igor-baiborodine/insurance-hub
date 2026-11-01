@@ -249,6 +249,29 @@ def test_prepare_respects_target_capabilities(
         assert initialize["spec"]["healthChecks"][0]["namespace"] == environment + "-apps"
 
 
+def test_prepare_updates_optional_runtime_version_with_image_tag(tmp_path: Path) -> None:
+    # given
+    create_service(tmp_path, "policy-search")
+    overlay = tmp_path / "k8s/overlays/qa/svc/policy-search/kustomization.yaml"
+    overlay.write_text(
+        overlay.read_text()
+        + "configMapGenerator:\n"
+        + "  - name: policy-search-config\n"
+        + "    literals:\n"
+        + "      - SERVICE_VERSION=1.0.0\n"
+    )
+
+    # when
+    release.prepare_release(
+        tmp_path, "policy-search", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST
+    )
+
+    # then
+    rendered = overlay.read_text()
+    assert "newTag: 1.2.3" in rendered
+    assert "SERVICE_VERSION=1.2.3" in rendered
+
+
 def test_prepare_retains_prior_release_prerequisites_and_replaces_only_api(
     tmp_path: Path,
 ) -> None:

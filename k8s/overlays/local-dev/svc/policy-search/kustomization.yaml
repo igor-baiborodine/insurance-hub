@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: local-dev-all
+namePrefix: local-dev-
+labels:
+  - includeSelectors: true
+    pairs:
+      environment: local-dev
+resources:
+  - ../../../../apps/svc/policy-search/base
+images:
+  - name: insurance-hub-policy-search-api
+    newName: insurance-hub-policy-search-api
+    newTag: 1.0.0-local.000000000000
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: policy-search-api

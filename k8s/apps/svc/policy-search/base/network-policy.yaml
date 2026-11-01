@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: policy-search-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: policy-search-api
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              insurance-hub.io/policy-search-business-client: "true"
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              insurance-hub.io/policy-search-management-client: "true"
+      ports:
+        - port: 8081
+          protocol: TCP
+  egress: []

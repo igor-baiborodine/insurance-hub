@@ -31,42 +31,7 @@ def target_environment(name: str = "local-dev") -> dict[str, str]:
 
 
 def rendered_items() -> list[dict]:
-    labels = {"app.kubernetes.io/name": "policy-search-api"}
-    return [
-        {
-            "apiVersion": "v1",
-            "kind": "ConfigMap",
-            "metadata": {"name": "local-dev-policy-search-config"},
-        },
-        {
-            "apiVersion": "apps/v1",
-            "kind": "Deployment",
-            "metadata": {"name": "local-dev-policy-search-api"},
-            "spec": {
-                "template": {
-                    "metadata": {"labels": labels},
-                    "spec": {
-                        "containers": [
-                            {
-                                "name": "policy-search-service",
-                                "image": "insurance-hub-policy-search-api:git-123456789abc",
-                            }
-                        ]
-                    },
-                }
-            },
-        },
-        {
-            "apiVersion": "v1",
-            "kind": "Service",
-            "metadata": {"name": "local-dev-policy-search-api"},
-        },
-        {
-            "apiVersion": "networking.k8s.io/v1",
-            "kind": "NetworkPolicy",
-            "metadata": {"name": "local-dev-policy-search-private"},
-        },
-    ]
+    return checks.documents(checks.render("local-dev"))
 
 
 def test_target_rejects_wrong_coordinates_before_cluster_access() -> None:
@@ -105,10 +70,48 @@ def test_render_rejects_java_ownership_and_business_dependencies() -> None:
             "local-dev", "\n---\n".join(checks.yaml.safe_dump(item) for item in java)
         )
     dependency = deepcopy(items)
-    dependency[0]["data"] = {"ELASTICSEARCH_URL": "http://synthetic"}
+    dependency[0].setdefault("data", {})["ELASTICSEARCH_URL"] = "http://synthetic"
     with pytest.raises(checks.DeploymentError, match="dependency"):
         checks.validate_render(
             "local-dev", "\n---\n".join(checks.yaml.safe_dump(item) for item in dependency)
+        )
+
+
+def test_render_rejects_missing_network_policy() -> None:
+    items = [item for item in rendered_items() if item["kind"] != "NetworkPolicy"]
+    with pytest.raises(checks.DeploymentError, match="required resource kind"):
+        checks.validate_render(
+            "local-dev", "\n---\n".join(checks.yaml.safe_dump(item) for item in items)
+        )
+
+
+@pytest.mark.parametrize(
+    ("kind", "field", "value", "message"),
+    [
+        ("Service", "type", "NodePort", "exposure"),
+        ("ConfigMap", "HTTP_ADDR", "127.0.0.1:8080", "runtime budgets"),
+    ],
+)
+def test_render_rejects_weakened_service_or_runtime_boundary(
+    kind: str, field: str, value: str, message: str
+) -> None:
+    items = rendered_items()
+    item = next(candidate for candidate in items if candidate["kind"] == kind)
+    owner = item["data"] if kind == "ConfigMap" else item["spec"]
+    owner[field] = value
+    with pytest.raises(checks.DeploymentError, match=message):
+        checks.validate_render(
+            "local-dev", "\n---\n".join(checks.yaml.safe_dump(candidate) for candidate in items)
+        )
+
+
+def test_render_rejects_weakened_termination_budget() -> None:
+    items = rendered_items()
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    deployment["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] = 5
+    with pytest.raises(checks.DeploymentError, match="termination grace"):
+        checks.validate_render(
+            "local-dev", "\n---\n".join(checks.yaml.safe_dump(item) for item in items)
         )
 
 
@@ -123,7 +126,9 @@ def test_image_source_guard_rejects_mismatched_revision() -> None:
         ),
     ):
         with pytest.raises(checks.DeploymentError, match="source revision"):
-            checks.secret_and_image(target, "insurance-hub-policy-search-api:git-123456789abc")
+            checks.secret_and_image(
+                target, "insurance-hub-policy-search-api:1.0.0-local.123456789abc"
+            )
 
 
 def test_cli_preserves_interrupt_status() -> None:
