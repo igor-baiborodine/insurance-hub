@@ -244,6 +244,7 @@ def test_qa_live_state_requires_running_pod_digest(
 
 
 def test_live_state_rejects_stale_deployment_after_rollout() -> None:
+    # given
     items = rendered_items()
     deployment = next(item for item in items if item["kind"] == "Deployment")
     actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
@@ -255,6 +256,7 @@ def test_live_state_rejects_stale_deployment_after_rollout() -> None:
     target.configuration = {"mode": "direct"}
     target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
 
+    # when / then
     with (
         patch.dict(os.environ, {}, clear=True),
         pytest.raises(checks.DeploymentError, match="image differs"),
@@ -263,6 +265,7 @@ def test_live_state_rejects_stale_deployment_after_rollout() -> None:
 
 
 def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:
+    # given
     items = rendered_items()
     deployment = next(item for item in items if item["kind"] == "Deployment")
     config = next(item for item in items if item["kind"] == "ConfigMap")
@@ -292,12 +295,16 @@ def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:
     target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
 
     with patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True):
+        # when / then the declared predecessor is accepted only before apply.
         target.live(items, require_deployment=False)
+
+        # when / then post-rollout verification requires the desired state.
         with pytest.raises(checks.DeploymentError, match="differs from rendered configuration"):
             target.live(items, require_deployment=True)
 
 
 def test_deploy_rejects_foreign_same_name_resource_before_apply() -> None:
+    # given
     items = rendered_items()
     deployment = next(item for item in items if item["kind"] == "Deployment")
     actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
@@ -313,6 +320,7 @@ def test_deploy_rejects_foreign_same_name_resource_before_apply() -> None:
     target.rendered = Mock(return_value=("rendered", items, "image"))
     target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
 
+    # when / then
     with (
         patch.dict(os.environ, {}, clear=True),
         patch.object(checks, "Target", return_value=target),
@@ -322,6 +330,8 @@ def test_deploy_rejects_foreign_same_name_resource_before_apply() -> None:
         pytest.raises(checks.DeploymentError, match="identity differs"),
     ):
         lifecycle.execute(checks, ["deploy"])
+
+    # then
     apply.assert_not_called()
 
 
