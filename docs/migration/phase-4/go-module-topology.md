@@ -21,18 +21,21 @@ inventory, owning Make target, consumers, and CI path agree.
 
 ## Current topology
 
-The repository currently owns three Go modules and no Go workspace.
+The repository currently owns four Go modules and no Go workspace.
 
 | Directory | Module path | Role and owner | Consumers | Replacements | Supported mode | Owning validation | CI |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `templates/go-service` | `github.com/igor-baiborodine/insurance-hub/templates/go-service` | Reusable service scaffold; Insurance Hub repository maintainers | Itself only | None | Standalone, `GOWORK=off` | `make -C templates/go-service check-go-pr` | `.github/workflows/go-pr-mod.yml` |
 | `services/product-service` | `github.com/igor-baiborodine/insurance-hub/services/product-service` | Product business service; Product service maintainers | Its current executable and support packages | None | Standalone, `GOWORK=off` | `make -C services/product-service check-go-pr` | `.github/workflows/go-pr-mod.yml` |
-| `libs/servicekit` | `github.com/igor-baiborodine/insurance-hub/libs/servicekit` | Public runtime infrastructure; Insurance Hub repository maintainers | Product/scaffold allowed; zero active consumers | None | Standalone, `GOWORK=off` | `make -C libs/servicekit check-go-pr` | `.github/workflows/go-pr-shared.yml` |
+| `services/policy-search-service` | `github.com/igor-baiborodine/insurance-hub/services/policy-search-service` | Policy Search Echo business service; Policy Search service maintainers | Its current executable, generated Echo contract and support packages | None | Standalone, `GOWORK=off` | `make -C services/policy-search-service check-go-pr` | `.github/workflows/go-pr-mod.yml` |
+| `libs/servicekit` | `github.com/igor-baiborodine/insurance-hub/libs/servicekit` | Public runtime infrastructure; Insurance Hub repository maintainers | Product, Policy Search and scaffold | None | Standalone, `GOWORK=off` | `make -C libs/servicekit check-go-pr` | `.github/workflows/go-pr-shared.yml` |
 
 The scaffold owns its Protobuf source and generated bindings. It is not a deployed business
 service, shared business model, or independently distributed contract module. Product owns its
 Product v1 contract, SQL reader, HTTP and gRPC adapters, and business listeners in one standalone
-module. There is no approved cross-module application dependency,
+module. Policy Search owns the temporary Policy Search Echo contract, generated gateway, runtime
+composition and deployment image; it has no Elasticsearch or Kafka dependency in this increment.
+There is no approved cross-module application dependency,
 private-module prerequisite, `go.work`, `go.work.sum`, or filesystem `replace`. The
 `services/example-copy` tree created by `check-copy` is a disposable reuse fixture and is excluded
 from topology.

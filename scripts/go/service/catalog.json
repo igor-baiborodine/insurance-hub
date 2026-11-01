@@ -91,6 +91,64 @@
           }
         }
       }
+    },
+    "policy-search": {
+      "repositoryRoot": "services",
+      "modulePath": "services/policy-search-service",
+      "localImage": "insurance-hub-policy-search-api",
+      "registryImage": "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api",
+      "kustomizeBase": "k8s/apps/svc/policy-search/base",
+      "overlays": {
+        "local-dev": "k8s/overlays/local-dev/svc/policy-search",
+        "qa": "k8s/overlays/qa/svc/policy-search"
+      },
+      "environments": [
+        "local-dev",
+        "qa"
+      ],
+      "capabilities": [
+        "image-build",
+        "image-check",
+        "deploy-render",
+        "deploy-check",
+        "deploy-preflight",
+        "deploy-status",
+        "image-load",
+        "deploy",
+        "deploy-verify",
+        "stop",
+        "deploy-test-tooling"
+      ],
+      "releaseTargets": [
+        "qa"
+      ],
+      "deploymentTargets": {
+        "local-dev": {
+          "mode": "direct",
+          "context": "kind-local-dev-insurance-hub",
+          "namespace": "local-dev-all",
+          "dataNamespace": "local-dev-all",
+          "overlay": "k8s/overlays/local-dev/svc/policy-search",
+          "kindCluster": "local-dev-insurance-hub"
+        },
+        "qa": {
+          "mode": "flux",
+          "context": "qa-insurance-hub",
+          "namespace": "qa-svc",
+          "dataNamespace": "qa-svc",
+          "overlay": "k8s/overlays/qa/svc/policy-search",
+          "flux": {
+            "namespace": "flux-system",
+            "sourcePrefix": "qa-policy-search-release",
+            "apiName": "qa-policy-search-api",
+            "bundle": "k8s/flux/qa/releases/policy-search/release.yaml",
+            "sharedSource": "insurance-hub",
+            "sharedOwner": "qa-svc",
+            "sharedPath": "./k8s/overlays/qa/svc",
+            "branch": "main"
+          }
+        }
+      }
     }
   }
 }
