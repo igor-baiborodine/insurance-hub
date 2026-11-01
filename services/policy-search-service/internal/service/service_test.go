@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -22,8 +23,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	policysearchv1 "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/gen/policysearch/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/domain"
+	policykafka "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/kafka"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/telemetry"
 )
 
@@ -157,6 +160,124 @@ func TestRun_FailsStartupWhenElasticsearchIsUnavailableAndCleansUp(t *testing.T)
 	}
 }
 
+func TestRun_DisabledWorkersAcquireNoEventResources(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	deps, _ := testDependencies(&fakeQuery{checkErr: errors.New("stop after composition")})
+	deps.newProjection = func(config.Elasticsearch) (projectionRuntime, error) {
+		t.Fatal("disabled mode constructed the writer client")
+		return nil, nil
+	}
+	deps.newWorker = func(policykafka.Settings, projectionRuntime, *slog.Logger) (eventWorker, error) {
+		t.Fatal("disabled mode constructed a Kafka client")
+		return nil, nil
+	}
+
+	// when
+	_ = run(context.Background(), settings, discardLogger(), deps)
+}
+
+func TestRun_EnabledWorkersStartReadinessAndBoundedShutdown(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	settings.Events = config.Events{
+		Enabled: true, Brokers: []string{"kafka.example:9093"}, Group: "issue-230",
+		RegisteredTopic: "registered-230", TerminatedTopic: "terminated-230",
+		CAFile: writeTestCA(t), Writer: settings.Elasticsearch,
+	}
+	deps, addresses := testDependencies(&fakeQuery{})
+	projection := &fakeProjectionRuntime{}
+	deps.newProjection = func(config.Elasticsearch) (projectionRuntime, error) {
+		return projection, nil
+	}
+	var workerSettings []policykafka.Settings
+	workers := []*fakeEventWorker{{}, {}}
+	deps.newWorker = func(
+		settings policykafka.Settings,
+		_ projectionRuntime,
+		_ *slog.Logger,
+	) (eventWorker, error) {
+		workerSettings = append(workerSettings, settings)
+		return workers[len(workerSettings)-1], nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+
+	// when
+	go func() { result <- run(ctx, settings, discardLogger(), deps) }()
+	_ = receiveString(t, addresses)
+	_ = receiveString(t, addresses)
+	healthAddress := receiveString(t, addresses)
+	waitForHTTPStatus(t, "http://"+healthAddress+"/readyz", http.StatusOK)
+	cancel()
+	if err := receiveError(t, result); err != nil {
+		t.Fatal(err)
+	}
+
+	// then
+	if len(workerSettings) != 2 ||
+		workerSettings[0].ClientID != "policy-registered-listener" ||
+		workerSettings[0].Topic != settings.Events.RegisteredTopic ||
+		workerSettings[1].ClientID != "policy-terminated-listener" ||
+		workerSettings[1].Topic != settings.Events.TerminatedTopic {
+		t.Fatalf("worker settings = %+v", workerSettings)
+	}
+	for _, worker := range workers {
+		started, stopped := worker.lifecycle()
+		if !started || !stopped {
+			t.Errorf("worker lifecycle = started:%t stopped:%t", started, stopped)
+		}
+	}
+	if !projection.closed {
+		t.Error("projection client remained open")
+	}
+}
+
+func TestRun_PartialWorkerStartupPreservesFailureAndCleansResources(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	settings.Events = config.Events{
+		Enabled: true, Brokers: []string{"kafka.example:9093"}, Group: "issue-230",
+		RegisteredTopic: "registered-230", TerminatedTopic: "terminated-230",
+		CAFile: writeTestCA(t), Writer: settings.Elasticsearch,
+	}
+	deps, _ := testDependencies(&fakeQuery{})
+	projection := &fakeProjectionRuntime{}
+	deps.newProjection = func(config.Elasticsearch) (projectionRuntime, error) {
+		return projection, nil
+	}
+	first := &fakeEventWorker{}
+	failure := errors.New("construct terminated worker")
+	created := 0
+	deps.newWorker = func(
+		policykafka.Settings,
+		projectionRuntime,
+		*slog.Logger,
+	) (eventWorker, error) {
+		created++
+		if created == 2 {
+			return nil, failure
+		}
+		return first, nil
+	}
+
+	// when
+	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
+	if !errors.Is(err, failure) {
+		t.Fatalf("run error = %v, want original worker failure", err)
+	}
+	_, stopped := first.lifecycle()
+	if !stopped || !projection.closed {
+		t.Fatalf(
+			"partial cleanup = worker stopped:%t projection closed:%t",
+			stopped,
+			projection.closed,
+		)
+	}
+}
+
 func TestRun_PartialBindFailureClosesEarlierListeners(t *testing.T) {
 	query := &fakeQuery{}
 	settings := testConfig(t)
@@ -279,6 +400,65 @@ type fakeQuery struct {
 	searchErr error
 	checkErr  error
 	closed    bool
+}
+
+type fakeProjectionRuntime struct {
+	mu       sync.Mutex
+	checkErr error
+	closed   bool
+}
+
+func (*fakeProjectionRuntime) ProjectPolicy(context.Context, application.PolicyEvent) error {
+	return nil
+}
+
+func (projection *fakeProjectionRuntime) Check(context.Context) error {
+	projection.mu.Lock()
+	defer projection.mu.Unlock()
+	return projection.checkErr
+}
+
+func (projection *fakeProjectionRuntime) CloseIdleConnections() {
+	projection.mu.Lock()
+	projection.closed = true
+	projection.mu.Unlock()
+}
+
+type fakeEventWorker struct {
+	mu      sync.Mutex
+	started bool
+	stopped bool
+}
+
+func (*fakeEventWorker) Check(context.Context) error { return nil }
+func (worker *fakeEventWorker) Run(ctx context.Context) error {
+	worker.mu.Lock()
+	worker.started = true
+	worker.mu.Unlock()
+	<-ctx.Done()
+	return nil
+}
+
+func (worker *fakeEventWorker) Shutdown(context.Context) error {
+	worker.mu.Lock()
+	worker.stopped = true
+	worker.mu.Unlock()
+	return nil
+}
+
+func (worker *fakeEventWorker) lifecycle() (bool, bool) {
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	return worker.started, worker.stopped
+}
+
+func writeTestCA(t *testing.T) string {
+	t.Helper()
+	path := t.TempDir() + "/ca.crt"
+	if err := os.WriteFile(path, []byte("test CA"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func (query *fakeQuery) SearchPolicies(ctx context.Context, value string) ([]domain.Policy, error) {

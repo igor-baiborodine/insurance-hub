@@ -9,12 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"reflect"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/domain"
 	policyelasticsearch "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/elasticsearch"
+	policykafka "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/kafka"
 )
 
 const (
@@ -195,7 +198,301 @@ func TestEventFixture_RealKafkaAndElasticsearchResources(t *testing.T) {
 			oracle.Events.Registration.ExpectedDocument,
 		)
 	}
+	consumer.Close()
+	verifyEventWorkers(t, ctx, producer, elasticsearchClient, environment, oracle)
+	verifyHandlerFailureCommitParity(t, ctx, producer, elasticsearchClient, environment, oracle)
 	verifyProjectionReplacement(t, ctx, elasticsearchClient, environment.Elasticsearch, oracle)
+}
+
+func verifyHandlerFailureCommitParity(
+	t *testing.T,
+	ctx context.Context,
+	producer *kgo.Client,
+	elasticsearchClient *policyelasticsearch.Client,
+	environment eventEnvironment,
+	oracle eventOracle,
+) {
+	t.Helper()
+	first := eventWithNumber(t, oracle.Events.Registration, "SYN-230-FAIL-1")
+	second := eventWithNumber(t, oracle.Events.Registration, "SYN-230-FAIL-2")
+	result := producer.ProduceSync(ctx,
+		&kgo.Record{Topic: environment.RegisteredTopic, Value: first.Value},
+		&kgo.Record{Topic: environment.RegisteredTopic, Value: second.Value},
+	)
+	if err := result.FirstErr(); err != nil {
+		t.Fatalf("produce handler-failure batch: %v", err)
+	}
+	projection := &failingEventProjection{}
+	worker, err := policykafka.NewWorker(policykafka.Settings{
+		Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup,
+		Topic: environment.RegisteredTopic, ClientID: "policy-registered-listener",
+	}, projection, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerCtx, cancelWorker := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(workerCtx) }()
+	if err := worker.Check(ctx); err != nil {
+		t.Fatal(err)
+	}
+	projection.waitForCalls(t, 1)
+	time.Sleep(300 * time.Millisecond)
+	if calls := projection.calls(); calls != 1 {
+		t.Fatalf(
+			"handler failure processed %d records from the fetched batch, want 1",
+			calls,
+		)
+	}
+	cancelWorker()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := worker.Shutdown(shutdownCtx); err != nil {
+		cancelShutdown()
+		t.Fatal(err)
+	}
+	cancelShutdown()
+	if _, exists := tryReadFixtureDocument(ctx, environment.Elasticsearch, second.Key); exists {
+		t.Fatal("unprocessed remainder was projected after the failed fetched batch")
+	}
+
+	writer, err := policyelasticsearch.NewWriter(elasticsearchClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	useCase, err := application.NewProjectPolicy(writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := policykafka.NewWorker(policykafka.Settings{
+		Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup,
+		Topic: environment.RegisteredTopic, ClientID: "policy-registered-listener",
+	}, eventProjection{useCase: useCase}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartCtx, cancelRestart := context.WithCancel(ctx)
+	restartDone := make(chan error, 1)
+	go func() { restartDone <- restarted.Run(restartCtx) }()
+	if err := restarted.Check(ctx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	cancelRestart()
+	if err := <-restartDone; err != nil {
+		t.Fatal(err)
+	}
+	shutdownCtx, cancelShutdown = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
+	if err := restarted.Shutdown(shutdownCtx); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := tryReadFixtureDocument(ctx, environment.Elasticsearch, second.Key); exists {
+		t.Fatal("graceful final-position commit replayed the failed batch remainder")
+	}
+}
+
+type failingEventProjection struct {
+	mu    sync.Mutex
+	count int
+}
+
+func (projection *failingEventProjection) ProjectPolicy(
+	context.Context,
+	application.PolicyEvent,
+) error {
+	projection.mu.Lock()
+	projection.count++
+	projection.mu.Unlock()
+	return errors.New("synthetic writer failure")
+}
+
+func (projection *failingEventProjection) calls() int {
+	projection.mu.Lock()
+	defer projection.mu.Unlock()
+	return projection.count
+}
+
+func (projection *failingEventProjection) waitForCalls(t *testing.T, count int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if projection.calls() >= count {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("projection calls = %d, want %d", projection.calls(), count)
+}
+
+func eventWithNumber(t *testing.T, source oracleEvent, number string) oracleEvent {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(source.Value, &payload); err != nil {
+		t.Fatal(err)
+	}
+	policy, ok := payload["policy"].(map[string]any)
+	if !ok {
+		t.Fatal("oracle event policy is not an object")
+	}
+	policy["number"] = number
+	value, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := make(map[string]string, len(source.ExpectedDocument))
+	for key, value := range source.ExpectedDocument {
+		want[key] = value
+	}
+	want["number"] = number
+	return oracleEvent{Key: number, Value: value, ExpectedDocument: want}
+}
+
+func verifyEventWorkers(
+	t *testing.T,
+	ctx context.Context,
+	producer *kgo.Client,
+	elasticsearchClient *policyelasticsearch.Client,
+	environment eventEnvironment,
+	oracle eventOracle,
+) {
+	t.Helper()
+	writer, err := policyelasticsearch.NewWriter(elasticsearchClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	useCase, err := application.NewProjectPolicy(writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection := eventProjection{useCase: useCase}
+	workers := make([]*policykafka.Worker, 0, 2)
+	for _, settings := range []policykafka.Settings{
+		{Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup, Topic: environment.RegisteredTopic, ClientID: "policy-registered-listener"},
+		{Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup, Topic: environment.TerminatedTopic, ClientID: "policy-terminated-listener"},
+	} {
+		worker, workerErr := policykafka.NewWorker(settings, projection, slog.Default())
+		if workerErr != nil {
+			t.Fatal(workerErr)
+		}
+		workers = append(workers, worker)
+	}
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	results := make(chan error, len(workers))
+	for _, worker := range workers {
+		go func(item *policykafka.Worker) { results <- item.Run(workerCtx) }(worker)
+	}
+	for _, worker := range workers {
+		if workerErr := worker.Check(ctx); workerErr != nil {
+			t.Fatal(workerErr)
+		}
+	}
+	produceEvent(t, ctx, producer, environment.RegisteredTopic, oracle.Events.Registration)
+	waitForFixtureDocument(t, ctx, environment.Elasticsearch, oracle.Events.Registration)
+	produceEvent(t, ctx, producer, environment.TerminatedTopic, oracle.Events.Termination)
+	waitForFixtureDocument(t, ctx, environment.Elasticsearch, oracle.Events.Termination)
+	produceRawEvent(t, ctx, producer, environment.RegisteredTopic, []byte(`{"policy":`))
+	produceEvent(t, ctx, producer, environment.RegisteredTopic, oracle.Events.Registration)
+	waitForFixtureDocument(t, ctx, environment.Elasticsearch, oracle.Events.Registration)
+	cancelWorkers()
+	for range workers {
+		if workerErr := <-results; workerErr != nil {
+			t.Fatalf("run event worker: %v", workerErr)
+		}
+	}
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
+	for _, worker := range workers {
+		if workerErr := worker.Shutdown(shutdownCtx); workerErr != nil {
+			t.Fatalf("shutdown event worker: %v", workerErr)
+		}
+	}
+}
+
+type eventProjection struct{ useCase application.ProjectPolicy }
+
+func (projection eventProjection) ProjectPolicy(
+	ctx context.Context,
+	event application.PolicyEvent,
+) error {
+	return projection.useCase.Execute(ctx, event)
+}
+
+func produceEvent(
+	t *testing.T,
+	ctx context.Context,
+	producer *kgo.Client,
+	topic string,
+	event oracleEvent,
+) {
+	t.Helper()
+	produceRawEvent(t, ctx, producer, topic, event.Value)
+}
+
+func produceRawEvent(
+	t *testing.T,
+	ctx context.Context,
+	producer *kgo.Client,
+	topic string,
+	value []byte,
+) {
+	t.Helper()
+	result := producer.ProduceSync(ctx, &kgo.Record{Topic: topic, Value: value})
+	if err := result.FirstErr(); err != nil {
+		t.Fatalf("produce worker fixture: %v", err)
+	}
+}
+
+func waitForFixtureDocument(
+	t *testing.T,
+	ctx context.Context,
+	elasticsearchURL string,
+	event oracleEvent,
+) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) && ctx.Err() == nil {
+		stored, ok := tryReadFixtureDocument(ctx, elasticsearchURL, event.Key)
+		if ok && reflect.DeepEqual(stored, event.ExpectedDocument) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("worker did not project expected document for %s", event.Key)
+}
+
+func tryReadFixtureDocument(
+	ctx context.Context,
+	elasticsearchURL string,
+	number string,
+) (map[string]string, bool) {
+	endpoint := fmt.Sprintf(
+		"%s/%s/_doc/%s",
+		elasticsearchURL,
+		eventFixtureIndex,
+		url.PathEscape(number),
+	)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, false
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, false
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, false
+	}
+	var result struct {
+		Source map[string]string `json:"_source"`
+	}
+	if json.NewDecoder(response.Body).Decode(&result) != nil {
+		return nil, false
+	}
+	return result.Source, true
 }
 
 func verifyProjectionReplacement(

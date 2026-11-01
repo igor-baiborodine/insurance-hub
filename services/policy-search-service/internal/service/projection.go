@@ -12,6 +12,7 @@ import (
 
 type projectionRuntime interface {
 	ProjectPolicy(context.Context, application.PolicyEvent) error
+	Check(context.Context) error
 	CloseIdleConnections()
 }
 
@@ -51,6 +52,10 @@ func (projection *productionProjection) ProjectPolicy(
 	event application.PolicyEvent,
 ) error {
 	return projection.useCase.Execute(ctx, event)
+}
+
+func (projection *productionProjection) Check(ctx context.Context) error {
+	return projection.client.Check(ctx)
 }
 
 func (projection *productionProjection) CloseIdleConnections() {

@@ -25,7 +25,8 @@ This standalone module delivers the first private Go Policy Search capability al
 Java service. Its module identity is
 `github.com/igor-baiborodine/insurance-hub/services/policy-search-service`. Run every command in this
 document from `services/policy-search-service/` with workspace mode disabled. The module has no root
-workspace, filesystem replacements, database, Kafka, or mandatory collector dependency.
+workspace, filesystem replacements, database, or mandatory collector dependency. Kafka and the
+Elasticsearch writer are optional and are acquired only when event workers are enabled.
 
 The service provides the versioned Policy Search contract through direct gRPC and a generated HTTP
 gateway. It owns generated Go and Swagger 2.0 artifacts, Elasticsearch query and policy-projection
@@ -127,8 +128,10 @@ tooling fixtures are removed after successful, failed, and interrupted sessions.
 
 The event-fixture target starts disposable pinned Kafka and Elasticsearch containers and runs only
 `TestEventFixture_*` from `internal/testing`. Its checked-in oracle owns C230-01–07 inputs and
-expected outcomes independently of the future consumer implementation. It fails when either image,
-Docker, exact test discovery or cleanup is unavailable; required integration never passes by skip.
+expected outcomes independently of the consumer implementation. It drives both production workers
+through registration, termination, malformed-record and replacement paths. It fails when either
+image, Docker, exact test discovery or cleanup is unavailable; required integration never passes by
+skip.
 The existing Elasticsearch target separately exercises the query adapter and real HTTP-to-RPC
 runtime. Image and deployment owners include a disposable Kind-namespace check. Mock generation,
 database integration and migrations remain inapplicable.
@@ -243,6 +246,14 @@ do not repeat its supplied value.
 | `ELASTICSEARCH_PASSWORD` | unset | Optional workload password; must be set together with `ELASTICSEARCH_USERNAME`. |
 | `ELASTICSEARCH_CA_FILE` | unset | Optional public CA file for HTTPS only. The file is read during startup. |
 | `ELASTICSEARCH_TIMEOUT` | `5s` | Positive duration no greater than five seconds; a shorter caller deadline remains authoritative. |
+| `EVENT_WORKERS_ENABLED` | `false` | Boolean. Disabled mode creates no Kafka or writer client and needs no event settings or Secrets. |
+| `KAFKA_BROKERS` | unset | Required when workers are enabled; comma-separated `host:port` bootstrap addresses. |
+| `KAFKA_GROUP` | `policy-search-service` when enabled | Nonempty consumer group. Isolated verification overrides this with `policy-search-service-issue-230`. |
+| `KAFKA_REGISTERED_TOPIC` | `policy-registered` when enabled | Nonempty registered-event topic; must differ from the terminated topic. |
+| `KAFKA_TERMINATED_TOPIC` | `policy-terminated` when enabled | Nonempty terminated-event topic; must differ from the registered topic. |
+| `KAFKA_CA_FILE` | unset | Required when workers are enabled; public CA file used with TLS 1.2 or newer and hostname verification. |
+| `ELASTICSEARCH_WRITER_USERNAME` | unset | Required when workers are enabled; separate document-writer identity. |
+| `ELASTICSEARCH_WRITER_PASSWORD` | unset | Required with the writer username; never reused as query configuration. |
 
 Identity values use 1–128 ASCII letters, digits, dots, underscores or hyphens. The namespace
 `insurance-hub` and implementation `go` are fixed. Enabled telemetry requires explicit environment,
@@ -435,7 +446,7 @@ owns this contract, lifecycle, exposure and deployment configuration.
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
 | Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC search gateway, legacy HTTP mapping, bounded transport signals and configurable HTTP/gRPC limits. |
-| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | RPC and Elasticsearch readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
+| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | RPC, Elasticsearch and enabled-worker Kafka readiness, three listener ownership, HTTP drain and bounded ordered worker/client cleanup. |
 | Business architecture | Product application-owned catalog ports and injected adapters | `internal/application` owns the policy-search and policy-view writer ports, stable selected-window ordering and Java-compatible event mapping; `internal/elasticsearch` implements query and whole-document replacement adapters. Runtime composition owns separate query and projection clients. |
 
 Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
@@ -447,7 +458,7 @@ source improvements through its own reviewed changes.
 | Package | Responsibility |
 | --- | --- |
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
-| `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
+| `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; conditionally construct the separate writer and two Kafka workers; own readiness, partial-start rollback and ordered drain. |
 | `internal/gateway` | Strict canonical `/policies` HTTP contract, generated gRPC client registration, legacy JSON error mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated search registration, presence validation, deadlines, size limits, domain-to-protobuf mapping, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Policy Search identity and cross-setting policy. |
@@ -455,6 +466,7 @@ source improvements through its own reviewed changes.
 | `internal/domain` | Policy and strict calendar-date values without transport or datastore types. |
 | `internal/application` | Search and policy-view writer ports, descending `dateFrom` ordering of the already selected hit window, and event-to-read-model projection with received date presence preserved. |
 | `internal/elasticsearch` | Official Elasticsearch 8.19 client configuration, the query adapter, and whole-document number-keyed replacement for the isolated `policy-views-issue-229` index. |
+| `internal/kafka` | Two franz-go clients with explicit legacy group/reset/commit/timing settings; decode the existing envelope, skip malformed records without payload logs, invoke projection synchronously, and perform bounded final-position commit and close. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/policysearch/v1`, `gen/policysearch/v1`, `gen/openapiv2/policysearch/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 
@@ -472,11 +484,13 @@ flowchart TD
     composition --> health["servicekit/health"]
     composition --> telemetry["internal/telemetry"]
     composition --> elasticsearchAdapters["internal/elasticsearch"]
+    composition --> kafka["internal/kafka"]
     composition --> config
     grpc --> telemetry
     grpc --> generated["gen/policysearch/v1"]
     gateway --> generated
     elasticsearchAdapters --> application["internal/application"]
+    kafka --> application
     application --> domain["internal/domain"]
     telemetry --> config
     telemetry --> logger["internal/logger"]
@@ -493,8 +507,10 @@ and translates it through the generated client across the owned instrumented con
 server invokes the application port, which asks the official Elasticsearch adapter for the capped
 hit window and applies stable date ordering before mapping the response. The request retains the
 shorter caller deadline while HTTP, gRPC and dependency observations use fixed safe dimensions.
-The projection constructor separately binds the application writer port to a dedicated
-Elasticsearch client and performs full replacement under the policy-number document ID. Worker
-configuration and lifecycle do not activate that constructor until the event composition step.
-Shutdown withdraws readiness and drains accepted HTTP work before connection and gRPC teardown,
-closes dependency connections, then closes management and telemetry within the shared deadline.
+When event workers are enabled, composition checks the dedicated writer and both Kafka clients,
+then starts one synchronous worker per legacy topic. Each worker decodes the existing envelope and
+invokes the same projection use case; the dedicated Elasticsearch client performs full replacement
+under the policy-number document ID. Disabled mode never constructs those resources. Shutdown
+withdraws readiness, stops polling, performs the selected bounded final current-position commit,
+closes both Kafka clients and the writer client, drains accepted HTTP work, then closes the query,
+management and telemetry resources within the shared deadline.

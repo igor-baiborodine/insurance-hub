@@ -1,0 +1,257 @@
+// Package kafka consumes the legacy policy event envelopes.
+package kafka
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"sync/atomic"
+	"time"
+
+	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/kmsg"
+
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/domain"
+)
+
+const (
+	pollTimeout = 100 * time.Millisecond
+	maxRecords  = 500
+)
+
+// Settings captures the explicit Java-compatible client behavior selected for issue 230.
+type Settings struct {
+	Brokers  []string
+	Group    string
+	Topic    string
+	ClientID string
+	CACert   []byte
+}
+
+type projection interface {
+	ProjectPolicy(context.Context, application.PolicyEvent) error
+}
+
+type pollResult struct {
+	records []*kgo.Record
+	errors  []error
+}
+
+type consumerClient interface {
+	Poll(context.Context, int) pollResult
+	Ping(context.Context) error
+	AllowRebalance()
+	CommitUncommittedOffsets(context.Context) error
+	CloseAllowingRebalance()
+}
+
+type franzClient struct{ client *kgo.Client }
+
+func (client franzClient) Poll(ctx context.Context, limit int) pollResult {
+	fetches := client.client.PollRecords(ctx, limit)
+	result := pollResult{records: fetches.Records()}
+	for _, fetchErr := range fetches.Errors() {
+		result.errors = append(result.errors, fetchErr.Err)
+	}
+	return result
+}
+
+func (client franzClient) Ping(ctx context.Context) error { return client.client.Ping(ctx) }
+func (client franzClient) AllowRebalance()                { client.client.AllowRebalance() }
+func (client franzClient) CommitUncommittedOffsets(ctx context.Context) error {
+	return client.client.CommitUncommittedOffsets(ctx)
+}
+func (client franzClient) CloseAllowingRebalance() { client.client.CloseAllowingRebalance() }
+
+// Worker synchronously projects one topic while preserving the selected weak auto-commit model.
+type Worker struct {
+	client     consumerClient
+	projection projection
+	logger     *slog.Logger
+	assigned   *atomic.Bool
+}
+
+// NewWorker creates one independently owned topic consumer.
+func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*Worker, error) {
+	if len(settings.Brokers) == 0 || settings.Group == "" || settings.Topic == "" ||
+		settings.ClientID == "" || projection == nil || logger == nil {
+		return nil, errors.New("configure policy event worker: incomplete settings")
+	}
+	options := []kgo.Opt{
+		kgo.SeedBrokers(settings.Brokers...),
+		kgo.ClientID(settings.ClientID),
+		kgo.ConsumerGroup(settings.Group),
+		kgo.ConsumeTopics(settings.Topic),
+		kgo.ConsumeStartOffset(kgo.NewOffset().AtStart()),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+		kgo.AutoCommitInterval(5 * time.Second),
+		kgo.SessionTimeout(10 * time.Second),
+		kgo.HeartbeatInterval(3 * time.Second),
+		kgo.RebalanceTimeout(5 * time.Minute),
+		kgo.Balancers(kgo.RangeBalancer()),
+		kgo.FetchMaxWait(500 * time.Millisecond),
+		kgo.BlockRebalanceOnPoll(),
+		kgo.AutoCommitCallback(func(
+			_ *kgo.Client,
+			_ *kmsg.OffsetCommitRequest,
+			_ *kmsg.OffsetCommitResponse,
+			err error,
+		) {
+			if err != nil {
+				logger.Error("policy event offset commit failed")
+			}
+		}),
+	}
+	assigned := &atomic.Bool{}
+	options = append(options,
+		kgo.OnPartitionsAssigned(func(context.Context, *kgo.Client, map[string][]int32) {
+			assigned.Store(true)
+		}),
+		kgo.OnPartitionsRevoked(func(context.Context, *kgo.Client, map[string][]int32) {
+			assigned.Store(false)
+		}),
+		kgo.OnPartitionsLost(func(context.Context, *kgo.Client, map[string][]int32) {
+			assigned.Store(false)
+		}),
+	)
+	if len(settings.CACert) > 0 {
+		roots, err := x509.SystemCertPool()
+		if err != nil {
+			return nil, errors.New("configure policy event worker: load system roots")
+		}
+		if !roots.AppendCertsFromPEM(settings.CACert) {
+			return nil, errors.New(
+				"configure policy event worker: invalid CA certificate",
+			)
+		}
+		options = append(options, kgo.DialTLSConfig(&tls.Config{
+			MinVersion: tls.VersionTLS12,
+			RootCAs:    roots,
+		}))
+	}
+	consumer, err := kgo.NewClient(options...)
+	if err != nil {
+		return nil, errors.New("configure policy event worker: create Kafka client")
+	}
+	return &Worker{
+		client: franzClient{client: consumer}, projection: projection,
+		logger: logger, assigned: assigned,
+	}, nil
+}
+
+func newWorker(client consumerClient, projection projection, logger *slog.Logger) *Worker {
+	assigned := &atomic.Bool{}
+	assigned.Store(true)
+	return &Worker{client: client, projection: projection, logger: logger, assigned: assigned}
+}
+
+// Check verifies broker reachability without joining a consumer group.
+func (worker *Worker) Check(ctx context.Context) error {
+	if err := worker.client.Ping(ctx); err != nil {
+		return errors.New("check policy event worker: Kafka unavailable")
+	}
+	for !worker.assigned.Load() {
+		select {
+		case <-ctx.Done():
+			return errors.New("check policy event worker: group assignment unavailable")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	return nil
+}
+
+// Run polls and processes records until cancellation. Malformed envelopes are skipped.
+func (worker *Worker) Run(ctx context.Context) error {
+	for ctx.Err() == nil {
+		pollCtx, cancel := context.WithTimeout(ctx, pollTimeout)
+		result := worker.client.Poll(pollCtx, maxRecords)
+		cancel()
+		if ctx.Err() != nil {
+			worker.client.AllowRebalance()
+			return nil
+		}
+		for _, fetchErr := range result.errors {
+			if !errors.Is(fetchErr, context.DeadlineExceeded) &&
+				!errors.Is(fetchErr, context.Canceled) {
+				worker.logger.ErrorContext(ctx, "policy event fetch failed")
+			}
+		}
+		for _, record := range result.records {
+			event, err := decode(record.Value)
+			if err != nil {
+				worker.logger.WarnContext(ctx, "malformed policy event skipped")
+				continue
+			}
+			if err := worker.projection.ProjectPolicy(ctx, event); err != nil {
+				worker.logger.ErrorContext(ctx, "policy event projection failed")
+				break
+			}
+		}
+		worker.client.AllowRebalance()
+	}
+	return nil
+}
+
+// Shutdown commits the current consumed position, releases rebalances and closes the client.
+func (worker *Worker) Shutdown(ctx context.Context) error {
+	commitErr := worker.client.CommitUncommittedOffsets(ctx)
+	worker.client.AllowRebalance()
+	closed := make(chan struct{})
+	go func() {
+		worker.client.CloseAllowingRebalance()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-ctx.Done():
+		return errors.Join(commitErr, ctx.Err())
+	}
+	return commitErr
+}
+
+type envelope struct {
+	Policy *policy `json:"policy"`
+}
+
+type policy struct {
+	Number       string  `json:"number"`
+	From         *string `json:"from"`
+	To           *string `json:"to"`
+	PolicyHolder string  `json:"policyHolder"`
+}
+
+func decode(value []byte) (application.PolicyEvent, error) {
+	var input envelope
+	if err := json.Unmarshal(value, &input); err != nil || input.Policy == nil {
+		return application.PolicyEvent{}, errors.New(
+			"decode policy event: invalid envelope",
+		)
+	}
+	from, err := parseDate(input.Policy.From)
+	if err != nil {
+		return application.PolicyEvent{}, err
+	}
+	to, err := parseDate(input.Policy.To)
+	if err != nil {
+		return application.PolicyEvent{}, err
+	}
+	return application.PolicyEvent{
+		Number: input.Policy.Number, From: from, To: to,
+		PolicyHolder: input.Policy.PolicyHolder,
+	}, nil
+}
+
+func parseDate(value *string) (*domain.Date, error) {
+	if value == nil {
+		return nil, nil
+	}
+	date, err := domain.ParseDate(*value)
+	if err != nil {
+		return nil, errors.New("decode policy event: invalid date")
+	}
+	return &date, nil
+}
