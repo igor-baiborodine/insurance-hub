@@ -10,10 +10,10 @@ from unittest.mock import Mock, patch
 
 import policy_search_deployment_checks as checks
 import pytest
-from scripts.go.service import deployment as lifecycle
-from scripts.go.service import release as release_owner
 
 import deployment
+from scripts.go.service import deployment as lifecycle
+from scripts.go.service import release as release_owner
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -32,8 +32,8 @@ def target_environment(name: str = "local-dev") -> dict[str, str]:
     }
 
 
-def rendered_items() -> list[dict]:
-    return checks.documents(checks.render("local-dev"))
+def rendered_items(environment: str = "local-dev") -> list[dict]:
+    return checks.documents(checks.render(environment))
 
 
 def test_target_rejects_wrong_coordinates_before_cluster_access() -> None:
@@ -273,6 +273,37 @@ def test_live_state_accepts_api_server_normalized_resources() -> None:
         # when / then the live-state guard still rejects the drift.
         with pytest.raises(checks.DeploymentError, match="differs from rendered policy"):
             target.live(items, require_deployment=True)
+
+
+def test_qa_live_state_accepts_required_ca_volume_and_rejects_drift() -> None:
+    # given the QA render and an identical live resource inventory.
+    items = rendered_items("qa")
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    target = object.__new__(checks.Target)
+    target.deployment = deployment["metadata"]["name"]
+    target.configuration = {"mode": "flux"}
+
+    def live_json(_operation, kind, *arguments):
+        if kind == "pods":
+            return {"items": []}
+        return actual[(kind, arguments[0])]
+
+    target.json = Mock(side_effect=live_json)
+
+    # when live state is checked before rollout digest verification.
+    with patch.dict(os.environ, {}, clear=True):
+        # then the exact required CA volume passes.
+        target.live(items, require_deployment=False)
+
+        # given the mounted Secret drifts from the rendered contract.
+        actual[("deployment", deployment["metadata"]["name"])]["spec"]["template"]["spec"][
+            "volumes"
+        ][0]["secret"]["secretName"] = "foreign-ca"
+
+        # when / then the live-state guard rejects the drift.
+        with pytest.raises(checks.DeploymentError, match="pod security settings differ"):
+            target.live(items, require_deployment=False)
 
 
 @pytest.mark.parametrize(

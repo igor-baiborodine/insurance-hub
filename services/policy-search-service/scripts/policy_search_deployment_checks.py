@@ -635,7 +635,7 @@ class Target:
                 and pod.get("hostIPC") is not True
                 and pod.get("serviceAccountName") in (None, "default")
                 and not pod.get("initContainers")
-                and not pod.get("volumes"),
+                and pod.get("volumes") == desired_pod.get("volumes"),
                 f"live Deployment/{name} pod security settings differ",
             )
             containers = pod.get("containers", [])
