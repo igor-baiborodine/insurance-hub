@@ -67,6 +67,12 @@ exact image and the image's `git-<12-hex>` source version into the rendered loca
 checked-in zero tag cannot be deployed directly.
 Telemetry is disabled locally and requires no collector.
 
+`kubectl config current-context` must also equal `kind-local-dev-insurance-hub`. If the operator's
+shared kubeconfig intentionally has no active context, copy it to a protected task-local file, set
+the required current context in that copy, and export its path through `KUBECONFIG` for the bounded
+operation. Do not change the shared kubeconfig implicitly. Remove the task-local copy through the
+operator's normal protected-file cleanup after retaining required evidence.
+
 ## Deploy and verify local-dev
 
 Run the guarded sequence:
