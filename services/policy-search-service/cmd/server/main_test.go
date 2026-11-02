@@ -138,13 +138,20 @@ func TestRun_RestoresTelemetryDiagnosticsAfterServiceFailure(t *testing.T) {
 	}
 }
 
-func TestServiceFailureStageUsesOnlyKnownSafeCategories(t *testing.T) {
-	if got := serviceFailureStage(
-		errors.New("run service: event workers not ready: private"),
-	); got != "event_worker_readiness" {
-		t.Fatalf("event worker stage = %q", got)
+func TestServiceFailureStage_UsesOnlyKnownSafeCategories(t *testing.T) {
+	// given
+	readinessFailure := errors.New("run service: event workers not ready: private")
+	unknownFailure := errors.New("private-marker")
+
+	// when
+	readinessStage := serviceFailureStage(readinessFailure)
+	unknownStage := serviceFailureStage(unknownFailure)
+
+	// then
+	if readinessStage != "event_worker_readiness" {
+		t.Fatalf("event worker stage = %q", readinessStage)
 	}
-	if got := serviceFailureStage(errors.New("private-marker")); got != "service_runtime" {
-		t.Fatalf("unknown stage = %q", got)
+	if unknownStage != "service_runtime" {
+		t.Fatalf("unknown stage = %q", unknownStage)
 	}
 }
