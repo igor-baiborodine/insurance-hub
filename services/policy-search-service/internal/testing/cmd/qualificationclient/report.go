@@ -802,23 +802,135 @@ func (report *comparisonReport) addLatencyMeasure(
 }
 
 func validateReportSet(javaQuery, goQuery queryReport, javaEvent, goEvent eventReport) error {
-	if !javaQuery.Complete || !goQuery.Complete || !javaEvent.Complete || !goEvent.Complete {
-		return errors.New("all reports must be complete")
+	for _, input := range []struct {
+		candidate string
+		report    queryReport
+	}{
+		{candidate: "java", report: javaQuery},
+		{candidate: "go", report: goQuery},
+	} {
+		if err := validateQueryReportGrid(input.report, input.candidate); err != nil {
+			return err
+		}
 	}
-	if javaQuery.Candidate != "java" || javaEvent.Candidate != "java" ||
-		goQuery.Candidate != "go" || goEvent.Candidate != "go" {
-		return errors.New("candidate identities differ")
+	for _, input := range []struct {
+		candidate string
+		report    eventReport
+	}{
+		{candidate: "java", report: javaEvent},
+		{candidate: "go", report: goEvent},
+	} {
+		if err := validateEventReportGrid(input.report, input.candidate); err != nil {
+			return err
+		}
 	}
 	if javaQuery.FixtureSHA256 == "" || javaQuery.FixtureSHA256 != goQuery.FixtureSHA256 ||
 		javaQuery.FixtureSHA256 != javaEvent.FixtureSHA256 || javaQuery.FixtureSHA256 != goEvent.FixtureSHA256 {
 		return errors.New("fixture identities differ")
 	}
-	if len(javaEvent.Samples) != 48 || len(goEvent.Samples) != 48 {
-		return errors.New("event reports must contain 48 samples")
+	return nil
+}
+
+func validateQueryReportGrid(report queryReport, candidate string) error {
+	endpoints := []string{"http"}
+	if candidate == "go" {
+		endpoints = append(endpoints, "grpc")
 	}
-	if javaQuery.CandidateOrder != pairedCandidateOrder ||
-		goQuery.CandidateOrder != pairedCandidateOrder {
-		return errors.New("paired candidate order differs")
+	queryIDs := []string{
+		"populated",
+		"omitted-fields",
+		"number-only",
+		"quoted-holder",
+		"zero-hit",
+		"size-cap",
+		"stable-order",
+	}
+	if report.SchemaVersion != reportSchemaVersion || report.Kind != "query-report" ||
+		report.Candidate != candidate || report.CandidateOrder != pairedCandidateOrder ||
+		report.WarmupCycles != 2 || report.Blocks != 5 || report.Cycles != 10 ||
+		!slices.Equal(report.Concurrency, []int{1, 4}) || !report.Complete ||
+		report.Failure != "" {
+		return fmt.Errorf("%s query report identity differs", candidate)
+	}
+	want := report.Blocks * report.Cycles * len(report.Concurrency)
+	want *= len(endpoints) * len(queryIDs)
+	if len(report.Samples) != want {
+		return fmt.Errorf("%s query report sample count differs", candidate)
+	}
+	allowedEndpoints := make(map[string]bool, len(endpoints))
+	for _, endpoint := range endpoints {
+		allowedEndpoints[endpoint] = true
+	}
+	allowedQueries := make(map[string]bool, len(queryIDs))
+	for _, queryID := range queryIDs {
+		allowedQueries[queryID] = true
+	}
+	seen := make(map[string]bool, want)
+	for _, sample := range report.Samples {
+		if sample.Block < 0 || sample.Block >= report.Blocks ||
+			sample.Cycle < 0 || sample.Cycle >= report.Cycles ||
+			!slices.Contains(report.Concurrency, sample.Concurrency) ||
+			!allowedEndpoints[sample.Endpoint] || !allowedQueries[sample.QueryID] ||
+			sample.DurationNS <= 0 || sample.Status != http.StatusOK ||
+			sample.Outcome != "passed" {
+			return fmt.Errorf("%s query report sample identity differs", candidate)
+		}
+		key := fmt.Sprintf(
+			"%d/%d/%d/%s/%s",
+			sample.Block,
+			sample.Cycle,
+			sample.Concurrency,
+			sample.Endpoint,
+			sample.QueryID,
+		)
+		if seen[key] {
+			return fmt.Errorf("%s query report contains a duplicate sample", candidate)
+		}
+		seen[key] = true
+	}
+	if len(seen) != want {
+		return fmt.Errorf("%s query report sample grid differs", candidate)
+	}
+	return nil
+}
+
+func validateEventReportGrid(report eventReport, candidate string) error {
+	eventTypes := []string{
+		"registration",
+		"registration-duplicate",
+		"termination",
+		"registration-reverse",
+	}
+	wantRelay := ""
+	if candidate == "java" {
+		wantRelay = "owned audit topic to pinned legacy topic on the same disposable broker"
+	}
+	if report.SchemaVersion != reportSchemaVersion || report.Kind != "event-report" ||
+		report.Candidate != candidate || report.Blocks != 3 || report.Identities != 4 ||
+		report.Relay != wantRelay || !report.Complete || report.Failure != "" {
+		return fmt.Errorf("%s event report identity differs", candidate)
+	}
+	want := report.Blocks * report.Identities * len(eventTypes)
+	if len(report.Samples) != want {
+		return fmt.Errorf("%s event report sample count differs", candidate)
+	}
+	seen := make(map[string]bool, want)
+	for _, sample := range report.Samples {
+		if sample.Block < 0 || sample.Block >= report.Blocks ||
+			sample.Identity < 0 || sample.Identity >= report.Identities ||
+			sample.Sequence < 0 || sample.Sequence >= len(eventTypes) ||
+			sample.EventType != eventTypes[sample.Sequence] || sample.DurationNS <= 0 ||
+			sample.Outcome != "passed" {
+			return fmt.Errorf("%s event report sample identity differs", candidate)
+		}
+		key := fmt.Sprintf("%d/%d/%d", sample.Block, sample.Identity, sample.Sequence)
+		if seen[key] {
+			return fmt.Errorf("%s event report contains a duplicate sample", candidate)
+		}
+		seen[key] = true
+	}
+	if len(seen) != want {
+		return fmt.Errorf("%s event report sample grid differs", candidate)
 	}
 	return nil
 }

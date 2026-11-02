@@ -181,13 +181,23 @@ func writeComparisonInputs(t *testing.T, paths comparisonPaths, baseline, candid
 	javaQuery := queryReport{
 		SchemaVersion: 1, Kind: "query-report", Candidate: "java", FixtureSHA256: "fixture",
 		Complete: true, Resources: resources, CandidateOrder: pairedCandidateOrder,
+		WarmupCycles: 2, Blocks: 5, Cycles: 10, Concurrency: []int{1, 4},
 	}
 	goQuery := queryReport{
 		SchemaVersion: 1, Kind: "query-report", Candidate: "go", FixtureSHA256: "fixture",
 		Complete: true, Resources: resources, CandidateOrder: pairedCandidateOrder,
+		WarmupCycles: 2, Blocks: 5, Cycles: 10, Concurrency: []int{1, 4},
 	}
 	for _, profile := range []int{1, 4} {
-		for _, queryID := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		for _, queryID := range []string{
+			"populated",
+			"omitted-fields",
+			"number-only",
+			"quoted-holder",
+			"zero-hit",
+			"size-cap",
+			"stable-order",
+		} {
 			for sample := range 50 {
 				javaQuery.Samples = append(javaQuery.Samples, querySample{
 					Block:       sample / 10,
@@ -226,34 +236,96 @@ func writeComparisonInputs(t *testing.T, paths comparisonPaths, baseline, candid
 	}
 	javaEvent := eventReport{
 		SchemaVersion: 1, Kind: "event-report", Candidate: "java", FixtureSHA256: "fixture",
-		Complete: true, Resources: resources,
+		Complete: true, Resources: resources, Blocks: 3, Identities: 4,
+		Relay: "owned audit topic to pinned legacy topic on the same disposable broker",
 	}
 	goEvent := eventReport{
 		SchemaVersion: 1, Kind: "event-report", Candidate: "go", FixtureSHA256: "fixture",
-		Complete: true, Resources: resources,
+		Complete: true, Resources: resources, Blocks: 3, Identities: 4,
 	}
-	for sample := range 48 {
-		javaEvent.Samples = append(
-			javaEvent.Samples,
-			eventSample{
-				Block:      sample / 16,
-				DurationNS: baseline.Nanoseconds(),
-				Outcome:    "passed",
-			},
-		)
-		goEvent.Samples = append(
-			goEvent.Samples,
-			eventSample{
-				Block:      sample / 16,
-				DurationNS: candidate.Nanoseconds(),
-				Outcome:    "passed",
-			},
-		)
+	eventTypes := []string{
+		"registration", "registration-duplicate", "termination", "registration-reverse",
+	}
+	for block := range 3 {
+		for identity := range 4 {
+			for sequence, eventType := range eventTypes {
+				javaEvent.Samples = append(javaEvent.Samples, eventSample{
+					Block:      block,
+					Identity:   identity,
+					Sequence:   sequence,
+					EventType:  eventType,
+					DurationNS: baseline.Nanoseconds(),
+					Outcome:    "passed",
+				})
+				goEvent.Samples = append(goEvent.Samples, eventSample{
+					Block:      block,
+					Identity:   identity,
+					Sequence:   sequence,
+					EventType:  eventType,
+					DurationNS: candidate.Nanoseconds(),
+					Outcome:    "passed",
+				})
+			}
+		}
 	}
 	writeTestJSON(t, paths.javaQuery, javaQuery)
 	writeTestJSON(t, paths.goQuery, goQuery)
 	writeTestJSON(t, paths.javaEvent, javaEvent)
 	writeTestJSON(t, paths.goEvent, goEvent)
+}
+
+func TestCompareReports_RejectsOmittedQueryCase(t *testing.T) {
+	// given
+	directory := t.TempDir()
+	paths := comparisonPaths{
+		javaQuery: filepath.Join(directory, "java-query.json"),
+		goQuery:   filepath.Join(directory, "go-query.json"),
+		javaEvent: filepath.Join(directory, "java-event.json"),
+		goEvent:   filepath.Join(directory, "go-event.json"),
+		output:    filepath.Join(directory, "comparison.json"),
+	}
+	writeComparisonInputs(t, paths, time.Millisecond, 2*time.Millisecond)
+	for _, path := range []string{paths.javaQuery, paths.goQuery} {
+		var report queryReport
+		readTestJSON(t, path, &report)
+		report.Samples = slices.DeleteFunc(report.Samples, func(sample querySample) bool {
+			return sample.QueryID == "stable-order"
+		})
+		writeTestJSON(t, path, report)
+	}
+
+	// when
+	_, err := compareReports(paths.settings())
+
+	// then
+	if err == nil || !strings.Contains(err.Error(), "sample count differs") {
+		t.Fatalf("omitted query comparison error = %v", err)
+	}
+}
+
+func TestCompareReports_RejectsDuplicatedEventSample(t *testing.T) {
+	// given
+	directory := t.TempDir()
+	paths := comparisonPaths{
+		javaQuery: filepath.Join(directory, "java-query.json"),
+		goQuery:   filepath.Join(directory, "go-query.json"),
+		javaEvent: filepath.Join(directory, "java-event.json"),
+		goEvent:   filepath.Join(directory, "go-event.json"),
+		output:    filepath.Join(directory, "comparison.json"),
+	}
+	writeComparisonInputs(t, paths, time.Millisecond, 2*time.Millisecond)
+	var report eventReport
+	readTestJSON(t, paths.goEvent, &report)
+	report.Samples[len(report.Samples)-1] = report.Samples[0]
+	writeTestJSON(t, paths.goEvent, report)
+
+	// when
+	_, err := compareReports(paths.settings())
+
+	// then
+	if err == nil || !strings.Contains(err.Error(), "duplicate sample") {
+		t.Fatalf("duplicated event comparison error = %v", err)
+	}
 }
 
 func writeTestJSON(t *testing.T, path string, value any) {
