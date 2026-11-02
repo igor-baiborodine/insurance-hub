@@ -265,7 +265,7 @@ def activate_event_render(environment: str, text: str) -> str:
     return yaml.safe_dump_all(items, explicit_start=True, sort_keys=False)
 
 
-def render_event_overlay(environment: str) -> str:
+def render_overlay_mode(environment: str, *, events_enabled: bool) -> str:
     validate_event_activation_contract(environment)
     source_overlay = ROOT / f"k8s/overlays/{environment}/svc/policy-search"
     source_base = ROOT / "k8s/apps/svc/policy-search/base"
@@ -279,26 +279,42 @@ def render_event_overlay(environment: str) -> str:
         shutil.copytree(source_base, temporary_base)
         kustomization_path = temporary_overlay / "kustomization.yaml"
         kustomization = yaml.safe_load(kustomization_path.read_text(encoding="utf-8"))
-        kustomization.setdefault("patches", []).extend(
-            [
-                {
-                    "path": "event-config-patch.yaml",
-                    "target": {"kind": "ConfigMap", "name": "policy-search-config"},
-                },
-                {
-                    "path": "event-deployment-patch.yaml",
-                    "target": {"kind": "Deployment", "name": "policy-search-api"},
-                },
-                {
-                    "path": "event-network-policy-patch.yaml",
-                    "target": {"kind": "NetworkPolicy", "name": "policy-search-api"},
-                },
-            ]
-        )
+        event_patches = [
+            {
+                "path": "event-config-patch.yaml",
+                "target": {"kind": "ConfigMap", "name": "policy-search-config"},
+            },
+            {
+                "path": "event-deployment-patch.yaml",
+                "target": {"kind": "Deployment", "name": "policy-search-api"},
+            },
+            {
+                "path": "event-network-policy-patch.yaml",
+                "target": {"kind": "NetworkPolicy", "name": "policy-search-api"},
+            },
+        ]
+        patches = kustomization.setdefault("patches", [])
+        for event_patch in event_patches:
+            path = event_patch["path"]
+            matches = [patch for patch in patches if patch.get("path") == path]
+            require(len(matches) <= 1, f"{environment} {path} is declared more than once")
+            if matches:
+                require(matches[0] == event_patch, f"{environment} {path} target differs")
+                patches.remove(matches[0])
+            if events_enabled:
+                patches.append(event_patch)
         kustomization_path.write_text(
             yaml.safe_dump(kustomization, sort_keys=False), encoding="utf-8"
         )
         return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(temporary_overlay)])
+
+
+def render_event_overlay(environment: str) -> str:
+    return render_overlay_mode(environment, events_enabled=True)
+
+
+def render_disabled_overlay(environment: str) -> str:
+    return render_overlay_mode(environment, events_enabled=False)
 
 
 def normalized_event_render(environment: str, text: str) -> list[dict[str, Any]]:
@@ -334,14 +350,10 @@ def validate_event_overlay_render(environment: str, disabled_text: str) -> str:
 
 
 def render(environment: str, mode: str | None = None) -> str:
-    record = service_record(ROOT, SERVICE)
-    configuration = target_record(ROOT, record, environment)
-    kubectl = os.environ.get("KUBECTL", "kubectl")
-    text = run([kubectl, "kustomize", str(ROOT / configuration["overlay"])])
     return (
         render_event_overlay(environment)
         if selected_event_mode(environment, mode) == "enabled"
-        else text
+        else render_disabled_overlay(environment)
     )
 
 

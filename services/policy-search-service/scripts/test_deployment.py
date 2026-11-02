@@ -10,10 +10,10 @@ from unittest.mock import Mock, patch
 
 import policy_search_deployment_checks as checks
 import pytest
-from scripts.go.service import deployment as lifecycle
-from scripts.go.service import release as release_owner
 
 import deployment
+from scripts.go.service import deployment as lifecycle
+from scripts.go.service import release as release_owner
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -125,6 +125,27 @@ def test_qa_event_render_preserves_query_and_telemetry_egress() -> None:
     assert "kube-dns" in encoded
     assert "qa-alloy" in encoded
     assert "qa-kafka" in encoded
+
+
+def test_qa_checked_in_activation_preserves_disabled_return_render() -> None:
+    # given / when
+    enabled = checks.documents(checks.render("qa", "enabled"))
+    disabled = checks.documents(checks.render("qa", "disabled"))
+
+    # then
+    enabled_config = next(item for item in enabled if item["kind"] == "ConfigMap")
+    disabled_config = next(item for item in disabled if item["kind"] == "ConfigMap")
+    enabled_deployment = next(item for item in enabled if item["kind"] == "Deployment")
+    disabled_deployment = next(item for item in disabled if item["kind"] == "Deployment")
+    enabled_policy = next(item for item in enabled if item["kind"] == "NetworkPolicy")
+    disabled_policy = next(item for item in disabled if item["kind"] == "NetworkPolicy")
+
+    assert enabled_config["data"]["EVENT_WORKERS_ENABLED"] == "true"
+    assert disabled_config["data"]["EVENT_WORKERS_ENABLED"] == "false"
+    assert len(enabled_deployment["spec"]["template"]["spec"]["volumes"]) == 2
+    assert len(disabled_deployment["spec"]["template"]["spec"]["volumes"]) == 1
+    assert len(enabled_policy["spec"]["egress"]) == 4
+    assert len(disabled_policy["spec"]["egress"]) == 3
 
 
 def test_live_state_requires_declared_event_mode_transition() -> None:
@@ -284,7 +305,7 @@ def test_qa_render_image_guard_accepts_release_owner_semver(image: str, accepted
 
 
 def test_release_preparation_produces_valid_qa_render(tmp_path) -> None:
-    # given the real inactive Policy Search QA overlay and release catalog entry.
+    # given the real event-enabled Policy Search QA overlay and release catalog entry.
     catalog = tmp_path / "scripts/go/service/catalog.json"
     catalog.parent.mkdir(parents=True)
     shutil.copy2(checks.ROOT / "scripts/go/service/catalog.json", catalog)
@@ -311,7 +332,7 @@ def test_release_preparation_produces_valid_qa_render(tmp_path) -> None:
             str(tmp_path / "k8s/overlays/qa/svc/policy-search"),
         ]
     )
-    items = checks.validate_render("qa", rendered)
+    items = checks.validate_render("qa", rendered, event_mode="enabled")
 
     # then release and telemetry identities satisfy the same QA render contract.
     deployment = next(item for item in items if item["kind"] == "Deployment")
@@ -321,6 +342,7 @@ def test_release_preparation_produces_valid_qa_render(tmp_path) -> None:
         == "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:1.27.305"
     )
     assert config["data"]["SERVICE_VERSION"] == "git-aaaaaaaaaaaa"
+    assert config["data"]["EVENT_WORKERS_ENABLED"] == "true"
     assert (
         deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"]
         == "git-aaaaaaaaaaaa"
