@@ -178,13 +178,13 @@ def matching_named_entries(actual: Any, expected: Any) -> bool:
 
 def matching_echo_predecessor_environment(actual: Any, expected: Any) -> bool:
     """Accept the reviewed Echo environment before its first query rollout only."""
-    if actual == expected:
+    if matching_named_entries(actual, expected):
         return True
     if not isinstance(actual, list) or not isinstance(expected, list):
         return False
     query_only = {"ELASTICSEARCH_USERNAME", "ELASTICSEARCH_PASSWORD"}
     predecessor = [item for item in expected if item.get("name") not in query_only]
-    return actual == predecessor
+    return matching_named_entries(actual, predecessor)
 
 
 def staged_image_matches(environment: str, image: str) -> bool:

@@ -187,6 +187,22 @@ def test_live_state_requires_declared_event_mode_transition() -> None:
         target.live(enabled, require_deployment=True)
 
 
+def test_echo_predecessor_environment_accepts_only_equivalent_or_query_omitted_entries() -> None:
+    # given
+    expected = [
+        {"name": "ELASTICSEARCH_USERNAME", "value": "reader"},
+        {"name": "ELASTICSEARCH_PASSWORD", "value": "password"},
+        {"name": "SERVICE_INSTANCE_ID", "value": "instance"},
+    ]
+
+    # when / then
+    assert checks.matching_echo_predecessor_environment(list(reversed(expected)), expected)
+    assert checks.matching_echo_predecessor_environment(expected[2:], expected)
+    assert not checks.matching_echo_predecessor_environment(
+        [{"name": "SERVICE_INSTANCE_ID", "value": "changed"}], expected
+    )
+
+
 def test_render_rejects_wrong_elasticsearch_secret_and_egress() -> None:
     items = rendered_items()
     deployment = next(item for item in items if item["kind"] == "Deployment")
