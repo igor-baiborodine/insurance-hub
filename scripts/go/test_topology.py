@@ -277,6 +277,13 @@ jobs:
           flags: ${{{{ steps.select.outputs.coverage_flag }}}}
           disable_search: true
           fail_ci_if_error: true
+      - if: steps.select.outputs.module_role != 'service-scaffold'
+        env:
+          COVERAGE_EXCLUSIONS: ${{{{ steps.select.outputs.coverage_exclusions }}}}
+          PATCH_COVERAGE_MINIMUM: '75'
+        run: >-
+          ./.venv/bin/python scripts/go/patch_coverage.py
+          --exclusions "$COVERAGE_EXCLUSIONS" --minimum "$PATCH_COVERAGE_MINIMUM"
 """
 
 
@@ -491,6 +498,21 @@ def test_topology_reports_controlled_manifest_failures(
             "files: ${{ steps.select.outputs.coverage_files }}",
             "files: coverage.txt",
             "selected-module validation contract",
+        ),
+        (
+            "scripts/go/patch_coverage.py",
+            "scripts/go/missing_patch_coverage.py",
+            "blocking patch coverage check",
+        ),
+        (
+            "PATCH_COVERAGE_MINIMUM: '75'",
+            "PATCH_COVERAGE_MINIMUM: '70'",
+            "75% patch coverage threshold",
+        ),
+        (
+            "steps.select.outputs.coverage_exclusions",
+            "steps.select.outputs.unexpected_exclusions",
+            "selected-module coverage exclusions",
         ),
         (
             "permissions:\n",

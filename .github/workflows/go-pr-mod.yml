@@ -113,3 +113,20 @@ jobs:
           name: ${{ steps.select.outputs.coverage_flag }}
           disable_search: true
           fail_ci_if_error: true
+
+      - name: Enforce selected module patch coverage
+        if: >-
+          success() && steps.select.outputs.module_dir != '' &&
+          steps.select.outputs.module_role != 'service-scaffold'
+        env:
+          COVERAGE_EXCLUSIONS: ${{ steps.select.outputs.coverage_exclusions }}
+          COVERAGE_FILES: ${{ steps.select.outputs.coverage_files }}
+          FORMAT_BASE: ${{ steps.select.outputs.format_base }}
+          MODULE_DIR: ${{ steps.select.outputs.module_dir }}
+          PATCH_COVERAGE_MINIMUM: '75'
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          ./.venv/bin/python scripts/go/patch_coverage.py
+          --base "$FORMAT_BASE" --head "$PR_HEAD"
+          --module-dir "$MODULE_DIR" --profiles "$COVERAGE_FILES"
+          --exclusions "$COVERAGE_EXCLUSIONS" --minimum "$PATCH_COVERAGE_MINIMUM"

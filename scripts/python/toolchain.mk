@@ -41,7 +41,9 @@ PYTHON_SHARED_TOOLING_FILES := \
 	scripts/python/test_runtime_check.py \
 	scripts/python/test_process_runner.py \
 	scripts/go/report_card.py \
+	scripts/go/patch_coverage.py \
 	scripts/go/select_pr_module.py \
+	scripts/go/test_patch_coverage.py \
 	scripts/go/test_report_card.py \
 	scripts/go/test_select_pr_module.py \
 	scripts/go/topology.py \
@@ -311,7 +313,7 @@ python-shared-tooling-test-fast: python-toolchain-check ## Run fast shared repos
 		scripts/test_markdown_pre_commit.py \
 		scripts/python/test_runtime_check.py \
 		scripts/python/test_process_runner.py \
-		scripts/go/test_report_card.py scripts/go/test_select_pr_module.py \
+		scripts/go/test_patch_coverage.py scripts/go/test_report_card.py scripts/go/test_select_pr_module.py \
 		scripts/go/test_shared_*.py \
 		scripts/go/test_topology.py scripts/go/module/test_module_tooling.py \
 		scripts/go/service/test_dispatch.py scripts/go/service/test_release.py \
