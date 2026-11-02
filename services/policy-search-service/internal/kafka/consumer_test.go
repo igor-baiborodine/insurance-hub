@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/application"
 )
@@ -81,6 +83,56 @@ func TestWorker_ShutdownCommitsThenCloses(t *testing.T) {
 	}
 }
 
+func TestWorker_ExtractsTraceContextAndRecordsBoundedOutcome(t *testing.T) {
+	// given
+	consumer := &fakeClient{polls: []pollResult{{records: []*kgo.Record{{
+		Headers: []kgo.RecordHeader{
+			{
+				Key: "traceparent",
+				Value: []byte(
+					"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+				),
+			},
+		},
+		Value: []byte(`{"policy":{"number":"SYN-230-TRACE","policyHolder":"Synthetic"}}`),
+	}}}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	projected := make(chan trace.SpanContext, 1)
+	finished := make(chan string, 1)
+	worker := newWorker(
+		consumer,
+		projectionFunc(func(ctx context.Context, _ application.PolicyEvent) error {
+			projected <- trace.SpanContextFromContext(ctx)
+			cancel()
+			return nil
+		}),
+		slog.Default(),
+	)
+	worker.propagator = propagation.TraceContext{}
+	worker.observe = func(ctx context.Context, eventType string) (context.Context, func(context.Context, string, error)) {
+		if eventType != "registered" {
+			t.Fatalf("event type = %q", eventType)
+		}
+		return ctx, func(_ context.Context, outcome string, _ error) { finished <- outcome }
+	}
+
+	// when
+	if err := worker.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// then
+	spanContext := <-projected
+	if !spanContext.IsRemote() ||
+		spanContext.TraceID().String() != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Fatalf("extracted span context = %v", spanContext)
+	}
+	if outcome := <-finished; outcome != "success" {
+		t.Fatalf("outcome = %q", outcome)
+	}
+}
+
 func TestDecode_PreservesOptionalDatesAndRejectsInvalidDate(t *testing.T) {
 	// given / when
 	got, err := decode(
@@ -149,6 +201,15 @@ type fakeProjection struct {
 	mu        sync.Mutex
 	projected []application.PolicyEvent
 	err       error
+}
+
+type projectionFunc func(context.Context, application.PolicyEvent) error
+
+func (function projectionFunc) ProjectPolicy(
+	ctx context.Context,
+	event application.PolicyEvent,
+) error {
+	return function(ctx, event)
 }
 
 func (projection *fakeProjection) ProjectPolicy(

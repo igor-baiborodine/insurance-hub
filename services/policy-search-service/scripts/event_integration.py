@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -61,6 +62,104 @@ def passed_tests(output: str) -> set[str]:
     return passed
 
 
+def create_kafka_certificates(
+    root: Path,
+    environment: dict[str, str],
+    openssl: str = "openssl",
+) -> Path:
+    ca_key = root / "ca.key"
+    ca_certificate = root / "ca.crt"
+    server_key = root / "server.key"
+    server_request = root / "server.csr"
+    server_certificate = root / "server.crt"
+    extensions = root / "server.ext"
+    keystore = root / "server.p12"
+    extensions.write_text(
+        "subjectAltName=IP:127.0.0.1,DNS:localhost\nextendedKeyUsage=serverAuth\n",
+        encoding="utf-8",
+    )
+    for arguments in (
+        [
+            openssl,
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=issue-230-disposable-ca",
+            "-keyout",
+            str(ca_key),
+            "-out",
+            str(ca_certificate),
+        ],
+        [
+            openssl,
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            "/CN=127.0.0.1",
+            "-keyout",
+            str(server_key),
+            "-out",
+            str(server_request),
+        ],
+        [
+            openssl,
+            "x509",
+            "-req",
+            "-days",
+            "1",
+            "-in",
+            str(server_request),
+            "-CA",
+            str(ca_certificate),
+            "-CAkey",
+            str(ca_key),
+            "-CAcreateserial",
+            "-extfile",
+            str(extensions),
+            "-out",
+            str(server_certificate),
+        ],
+        [
+            openssl,
+            "pkcs12",
+            "-export",
+            "-name",
+            "kafka",
+            "-in",
+            str(server_certificate),
+            "-inkey",
+            str(server_key),
+            "-certfile",
+            str(ca_certificate),
+            "-passout",
+            "pass:changeit",
+            "-out",
+            str(keystore),
+        ],
+    ):
+        run(
+            arguments,
+            cwd=MODULE_ROOT,
+            env=environment,
+            timeout_seconds=30,
+            activity="create disposable Kafka TLS identity",
+            capture=True,
+        )
+    (root / "key-password").write_text("changeit\n", encoding="utf-8")
+    (root / "keystore-password").write_text("changeit\n", encoding="utf-8")
+    root.chmod(0o755)
+    for path in root.iterdir():
+        path.chmod(0o644)
+    return ca_certificate
+
+
 def main() -> int:
     docker = os.environ.get("DOCKER", "")
     go = os.environ.get("GO", "")
@@ -72,6 +171,7 @@ def main() -> int:
     owned_containers: list[str] = []
     status = 0
     environment: dict[str, str] = {}
+    certificate_directory: tempfile.TemporaryDirectory[str] | None = None
     try:
         require(docker, "DOCKER is required")
         require(go, "GO is required")
@@ -82,6 +182,7 @@ def main() -> int:
             "POLICY_SEARCH_TEST_ELASTICSEARCH_URL",
             "POLICY_SEARCH_TEST_KAFKA_BROKERS",
             "POLICY_SEARCH_TEST_EVENT_OWNERSHIP",
+            "POLICY_SEARCH_TEST_KAFKA_CA_FILE",
         ):
             require(name not in os.environ, f"{name} must be unset; the runner owns dependencies")
         environment = child_environment(preferred_executables=(docker, go))
@@ -93,6 +194,9 @@ def main() -> int:
             activity="check Docker daemon",
             capture=True,
         )
+        certificate_directory = tempfile.TemporaryDirectory(prefix="policy-search-event-tls-")
+        certificate_root = Path(certificate_directory.name)
+        ca_certificate = create_kafka_certificates(certificate_root, environment)
 
         owned_containers.append(elasticsearch_name)
         run(
@@ -144,6 +248,8 @@ def main() -> int:
                 kafka_name,
                 "--publish",
                 f"127.0.0.1:{kafka_port}:9092",
+                "--volume",
+                f"{certificate_root}:/etc/kafka/secrets:ro",
                 "--env",
                 "CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk",
                 "--env",
@@ -151,17 +257,27 @@ def main() -> int:
                 "--env",
                 "KAFKA_PROCESS_ROLES=broker,controller",
                 "--env",
-                "KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093",
+                "KAFKA_LISTENERS=SSL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:9094",
                 "--env",
-                f"KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:{kafka_port}",
+                f"KAFKA_ADVERTISED_LISTENERS=SSL://127.0.0.1:{kafka_port},INTERNAL://127.0.0.1:9094",
                 "--env",
-                "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT",
+                "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=SSL:SSL,CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT",
                 "--env",
                 "KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER",
                 "--env",
                 "KAFKA_CONTROLLER_QUORUM_VOTERS=1@127.0.0.1:9093",
                 "--env",
-                "KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT",
+                "KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL",
+                "--env",
+                "KAFKA_SSL_KEYSTORE_FILENAME=server.p12",
+                "--env",
+                "KAFKA_SSL_KEYSTORE_TYPE=PKCS12",
+                "--env",
+                "KAFKA_SSL_KEYSTORE_CREDENTIALS=keystore-password",
+                "--env",
+                "KAFKA_SSL_KEY_CREDENTIALS=key-password",
+                "--env",
+                "KAFKA_SSL_CLIENT_AUTH=none",
                 "--env",
                 "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1",
                 "--env",
@@ -209,6 +325,7 @@ def main() -> int:
                 "POLICY_SEARCH_TEST_TERMINATED_TOPIC": TERMINATED_TOPIC,
                 "POLICY_SEARCH_TEST_CONSUMER_GROUP": CONSUMER_GROUP,
                 "POLICY_SEARCH_TEST_EVENT_OWNERSHIP": OWNERSHIP,
+                "POLICY_SEARCH_TEST_KAFKA_CA_FILE": str(ca_certificate),
             },
             timeout_seconds=600,
             teardown_seconds=20,
@@ -243,6 +360,8 @@ def main() -> int:
             except (CommandError, OSError) as error:
                 print(f"test-event-integration: cleanup failed: {error}", file=sys.stderr)
                 status = 1
+        if certificate_directory is not None:
+            certificate_directory.cleanup()
     if status:
         return status
     print("test-event-integration: selected=2 cleanup=passed")

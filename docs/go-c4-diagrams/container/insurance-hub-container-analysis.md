@@ -1,3 +1,13 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Explanation of Containers and Flows](#explanation-of-containers-and-flows)
+  - [Containers (Internal Systems)](#containers-internal-systems)
+  - [External Systems & Services](#external-systems--services)
+  - [Key Architectural Flows](#key-architectural-flows)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ### Explanation of Containers and Flows
 
 This document explains the containers and data flows shown in the C4 Container Diagram for the Go
@@ -20,8 +30,9 @@ implementation of the Insurance Hub system.
   information about available products and their coverage options.
 * **Pricing Service**: A Go service that calculates the price for an insurance product based on a
   set of rules (tariffs) fetched from Tarantool.
-* **Policy Search Service**: A Go service that provides a powerful search capability over all
-  policies. It maintains a denormalized read model of policy data in Elasticsearch.
+* **Policy Search Service**: A Go service that queries a denormalized policy read model and can
+  consume registered and terminated policy events to replace that model in Elasticsearch. Query
+  and projection use separate least-privilege identities; Kafka trust uses its public CA.
 * **Payment Service**: A Go service that handles all financial aspects, including managing
   policyholder accounts, processing payments, and importing bank statements from MinIO.
 * **Document Service**: A Go service responsible for generating, storing, and providing access to
@@ -73,7 +84,8 @@ implementation of the Insurance Hub system.
     * When a policy is saved, the `Policy Service` publishes a `PolicyCreated` event to
       `Apache Kafka`.
     * This event is consumed independently by several other services:
-        * The `Policy Search Service` indexes the new policy data in `Elasticsearch`.
+        * The `Policy Search Service` consumes registered and terminated policy events through TLS
+          and replaces the matching policy document in `Elasticsearch` with a dedicated writer.
         * The `Payment Service` creates a new policy account in its `Payment DB`.
         * The `Dashboard Service` processes the event and updates sales analytics in
           `Elasticsearch`.

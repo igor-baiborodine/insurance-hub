@@ -6,6 +6,7 @@
   - [Repository validation](#repository-validation)
   - [Select local-dev](#select-local-dev)
   - [Set up and verify the local-dev fixture](#set-up-and-verify-the-local-dev-fixture)
+  - [Set up and verify isolated event resources](#set-up-and-verify-isolated-event-resources)
   - [Deploy and verify local-dev](#deploy-and-verify-local-dev)
   - [Diagnostics and recovery](#diagnostics-and-recovery)
   - [Stop, remove and restore local-dev](#stop-remove-and-restore-local-dev)
@@ -22,7 +23,10 @@ Policy Search runs beside the legacy Java workload. The Go owner creates only
 NetworkPolicy. A separate, explicitly selected fixture owner creates only
 `policy-views-issue-229`, native role/user `go_policy_search_reader` and the workload-owned
 Elasticsearch Secrets. Neither owner modifies the Java `policy-search-api-legacy` Deployment or
-Service, creates an Ingress, accesses shared application indices, or starts Kafka work.
+Service, creates an Ingress, or accesses shared application indices. A separately invoked event
+fixture owner creates only the two `*-issue-230` Kafka topics, `go_policy_search_writer`, its
+workload Secret and a cert-only Kafka CA Secret. Active local-dev and QA renders keep workers
+disabled and reference none of those event resources.
 
 Business ports are reachable only from same-namespace Pods labeled
 `insurance-hub.io/policy-search-business-client=true`. Management port 8081 requires
@@ -49,7 +53,10 @@ budgets, exact Secret/trust references, service exposure, telemetry and NetworkP
 the active Go QA overlay remains in the shared QA root. Rendering and fake-adapter tests do not
 prove admission, enforcement or signal delivery. `deploy-test` first uses a security-enabled
 Elasticsearch 8.19.6 Docker node to verify native reader permissions and actual denial responses.
-It then uses a uniquely named namespace on the configured Kind cluster, a separate Elasticsearch
+The same permission test proves the separate event writer can replace a document in the accepted
+index while reads, deletes, unrelated indices and security administration are denied. The event
+integration target uses a generated CA and hostname-verified TLS with disposable Kafka. The
+deployment test then uses a uniquely named namespace on the configured Kind cluster and a separate Elasticsearch
 8.19.6 node and the exact synthetic fixture to verify search transports, policy, dependency
 recovery, restart and restoration. It removes the Docker node, Kind namespace and scratch
 qualification image, leaving the reviewed runtime image loaded for the later local-dev operation.
@@ -101,6 +108,25 @@ make go-svc-fixture-verify SVC_NAME=policy-search
 Verification uses only the workload Secret. It proves `read` and `view_index_metadata` on
 `policy-views-issue-229`, no cluster privileges, and no write, mapping/index-management, other-index
 or security-administration access. A failure leaves the fixture for inspection and safe replay.
+
+## Set up and verify isolated event resources
+
+Event setup is separate from query setup and from normal checks or application startup. With the
+same exact target variables and current context selected, create only the issue-230 resources:
+
+```sh
+export FIXTURE_CONFIRM=event-setup-policy-views-issue-229
+make go-svc-event-fixture-setup SVC_NAME=policy-search
+unset FIXTURE_CONFIRM
+make go-svc-event-fixture-verify SVC_NAME=policy-search
+```
+
+Local-dev uses `local-dev-kafka-kafka-bootstrap:9093`, one-replica isolated topics and the public
+`ca.crt` from `local-dev-kafka-cluster-ca-cert`. QA uses
+`qa-kafka-kafka-bootstrap.qa-data.svc:9093`, three-replica isolated topics and only `ca.crt` from
+`qa-kafka-cluster-ca-cert`. Verification checks topic cluster/owner labels, the workload CA and the
+writer's exact-index `index` privilege while read, index administration, other-index and security
+privileges remain denied. It does not reset the query fixture or inspect Java topics/groups.
 
 ## Deploy and verify local-dev
 
@@ -163,6 +189,25 @@ contain credentials or request payloads. Loss of Elasticsearch or the exact inde
 fail while liveness remains process-only; restoring the dependency recovers readiness without a
 Policy Search restart.
 
+For an enabled event release, add only bounded resource observations:
+
+```sh
+kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_DATA_NS" \
+  get kafkatopic policy-registered-issue-230 policy-terminated-issue-230
+kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" \
+  get secret "${DEPLOY_ENV}-policy-search-elasticsearch-writer" \
+  "${DEPLOY_ENV}-policy-search-kafka-ca" \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\\n"}{end}'
+make go-svc-event-fixture-verify SVC_NAME=policy-search
+```
+
+Inspect safe worker logs for the fixed messages `policy event completed`, `malformed policy event
+skipped`, `policy event projection failed` and `policy event fetch failed`. Do not record payloads,
+policy/customer values, credentials or Secret data. QA signals use the configured Alloy OTLP/gRPC
+endpoint and bounded labels `registered|terminated` and
+`success|malformed|error|cancelled`. A collector failure may emit only the shared rate-limited safe
+diagnostic; it does not relax worker readiness or dependency trust.
+
 ## Stop, remove and restore local-dev
 
 The normal stop owner scales only the Go Deployment to zero and confirms Java UIDs are unchanged:
@@ -211,6 +256,25 @@ unset FIXTURE_CONFIRM
 
 Retirement deletes only `policy-views-issue-229`, `go_policy_search_reader` and the two possible
 workload-owned Secrets. It does not delete or inspect shared indices.
+
+For an event-to-query return, first roll out the complete query predecessor state: workers disabled,
+no writer/Kafka Secret references or CA mount, and no Kafka egress rule. Confirm the two consumers
+leave `policy-search-service-issue-230`, query/health checks pass and the issue-230 topics, offsets
+and synthetic documents remain. Restore the event release with its exact image, configuration,
+trust mounts and egress, then confirm consumption resumes without resetting offsets. Image-only
+rollback is not a valid return rehearsal.
+
+Retire event resources only after an explicit abort or final retirement, after no Pod references
+their Secrets:
+
+```sh
+export FIXTURE_CONFIRM=event-retire-policy-views-issue-229
+make go-svc-event-fixture-retire SVC_NAME=policy-search
+unset FIXTURE_CONFIRM
+```
+
+Event retirement removes only the two issue-230 topics, writer role/user and event Secrets. It
+preserves `policy-views-issue-229`, the query reader and all Java resources.
 
 ## Stage and activate QA
 

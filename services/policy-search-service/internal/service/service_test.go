@@ -164,7 +164,7 @@ func TestRun_DisabledWorkersAcquireNoEventResources(t *testing.T) {
 	// given
 	settings := testConfig(t)
 	deps, _ := testDependencies(&fakeQuery{checkErr: errors.New("stop after composition")})
-	deps.newProjection = func(config.Elasticsearch) (projectionRuntime, error) {
+	deps.newProjection = func(config.Elasticsearch, *telemetry.DependencyObserver) (projectionRuntime, error) {
 		t.Fatal("disabled mode constructed the writer client")
 		return nil, nil
 	}
@@ -187,7 +187,7 @@ func TestRun_EnabledWorkersStartReadinessAndBoundedShutdown(t *testing.T) {
 	}
 	deps, addresses := testDependencies(&fakeQuery{})
 	projection := &fakeProjectionRuntime{}
-	deps.newProjection = func(config.Elasticsearch) (projectionRuntime, error) {
+	deps.newProjection = func(config.Elasticsearch, *telemetry.DependencyObserver) (projectionRuntime, error) {
 		return projection, nil
 	}
 	var workerSettings []policykafka.Settings
@@ -217,9 +217,12 @@ func TestRun_EnabledWorkersStartReadinessAndBoundedShutdown(t *testing.T) {
 	// then
 	if len(workerSettings) != 2 ||
 		workerSettings[0].ClientID != "policy-registered-listener" ||
+		workerSettings[0].EventType != "registered" ||
 		workerSettings[0].Topic != settings.Events.RegisteredTopic ||
 		workerSettings[1].ClientID != "policy-terminated-listener" ||
-		workerSettings[1].Topic != settings.Events.TerminatedTopic {
+		workerSettings[1].EventType != "terminated" ||
+		workerSettings[1].Topic != settings.Events.TerminatedTopic ||
+		workerSettings[0].Propagator == nil || workerSettings[0].Observe == nil {
 		t.Fatalf("worker settings = %+v", workerSettings)
 	}
 	for _, worker := range workers {
@@ -243,7 +246,7 @@ func TestRun_PartialWorkerStartupPreservesFailureAndCleansResources(t *testing.T
 	}
 	deps, _ := testDependencies(&fakeQuery{})
 	projection := &fakeProjectionRuntime{}
-	deps.newProjection = func(config.Elasticsearch) (projectionRuntime, error) {
+	deps.newProjection = func(config.Elasticsearch, *telemetry.DependencyObserver) (projectionRuntime, error) {
 		return projection, nil
 	}
 	first := &fakeEventWorker{}

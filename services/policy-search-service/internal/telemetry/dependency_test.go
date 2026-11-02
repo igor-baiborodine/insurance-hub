@@ -27,7 +27,7 @@ func TestDependencyObserver_RecordsBoundedSignalsWithoutQueryOrError(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, request := observer.StartElasticsearch(context.Background())
+	ctx, request := observer.StartElasticsearch(context.Background(), ElasticsearchSearch)
 	request.Finish(ctx, errors.New(privateMarker))
 	combined := logs.String()
 	for _, span := range recorder.Ended() {

@@ -75,7 +75,7 @@ type dependencies struct {
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newQuery       func(config.Elasticsearch, *telemetry.DependencyObserver) (queryRuntime, error)
-	newProjection  func(config.Elasticsearch) (projectionRuntime, error)
+	newProjection  func(config.Elasticsearch, *telemetry.DependencyObserver) (projectionRuntime, error)
 	newWorker      func(policykafka.Settings, projectionRuntime, *slog.Logger) (eventWorker, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.SearchPolicies) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
@@ -199,12 +199,27 @@ func run(
 	if err != nil {
 		return fail(err)
 	}
+	eventObserver, err := telemetry.NewEventObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+	)
+	if err != nil {
+		return fail(err)
+	}
 	runtime.query, err = deps.newQuery(settings.Elasticsearch, dependencyObserver)
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
 	}
 	if settings.Events.Enabled {
-		if err := runtime.configureWorkers(settings.Events, logger, deps); err != nil {
+		if err := runtime.configureWorkers(
+			settings.Events,
+			logger,
+			deps,
+			dependencyObserver,
+			eventObserver,
+			provider.HTTPPropagator(),
+		); err != nil {
 			return fail(fmt.Errorf("run service: %w", err))
 		}
 	}
@@ -370,19 +385,27 @@ func (runtime *runningService) configureWorkers(
 	settings config.Events,
 	logger *slog.Logger,
 	deps dependencies,
+	dependencyObserver *telemetry.DependencyObserver,
+	eventObserver *telemetry.EventObserver,
+	propagator propagation.TextMapPropagator,
 ) error {
 	caCertificate, err := os.ReadFile(settings.CAFile)
 	if err != nil {
 		return errors.New("read Kafka CA file")
 	}
-	runtime.projection, err = deps.newProjection(settings.Writer)
+	runtime.projection, err = deps.newProjection(settings.Writer, dependencyObserver)
 	if err != nil {
 		return err
 	}
 	for _, workerSettings := range []policykafka.Settings{
-		{Brokers: settings.Brokers, Group: settings.Group, Topic: settings.RegisteredTopic, ClientID: "policy-registered-listener", CACert: caCertificate},
-		{Brokers: settings.Brokers, Group: settings.Group, Topic: settings.TerminatedTopic, ClientID: "policy-terminated-listener", CACert: caCertificate},
+		{Brokers: settings.Brokers, Group: settings.Group, Topic: settings.RegisteredTopic, ClientID: "policy-registered-listener", CACert: caCertificate, EventType: "registered"},
+		{Brokers: settings.Brokers, Group: settings.Group, Topic: settings.TerminatedTopic, ClientID: "policy-terminated-listener", CACert: caCertificate, EventType: "terminated"},
 	} {
+		workerSettings.Propagator = propagator
+		workerSettings.Observe = func(ctx context.Context, eventType string) (context.Context, func(context.Context, string, error)) {
+			observedCtx, observation := eventObserver.Start(ctx, eventType)
+			return observedCtx, observation.Finish
+		}
 		worker, workerErr := deps.newWorker(workerSettings, runtime.projection, logger)
 		if workerErr != nil {
 			return workerErr

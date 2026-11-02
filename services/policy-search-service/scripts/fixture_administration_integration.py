@@ -136,12 +136,51 @@ def main() -> int:
         ):
             status, _ = reader.request(method, path, body)
             require(status == 403, f"reader {action} was not denied")
+        event_password = secrets.token_urlsafe(32)
+        administration.setup_event_access(admin, fixture, event_password)
+        administration.setup_event_access(admin, fixture, event_password)
+        writer = administration.ElasticsearchClient(
+            port, administration.EVENT_WRITER, event_password
+        )
+        administration.verify_event_access(writer, fixture)
+        status, _ = writer.request(
+            "PUT",
+            f"/{fixture.index}/_doc/SYN-230-PERMISSION-CHECK",
+            {
+                "number": "SYN-230-PERMISSION-CHECK",
+                "policyHolder": "Synthetic Permission Check",
+            },
+        )
+        require(status in {200, 201}, "event writer document replacement was denied")
+        for method, path, body, action in (
+            (
+                "GET",
+                f"/{fixture.index}/_doc/SYN-230-PERMISSION-CHECK",
+                None,
+                "document read",
+            ),
+            ("PUT", "/policy-views-issue-229-other", {}, "other-index create"),
+            (
+                "DELETE",
+                f"/{fixture.index}/_doc/SYN-230-PERMISSION-CHECK",
+                None,
+                "document delete",
+            ),
+        ):
+            status, _ = writer.request(method, path, body)
+            require(status == 403, f"event writer {action} was not denied")
+        status, _ = admin.request(
+            "DELETE", f"/{fixture.index}/_doc/SYN-230-PERMISSION-CHECK?refresh=true"
+        )
+        require(status == 200, "admin could not clean event permission document")
+        administration.retire_event_access(admin)
+        administration.verify_fixture(reader, fixture)
         administration.retire_fixture(admin, fixture)
         status, _ = admin.request("HEAD", f"/{fixture.index}")
         require(status == 404, "fixture retirement left the index present")
         print(
-            "policy-search-fixture-integration: idempotence, reads, denials, "
-            "retirement and cleanup passed"
+            "policy-search-fixture-integration: reader and event-writer permissions, "
+            "idempotence, denials, retirement and cleanup passed"
         )
         return 0
     finally:

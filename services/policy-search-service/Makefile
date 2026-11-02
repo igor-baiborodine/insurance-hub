@@ -107,6 +107,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
 	image-build image-check _image-check-existing test-integration test-elasticsearch-integration test-event-integration deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop fixture-setup fixture-verify fixture-retire \
+	event-fixture-setup event-fixture-verify event-fixture-retire \
 	deploy-test-tooling deploy-test \
 	build-qualification-client \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
@@ -165,6 +166,10 @@ deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runt
 fixture-setup fixture-verify fixture-retire: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/fixture_administration.py '$(@:fixture-%=%)'
+
+event-fixture-setup event-fixture-verify event-fixture-retire: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/fixture_administration.py '$(@:event-fixture-%=event-%)'
 
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed deployment guards without a cluster
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \

@@ -13,6 +13,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
+	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/domain"
@@ -25,11 +26,14 @@ const (
 
 // Settings captures the explicit Java-compatible client behavior selected for issue 230.
 type Settings struct {
-	Brokers  []string
-	Group    string
-	Topic    string
-	ClientID string
-	CACert   []byte
+	Brokers    []string
+	Group      string
+	Topic      string
+	ClientID   string
+	CACert     []byte
+	EventType  string
+	Propagator propagation.TextMapPropagator
+	Observe    func(context.Context, string) (context.Context, func(context.Context, string, error))
 }
 
 type projection interface {
@@ -73,12 +77,15 @@ type Worker struct {
 	projection projection
 	logger     *slog.Logger
 	assigned   *atomic.Bool
+	eventType  string
+	propagator propagation.TextMapPropagator
+	observe    func(context.Context, string) (context.Context, func(context.Context, string, error))
 }
 
 // NewWorker creates one independently owned topic consumer.
 func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*Worker, error) {
 	if len(settings.Brokers) == 0 || settings.Group == "" || settings.Topic == "" ||
-		settings.ClientID == "" || projection == nil || logger == nil {
+		settings.ClientID == "" || settings.EventType == "" || projection == nil || logger == nil {
 		return nil, errors.New("configure policy event worker: incomplete settings")
 	}
 	options := []kgo.Opt{
@@ -140,13 +147,18 @@ func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*
 	return &Worker{
 		client: franzClient{client: consumer}, projection: projection,
 		logger: logger, assigned: assigned,
+		eventType: settings.EventType, propagator: settings.Propagator,
+		observe: settings.Observe,
 	}, nil
 }
 
 func newWorker(client consumerClient, projection projection, logger *slog.Logger) *Worker {
 	assigned := &atomic.Bool{}
 	assigned.Store(true)
-	return &Worker{client: client, projection: projection, logger: logger, assigned: assigned}
+	return &Worker{
+		client: client, projection: projection, logger: logger, assigned: assigned,
+		eventType: "registered",
+	}
 }
 
 // Check verifies broker reachability without joining a consumer group.
@@ -181,19 +193,72 @@ func (worker *Worker) Run(ctx context.Context) error {
 			}
 		}
 		for _, record := range result.records {
+			recordCtx := ctx
+			if worker.propagator != nil {
+				recordCtx = worker.propagator.Extract(
+					ctx,
+					kafkaHeaderCarrier(record.Headers),
+				)
+			}
+			finish := func(context.Context, string, error) {}
+			if worker.observe != nil {
+				recordCtx, finish = worker.observe(recordCtx, worker.eventType)
+			}
 			event, err := decode(record.Value)
 			if err != nil {
-				worker.logger.WarnContext(ctx, "malformed policy event skipped")
+				finish(recordCtx, "malformed", err)
+				worker.logger.WarnContext(
+					recordCtx,
+					"malformed policy event skipped",
+				)
 				continue
 			}
-			if err := worker.projection.ProjectPolicy(ctx, event); err != nil {
-				worker.logger.ErrorContext(ctx, "policy event projection failed")
+			if err := worker.projection.ProjectPolicy(recordCtx, event); err != nil {
+				outcome := "error"
+				if errors.Is(err, context.Canceled) ||
+					errors.Is(err, context.DeadlineExceeded) {
+					outcome = "cancelled"
+				}
+				finish(recordCtx, outcome, err)
+				worker.logger.ErrorContext(
+					recordCtx,
+					"policy event projection failed",
+				)
 				break
 			}
+			finish(recordCtx, "success", nil)
 		}
 		worker.client.AllowRebalance()
 	}
 	return nil
+}
+
+type kafkaHeaderCarrier []kgo.RecordHeader
+
+func (carrier kafkaHeaderCarrier) Get(key string) string {
+	for _, header := range carrier {
+		if header.Key == key {
+			return string(header.Value)
+		}
+	}
+	return ""
+}
+
+func (carrier kafkaHeaderCarrier) Set(key, value string) {
+	for index := range carrier {
+		if carrier[index].Key == key {
+			carrier[index].Value = []byte(value)
+			return
+		}
+	}
+}
+
+func (carrier kafkaHeaderCarrier) Keys() []string {
+	keys := make([]string, 0, len(carrier))
+	for _, header := range carrier {
+		keys = append(keys, header.Key)
+	}
+	return keys
 }
 
 // Shutdown commits the current consumed position, releases rebalances and closes the client.

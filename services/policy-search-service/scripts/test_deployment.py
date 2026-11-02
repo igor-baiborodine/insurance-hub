@@ -79,6 +79,11 @@ def test_render_rejects_java_ownership_and_kafka_dependency() -> None:
         )
 
 
+def test_event_activation_contract_uses_exact_writer_trust_and_kafka_egress() -> None:
+    for environment in ("local-dev", "qa"):
+        checks.validate_event_activation_contract(environment)
+
+
 def test_render_rejects_wrong_elasticsearch_secret_and_egress() -> None:
     items = rendered_items()
     deployment = next(item for item in items if item["kind"] == "Deployment")

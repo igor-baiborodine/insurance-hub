@@ -53,7 +53,10 @@ func (query *productionQuery) SearchPolicies(
 	ctx context.Context,
 	value string,
 ) ([]domain.Policy, error) {
-	dependencyCtx, observation := query.observer.StartElasticsearch(ctx)
+	dependencyCtx, observation := query.observer.StartElasticsearch(
+		ctx,
+		telemetry.ElasticsearchSearch,
+	)
 	policies, err := query.useCase.Execute(dependencyCtx, value)
 	observation.Finish(dependencyCtx, err)
 	return policies, err

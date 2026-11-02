@@ -111,11 +111,18 @@ def test_policy_search_fixture_operations_use_the_existing_dispatch() -> None:
             "policy-search",
             capability,
         )
-        for capability in ("fixture-setup", "fixture-verify", "fixture-retire")
+        for capability in (
+            "fixture-setup",
+            "fixture-verify",
+            "fixture-retire",
+            "event-fixture-setup",
+            "event-fixture-verify",
+            "event-fixture-retire",
+        )
     ]
 
     # then
-    assert paths == ["services/policy-search-service"] * 3
+    assert paths == ["services/policy-search-service"] * 6
 
 
 @pytest.mark.parametrize("arguments", [[], ["deploy", "status"]])

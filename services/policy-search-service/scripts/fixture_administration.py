@@ -27,6 +27,7 @@ from scripts.python.process_runner import CommandError, run_command  # noqa: E40
 SERVICE = "policy-search"
 FIXTURE_PATH = ROOT / "services/policy-search-service/internal/administration/fixture.json"
 MAX_RESPONSE_BYTES = 64 * 1024
+EVENT_WRITER = "go_policy_search_writer"
 
 
 class AdministrationError(RuntimeError):
@@ -262,6 +263,20 @@ class Target:
             == "services/policy-search-service/internal/administration/fixture.json",
             "fixture administration catalog contract differs",
         )
+        events = administration.get("events", {})
+        require(
+            events
+            == {
+                "owner": "issue-230",
+                "index": "policy-views-issue-229",
+                "writerRole": EVENT_WRITER,
+                "writerUser": EVENT_WRITER,
+                "registeredTopic": "policy-registered-issue-230",
+                "terminatedTopic": "policy-terminated-issue-230",
+                "consumerGroup": "policy-search-service-issue-230",
+            },
+            "event administration catalog contract differs",
+        )
         self.environment = os.environ.get("DEPLOY_ENV", "")
         require(self.environment in record.get("environments", []), "DEPLOY_ENV is invalid")
         selected = target_record(ROOT, record, self.environment)
@@ -274,6 +289,28 @@ class Target:
             require(os.environ.get(name, "") == value, f"{name} differs from the catalog")
         fixture = selected.get("fixtureAdministration", {})
         require(fixture, "fixture administration is not configured")
+        expected_event_target = {
+            "local-dev": {
+                "eventWriterSecret": "local-dev-policy-search-elasticsearch-writer",
+                "kafkaCluster": "local-dev-kafka",
+                "kafkaBootstrap": "local-dev-kafka-kafka-bootstrap:9093",
+                "kafkaPublicCASecret": "local-dev-kafka-cluster-ca-cert",
+                "kafkaWorkloadCASecret": "local-dev-policy-search-kafka-ca",
+                "kafkaReplicas": 1,
+            },
+            "qa": {
+                "eventWriterSecret": "qa-policy-search-elasticsearch-writer",
+                "kafkaCluster": "qa-kafka",
+                "kafkaBootstrap": "qa-kafka-kafka-bootstrap.qa-data.svc:9093",
+                "kafkaPublicCASecret": "qa-kafka-cluster-ca-cert",
+                "kafkaWorkloadCASecret": "qa-policy-search-kafka-ca",
+                "kafkaReplicas": 3,
+            },
+        }[self.environment]
+        require(
+            all(fixture.get(key) == value for key, value in expected_event_target.items()),
+            "event target catalog contract differs",
+        )
         self.context = selected["context"]
         self.namespace = selected["namespace"]
         self.data_namespace = selected["dataNamespace"]
@@ -283,6 +320,16 @@ class Target:
         self.public_ca_secret = fixture.get("publicCASecret", "")
         self.workload_ca_secret = fixture.get("workloadCASecret", "")
         self.server_name = fixture.get("serverName", "")
+        self.event_writer_secret = fixture["eventWriterSecret"]
+        self.kafka_cluster = fixture["kafkaCluster"]
+        self.kafka_bootstrap = fixture["kafkaBootstrap"]
+        self.kafka_public_ca_secret = fixture["kafkaPublicCASecret"]
+        self.kafka_workload_ca_secret = fixture["kafkaWorkloadCASecret"]
+        self.kafka_replicas = fixture["kafkaReplicas"]
+        self.event_topics = (
+            events["registeredTopic"],
+            events["terminatedTopic"],
+        )
         self.kubectl = os.environ.get("KUBECTL", "kubectl")
 
     def run(
@@ -329,6 +376,34 @@ class Target:
             "Elasticsearch Service selector differs",
         )
 
+    def verify_event_boundary(self) -> None:
+        kafka = self.json("get", "kafka", self.kafka_cluster, namespace=self.data_namespace)
+        require(
+            kafka.get("metadata", {}).get("name") == self.kafka_cluster
+            and kafka.get("metadata", {}).get("namespace") == self.data_namespace,
+            "Kafka target identity differs",
+        )
+        listeners = kafka.get("spec", {}).get("kafka", {}).get("listeners", [])
+        require(
+            any(
+                item.get("name") == "tls" and item.get("port") == 9093 and item.get("tls") is True
+                for item in listeners
+            ),
+            "Kafka TLS listener differs",
+        )
+        service = self.json(
+            "get",
+            "service",
+            f"{self.kafka_cluster}-kafka-bootstrap",
+            namespace=self.data_namespace,
+        )
+        require(
+            service.get("spec", {}).get("selector", {}).get("strimzi.io/cluster")
+            == self.kafka_cluster
+            and any(port.get("port") == 9093 for port in service.get("spec", {}).get("ports", [])),
+            "Kafka bootstrap Service differs",
+        )
+
     def secret_value(self, namespace: str, name: str, key: str) -> bytes:
         secret = self.json("get", "secret", name, namespace=namespace)
         encoded = secret.get("data", {}).get(key)
@@ -338,8 +413,8 @@ class Target:
         except ValueError as error:
             raise AdministrationError(f"Secret/{name} has malformed {key}") from error
 
-    def optional_workload_password(self) -> str:
-        value = self.json("get", "secret", self.workload_secret, "--ignore-not-found")
+    def optional_workload_password(self, name: str) -> str:
+        value = self.json("get", "secret", name, "--ignore-not-found")
         encoded = value.get("data", {}).get("password")
         if not encoded:
             return ""
@@ -350,7 +425,7 @@ class Target:
         require(len(password) >= 32, "workload Secret password is too short")
         return password
 
-    def apply_secret(self, name: str, data: dict[str, str]) -> None:
+    def apply_secret(self, name: str, data: dict[str, str], component: str) -> None:
         value = {
             "apiVersion": "v1",
             "kind": "Secret",
@@ -359,7 +434,7 @@ class Target:
                 "namespace": self.namespace,
                 "labels": {
                     "app.kubernetes.io/name": "policy-search-api",
-                    "app.kubernetes.io/component": "elasticsearch-access",
+                    "app.kubernetes.io/component": component,
                 },
             },
             "type": "Opaque",
@@ -373,6 +448,44 @@ class Target:
             "-",
             input_text=json.dumps(value),
         )
+
+    def apply_event_topics(self) -> None:
+        for name in self.event_topics:
+            value = {
+                "apiVersion": "kafka.strimzi.io/v1beta2",
+                "kind": "KafkaTopic",
+                "metadata": {
+                    "name": name,
+                    "namespace": self.data_namespace,
+                    "labels": {
+                        "strimzi.io/cluster": self.kafka_cluster,
+                        "insurance-hub.io/owner": "issue-230",
+                    },
+                },
+                "spec": {"partitions": 1, "replicas": self.kafka_replicas},
+            }
+            self.run(
+                "apply",
+                "--server-side",
+                "--field-manager=policy-search-event-fixture",
+                "-f",
+                "-",
+                namespace=self.data_namespace,
+                input_text=json.dumps(value),
+            )
+
+    def verify_event_topics(self) -> None:
+        for name in self.event_topics:
+            value = self.json("get", "kafkatopic", name, namespace=self.data_namespace)
+            metadata = value.get("metadata", {})
+            spec = value.get("spec", {})
+            require(
+                metadata.get("labels", {}).get("strimzi.io/cluster") == self.kafka_cluster
+                and metadata.get("labels", {}).get("insurance-hub.io/owner") == "issue-230"
+                and spec.get("partitions") == 1
+                and spec.get("replicas") == self.kafka_replicas,
+                f"KafkaTopic/{name} differs from the event fixture contract",
+            )
 
 
 def require_status(status: int, accepted: set[int], action: str) -> None:
@@ -515,6 +628,95 @@ def verify_fixture(client: ElasticsearchClient, fixture: Fixture) -> None:
     )
 
 
+def setup_event_access(client: ElasticsearchClient, fixture: Fixture, password: str) -> None:
+    role = {
+        "cluster": [],
+        "indices": [
+            {
+                "names": [fixture.index],
+                "privileges": ["index"],
+                "allow_restricted_indices": False,
+            }
+        ],
+        "applications": [],
+        "run_as": [],
+        "metadata": {"owner": "issue-230"},
+    }
+    status, _ = client.request("PUT", f"/_security/role/{EVENT_WRITER}", role)
+    require_status(status, {200}, "create event writer role")
+    user = {
+        "password": password,
+        "roles": [EVENT_WRITER],
+        "full_name": "Policy Search issue-230 event writer",
+        "metadata": {"owner": "issue-230"},
+        "enabled": True,
+    }
+    status, _ = client.request("PUT", f"/_security/user/{EVENT_WRITER}", user)
+    require_status(status, {200}, "create event writer user")
+
+
+def verify_event_access(client: ElasticsearchClient, fixture: Fixture) -> None:
+    privileges = {
+        "cluster": ["manage_security", "monitor"],
+        "index": [
+            {
+                "names": [fixture.index],
+                "privileges": [
+                    "index",
+                    "read",
+                    "view_index_metadata",
+                    "create_index",
+                    "delete_index",
+                    "manage",
+                ],
+            },
+            {
+                "names": ["policy-views", "policy-views-issue-229-other"],
+                "privileges": ["index", "read", "view_index_metadata", "manage"],
+            },
+        ],
+    }
+    status, value = client.request("POST", "/_security/user/_has_privileges", privileges)
+    require_status(status, {200}, "verify event writer privileges")
+    require(isinstance(value, dict), "event writer privilege response is malformed")
+    require(
+        value.get("cluster") == {"manage_security": False, "monitor": False},
+        "event writer cluster privileges differ",
+    )
+    indices = value.get("index", {})
+    require(
+        indices.get(fixture.index)
+        == {
+            "index": True,
+            "read": False,
+            "view_index_metadata": False,
+            "create_index": False,
+            "delete_index": False,
+            "manage": False,
+        },
+        "event writer fixture-index privileges differ",
+    )
+    for name in ("policy-views", "policy-views-issue-229-other"):
+        require(
+            indices.get(name)
+            == {"index": False, "read": False, "view_index_metadata": False, "manage": False},
+            "event writer other-index privileges differ",
+        )
+    status, _ = client.request("GET", "/_security/role")
+    require_status(status, {403}, "verify event writer security API denial")
+    status, _ = client.request("GET", f"/{fixture.index}/_count")
+    require_status(status, {403}, "verify event writer read denial")
+
+
+def retire_event_access(client: ElasticsearchClient) -> None:
+    for method, path, action in (
+        ("DELETE", f"/_security/user/{EVENT_WRITER}", "delete event writer user"),
+        ("DELETE", f"/_security/role/{EVENT_WRITER}", "delete event writer role"),
+    ):
+        status, _ = client.request(method, path)
+        require_status(status, {200, 404}, action)
+
+
 def retire_fixture(client: ElasticsearchClient, fixture: Fixture) -> None:
     for method, path, action in (
         ("DELETE", f"/{fixture.index}", "delete fixture index"),
@@ -540,13 +742,31 @@ def client_for(target: Target, username: str, password: str, port: int) -> Elast
 
 def execute(operation: str) -> None:
     fixture = load_fixture()
-    if operation in {"setup", "retire"}:
+    base_operation = operation.removeprefix("event-")
+    if base_operation in {"setup", "retire"}:
         expected = f"{operation}-{fixture.index}"
         require(
             os.environ.get("FIXTURE_CONFIRM") == expected, f"FIXTURE_CONFIRM must equal {expected}"
         )
     target = Target()
     target.verify_boundary()
+    if operation.startswith("event-"):
+        target.verify_event_boundary()
+    if operation == "event-verify":
+        target.verify_event_topics()
+        username = target.secret_value(
+            target.namespace, target.event_writer_secret, "username"
+        ).decode("utf-8")
+        password = target.secret_value(
+            target.namespace, target.event_writer_secret, "password"
+        ).decode("utf-8")
+        require(username == EVENT_WRITER, "event writer Secret username differs")
+        ca = target.secret_value(target.namespace, target.kafka_workload_ca_secret, "ca.crt")
+        require(b"BEGIN CERTIFICATE" in ca, "Kafka workload CA differs")
+        with PortForward(target) as port:
+            verify_event_access(client_for(target, username, password, port), fixture)
+        print(f"policy-search-event-fixture: environment={target.environment} verify=passed")
+        return
     if operation == "verify":
         username = target.secret_value(target.namespace, target.workload_secret, "username").decode(
             "utf-8"
@@ -565,19 +785,63 @@ def execute(operation: str) -> None:
     with PortForward(target) as port:
         admin = client_for(target, "elastic", admin_password, port)
         if operation == "setup":
-            password = target.optional_workload_password() or secrets.token_urlsafe(32)
+            password = target.optional_workload_password(
+                target.workload_secret
+            ) or secrets.token_urlsafe(32)
             setup_fixture(admin, fixture, password)
             target.apply_secret(
                 target.workload_secret,
                 {"username": "go_policy_search_reader", "password": password},
+                "elasticsearch-access",
             )
             if target.public_ca_secret:
                 ca = target.secret_value(target.data_namespace, target.public_ca_secret, "ca.crt")
-                target.apply_secret(target.workload_ca_secret, {"ca.crt": ca.decode("utf-8")})
+                target.apply_secret(
+                    target.workload_ca_secret,
+                    {"ca.crt": ca.decode("utf-8")},
+                    "elasticsearch-trust",
+                )
             print(f"policy-search-fixture: environment={target.environment} setup=passed")
             return
         if operation == "retire":
             retire_fixture(admin, fixture)
+        if operation == "event-setup":
+            password = target.optional_workload_password(
+                target.event_writer_secret
+            ) or secrets.token_urlsafe(32)
+            setup_event_access(admin, fixture, password)
+            target.apply_secret(
+                target.event_writer_secret,
+                {"username": EVENT_WRITER, "password": password},
+                "elasticsearch-event-writer",
+            )
+            ca = target.secret_value(
+                target.data_namespace,
+                target.kafka_public_ca_secret,
+                "ca.crt",
+            )
+            target.apply_secret(
+                target.kafka_workload_ca_secret,
+                {"ca.crt": ca.decode("utf-8")},
+                "kafka-trust",
+            )
+            target.apply_event_topics()
+            print(f"policy-search-event-fixture: environment={target.environment} setup=passed")
+            return
+        if operation == "event-retire":
+            retire_event_access(admin)
+            for name in target.event_topics:
+                target.run(
+                    "delete",
+                    "kafkatopic",
+                    name,
+                    "--ignore-not-found",
+                    namespace=target.data_namespace,
+                )
+            target.run("delete", "secret", target.event_writer_secret, "--ignore-not-found")
+            target.run("delete", "secret", target.kafka_workload_ca_secret, "--ignore-not-found")
+            print(f"policy-search-event-fixture: environment={target.environment} retire=passed")
+            return
     target.run("delete", "secret", target.workload_secret, "--ignore-not-found")
     if target.workload_ca_secret:
         target.run("delete", "secret", target.workload_ca_secret, "--ignore-not-found")
@@ -587,7 +851,9 @@ def execute(operation: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     require(
-        len(arguments) == 1 and arguments[0] in {"setup", "verify", "retire"},
+        len(arguments) == 1
+        and arguments[0]
+        in {"setup", "verify", "retire", "event-setup", "event-verify", "event-retire"},
         "unsupported fixture operation",
     )
     execute(arguments[0])

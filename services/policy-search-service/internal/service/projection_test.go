@@ -3,14 +3,30 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/telemetry"
 )
+
+func projectionObserver(t *testing.T) *telemetry.DependencyObserver {
+	t.Helper()
+	observer, err := telemetry.NewDependencyObserver(
+		slog.Default(), metricnoop.NewMeterProvider(), tracenoop.NewTracerProvider(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return observer
+}
 
 func TestProductionProjection_ConstructsDedicatedWriterRuntime(t *testing.T) {
 	// given
@@ -28,7 +44,7 @@ func TestProductionProjection_ConstructsDedicatedWriterRuntime(t *testing.T) {
 	runtime, err := newProductionProjection(config.Elasticsearch{
 		URL:     server.URL,
 		Timeout: time.Second,
-	})
+	}, projectionObserver(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +68,7 @@ func TestProductionProjection_RejectsInvalidWriterClientSettings(t *testing.T) {
 	_, err := newProductionProjection(config.Elasticsearch{
 		URL:     "invalid://private-marker",
 		Timeout: time.Second,
-	})
+	}, projectionObserver(t))
 
 	// then
 	if err == nil || err.Error() !=

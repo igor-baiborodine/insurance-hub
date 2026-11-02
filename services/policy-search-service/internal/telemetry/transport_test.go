@@ -2,6 +2,8 @@ package telemetry
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net"
 	"testing"
 	"time"
@@ -82,6 +84,29 @@ func TestProvider_ExportsIdentifiedTracesAndCumulativeRuntimeMetrics(t *testing.
 	// when
 	_, span := provider.TracerProvider().Tracer("test").Start(ctx, "example")
 	span.End()
+	eventObserver, err := NewEventObserver(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventCtx, event := eventObserver.Start(ctx, "registered")
+	event.Finish(eventCtx, "success", nil)
+	dependencyObserver, err := NewDependencyObserver(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependencyCtx, dependency := dependencyObserver.StartElasticsearch(
+		ctx,
+		ElasticsearchReplace,
+	)
+	dependency.Finish(dependencyCtx, nil)
 	err = provider.ForceFlush(ctx)
 	// then
 	if err != nil {
@@ -93,8 +118,16 @@ func TestProvider_ExportsIdentifiedTracesAndCumulativeRuntimeMetrics(t *testing.
 			t.Fatalf("trace resources = %d", len(request.ResourceSpans))
 		}
 		assertResourceIdentity(t, request.ResourceSpans[0].Resource.Attributes)
-		if request.ResourceSpans[0].ScopeSpans[0].Spans[0].Name != "example" {
-			t.Error("missing example span")
+		names := map[string]bool{}
+		for _, scope := range request.ResourceSpans[0].ScopeSpans {
+			for _, item := range scope.Spans {
+				names[item.Name] = true
+			}
+		}
+		for _, name := range []string{"example", "Kafka policy event", "Elasticsearch replace"} {
+			if !names[name] {
+				t.Errorf("missing %s span", name)
+			}
 		}
 	case <-ctx.Done():
 		t.Fatal("trace receiver timed out")
@@ -105,11 +138,11 @@ func TestProvider_ExportsIdentifiedTracesAndCumulativeRuntimeMetrics(t *testing.
 			t.Fatalf("metric resources = %d", len(request.ResourceMetrics))
 		}
 		assertResourceIdentity(t, request.ResourceMetrics[0].Resource.Attributes)
-		found := false
+		found := map[string]bool{}
 		for _, scope := range request.ResourceMetrics[0].ScopeMetrics {
 			for _, measurement := range scope.Metrics {
+				found[measurement.Name] = true
 				if measurement.Name == "go.memory.allocations" {
-					found = true
 					if measurement.GetSum().
 						GetAggregationTemporality() !=
 						metricpb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE {
@@ -118,8 +151,16 @@ func TestProvider_ExportsIdentifiedTracesAndCumulativeRuntimeMetrics(t *testing.
 				}
 			}
 		}
-		if !found {
-			t.Error("missing runtime allocations counter")
+		for _, name := range []string{
+			"go.memory.allocations",
+			"insurance_hub.policy_search.events",
+			"insurance_hub.policy_search.event.duration",
+			"insurance_hub.policy_search.dependencies",
+			"insurance_hub.policy_search.dependency.duration",
+		} {
+			if !found[name] {
+				t.Errorf("missing %s metric", name)
+			}
 		}
 	case <-ctx.Done():
 		t.Fatal("metric receiver timed out")

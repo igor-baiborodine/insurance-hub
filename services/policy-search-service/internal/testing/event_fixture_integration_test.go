@@ -5,6 +5,8 @@ package testing_test
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -73,6 +75,7 @@ type eventEnvironment struct {
 	RegisteredTopic string
 	TerminatedTopic string
 	ConsumerGroup   string
+	KafkaCA         []byte
 }
 
 func TestEventFixture_OracleDefinesIndependentCases(t *testing.T) {
@@ -125,7 +128,7 @@ func TestEventFixture_RealKafkaAndElasticsearchResources(t *testing.T) {
 	environment := requireEventEnvironment(t, oracle)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	producer, err := kgo.NewClient(kgo.SeedBrokers(environment.Broker))
+	producer, err := kgo.NewClient(kafkaTLSOptions(t, environment)...)
 	if err != nil {
 		t.Fatalf("construct fixture Kafka client: %v", err)
 	}
@@ -138,8 +141,7 @@ func TestEventFixture_RealKafkaAndElasticsearchResources(t *testing.T) {
 		environment.RegisteredTopic,
 		environment.TerminatedTopic,
 	)
-	consumer, err := kgo.NewClient(
-		kgo.SeedBrokers(environment.Broker),
+	consumerOptions := append(kafkaTLSOptions(t, environment),
 		kgo.ClientID("issue-230-event-fixture"),
 		kgo.ConsumerGroup(environment.ConsumerGroup),
 		kgo.ConsumeTopics(environment.RegisteredTopic),
@@ -147,6 +149,7 @@ func TestEventFixture_RealKafkaAndElasticsearchResources(t *testing.T) {
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 		kgo.Balancers(kgo.RangeBalancer()),
 	)
+	consumer, err := kgo.NewClient(consumerOptions...)
 	if err != nil {
 		t.Fatalf("construct fixture Kafka group client: %v", err)
 	}
@@ -226,6 +229,8 @@ func verifyHandlerFailureCommitParity(
 	worker, err := policykafka.NewWorker(policykafka.Settings{
 		Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup,
 		Topic: environment.RegisteredTopic, ClientID: "policy-registered-listener",
+		EventType: "registered",
+		CACert:    environment.KafkaCA,
 	}, projection, slog.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -269,6 +274,8 @@ func verifyHandlerFailureCommitParity(
 	restarted, err := policykafka.NewWorker(policykafka.Settings{
 		Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup,
 		Topic: environment.RegisteredTopic, ClientID: "policy-registered-listener",
+		EventType: "registered",
+		CACert:    environment.KafkaCA,
 	}, eventProjection{useCase: useCase}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -370,8 +377,8 @@ func verifyEventWorkers(
 	projection := eventProjection{useCase: useCase}
 	workers := make([]*policykafka.Worker, 0, 2)
 	for _, settings := range []policykafka.Settings{
-		{Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup, Topic: environment.RegisteredTopic, ClientID: "policy-registered-listener"},
-		{Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup, Topic: environment.TerminatedTopic, ClientID: "policy-terminated-listener"},
+		{Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup, Topic: environment.RegisteredTopic, ClientID: "policy-registered-listener", EventType: "registered", CACert: environment.KafkaCA},
+		{Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup, Topic: environment.TerminatedTopic, ClientID: "policy-terminated-listener", EventType: "terminated", CACert: environment.KafkaCA},
 	} {
 		worker, workerErr := policykafka.NewWorker(settings, projection, slog.Default())
 		if workerErr != nil {
@@ -751,6 +758,15 @@ func requireEventEnvironment(t *testing.T, oracle eventOracle) eventEnvironment 
 		TerminatedTopic: os.Getenv("POLICY_SEARCH_TEST_TERMINATED_TOPIC"),
 		ConsumerGroup:   os.Getenv("POLICY_SEARCH_TEST_CONSUMER_GROUP"),
 	}
+	caPath := os.Getenv("POLICY_SEARCH_TEST_KAFKA_CA_FILE")
+	if caPath == "" {
+		t.Fatal("POLICY_SEARCH_TEST_KAFKA_CA_FILE is required")
+	}
+	var err error
+	environment.KafkaCA, err = os.ReadFile(caPath)
+	if err != nil || !bytes.Contains(environment.KafkaCA, []byte("BEGIN CERTIFICATE")) {
+		t.Fatal("POLICY_SEARCH_TEST_KAFKA_CA_FILE must contain the owned public CA")
+	}
 	host, _, err := net.SplitHostPort(environment.Broker)
 	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
 		t.Fatal("POLICY_SEARCH_TEST_KAFKA_BROKERS must be one loopback host:port")
@@ -769,6 +785,18 @@ func requireEventEnvironment(t *testing.T, oracle eventOracle) eventEnvironment 
 		t.Fatal("event integration resources differ from the accepted issue-230 oracle")
 	}
 	return environment
+}
+
+func kafkaTLSOptions(t *testing.T, environment eventEnvironment) []kgo.Opt {
+	t.Helper()
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(environment.KafkaCA) {
+		t.Fatal("append Kafka test CA")
+	}
+	return []kgo.Opt{
+		kgo.SeedBrokers(environment.Broker),
+		kgo.DialTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}),
+	}
 }
 
 func waitForKafka(t *testing.T, ctx context.Context, client *kgo.Client) {

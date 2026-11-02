@@ -20,6 +20,7 @@ def configure(monkeypatch: pytest.MonkeyPatch) -> None:
         "POLICY_SEARCH_TEST_ELASTICSEARCH_URL",
         "POLICY_SEARCH_TEST_KAFKA_BROKERS",
         "POLICY_SEARCH_TEST_EVENT_OWNERSHIP",
+        "POLICY_SEARCH_TEST_KAFKA_CA_FILE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -116,6 +117,30 @@ def test_run_cli_maps_interruption_after_cleanup(
     assert status == 130
     removals = [command for command in commands if command[1:3] == ["rm", "--force"]]
     assert len(removals) == 2
+
+
+def test_main_starts_kafka_with_owned_tls_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    configure(monkeypatch)
+    commands = prepare_owned_run(monkeypatch)
+
+    # when
+    assert integration.main() == 1
+
+    # then
+    kafka = next(
+        command
+        for command in commands
+        if command[:3] == ["docker-controlled", "run", "--detach"]
+        and any("event-kafka" in value for value in command)
+    )
+    joined = "\n".join(kafka)
+    assert "KAFKA_ADVERTISED_LISTENERS=SSL://127.0.0.1:49092" in joined
+    assert "KAFKA_SSL_KEYSTORE_FILENAME=server.p12" in joined
+    assert "/etc/kafka/secrets:ro" in joined
+    assert "PLAINTEXT://127.0.0.1:49092" not in joined
 
 
 def test_passed_tests_ignores_non_json_and_package_records() -> None:

@@ -346,6 +346,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "GRPC_MAX_RECV_BYTES": "1048576",
         "GRPC_MAX_SEND_BYTES": "8388608",
         "ELASTICSEARCH_TIMEOUT": "5s",
+        "EVENT_WORKERS_ENABLED": "false",
     }
     require(
         all(data.get(key) == value for key, value in required_data.items()),
@@ -385,7 +386,96 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         not any("kafka" in json.dumps(item).lower() for item in items),
         "Kafka dependency leaked into query deployment",
     )
+    require(
+        "ELASTICSEARCH_WRITER_USERNAME" not in env and "ELASTICSEARCH_WRITER_PASSWORD" not in env,
+        "event writer Secret leaked into disabled deployment",
+    )
     return items
+
+
+def validate_event_activation_contract(environment: str) -> None:
+    root = ROOT / f"k8s/overlays/{environment}/svc/policy-search"
+    patches = {
+        name: yaml.safe_load((root / f"event-{name}-patch.yaml").read_text(encoding="utf-8"))
+        for name in ("config", "deployment", "network-policy")
+    }
+    prefix = f"{environment}-"
+    data_namespace = "local-dev-all" if environment == "local-dev" else "qa-data"
+    bootstrap = (
+        "local-dev-kafka-kafka-bootstrap:9093"
+        if environment == "local-dev"
+        else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
+    )
+    require(
+        patches["config"].get("data")
+        == {
+            "EVENT_WORKERS_ENABLED": "true",
+            "KAFKA_BROKERS": bootstrap,
+            "KAFKA_GROUP": "policy-search-service-issue-230",
+            "KAFKA_REGISTERED_TOPIC": "policy-registered-issue-230",
+            "KAFKA_TERMINATED_TOPIC": "policy-terminated-issue-230",
+            "KAFKA_CA_FILE": "/etc/policy-search/kafka/ca.crt",
+        },
+        f"{environment} event configuration differs",
+    )
+    pod = patches["deployment"]["spec"]["template"]["spec"]
+    container = pod["containers"][0]
+    env = {item["name"]: item for item in container.get("env", [])}
+    writer_secret = f"{prefix}policy-search-elasticsearch-writer"
+    for name, key in (
+        ("ELASTICSEARCH_WRITER_USERNAME", "username"),
+        ("ELASTICSEARCH_WRITER_PASSWORD", "password"),
+    ):
+        require(
+            env.get(name, {}).get("valueFrom", {}).get("secretKeyRef")
+            == {"name": writer_secret, "key": key},
+            f"{environment} event writer Secret reference differs",
+        )
+    require(
+        container.get("volumeMounts")
+        == [
+            {
+                "name": "kafka-ca",
+                "mountPath": "/etc/policy-search/kafka",
+                "readOnly": True,
+            }
+        ]
+        and pod.get("volumes")
+        == [
+            {
+                "name": "kafka-ca",
+                "secret": {
+                    "secretName": f"{prefix}policy-search-kafka-ca",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 0o444,
+                },
+            }
+        ],
+        f"{environment} Kafka CA mount differs",
+    )
+    egress = patches["network-policy"]["spec"].get("egress")
+    require(
+        egress
+        == [
+            {
+                "to": [
+                    {
+                        "namespaceSelector": {
+                            "matchLabels": {"kubernetes.io/metadata.name": data_namespace}
+                        },
+                        "podSelector": {
+                            "matchLabels": {
+                                "strimzi.io/cluster": f"{environment}-kafka",
+                                "strimzi.io/component-type": "kafka",
+                            }
+                        },
+                    }
+                ],
+                "ports": [{"port": 9093, "protocol": "TCP"}],
+            }
+        ],
+        f"{environment} Kafka egress differs",
+    )
 
 
 class Target:
@@ -943,6 +1033,7 @@ def main(argv: list[str] | None = None) -> int:
         require(environment in {"local-dev", "qa"}, "DEPLOY_ENV is invalid")
         text = render(environment)
         validate_render(environment, text)
+        validate_event_activation_contract(environment)
         if arguments[0] == "render":
             sys.stdout.write(text)
     if arguments[0] == "check":

@@ -154,7 +154,7 @@ def test_verify_proves_read_only_exact_index_and_security_denial() -> None:
 
 
 def test_setup_and_retire_require_confirmation_before_target_contact() -> None:
-    for operation in ("setup", "retire"):
+    for operation in ("setup", "retire", "event-setup", "event-retire"):
         # given
         target = Mock()
 
@@ -193,3 +193,95 @@ def test_retire_removes_only_ticket_owned_elasticsearch_objects() -> None:
         ("DELETE", "/_security/user/go_policy_search_reader"),
         ("DELETE", "/_security/role/go_policy_search_reader"),
     ]
+
+
+def test_event_setup_grants_only_document_indexing_on_existing_query_index() -> None:
+    # given
+    fixture = administration.load_fixture()
+    client = FakeClient([(200, {}), (200, {})])
+
+    # when
+    administration.setup_event_access(client, fixture, "controlled-password")
+
+    # then
+    role = client.requests[0][2]
+    assert role == {
+        "cluster": [],
+        "indices": [
+            {
+                "names": ["policy-views-issue-229"],
+                "privileges": ["index"],
+                "allow_restricted_indices": False,
+            }
+        ],
+        "applications": [],
+        "run_as": [],
+        "metadata": {"owner": "issue-230"},
+    }
+    assert client.requests[1][0:2] == (
+        "PUT",
+        "/_security/user/go_policy_search_writer",
+    )
+
+
+def test_event_verify_requires_write_only_exact_index_and_denials() -> None:
+    # given
+    fixture = administration.load_fixture()
+    client = FakeClient(
+        [
+            (
+                200,
+                {
+                    "cluster": {"manage_security": False, "monitor": False},
+                    "index": {
+                        fixture.index: {
+                            "index": True,
+                            "read": False,
+                            "view_index_metadata": False,
+                            "create_index": False,
+                            "delete_index": False,
+                            "manage": False,
+                        },
+                        "policy-views": {
+                            "index": False,
+                            "read": False,
+                            "view_index_metadata": False,
+                            "manage": False,
+                        },
+                        "policy-views-issue-229-other": {
+                            "index": False,
+                            "read": False,
+                            "view_index_metadata": False,
+                            "manage": False,
+                        },
+                    },
+                },
+            ),
+            (403, {}),
+            (403, {}),
+        ]
+    )
+
+    # when
+    administration.verify_event_access(client, fixture)
+
+    # then
+    assert client.requests[1][0:2] == ("GET", "/_security/role")
+    assert client.requests[2][0:2] == ("GET", "/policy-views-issue-229/_count")
+
+
+def test_event_retire_preserves_query_index_and_reader_identity() -> None:
+    # given
+    client = FakeClient([(200, {}), (200, {})])
+
+    # when
+    administration.retire_event_access(client)
+
+    # then
+    paths = [path for _, path, _ in client.requests]
+    assert paths == [
+        "/_security/user/go_policy_search_writer",
+        "/_security/role/go_policy_search_writer",
+    ]
+    assert all("policy-views" not in path for path in paths)
+    assert all("reader" not in path for path in paths)
