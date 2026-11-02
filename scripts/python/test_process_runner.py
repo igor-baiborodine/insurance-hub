@@ -26,6 +26,24 @@ def test_success_returns_captured_output(tmp_path: Path) -> None:
     assert result.stdout == "ready\n"
 
 
+def test_failure_retains_captured_output_for_the_owning_caller(tmp_path: Path) -> None:
+    # when / then
+    with pytest.raises(process_runner.CommandError, match="status 7") as raised:
+        process_runner.run_command(
+            [
+                sys.executable,
+                "-c",
+                "import sys; print('test detail'); print('diagnostic', file=sys.stderr); sys.exit(7)",
+            ],
+            cwd=tmp_path,
+            env={"PATH": os.environ.get("PATH", "")},
+            timeout_seconds=5,
+            activity="controlled failure",
+        )
+    assert raised.value.stdout == "test detail\n"
+    assert raised.value.stderr == "diagnostic\n"
+
+
 def test_timeout_terminates_and_reaps_owned_process_group(tmp_path: Path) -> None:
     # given
     child_pid = tmp_path / "child.pid"

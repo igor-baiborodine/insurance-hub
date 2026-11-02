@@ -183,6 +183,33 @@ func TestNewWorker_RejectsEmptyCACertificate(t *testing.T) {
 	}
 }
 
+func TestWorker_CheckRequiresStableAssignment(t *testing.T) {
+	// given
+	worker := newWorker(&fakeClient{}, &fakeProjection{}, slog.Default())
+	worker.assigned.Store(false)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	started := time.Now()
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		worker.assigned.Store(true)
+		time.Sleep(50 * time.Millisecond)
+		worker.assigned.Store(false)
+		time.Sleep(20 * time.Millisecond)
+		worker.assigned.Store(true)
+	}()
+
+	// when
+	err := worker.Check(ctx)
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < 300*time.Millisecond {
+		t.Fatalf("readiness returned after unstable assignment in %s", elapsed)
+	}
+}
+
 func TestDecode_PreservesOptionalDatesAndRejectsInvalidDate(t *testing.T) {
 	// given / when
 	got, err := decode(

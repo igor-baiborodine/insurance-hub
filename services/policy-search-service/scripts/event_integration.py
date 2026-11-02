@@ -331,6 +331,7 @@ def main() -> int:
             teardown_seconds=20,
             activity="run policy-search event fixture integration",
             capture=True,
+            reveal_failure_output=True,
         )
         sys.stdout.write(output)
         expected = {

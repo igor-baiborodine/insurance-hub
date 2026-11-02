@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	pollTimeout = 100 * time.Millisecond
-	maxRecords  = 500
+	pollTimeout         = 100 * time.Millisecond
+	maxRecords          = 500
+	assignmentStability = 250 * time.Millisecond
 )
 
 var errMissingPolicy = errors.New("project policy event: missing policy")
@@ -165,7 +166,7 @@ func newWorker(client consumerClient, projection projection, logger *slog.Logger
 	}
 }
 
-// Check verifies broker reachability without joining a consumer group.
+// Check verifies broker reachability and waits for a stable group assignment.
 func (worker *Worker) Check(ctx context.Context) error {
 	if err := worker.client.Ping(ctx); err != nil {
 		worker.logger.ErrorContext(
@@ -176,7 +177,18 @@ func (worker *Worker) Check(ctx context.Context) error {
 		)
 		return errors.New("check policy event worker: Kafka unavailable")
 	}
-	for !worker.assigned.Load() {
+	stableSince := time.Time{}
+	for {
+		if worker.assigned.Load() {
+			if stableSince.IsZero() {
+				stableSince = time.Now()
+			}
+			if time.Since(stableSince) >= assignmentStability {
+				return nil
+			}
+		} else {
+			stableSince = time.Time{}
+		}
 		select {
 		case <-ctx.Done():
 			worker.logger.ErrorContext(
@@ -189,7 +201,6 @@ func (worker *Worker) Check(ctx context.Context) error {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	return nil
 }
 
 // Run polls and processes records until cancellation. Malformed envelopes are skipped, while an

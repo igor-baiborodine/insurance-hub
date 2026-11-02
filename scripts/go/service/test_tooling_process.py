@@ -25,6 +25,23 @@ def test_run_captures_owned_command_output() -> None:
     assert output == "fixture"
 
 
+def test_run_can_reveal_owned_failure_output(capsys: pytest.CaptureFixture[str]) -> None:
+    # when / then
+    with pytest.raises(tooling_process.CommandError, match="status 9"):
+        tooling_process.run(
+            ["/bin/sh", "-c", "printf detail; printf diagnostic >&2; exit 9"],
+            cwd=tooling_process.Path.cwd(),
+            env={"PATH": os.environ["PATH"]},
+            timeout_seconds=5,
+            activity="controlled failure",
+            capture=True,
+            reveal_failure_output=True,
+        )
+    captured = capsys.readouterr()
+    assert captured.out == "detail"
+    assert captured.err == "diagnostic"
+
+
 def test_run_cli_maps_termination_and_restores_handler(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
