@@ -25,8 +25,9 @@ NetworkPolicy. A separate, explicitly selected fixture owner creates only
 Elasticsearch Secrets. Neither owner modifies the Java `policy-search-api-legacy` Deployment or
 Service, creates an Ingress, or accesses shared application indices. A separately invoked event
 fixture owner creates only the two `*-issue-230` Kafka topics, `go_policy_search_writer`, its
-workload Secret and a cert-only Kafka CA Secret. Active local-dev and QA renders keep workers
-disabled and reference none of those event resources.
+workload Secret and a cert-only Kafka CA Secret. The checked-in local-dev render keeps workers
+disabled and references none of those event resources. The active QA render enables the workers
+and references only those separately owned issue-230 inputs.
 
 Business ports are reachable only from same-namespace Pods labeled
 `insurance-hub.io/policy-search-business-client=true`. Management port 8081 requires
@@ -327,19 +328,21 @@ preserves `policy-views-issue-229`, the query reader and all Java resources.
 
 ## Stage and activate QA
 
-The QA overlay is active and publishes
+The QA overlay is active, enables the issue-230 workers and publishes
 `ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:<semantic-version>`. The generic release
 owner updates the image tag from the semantic release version and sets `SERVICE_VERSION` to
-`git-<12-source-hex>` from the full release source commit. Before PR1 merge or release, run the
-separately authorized setup and verification operations with `DEPLOY_ENV=qa`, context
-`qa-insurance-hub`, service namespace `qa-svc` and data namespace `qa-data`. Setup copies only
-`ca.crt` from `qa-elasticsearch-es-http-certs-public` into
+`git-<12-source-hex>` from the full release source commit. Before an event-activation revision is
+reconciled, run the separately authorized setup and verification operations with `DEPLOY_ENV=qa`,
+context `qa-insurance-hub`, service namespace `qa-svc` and data namespace `qa-data`. Setup copies
+only `ca.crt` from `qa-elasticsearch-es-http-certs-public` into
 `qa-policy-search-elasticsearch-ca`; the administrative credential never enters `qa-svc`.
 
 Prove the staged endpoint, workload Secret, CA mount and egress policy remain compatible with the
-accepted Echo image before releasing the query image. The Echo process ignores the added settings,
-while Kubernetes requires both Secrets to exist. A failed compatibility gate stops the release and
-requires revising the PR allocation.
+accepted query predecessor before activating the workers. Kubernetes requires every referenced
+Secret to exist even while a predecessor process ignores event settings. A failed compatibility
+gate stops activation and requires revising the PR allocation. Deployment checks retain an exact
+disabled render for predecessor and return-path verification without changing the active QA
+Kustomization.
 
 Direct `image-load`, `deploy` and `stop` operations reject QA. Use the shared `qa-svc` Flux owner,
 observe its source revision and reconciliation, and export both the exact 40-character reconciled
