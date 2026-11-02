@@ -533,8 +533,9 @@ The active local-dev and QA overlays keep `EVENT_WORKERS_ENABLED=false`, so quer
 depends on event Secrets or Kafka. The reviewed activation patches beside each overlay define the
 later transition: exact issue-230 topics/group, TLS 9093 bootstrap, a cert-only Kafka CA mount,
 separate writer credentials, a bounded 30-second initial assignment budget and one broker-only TCP
-9093 egress rule. `DEPLOY_EVENT_MODE=enabled` composes those patches only for the direct local-dev
-owner; QA activation remains Git/Flux owned. Deployment checks validate both complete modes while
+9093 egress rule. The egress input is a JSON patch that appends to the active policy. QA activation
+remains Git/Flux owned. Deployment checks wire all three event inputs into temporary local-dev and
+QA overlays, render them through Kustomize and compare them with the deployment composition while
 rejecting undeclared transitions and event references in the disabled render.
 
 When enabled, each worker extracts incoming W3C trace headers, records a fixed event-type span,

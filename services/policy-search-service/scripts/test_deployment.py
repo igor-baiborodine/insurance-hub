@@ -105,11 +105,26 @@ def test_local_event_render_composes_complete_activation_boundary() -> None:
     assert policy["spec"]["egress"][-1]["ports"] == [{"port": 9093, "protocol": "TCP"}]
 
 
-def test_event_mode_is_fail_closed_and_direct_local_only() -> None:
+def test_event_mode_is_fail_closed_and_supports_flux_render_validation() -> None:
+    # given / when / then
     with pytest.raises(checks.DeploymentError, match="must be disabled or enabled"):
         checks.selected_event_mode("local-dev", "unexpected")
-    with pytest.raises(checks.DeploymentError, match="direct-local only"):
-        checks.selected_event_mode("qa", "enabled")
+    assert checks.selected_event_mode("qa", "enabled") == "enabled"
+
+
+def test_qa_event_render_preserves_query_and_telemetry_egress() -> None:
+    # given / when
+    text = checks.render("qa", "enabled")
+    items = checks.validate_render("qa", text, event_mode="enabled")
+    policy = next(item for item in items if item["kind"] == "NetworkPolicy")
+
+    # then
+    assert len(policy["spec"]["egress"]) == 4
+    encoded = checks.json.dumps(policy["spec"]["egress"], sort_keys=True)
+    assert "qa-elasticsearch" in encoded
+    assert "kube-dns" in encoded
+    assert "qa-alloy" in encoded
+    assert "qa-kafka" in encoded
 
 
 def test_live_state_requires_declared_event_mode_transition() -> None:
@@ -123,7 +138,7 @@ def test_live_state_requires_declared_event_mode_transition() -> None:
     target.event_mode = "enabled"
     target.deployment = deployment["metadata"]["name"]
     target.configuration = {"mode": "direct"}
-    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
+    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual.get((kind, name), {}))
     target.render_contract = Mock(
         return_value=(checks.yaml.safe_dump_all(disabled), disabled, "unused")
     )

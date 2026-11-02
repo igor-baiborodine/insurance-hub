@@ -6,9 +6,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -179,20 +181,29 @@ def staged_image_matches(environment: str, image: str) -> bool:
 def selected_event_mode(environment: str, requested: str | None = None) -> str:
     mode = os.environ.get(EVENT_MODE_ENV, "disabled") if requested is None else requested
     require(mode in EVENT_MODES, f"{EVENT_MODE_ENV} must be disabled or enabled")
-    require(
-        mode == "disabled" or environment == "local-dev",
-        "event activation is direct-local only",
-    )
     return mode
 
 
-def event_activation_patches(environment: str) -> dict[str, dict[str, Any]]:
+def event_activation_patches(environment: str) -> dict[str, Any]:
     validate_event_activation_contract(environment)
     root = ROOT / f"k8s/overlays/{environment}/svc/policy-search"
     return {
         name: yaml.safe_load((root / f"event-{name}-patch.yaml").read_text(encoding="utf-8"))
         for name in ("config", "deployment", "network-policy")
     }
+
+
+def event_network_rule(patches: dict[str, Any]) -> dict[str, Any]:
+    operations = patches["network-policy"]
+    require(
+        isinstance(operations, list)
+        and len(operations) == 1
+        and operations[0].get("op") == "add"
+        and operations[0].get("path") == "/spec/egress/-"
+        and isinstance(operations[0].get("value"), dict),
+        "event NetworkPolicy patch must append one egress rule",
+    )
+    return operations[0]["value"]
 
 
 def activate_event_render(environment: str, text: str) -> str:
@@ -250,10 +261,76 @@ def activate_event_render(environment: str, text: str) -> str:
         deepcopy(event_container.get("volumeMounts", []))
     )
     pod.setdefault("volumes", []).extend(deepcopy(event_pod.get("volumes", [])))
-    policy["spec"].setdefault("egress", []).extend(
-        deepcopy(patches["network-policy"]["spec"].get("egress", []))
-    )
+    policy["spec"].setdefault("egress", []).append(deepcopy(event_network_rule(patches)))
     return yaml.safe_dump_all(items, explicit_start=True, sort_keys=False)
+
+
+def render_event_overlay(environment: str) -> str:
+    validate_event_activation_contract(environment)
+    source_overlay = ROOT / f"k8s/overlays/{environment}/svc/policy-search"
+    source_base = ROOT / "k8s/apps/svc/policy-search/base"
+    with tempfile.TemporaryDirectory(prefix="policy-search-event-render-") as directory:
+        temporary_root = Path(directory)
+        temporary_overlay = temporary_root / f"k8s/overlays/{environment}/svc/policy-search"
+        temporary_base = temporary_root / "k8s/apps/svc/policy-search/base"
+        temporary_overlay.parent.mkdir(parents=True)
+        temporary_base.parent.mkdir(parents=True)
+        shutil.copytree(source_overlay, temporary_overlay)
+        shutil.copytree(source_base, temporary_base)
+        kustomization_path = temporary_overlay / "kustomization.yaml"
+        kustomization = yaml.safe_load(kustomization_path.read_text(encoding="utf-8"))
+        kustomization.setdefault("patches", []).extend(
+            [
+                {
+                    "path": "event-config-patch.yaml",
+                    "target": {"kind": "ConfigMap", "name": "policy-search-config"},
+                },
+                {
+                    "path": "event-deployment-patch.yaml",
+                    "target": {"kind": "Deployment", "name": "policy-search-api"},
+                },
+                {
+                    "path": "event-network-policy-patch.yaml",
+                    "target": {"kind": "NetworkPolicy", "name": "policy-search-api"},
+                },
+            ]
+        )
+        kustomization_path.write_text(
+            yaml.safe_dump(kustomization, sort_keys=False), encoding="utf-8"
+        )
+        return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(temporary_overlay)])
+
+
+def normalized_event_render(environment: str, text: str) -> list[dict[str, Any]]:
+    config_name = re.compile(re.escape(f"{environment}-policy-search-config-") + r"[a-z0-9]{10}")
+
+    def normalize(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: normalize(item) for key, item in value.items()}
+        if isinstance(value, list):
+            normalized = [normalize(item) for item in value]
+            if normalized and all(
+                isinstance(item, dict) and isinstance(item.get("name"), str) for item in normalized
+            ):
+                return sorted(normalized, key=lambda item: item["name"])
+            return normalized
+        if isinstance(value, str):
+            return config_name.sub(f"{environment}-policy-search-config-<hash>", value)
+        return value
+
+    return normalize(documents(text))
+
+
+def validate_event_overlay_render(environment: str, disabled_text: str) -> str:
+    composed = activate_event_render(environment, disabled_text)
+    activated = render_event_overlay(environment)
+    validate_render(environment, activated, event_mode="enabled")
+    require(
+        normalized_event_render(environment, activated)
+        == normalized_event_render(environment, composed),
+        f"{environment} Flux event render differs from deployment composition",
+    )
+    return activated
 
 
 def render(environment: str, mode: str | None = None) -> str:
@@ -262,7 +339,7 @@ def render(environment: str, mode: str | None = None) -> str:
     kubectl = os.environ.get("KUBECTL", "kubectl")
     text = run([kubectl, "kustomize", str(ROOT / configuration["overlay"])])
     return (
-        activate_event_render(environment, text)
+        render_event_overlay(environment)
         if selected_event_mode(environment, mode) == "enabled"
         else text
     )
@@ -358,30 +435,34 @@ def validate_render(
             "local-dev mounts differ",
         )
     else:
-        require(not events_enabled, "QA event activation must remain Git/Flux owned")
+        expected_volumes = [
+            {
+                "name": "elasticsearch-ca",
+                "secret": {
+                    "secretName": "qa-policy-search-elasticsearch-ca",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 0o444,
+                },
+            }
+        ]
+        expected_mounts = [
+            {
+                "name": "elasticsearch-ca",
+                "mountPath": "/etc/policy-search/elasticsearch",
+                "readOnly": True,
+            }
+        ]
+        if events_enabled:
+            expected_volumes.append(kafka_volume)
+            expected_mounts.append(kafka_mount)
         require(
-            volumes
-            == [
-                {
-                    "name": "elasticsearch-ca",
-                    "secret": {
-                        "secretName": "qa-policy-search-elasticsearch-ca",
-                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                        "defaultMode": 0o444,
-                    },
-                }
-            ],
+            sorted(volumes, key=lambda item: item["name"])
+            == sorted(expected_volumes, key=lambda item: item["name"]),
             "QA Elasticsearch CA volume differs",
         )
         require(
-            container.get("volumeMounts")
-            == [
-                {
-                    "name": "elasticsearch-ca",
-                    "mountPath": "/etc/policy-search/elasticsearch",
-                    "readOnly": True,
-                }
-            ],
+            sorted(container.get("volumeMounts", []), key=lambda item: item["name"])
+            == sorted(expected_mounts, key=lambda item: item["name"]),
             "QA Elasticsearch CA mount differs",
         )
     env = {item.get("name"): item for item in container.get("env", [])}
@@ -516,7 +597,7 @@ def validate_render(
         )
     encoded_items = json.dumps(items).lower()
     if events_enabled:
-        kafka_rule = event_activation_patches(environment)["network-policy"]["spec"]["egress"][0]
+        kafka_rule = event_network_rule(event_activation_patches(environment))
         require(policy.get("egress", [])[-1:] == [kafka_rule], "Kafka egress differs")
         require("kafka" in encoded_items, "Kafka dependency is missing")
     else:
@@ -585,27 +666,25 @@ def validate_event_activation_contract(environment: str) -> None:
         ],
         f"{environment} Kafka CA mount differs",
     )
-    egress = patches["network-policy"]["spec"].get("egress")
+    egress = event_network_rule(patches)
     require(
         egress
-        == [
-            {
-                "to": [
-                    {
-                        "namespaceSelector": {
-                            "matchLabels": {"kubernetes.io/metadata.name": data_namespace}
-                        },
-                        "podSelector": {
-                            "matchLabels": {
-                                "strimzi.io/cluster": f"{environment}-kafka",
-                                "strimzi.io/component-type": "kafka",
-                            }
-                        },
-                    }
-                ],
-                "ports": [{"port": 9093, "protocol": "TCP"}],
-            }
-        ],
+        == {
+            "to": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": data_namespace}
+                    },
+                    "podSelector": {
+                        "matchLabels": {
+                            "strimzi.io/cluster": f"{environment}-kafka",
+                            "strimzi.io/component-type": "kafka",
+                        }
+                    },
+                }
+            ],
+            "ports": [{"port": 9093, "protocol": "TCP"}],
+        },
         f"{environment} Kafka egress differs",
     )
 
@@ -1194,9 +1273,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     for environment in environments:
         require(environment in {"local-dev", "qa"}, "DEPLOY_ENV is invalid")
-        text = render(environment)
-        validate_render(environment, text)
+        mode = selected_event_mode(environment)
+        text = render(environment, mode)
+        validate_render(environment, text, event_mode=mode)
         validate_event_activation_contract(environment)
+        disabled = render(environment, "disabled")
+        validate_event_overlay_render(environment, disabled)
         if arguments[0] == "render":
             sys.stdout.write(text)
     if arguments[0] == "check":
