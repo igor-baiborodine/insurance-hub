@@ -22,6 +22,10 @@ REGISTERED_TOPIC = "policy-registered-issue-230"
 TERMINATED_TOPIC = "policy-terminated-issue-230"
 CONSUMER_GROUP = "policy-search-service-issue-230"
 OWNERSHIP = "issue-230-disposable"
+TRANSFER_REGISTERED_TOPIC = "policy-registered-issue-234-transfer"
+TRANSFER_TERMINATED_TOPIC = "policy-terminated-issue-234-transfer"
+TRANSFER_CONSUMER_GROUP = "policy-search-service-issue-234-transfer"
+TRANSFER_OWNERSHIP = "issue-234-transfer"
 
 
 class IntegrationError(ValueError):
@@ -48,6 +52,37 @@ def wait_for_kafka_port(port: int, deadline_seconds: float = 120) -> None:
         except OSError:
             time.sleep(0.25)
     raise IntegrationError(f"Kafka readiness exceeded {deadline_seconds:g}s")
+
+
+def wait_for_kafka_metadata(
+    docker: str,
+    container: str,
+    environment: dict[str, str],
+    deadline_seconds: float = 120,
+) -> None:
+    deadline = time.monotonic() + deadline_seconds
+    while time.monotonic() < deadline:
+        try:
+            run(
+                [
+                    docker,
+                    "exec",
+                    container,
+                    "/opt/kafka/bin/kafka-topics.sh",
+                    "--bootstrap-server",
+                    "127.0.0.1:9094",
+                    "--list",
+                ],
+                cwd=MODULE_ROOT,
+                env=environment,
+                timeout_seconds=10,
+                activity="wait for disposable Kafka metadata",
+                capture=True,
+            )
+            return
+        except CommandError, OSError:
+            time.sleep(0.25)
+    raise IntegrationError(f"Kafka metadata readiness exceeded {deadline_seconds:g}s")
 
 
 def passed_tests(output: str) -> set[str]:
@@ -166,6 +201,7 @@ def main() -> int:
     elasticsearch_image = os.environ.get("ELASTICSEARCH_IMAGE", "")
     kafka_image = os.environ.get("KAFKA_IMAGE", "")
     coverage = os.environ.get("EVENT_INTEGRATION_COVERAGE_FILE", "")
+    requested_transfer_report = os.environ.get("EVENT_TRANSFER_REPORT", "")
     elasticsearch_name = f"policy-search-event-elasticsearch-{os.getpid()}"
     kafka_name = f"policy-search-event-kafka-{os.getpid()}"
     owned_containers: list[str] = []
@@ -197,6 +233,15 @@ def main() -> int:
         certificate_directory = tempfile.TemporaryDirectory(prefix="policy-search-event-tls-")
         certificate_root = Path(certificate_directory.name)
         ca_certificate = create_kafka_certificates(certificate_root, environment)
+        transfer_report = (
+            Path(requested_transfer_report)
+            if requested_transfer_report
+            else certificate_root / "transfer-report.json"
+        )
+        require(
+            transfer_report.is_absolute(),
+            "EVENT_TRANSFER_REPORT must be an absolute path when supplied",
+        )
 
         owned_containers.append(elasticsearch_name)
         run(
@@ -295,8 +340,10 @@ def main() -> int:
             capture=True,
         )
         wait_for_kafka_port(kafka_port)
+        wait_for_kafka_metadata(docker, kafka_name, environment)
 
         coverage_path = MODULE_ROOT / coverage
+        coverage_path.parent.mkdir(parents=True, exist_ok=True)
         coverage_path.unlink(missing_ok=True)
         output = run(
             [
@@ -312,7 +359,8 @@ def main() -> int:
                 f"-coverprofile={coverage}",
                 "-json",
                 "-run",
-                "^TestEventFixture_",
+                "^(TestEventFixture_|TestOwnershipTransfer_)",
+                "./internal/service",
                 "./internal/testing",
             ],
             cwd=MODULE_ROOT,
@@ -326,6 +374,11 @@ def main() -> int:
                 "POLICY_SEARCH_TEST_CONSUMER_GROUP": CONSUMER_GROUP,
                 "POLICY_SEARCH_TEST_EVENT_OWNERSHIP": OWNERSHIP,
                 "POLICY_SEARCH_TEST_KAFKA_CA_FILE": str(ca_certificate),
+                "POLICY_SEARCH_TEST_TRANSFER_REGISTERED_TOPIC": TRANSFER_REGISTERED_TOPIC,
+                "POLICY_SEARCH_TEST_TRANSFER_TERMINATED_TOPIC": TRANSFER_TERMINATED_TOPIC,
+                "POLICY_SEARCH_TEST_TRANSFER_CONSUMER_GROUP": TRANSFER_CONSUMER_GROUP,
+                "POLICY_SEARCH_TEST_TRANSFER_OWNERSHIP": TRANSFER_OWNERSHIP,
+                "POLICY_SEARCH_TEST_TRANSFER_REPORT": str(transfer_report),
             },
             timeout_seconds=600,
             teardown_seconds=20,
@@ -337,6 +390,7 @@ def main() -> int:
         expected = {
             "TestEventFixture_OracleDefinesIndependentCases",
             "TestEventFixture_RealKafkaAndElasticsearchResources",
+            "TestOwnershipTransfer_PreservesPopulatedStateAndProgress",
         }
         discovered = passed_tests(output)
         require(
@@ -344,6 +398,7 @@ def main() -> int:
             f"event fixture suite missed expected tests; passed={sorted(discovered)}",
         )
         require(coverage_path.is_file(), "event integration coverage profile was not produced")
+        require(transfer_report.is_file(), "ownership transfer report was not produced")
     except (IntegrationError, CommandError, OSError) as error:
         print(f"test-event-integration: {error}", file=sys.stderr)
         status = 1
@@ -365,7 +420,7 @@ def main() -> int:
             certificate_directory.cleanup()
     if status:
         return status
-    print("test-event-integration: selected=2 cleanup=passed")
+    print("test-event-integration: selected=3 cleanup=passed")
     return 0
 
 

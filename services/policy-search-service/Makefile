@@ -72,6 +72,7 @@ COVERAGE_EXCLUDE_PATHS := gen internal/testing
 INTEGRATION_COVERAGE_FILE ?=
 ELASTICSEARCH_INTEGRATION_COVERAGE_FILE ?= elasticsearch-integration-coverage.txt
 EVENT_INTEGRATION_COVERAGE_FILE ?= event-integration-coverage.txt
+EVENT_TRANSFER_REPORT ?=
 HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
@@ -148,6 +149,7 @@ test-elasticsearch-integration: python-runtime-check ## Exercise the query adapt
 test-event-integration: python-runtime-check ## Exercise event fixtures against owned disposable Kafka and Elasticsearch
 	@DOCKER="$(DOCKER)" GO="$(GO)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
 		KAFKA_IMAGE="$(KAFKA_IMAGE)" EVENT_INTEGRATION_COVERAGE_FILE="$(EVENT_INTEGRATION_COVERAGE_FILE)" \
+		EVENT_TRANSFER_REPORT="$(EVENT_TRANSFER_REPORT)" \
 		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" scripts/event_integration.py
 
