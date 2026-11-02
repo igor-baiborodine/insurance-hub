@@ -293,8 +293,8 @@ def validate_source_policy(config: str, values: str, makefile: str, operations: 
         for line in metric_transform.splitlines()
         if "keep_matching_keys(attributes" in line and "metric.name" in line
     ]
-    if len(metric_dimension_allowlists) != 7:
-        raise ValidationError("shared Go metric policy must contain seven dimension allowlists")
+    if len(metric_dimension_allowlists) != 9:
+        raise ValidationError("shared Go metric policy must contain nine dimension allowlists")
     if any(
         'resource.attributes["insurance_hub.service.implementation"] == "go"' not in line
         for line in metric_dimension_allowlists
@@ -302,10 +302,26 @@ def validate_source_policy(config: str, values: str, makefile: str, operations: 
         raise ValidationError("metric datapoint allowlists must remain Go-service scoped")
     if re.search(r"insurance_hub\\\\\.[a-z0-9_]+", metric_transform):
         raise ValidationError("shared Go metric policy must not encode one service namespace")
-    if metric_transform.count('resource.attributes["insurance_hub.expected.service.domain"]') < 5:
+    if metric_transform.count('resource.attributes["insurance_hub.expected.service.domain"]') < 9:
         raise ValidationError(
             "metric policy must bind instruments and dimensions to service domain"
         )
+
+    trace_transform = _block(config, 'otelcol.processor.transform "service_trace_policies"')
+    metric_filter = _block(config, 'otelcol.processor.filter "service_metric_policies"')
+    for field in (r"event\\.type", "dependency"):
+        if field not in trace_transform:
+            raise ValidationError(f"shared Go span policy must retain bounded {field}")
+    for instrument in (
+        "events",
+        r"event\\.duration",
+        "dependencies",
+        r"dependency\\.duration",
+    ):
+        if instrument not in metric_filter:
+            raise ValidationError(
+                f"shared Go metric policy must retain bounded {instrument} instruments"
+            )
 
     for marker in (
         'otelcol.processor.transform "service_trace_policies"',
@@ -573,6 +589,8 @@ def sanitize_go_span(service_domain: str, attributes: Mapping[str, object]) -> d
         f"insurance_hub.{service_domain}.transport",
         f"insurance_hub.{service_domain}.outcome",
         f"insurance_hub.{service_domain}.database.stage",
+        f"insurance_hub.{service_domain}.event.type",
+        f"insurance_hub.{service_domain}.dependency",
     }
     allowed = set(COMMON_SPAN_ATTRIBUTES) | service_attributes
     return {key: value for key, value in attributes.items() if key in allowed}
@@ -611,6 +629,23 @@ def sanitize_datapoint(
             f"{application_prefix}.operation",
             f"{application_prefix}.database.stage",
             f"{application_prefix}.database.outcome",
+        )
+    elif metric_name in {
+        f"{application_prefix}.events",
+        f"{application_prefix}.event.duration",
+    }:
+        dimensions = (
+            f"{application_prefix}.event.type",
+            f"{application_prefix}.outcome",
+        )
+    elif metric_name in {
+        f"{application_prefix}.dependencies",
+        f"{application_prefix}.dependency.duration",
+    }:
+        dimensions = (
+            f"{application_prefix}.dependency",
+            f"{application_prefix}.operation",
+            f"{application_prefix}.outcome",
         )
     elif metric_name == "db.client.operation.duration":
         dimensions = (

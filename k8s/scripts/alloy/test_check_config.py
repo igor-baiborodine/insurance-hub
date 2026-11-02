@@ -201,6 +201,38 @@ class TestMetricPolicy:
             "insurance_hub.alpha.unbounded", {"record_id": "x"}, self.resource
         )
 
+    @pytest.mark.parametrize(
+        ("metric", "dimensions"),
+        (
+            (
+                "insurance_hub.alpha.events",
+                {
+                    "insurance_hub.alpha.event.type": "registered",
+                    "insurance_hub.alpha.outcome": "success",
+                },
+            ),
+            (
+                "insurance_hub.alpha.dependency.duration",
+                {
+                    "insurance_hub.alpha.dependency": "elasticsearch",
+                    "insurance_hub.alpha.operation": "replace",
+                    "insurance_hub.alpha.outcome": "success",
+                },
+            ),
+        ),
+    )
+    def test_event_and_dependency_metrics_keep_bounded_dimensions(
+        self, metric: str, dimensions: dict[str, str]
+    ) -> None:
+        result = alloy_check.sanitize_datapoint(
+            metric,
+            dict(dimensions, record_id="forbidden", policy_number="forbidden"),
+            self.resource,
+        )
+        assert set(alloy_check.METRIC_RESOURCE_LABELS) | set(dimensions) == set(result)
+        assert "record_id" not in result
+        assert "policy_number" not in result
+
     def test_services_use_the_shared_dimension_policy(self) -> None:
         for service_slug, service_domain in GO_SERVICE_CASES:
             resource = go_resource(service_slug)
@@ -278,6 +310,23 @@ class TestSpanPolicy:
         assert "/records" == attributes["http.route"]
         assert "record_id" not in attributes
         assert "authorization" not in attributes
+
+    def test_go_span_keeps_bounded_event_and_dependency_fields(self) -> None:
+        attributes = alloy_check.sanitize_go_span(
+            "alpha",
+            {
+                "insurance_hub.alpha.event.type": "terminated",
+                "insurance_hub.alpha.dependency": "elasticsearch",
+                "insurance_hub.alpha.outcome": "success",
+                "policy_number": "forbidden",
+                "customer_id": "forbidden",
+            },
+        )
+        assert {
+            "insurance_hub.alpha.event.type": "terminated",
+            "insurance_hub.alpha.dependency": "elasticsearch",
+            "insurance_hub.alpha.outcome": "success",
+        } == attributes
 
 
 class TestLogPolicy:
