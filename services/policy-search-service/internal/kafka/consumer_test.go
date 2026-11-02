@@ -59,6 +59,38 @@ func TestWorker_SkipsMalformedAndStopsFailedFetchedBatch(t *testing.T) {
 	}
 }
 
+func TestWorker_MissingPolicyStopsFetchedBatch(t *testing.T) {
+	for name, payload := range map[string]string{
+		"missing": `{}`,
+		"null":    `{"policy":null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			// given
+			consumer := &fakeClient{polls: []pollResult{{records: []*kgo.Record{
+				{Value: []byte(payload)},
+				{Value: []byte(`{"policy":{"number":"must-not-run"}}`)},
+			}}}}
+			projection := &fakeProjection{}
+			worker := newWorker(consumer, projection, slog.Default())
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+
+			// when
+			go func() { done <- worker.Run(ctx) }()
+			waitForAllows(t, consumer, 1)
+			cancel()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+
+			// then
+			if got := projection.events(); len(got) != 0 {
+				t.Fatalf("projected events = %+v", got)
+			}
+		})
+	}
+}
+
 func TestWorker_ShutdownCommitsThenCloses(t *testing.T) {
 	// given
 	consumer := &fakeClient{}
@@ -213,6 +245,18 @@ func (client *fakeClient) allowCount() int {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	return client.allowed
+}
+
+func waitForAllows(t *testing.T, client *fakeClient, count int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if client.allowCount() >= count {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("rebalance releases = %d, want %d", client.allowCount(), count)
 }
 
 type fakeProjection struct {

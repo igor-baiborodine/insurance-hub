@@ -25,6 +25,8 @@ const (
 	maxRecords  = 500
 )
 
+var errMissingPolicy = errors.New("project policy event: missing policy")
+
 // Settings captures the explicit Java-compatible client behavior selected for issue 230.
 type Settings struct {
 	Brokers    []string
@@ -190,7 +192,8 @@ func (worker *Worker) Check(ctx context.Context) error {
 	return nil
 }
 
-// Run polls and processes records until cancellation. Malformed envelopes are skipped.
+// Run polls and processes records until cancellation. Malformed envelopes are skipped, while an
+// envelope without a policy follows the legacy handler-failure path and stops the fetched batch.
 func (worker *Worker) Run(ctx context.Context) error {
 	for ctx.Err() == nil {
 		pollCtx, cancel := context.WithTimeout(ctx, pollTimeout)
@@ -219,6 +222,14 @@ func (worker *Worker) Run(ctx context.Context) error {
 				recordCtx, finish = worker.observe(recordCtx, worker.eventType)
 			}
 			event, err := decode(record.Value)
+			if errors.Is(err, errMissingPolicy) {
+				finish(recordCtx, "error", err)
+				worker.logger.ErrorContext(
+					recordCtx,
+					"policy event projection failed",
+				)
+				break
+			}
 			if err != nil {
 				finish(recordCtx, "malformed", err)
 				worker.logger.WarnContext(
@@ -305,10 +316,13 @@ type policy struct {
 
 func decode(value []byte) (application.PolicyEvent, error) {
 	var input envelope
-	if err := json.Unmarshal(value, &input); err != nil || input.Policy == nil {
+	if err := json.Unmarshal(value, &input); err != nil {
 		return application.PolicyEvent{}, errors.New(
 			"decode policy event: invalid envelope",
 		)
+	}
+	if input.Policy == nil {
+		return application.PolicyEvent{}, errMissingPolicy
 	}
 	from, err := parseDate(input.Policy.From)
 	if err != nil {
