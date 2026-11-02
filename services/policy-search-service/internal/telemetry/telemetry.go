@@ -54,10 +54,6 @@ func New(ctx context.Context, serviceName string, settings config.Telemetry) (*P
 				requestBuckets,
 			),
 			kittelemetry.HistogramView(
-				"insurance_hub.policy_search.dependency.duration",
-				requestBuckets,
-			),
-			kittelemetry.HistogramView(
 				"insurance_hub.policy_search.event.duration",
 				requestBuckets,
 			),
