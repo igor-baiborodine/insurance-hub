@@ -2,6 +2,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -400,6 +401,9 @@ func (runtime *runningService) configureWorkers(
 	caCertificate, err := os.ReadFile(settings.CAFile)
 	if err != nil {
 		return errors.New("read Kafka CA file")
+	}
+	if len(bytes.TrimSpace(caCertificate)) == 0 {
+		return errors.New("read Kafka CA file: empty certificate")
 	}
 	runtime.projection, err = deps.newProjection(settings.Writer, dependencyObserver)
 	if err != nil {

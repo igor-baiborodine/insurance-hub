@@ -236,6 +236,33 @@ func TestRun_EnabledWorkersStartReadinessAndBoundedShutdown(t *testing.T) {
 	}
 }
 
+func TestRun_EnabledWorkersRejectEmptyKafkaCAFile(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	emptyCA := t.TempDir() + "/ca.crt"
+	if err := os.WriteFile(emptyCA, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings.Events = config.Events{
+		Enabled: true, Brokers: []string{"kafka.example:9093"}, Group: "issue-230",
+		RegisteredTopic: "registered-230", TerminatedTopic: "terminated-230",
+		CAFile: emptyCA, Writer: settings.Elasticsearch,
+	}
+	deps, _ := testDependencies(&fakeQuery{})
+	deps.newProjection = func(config.Elasticsearch, *telemetry.DependencyObserver) (projectionRuntime, error) {
+		t.Fatal("empty Kafka CA constructed the writer client")
+		return nil, nil
+	}
+
+	// when
+	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
+	if err == nil || !strings.Contains(err.Error(), "empty certificate") {
+		t.Fatalf("run error = %v", err)
+	}
+}
+
 func TestRun_PartialWorkerStartupPreservesFailureAndCleansResources(t *testing.T) {
 	// given
 	settings := testConfig(t)

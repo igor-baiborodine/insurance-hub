@@ -2,6 +2,7 @@
 package kafka
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -88,6 +89,9 @@ func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*
 		settings.ClientID == "" || settings.EventType == "" || projection == nil || logger == nil {
 		return nil, errors.New("configure policy event worker: incomplete settings")
 	}
+	if len(bytes.TrimSpace(settings.CACert)) == 0 {
+		return nil, errors.New("configure policy event worker: empty CA certificate")
+	}
 	options := []kgo.Opt{
 		kgo.SeedBrokers(settings.Brokers...),
 		kgo.ClientID(settings.ClientID),
@@ -125,21 +129,19 @@ func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*
 			assigned.Store(false)
 		}),
 	)
-	if len(settings.CACert) > 0 {
-		roots, err := x509.SystemCertPool()
-		if err != nil {
-			return nil, errors.New("configure policy event worker: load system roots")
-		}
-		if !roots.AppendCertsFromPEM(settings.CACert) {
-			return nil, errors.New(
-				"configure policy event worker: invalid CA certificate",
-			)
-		}
-		options = append(options, kgo.DialTLSConfig(&tls.Config{
-			MinVersion: tls.VersionTLS12,
-			RootCAs:    roots,
-		}))
+	roots, err := x509.SystemCertPool()
+	if err != nil {
+		return nil, errors.New("configure policy event worker: load system roots")
 	}
+	if !roots.AppendCertsFromPEM(settings.CACert) {
+		return nil, errors.New(
+			"configure policy event worker: invalid CA certificate",
+		)
+	}
+	options = append(options, kgo.DialTLSConfig(&tls.Config{
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    roots,
+	}))
 	consumer, err := kgo.NewClient(options...)
 	if err != nil {
 		return nil, errors.New("configure policy event worker: create Kafka client")

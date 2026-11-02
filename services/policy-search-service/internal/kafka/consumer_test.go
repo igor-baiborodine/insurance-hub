@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -130,6 +131,23 @@ func TestWorker_ExtractsTraceContextAndRecordsBoundedOutcome(t *testing.T) {
 	}
 	if outcome := <-finished; outcome != "success" {
 		t.Fatalf("outcome = %q", outcome)
+	}
+}
+
+func TestNewWorker_RejectsEmptyCACertificate(t *testing.T) {
+	// given
+	settings := Settings{
+		Brokers: []string{"kafka.example:9093"}, Group: "issue-230",
+		Topic: "policy-registered-issue-230", ClientID: "policy-registered-listener",
+		EventType: "registered", CACert: []byte(" \n\t"),
+	}
+
+	// when
+	worker, err := NewWorker(settings, &fakeProjection{}, slog.Default())
+
+	// then
+	if worker != nil || err == nil || !strings.Contains(err.Error(), "empty CA certificate") {
+		t.Fatalf("NewWorker() = (%v, %v)", worker, err)
 	}
 }
 
