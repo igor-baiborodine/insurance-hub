@@ -141,6 +141,13 @@ def test_main_starts_kafka_with_owned_tls_identity(
     assert "KAFKA_SSL_KEYSTORE_FILENAME=server.p12" in joined
     assert "/etc/kafka/secrets:ro" in joined
     assert "PLAINTEXT://127.0.0.1:49092" not in joined
+    kafka_name = kafka[kafka.index("--name") + 1]
+    assert any(
+        command[:3] == ["docker-controlled", "exec", kafka_name]
+        and "kafka-topics.sh" in command[3]
+        and command[-2:] == ["127.0.0.1:9094", "--list"]
+        for command in commands
+    )
 
 
 def test_passed_tests_ignores_non_json_and_package_records() -> None:
