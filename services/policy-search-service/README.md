@@ -397,9 +397,9 @@ Commands never select an environment implicitly. Direct image load, apply and st
 is owned by Git and the shared Flux reconciliation. QA status and verification require both
 `DEPLOY_SOURCE_REVISION=<40-source-hex>` and `DEPLOY_IMAGE_DIGEST=sha256:<64-hex>`; the latter must
 match the running Policy Search container's runtime `imageID`. The QA overlay remains active under
-the shared Flux root. Provision and verify the QA fixture and workload-owned Secrets before merging
-configuration that references them; the accepted Echo image ignores the added search settings but
-Kubernetes still requires each referenced Secret. See the
+the shared Flux root. Provision and verify the QA query and event fixtures before merging
+configuration that references their workload-owned Secrets; Kubernetes requires each referenced
+Secret even before an enabled worker first consumes an event. See the
 [deployment runbook](../../docs/migration/phase-4/policy-search-service/deployment-runbook.md) for
 release, diagnostics, reachability, cleanup and restoration procedures.
 
@@ -531,14 +531,14 @@ management and telemetry resources within the shared deadline.
 
 ### Event processing and diagnostics walkthrough
 
-The active local-dev and QA overlays keep `EVENT_WORKERS_ENABLED=false`, so query operation never
-depends on event Secrets or Kafka. The reviewed activation patches beside each overlay define the
-later transition: exact issue-230 topics/group, TLS 9093 bootstrap, a cert-only Kafka CA mount,
-separate writer credentials, a bounded 30-second initial assignment budget and one broker-only TCP
-9093 egress rule. The egress input is a JSON patch that appends to the active policy. QA activation
-remains Git/Flux owned. Deployment checks wire all three event inputs into temporary local-dev and
-QA overlays, render them through Kustomize and compare them with the deployment composition while
-rejecting undeclared transitions and event references in the disabled render.
+The checked-in local-dev overlay keeps `EVENT_WORKERS_ENABLED=false`, so its default query
+operation never depends on event Secrets or Kafka. The active QA overlay enables the workers with
+the exact issue-230 topics/group, TLS 9093 bootstrap, a cert-only Kafka CA mount, separate writer
+credentials, a bounded 30-second initial assignment budget and one broker-only TCP 9093 egress
+rule. The egress input is a JSON patch that appends to the active policy, and QA activation remains
+Git/Flux owned. Deployment checks render both the enabled and disabled forms through Kustomize,
+compare them with the deployment composition, and reject undeclared transitions, duplicate patches
+or event references in the disabled render.
 
 When enabled, each worker extracts incoming W3C trace headers, records a fixed event-type span,
 decodes the existing envelope and synchronously replaces the number-keyed Elasticsearch document.
