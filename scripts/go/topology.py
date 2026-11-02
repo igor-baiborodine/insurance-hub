@@ -636,6 +636,12 @@ def main_coverage_check(root: Path) -> None:
     codecov_path = root / "codecov.yml"
     require(codecov_path.is_file(), "missing Codecov configuration: codecov.yml")
     codecov = codecov_path.read_text(encoding="utf-8")
+    patch_gate = "    patch:\n      default:\n        target: 75%\n        threshold: 0%\n"
+    require(patch_gate in codecov, "Codecov patch coverage must block below 75%")
+    require(
+        "        informational: true\n" not in codecov,
+        "Codecov patch coverage must not be informational",
+    )
     require("    carryforward: false\n" in codecov, "Codecov flags must not carry forward")
     for module, _role, flag in MAIN_COVERAGE_MODULES:
         record = f"    - name: {flag}\n      paths:\n        - {module}/\n"
@@ -648,6 +654,11 @@ def expected_selector_outputs(module: dict[str, Any], merge_base: str) -> dict[s
     coverage_files = coverage_file
     if module["role"] == "business-service":
         coverage_files += f",{directory}/integration-coverage.txt"
+    if directory == "services/policy-search-service":
+        coverage_files += (
+            f",{directory}/elasticsearch-integration-coverage.txt"
+            f",{directory}/event-integration-coverage.txt"
+        )
     return {
         "module_dir": directory,
         "module_key": directory.replace("/", "-"),

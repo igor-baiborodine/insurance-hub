@@ -658,6 +658,33 @@ def test_main_coverage_contract_rejects_missing_flag_ownership(tmp_path: Path) -
         topology.main_coverage_check(tmp_path)
 
 
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("        target: 75%\n", "        target: 70%\n", "block below 75%"),
+        (
+            "        threshold: 0%\n",
+            "        threshold: 5%\n",
+            "block below 75%",
+        ),
+        (
+            "        threshold: 0%\n",
+            "        threshold: 0%\n        informational: true\n",
+            "must not be informational",
+        ),
+    ],
+)
+def test_main_coverage_contract_rejects_weak_patch_gate(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    codecov = (REPOSITORY_ROOT / "codecov.yml").read_text(encoding="utf-8")
+    assert old in codecov
+    write_main_coverage_contract(tmp_path, codecov=codecov.replace(old, new, 1))
+
+    with pytest.raises(topology.TopologyError, match=message):
+        topology.main_coverage_check(tmp_path)
+
+
 def test_ci_coverage_preserves_historical_path_arguments(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

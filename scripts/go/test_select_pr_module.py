@@ -59,6 +59,36 @@ def test_multiple_modules_are_rejected() -> None:
         select_pr_module.selection_outputs(paths, "a" * 40)
 
 
+def test_policy_search_uploads_every_check_go_pr_coverage_profile() -> None:
+    # when
+    result = select_pr_module.selection_outputs(
+        ["services/policy-search-service/internal/service/service.go"],
+        "a" * 40,
+    )
+
+    # then
+    assert result["coverage_files"].split(",") == [
+        "services/policy-search-service/coverage.txt",
+        "services/policy-search-service/integration-coverage.txt",
+        "services/policy-search-service/elasticsearch-integration-coverage.txt",
+        "services/policy-search-service/event-integration-coverage.txt",
+    ]
+
+
+def test_product_service_keeps_its_owned_coverage_profiles() -> None:
+    # when
+    result = select_pr_module.selection_outputs(
+        ["services/product-service/internal/app.go"],
+        "a" * 40,
+    )
+
+    # then
+    assert result["coverage_files"].split(",") == [
+        "services/product-service/coverage.txt",
+        "services/product-service/integration-coverage.txt",
+    ]
+
+
 @pytest.mark.parametrize(
     "path",
     [

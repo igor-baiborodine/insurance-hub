@@ -22,6 +22,10 @@ GO_PR_ROOT_FILES = frozenset(
         "sqlc.yaml",
     }
 )
+POLICY_SEARCH_ADDITIONAL_COVERAGE_FILES = (
+    "elasticsearch-integration-coverage.txt",
+    "event-integration-coverage.txt",
+)
 
 
 class SelectionError(RuntimeError):
@@ -94,9 +98,13 @@ def selection_outputs(paths: list[str], merge_base: str) -> dict[str, str]:
         else "business-service"
     )
     coverage_file = f"{module_dir}/coverage.txt"
-    coverage_files = coverage_file
+    coverage_files = [coverage_file]
     if module_role == "business-service":
-        coverage_files += f",{module_dir}/integration-coverage.txt"
+        coverage_files.append(f"{module_dir}/integration-coverage.txt")
+    if module_dir == "services/policy-search-service":
+        coverage_files.extend(
+            f"{module_dir}/{name}" for name in POLICY_SEARCH_ADDITIONAL_COVERAGE_FILES
+        )
     return {
         "module_dir": module_dir,
         "module_key": module_dir.replace("/", "-"),
@@ -105,7 +113,7 @@ def selection_outputs(paths: list[str], merge_base: str) -> dict[str, str]:
         "validation_target": "check-go-pr",
         "format_base": merge_base,
         "coverage_file": coverage_file,
-        "coverage_files": coverage_files,
+        "coverage_files": ",".join(coverage_files),
         "coverage_flag": module_dir.rsplit("/", 1)[-1],
     }
 
