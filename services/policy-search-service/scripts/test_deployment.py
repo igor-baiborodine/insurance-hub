@@ -181,6 +181,9 @@ def test_live_state_requires_declared_event_mode_transition() -> None:
         actual.update(
             {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in enabled}
         )
+        actual[("deployment", deployment["metadata"]["name"])]["spec"]["template"]["spec"][
+            "containers"
+        ][0]["env"].reverse()
         target.live(enabled, require_deployment=True)
 
 

@@ -156,6 +156,26 @@ def matching_config_map_reference(actual: Any, expected: Any) -> bool:
     )
 
 
+def matching_named_entries(actual: Any, expected: Any) -> bool:
+    if actual == expected:
+        return True
+    if not isinstance(actual, list) or not isinstance(expected, list):
+        return False
+    actual_names = [item.get("name") for item in actual if isinstance(item, dict)]
+    expected_names = [item.get("name") for item in expected if isinstance(item, dict)]
+    if (
+        len(actual_names) != len(actual)
+        or len(expected_names) != len(expected)
+        or any(not isinstance(name, str) for name in actual_names + expected_names)
+        or len(set(actual_names)) != len(actual_names)
+        or len(set(expected_names)) != len(expected_names)
+    ):
+        return False
+    return sorted(actual, key=lambda item: item["name"]) == sorted(
+        expected, key=lambda item: item["name"]
+    )
+
+
 def matching_echo_predecessor_environment(actual: Any, expected: Any) -> bool:
     """Accept the reviewed Echo environment before its first query rollout only."""
     if actual == expected:
@@ -1024,6 +1044,12 @@ class Target:
                         matching_echo_predecessor_environment(
                             container.get(field), desired_container.get(field)
                         ),
+                        f"live Deployment/{name} container {field} differs",
+                    )
+                    continue
+                if field == "env":
+                    require(
+                        matching_named_entries(container.get(field), desired_container.get(field)),
                         f"live Deployment/{name} container {field} differs",
                     )
                     continue
