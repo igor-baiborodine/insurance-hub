@@ -12,6 +12,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,9 @@ EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
 JAVA_NAMES = {"policy-search-api-legacy"}
 BUSINESS_CLIENT_LABEL = "insurance-hub.io/policy-search-business-client"
 MANAGEMENT_CLIENT_LABEL = "insurance-hub.io/policy-search-management-client"
+EVENT_MODE_ENV = "DEPLOY_EVENT_MODE"
+PREVIOUS_EVENT_MODE_ENV = "DEPLOY_PREVIOUS_EVENT_MODE"
+EVENT_MODES = {"disabled", "enabled"}
 
 
 class DeploymentError(RuntimeError):
@@ -172,14 +176,106 @@ def staged_image_matches(environment: str, image: str) -> bool:
     )
 
 
-def render(environment: str) -> str:
+def selected_event_mode(environment: str, requested: str | None = None) -> str:
+    mode = os.environ.get(EVENT_MODE_ENV, "disabled") if requested is None else requested
+    require(mode in EVENT_MODES, f"{EVENT_MODE_ENV} must be disabled or enabled")
+    require(
+        mode == "disabled" or environment == "local-dev",
+        "event activation is direct-local only",
+    )
+    return mode
+
+
+def event_activation_patches(environment: str) -> dict[str, dict[str, Any]]:
+    validate_event_activation_contract(environment)
+    root = ROOT / f"k8s/overlays/{environment}/svc/policy-search"
+    return {
+        name: yaml.safe_load((root / f"event-{name}-patch.yaml").read_text(encoding="utf-8"))
+        for name in ("config", "deployment", "network-policy")
+    }
+
+
+def activate_event_render(environment: str, text: str) -> str:
+    items = deepcopy(documents(text))
+    patches = event_activation_patches(environment)
+    prefix = f"{environment}-"
+    configs = [
+        item
+        for item in items
+        if item.get("kind") == "ConfigMap"
+        and re.fullmatch(
+            re.escape(prefix + "policy-search-config") + r"-[a-z0-9]{10}",
+            item.get("metadata", {}).get("name", ""),
+        )
+    ]
+    require(len(configs) == 1, "expected exactly one generated Policy Search ConfigMap")
+    config = configs[0]
+    deployment = resource(items, "Deployment", prefix + "policy-search-api")
+    policy = resource(items, "NetworkPolicy", prefix + "policy-search-api")
+
+    collisions = set(config.get("data", {})) & set(patches["config"].get("data", {}))
+    require(
+        collisions == {"EVENT_WORKERS_ENABLED", "PROBE_TIMEOUT"},
+        "event configuration collides with active configuration",
+    )
+    config.setdefault("data", {}).update(deepcopy(patches["config"]["data"]))
+
+    pod = deployment["spec"]["template"]["spec"]
+    container = pod["containers"][0]
+    event_pod = patches["deployment"]["spec"]["template"]["spec"]
+    event_container = event_pod["containers"][0]
+    require(
+        not (
+            {item["name"] for item in container.get("env", [])}
+            & {item["name"] for item in event_container.get("env", [])}
+        ),
+        "event environment collides with active environment",
+    )
+    require(
+        not (
+            {item["name"] for item in container.get("volumeMounts", [])}
+            & {item["name"] for item in event_container.get("volumeMounts", [])}
+        ),
+        "event mount collides with active mounts",
+    )
+    require(
+        not (
+            {item["name"] for item in pod.get("volumes", [])}
+            & {item["name"] for item in event_pod.get("volumes", [])}
+        ),
+        "event volume collides with active volumes",
+    )
+    container.setdefault("env", []).extend(deepcopy(event_container.get("env", [])))
+    container.setdefault("volumeMounts", []).extend(
+        deepcopy(event_container.get("volumeMounts", []))
+    )
+    pod.setdefault("volumes", []).extend(deepcopy(event_pod.get("volumes", [])))
+    policy["spec"].setdefault("egress", []).extend(
+        deepcopy(patches["network-policy"]["spec"].get("egress", []))
+    )
+    return yaml.safe_dump_all(items, explicit_start=True, sort_keys=False)
+
+
+def render(environment: str, mode: str | None = None) -> str:
     record = service_record(ROOT, SERVICE)
     configuration = target_record(ROOT, record, environment)
     kubectl = os.environ.get("KUBECTL", "kubectl")
-    return run([kubectl, "kustomize", str(ROOT / configuration["overlay"])])
+    text = run([kubectl, "kustomize", str(ROOT / configuration["overlay"])])
+    return (
+        activate_event_render(environment, text)
+        if selected_event_mode(environment, mode) == "enabled"
+        else text
+    )
 
 
-def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
+def validate_render(
+    environment: str,
+    text: str,
+    *,
+    event_mode: str | None = None,
+) -> list[dict[str, Any]]:
+    mode = selected_event_mode(environment, event_mode)
+    events_enabled = mode == "enabled"
     items = documents(text)
     require(items, "overlay rendered no resources")
     require(
@@ -239,9 +335,30 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(pod_spec.get("enableServiceLinks") is False, "service links enabled")
     require(pod_spec.get("terminationGracePeriodSeconds") == 30, "termination grace differs")
     volumes = pod_spec.get("volumes", [])
+    kafka_volume = {
+        "name": "kafka-ca",
+        "secret": {
+            "secretName": f"{environment}-policy-search-kafka-ca",
+            "items": [{"key": "ca.crt", "path": "ca.crt"}],
+            "defaultMode": 0o444,
+        },
+    }
+    kafka_mount = {
+        "name": "kafka-ca",
+        "mountPath": "/etc/policy-search/kafka",
+        "readOnly": True,
+    }
     if environment == "local-dev":
-        require(not volumes, "local-dev must not mount volumes")
+        require(
+            volumes == ([kafka_volume] if events_enabled else []),
+            "local-dev volumes differ",
+        )
+        require(
+            container.get("volumeMounts", []) == ([kafka_mount] if events_enabled else []),
+            "local-dev mounts differ",
+        )
     else:
+        require(not events_enabled, "QA event activation must remain Git/Flux owned")
         require(
             volumes
             == [
@@ -278,6 +395,19 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             == {"name": expected_secret, "key": key},
             f"{name} Secret reference differs",
         )
+    writer_secret = f"{environment}-policy-search-elasticsearch-writer"
+    for name, key in (
+        ("ELASTICSEARCH_WRITER_USERNAME", "username"),
+        ("ELASTICSEARCH_WRITER_PASSWORD", "password"),
+    ):
+        if events_enabled:
+            require(
+                env.get(name, {}).get("valueFrom", {}).get("secretKeyRef")
+                == {"name": writer_secret, "key": key},
+                f"{name} event Secret reference differs",
+            )
+        else:
+            require(name not in env, "event writer Secret leaked into disabled deployment")
     for name, path, period, failures in (
         ("startupProbe", "/livez", 2, 30),
         ("livenessProbe", "/livez", 10, 3),
@@ -346,8 +476,10 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "GRPC_MAX_RECV_BYTES": "1048576",
         "GRPC_MAX_SEND_BYTES": "8388608",
         "ELASTICSEARCH_TIMEOUT": "5s",
-        "EVENT_WORKERS_ENABLED": "false",
+        "EVENT_WORKERS_ENABLED": "true" if events_enabled else "false",
     }
+    if events_enabled:
+        required_data.update(event_activation_patches(environment)["config"]["data"])
     require(
         all(data.get(key) == value for key, value in required_data.items()),
         "runtime budgets differ",
@@ -382,14 +514,13 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             and labels.get("app.kubernetes.io/version") == data.get("SERVICE_VERSION"),
             "QA Pod and telemetry versions differ",
         )
-    require(
-        not any("kafka" in json.dumps(item).lower() for item in items),
-        "Kafka dependency leaked into query deployment",
-    )
-    require(
-        "ELASTICSEARCH_WRITER_USERNAME" not in env and "ELASTICSEARCH_WRITER_PASSWORD" not in env,
-        "event writer Secret leaked into disabled deployment",
-    )
+    encoded_items = json.dumps(items).lower()
+    if events_enabled:
+        kafka_rule = event_activation_patches(environment)["network-policy"]["spec"]["egress"][0]
+        require(policy.get("egress", [])[-1:] == [kafka_rule], "Kafka egress differs")
+        require("kafka" in encoded_items, "Kafka dependency is missing")
+    else:
+        require("kafka" not in encoded_items, "Kafka dependency leaked into query deployment")
     return items
 
 
@@ -410,6 +541,7 @@ def validate_event_activation_contract(environment: str) -> None:
         patches["config"].get("data")
         == {
             "EVENT_WORKERS_ENABLED": "true",
+            "PROBE_TIMEOUT": "30s",
             "KAFKA_BROKERS": bootstrap,
             "KAFKA_GROUP": "policy-search-service-issue-230",
             "KAFKA_REGISTERED_TOPIC": "policy-registered-issue-230",
@@ -501,6 +633,7 @@ class Target:
         self.business = f"{self.environment}-policy-search-api"
         self.management = f"{self.environment}-policy-search-api-management"
         self.kubectl_binary = os.environ.get("KUBECTL", "kubectl")
+        self.event_mode = selected_event_mode(self.environment)
 
     def kubectl(
         self,
@@ -531,26 +664,29 @@ class Target:
         namespace = self.json("get", "namespace", self.namespace)
         require(namespace.get("metadata", {}).get("name") == self.namespace, "namespace differs")
 
-    def rendered(self) -> tuple[str, list[dict[str, Any]], str]:
-        text = self.kubectl("kustomize", str(ROOT / self.configuration["overlay"]))
-        items = validate_render(self.environment, text)
+    def render_contract(
+        self,
+        mode: str,
+        requested_image: str = "",
+    ) -> tuple[str, list[dict[str, Any]], str]:
+        text = render(self.environment, mode)
+        items = validate_render(self.environment, text, event_mode=mode)
         deployment = next(item for item in items if item.get("kind") == "Deployment")
         image = deployment["spec"]["template"]["spec"]["containers"][0]["image"]
-        requested = os.environ.get("DEPLOY_IMAGE_REF", "")
-        if requested:
+        if requested_image:
             require(self.environment == "local-dev", "DEPLOY_IMAGE_REF is direct-local only")
             require(
                 bool(
                     re.fullmatch(
                         r"insurance-hub-policy-search-api:1\.[0-9]+\.[0-9]+-local\.[0-9a-f]{12}",
-                        requested,
+                        requested_image,
                     )
                 ),
                 "DEPLOY_IMAGE_REF differs",
             )
-            source_short = requested.rsplit(".", 1)[1]
+            source_short = requested_image.rsplit(".", 1)[1]
             version = f"git-{source_short}"
-            deployment["spec"]["template"]["spec"]["containers"][0]["image"] = requested
+            deployment["spec"]["template"]["spec"]["containers"][0]["image"] = requested_image
             deployment["metadata"].setdefault("labels", {})["app.kubernetes.io/version"] = version
             deployment["spec"]["template"]["metadata"].setdefault("labels", {})[
                 "app.kubernetes.io/version"
@@ -558,10 +694,32 @@ class Target:
             config = next(item for item in items if item.get("kind") == "ConfigMap")
             config["data"]["SERVICE_VERSION"] = version
             text = yaml.safe_dump_all(items, explicit_start=True, sort_keys=False)
-            image = requested
+            image = requested_image
         return text, items, image
 
+    def rendered(self) -> tuple[str, list[dict[str, Any]], str]:
+        return self.render_contract(
+            self.event_mode,
+            os.environ.get("DEPLOY_IMAGE_REF", ""),
+        )
+
     def live(self, items: list[dict[str, Any]], *, require_deployment: bool) -> None:
+        previous_event_mode = os.environ.get(PREVIOUS_EVENT_MODE_ENV, "")
+        require(
+            not previous_event_mode or previous_event_mode in EVENT_MODES,
+            f"{PREVIOUS_EVENT_MODE_ENV} must be disabled or enabled",
+        )
+        if previous_event_mode:
+            require(
+                self.configuration["mode"] == "direct",
+                f"{PREVIOUS_EVENT_MODE_ENV} is direct-local only",
+            )
+            if not require_deployment:
+                desired_image = resource(items, "Deployment", self.deployment)["spec"]["template"][
+                    "spec"
+                ]["containers"][0]["image"]
+                previous_image = os.environ.get("DEPLOY_PREVIOUS_IMAGE_REF", "") or desired_image
+                _, items, _ = self.render_contract(previous_event_mode, previous_image)
         desired_deployment = resource(items, "Deployment", self.deployment)
         desired_container = desired_deployment["spec"]["template"]["spec"]["containers"][0]
         desired_image = desired_container["image"]
@@ -659,7 +817,7 @@ class Target:
                 continue
 
             if kind == "NetworkPolicy":
-                if previous_image and not require_deployment:
+                if previous_image and not previous_event_mode and not require_deployment:
                     require(
                         matching_echo_predecessor_network_policy(
                             actual.get("spec"), desired.get("spec")
@@ -765,7 +923,12 @@ class Target:
                         f"live Deployment/{name} container {field} differs",
                     )
                     continue
-                if field == "env" and previous_image and not require_deployment:
+                if (
+                    field == "env"
+                    and previous_image
+                    and not previous_event_mode
+                    and not require_deployment
+                ):
                     require(
                         matching_echo_predecessor_environment(
                             container.get(field), desired_container.get(field)

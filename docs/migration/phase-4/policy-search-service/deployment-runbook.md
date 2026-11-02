@@ -157,6 +157,25 @@ make go-svc-deploy-status SVC_NAME=policy-search
 make go-svc-deploy-verify SVC_NAME=policy-search
 ```
 
+To activate the reviewed local-dev event boundary, declare both sides of the mode transition. The
+owner composes the event ConfigMap, writer Secret references, public Kafka CA mount and broker
+egress as one rendered state. It rejects event mode for QA because that target remains Git/Flux
+owned:
+
+```sh
+export DEPLOY_EVENT_MODE=enabled
+export DEPLOY_PREVIOUS_EVENT_MODE=disabled
+make go-svc-deploy-preflight SVC_NAME=policy-search
+make go-svc-image-load SVC_NAME=policy-search
+make go-svc-deploy SVC_NAME=policy-search
+unset DEPLOY_PREVIOUS_EVENT_MODE
+make go-svc-deploy-status SVC_NAME=policy-search
+make go-svc-deploy-verify SVC_NAME=policy-search
+```
+
+Set `DEPLOY_PREVIOUS_IMAGE_REF` as described above when activation also changes the image. Keep
+`DEPLOY_EVENT_MODE=enabled` for status and verification, then unset it after the bounded operation.
+
 Preflight checks target identity, Java resource UIDs, image/source identity and a server-side dry
 run before writes. Deploy applies only the rendered Go resources and waits up to the workload's
 180-second progress deadline. Verify checks the live inventory, absence of public routes, health
@@ -263,6 +282,33 @@ leave `policy-search-service-issue-230`, query/health checks pass and the issue-
 and synthetic documents remain. Restore the event release with its exact image, configuration,
 trust mounts and egress, then confirm consumption resumes without resetting offsets. Image-only
 rollback is not a valid return rehearsal.
+
+Use the same owner in both directions:
+
+```sh
+export EVENT_IMAGE_REF="$DEPLOY_IMAGE_REF"
+export QUERY_IMAGE_REF="insurance-hub-policy-search-api:1.1.0-local.<query-source-hex>"
+
+export DEPLOY_IMAGE_REF="$QUERY_IMAGE_REF"
+export DEPLOY_PREVIOUS_IMAGE_REF="$EVENT_IMAGE_REF"
+export DEPLOY_EVENT_MODE=disabled
+export DEPLOY_PREVIOUS_EVENT_MODE=enabled
+make go-svc-deploy-preflight SVC_NAME=policy-search
+make go-svc-image-load SVC_NAME=policy-search
+make go-svc-deploy SVC_NAME=policy-search
+unset DEPLOY_PREVIOUS_IMAGE_REF DEPLOY_PREVIOUS_EVENT_MODE
+make go-svc-deploy-verify SVC_NAME=policy-search
+
+export DEPLOY_IMAGE_REF="$EVENT_IMAGE_REF"
+export DEPLOY_PREVIOUS_IMAGE_REF="$QUERY_IMAGE_REF"
+export DEPLOY_EVENT_MODE=enabled
+export DEPLOY_PREVIOUS_EVENT_MODE=disabled
+make go-svc-deploy-preflight SVC_NAME=policy-search
+make go-svc-image-load SVC_NAME=policy-search
+make go-svc-deploy SVC_NAME=policy-search
+unset DEPLOY_PREVIOUS_IMAGE_REF DEPLOY_PREVIOUS_EVENT_MODE
+make go-svc-deploy-verify SVC_NAME=policy-search
+```
 
 Retire event resources only after an explicit abort or final retirement, after no Pod references
 their Secrets:

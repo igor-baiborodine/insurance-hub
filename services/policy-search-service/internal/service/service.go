@@ -298,7 +298,15 @@ func run(
 	err = runtime.checkWorkers(workerCheckContext)
 	cancelWorkerCheck()
 	if err != nil {
+		logger.ErrorContext(
+			context.Background(),
+			"event worker startup failed",
+			slog.String("reason", "dependency_check_failed"),
+		)
 		return fail(fmt.Errorf("run service: event workers not ready: %w", err))
+	}
+	if len(runtime.workers) > 0 {
+		logger.InfoContext(ctx, "event workers ready")
 	}
 	state, err := health.NewState(
 		settings.ProbeTimeout,

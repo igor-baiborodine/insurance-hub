@@ -33,7 +33,7 @@ def target_environment(name: str = "local-dev") -> dict[str, str]:
 
 
 def rendered_items(environment: str = "local-dev") -> list[dict]:
-    return checks.documents(checks.render(environment))
+    return checks.documents(checks.render(environment, "disabled"))
 
 
 def test_target_rejects_wrong_coordinates_before_cluster_access() -> None:
@@ -82,6 +82,70 @@ def test_render_rejects_java_ownership_and_kafka_dependency() -> None:
 def test_event_activation_contract_uses_exact_writer_trust_and_kafka_egress() -> None:
     for environment in ("local-dev", "qa"):
         checks.validate_event_activation_contract(environment)
+
+
+def test_local_event_render_composes_complete_activation_boundary() -> None:
+    text = checks.render("local-dev", "enabled")
+    items = checks.validate_render("local-dev", text, event_mode="enabled")
+    config = next(item for item in items if item["kind"] == "ConfigMap")
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    policy = next(item for item in items if item["kind"] == "NetworkPolicy")
+    container = deployment["spec"]["template"]["spec"]["containers"][0]
+
+    assert config["data"]["EVENT_WORKERS_ENABLED"] == "true"
+    assert config["data"]["PROBE_TIMEOUT"] == "30s"
+    assert {item["name"] for item in container["env"]} >= {
+        "ELASTICSEARCH_USERNAME",
+        "ELASTICSEARCH_PASSWORD",
+        "ELASTICSEARCH_WRITER_USERNAME",
+        "ELASTICSEARCH_WRITER_PASSWORD",
+    }
+    assert deployment["spec"]["template"]["spec"]["volumes"][0]["name"] == "kafka-ca"
+    assert len(policy["spec"]["egress"]) == 3
+    assert policy["spec"]["egress"][-1]["ports"] == [{"port": 9093, "protocol": "TCP"}]
+
+
+def test_event_mode_is_fail_closed_and_direct_local_only() -> None:
+    with pytest.raises(checks.DeploymentError, match="must be disabled or enabled"):
+        checks.selected_event_mode("local-dev", "unexpected")
+    with pytest.raises(checks.DeploymentError, match="direct-local only"):
+        checks.selected_event_mode("qa", "enabled")
+
+
+def test_live_state_requires_declared_event_mode_transition() -> None:
+    disabled = rendered_items()
+    enabled = checks.documents(checks.render("local-dev", "enabled"))
+    checks.validate_render("local-dev", checks.yaml.safe_dump_all(enabled), event_mode="enabled")
+    deployment = next(item for item in enabled if item["kind"] == "Deployment")
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in disabled}
+    target = object.__new__(checks.Target)
+    target.environment = "local-dev"
+    target.event_mode = "enabled"
+    target.deployment = deployment["metadata"]["name"]
+    target.configuration = {"mode": "direct"}
+    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
+    target.render_contract = Mock(
+        return_value=(checks.yaml.safe_dump_all(disabled), disabled, "unused")
+    )
+
+    with patch.dict(os.environ, {}, clear=True):
+        with pytest.raises(checks.DeploymentError):
+            target.live(enabled, require_deployment=False)
+
+    with patch.dict(
+        os.environ,
+        {checks.PREVIOUS_EVENT_MODE_ENV: "disabled"},
+        clear=True,
+    ):
+        target.live(enabled, require_deployment=False)
+        with pytest.raises(checks.DeploymentError):
+            target.live(enabled, require_deployment=True)
+
+        actual.clear()
+        actual.update(
+            {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in enabled}
+        )
+        target.live(enabled, require_deployment=True)
 
 
 def test_render_rejects_wrong_elasticsearch_secret_and_egress() -> None:

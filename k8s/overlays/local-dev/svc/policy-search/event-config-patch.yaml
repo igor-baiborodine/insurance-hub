@@ -4,6 +4,7 @@ metadata:
   name: policy-search-config
 data:
   EVENT_WORKERS_ENABLED: "true"
+  PROBE_TIMEOUT: 30s
   KAFKA_BROKERS: local-dev-kafka-kafka-bootstrap:9093
   KAFKA_GROUP: policy-search-service-issue-230
   KAFKA_REGISTERED_TOPIC: policy-registered-issue-230

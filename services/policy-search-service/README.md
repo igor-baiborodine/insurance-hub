@@ -235,7 +235,7 @@ do not repeat its supplied value.
 | `HTTP_IDLE_TIMEOUT` | `30s` | Positive duration. |
 | `LOG_LEVEL` | `info` | A level accepted by `slog.Level`, including documented offsets. |
 | `REQUEST_TIMEOUT` | `8s` | Positive duration bounding HTTP admission and application work; never extends a shorter caller deadline. |
-| `PROBE_TIMEOUT` | `2s` | Positive duration bounding initial gateway connection and readiness checks. |
+| `PROBE_TIMEOUT` | `2s` | Positive duration bounding initial gateway connection and readiness checks. Event activation sets `30s` so TLS discovery and the first group assignment remain bounded without using the query-only startup budget. |
 | `GRPC_MAX_RECV_BYTES` | `1048576` | Integer from 1 through 16777216; server receive and gateway-client send limit. |
 | `GRPC_MAX_SEND_BYTES` | `8388608` | Integer from 1 through 67108864; server send and gateway-client receive limit. |
 | `DEPLOYMENT_ENVIRONMENT` | `development` when disabled | Explicit non-development value required when telemetry is enabled. |
@@ -518,10 +518,11 @@ and translates it through the generated client across the owned instrumented con
 server invokes the application port, which asks the official Elasticsearch adapter for the capped
 hit window and applies stable date ordering before mapping the response. The request retains the
 shorter caller deadline while HTTP, gRPC and dependency observations use fixed safe dimensions.
-When event workers are enabled, composition checks the dedicated writer and both Kafka clients,
-then starts one synchronous worker per legacy topic. Each worker decodes the existing envelope and
-invokes the same projection use case; the dedicated Elasticsearch client performs full replacement
-under the policy-number document ID. Disabled mode never constructs those resources. Shutdown
+When event workers are enabled, composition checks the dedicated writer, starts one synchronous
+worker per legacy topic, then requires Kafka reachability and an assignment for both workers. Each
+worker decodes the existing envelope and invokes the same projection use case; the dedicated
+Elasticsearch client performs full replacement under the policy-number document ID. Disabled mode
+never constructs those resources. Shutdown
 withdraws readiness, stops polling, performs the selected bounded final current-position commit,
 closes both Kafka clients and the writer client, drains accepted HTTP work, then closes the query,
 management and telemetry resources within the shared deadline.
@@ -531,15 +532,18 @@ management and telemetry resources within the shared deadline.
 The active local-dev and QA overlays keep `EVENT_WORKERS_ENABLED=false`, so query operation never
 depends on event Secrets or Kafka. The reviewed activation patches beside each overlay define the
 later transition: exact issue-230 topics/group, TLS 9093 bootstrap, a cert-only Kafka CA mount,
-separate writer credentials and one broker-only TCP 9093 egress rule. Deployment checks validate
-those patches while also rejecting any event reference in the disabled active render.
+separate writer credentials, a bounded 30-second initial assignment budget and one broker-only TCP
+9093 egress rule. `DEPLOY_EVENT_MODE=enabled` composes those patches only for the direct local-dev
+owner; QA activation remains Git/Flux owned. Deployment checks validate both complete modes while
+rejecting undeclared transitions and event references in the disabled render.
 
 When enabled, each worker extracts incoming W3C trace headers, records a fixed event-type span,
 decodes the existing envelope and synchronously replaces the number-keyed Elasticsearch document.
 Malformed input is skipped with a safe outcome; projection failure stops the remainder of that
-fetched batch under the accepted weak auto-commit behavior. Readiness covers the writer and both
-assigned consumers. Logs and metric labels never contain an event body, topic, group, policy
-number, customer value, credential or raw error.
+fetched batch under the accepted weak auto-commit behavior. Readiness verifies the writer's own
+single-index `index` privilege through Elasticsearch's non-mutating self-check and requires both
+consumers to hold assignments. Logs and metric labels never contain an event body, topic, group,
+policy number, customer value, credential or raw error.
 
 Use `make event-fixture-verify` for resource and permission diagnostics. In QA, trace and metric
 delivery uses the configured Alloy endpoint; collector failure follows the provider's bounded,

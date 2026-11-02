@@ -164,11 +164,23 @@ func newWorker(client consumerClient, projection projection, logger *slog.Logger
 // Check verifies broker reachability without joining a consumer group.
 func (worker *Worker) Check(ctx context.Context) error {
 	if err := worker.client.Ping(ctx); err != nil {
+		worker.logger.ErrorContext(
+			ctx,
+			"policy event worker readiness failed",
+			slog.String("event_type", worker.eventType),
+			slog.String("reason", "kafka_unavailable"),
+		)
 		return errors.New("check policy event worker: Kafka unavailable")
 	}
 	for !worker.assigned.Load() {
 		select {
 		case <-ctx.Done():
+			worker.logger.ErrorContext(
+				context.Background(),
+				"policy event worker readiness failed",
+				slog.String("event_type", worker.eventType),
+				slog.String("reason", "group_assignment_unavailable"),
+			)
 			return errors.New("check policy event worker: group assignment unavailable")
 		case <-time.After(10 * time.Millisecond):
 		}

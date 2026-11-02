@@ -69,7 +69,7 @@ func (projection *productionProjection) ProjectPolicy(
 }
 
 func (projection *productionProjection) Check(ctx context.Context) error {
-	return projection.client.Check(ctx)
+	return projection.client.CheckWrite(ctx)
 }
 
 func (projection *productionProjection) CloseIdleConnections() {
