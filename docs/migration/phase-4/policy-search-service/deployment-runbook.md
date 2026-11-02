@@ -56,10 +56,13 @@ Elasticsearch 8.19.6 Docker node to verify native reader permissions and actual 
 The same permission test proves the separate event writer can replace a document in the accepted
 index while reads, deletes, unrelated indices and security administration are denied. The event
 integration target uses a generated CA and hostname-verified TLS with disposable Kafka. The
-deployment test then uses a uniquely named namespace on the configured Kind cluster and a separate Elasticsearch
-8.19.6 node and the exact synthetic fixture to verify search transports, policy, dependency
-recovery, restart and restoration. It removes the Docker node, Kind namespace and scratch
-qualification image, leaving the reviewed runtime image loaded for the later local-dev operation.
+deployment test then uses a uniquely named namespace on the configured Kind cluster with a
+security-enabled Elasticsearch node, generated reader and index-only writer identities, and a
+hostname-verified TLS Kafka broker. The event-enabled deployment must project the independent
+registration oracle and return it through the query API while preserving the complete composed
+NetworkPolicy. The run also verifies search transports, policy, dependency recovery, restart and
+restoration. It removes the Docker node, Kind namespace and scratch qualification image, leaving
+the reviewed runtime image loaded for the later local-dev operation.
 
 ## Select local-dev
 

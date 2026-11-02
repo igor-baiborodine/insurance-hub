@@ -180,7 +180,7 @@ deploy-test: python-toolchain-check image-build ## Exercise the exact image in a
 		DOCKER="$(DOCKER)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
 		"$(PYTHON)" scripts/fixture_administration_integration.py
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" \
-		ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
+		ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" KAFKA_IMAGE="$(KAFKA_IMAGE)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_disposable_deployment.py
 
 build-qualification-client: ## Build the read-only disposable HTTP/gRPC qualification client

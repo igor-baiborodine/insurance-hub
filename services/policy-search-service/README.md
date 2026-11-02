@@ -386,10 +386,12 @@ post-rollout state remain errors.
 
 The disposable target first verifies the native reader permission boundary against a
 security-enabled Elasticsearch 8.19.6 Docker node. It then builds the exact committed image and
-creates a separate Elasticsearch 8.19.6 node and exact fixture in a uniquely named Kind namespace
-to exercise query HTTP/gRPC, allowed/denied NetworkPolicy paths, readiness loss and recovery,
-restart, scale-to-zero and restoration. It removes both Elasticsearch resources, the namespace and
-the qualification image.
+creates a security-enabled Elasticsearch 8.19.6 node, a hostname-verified TLS Kafka 4.1.0 broker
+and the exact query/event fixtures in a uniquely named Kind namespace. The event-enabled service
+must acquire its index-only writer and consumer assignments, project the independent registration
+oracle, and return it through HTTP. The same run exercises query HTTP/gRPC, allowed/denied
+NetworkPolicy paths, readiness loss and recovery, restart, scale-to-zero and restoration. It
+removes the namespace and qualification image while retaining only the reviewed runtime image.
 
 Commands never select an environment implicitly. Direct image load, apply and stop reject QA; QA
 is owned by Git and the shared Flux reconciliation. QA status and verification require both
