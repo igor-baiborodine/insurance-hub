@@ -23,6 +23,7 @@ export SVC_NAME
 	go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test \
 	go-svc-fixture-setup go-svc-fixture-verify go-svc-fixture-retire \
+	go-svc-event-fixture-setup go-svc-event-fixture-verify go-svc-event-fixture-retire \
 	go-svc-deploy-test-flux \
 	go-svc-dispatch-test go-svc-release-select go-svc-release-prepare go-svc-release-test go-svc-release-test-collect
 
@@ -57,13 +58,17 @@ go-svc-stop: ## Stop only the selected direct-target Deployment
 go-svc-fixture-setup: ## Create the selected service's accepted fixture and least-privilege identity
 go-svc-fixture-verify: ## Verify the selected service's fixture and reader permission boundary
 go-svc-fixture-retire: ## Remove only the selected service's accepted fixture and identity
+go-svc-event-fixture-setup: ## Create the selected service's isolated event resources and writer identity
+go-svc-event-fixture-verify: ## Verify isolated event resources, trust and writer permissions
+go-svc-event-fixture-retire: ## Remove only the selected service's isolated event resources and identity
 go-svc-deploy-test-tooling: ## Test selected-service deployment guards and cleanup
 go-svc-deploy-test: ## Exercise one service in an owned disposable Kind namespace
 go-svc-deploy-test-flux: ## Exercise one service with pinned Flux/CNPG in an owned Kind cluster
 go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test \
 	go-svc-deploy-test-flux go-svc-fixture-setup go-svc-fixture-verify \
-	go-svc-fixture-retire: python-runtime-check
+	go-svc-fixture-retire go-svc-event-fixture-setup go-svc-event-fixture-verify \
+	go-svc-event-fixture-retire: python-runtime-check
 	+@set -eu; \
 		capability='$(@:go-svc-%=%)'; \
 		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) "$$capability")"; \

@@ -25,7 +25,11 @@ TOOL_NAMES = (
     "govulncheck",
 )
 IGNORED_DIRECTORIES = {".git", ".tools", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
-IGNORED_FILES = {"coverage.txt", "integration-coverage.txt"}
+IGNORED_FILES = {
+    "coverage.txt",
+    "event-integration-coverage.txt",
+    "integration-coverage.txt",
+}
 PROTO_SCHEMA = Path("api/policysearch/v1/policy_search_service.proto")
 GENERATED_PACKAGE = Path("gen/policysearch/v1")
 

@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "ownership": "issue-230-disposable",
+  "resources": {
+    "registeredTopic": "policy-registered-issue-230",
+    "terminatedTopic": "policy-terminated-issue-230",
+    "consumerGroup": "policy-search-service-issue-230",
+    "index": "policy-views-issue-229",
+    "syntheticIdPrefix": "SYN-230-"
+  },
+  "events": {
+    "registration": {
+      "key": "SYN-230-001",
+      "value": {
+        "policy": {
+          "number": "SYN-230-001",
+          "from": "2026-01-01",
+          "to": "2026-12-31",
+          "policyHolder": "Synthetic Holder A",
+          "productCode": "SYNTHETIC",
+          "totalPremium": 101.25,
+          "agentLogin": "synthetic-agent"
+        }
+      },
+      "expectedDocument": {
+        "number": "SYN-230-001",
+        "dateFrom": "2026-01-01",
+        "dateTo": "2026-12-31",
+        "policyHolder": "Synthetic Holder A"
+      }
+    },
+    "termination": {
+      "key": "SYN-230-001",
+      "value": {
+        "policy": {
+          "number": "SYN-230-001",
+          "from": "2026-01-01",
+          "to": "2026-06-30",
+          "policyHolder": "Synthetic Holder A",
+          "productCode": "SYNTHETIC",
+          "totalPremium": 101.25,
+          "agentLogin": "synthetic-agent"
+        }
+      },
+      "expectedDocument": {
+        "number": "SYN-230-001",
+        "dateFrom": "2026-01-01",
+        "dateTo": "2026-06-30",
+        "policyHolder": "Synthetic Holder A"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "C230-01",
+      "sequence": ["registration"],
+      "expected": "registration document"
+    },
+    {
+      "id": "C230-02",
+      "sequence": ["registration", "termination"],
+      "expected": "termination document"
+    },
+    {
+      "id": "C230-03-duplicate",
+      "sequence": ["registration", "registration"],
+      "expected": "one equivalent registration document"
+    },
+    {
+      "id": "C230-03-reversed",
+      "sequence": ["termination", "registration"],
+      "expected": "registration document"
+    },
+    {
+      "id": "C230-04-no-commit",
+      "sequence": ["registration", "hard-crash-before-commit", "restart"],
+      "expected": "record may replay from earliest or the last committed offset"
+    },
+    {
+      "id": "C230-04-malformed",
+      "sequence": ["malformed-json", "registration"],
+      "expected": "malformed record skipped and registration processed"
+    },
+    {
+      "id": "C230-04-handler-failure",
+      "sequence": ["registration", "writer-failure", "next-poll"],
+      "expected": "advanced fetch position may commit the failed and remaining records"
+    },
+    {
+      "id": "C230-05",
+      "sequence": ["workers-disabled", "query"],
+      "expected": "no group membership or writes and query remains available"
+    },
+    {
+      "id": "C230-06",
+      "sequence": ["reader-write", "writer-other-index"],
+      "expected": "both denied without fallback authority or sensitive diagnostics"
+    },
+    {
+      "id": "C230-07",
+      "sequence": ["registration", "termination", "telemetry-cleanup"],
+      "expected": "bounded safe signals without raw policy or credential data"
+    }
+  ]
+}

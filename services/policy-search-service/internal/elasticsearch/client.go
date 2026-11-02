@@ -2,9 +2,11 @@
 package elasticsearch
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -107,6 +109,42 @@ func (client *Client) Check(ctx context.Context) error {
 	}
 	if response.IsError() {
 		return errors.New("check elasticsearch: unsuccessful response")
+	}
+	return nil
+}
+
+// CheckWrite verifies the projection identity's exact index permission without reading or
+// mutating the index.
+func (client *Client) CheckWrite(ctx context.Context) error {
+	if client == nil || client.Client == nil {
+		return errors.New("check elasticsearch writer: client is required")
+	}
+	payload := []byte(`{"index":[{"names":["` + PolicyIndex + `"],"privileges":["index"]}]}`)
+	response, err := client.Security.HasPrivileges(
+		bytes.NewReader(payload),
+		client.Security.HasPrivileges.WithContext(ctx),
+	)
+	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return contextErr
+		}
+		return errors.New("check elasticsearch writer: request failed")
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.IsError() {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return errors.New("check elasticsearch writer: unsuccessful response")
+	}
+	var privileges struct {
+		HasAllRequested bool                       `json:"has_all_requested"`
+		Index           map[string]map[string]bool `json:"index"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4096)).
+		Decode(&privileges); err != nil {
+		return errors.New("check elasticsearch writer: invalid response")
+	}
+	if !privileges.HasAllRequested || !privileges.Index[PolicyIndex]["index"] {
+		return errors.New("check elasticsearch writer: required privilege unavailable")
 	}
 	return nil
 }

@@ -2,12 +2,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -25,6 +27,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/grpc"
+	policykafka "github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/kafka"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-search-service/internal/telemetry"
 )
 
@@ -63,10 +66,18 @@ type gatewayConnection interface {
 	Close() error
 }
 
+type eventWorker interface {
+	Check(context.Context) error
+	Run(context.Context) error
+	Shutdown(context.Context) error
+}
+
 type dependencies struct {
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newQuery       func(config.Elasticsearch, *telemetry.DependencyObserver) (queryRuntime, error)
+	newProjection  func(config.Elasticsearch, *telemetry.DependencyObserver) (projectionRuntime, error)
+	newWorker      func(policykafka.Settings, projectionRuntime, *slog.Logger) (eventWorker, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.SearchPolicies) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
 	newGateway     func(policysearchv1.PolicySearchServiceClient, gateway.Settings) (http.Handler, error)
@@ -81,7 +92,11 @@ func productionDependencies() dependencies {
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
-		newQuery: newProductionQuery,
+		newQuery:      newProductionQuery,
+		newProjection: newProductionProjection,
+		newWorker: func(settings policykafka.Settings, projection projectionRuntime, logger *slog.Logger) (eventWorker, error) {
+			return policykafka.NewWorker(settings, projection, logger)
+		},
 		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, search transport.SearchPolicies) (grpcServer, error) {
 			return transport.NewServer(logger, tracer, propagator, settings, search)
 		},
@@ -140,6 +155,11 @@ type runningService struct {
 	managementServer   httpServer
 	managementListener net.Listener
 	tracker            *handlerTracker
+	projection         projectionRuntime
+	workers            []eventWorker
+	workerCancel       context.CancelFunc
+	workerResults      chan error
+	workerWG           sync.WaitGroup
 }
 
 func run(
@@ -180,9 +200,29 @@ func run(
 	if err != nil {
 		return fail(err)
 	}
+	eventObserver, err := telemetry.NewEventObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+	)
+	if err != nil {
+		return fail(err)
+	}
 	runtime.query, err = deps.newQuery(settings.Elasticsearch, dependencyObserver)
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
+	}
+	if settings.Events.Enabled {
+		if err := runtime.configureWorkers(
+			settings.Events,
+			logger,
+			deps,
+			dependencyObserver,
+			eventObserver,
+			provider.HTTPPropagator(),
+		); err != nil {
+			return fail(fmt.Errorf("run service: %w", err))
+		}
 	}
 	runtime.grpcServer, err = deps.newGRPCServer(
 		logger, provider.TracerProvider(), provider.GRPCPropagator(),
@@ -238,13 +278,47 @@ func run(
 	if err != nil {
 		return fail(fmt.Errorf("run service: Elasticsearch not ready: %w", err))
 	}
+	if runtime.projection != nil {
+		projectionContext, cancelProjection := context.WithTimeout(
+			ctx,
+			settings.ProbeTimeout,
+		)
+		err = runtime.projection.Check(projectionContext)
+		cancelProjection()
+		if err != nil {
+			return fail(
+				fmt.Errorf(
+					"run service: projection Elasticsearch not ready: %w",
+					err,
+				),
+			)
+		}
+	}
+	runtime.startWorkers(ctx)
+	workerCheckContext, cancelWorkerCheck := context.WithTimeout(ctx, settings.ProbeTimeout)
+	err = runtime.checkWorkers(workerCheckContext)
+	cancelWorkerCheck()
+	if err != nil {
+		logger.ErrorContext(
+			context.Background(),
+			"event worker startup failed",
+			slog.String("reason", "dependency_check_failed"),
+		)
+		return fail(fmt.Errorf("run service: event workers not ready: %w", err))
+	}
+	if len(runtime.workers) > 0 {
+		logger.InfoContext(ctx, "event workers ready")
+	}
 	state, err := health.NewState(
 		settings.ProbeTimeout,
 		func(checkContext context.Context) error {
 			if runtime.connection.GetState() != connectivity.Ready {
 				return errors.New("gateway connection is not ready")
 			}
-			return runtime.query.Check(checkContext)
+			if err := runtime.query.Check(checkContext); err != nil {
+				return err
+			}
+			return runtime.checkWorkers(checkContext)
 		},
 	)
 	if err != nil {
@@ -302,11 +376,89 @@ func run(
 		serveErr = unexpectedServeError("business HTTP", err)
 	case err := <-managementResult:
 		serveErr = unexpectedServeError("management HTTP", err)
+	case err := <-runtime.workerResults:
+		if ctx.Err() == nil {
+			if err == nil {
+				err = errors.New("stopped unexpectedly")
+			}
+			serveErr = fmt.Errorf("event worker stopped: %w", err)
+		}
 	}
 	return errors.Join(
 		serveErr,
 		runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 	)
+}
+
+func (runtime *runningService) configureWorkers(
+	settings config.Events,
+	logger *slog.Logger,
+	deps dependencies,
+	dependencyObserver *telemetry.DependencyObserver,
+	eventObserver *telemetry.EventObserver,
+	propagator propagation.TextMapPropagator,
+) error {
+	caCertificate, err := os.ReadFile(settings.CAFile)
+	if err != nil {
+		return errors.New("read Kafka CA file")
+	}
+	if len(bytes.TrimSpace(caCertificate)) == 0 {
+		return errors.New("read Kafka CA file: empty certificate")
+	}
+	runtime.projection, err = deps.newProjection(settings.Writer, dependencyObserver)
+	if err != nil {
+		return err
+	}
+	for _, workerSettings := range []policykafka.Settings{
+		{Brokers: settings.Brokers, Group: settings.Group, Topic: settings.RegisteredTopic, ClientID: "policy-registered-listener", CACert: caCertificate, EventType: "registered"},
+		{Brokers: settings.Brokers, Group: settings.Group, Topic: settings.TerminatedTopic, ClientID: "policy-terminated-listener", CACert: caCertificate, EventType: "terminated"},
+	} {
+		workerSettings.Propagator = propagator
+		workerSettings.Observe = func(ctx context.Context, eventType string) (context.Context, func(context.Context, string, error)) {
+			observedCtx, observation := eventObserver.Start(ctx, eventType)
+			return observedCtx, observation.Finish
+		}
+		worker, workerErr := deps.newWorker(workerSettings, runtime.projection, logger)
+		if workerErr != nil {
+			return workerErr
+		}
+		runtime.workers = append(runtime.workers, worker)
+	}
+	return nil
+}
+
+func (runtime *runningService) checkWorkers(ctx context.Context) error {
+	if len(runtime.workers) == 0 {
+		return nil
+	}
+	if runtime.projection == nil {
+		return errors.New("projection is unavailable")
+	}
+	if err := runtime.projection.Check(ctx); err != nil {
+		return err
+	}
+	for _, worker := range runtime.workers {
+		if err := worker.Check(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (runtime *runningService) startWorkers(parent context.Context) {
+	if len(runtime.workers) == 0 {
+		return
+	}
+	workerCtx, cancel := context.WithCancel(parent)
+	runtime.workerCancel = cancel
+	runtime.workerResults = make(chan error, len(runtime.workers))
+	for _, worker := range runtime.workers {
+		runtime.workerWG.Add(1)
+		go func(item eventWorker) {
+			defer runtime.workerWG.Done()
+			runtime.workerResults <- item.Run(workerCtx)
+		}(worker)
+	}
 }
 
 func waitForConnection(ctx context.Context, connection gatewayConnection) error {
@@ -353,6 +505,27 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 	)
 	defer cancelGraceful()
 	var shutdownErrors []error
+	if runtime.workerCancel != nil {
+		runtime.workerCancel()
+		workersStopped := make(chan struct{})
+		go func() { runtime.workerWG.Wait(); close(workersStopped) }()
+		select {
+		case <-workersStopped:
+		case <-graceful.Done():
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("stop event workers: %w", graceful.Err()),
+			)
+		}
+	}
+	for _, worker := range runtime.workers {
+		if err := worker.Shutdown(graceful); err != nil {
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("shutdown event worker: %w", err),
+			)
+		}
+	}
 
 	if runtime.tracker != nil {
 		runtime.tracker.beginDrain()
@@ -449,6 +622,9 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 	}
 	if runtime.query != nil {
 		runtime.query.CloseIdleConnections()
+	}
+	if runtime.projection != nil {
+		runtime.projection.CloseIdleConnections()
 	}
 	if runtime.provider != nil {
 		if err := runtime.provider.Shutdown(overall); err != nil {

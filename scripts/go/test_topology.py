@@ -277,6 +277,13 @@ jobs:
           flags: ${{{{ steps.select.outputs.coverage_flag }}}}
           disable_search: true
           fail_ci_if_error: true
+      - if: steps.select.outputs.module_role != 'service-scaffold'
+        env:
+          COVERAGE_EXCLUSIONS: ${{{{ steps.select.outputs.coverage_exclusions }}}}
+          PATCH_COVERAGE_MINIMUM: '75'
+        run: >-
+          ./.venv/bin/python scripts/go/patch_coverage.py
+          --exclusions "$COVERAGE_EXCLUSIONS" --minimum "$PATCH_COVERAGE_MINIMUM"
 """
 
 
@@ -493,6 +500,21 @@ def test_topology_reports_controlled_manifest_failures(
             "selected-module validation contract",
         ),
         (
+            "scripts/go/patch_coverage.py",
+            "scripts/go/missing_patch_coverage.py",
+            "blocking patch coverage check",
+        ),
+        (
+            "PATCH_COVERAGE_MINIMUM: '75'",
+            "PATCH_COVERAGE_MINIMUM: '70'",
+            "75% patch coverage threshold",
+        ),
+        (
+            "steps.select.outputs.coverage_exclusions",
+            "steps.select.outputs.unexpected_exclusions",
+            "selected-module coverage exclusions",
+        ),
+        (
             "permissions:\n",
             "permissions:\n      - uses: actions/setup-java@v5\n",
             "forbidden non-Go",
@@ -655,6 +677,33 @@ def test_main_coverage_contract_rejects_missing_flag_ownership(tmp_path: Path) -
     write_main_coverage_contract(tmp_path, codecov=codecov.replace(record, "", 1))
 
     with pytest.raises(topology.TopologyError, match="servicekit flag ownership"):
+        topology.main_coverage_check(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("        target: 75%\n", "        target: 70%\n", "block below 75%"),
+        (
+            "        threshold: 0%\n",
+            "        threshold: 5%\n",
+            "block below 75%",
+        ),
+        (
+            "        threshold: 0%\n",
+            "        threshold: 0%\n        informational: true\n",
+            "must not be informational",
+        ),
+    ],
+)
+def test_main_coverage_contract_rejects_weak_patch_gate(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    codecov = (REPOSITORY_ROOT / "codecov.yml").read_text(encoding="utf-8")
+    assert old in codecov
+    write_main_coverage_contract(tmp_path, codecov=codecov.replace(old, new, 1))
+
+    with pytest.raises(topology.TopologyError, match=message):
         topology.main_coverage_check(tmp_path)
 
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import secrets
@@ -16,14 +17,16 @@ from pathlib import Path
 from typing import Any
 
 import fixture_administration as fixture_admin
+import policy_search_deployment_checks as deployment_checks
 import yaml
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 MODULE = ROOT / "services/policy-search-service"
-OVERLAY = ROOT / "k8s/overlays/local-dev/svc/policy-search"
 CONTEXT = "kind-local-dev-insurance-hub"
 KIND_CLUSTER = "local-dev-insurance-hub"
 OWNER_LABEL = "insurance-hub.io/policy-search-disposable"
+REGISTERED_TOPIC = "policy-registered-issue-230"
+TERMINATED_TOPIC = "policy-terminated-issue-230"
 
 
 class CheckFailed(RuntimeError):
@@ -73,8 +76,14 @@ class Cluster:
         return json.loads(self.kubectl(*arguments, "-o", "json") or "{}")
 
 
-def render(cluster: Cluster, image: str, source_short: str) -> tuple[str, list[dict[str, Any]]]:
-    text = cluster.kubectl("kustomize", str(OVERLAY))
+def render(
+    cluster: Cluster,
+    image: str,
+    source_short: str,
+    event_mode: str = "disabled",
+) -> tuple[str, list[dict[str, Any]]]:
+    text = deployment_checks.render("local-dev", event_mode)
+    deployment_checks.validate_render("local-dev", text, event_mode=event_mode)
     items = [item for item in yaml.safe_load_all(text) if isinstance(item, dict)]
     require(
         {item.get("kind") for item in items}
@@ -96,10 +105,10 @@ def render(cluster: Cluster, image: str, source_short: str) -> tuple[str, list[d
     )
     policy = next(item for item in items if item["kind"] == "NetworkPolicy")
     for rule in policy["spec"]["egress"]:
-        if any(port.get("port") == 9200 for port in rule.get("ports", [])):
-            rule["to"][0]["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"] = (
-                cluster.namespace
-            )
+        for peer in rule.get("to", []):
+            labels = peer.get("namespaceSelector", {}).get("matchLabels", {})
+            if labels.get("kubernetes.io/metadata.name") == "local-dev-all":
+                labels["kubernetes.io/metadata.name"] = cluster.namespace
     return yaml.safe_dump_all(items, explicit_start=True, sort_keys=False), items
 
 
@@ -206,7 +215,9 @@ def build_probe(image: str, source_short: str) -> str:
             timeout=180,
         )
     elasticsearch_image = os.environ.get("ELASTICSEARCH_IMAGE", "")
+    kafka_image = os.environ.get("KAFKA_IMAGE", "")
     require(elasticsearch_image, "ELASTICSEARCH_IMAGE is required")
+    require(kafka_image, "KAFKA_IMAGE is required")
     command(
         [
             "kind",
@@ -215,6 +226,7 @@ def build_probe(image: str, source_short: str) -> str:
             image,
             probe_image,
             elasticsearch_image,
+            kafka_image,
             "--name",
             KIND_CLUSTER,
         ],
@@ -223,7 +235,7 @@ def build_probe(image: str, source_short: str) -> str:
     return probe_image
 
 
-def elasticsearch_resources(cluster: Cluster, image: str) -> str:
+def elasticsearch_resources(cluster: Cluster, image: str, admin_password: str) -> str:
     labels = {
         OWNER_LABEL: cluster.namespace,
         "elasticsearch.k8s.elastic.co/cluster-name": "local-dev-elasticsearch",
@@ -240,6 +252,17 @@ def elasticsearch_resources(cluster: Cluster, image: str) -> str:
             "selector": labels,
             "ports": [{"name": "https", "port": 9200, "targetPort": 9200}],
         },
+    }
+    bootstrap_secret = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": "local-dev-elasticsearch-bootstrap",
+            "namespace": cluster.namespace,
+            "labels": labels,
+        },
+        "type": "Opaque",
+        "stringData": {"password": admin_password},
     }
     deployment = {
         "apiVersion": "apps/v1",
@@ -271,17 +294,26 @@ def elasticsearch_resources(cluster: Cluster, image: str) -> str:
                                 }
                             ],
                             "readinessProbe": {
-                                "httpGet": {"path": "/", "port": 9200},
+                                "tcpSocket": {"port": 9200},
                                 "periodSeconds": 2,
                                 "timeoutSeconds": 1,
                                 "failureThreshold": 90,
                             },
                             "env": [
                                 {"name": "discovery.type", "value": "single-node"},
-                                {"name": "xpack.security.enabled", "value": "false"},
+                                {"name": "xpack.security.enabled", "value": "true"},
                                 {
                                     "name": "xpack.security.http.ssl.enabled",
                                     "value": "false",
+                                },
+                                {
+                                    "name": "ELASTIC_PASSWORD",
+                                    "valueFrom": {
+                                        "secretKeyRef": {
+                                            "name": "local-dev-elasticsearch-bootstrap",
+                                            "key": "password",
+                                        }
+                                    },
                                 },
                                 {
                                     "name": "ES_JAVA_OPTS",
@@ -298,7 +330,9 @@ def elasticsearch_resources(cluster: Cluster, image: str) -> str:
             },
         },
     }
-    return yaml.safe_dump_all([service, deployment], explicit_start=True, sort_keys=False)
+    return yaml.safe_dump_all(
+        [bootstrap_secret, service, deployment], explicit_start=True, sort_keys=False
+    )
 
 
 @contextmanager
@@ -344,12 +378,18 @@ def port_forward(cluster: Cluster):
                 process.wait(timeout=5)
 
 
-def setup_elasticsearch(cluster: Cluster, image: str) -> None:
+def setup_elasticsearch(
+    cluster: Cluster,
+    image: str,
+    admin_password: str,
+    reader_password: str,
+    writer_password: str,
+) -> None:
     cluster.kubectl(
         "apply",
         "-f",
         "-",
-        input_text=elasticsearch_resources(cluster, image),
+        input_text=elasticsearch_resources(cluster, image, admin_password),
     )
     cluster.kubectl(
         "rollout",
@@ -360,7 +400,7 @@ def setup_elasticsearch(cluster: Cluster, image: str) -> None:
     )
     fixture = fixture_admin.load_fixture()
     with port_forward(cluster) as port:
-        admin = fixture_admin.ElasticsearchClient(port, "", "")
+        admin = fixture_admin.ElasticsearchClient(port, "elastic", admin_password)
         started = time.monotonic()
         deadline = started + 180
         heartbeat = started + 30
@@ -408,49 +448,399 @@ def setup_elasticsearch(cluster: Cluster, image: str) -> None:
                 f"disposable Elasticsearch did not become ready: {last_status}; restarts={restarts}"
                 f"; observations={json.dumps(observations, sort_keys=True)}"
             )
-        status, _ = admin.request("PUT", f"/{fixture.index}", {"mappings": fixture.mapping})
-        fixture_admin.require_status(status, {200}, "create disposable fixture index")
-        status, result = admin.request(
-            "POST", "/_bulk?refresh=true", fixture_admin.fixture_bulk(fixture)
+        fixture_admin.setup_fixture(admin, fixture, reader_password)
+        fixture_admin.setup_event_access(admin, fixture, writer_password)
+        reader = fixture_admin.ElasticsearchClient(port, "go_policy_search_reader", reader_password)
+        fixture_admin.verify_fixture(reader, fixture)
+        writer = fixture_admin.ElasticsearchClient(
+            port, fixture_admin.EVENT_WRITER, writer_password
         )
-        fixture_admin.require_status(status, {200}, "index disposable fixture documents")
-        require(
-            isinstance(result, dict) and result.get("errors") is False,
-            "disposable fixture bulk indexing failed",
-        )
-        status, result = admin.request(
-            "POST",
-            f"/{fixture.index}/_search",
+        fixture_admin.verify_event_access(writer, fixture)
+    credentials = []
+    for name, username, password in (
+        (
+            "local-dev-policy-search-elasticsearch",
+            "go_policy_search_reader",
+            reader_password,
+        ),
+        (
+            "local-dev-policy-search-elasticsearch-writer",
+            fixture_admin.EVENT_WRITER,
+            writer_password,
+        ),
+    ):
+        credentials.append(
             {
-                "size": 1,
-                "query": {
-                    "query_string": {
-                        "query": "Synthetic Person",
-                        "fields": ["number", "policyHolder"],
-                    }
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "metadata": {
+                    "name": name,
+                    "namespace": cluster.namespace,
+                    "labels": {OWNER_LABEL: cluster.namespace},
                 },
-            },
+                "type": "Opaque",
+                "stringData": {"username": username, "password": password},
+            }
         )
-        fixture_admin.require_status(status, {200}, "query disposable fixture")
-        require(
-            isinstance(result, dict) and result.get("hits", {}).get("hits"),
-            "disposable fixture query returned no documents",
-        )
-    secret = {
+    cluster.kubectl(
+        "apply",
+        "-f",
+        "-",
+        input_text=yaml.safe_dump_all(credentials, explicit_start=True, sort_keys=False),
+    )
+
+
+def create_kafka_certificates(root: Path, namespace: str) -> dict[str, bytes]:
+    ca_key = root / "ca.key"
+    ca_certificate = root / "ca.crt"
+    server_key = root / "server.key"
+    server_request = root / "server.csr"
+    server_certificate = root / "server.crt"
+    extensions = root / "server.ext"
+    keystore = root / "server.p12"
+    bootstrap = "local-dev-kafka-kafka-bootstrap"
+    extensions.write_text(
+        "subjectAltName="
+        f"DNS:{bootstrap},DNS:{bootstrap}.{namespace}.svc,DNS:localhost,IP:127.0.0.1\n"
+        "extendedKeyUsage=serverAuth\n",
+        encoding="utf-8",
+    )
+    for arguments in (
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=policy-search-disposable-ca",
+            "-keyout",
+            str(ca_key),
+            "-out",
+            str(ca_certificate),
+        ],
+        [
+            "openssl",
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            f"/CN={bootstrap}",
+            "-keyout",
+            str(server_key),
+            "-out",
+            str(server_request),
+        ],
+        [
+            "openssl",
+            "x509",
+            "-req",
+            "-days",
+            "1",
+            "-in",
+            str(server_request),
+            "-CA",
+            str(ca_certificate),
+            "-CAkey",
+            str(ca_key),
+            "-CAcreateserial",
+            "-extfile",
+            str(extensions),
+            "-out",
+            str(server_certificate),
+        ],
+        [
+            "openssl",
+            "pkcs12",
+            "-export",
+            "-name",
+            "kafka",
+            "-in",
+            str(server_certificate),
+            "-inkey",
+            str(server_key),
+            "-certfile",
+            str(ca_certificate),
+            "-passout",
+            "pass:changeit",
+            "-out",
+            str(keystore),
+        ],
+    ):
+        command(arguments, timeout=30)
+    return {
+        "ca.crt": ca_certificate.read_bytes(),
+        "server.p12": keystore.read_bytes(),
+    }
+
+
+def kafka_resources(
+    cluster: Cluster,
+    image: str,
+    certificates: dict[str, bytes],
+) -> str:
+    labels = {
+        OWNER_LABEL: cluster.namespace,
+        "strimzi.io/cluster": "local-dev-kafka",
+        "strimzi.io/component-type": "kafka",
+    }
+    server_secret = {
         "apiVersion": "v1",
         "kind": "Secret",
         "metadata": {
-            "name": "local-dev-policy-search-elasticsearch",
+            "name": "local-dev-kafka-tls",
+            "namespace": cluster.namespace,
+            "labels": labels,
+        },
+        "type": "Opaque",
+        "data": {
+            name: base64.b64encode(value).decode("ascii") for name, value in certificates.items()
+        },
+        "stringData": {
+            "key-password": "changeit\n",
+            "keystore-password": "changeit\n",
+            "client.properties": (
+                "security.protocol=SSL\n"
+                "ssl.truststore.type=PEM\n"
+                "ssl.truststore.location=/etc/kafka/secrets/ca.crt\n"
+            ),
+        },
+    }
+    workload_ca = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": "local-dev-policy-search-kafka-ca",
             "namespace": cluster.namespace,
             "labels": {OWNER_LABEL: cluster.namespace},
         },
         "type": "Opaque",
-        "stringData": {
-            "username": "go_policy_search_reader",
-            "password": "disposable-reader-password",
+        "data": {"ca.crt": base64.b64encode(certificates["ca.crt"]).decode("ascii")},
+    }
+    service = {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+            "name": "local-dev-kafka-kafka-bootstrap",
+            "namespace": cluster.namespace,
+            "labels": labels,
+        },
+        "spec": {
+            "selector": labels,
+            "ports": [{"name": "tls", "port": 9093, "targetPort": 9093}],
         },
     }
-    cluster.kubectl("apply", "-f", "-", input_text=json.dumps(secret))
+    deployment = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": "local-dev-kafka",
+            "namespace": cluster.namespace,
+            "labels": labels,
+        },
+        "spec": {
+            "replicas": 1,
+            "selector": {"matchLabels": labels},
+            "template": {
+                "metadata": {"labels": labels},
+                "spec": {
+                    "automountServiceAccountToken": False,
+                    "volumes": [
+                        {
+                            "name": "tls",
+                            "secret": {
+                                "secretName": "local-dev-kafka-tls",
+                                "defaultMode": 0o444,
+                            },
+                        }
+                    ],
+                    "containers": [
+                        {
+                            "name": "kafka",
+                            "image": image,
+                            "imagePullPolicy": "IfNotPresent",
+                            "ports": [
+                                {"name": "tls", "containerPort": 9093},
+                                {"name": "controller", "containerPort": 9094},
+                            ],
+                            "volumeMounts": [
+                                {
+                                    "name": "tls",
+                                    "mountPath": "/etc/kafka/secrets",
+                                    "readOnly": True,
+                                }
+                            ],
+                            "readinessProbe": {
+                                "tcpSocket": {"port": 9093},
+                                "periodSeconds": 2,
+                                "timeoutSeconds": 1,
+                                "failureThreshold": 90,
+                            },
+                            "env": [
+                                {"name": "CLUSTER_ID", "value": "MkU3OEVBNTcwNTJENDM2Qk"},
+                                {"name": "KAFKA_NODE_ID", "value": "1"},
+                                {
+                                    "name": "KAFKA_PROCESS_ROLES",
+                                    "value": "broker,controller",
+                                },
+                                {
+                                    "name": "KAFKA_LISTENERS",
+                                    "value": (
+                                        "SSL://0.0.0.0:9093,"
+                                        "CONTROLLER://0.0.0.0:9094,"
+                                        "INTERNAL://0.0.0.0:9095"
+                                    ),
+                                },
+                                {
+                                    "name": "KAFKA_ADVERTISED_LISTENERS",
+                                    "value": (
+                                        "SSL://local-dev-kafka-kafka-bootstrap:9093,"
+                                        "INTERNAL://localhost:9095"
+                                    ),
+                                },
+                                {
+                                    "name": "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP",
+                                    "value": ("SSL:SSL,CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT"),
+                                },
+                                {
+                                    "name": "KAFKA_CONTROLLER_LISTENER_NAMES",
+                                    "value": "CONTROLLER",
+                                },
+                                {
+                                    "name": "KAFKA_CONTROLLER_QUORUM_VOTERS",
+                                    "value": "1@localhost:9094",
+                                },
+                                {
+                                    "name": "KAFKA_INTER_BROKER_LISTENER_NAME",
+                                    "value": "INTERNAL",
+                                },
+                                {
+                                    "name": "KAFKA_SSL_KEYSTORE_FILENAME",
+                                    "value": "server.p12",
+                                },
+                                {
+                                    "name": "KAFKA_SSL_KEYSTORE_TYPE",
+                                    "value": "PKCS12",
+                                },
+                                {
+                                    "name": "KAFKA_SSL_KEYSTORE_CREDENTIALS",
+                                    "value": "keystore-password",
+                                },
+                                {
+                                    "name": "KAFKA_SSL_KEY_CREDENTIALS",
+                                    "value": "key-password",
+                                },
+                                {"name": "KAFKA_SSL_CLIENT_AUTH", "value": "none"},
+                                {
+                                    "name": "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR",
+                                    "value": "1",
+                                },
+                                {
+                                    "name": "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR",
+                                    "value": "1",
+                                },
+                                {
+                                    "name": "KAFKA_TRANSACTION_STATE_LOG_MIN_ISR",
+                                    "value": "1",
+                                },
+                                {
+                                    "name": "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS",
+                                    "value": "0",
+                                },
+                            ],
+                            "resources": {
+                                "requests": {"cpu": "100m", "memory": "384Mi"},
+                                "limits": {"cpu": "1", "memory": "768Mi"},
+                            },
+                        }
+                    ],
+                },
+            },
+        },
+    }
+    return yaml.safe_dump_all(
+        [server_secret, workload_ca, service, deployment],
+        explicit_start=True,
+        sort_keys=False,
+    )
+
+
+def kafka_cli(
+    cluster: Cluster,
+    executable: str,
+    *arguments: str,
+    input_text: str | None = None,
+    timeout: int = 60,
+) -> str:
+    exec_arguments = ["exec"]
+    if input_text is not None:
+        exec_arguments.append("--stdin")
+    return cluster.kubectl(
+        *exec_arguments,
+        "deployment/local-dev-kafka",
+        "--",
+        f"/opt/kafka/bin/{executable}",
+        *arguments,
+        input_text=input_text,
+        timeout=timeout,
+    )
+
+
+def setup_kafka(cluster: Cluster, image: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="policy-search-kind-kafka-") as directory:
+        certificates = create_kafka_certificates(Path(directory), cluster.namespace)
+        cluster.kubectl(
+            "apply",
+            "-f",
+            "-",
+            input_text=kafka_resources(cluster, image, certificates),
+        )
+    cluster.kubectl(
+        "rollout",
+        "status",
+        "deployment/local-dev-kafka",
+        "--timeout=180s",
+        timeout=200,
+    )
+
+    def ready() -> bool:
+        try:
+            kafka_cli(
+                cluster,
+                "kafka-topics.sh",
+                "--bootstrap-server",
+                "localhost:9093",
+                "--command-config",
+                "/etc/kafka/secrets/client.properties",
+                "--list",
+                timeout=15,
+            )
+            return True
+        except CheckFailed:
+            return False
+
+    wait_for(cluster, "TLS Kafka readiness", ready, seconds=120)
+    for topic in (REGISTERED_TOPIC, TERMINATED_TOPIC):
+        kafka_cli(
+            cluster,
+            "kafka-topics.sh",
+            "--bootstrap-server",
+            "localhost:9093",
+            "--command-config",
+            "/etc/kafka/secrets/client.properties",
+            "--create",
+            "--if-not-exists",
+            "--topic",
+            topic,
+            "--partitions",
+            "1",
+            "--replication-factor",
+            "1",
+        )
 
 
 def exercise(cluster: Cluster, probe_image: str) -> None:
@@ -490,11 +880,73 @@ def exercise(cluster: Cluster, probe_image: str) -> None:
         )
 
 
+def exercise_event_projection(
+    cluster: Cluster,
+    probe_image: str,
+    admin_password: str,
+) -> None:
+    oracle = json.loads((MODULE / "testdata/events/oracle.json").read_text(encoding="utf-8"))
+    registration = oracle.get("events", {}).get("registration", {})
+    event = registration.get("value")
+    expected = registration.get("expectedDocument")
+    require(
+        oracle.get("ownership") == "issue-230-disposable"
+        and registration.get("key") == "SYN-230-001"
+        and isinstance(event, dict)
+        and isinstance(expected, dict),
+        "event oracle differs",
+    )
+    kafka_cli(
+        cluster,
+        "kafka-console-producer.sh",
+        "--bootstrap-server",
+        "localhost:9093",
+        "--producer.config",
+        "/etc/kafka/secrets/client.properties",
+        "--topic",
+        REGISTERED_TOPIC,
+        input_text=json.dumps(event, separators=(",", ":")) + "\n",
+    )
+    fixture = fixture_admin.load_fixture()
+    with port_forward(cluster) as port:
+        admin = fixture_admin.ElasticsearchClient(port, "elastic", admin_password)
+        projected: dict[str, Any] | None = None
+
+        def stored() -> bool:
+            nonlocal projected
+            try:
+                status, result = admin.request(
+                    "GET", f"/{fixture.index}/_doc/{registration['key']}"
+                )
+            except fixture_admin.AdministrationError:
+                return False
+            if status == 200 and isinstance(result, dict):
+                projected = result.get("_source")
+            return projected == expected
+
+        wait_for(cluster, "deployed event projection", stored, seconds=90)
+        status, _ = admin.request("POST", f"/{fixture.index}/_refresh")
+        fixture_admin.require_status(status, {200}, "refresh projected event document")
+    probe(
+        cluster,
+        probe_image,
+        "event-http",
+        [
+            "--mode=http",
+            "--address=http://local-dev-policy-search-api/policies",
+            '--query=number:"SYN-230-001"',
+        ],
+        {"insurance-hub.io/policy-search-business-client": "true"},
+    )
+
+
 def main() -> int:
     image = os.environ.get("IMAGE_REF", "")
     elasticsearch_image = os.environ.get("ELASTICSEARCH_IMAGE", "")
+    kafka_image = os.environ.get("KAFKA_IMAGE", "")
     require(image.startswith("insurance-hub-policy-search-api:1.0.0-local."), "IMAGE_REF differs")
     require(elasticsearch_image, "ELASTICSEARCH_IMAGE is required")
+    require(kafka_image, "KAFKA_IMAGE is required")
     source_short = image.rsplit(".", 1)[1]
     require(len(source_short) == 12, "IMAGE_REF source identity differs")
     namespace = f"policy-search-disposable-{secrets.token_hex(4)}"
@@ -514,8 +966,18 @@ def main() -> int:
             ["kubectl", "--context", CONTEXT, "apply", "-f", "-"],
             input_text=json.dumps(namespace_object),
         )
-        setup_elasticsearch(cluster, elasticsearch_image)
-        rendered, items = render(cluster, image, source_short)
+        admin_password = secrets.token_urlsafe(32)
+        reader_password = secrets.token_urlsafe(32)
+        writer_password = secrets.token_urlsafe(32)
+        setup_elasticsearch(
+            cluster,
+            elasticsearch_image,
+            admin_password,
+            reader_password,
+            writer_password,
+        )
+        setup_kafka(cluster, kafka_image)
+        rendered, _items = render(cluster, image, source_short, event_mode="enabled")
         cluster.kubectl("apply", "-f", "-", input_text=rendered)
         cluster.kubectl(
             "rollout",
@@ -526,6 +988,7 @@ def main() -> int:
         )
         require(endpoint_count(cluster) == 1, "business endpoint did not become ready")
         exercise(cluster, probe_image)
+        exercise_event_projection(cluster, probe_image, admin_password)
         elasticsearch_pods = cluster.json(
             "get",
             "pods",
@@ -615,8 +1078,8 @@ def main() -> int:
         )
         require(endpoint_count(cluster) == 1, "restored endpoint did not become ready")
         print(
-            "policy-search-disposable: search, policy, dependency recovery, "
-            "restart and restoration passed"
+            "policy-search-disposable: TLS event projection, writer permissions, search, policy, "
+            "dependency recovery, restart and restoration passed"
         )
         return 0
     finally:

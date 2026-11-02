@@ -13,6 +13,11 @@ from collections.abc import Mapping, Sequence
 class CommandError(RuntimeError):
     """A bounded child command failed or exceeded its deadline."""
 
+    def __init__(self, message: str, *, stdout: str = "", stderr: str = "") -> None:
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
+
 
 def _process_group_exists(process: subprocess.Popen[str]) -> bool:
     try:
@@ -112,5 +117,9 @@ def run_command(
         raise CommandError(f"{activity} cleanup exceeded its {teardown_seconds:g}-second deadline")
     result = subprocess.CompletedProcess(list(arguments), process.returncode, stdout, stderr)
     if result.returncode != 0:
-        raise CommandError(f"{activity} failed with status {result.returncode}")
+        raise CommandError(
+            f"{activity} failed with status {result.returncode}",
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
     return result

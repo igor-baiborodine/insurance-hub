@@ -2,10 +2,12 @@ package elasticsearch
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -173,5 +175,65 @@ func TestClient_Check_PropagatesCancellation(t *testing.T) {
 	// then
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled check error = %v", err)
+	}
+}
+
+func TestClient_CheckWrite_UsesSelfPrivilegeCheckWithoutIndexRead(t *testing.T) {
+	// given
+	var gotPath string
+	var gotBody map[string]any
+	server := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			gotPath = request.URL.Path
+			if err := json.NewDecoder(request.Body).Decode(&gotBody); err != nil {
+				t.Error(err)
+			}
+			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
+			_, _ = writer.Write([]byte(
+				`{"has_all_requested":true,"index":{"policy-views-issue-229":{"index":true}}}`,
+			))
+		}),
+	)
+	defer server.Close()
+	client, err := New(Config{Endpoint: server.URL, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// when
+	err = client.CheckWrite(context.Background())
+
+	// then
+	indices, _ := gotBody["index"].([]any)
+	requested, _ := indices[0].(map[string]any)
+	if err != nil || gotPath != "/_security/user/_has_privileges" ||
+		!reflect.DeepEqual(requested["names"], []any{PolicyIndex}) ||
+		!reflect.DeepEqual(requested["privileges"], []any{"index"}) {
+		t.Fatalf("writer check = path:%q body:%v error:%v", gotPath, gotBody, err)
+	}
+}
+
+func TestClient_CheckWrite_RejectsMissingPrivilegeSafely(t *testing.T) {
+	// given
+	server := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
+			_, _ = writer.Write([]byte(
+				`{"has_all_requested":false,"index":{"private-marker":{"index":false}}}`,
+			))
+		}),
+	)
+	defer server.Close()
+	client, err := New(Config{Endpoint: server.URL, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// when
+	err = client.CheckWrite(context.Background())
+
+	// then
+	if err == nil || strings.Contains(err.Error(), "private-marker") {
+		t.Fatalf("unsafe or absent writer check error: %v", err)
 	}
 }

@@ -52,20 +52,31 @@ func NewDependencyObserver(
 }
 
 type DependencyRequest struct {
-	observer *DependencyObserver
-	started  time.Time
-	span     trace.Span
+	observer  *DependencyObserver
+	started   time.Time
+	span      trace.Span
+	operation string
 }
+
+type ElasticsearchOperation string
+
+const (
+	ElasticsearchSearch  ElasticsearchOperation = "search"
+	ElasticsearchReplace ElasticsearchOperation = "replace"
+)
 
 func (observer *DependencyObserver) StartElasticsearch(
 	ctx context.Context,
+	operation ElasticsearchOperation,
 ) (context.Context, *DependencyRequest) {
 	ctx, span := observer.tracer.Start(
 		ctx,
-		"Elasticsearch search",
+		"Elasticsearch "+string(operation),
 		trace.WithSpanKind(trace.SpanKindClient),
 	)
-	return ctx, &DependencyRequest{observer: observer, started: time.Now(), span: span}
+	return ctx, &DependencyRequest{
+		observer: observer, started: time.Now(), span: span, operation: string(operation),
+	}
 }
 
 func (request *DependencyRequest) Finish(ctx context.Context, err error) {
@@ -81,7 +92,7 @@ func (request *DependencyRequest) Finish(ctx context.Context, err error) {
 	elapsed := time.Since(request.started)
 	attrs := []attribute.KeyValue{
 		attribute.String("insurance_hub.policy_search.dependency", "elasticsearch"),
-		attribute.String("insurance_hub.policy_search.operation", "search"),
+		attribute.String("insurance_hub.policy_search.operation", request.operation),
 		attribute.String("insurance_hub.policy_search.outcome", outcome),
 	}
 	request.span.SetAttributes(attrs...)
@@ -97,7 +108,7 @@ func (request *DependencyRequest) Finish(ctx context.Context, err error) {
 		level,
 		"dependency completed",
 		slog.String("dependency", "elasticsearch"),
-		slog.String("operation", "search"),
+		slog.String("operation", request.operation),
 		slog.String("outcome", outcome),
 		slog.Float64("duration_ms", float64(elapsed)/float64(time.Millisecond)),
 	)

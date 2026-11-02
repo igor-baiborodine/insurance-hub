@@ -40,7 +40,8 @@
         "check-proto-breaking"
       ],
       "integration": [
-        "test-integration"
+        "test-integration",
+        "test-event-integration"
       ]
     },
     "imageCheckTarget": "_image-check-existing"

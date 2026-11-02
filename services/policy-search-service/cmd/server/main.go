@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
@@ -64,9 +65,25 @@ func runWith(
 		serviceLogger.ErrorContext(
 			context.Background(),
 			"service failed",
+			slog.String("failure_stage", serviceFailureStage(err)),
 			slog.Any("error", err),
 		)
 		return err
 	}
 	return nil
+}
+
+func serviceFailureStage(err error) string {
+	for _, known := range []struct{ needle, stage string }{
+		{"projection Elasticsearch not ready", "projection_dependency"},
+		{"event workers not ready", "event_worker_readiness"},
+		{"gateway connection not ready", "gateway_dependency"},
+		{"Elasticsearch not ready", "query_dependency"},
+		{"event worker stopped", "event_worker_runtime"},
+	} {
+		if strings.Contains(err.Error(), known.needle) {
+			return known.stage
+		}
+	}
+	return "service_runtime"
 }

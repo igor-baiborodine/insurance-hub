@@ -73,6 +73,107 @@ func TestLoad_Defaults(t *testing.T) {
 		got.Elasticsearch.Password != "" || got.Elasticsearch.CAFile != "" {
 		t.Errorf("Elasticsearch defaults = %+v", got.Elasticsearch)
 	}
+	if got.Events.Enabled || len(got.Events.Brokers) != 0 {
+		t.Errorf("event worker defaults = %+v, want disabled", got.Events)
+	}
+}
+
+func TestLoad_EnabledEventWorkersRequireAndPreserveIsolatedSettings(t *testing.T) {
+	// given
+	values := map[string]string{
+		EnvEventWorkersEnabled:  "true",
+		EnvKafkaBrokers:         "kafka-a.example:9093, kafka-b.example:9093",
+		EnvKafkaGroup:           "policy-search-service-issue-230",
+		EnvKafkaRegisteredTopic: "policy-registered-issue-230",
+		EnvKafkaTerminatedTopic: "policy-terminated-issue-230",
+		EnvKafkaCAFile:          "/var/run/kafka/ca.crt",
+		EnvWriterUsername:       "writer",
+		EnvWriterPassword:       "private-password",
+	}
+
+	// when
+	got, err := load(mapLookup(values))
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Events.Enabled || len(got.Events.Brokers) != 2 ||
+		got.Events.Group != values[EnvKafkaGroup] ||
+		got.Events.RegisteredTopic != values[EnvKafkaRegisteredTopic] ||
+		got.Events.TerminatedTopic != values[EnvKafkaTerminatedTopic] ||
+		got.Events.Writer.Username != "writer" ||
+		got.Events.Writer.Password != "private-password" ||
+		got.Events.Writer.URL != got.Elasticsearch.URL {
+		t.Fatalf("event settings = %+v", got.Events)
+	}
+}
+
+func TestLoad_EnabledEventWorkersFailOnIncompleteOrUnsafeSettings(t *testing.T) {
+	// given
+	valid := map[string]string{
+		EnvEventWorkersEnabled: "true",
+		EnvKafkaBrokers:        "kafka.example:9093",
+		EnvKafkaCAFile:         "/var/run/kafka/ca.crt",
+		EnvWriterUsername:      "writer",
+		EnvWriterPassword:      "private-password",
+	}
+	tests := []struct {
+		name    string
+		setting string
+		change  func(map[string]string)
+	}{
+		{
+			"brokers",
+			EnvKafkaBrokers,
+			func(values map[string]string) { delete(values, EnvKafkaBrokers) },
+		},
+		{
+			"broker address",
+			EnvKafkaBrokers,
+			func(values map[string]string) { values[EnvKafkaBrokers] = "missing-port" },
+		},
+		{
+			"CA",
+			EnvKafkaCAFile,
+			func(values map[string]string) { delete(values, EnvKafkaCAFile) },
+		},
+		{
+			"writer username",
+			EnvWriterUsername,
+			func(values map[string]string) { delete(values, EnvWriterUsername) },
+		},
+		{
+			"writer password",
+			EnvWriterPassword,
+			func(values map[string]string) { delete(values, EnvWriterPassword) },
+		},
+		{
+			"same topic",
+			EnvKafkaTerminatedTopic,
+			func(values map[string]string) { values[EnvKafkaTerminatedTopic] = defaultRegisteredTopic },
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			values := make(map[string]string, len(valid))
+			for key, value := range valid {
+				values[key] = value
+			}
+			test.change(values)
+
+			// when
+			_, err := load(mapLookup(values))
+
+			// then
+			if err == nil {
+				t.Fatal("invalid event settings accepted")
+			}
+			setting, _ := kitconfig.ErrorDetails(err)
+			if setting != test.setting {
+				t.Fatalf("setting = %q, want %q: %v", setting, test.setting, err)
+			}
+		})
+	}
 }
 
 func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) {

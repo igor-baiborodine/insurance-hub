@@ -7,7 +7,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from scripts.python.process_runner import run_command
+from scripts.python.process_runner import CommandError, run_command
 
 
 class ToolingSignal(BaseException):
@@ -29,18 +29,27 @@ def run(
     heartbeat_seconds: float = 30,
     teardown_seconds: float = 5,
     capture: bool = False,
+    reveal_failure_output: bool = False,
 ) -> str:
     """Run one owned command and optionally return its captured standard output."""
-    result = run_command(
-        arguments,
-        cwd=cwd,
-        env=env,
-        timeout_seconds=timeout_seconds,
-        activity=activity,
-        input_text=input_text,
-        heartbeat_seconds=heartbeat_seconds,
-        teardown_seconds=teardown_seconds,
-    )
+    try:
+        result = run_command(
+            arguments,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=timeout_seconds,
+            activity=activity,
+            input_text=input_text,
+            heartbeat_seconds=heartbeat_seconds,
+            teardown_seconds=teardown_seconds,
+        )
+    except CommandError as error:
+        if reveal_failure_output:
+            if error.stdout:
+                print(error.stdout, end="")
+            if error.stderr:
+                print(error.stderr, end="", file=sys.stderr)
+        raise
     if capture:
         return result.stdout
     if result.stdout:

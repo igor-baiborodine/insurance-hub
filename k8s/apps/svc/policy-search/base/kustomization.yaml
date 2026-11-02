@@ -31,5 +31,6 @@ configMapGenerator:
       - ELASTICSEARCH_TIMEOUT=5s
       - LOG_LEVEL=info
       - OTEL_ENABLED=false
+      - EVENT_WORKERS_ENABLED=false
       - DEPLOYMENT_ENVIRONMENT=local-dev
       - SERVICE_VERSION=development
