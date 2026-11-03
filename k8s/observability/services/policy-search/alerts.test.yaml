@@ -214,10 +214,15 @@ tests:
       - series: 'insurance_hub_policy_search_event_worker_enabled{service_name="policy-search-service",insurance_hub_policy_search_event_type="terminated"}'
         values: '1x20'
       - series: 'insurance_hub_policy_search_event_worker_in_flight_age_seconds{service_name="policy-search-service",insurance_hub_policy_search_event_type="terminated"}'
-        values: '31x10 0x10'
+        values: '0 31x9 0x10'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PolicySearchEventStalled",alertstate="firing"}) or vector(0)'
         eval_time: 2m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+      - expr: 'count(ALERTS{alertname="PolicySearchEventStalled",alertstate="firing"}) or vector(0)'
+        eval_time: 2m30s
         exp_samples:
           - labels: '{}'
             value: 1
@@ -235,6 +240,11 @@ tests:
       - series: 'container_cpu_usage_seconds_total{namespace="qa-svc",pod="qa-policy-search-api-fixture",container="policy-search-api"}'
         values: '0+0.01x24'
     promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PolicySearchResourcePressure",alertstate="firing"}) or vector(0)'
+        eval_time: 4m30s
+        exp_samples:
+          - labels: '{}'
+            value: 0
       - expr: 'count(ALERTS{alertname="PolicySearchResourcePressure",alertstate="firing"}) or vector(0)'
         eval_time: 6m
         exp_samples:
@@ -254,6 +264,11 @@ tests:
       - series: 'kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-policy-search-api"}'
         values: '0x14 1x10'
     promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PolicySearchUnavailable",alertstate="firing"}) or vector(0)'
+        eval_time: 1m30s
+        exp_samples:
+          - labels: '{}'
+            value: 0
       - expr: 'count(ALERTS{alertname="PolicySearchUnavailable",alertstate="firing"}) or vector(0)'
         eval_time: 3m
         exp_samples:
@@ -278,6 +293,11 @@ tests:
       - series: 'go_goroutine_count{service_name="policy-search-service",deployment_environment_name="qa",service_implementation="go"}'
         values: '_x10 12x10'
     promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PolicySearchTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 30s
+        exp_samples:
+          - labels: '{}'
+            value: 0
       - expr: 'count(ALERTS{alertname="PolicySearchTelemetryMissing",alertstate="firing"}) or vector(0)'
         eval_time: 4m
         exp_samples:
@@ -351,6 +371,11 @@ tests:
       - series: 'otelcol_exporter_queue_capacity{job="qa-alloy"}'
         values: '2048x22'
     promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PolicySearchTelemetryBacklog",alertstate="firing"}) or vector(0)'
+        eval_time: 2m30s
+        exp_samples:
+          - labels: '{}'
+            value: 0
       - expr: 'count(ALERTS{alertname="PolicySearchTelemetryBacklog",alertstate="firing"}) or vector(0)'
         eval_time: 3m
         exp_samples:
