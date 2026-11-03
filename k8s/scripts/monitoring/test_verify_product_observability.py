@@ -12,6 +12,8 @@ from unittest import mock
 import pytest
 import verify_product_observability as verifier
 
+from monitoring_assets import VerificationContract
+
 ASSETS_ROOT = Path(__file__).parents[2] / "observability"
 
 
@@ -24,9 +26,36 @@ class TestProductObservabilityVerification:
         selected = verifier.verification_config(self.assets)
 
         # then
-        assert "qa-svc" == selected["service_namespace"]
-        assert "qa-product-api" == selected["product_deployment"]
-        assert "qa-prometheus-kube-prometh-prometheus" == selected["prometheus_service"]
+        assert "qa-svc" == selected.service_namespace
+        assert "qa-product-api" == selected.deployment
+        assert "qa-prometheus-kube-prometh-prometheus" == selected.prometheus_service
+
+    def test_probe_selection_rejects_cross_service_and_unregistered_defaults(self) -> None:
+        # given
+        cross_contract = dataclasses.replace(
+            self.assets.contract,
+            verification=VerificationContract(
+                probe="policy-search",
+                expected_signals=self.assets.contract.verification.expected_signals,
+            ),
+        )
+        cross_service = dataclasses.replace(self.assets, contract=cross_contract)
+
+        # when / then
+        with pytest.raises(verifier.VerificationError, match="differs from the selected service"):
+            verifier.select_probe(cross_service)
+
+        unregistered_contract = dataclasses.replace(
+            cross_contract,
+            service="policy-search",
+        )
+        unregistered = dataclasses.replace(
+            self.assets,
+            service="policy-search",
+            contract=unregistered_contract,
+        )
+        with pytest.raises(verifier.VerificationError, match="is not registered"):
+            verifier.select_probe(unregistered)
 
     def test_target_rejects_non_qa_or_malformed_revision(self) -> None:
         # when / then
@@ -97,9 +126,113 @@ class TestProductObservabilityVerification:
         with mock.patch.object(target, "json", return_value=rule):
             with pytest.raises(
                 verifier.VerificationError,
-                match="live Product alert inventory differs from reviewed assets",
+                match="live selected-service alert inventory differs from reviewed assets",
             ):
                 target.monitoring_assets()
+
+    def test_flux_revision_rejects_wrong_source_before_workload(self) -> None:
+        # given
+        target = verifier.KubernetesTarget(self.assets, "a" * 40)
+        source = {
+            "status": {
+                "artifact": {"revision": "main@sha1:" + "b" * 40},
+                "conditions": [{"type": "Ready", "status": "True"}],
+            }
+        }
+        reconciler = {
+            "status": {
+                "lastAppliedRevision": "main@sha1:" + "b" * 40,
+                "conditions": [{"type": "Ready", "status": "True"}],
+            }
+        }
+
+        # when / then
+        with mock.patch.object(target, "json", side_effect=[source, reconciler]):
+            with pytest.raises(verifier.VerificationError, match="differs from the requested"):
+                target.flux_revision()
+
+    def test_deployment_uses_selected_identity_and_deployment_selector(self) -> None:
+        # given
+        target = verifier.KubernetesTarget(self.assets, "a" * 40)
+        deployment = {
+            "spec": {
+                "replicas": 1,
+                "selector": {"matchLabels": {"app.kubernetes.io/name": "product-api"}},
+                "template": {
+                    "spec": {
+                        "containers": [{"envFrom": [{"configMapRef": {"name": "product-config"}}]}]
+                    }
+                },
+            },
+            "status": {"readyReplicas": 1},
+        }
+        config_map = {
+            "data": {
+                "OTEL_ENABLED": "true",
+                "SERVICE_NAME": "product-service",
+                "DEPLOYMENT_ENVIRONMENT": "qa",
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://qa-alloy.qa-monitoring.svc:4318",
+            }
+        }
+        pods = {
+            "items": [
+                {
+                    "metadata": {"uid": "pod-uid"},
+                    "status": {
+                        "containerStatuses": [
+                            {"ready": True, "imageID": "registry/product@sha256:abc"}
+                        ]
+                    },
+                }
+            ]
+        }
+
+        # when
+        with mock.patch.object(target, "json", side_effect=[deployment, config_map, pods]) as query:
+            observed = target.deployment("enabled")
+
+        # then
+        assert observed["pods"] == [
+            {"pod_uid": "pod-uid", "image_id": "registry/product@sha256:abc"}
+        ]
+        assert query.call_args_list[-1] == mock.call(
+            "qa-svc", "get", "pods", "-l", "app.kubernetes.io/name=product-api"
+        )
+
+    def test_deployment_rejects_missing_service_identity(self) -> None:
+        # given
+        target = verifier.KubernetesTarget(self.assets, "a" * 40)
+        deployment = {
+            "spec": {
+                "replicas": 1,
+                "selector": {"matchLabels": {"app": "product"}},
+                "template": {
+                    "spec": {
+                        "containers": [
+                            {
+                                "env": [{"name": "OTEL_ENABLED", "value": "false"}],
+                                "envFrom": [],
+                            }
+                        ]
+                    }
+                },
+            },
+            "status": {"readyReplicas": 1},
+        }
+
+        # when / then
+        with mock.patch.object(target, "json", return_value=deployment):
+            with pytest.raises(verifier.VerificationError, match="service identity differs"):
+                target.deployment("disabled")
+
+    def test_backend_result_rejects_malformed_payload(self) -> None:
+        with pytest.raises(verifier.VerificationError, match="backend query result is malformed"):
+            verifier.query_results({"data": {"result": "not-an-array"}})
+
+    def test_backend_wait_is_bounded(self) -> None:
+        with mock.patch.object(verifier.time, "monotonic", side_effect=[0.0, 1.0]):
+            with pytest.raises(verifier.VerificationError, match="timed out waiting"):
+                verifier.wait_for("test signal", lambda: [], timeout=0.5)
 
     def test_forwards_close_every_started_child_after_partial_failure(self) -> None:
         # given
@@ -139,6 +272,31 @@ class TestProductObservabilityVerification:
             mock.call(second, graceful_seconds=5, teardown_seconds=10),
             mock.call(first, graceful_seconds=5, teardown_seconds=10),
         ] == terminate.call_args_list
+
+    def test_forwards_report_owned_cleanup_failure(self) -> None:
+        # given
+        target = verifier.KubernetesTarget(self.assets, "a" * 40)
+
+        class Child:
+            def poll(self) -> int | None:
+                return None
+
+        child = Child()
+        services = [("product", "qa-svc", "qa-product-api", 8081)]
+
+        # when / then
+        with (
+            mock.patch.object(verifier.subprocess, "Popen", return_value=child),
+            mock.patch.object(verifier.socket, "create_connection", return_value=nullcontext()),
+            mock.patch.object(
+                verifier.monitoring_runtime,
+                "terminate_process_group",
+                side_effect=RuntimeError("owned forward survived"),
+            ),
+        ):
+            with pytest.raises(verifier.VerificationError, match="cleanup failed"):
+                with verifier.forwards(target, services):
+                    pass
 
     def test_product_reads_use_safe_get_and_deterministic_trace_header(self) -> None:
         # given

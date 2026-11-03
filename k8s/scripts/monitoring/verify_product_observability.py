@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only Product observability verification against an explicit QA target."""
+"""Read-only service observability verification against an explicit QA target."""
 
 from __future__ import annotations
 
@@ -13,8 +13,9 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ import monitoring_runtime
 from monitoring_assets import (
     AssetError,
     MonitoringAssets,
+    ServiceVerification,
     grafana_dashboard_resource,
     load_assets,
     prometheus_rule_resource,
@@ -83,30 +85,17 @@ def request_text(url: str, headers: Mapping[str, str] | None = None) -> str:
         raise VerificationError("Product endpoint was unavailable") from error
 
 
-def verification_config(assets: MonitoringAssets) -> dict[str, str]:
+def verification_config(assets: MonitoringAssets) -> ServiceVerification:
     value = assets.environment.service_verification.get(assets.service)
-    require(value is not None, "environment has no Product verification coordinates")
-    require(value.management_service is not None, "Product management service is required")
-    return {
-        "service_namespace": value.service_namespace,
-        "product_deployment": value.deployment,
-        "product_business_service": value.business_service,
-        "product_management_service": value.management_service,
-        "prometheus_service": value.prometheus_service,
-        "loki_service": value.loki_service,
-        "tempo_service": value.tempo_service,
-        "flux_namespace": value.flux_namespace,
-        "flux_source": value.flux_source,
-        "flux_kustomization": value.flux_kustomization,
-    }
+    require(value is not None, f"environment has no {assets.service} verification coordinates")
+    return value
 
 
 class KubernetesTarget:
     def __init__(self, assets: MonitoringAssets, source_revision: str) -> None:
         require(
-            assets.environment_name == "qa", "live Product observability verification is QA-only"
+            assets.environment_name == "qa", "live service observability verification is QA-only"
         )
-        require(assets.service == "product", "live verification supports Product only")
         require(
             bool(REVISION.fullmatch(source_revision)),
             "source revision must be 40 lowercase hex characters",
@@ -116,7 +105,7 @@ class KubernetesTarget:
         self.context = assets.environment.kube_context
         self.monitoring_namespace = assets.environment.monitoring_namespace
         self.config = verification_config(assets)
-        self.service_namespace = self.config["service_namespace"]
+        self.service_namespace = self.config.service_namespace
 
     def kubectl(self, namespace: str, *arguments: str) -> str:
         return run(["kubectl", "--context", self.context, "--namespace", namespace, *arguments])
@@ -140,22 +129,22 @@ class KubernetesTarget:
         )
         require(
             namespace == self.service_namespace,
-            "active Kubernetes namespace differs from the Product service namespace",
+            "active Kubernetes namespace differs from the selected service namespace",
         )
         for selected in (self.service_namespace, self.monitoring_namespace):
             self.json(selected, "get", "namespace", selected)
 
     def flux_revision(self) -> str:
-        namespace = self.config["flux_namespace"]
-        source = self.json(namespace, "get", "gitrepository", self.config["flux_source"])
-        reconciler = self.json(namespace, "get", "kustomization", self.config["flux_kustomization"])
+        namespace = self.config.flux_namespace
+        source = self.json(namespace, "get", "gitrepository", self.config.flux_source)
+        reconciler = self.json(namespace, "get", "kustomization", self.config.flux_kustomization)
         for item in (source, reconciler):
             require(
                 any(
                     condition.get("type") == "Ready" and condition.get("status") == "True"
                     for condition in item.get("status", {}).get("conditions", [])
                 ),
-                "Flux source or Product Kustomization is not ready",
+                "Flux source or selected service Kustomization is not ready",
             )
         source_revision = source.get("status", {}).get("artifact", {}).get("revision", "")
         applied_revision = reconciler.get("status", {}).get("lastAppliedRevision", "")
@@ -170,52 +159,72 @@ class KubernetesTarget:
             self.service_namespace,
             "get",
             "deployment",
-            self.config["product_deployment"],
+            self.config.deployment,
         )
         desired = deployment.get("spec", {}).get("replicas", 0)
         ready = deployment.get("status", {}).get("readyReplicas", 0)
-        require(desired > 0 and ready == desired, "Product Deployment is not fully ready")
+        require(desired > 0 and ready == desired, "selected service Deployment is not fully ready")
         containers = (
             deployment.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
         )
-        require(len(containers) == 1, "Product Deployment has an unexpected container inventory")
+        require(
+            len(containers) == 1,
+            "selected service Deployment has an unexpected container inventory",
+        )
         settings: dict[str, str] = {}
         for source in containers[0].get("envFrom", []):
             name = source.get("configMapRef", {}).get("name")
-            require(isinstance(name, str) and name, "Product envFrom is not a ConfigMap reference")
+            require(
+                isinstance(name, str) and name,
+                "selected service envFrom is not a ConfigMap reference",
+            )
             config_map = self.json(self.service_namespace, "get", "configmap", name)
             data = config_map.get("data", {})
-            require(isinstance(data, dict), "Product ConfigMap data is malformed")
+            require(isinstance(data, dict), "selected service ConfigMap data is malformed")
             settings.update({key: value for key, value in data.items() if isinstance(value, str)})
         for variable in containers[0].get("env", []):
             if isinstance(variable.get("value"), str):
                 settings[variable["name"]] = variable["value"]
         expected = "true" if mode == "enabled" else "false"
         require(
-            settings.get("OTEL_ENABLED") == expected, f"Product OTEL_ENABLED must be {expected}"
+            settings.get("OTEL_ENABLED") == expected,
+            f"selected service OTEL_ENABLED must be {expected}",
         )
         require(
-            settings.get("SERVICE_NAME", "product-service") == "product-service",
-            "Product service identity differs",
+            settings.get("SERVICE_NAME") == self.assets.contract.service_name,
+            "selected service identity differs",
         )
         if mode == "enabled":
             require(
                 settings.get("DEPLOYMENT_ENVIRONMENT") == "qa",
-                "enabled Product environment must be qa",
+                "enabled service environment must be qa",
             )
             endpoint = settings.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
             require(
                 endpoint.startswith("http://qa-alloy.qa-monitoring.svc"),
-                "enabled Product OTLP endpoint is not internal Alloy",
+                "enabled service OTLP endpoint is not internal Alloy",
             )
+        selector_labels = deployment.get("spec", {}).get("selector", {}).get("matchLabels", {})
+        require(
+            isinstance(selector_labels, dict)
+            and selector_labels
+            and all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in selector_labels.items()
+            ),
+            "selected service Deployment selector is malformed",
+        )
+        selector = ",".join(f"{key}={value}" for key, value in sorted(selector_labels.items()))
         pods = self.json(
             self.service_namespace,
             "get",
             "pods",
             "-l",
-            "app.kubernetes.io/name=product-api",
+            selector,
         ).get("items", [])
-        require(len(pods) == desired, "Product Pod inventory differs from desired replicas")
+        require(
+            len(pods) == desired, "selected service Pod inventory differs from desired replicas"
+        )
         identities = []
         for pod in pods:
             statuses = pod.get("status", {}).get("containerStatuses", [])
@@ -223,7 +232,7 @@ class KubernetesTarget:
                 len(statuses) == 1
                 and statuses[0].get("ready") is True
                 and statuses[0].get("imageID"),
-                "Product Pod is not ready or lacks immutable image identity",
+                "selected service Pod is not ready or lacks immutable image identity",
             )
             identities.append(
                 {
@@ -244,7 +253,8 @@ class KubernetesTarget:
         }
         expected_alerts = set(self.assets.contract.alerts.durations)
         require(
-            alerts == expected_alerts, "live Product alert inventory differs from reviewed assets"
+            alerts == expected_alerts,
+            "live selected-service alert inventory differs from reviewed assets",
         )
         dashboard_name = grafana_dashboard_resource(self.assets)["metadata"]["name"]
         dashboard = self.json(self.monitoring_namespace, "get", "configmap", dashboard_name)
@@ -260,7 +270,7 @@ class KubernetesTarget:
         require(
             rendered.get("uid") == self.assets.contract.dashboard.uid
             and rendered.get("editable") is False,
-            "live Product dashboard identity or immutability differs",
+            "live selected-service dashboard identity or immutability differs",
         )
         return {"prometheus_rule": rule_name, "dashboard_config_map": dashboard_name}
 
@@ -348,6 +358,14 @@ def product_reads(ports: Mapping[str, int], trace_id: str) -> int:
     return len(products)
 
 
+def product_services(target: KubernetesTarget) -> list[tuple[str, str, str, int]]:
+    require(target.config.management_service is not None, "Product management service is required")
+    return [
+        ("product", target.service_namespace, target.config.business_service, 8081),
+        ("health", target.service_namespace, target.config.management_service, 8080),
+    ]
+
+
 def query_results(value: Mapping[str, Any]) -> list[dict[str, Any]]:
     results = value.get("data", {}).get("result", [])
     require(isinstance(results, list), "backend query result is malformed")
@@ -368,9 +386,18 @@ def wait_for(description: str, probe: Any, timeout: float = QUERY_TIMEOUT) -> An
     raise VerificationError(f"timed out waiting for {description}")
 
 
-def verify_enabled_signals(ports: Mapping[str, int], trace_id: str, pod_uid: str) -> dict[str, Any]:
+def verify_product_enabled_signals(
+    assets: MonitoringAssets, ports: Mapping[str, int], trace_id: str, pod_uid: str
+) -> dict[str, Any]:
+    expected = assets.contract.verification.expected_signals
+    require(
+        len(expected.metrics) == 1
+        and len(expected.logs) == 1
+        and expected.traces == (assets.contract.service_name,),
+        "Product expected signal inventory differs from its registered probe",
+    )
     metric_query = (
-        'insurance_hub_product_requests_total{service_name="product-service",'
+        f'{expected.metrics[0]}{{service_name="{assets.contract.service_name}",'
         'deployment_environment_name="qa",service_implementation="go",'
         f'service_instance_id="{pod_uid}",insurance_hub_product_transport="http",'
         'insurance_hub_product_operation="list"}'
@@ -384,8 +411,8 @@ def verify_enabled_signals(ports: Mapping[str, int], trace_id: str, pod_uid: str
     )
     now = time.time_ns()
     loki_query = (
-        '{service_name="product-service",deployment_environment_name="qa",'
-        'service_implementation="go"} | json | trace_id=' + json.dumps(trace_id)
+        f'{{service_name="{assets.contract.service_name}",deployment_environment_name="qa",'
+        f'service_implementation="go"}} | json | {expected.logs[0]}=' + json.dumps(trace_id)
     )
     loki_url = (
         f"http://127.0.0.1:{ports['loki']}/loki/api/v1/query_range?"
@@ -407,14 +434,17 @@ def verify_enabled_signals(ports: Mapping[str, int], trace_id: str, pod_uid: str
         "correlated Product trace",
         lambda: request_json(trace_url).get("batches"),
     )
-    alert_query = 'count(ALERTS{service="product-service",alertstate="firing"}) or vector(0)'
+    alert_query = (
+        f'count(ALERTS{{service="{assets.contract.service_name}",alertstate="firing"}}) '
+        "or vector(0)"
+    )
     alert_url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
         {"query": alert_query}
     )
     alerts = query_results(request_json(alert_url))
     require(
         len(alerts) == 1 and float(alerts[0]["value"][1]) == 0,
-        "a Product pilot alert is firing",
+        "a selected-service pilot alert is firing",
     )
     return {
         "metric_series": len(metric),
@@ -424,8 +454,40 @@ def verify_enabled_signals(ports: Mapping[str, int], trace_id: str, pod_uid: str
     }
 
 
+@dataclass(frozen=True)
+class ServiceProbe:
+    """Service-owned workload and signal checks behind generic target selection."""
+
+    service: str
+    services: Callable[[KubernetesTarget], list[tuple[str, str, str, int]]]
+    workload: Callable[[Mapping[str, int], str], int]
+    enabled_signals: Callable[[MonitoringAssets, Mapping[str, int], str, str], dict[str, Any]]
+    result_key: str
+
+
+SERVICE_PROBES = {
+    "product": ServiceProbe(
+        service="product",
+        services=product_services,
+        workload=product_reads,
+        enabled_signals=verify_product_enabled_signals,
+        result_key="product_rows",
+    )
+}
+
+
+def select_probe(assets: MonitoringAssets) -> ServiceProbe:
+    key = assets.contract.verification.probe
+    require(key == assets.service, "service probe selection differs from the selected service")
+    probe = SERVICE_PROBES.get(key)
+    require(probe is not None, f"service probe {key!r} is not registered")
+    require(probe.service == assets.service, "registered probe belongs to another service")
+    return probe
+
+
 def execute(args: argparse.Namespace) -> dict[str, Any]:
     assets = load_assets(args.assets_root, args.environment, args.service)
+    probe = select_probe(assets)
     target = KubernetesTarget(assets, args.source_revision)
     target.coordinates()
     revision = target.flux_revision()
@@ -433,41 +495,39 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     monitoring: dict[str, Any] = {}
     if args.mode == "enabled":
         monitoring = target.monitoring_assets()
-    services = [
-        ("product", target.service_namespace, target.config["product_business_service"], 8081),
-        ("health", target.service_namespace, target.config["product_management_service"], 8080),
-    ]
+    services = probe.services(target)
     if args.mode == "enabled":
         services.extend(
             [
                 (
                     "prometheus",
                     target.monitoring_namespace,
-                    target.config["prometheus_service"],
+                    target.config.prometheus_service,
                     9090,
                 ),
-                ("loki", target.monitoring_namespace, target.config["loki_service"], 3100),
-                ("tempo", target.monitoring_namespace, target.config["tempo_service"], 3200),
+                ("loki", target.monitoring_namespace, target.config.loki_service, 3100),
+                ("tempo", target.monitoring_namespace, target.config.tempo_service, 3200),
             ]
         )
     trace_id = hashlib.sha256(f"{args.source_revision}:{time.time_ns()}".encode()).hexdigest()[:32]
     with forwards(target, services) as ports:
-        rows = product_reads(ports, trace_id)
+        workload_result = probe.workload(ports, trace_id)
         signals: dict[str, Any] = {}
         if args.mode == "enabled":
             pod_uid = deployment["pods"][0]["pod_uid"]
-            require(isinstance(pod_uid, str) and pod_uid, "Product Pod UID is unavailable")
-            signals = verify_enabled_signals(ports, trace_id, pod_uid)
-    return {
+            require(isinstance(pod_uid, str) and pod_uid, "selected service Pod UID is unavailable")
+            signals = probe.enabled_signals(assets, ports, trace_id, pod_uid)
+    evidence = {
         "mode": args.mode,
         "source_revision": args.source_revision,
         "flux_revision": revision,
-        "product_rows": rows,
         "trace_id": trace_id,
         "pods": deployment["pods"],
         "monitoring": monitoring,
         "signals": signals,
     }
+    evidence[probe.result_key] = workload_result
+    return evidence
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -485,11 +545,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         with (
             monitoring_runtime.controlled_signals(),
-            monitoring_runtime.bounded_activity("Product observability verification", 600),
+            monitoring_runtime.bounded_activity(f"{args.service} observability verification", 600),
         ):
             evidence = execute(args)
     except monitoring_runtime.Interrupted as error:
-        print(f"Product observability verification {error}", file=sys.stderr)
+        print(f"Service observability verification {error}", file=sys.stderr)
         for note in getattr(error, "__notes__", ()):
             print(note, file=sys.stderr)
         return error.status
@@ -502,10 +562,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         TypeError,
         ValueError,
     ) as error:
-        print(f"Product observability verification failed: {error}", file=sys.stderr)
+        print(f"Service observability verification failed: {error}", file=sys.stderr)
         return 1
     print(json.dumps(evidence, indent=2, sort_keys=True))
-    print("Product observability verification passed", file=sys.stderr)
+    print(f"{args.service} observability verification passed", file=sys.stderr)
     return 0
 
 

@@ -434,6 +434,12 @@ class TestMonitoringTooling:
         assert status == 0
         assert output == "qa-product-service\n"
 
+    def test_makefile_keeps_generic_and_product_verification_entry_points(self) -> None:
+        validation = (ASSETS_ROOT.parent / "tests/validation.mk").read_text(encoding="utf-8")
+        assert "verify-service-observability:" in validation
+        assert "verify-product-observability:" in validation
+        assert "verify-product-observability requires SVC_NAME=product" in validation
+
     def test_fixture_and_dashboard_substitution_are_service_driven(self) -> None:
         fixture = harness.MetricFixture(self.assets.fixture)
         first = fixture.render().decode("utf-8")
