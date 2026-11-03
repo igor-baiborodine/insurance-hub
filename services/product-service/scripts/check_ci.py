@@ -46,6 +46,9 @@ QUALIFYING_PATHS = [
     "!templates/*/*-service/**",
 ]
 
+REPORT_CARD_PATHS = ["libs/servicekit/**", *QUALIFYING_PATHS]
+REPORT_CARD_STEP = "Check registered services, shared libraries, and scaffold"
+
 
 def require(condition: bool, message: str) -> None:
     if not condition:
@@ -397,13 +400,15 @@ def validate_report_card(workflow: dict) -> None:
         trigger = workflow["on"][event]
         require(trigger["branches"] == ["main"], f"Go Report Card {event} trigger must target main")
         require(
-            trigger["paths"] == QUALIFYING_PATHS,
-            f"Go Report Card {event} qualifying path matrix differs from Go PR validation",
+            trigger["paths"] == REPORT_CARD_PATHS,
+            f"Go Report Card {event} paths differ from service, shared library, and scaffold inputs",
         )
         validate_trigger_examples(trigger["paths"])
-    command = step_named(
-        workflow["jobs"]["report-card"], "Check registered service modules and scaffold"
-    )["run"]
+        require(
+            path_matches("libs/servicekit/health/health.go", trigger["paths"]),
+            f"Go Report Card {event} trigger excludes Servicekit",
+        )
+    command = step_named(workflow["jobs"]["report-card"], REPORT_CARD_STEP)["run"]
     require(
         '--topology "$GITHUB_WORKSPACE/go-module-topology.json"' in command,
         "Go Report Card must select modules from the owned topology inventory",
@@ -412,7 +417,7 @@ def validate_report_card(workflow: dict) -> None:
     eligible = [
         item["directory"]
         for item in topology["modules"]
-        if item["role"] in {"business-service", "service-scaffold"}
+        if item["role"] in {"business-service", "public-shared", "service-scaffold"}
     ]
     require(
         all(directory not in command for directory in eligible),
@@ -1024,24 +1029,16 @@ def main(_argv: list[str] | None = None) -> int:
         raise ValueError("controlled Go PR workflow corruption was accepted")
 
     report_card_corruptions = [
-        lambda item: item["on"]["push"]["paths"].pop(),
+        lambda item: item["on"]["push"]["paths"].pop(0),
         lambda item: item["on"]["pull_request"]["paths"].append("services/*-service/**"),
-        lambda item: step_named(
-            item["jobs"]["report-card"], "Check registered service modules and scaffold"
-        ).update(
-            run=step_named(
-                item["jobs"]["report-card"], "Check registered service modules and scaffold"
-            )["run"].replace(
+        lambda item: step_named(item["jobs"]["report-card"], REPORT_CARD_STEP).update(
+            run=step_named(item["jobs"]["report-card"], REPORT_CARD_STEP)["run"].replace(
                 '--topology "$GITHUB_WORKSPACE/go-module-topology.json"',
                 "services/product-service templates/go-service",
             )
         ),
-        lambda item: step_named(
-            item["jobs"]["report-card"], "Check registered service modules and scaffold"
-        ).update(
-            run=step_named(
-                item["jobs"]["report-card"], "Check registered service modules and scaffold"
-            )["run"]
+        lambda item: step_named(item["jobs"]["report-card"], REPORT_CARD_STEP).update(
+            run=step_named(item["jobs"]["report-card"], REPORT_CARD_STEP)["run"]
             + " services/product-service"
         ),
     ]
@@ -1055,7 +1052,7 @@ def main(_argv: list[str] | None = None) -> int:
         raise ValueError("controlled Go Report Card workflow corruption was accepted")
 
     print(
-        "check-ci: generic release with thirty trigger cases, Go Report Card path parity, "
+        "check-ci: generic release with thirty trigger cases, Go Report Card service/shared path coverage, "
         "selected-module PR validation, eleven selection cases, one coverage path execution "
         "case, and twenty-five controlled "
         "corruptions passed"

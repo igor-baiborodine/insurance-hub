@@ -20,7 +20,7 @@ class ReportCardError(RuntimeError):
     """A report-card result is malformed or below the required threshold."""
 
 
-REPORT_CARD_ROLES = {"business-service", "service-scaffold"}
+REPORT_CARD_ROLES = {"business-service", "public-shared", "service-scaffold"}
 
 
 def select_modules(topology_path: Path, requested: list[str]) -> list[str]:

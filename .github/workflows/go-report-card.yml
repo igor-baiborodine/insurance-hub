@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - 'libs/servicekit/**'
       - '**/*-service/**/*.go'
       - '**/*-service/go.mod'
       - '**/*-service/go.sum'
@@ -24,6 +25,7 @@ on:
     branches:
       - main
     paths:
+      - 'libs/servicekit/**'
       - '**/*-service/**/*.go'
       - '**/*-service/go.mod'
       - '**/*-service/go.sum'
@@ -48,6 +50,7 @@ jobs:
   report-card:
     name: Check Go module report cards
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout Insurance Hub
         uses: actions/checkout@v6
@@ -80,7 +83,7 @@ jobs:
       - name: Install archived report checks
         run: make -C .tools/goreportcard install
 
-      - name: Check registered service modules and scaffold
+      - name: Check registered services, shared libraries, and scaffold
         run: |
           report_card_bin="$(dirname "$(command -v go)")"
           ./.venv/bin/python scripts/go/report_card.py \
