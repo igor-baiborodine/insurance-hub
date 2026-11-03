@@ -335,6 +335,30 @@ class TestMonitoringTooling:
         with pytest.raises(check.ValidationError, match="lacks required service selector"):
             check.validate_dashboard(replace(self.assets, dashboard=dashboard))
 
+    def test_dashboard_rejects_runtime_metric_without_service_selector(self) -> None:
+        dashboard = copy.deepcopy(self.assets.dashboard)
+        target = next(
+            item
+            for item in check.prometheus_targets(dashboard)
+            if "go_goroutine_count" in item["expr"]
+        )
+        target["expr"] = target["expr"].replace('service_name="product-service",', "")
+        with pytest.raises(check.ValidationError, match="lacks required service selector"):
+            check.validate_dashboard(replace(self.assets, dashboard=dashboard))
+
+    @pytest.mark.parametrize(
+        "service_literal",
+        ["'policy-search-service'", "`policy-search-service`"],
+    )
+    def test_dashboard_rejects_noncanonical_service_literal(self, service_literal: str) -> None:
+        dashboard = copy.deepcopy(self.assets.dashboard)
+        expression = dashboard["panels"][0]["targets"][0]["expr"]
+        dashboard["panels"][0]["targets"][0]["expr"] = expression.replace(
+            '"product-service"', service_literal
+        )
+        with pytest.raises(check.ValidationError, match="outside the service contract"):
+            check.validate_dashboard(replace(self.assets, dashboard=dashboard))
+
     def test_alert_inventory_and_labels_come_from_service_contract(self) -> None:
         rules = self.assets.alerts_path.read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as temporary:

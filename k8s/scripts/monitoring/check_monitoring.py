@@ -17,7 +17,16 @@ from monitoring_assets import AssetError, MonitoringAssets, load_assets
 
 KUBE_PROMETHEUS_STACK_VERSION = "92.6.0"
 PROMETHEUS_IMAGE = "quay.io/prometheus/prometheus:v3.15.0-distroless"
-SERVICE_NAME_MATCHER = re.compile(r'\bservice_name\s*(=~|!~|!=|=)\s*"((?:\\.|[^"\\])*)"')
+SERVICE_NAME_REFERENCE = re.compile(r"\bservice_name\s*(?:=~|!~|!=|=)")
+SERVICE_NAME_MATCHER = re.compile(
+    r"""\bservice_name\s*(=~|!~|!=|=)\s*(?:
+        "(?P<double>(?:\\.|[^"\\])*)"
+        |'(?P<single>(?:\\.|[^'\\])*)'
+        |`(?P<backtick>[^`]*)`
+    )""",
+    re.VERBOSE,
+)
+SERVICE_RUNTIME_METRIC = re.compile(r"(?<![A-Za-z0-9_:])(?:go|db_client)_[A-Za-z_:][A-Za-z0-9_:]*")
 
 
 class ValidationError(Exception):
@@ -58,6 +67,21 @@ def prometheus_targets(dashboard: Mapping[str, Any]) -> list[Mapping[str, Any]]:
             ):
                 targets.append(mapping(target, f"dashboard panel {index} target {target_index}"))
     return targets
+
+
+def service_name_matchers(expression: str) -> list[tuple[str, str, str]]:
+    matches: list[tuple[str, str, str]] = []
+    for match in SERVICE_NAME_MATCHER.finditer(expression):
+        for quote, group in (("double", "double"), ("single", "single"), ("backtick", "backtick")):
+            value = match.group(group)
+            if value is not None:
+                matches.append((match.group(1), value, quote))
+                break
+    if len(matches) != len(SERVICE_NAME_REFERENCE.findall(expression)):
+        raise ValidationError(
+            f"application query has an unsupported service selector: {expression}"
+        )
+    return matches
 
 
 def validate_dashboard(assets: MonitoringAssets) -> None:
@@ -121,16 +145,19 @@ def validate_dashboard(assets: MonitoringAssets) -> None:
             raise ValidationError(
                 f"dashboard Prometheus target {index} expression must be a non-empty string"
             )
-        service_matchers = SERVICE_NAME_MATCHER.findall(expression)
+        service_matchers = service_name_matchers(expression)
         if any(
-            operator != "=" or value != assets.contract.service_name
-            for operator, value in service_matchers
+            operator != "=" or value != assets.contract.service_name or quote != "double"
+            for operator, value, quote in service_matchers
         ):
             raise ValidationError(
                 "application query uses a service selector outside the service contract: "
                 f"{expression}"
             )
-        if application_metric_prefix in expression and not service_matchers:
+        service_owned_metric = bool(
+            application_metric_prefix in expression or SERVICE_RUNTIME_METRIC.search(expression)
+        )
+        if service_owned_metric and not service_matchers:
             raise ValidationError(
                 f"application query lacks required service selector: {expression}"
             )
