@@ -57,6 +57,22 @@
 HTTP adapter choice using the subsequent Product baseline and implementation. Other dated findings
 and adoption gates retain their original scope; this follow-up does not refresh the full review.
 
+**Monitoring guidance follow-up: 3 November 2026.** The
+[Go-service dashboards and alerts guide](go-service-dashboards-and-alerts.md) defines the common
+operational baseline from Product issue #135 and the standardization scope in Phase 4.3 issue #267.
+It requires service owners to use engineering judgment to add domain-specific dashboards and
+alerts. The updates to P4-28, G19-13 and the observability scenarios below describe adoption
+expectations; they do not certify #267 delivery or refresh unrelated September findings.
+
+**Migration delivery follow-up: 3 November 2026.** Use the
+[Go-service migration scope and requirements guide](go-service-migration-scope.md) for new migration
+scopes. Deliver small deployed MVP increments, limit Java discovery to the next capability's
+compatibility needs, and make Java/Go performance comparison optional rather than a default gate.
+Defer deployment rollback/restore rehearsals to final implementation qualification before live
+ownership transfer; retain ordinary functional, access and process-lifecycle checks per increment.
+Historical research and validation scenarios below supply relevant technical cases, not a
+mandatory program to repeat for every service or intermediate release.
+
 This addendum supersedes the Phase 4 implementation recommendations in the
 [original migration analysis](../../system-overview-and-migration-analysis.md), including its
 [Architecture Pattern Migrations](../../system-overview-and-migration-analysis.md#architecture-pattern-migrations),
@@ -94,6 +110,12 @@ with sqlc for actual PostgreSQL adapters, Protovalidate for Protobuf request sha
 Kafka, the official Elasticsearch v8 client, and the MinIO v7 SDK for document/payment. Use
 standard-library slog JSON and OpenTelemetry through Alloy. These choices require service-owned
 compatible pins and tests; they are not a universal dependency list.
+
+New Go services should adopt the
+[common dashboard and alert baseline](go-service-dashboards-and-alerts.md), extend it for their
+actual domain and dependencies, and supply accepted operational evidence before live ownership
+or traffic transfer. Product provides the implemented reference; #267 owns the reusable contract
+and Policy Search adoption.
 
 Replace the blanket Wire, Viper, GORM, protoc-gen-validate and olivere/elastic defaults. Defer the
 pricing evaluator, chromedp adoption, unnecessary streaming/history capabilities, Keycloak/Envoy/mesh
@@ -156,7 +178,9 @@ privacy, cost or a completed development pilot.
 Stable inventory IDs P4-01–54 map one-to-one to decision IDs D19-01–54. **Retain** keeps a direction;
 **replace** changes a default; **qualify** limits scope or adoption; **defer** withholds selection
 until named evidence exists. A deferred subfeature remains deferred within a qualified row.
-All runtime gates are open. Gate IDs are linked to the acceptance boundary later in this document.
+All runtime gates were open at the September review baseline. Dated follow-ups record subsequent
+scope and evidence without certifying other services. Gate IDs are linked to the acceptance
+boundary later in this document.
 
 “All Go” means the eight business services. “PG owners” means product, document, pricing, policy
 and payment, with legacy auth included in coexistence; dashboard/chat PostgreSQL requirements are
@@ -200,7 +224,7 @@ dependencies. Standard-library choices add no separate third-party runtime packa
 | <a id="p4-25"></a>P4-25 / D19-25 | OTel traces, Tempo/Jaeger and collector options. [A:144–145, 189–190, 499, 522–541](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L144) | P:158 and D:241 touch integration | **qualify** | OTel traces through Alloy to configured Tempo path; verify Java B3/Go W3C propagation, sampling and bounded exporter shutdown. No direct backend coupling. All Go. | [Assessment](#observability); [G19-13](#g19-13) |
 | <a id="p4-26"></a>P4-26 / D19-26 | JSON stdout automatically collected/correlated. [A:146–147, 500, 545–556](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L146) | D/C discuss bootstrap and redaction | **qualify** | Retain slog JSON in deployed environments; add safe trace fields explicitly. QA stdout collection is not configured in reviewed Alloy values; no payload/debug leakage. | [Assessment](#observability); [G19-13](#g19-13) |
 | <a id="p4-27"></a>P4-27 / D19-27 | Universal Prometheus metrics endpoint/scraping. [A:148–149, 501, 558–569](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L148) | P:158, D:242 touch pool/registry helpers | **qualify** | OTel metrics to Alloy direction; resolve downstream ingestion. Optional restricted scrape endpoint only with an owned collector/monitor route and duplicate policy. | [Assessment](#observability); [G19-13](#g19-13) |
-| <a id="p4-28"></a>P4-28 / D19-28 | Grafana dashboards and SLA/KPI alerts. [A:150–151, 502–503, 571–583](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L150) | None | **qualify** | Retain goal; choose per-service SLOs/rollback signals after delivery, cardinality and capacity checks. Default dashboards/data sources do not prove service coverage. | [Assessment](#observability); [G19-13](#g19-13), [G19-14](#g19-14) |
+| <a id="p4-28"></a>P4-28 / D19-28 | Grafana dashboards and SLA/KPI alerts. [A:150–151, 502–503, 571–583](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L150) | None at original review | **qualify** | November follow-up: adopt the [common dashboard and alert baseline](go-service-dashboards-and-alerts.md), using Product #135 as the implemented reference and #267 for standardization/Policy Search adoption. Add domain-specific coverage through service-owner judgment; prove workload-backed thresholds and rollback signals before transfer. Production SLOs and paging remain separately owned decisions. | [Assessment](#observability); [G19-13](#g19-13), [G19-14](#g19-14) |
 | <a id="p4-29"></a>P4-29 / D19-29 | Common health/readiness/liveness. [A:504, 585–594](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L504) | D lifecycle and C startup checks | **qualify** | Readiness reflects serving ability; liveness process health. Render probes/ports and test startup/drain; collector outage must not create restart loops. | [Assessment](#composition-and-lifecycle); [G19-03](#g19-03) |
 | <a id="p4-30"></a>P4-30 / D19-30 | Alloy permanently collects all signals. [A:650–687, especially 665–680](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L650) | None dedicated | **qualify** | Retain configured QA intermediary and Zipkin bridge; prove logs/metrics/traces end to end. Local-dev collector is absent; explicit disabled/local mode needed. | [Assessment](#observability); [G19-13](#g19-13) |
 | <a id="p4-31"></a>P4-31 / D19-31 | Kind local, K3s QA, completed Java platform lift. [A:613–648](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L613) | C assumes local/QA composition | **qualify** | Retain checked-in environment/bootstrap pattern, not a claim of live completion. Reconcile effective versions, ownership, endpoints and Go resource suitability. | [Assessment](#deployment-comparison); [G19-03](#g19-03) |
@@ -691,6 +715,34 @@ oracle. Native evaluator availability is not pricing parity or a performance res
 
 ### Observability
 
+**3 November follow-up — dashboards and alerts.** Use the
+[Go-service dashboards and alerts guide](go-service-dashboards-and-alerts.md) for the common core:
+request traffic/errors/latency, Go runtime, Pod resources, availability/restarts, telemetry delivery
+and safe Loki/Tempo investigation. Add dependency and worker panels/rules only for capabilities
+the service owns. Explicitly use common sense and engineering judgment to add further dashboards
+and alerts for the service's domain, workflows and failure modes; the baseline is not exhaustive.
+
+[Product issue #135](https://github.com/igor-baiborodine/insurance-hub/issues/135) supplies the
+implemented reference through its
+[service-owned monitoring assets](../../../k8s/observability/services/product/) and
+[observability runbook](product-service/observability-runbook.md). Preserve its accepted behavior
+while deriving new services' thresholds and queries from their own workloads. Source-owned,
+read-only Grafana dashboards and tested Prometheus rules must have collected-data and actual
+environment evidence, including firing, suppression, recovery and useful investigation paths.
+Shared collector health must be identified as shared; legitimate idle or disabled workers must
+not be mistaken for missing telemetry or a processing stall.
+
+[Issue #267](https://github.com/igor-baiborodine/insurance-hub/issues/267) owns the reusable contract
+and Policy Search adoption under [#215](https://github.com/igor-baiborodine/insurance-hub/issues/215),
+including Elasticsearch and event-worker coverage. Its accepted handoff is required before
+[#235](https://github.com/igor-baiborodine/insurance-hub/issues/235) transfers ownership. Reliable
+event lag/stall semantics remain a bounded decision before the dependent rule is accepted.
+This documentation does not complete that ticket or establish production SLOs/paging.
+
+**September source assessment (historical).** The configuration observations below describe the
+original reviewed revision. Product's later contract/runbook owns its implemented signal routes;
+recheck the selected service and platform before applying these historical gaps to current work.
+
 Retain the canonical boundary: slog JSON to deployed stdout/stderr and OTel signals through Alloy,
 without direct service clients for Loki/Prometheus/Tempo. The actual input to the QA Helm target is
 [Alloy values.yaml](../../../k8s/overlays/qa/infra/alloy/values.yaml), chart 1.8.1, not the adjacent
@@ -990,7 +1042,7 @@ investigation. Detailed validation scenarios follow this table; their stable IDs
 | <a id="g19-10"></a>G19-10 | Document; renderer/service owners | Export effective template/assets/fonts/browser/license and reference PDFs. Interim jsreport needs support/capacity and event-to-PDF proof; replacement additionally needs text/visual tolerance, pinned sandboxed browser, hostile-resource tests, bounded load/timeouts/crash/drain. | Document pilot needs its interim-path evidence; chromedp selection/replacement waits for full rendering/runtime parity. |
 | <a id="g19-11"></a>G19-11 | Chat/Vue/Nginx; browser/realtime owners | Approve safe payload/rendering and handshake identity; test origin/topic denial, sender exclusion, frame limits, queues/slow readers, race/load, close/reconnect and Nginx rollback. Require explicit fanout before scaling; identify real caller/retention need before internal stream/history. | Browser chat cutover; multi-replica, history and stream adoption are independently blocked. |
 | <a id="g19-12"></a>G19-12 | Pricing and policy caller; pricing/domain owners | Export effective MVEL/factors/order and safe Java oracle fixtures; compare candidate grammar, intermediate decimal values/scales, HALF_UP, invalid rules and resource limits. Specify immutable publication/cache identity, preserve MVEL and test shadow/rollback/concurrent edits. | Go evaluator selection and pricing ownership; policy may retain Java pricing with proven caller parity. |
-| <a id="g19-13"></a>G19-13 | All Go and QA observability; platform/operations owners | Prove Go/Java context and OTLP traces through Alloy; choose/test stdout log ingestion and supported metrics path through the collector. Verify safe fields, labels, local disabled behavior, bounded outage/flush and queryable signals plus service dashboards/SLO alerts. | Claims of full observability and any traffic shift relying on these rollback signals. |
+| <a id="g19-13"></a>G19-13 | All Go and QA observability; service/platform/operations owners | Prove Go/Java context and OTLP traces through Alloy; choose/test stdout log ingestion and supported metrics delivery. Verify safe fields, bounded outage/flush and local disabled behavior. Apply the [common monitoring guide](go-service-dashboards-and-alerts.md), add domain coverage using service-owner judgment, and prove source-owned read-only dashboards plus actionable alerts against collected and actual environment data. Record thresholds, no-data/disabled behavior and rollback responses; production SLO/paging policy remains separately agreed. | Claims of full observability and live ownership/traffic transfer require the selected service's accepted monitoring handoff. In Phase 4.3, #267 gates #235. |
 | <a id="g19-14"></a>G19-14 | Each service plus edge/data/event owners | Write a concrete release/runbook with schema compatibility, resource controller, isolated shadow effects, HTTP routing, consumer offsets, job ownership and socket/rule transitions. Define measured pass/abort thresholds and dwell, then run internal parity/e2e/performance and rollback scenarios through owning Make targets. Reconfirm product PG baseline before pilot. | Production cutover; no default percentages, decommission or destructive rollback assumptions. |
 | <a id="g19-15"></a>G19-15 | Platform and affected service owners | After an agreed rollback window, prove no active Java/Consul/Zipkin consumers, compatible retained data and tested trace archive/restore. Size HPA/resources from measured signals and prove chat fanout/job safety under replicas. Obtain separately scoped cleanup delivery. | Legacy retirement, destructive schema/data cleanup, archive adoption and autoscaling claims. |
 
@@ -998,7 +1050,8 @@ investigation. Detailed validation scenarios follow this table; their stable IDs
 
 These are unexecuted acceptance tasks for future service/platform tickets. Use owning Make targets
 and record exact environment, fixtures, outputs and limitations. Conditional features need these
-checks only if selected. No external issue numbers or assignees are implied.
+checks only if selected. Scenario IDs do not create or assign tickets; explicitly cited issues
+retain their own scope and acceptance evidence.
 
 ### PostgreSQL validation scenarios
 
@@ -1117,8 +1170,10 @@ checks only if selected. No external issue numbers or assignees are implied.
 | OB-16-02 | Platform/logging owner: choose one stdout→Alloy→Loki or approved OTLP-log route; configure collection, RBAC, parsing, label policy and retention. Emit a harmless JSON `slog` record with a trace ID from a Go Pod, then query it in Loki and prove no duplicate, missing, secret or customer fields. Test collector outage/restart and bounded buffering/loss reporting. |
 | OB-16-03 | Platform/metrics owner: decide and render a supported Alloy→Prometheus ingestion route. Verify receiver/monitor settings, authentication, a sample from Go runtime and an application counter/histogram in Prometheus, bounded label cardinality, no duplicate series, and failure/dropped-sample visibility. Do not treat an OTLP receiver's acceptance as Prometheus ingestion proof. |
 | OB-16-04 | Go service owner: pin SDK/contrib/instrumentation versions against the service Go toolchain under G19-01. Test route-templated HTTP/gRPC spans, SQL/pgx and Kafka boundaries as applicable, context cancellation, exporter timeouts, provider flush/shutdown, disabled/local-dev behavior, and no direct backend dependency. Verify stderr/stdout JSON and no payload logging even at debug. |
-| OB-16-05 | Service/operations owner: validate liveness/readiness/startup transitions, collector outage independence, restricted debug/metrics exposure, service identity, sampling rate, safe field/metric-label allowlists, collector and backend capacity, dashboards and actionable alerts. Capture actual SLO and rollback signals before a traffic shift. |
+| OB-16-05 | Service/operations owner: validate liveness/readiness/startup transitions, collector outage independence, restricted debug/metrics exposure, service identity, sampling rate, safe field/metric-label allowlists and collector/backend capacity. Apply the [common monitoring baseline](go-service-dashboards-and-alerts.md), record service-specific workload/threshold rationale and accepted operational rollback signals before live ownership/traffic transfer. Production SLOs need separately agreed objectives. |
 | OB-16-06 | Platform owner: before Zipkin retirement, prove no active Java/consumer dependency, full Tempo trace retention/search parity, and a documented, tested historical trace archive/restore path. Until then keep the bridge and do not change Go exporters to point at Tempo directly. |
+| OB-16-07 | Service/monitoring owner: validate exact source dashboard/rule inventories, service/environment/implementation selectors and immutable provisioning. Exercise every PromQL expression with collected disposable data and every alert's firing, suppression and recovery windows. After authorized apply, verify actual service data, safe Loki/Tempo investigation, read-only UI/API behavior and restoration of owned assets. Preserve Product compatibility when shared tooling changes. |
+| OB-16-08 | Service/domain owner: use common sense and engineering judgment to identify business failures hidden by healthy HTTP/Pod metrics and add suitable dashboards/alerts. Test selected dependency and worker outcomes, including legitimate idle, disabled mode and missing telemetry. For Policy Search, cover Elasticsearch and events; establish a reliable lag/stall signal before accepting that rule. Record the operational handoff from #267 before #235. |
 
 ### Security validation scenarios
 
