@@ -84,28 +84,21 @@ def request_text(url: str, headers: Mapping[str, str] | None = None) -> str:
 
 
 def verification_config(assets: MonitoringAssets) -> dict[str, str]:
-    value = assets.environment.get("product_verification")
-    require(isinstance(value, dict), "environment product_verification must be an object")
-    required = {
-        "service_namespace",
-        "product_deployment",
-        "product_business_service",
-        "product_management_service",
-        "prometheus_service",
-        "loki_service",
-        "tempo_service",
-        "flux_namespace",
-        "flux_source",
-        "flux_kustomization",
+    value = assets.environment.service_verification.get(assets.service)
+    require(value is not None, "environment has no Product verification coordinates")
+    require(value.management_service is not None, "Product management service is required")
+    return {
+        "service_namespace": value.service_namespace,
+        "product_deployment": value.deployment,
+        "product_business_service": value.business_service,
+        "product_management_service": value.management_service,
+        "prometheus_service": value.prometheus_service,
+        "loki_service": value.loki_service,
+        "tempo_service": value.tempo_service,
+        "flux_namespace": value.flux_namespace,
+        "flux_source": value.flux_source,
+        "flux_kustomization": value.flux_kustomization,
     }
-    require(
-        set(value) == required, "environment product_verification fields differ from the contract"
-    )
-    require(
-        all(isinstance(value[name], str) and value[name] for name in required),
-        "environment product_verification fields must be non-empty strings",
-    )
-    return {name: value[name] for name in required}
 
 
 class KubernetesTarget:
@@ -120,8 +113,8 @@ class KubernetesTarget:
         )
         self.assets = assets
         self.source_revision = source_revision
-        self.context = assets.environment["kube_context"]
-        self.monitoring_namespace = assets.environment["monitoring_namespace"]
+        self.context = assets.environment.kube_context
+        self.monitoring_namespace = assets.environment.monitoring_namespace
         self.config = verification_config(assets)
         self.service_namespace = self.config["service_namespace"]
 
@@ -249,9 +242,7 @@ class KubernetesTarget:
             for item in group.get("rules", [])
             if item.get("alert")
         }
-        expected_alert_durations = self.assets.contract["alerts"].get("for")
-        require(isinstance(expected_alert_durations, dict), "reviewed alert inventory is malformed")
-        expected_alerts = set(expected_alert_durations)
+        expected_alerts = set(self.assets.contract.alerts.durations)
         require(
             alerts == expected_alerts, "live Product alert inventory differs from reviewed assets"
         )
@@ -267,7 +258,7 @@ class KubernetesTarget:
         except (TypeError, json.JSONDecodeError) as error:
             raise VerificationError("live dashboard ConfigMap contains malformed JSON") from error
         require(
-            rendered.get("uid") == self.assets.contract["dashboard"]["uid"]
+            rendered.get("uid") == self.assets.contract.dashboard.uid
             and rendered.get("editable") is False,
             "live Product dashboard identity or immutability differs",
         )

@@ -200,7 +200,7 @@ def cleanup(container: str) -> None:
 
 def execute(assets: MonitoringAssets) -> None:
     expressions = dashboard_expressions(assets)
-    minimum = assets.contract["dashboard"]["minimum_prometheus_targets"]
+    minimum = assets.contract.dashboard.minimum_prometheus_targets
     if len(expressions) < minimum:
         raise HarnessError(
             f"dashboard fixture found {len(expressions)} expressions, expected at least {minimum}"
@@ -254,7 +254,7 @@ def execute(assets: MonitoringAssets) -> None:
             )
             port = port_for(container)
             wait_ready(port)
-            minimum_scrapes = assets.contract["fixture"]["minimum_scrapes"]
+            minimum_scrapes = assets.contract.fixture.minimum_scrapes_per_series
             deadline = time.monotonic() + 15
             while fixture.scrapes < minimum_scrapes and time.monotonic() < deadline:
                 time.sleep(0.25)

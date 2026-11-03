@@ -52,7 +52,7 @@ class TestProductObservabilityVerification:
     def test_monitoring_assets_accept_reviewed_alert_inventory(self) -> None:
         # given
         target = verifier.KubernetesTarget(self.assets, "a" * 40)
-        expected_alerts = set(self.assets.contract["alerts"]["for"])
+        expected_alerts = set(self.assets.contract.alerts.durations)
         rule = {
             "spec": {
                 "groups": [
@@ -64,7 +64,7 @@ class TestProductObservabilityVerification:
             "data": {
                 "product-dashboard.json": json.dumps(
                     {
-                        "uid": self.assets.contract["dashboard"]["uid"],
+                        "uid": self.assets.contract.dashboard.uid,
                         "editable": False,
                     }
                 )
@@ -84,7 +84,7 @@ class TestProductObservabilityVerification:
     def test_monitoring_assets_reject_alert_inventory_mismatch(self) -> None:
         # given
         target = verifier.KubernetesTarget(self.assets, "a" * 40)
-        expected_alerts = sorted(self.assets.contract["alerts"]["for"])
+        expected_alerts = sorted(self.assets.contract.alerts.durations)
         rule = {
             "spec": {
                 "groups": [

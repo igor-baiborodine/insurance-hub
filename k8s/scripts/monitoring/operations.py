@@ -19,7 +19,7 @@ from render_grafana_dashboard import render as render_dashboard
 from render_prometheus_rule import render as render_rule
 
 from check_monitoring import ValidationError
-from monitoring_assets import AssetError, load_assets
+from monitoring_assets import AssetError, load_assets, prometheus_rule_resource
 
 ROOT = Path(__file__).resolve().parents[3]
 K8S = ROOT / "k8s"
@@ -106,7 +106,7 @@ def context(runner: Runner, expected: str) -> None:
 
 
 def values_path(assets: Any) -> Path:
-    return assets.assets_root.parent / assets.environment["prometheus_values_path"]
+    return assets.assets_root.parent / assets.environment.prometheus_values_path
 
 
 def stack_template(
@@ -181,7 +181,7 @@ def assets_check(args: argparse.Namespace, runner: Runner) -> None:
     rendered = stack_template(
         runner,
         f"{args.environment}-prometheus",
-        assets.environment["monitoring_namespace"],
+        assets.environment.monitoring_namespace,
         values_path(assets),
         args.stack_version,
     )
@@ -240,12 +240,12 @@ def assets_check(args: argparse.Namespace, runner: Runner) -> None:
 def apply_asset(args: argparse.Namespace, runner: Runner) -> None:
     assets_check(args, runner)
     assets = load_assets(args.assets_root, args.environment, args.service)
-    expected = assets.environment["kube_context"]
+    expected = assets.environment.kube_context
     context(runner, expected)
     if args.operation == "apply-rules":
         rendered = render_rule(args.assets_root, args.environment, args.service)
         kind = "prometheusrule"
-        name = assets.contract["prometheus_rule_name"]
+        name = prometheus_rule_resource(assets)["metadata"]["name"]
     else:
         rendered = render_dashboard(args.assets_root, args.environment, args.service)
         resource = yaml.safe_load(rendered)
@@ -259,7 +259,7 @@ def apply_asset(args: argparse.Namespace, runner: Runner) -> None:
             "--context",
             expected,
             "--namespace",
-            assets.environment["monitoring_namespace"],
+            assets.environment.monitoring_namespace,
         ]
         runner.run(
             [*prefix, "apply", "--dry-run=server", "-f", str(path)],
