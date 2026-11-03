@@ -27,7 +27,7 @@ OBSERVABILITY_BACKEND_CHECK_TEST := $(K8S_VALIDATION_ROOT)/scripts/alloy/test_ch
 OBSERVABILITY_BACKEND_TEST_SCRIPT := $(K8S_VALIDATION_ROOT)/scripts/alloy/backend_ingestion.py
 OBSERVABILITY_SERVICE_DOMAIN ?= product
 OBSERVABILITY_SERVICE_ROOT ?= $(K8S_VALIDATION_REPOSITORY_ROOT)/services/$(OBSERVABILITY_SERVICE_DOMAIN)-service
-OBSERVABILITY_SERVICE_PROBE ?= $(K8S_VALIDATION_ROOT)/scripts/alloy/probe_$(OBSERVABILITY_SERVICE_DOMAIN).py
+OBSERVABILITY_SERVICE_PROBE ?= $(K8S_VALIDATION_ROOT)/scripts/alloy/probe_$(subst -,_,$(OBSERVABILITY_SERVICE_DOMAIN)).py
 OBSERVABILITY_REQUEST_HISTOGRAM_BUCKETS ?= 15
 
 OBSERVABILITY_ACCEPTANCE_TEST := $(K8S_VALIDATION_ROOT)/scripts/alloy/test_disposable_acceptance.py
@@ -84,8 +84,10 @@ observability-verify-test-tooling: python-toolchain-check ## Exercise service-se
 .PHONY: _observability-verify-args-check
 _observability-verify-args-check: _monitoring-assets-args-check
 	@if [ "$(origin VERIFY_MODE)" != "command line" ] || \
-		{ [ "$(VERIFY_MODE)" != "disabled" ] && [ "$(VERIFY_MODE)" != "enabled" ]; }; then \
-		echo "ERROR: VERIFY_MODE=disabled|enabled is required on the make command line."; \
+		{ [ "$(VERIFY_MODE)" != "disabled" ] && \
+		  [ "$(VERIFY_MODE)" != "pre-provision" ] && \
+		  [ "$(VERIFY_MODE)" != "enabled" ]; }; then \
+		echo "ERROR: VERIFY_MODE=disabled|pre-provision|enabled is required on the make command line."; \
 		exit 1; \
 	fi
 	@if [ "$(origin VERIFY_SOURCE_REVISION)" != "command line" ] || \

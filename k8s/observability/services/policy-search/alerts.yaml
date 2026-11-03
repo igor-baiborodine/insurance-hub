@@ -1,0 +1,158 @@
+groups:
+  - interval: 30s
+    name: insurance-hub-policy-search-service
+    rules:
+      - alert: PolicySearchServiceErrorRate
+        annotations:
+          description: More than 10% of at least 20 Policy Search requests failed unexpectedly in five minutes.
+          runbook_action: Split failures by transport and status, inspect safe logs and traces, and verify Elasticsearch before rollback.
+          summary: Policy Search error rate exceeds the pilot threshold
+        expr: >-
+          sum(rate(insurance_hub_policy_search_requests_total{service_name="policy-search-service",insurance_hub_policy_search_outcome=~"internal_error|deadline_exceeded"}[5m]))
+          / clamp_min(sum(rate(insurance_hub_policy_search_requests_total{service_name="policy-search-service"}[5m])), 0.000001) > 0.1
+          and sum(increase(insurance_hub_policy_search_requests_total{service_name="policy-search-service"}[5m])) >= 20
+        for: 2m
+        labels:
+          service: policy-search-service
+          severity: warning
+      - alert: PolicySearchHighLatency
+        annotations:
+          description: Aggregate Policy Search request p95 exceeded 250ms with at least 20 requests in five minutes.
+          runbook_action: Split latency by transport, then inspect Elasticsearch duration and a representative slow trace.
+          summary: Policy Search request latency exceeds the pilot threshold
+        expr: |-
+          histogram_quantile(0.95,
+            sum by (le) (rate(insurance_hub_policy_search_request_duration_seconds_bucket{service_name="policy-search-service"}[5m]))) > 0.25
+          and sum(increase(insurance_hub_policy_search_requests_total{service_name="policy-search-service"}[5m])) >= 20
+        for: 5m
+        labels:
+          service: policy-search-service
+          severity: warning
+      - alert: PolicySearchElasticsearchFailure
+        annotations:
+          description: More than 5% of at least 20 Elasticsearch operations failed in five minutes.
+          runbook_action: Separate search from replace failures and verify Elasticsearch readiness, TLS, and index privileges.
+          summary: Policy Search Elasticsearch failure rate exceeds the pilot threshold
+        expr: >-
+          sum(rate(insurance_hub_policy_search_dependencies_total{service_name="policy-search-service",insurance_hub_policy_search_dependency="elasticsearch",insurance_hub_policy_search_outcome=~"error|deadline_exceeded"}[5m]))
+          / clamp_min(sum(rate(insurance_hub_policy_search_dependencies_total{service_name="policy-search-service",insurance_hub_policy_search_dependency="elasticsearch"}[5m])), 0.000001) > 0.05
+          and sum(increase(insurance_hub_policy_search_dependencies_total{service_name="policy-search-service",insurance_hub_policy_search_dependency="elasticsearch"}[5m])) >= 20
+        for: 2m
+        labels:
+          service: policy-search-service
+          severity: warning
+      - alert: PolicySearchElasticsearchHighLatency
+        annotations:
+          description: Aggregate Elasticsearch operation p95 exceeded 250ms with at least 20 operations in five minutes.
+          runbook_action: Split search and replace latency, inspect Elasticsearch health, and correlate a slow trace.
+          summary: Policy Search Elasticsearch latency exceeds the pilot threshold
+        expr: |-
+          histogram_quantile(0.95,
+            sum by (le) (rate(insurance_hub_policy_search_dependency_duration_seconds_bucket{service_name="policy-search-service",insurance_hub_policy_search_dependency="elasticsearch"}[5m]))) > 0.25
+          and sum(increase(insurance_hub_policy_search_dependencies_total{service_name="policy-search-service",insurance_hub_policy_search_dependency="elasticsearch"}[5m])) >= 20
+        for: 5m
+        labels:
+          service: policy-search-service
+          severity: warning
+      - alert: PolicySearchEventFailure
+        annotations:
+          description: More than 10% of at least 10 completed events failed while event workers were enabled.
+          runbook_action: Split registered and terminated outcomes, inspect safe worker logs, and verify writer readiness.
+          summary: Policy Search event failure rate exceeds the pilot threshold
+        expr: >-
+          sum(rate(insurance_hub_policy_search_events_total{service_name="policy-search-service",insurance_hub_policy_search_outcome=~"malformed|error|cancelled"}[5m]))
+          / clamp_min(sum(rate(insurance_hub_policy_search_events_total{service_name="policy-search-service"}[5m])), 0.000001) > 0.1
+          and sum(increase(insurance_hub_policy_search_events_total{service_name="policy-search-service"}[5m])) >= 10
+          and max(insurance_hub_policy_search_event_worker_enabled{service_name="policy-search-service"}) > 0
+        for: 2m
+        labels:
+          service: policy-search-service
+          severity: warning
+      - alert: PolicySearchEventStalled
+        annotations:
+          description: An enabled registered or terminated worker has held one synchronous record for more than 30 seconds.
+          runbook_action: Inspect the fixed event type, writer and Kafka readiness, and a correlated trace; preserve offsets before restart or rollback.
+          summary: A Policy Search event worker appears stalled
+        expr: >-
+          max by (insurance_hub_policy_search_event_type) (insurance_hub_policy_search_event_worker_in_flight_age_seconds{service_name="policy-search-service"}) > 30
+          and on (insurance_hub_policy_search_event_type)
+          max by (insurance_hub_policy_search_event_type) (insurance_hub_policy_search_event_worker_enabled{service_name="policy-search-service"}) == 1
+        for: 2m
+        labels:
+          service: policy-search-service
+          severity: warning
+      - alert: PolicySearchResourcePressure
+        annotations:
+          description: Policy Search memory exceeded 80% of 256MiB or CPU exceeded 80% of 300m for five minutes.
+          runbook_action: Inspect query and event load, runtime memory, throttling, pod events, and rollout identity.
+          summary: Policy Search resource use exceeds the pilot budget
+        expr: >-
+          sum(container_memory_working_set_bytes{namespace="qa-svc",pod=~"qa-policy-search-api-.*",pod!~"qa-policy-search-api-legacy-.*",container="policy-search-api"}) > 214748364.8
+          or sum(rate(container_cpu_usage_seconds_total{namespace="qa-svc",pod=~"qa-policy-search-api-.*",pod!~"qa-policy-search-api-legacy-.*",container="policy-search-api"}[5m])) > 0.24
+        for: 5m
+        labels:
+          service: policy-search-service
+          severity: warning
+      - alert: PolicySearchUnavailable
+        annotations:
+          description: The QA Policy Search Deployment has been unavailable or under-replicated for two minutes.
+          runbook_action: Check rollout, readiness, configuration, Elasticsearch, and Kafka assignment before rollback.
+          summary: Policy Search has fewer available replicas than desired
+        expr: >-
+          sum(kube_deployment_spec_replicas{namespace="qa-svc",deployment="qa-policy-search-api"})
+          > sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-policy-search-api"})
+        for: 2m
+        labels:
+          service: policy-search-service
+          severity: warning
+      - alert: PolicySearchTelemetryMissing
+        annotations:
+          description: A Policy Search replica is available, but no bounded Go runtime sample has arrived for two minutes.
+          runbook_action: Verify OTLP configuration, Alloy receiver, and remote-write health before changing the rule.
+          summary: Policy Search is available but runtime telemetry is missing
+        expr: >-
+          sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-policy-search-api"}) > 0
+          and on() absent_over_time(go_goroutine_count{service_name="policy-search-service",deployment_environment_name="qa",service_implementation="go"}[2m])
+        for: 1m
+        labels:
+          service: policy-search-service
+          severity: warning
+      - alert: PolicySearchTelemetryDeliveryFailure
+        annotations:
+          description: Alloy reported a Loki drop, Prometheus remote-write failure, or OTLP span export failure in five minutes.
+          runbook_action: Identify the failed signal and backend, inspect bounded retry and drop counters, and preserve service availability.
+          summary: The shared Policy Search telemetry path dropped or failed data
+        expr: >-
+          sum(increase(loki_write_dropped_entries_total{job=~".*alloy.*"}[5m])) > 0
+          or sum(increase(prometheus_remote_storage_samples_failed_total{job=~".*alloy.*"}[5m])) > 0
+          or sum(increase(prometheus_remote_storage_samples_dropped_total{job=~".*alloy.*"}[5m])) > 0
+          or sum(increase(otelcol_exporter_send_failed_spans_total{job=~".*alloy.*"}[5m])) > 0
+        labels:
+          service: policy-search-service
+          severity: warning
+      - alert: PolicySearchTelemetryBacklog
+        annotations:
+          description: Remote-write lag exceeded 30 seconds while samples were pending, or an OTLP exporter queue exceeded 80%.
+          runbook_action: Check backend reachability and Alloy queue or WAL health, then verify recovery within two minutes.
+          summary: The shared Policy Search telemetry path has a sustained backlog
+        expr: |-
+          (sum(prometheus_remote_storage_samples_pending{job=~".*alloy.*"}) > 0
+            and
+            time() - (max(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job=~".*alloy.*"}) or vector(0)) > 30)
+          or sum(otelcol_exporter_queue_size{job=~".*alloy.*"})
+            /
+            clamp_min(sum(otelcol_exporter_queue_capacity{job=~".*alloy.*"}), 1) > 0.8
+        for: 2m
+        labels:
+          service: policy-search-service
+          severity: warning
+      - alert: PolicySearchUnexpectedRestart
+        annotations:
+          description: A Policy Search container restarted during the last 15 minutes.
+          runbook_action: Inspect prior state, safe logs, pod events, resource pressure, and rollout identity before rollback.
+          summary: Policy Search restarted unexpectedly
+        expr: >-
+          sum(increase(kube_pod_container_status_restarts_total{namespace="qa-svc",pod=~"qa-policy-search-api-.*",pod!~"qa-policy-search-api-legacy-.*",container="policy-search-api"}[15m])) > 0
+        labels:
+          service: policy-search-service
+          severity: warning

@@ -88,6 +88,7 @@ func TestProvider_ExportsIdentifiedTracesAndCumulativeRuntimeMetrics(t *testing.
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		provider.MeterProvider(),
 		provider.TracerProvider(),
+		true,
 	)
 	if err != nil {
 		t.Fatal(err)

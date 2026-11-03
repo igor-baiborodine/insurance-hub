@@ -441,7 +441,12 @@ class DockerHarness:
         return result.stdout.strip()
 
     def probe(
-        self, arguments: Sequence[str], ownership_file: Path, *, timeout: float = 660
+        self,
+        arguments: Sequence[str],
+        ownership_file: Path,
+        *,
+        service_domain: str = "product",
+        timeout: float = 660,
     ) -> None:
         """Let the probe unwind, then reclaim its separately owned resources."""
         child = subprocess.Popen(
@@ -455,7 +460,8 @@ class DockerHarness:
             stdout, stderr = child.communicate(timeout=timeout)
             if child.returncode != 0:
                 raise HarnessError(
-                    f"Product probe failed ({child.returncode}): {stderr.strip() or stdout.strip()}"
+                    f"{service_domain} probe failed ({child.returncode}): "
+                    f"{stderr.strip() or stdout.strip()}"
                 )
         except BaseException as primary:
             recovery_errors: list[Exception] = []
@@ -478,7 +484,7 @@ class DockerHarness:
                             child.communicate(timeout=alloy_runtime.teardown_timeout(5))
                         except subprocess.TimeoutExpired as error:
                             recovery_errors.append(error)
-                    # The Product binary has its own session; the probe records its
+                    # The service binary has its own session; the probe records its
                     # group before readiness, allowing recovery after forced death.
                     if ownership_file.exists():
                         try:
@@ -488,7 +494,7 @@ class DockerHarness:
                         except (OSError, ValueError) as error:
                             if not isinstance(error, ProcessLookupError):
                                 recovery_errors.append(error)
-                    container = f"ih-product-probe-{child.pid}"
+                    container = f"ih-{service_domain}-probe-{child.pid}"
                     try:
                         if self.container_exists(container):
                             self.command(["docker", "rm", "-f", container], timeout=15)
@@ -1017,6 +1023,11 @@ def validate_database_pool_and_runtime_metrics(
     if float(pool_max[0]["value"][1]) != 4:
         raise HarnessError(f"{service_domain} pool maximum is not the configured value 4")
 
+    validate_runtime_metrics(service_domain, prometheus_port)
+
+
+def validate_runtime_metrics(service_domain: str, prometheus_port: int) -> None:
+    service_name = f"{service_domain}-service"
     runtime_metrics = {
         "go_memory_used_bytes": [
             {"go_memory_type": "stack"},
@@ -1039,6 +1050,128 @@ def validate_database_pool_and_runtime_metrics(
             raise HarnessError(
                 f"{metric_name} is {values}, expected the probe's 256MiB limit in bytes"
             )
+
+
+def validate_histogram_inventory(
+    prometheus_port: int,
+    metric_name: str,
+    service_name: str,
+    dimensions: Sequence[Mapping[str, str]],
+) -> None:
+    bucket_name = f"{metric_name}_bucket"
+    response = wait_json(
+        f"http://127.0.0.1:{prometheus_port}/api/v1/query?"
+        + urllib.parse.urlencode({"query": f'{bucket_name}{{service_name="{service_name}"}}'}),
+        lambda value: len(query_results(value)) >= len(dimensions),
+        f"{metric_name} bucket series",
+    )
+    identity_keys = set(METRIC_IDENTITY) | {
+        "service_name",
+        "job",
+        "instance",
+        "__name__",
+        "le",
+    }
+    actual = {
+        tuple(
+            sorted(
+                (key, value)
+                for key, value in result.get("metric", {}).items()
+                if key not in identity_keys
+            )
+        )
+        for result in query_results(response)
+    }
+    expected = {tuple(sorted(value.items())) for value in dimensions}
+    if actual != expected:
+        raise HarnessError(f"{metric_name} bucket dimensions are {actual}, expected {expected}")
+    infinite = {
+        tuple(
+            sorted(
+                (key, value)
+                for key, value in result.get("metric", {}).items()
+                if key not in identity_keys
+            )
+        )
+        for result in query_results(response)
+        if result.get("metric", {}).get("le") == "+Inf"
+    }
+    if infinite != expected:
+        raise HarnessError(f"{metric_name} is missing +Inf buckets")
+    metric_series(prometheus_port, f"{metric_name}_count", service_name, dimensions)
+    metric_series(prometheus_port, f"{metric_name}_sum", service_name, dimensions)
+
+
+def validate_policy_search_metrics(prometheus_port: int) -> None:
+    service_name = "policy-search-service"
+    prefix = "insurance_hub_policy_search_"
+    dependency_dimensions = [
+        {
+            f"{prefix}dependency": "elasticsearch",
+            f"{prefix}operation": operation,
+            f"{prefix}outcome": "success",
+        }
+        for operation in ("search", "replace")
+    ]
+    dependencies = metric_series(
+        prometheus_port,
+        f"{prefix}dependencies_total",
+        service_name,
+        dependency_dimensions,
+    )
+    dependency_values = {
+        result["metric"][f"{prefix}operation"]: float(result["value"][1]) for result in dependencies
+    }
+    if dependency_values != {"search": 1, "replace": 2}:
+        raise HarnessError(f"Policy Search dependency counts are {dependency_values}")
+    validate_histogram_inventory(
+        prometheus_port,
+        f"{prefix}dependency_duration_seconds",
+        service_name,
+        dependency_dimensions,
+    )
+
+    event_dimensions = [
+        {
+            f"{prefix}event_type": event_type,
+            f"{prefix}outcome": "success",
+        }
+        for event_type in ("registered", "terminated")
+    ]
+    events = metric_series(
+        prometheus_port,
+        f"{prefix}events_total",
+        service_name,
+        event_dimensions,
+    )
+    if any(float(result["value"][1]) != 1 for result in events):
+        raise HarnessError("Policy Search event counters are not exactly one each")
+    validate_histogram_inventory(
+        prometheus_port,
+        f"{prefix}event_duration_seconds",
+        service_name,
+        event_dimensions,
+    )
+    worker_dimensions = [
+        {f"{prefix}event_type": event_type} for event_type in ("registered", "terminated")
+    ]
+    enabled = metric_series(
+        prometheus_port,
+        f"{prefix}event_worker_enabled",
+        service_name,
+        worker_dimensions,
+    )
+    ages = metric_series(
+        prometheus_port,
+        f"{prefix}event_worker_in_flight_age_seconds",
+        service_name,
+        worker_dimensions,
+    )
+    if any(float(result["value"][1]) != 1 for result in enabled):
+        raise HarnessError("Policy Search event worker enabled gauges are not one")
+    if any(float(result["value"][1]) != 0 for result in ages):
+        raise HarnessError("Policy Search event worker age gauges did not return to zero")
+    validate_runtime_metrics("policy-search", prometheus_port)
 
 
 def start_prometheus(harness: DockerHarness, enabled: bool) -> tuple[str, int]:
@@ -1090,8 +1223,9 @@ def validate_service_backends(
 ) -> None:
     service_name = f"{service_domain}-service"
     metric_domain = service_domain.replace("-", "_")
+    operation = "search" if service_domain == "policy-search" else "list"
     request_dimensions = {
-        f"insurance_hub_{metric_domain}_operation": "list",
+        f"insurance_hub_{metric_domain}_operation": operation,
         f"insurance_hub_{metric_domain}_transport": "http",
         f"insurance_hub_{metric_domain}_outcome": "success",
         "http_response_status_code": "200",
@@ -1117,7 +1251,12 @@ def validate_service_backends(
         request_dimensions,
         REQUEST_HISTOGRAM_BOUNDS,
     )
-    validate_database_pool_and_runtime_metrics(service_domain, prometheus_port)
+    if service_domain == "product":
+        validate_database_pool_and_runtime_metrics(service_domain, prometheus_port)
+    elif service_domain == "policy-search":
+        validate_policy_search_metrics(prometheus_port)
+    else:
+        raise HarnessError(f"no backend signal validator is registered for {service_domain}")
     target = prom_query(prometheus_port, f'target_info{{service_name="{service_name}"}}')
     if len(query_results(target)) != 1:
         raise HarnessError(f"{service_domain} target_info is missing or duplicated")
@@ -1133,7 +1272,7 @@ def validate_service_backends(
     )
     # Filter the retained JSON body without a query-time parser so the returned
     # stream map contains only stored index labels, not extracted fields.
-    query = f'{{service_name="{service_name}"}} |= "{SERVICE_TRACE_ID}"'
+    query = f'{{service_name="{service_name}"}} |= "{SERVICE_TRACE_ID}" |= "request completed"'
     start = int((time.time() - 300) * 1_000_000_000)
     end = int((time.time() + 30) * 1_000_000_000)
     url = f"http://127.0.0.1:{loki_port}/loki/api/v1/query_range?" + urllib.parse.urlencode(
@@ -1411,7 +1550,8 @@ def execute(args: argparse.Namespace) -> None:
                     "--trace-id",
                     SERVICE_TRACE_ID,
                 ],
-                root / "probe-product-pgid",
+                root / f"probe-{args.service_domain}-pgid",
+                service_domain=args.service_domain,
             )
             validate_service_backends(
                 args.service_domain,

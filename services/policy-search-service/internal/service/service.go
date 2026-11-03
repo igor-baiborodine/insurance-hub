@@ -204,6 +204,7 @@ func run(
 		logger,
 		provider.MeterProvider(),
 		provider.TracerProvider(),
+		settings.Events.Enabled,
 	)
 	if err != nil {
 		return fail(err)

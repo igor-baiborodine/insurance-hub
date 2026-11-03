@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from argparse import Namespace
 from contextlib import nullcontext
 from pathlib import Path
 from unittest import mock
@@ -47,11 +48,15 @@ class TestProductObservabilityVerification:
 
         unregistered_contract = dataclasses.replace(
             cross_contract,
-            service="policy-search",
+            service="missing-service",
+            verification=VerificationContract(
+                probe="missing-service",
+                expected_signals=self.assets.contract.verification.expected_signals,
+            ),
         )
         unregistered = dataclasses.replace(
             self.assets,
-            service="policy-search",
+            service="missing-service",
             contract=unregistered_contract,
         )
         with pytest.raises(verifier.VerificationError, match="is not registered"):
@@ -151,7 +156,8 @@ class TestProductObservabilityVerification:
             with pytest.raises(verifier.VerificationError, match="differs from the requested"):
                 target.flux_revision()
 
-    def test_deployment_uses_selected_identity_and_deployment_selector(self) -> None:
+    @pytest.mark.parametrize("mode", ["pre-provision", "enabled"])
+    def test_deployment_uses_selected_identity_and_deployment_selector(self, mode: str) -> None:
         # given
         target = verifier.KubernetesTarget(self.assets, "a" * 40)
         deployment = {
@@ -189,7 +195,7 @@ class TestProductObservabilityVerification:
 
         # when
         with mock.patch.object(target, "json", side_effect=[deployment, config_map, pods]) as query:
-            observed = target.deployment("enabled")
+            observed = target.deployment(mode)
 
         # then
         assert observed["pods"] == [
@@ -198,6 +204,56 @@ class TestProductObservabilityVerification:
         assert query.call_args_list[-1] == mock.call(
             "qa-svc", "get", "pods", "-l", "app.kubernetes.io/name=product-api"
         )
+
+    def test_pre_provision_checks_enabled_workload_without_monitoring_assets(self) -> None:
+        # given
+        args = Namespace(
+            assets_root=ASSETS_ROOT,
+            environment="qa",
+            service="product",
+            mode="pre-provision",
+            source_revision="a" * 40,
+        )
+        target = mock.Mock(spec=verifier.KubernetesTarget)
+        target.flux_revision.return_value = "main@sha1:" + "a" * 40
+        target.deployment.return_value = {
+            "pods": [{"pod_uid": "pod-uid", "image_id": "registry/product@sha256:abc"}]
+        }
+        target.monitoring_namespace = "qa-monitoring"
+        services = mock.Mock(return_value=[("product", "qa-svc", "qa-product-api", 80)])
+        workload = mock.Mock(return_value=1)
+        enabled_signals = mock.Mock()
+        probe = verifier.ServiceProbe(
+            service="product",
+            services=services,
+            workload=workload,
+            enabled_signals=enabled_signals,
+            result_key="product_rows",
+        )
+
+        # when
+        with (
+            mock.patch.object(verifier, "load_assets", return_value=self.assets),
+            mock.patch.object(verifier, "select_probe", return_value=probe),
+            mock.patch.object(verifier, "KubernetesTarget", return_value=target),
+            mock.patch.object(
+                verifier, "forwards", return_value=nullcontext({"product": 1001})
+            ) as forwarded,
+        ):
+            observed = verifier.execute(args)
+
+        # then
+        target.coordinates.assert_called_once_with()
+        target.flux_revision.assert_called_once_with()
+        target.deployment.assert_called_once_with("pre-provision")
+        target.monitoring_assets.assert_not_called()
+        forwarded.assert_called_once_with(target, [("product", "qa-svc", "qa-product-api", 80)])
+        workload.assert_called_once_with({"product": 1001}, observed["trace_id"])
+        enabled_signals.assert_not_called()
+        assert observed["mode"] == "pre-provision"
+        assert observed["monitoring"] == {}
+        assert observed["signals"] == {}
+        assert observed["product_rows"] == 1
 
     def test_deployment_rejects_missing_service_identity(self) -> None:
         # given
@@ -311,3 +367,109 @@ class TestProductObservabilityVerification:
         assert {"traceparent": "00-" + "a" * 32 + "-0123456789abcdef-01"} == request.call_args_list[
             -1
         ].args[1]
+
+    def test_policy_search_probe_resolves_its_own_target_and_safe_read(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "policy-search")
+        target = verifier.KubernetesTarget(assets, "a" * 40)
+        responses = ["live\n", "ready\n", '{"policies":[{"number":"SYN-267"}]}']
+
+        # when
+        probe = verifier.select_probe(assets)
+        services = probe.services(target)
+        with mock.patch.object(verifier, "request_text", side_effect=responses) as request:
+            rows = probe.workload({"health": 1001, "policy-search": 1002}, "b" * 32)
+
+        # then
+        assert probe.service == "policy-search"
+        assert services == [
+            ("policy-search", "qa-svc", "qa-policy-search-api", 80),
+            ("health", "qa-svc", "qa-policy-search-api-management", 8081),
+        ]
+        assert rows == 1
+        assert request.call_args_list[-1].args[0].endswith("/policies?q=%2A")
+        assert request.call_args_list[-1].args[1] == {
+            "traceparent": "00-" + "b" * 32 + "-0123456789abcdef-01"
+        }
+
+    @pytest.mark.parametrize(
+        ("configured", "observed"),
+        [("true", "1"), ("false", "0")],
+    )
+    def test_policy_search_enabled_signals_match_deployment_worker_mode(
+        self, configured: str, observed: str
+    ) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "policy-search")
+        worker_results = [
+            {
+                "metric": {"insurance_hub_policy_search_event_type": event_type},
+                "value": [0, observed],
+            }
+            for event_type in ("registered", "terminated")
+        ]
+
+        def observed_signal(description: str, _probe: object) -> object:
+            if description == "Policy Search event_workers metric":
+                return worker_results
+            if "trace" in description:
+                return [{"trace": "observed"}]
+            return [{"value": [0, "1"]}]
+
+        # when
+        with (
+            mock.patch.object(verifier, "wait_for", side_effect=observed_signal),
+            mock.patch.object(
+                verifier,
+                "request_json",
+                return_value={"data": {"result": [{"value": [0, "0"]}]}},
+            ),
+        ):
+            result = verifier.verify_policy_search_enabled_signals(
+                assets,
+                {"prometheus": 1001, "loki": 1002, "tempo": 1003},
+                "a" * 32,
+                "pod-uid",
+                {"EVENT_WORKERS_ENABLED": configured},
+            )
+
+        # then
+        assert result["metric_series"]["event_workers"] == 2
+
+    @pytest.mark.parametrize(
+        ("configured", "observed"),
+        [("true", "0"), ("false", "1")],
+    )
+    def test_policy_search_enabled_signals_reject_worker_mode_mismatch(
+        self, configured: str, observed: str
+    ) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "policy-search")
+        worker_results = [
+            {
+                "metric": {"insurance_hub_policy_search_event_type": event_type},
+                "value": [0, observed],
+            }
+            for event_type in ("registered", "terminated")
+        ]
+
+        def observed_signal(description: str, _probe: object) -> object:
+            if description == "Policy Search event_workers metric":
+                return worker_results
+            return [{"value": [0, "1"]}]
+
+        # when / then
+        with (
+            mock.patch.object(verifier, "wait_for", side_effect=observed_signal),
+            pytest.raises(
+                verifier.VerificationError,
+                match="differs from Deployment EVENT_WORKERS_ENABLED",
+            ),
+        ):
+            verifier.verify_policy_search_enabled_signals(
+                assets,
+                {"prometheus": 1001, "loki": 1002, "tempo": 1003},
+                "a" * 32,
+                "pod-uid",
+                {"EVENT_WORKERS_ENABLED": configured},
+            )

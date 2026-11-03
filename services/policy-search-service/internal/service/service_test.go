@@ -14,6 +14,12 @@ import (
 	"time"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"go.opentelemetry.io/otel/trace"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
@@ -175,6 +181,57 @@ func TestRun_DisabledWorkersAcquireNoEventResources(t *testing.T) {
 
 	// when
 	_ = run(context.Background(), settings, discardLogger(), deps)
+}
+
+func TestRun_EventWorkerGaugeUsesConfiguredMode(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		enabled bool
+		want    int64
+	}{
+		{name: "disabled", enabled: false, want: 0},
+		{name: "enabled", enabled: true, want: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			reader := sdkmetric.NewManualReader()
+			meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			t.Cleanup(func() { _ = meterProvider.Shutdown(context.Background()) })
+			provider := &workerMetricTelemetryProvider{
+				meterProvider:  meterProvider,
+				tracerProvider: tracenoop.NewTracerProvider(),
+			}
+			settings := testConfig(t)
+			settings.Events.Enabled = test.enabled
+			deps, _ := testDependencies(&fakeQuery{})
+			deps.newTelemetry = func(
+				context.Context,
+				string,
+				config.Telemetry,
+			) (telemetryProvider, error) {
+				return provider, nil
+			}
+			deps.newQuery = func(
+				config.Elasticsearch,
+				*telemetry.DependencyObserver,
+			) (queryRuntime, error) {
+				return nil, errors.New("stop after event observer")
+			}
+
+			// when
+			err := run(context.Background(), settings, discardLogger(), deps)
+
+			// then
+			if err == nil ||
+				!strings.Contains(err.Error(), "stop after event observer") {
+				t.Fatalf("run error = %v", err)
+			}
+			assertWorkerEnabledMetrics(t, reader, map[string]int64{
+				"registered": test.want,
+				"terminated": test.want,
+			})
+		})
+	}
 }
 
 func TestRun_EnabledWorkersStartReadinessAndBoundedShutdown(t *testing.T) {
@@ -548,6 +605,81 @@ func testDependencies(query queryRuntime) (dependencies, <-chan string) {
 		return query, nil
 	}
 	return deps, addresses
+}
+
+type workerMetricTelemetryProvider struct {
+	meterProvider  *sdkmetric.MeterProvider
+	tracerProvider trace.TracerProvider
+}
+
+func (provider *workerMetricTelemetryProvider) MeterProvider() metric.MeterProvider {
+	return provider.meterProvider
+}
+
+func (provider *workerMetricTelemetryProvider) TracerProvider() trace.TracerProvider {
+	return provider.tracerProvider
+}
+
+func (*workerMetricTelemetryProvider) HTTPPropagator() propagation.TextMapPropagator {
+	return propagation.TraceContext{}
+}
+
+func (*workerMetricTelemetryProvider) GRPCPropagator() propagation.TextMapPropagator {
+	return propagation.TraceContext{}
+}
+
+func (*workerMetricTelemetryProvider) Shutdown(context.Context) error { return nil }
+
+func assertWorkerEnabledMetrics(
+	t *testing.T,
+	reader *sdkmetric.ManualReader,
+	want map[string]int64,
+) {
+	t.Helper()
+	var metrics metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &metrics); err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]int64, len(want))
+	for _, scope := range metrics.ScopeMetrics {
+		for _, measurement := range scope.Metrics {
+			gauge, ok := measurement.Data.(metricdata.Gauge[int64])
+			if !ok ||
+				measurement.Name != "insurance_hub.policy_search.event.worker.enabled" {
+				continue
+			}
+			for _, point := range gauge.DataPoints {
+				eventType := ""
+				for _, item := range point.Attributes.ToSlice() {
+					if string(
+						item.Key,
+					) == "insurance_hub.policy_search.event.type" {
+						eventType = item.Value.AsString()
+					}
+				}
+				if _, expected := want[eventType]; !expected {
+					t.Fatalf(
+						"unexpected event-worker metric attributes = %v",
+						point.Attributes,
+					)
+				}
+				got[eventType] = point.Value
+			}
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("event-worker enabled metrics = %v, want %v", got, want)
+	}
+	for eventType, expected := range want {
+		if got[eventType] != expected {
+			t.Errorf(
+				"event-worker enabled metric %s = %d, want %d",
+				eventType,
+				got[eventType],
+				expected,
+			)
+		}
+	}
 }
 
 func testConfig(t *testing.T) config.Config {

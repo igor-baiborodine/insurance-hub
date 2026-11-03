@@ -1,0 +1,216 @@
+{
+  "alerts": {
+    "expression_markers": {
+      "PolicySearchServiceErrorRate": [
+        "> 0.1",
+        ">= 20",
+        "[5m]"
+      ],
+      "PolicySearchHighLatency": [
+        "histogram_quantile(0.95",
+        "> 0.25",
+        ">= 20"
+      ],
+      "PolicySearchElasticsearchFailure": [
+        "insurance_hub_policy_search_dependency=\"elasticsearch\"",
+        "> 0.05",
+        ">= 20"
+      ],
+      "PolicySearchElasticsearchHighLatency": [
+        "insurance_hub_policy_search_dependency_duration_seconds_bucket",
+        "> 0.25",
+        ">= 20"
+      ],
+      "PolicySearchEventFailure": [
+        "insurance_hub_policy_search_event_worker_enabled",
+        "> 0.1",
+        ">= 10"
+      ],
+      "PolicySearchEventStalled": [
+        "insurance_hub_policy_search_event_worker_in_flight_age_seconds",
+        "> 30",
+        "insurance_hub_policy_search_event_worker_enabled"
+      ],
+      "PolicySearchResourcePressure": [
+        "> 214748364.8",
+        "> 0.24"
+      ],
+      "PolicySearchUnavailable": [
+        "kube_deployment_spec_replicas",
+        "kube_deployment_status_replicas_available"
+      ],
+      "PolicySearchTelemetryMissing": [
+        "absent_over_time",
+        "go_goroutine_count",
+        "[2m]"
+      ],
+      "PolicySearchTelemetryDeliveryFailure": [
+        "loki_write_dropped_entries_total",
+        "prometheus_remote_storage_samples_failed_total",
+        "prometheus_remote_storage_samples_dropped_total",
+        "otelcol_exporter_send_failed_spans_total"
+      ],
+      "PolicySearchTelemetryBacklog": [
+        "prometheus_remote_storage_samples_pending",
+        "highest_sent_timestamp_seconds",
+        "otelcol_exporter_queue_size",
+        "> 0.8"
+      ],
+      "PolicySearchUnexpectedRestart": [
+        "kube_pod_container_status_restarts_total",
+        "[15m]"
+      ]
+    },
+    "for": {
+      "PolicySearchServiceErrorRate": "2m",
+      "PolicySearchHighLatency": "5m",
+      "PolicySearchElasticsearchFailure": "2m",
+      "PolicySearchElasticsearchHighLatency": "5m",
+      "PolicySearchEventFailure": "2m",
+      "PolicySearchEventStalled": "2m",
+      "PolicySearchResourcePressure": "5m",
+      "PolicySearchUnavailable": "2m",
+      "PolicySearchTelemetryMissing": "1m",
+      "PolicySearchTelemetryDeliveryFailure": null,
+      "PolicySearchTelemetryBacklog": "2m",
+      "PolicySearchUnexpectedRestart": null
+    },
+    "group_name": "insurance-hub-policy-search-service",
+    "interval": "30s",
+    "common_labels": {
+      "service": "policy-search-service",
+      "severity": "warning"
+    },
+    "inventory": {
+      "common": [
+        "PolicySearchServiceErrorRate",
+        "PolicySearchHighLatency",
+        "PolicySearchResourcePressure",
+        "PolicySearchUnavailable",
+        "PolicySearchTelemetryMissing",
+        "PolicySearchTelemetryDeliveryFailure",
+        "PolicySearchTelemetryBacklog",
+        "PolicySearchUnexpectedRestart"
+      ],
+      "dependencies": {
+        "elasticsearch": [
+          "PolicySearchElasticsearchFailure",
+          "PolicySearchElasticsearchHighLatency"
+        ]
+      },
+      "workers": {
+        "events": [
+          "PolicySearchEventFailure",
+          "PolicySearchEventStalled"
+        ]
+      }
+    },
+    "path": "alerts.yaml",
+    "prometheus_rule_name": "policy-search-service",
+    "required_annotations": [
+      "summary",
+      "description",
+      "runbook_action"
+    ],
+    "test_path": "alerts.test.yaml"
+  },
+  "acceptance": {
+    "path": "acceptance.json"
+  },
+  "capabilities": {
+    "dependencies": [
+      "elasticsearch"
+    ],
+    "workers": [
+      "events"
+    ]
+  },
+  "dashboard": {
+    "application_selector": "service_name=\"policy-search-service\"",
+    "editable": false,
+    "minimum_prometheus_targets": 30,
+    "path": "dashboard.json",
+    "refresh": "30s",
+    "required_markers": [
+      "\"type\": \"loki\"",
+      "\"type\": \"tempo\"",
+      "trace_id",
+      "Legitimate idle time",
+      "missing telemetry",
+      "collection failure",
+      "pod!~\\\"qa-policy-search-api-legacy-.*\\\""
+    ],
+    "outcomes": {
+      "common": {
+        "availability": [
+          "Readiness and restarts"
+        ],
+        "investigation": [
+          "Failed request and worker investigation logs",
+          "Policy Search traces",
+          "Investigation workflow"
+        ],
+        "pod_resources": [
+          "Pod CPU and memory"
+        ],
+        "requests": [
+          "Request rate",
+          "Service error rate",
+          "Request latency percentiles"
+        ],
+        "runtime": [
+          "Go runtime"
+        ],
+        "telemetry_delivery": [
+          "Telemetry delivery health"
+        ]
+      },
+      "dependencies": {
+        "elasticsearch": [
+          "Elasticsearch outcomes",
+          "Elasticsearch latency percentiles"
+        ]
+      },
+      "workers": {
+        "events": [
+          "Event rate and outcomes",
+          "Event duration percentiles",
+          "Event worker state"
+        ]
+      }
+    },
+    "required_query_filters": [
+      "deployment_environment_name=~\"$environment\"",
+      "service_implementation=~\"$implementation\""
+    ],
+    "uid": "insurance-hub-policy-search-service",
+    "variables": {
+      "environment": "deployment_environment_name",
+      "implementation": "service_implementation"
+    }
+  },
+  "fixture": {
+    "minimum_scrapes_per_series": 4,
+    "path": "fixture.json"
+  },
+  "schema_version": 2,
+  "service": "policy-search",
+  "service_name": "policy-search-service",
+  "supported_environments": [
+    "qa"
+  ],
+  "verification": {
+    "expected_signals": {
+      "logs": [
+        "trace_id"
+      ],
+      "metrics": [
+        "insurance_hub_policy_search_requests_total"
+      ],
+      "traces": [
+        "policy-search-service"
+      ]
+    },
+    "probe": "policy-search"
+  }
+}
