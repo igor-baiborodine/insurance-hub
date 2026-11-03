@@ -41,8 +41,9 @@ dependency-aware health, and bounded signal-driven shutdown.
 - The [observability runbook](observability-runbook.md) owns monitoring validation, QA
   provisioning, Grafana investigation, alert response and monitoring rollback.
 
-The runbooks use QA for concrete operational examples. This README remains the module reference
-for prerequisites, development, configuration, interfaces and architecture.
+The runbooks use QA for concrete operational examples and document the corresponding local-dev
+adaptations. This README remains the module reference for prerequisites, development,
+configuration, interfaces and architecture.
 
 ## Prerequisites
 
