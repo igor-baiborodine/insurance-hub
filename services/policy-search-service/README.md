@@ -2,6 +2,7 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
 - [Policy Search service](#policy-search-service)
+  - [Operational runbooks](#operational-runbooks)
   - [Prerequisites](#prerequisites)
     - [Mutating and runtime targets](#mutating-and-runtime-targets)
     - [Non-mutating validation targets](#non-mutating-validation-targets)
@@ -12,7 +13,6 @@
     - [Repository topology](#repository-topology)
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
-  - [Build and operate the deployment](#build-and-operate-the-deployment)
   - [Policy search RPC and HTTP gateway](#policy-search-rpc-and-http-gateway)
   - [Architecture and ownership](#architecture-and-ownership)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
@@ -34,11 +34,15 @@ gateway. It owns generated Go and Swagger 2.0 artifacts, Elasticsearch query and
 adapters, typed configuration, safe structured logging, optional trace and metric export,
 dependency-aware health, and bounded signal-driven shutdown.
 
-Use the
-[observability runbook](../../docs/migration/phase-4/policy-search-service/observability-runbook.md)
-for monitoring validation, QA provisioning, Grafana investigation and monitoring rollback. The
-[deployment runbook](../../docs/migration/phase-4/policy-search-service/deployment-runbook.md)
-owns service deployment and event-fixture operations.
+## Operational runbooks
+
+- The [deployment runbook](deployment-runbook.md) owns QA dependency provisioning, release
+  verification, diagnostics, application rollback and resource retirement.
+- The [observability runbook](observability-runbook.md) owns monitoring validation, QA
+  provisioning, Grafana investigation, alert response and monitoring rollback.
+
+The runbooks use QA for concrete operational examples. This README remains the module reference
+for prerequisites, development, configuration, interfaces and architecture.
 
 ## Prerequisites
 
@@ -357,72 +361,6 @@ connection, gRPC and management cleanup
 share the cutoff at `SHUTDOWN_TIMEOUT - OTEL_EXPORTER_OTLP_TIMEOUT`; telemetry receives the final
 reserved interval within the one overall deadline.
 
-## Build and operate the deployment
-
-Docker, kubectl and Kind are required for image and local deployment commands. From the repository
-root, validate the image and both isolated overlays without changing a cluster:
-
-```sh
-make go-svc-image-check SVC_NAME=policy-search
-make go-svc-deploy-check SVC_NAME=policy-search
-make go-svc-deploy-test-tooling SVC_NAME=policy-search
-make go-svc-deploy-test SVC_NAME=policy-search
-```
-
-The local-dev target uses context `kind-local-dev-insurance-hub` and namespace `local-dev-all`.
-The operator must export the exact catalog coordinates plus the image produced from current `HEAD`:
-
-```sh
-export DEPLOY_ENV=local-dev
-export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
-export DEPLOY_SVC_NS=local-dev-all
-export DEPLOY_DATA_NS=local-dev-all
-export DEPLOY_IMAGE_REF="insurance-hub-policy-search-api:1.0.0-local.$(git rev-parse --short=12 HEAD)"
-
-export FIXTURE_CONFIRM=setup-policy-views-issue-229
-make go-svc-fixture-setup SVC_NAME=policy-search
-unset FIXTURE_CONFIRM
-make go-svc-fixture-verify SVC_NAME=policy-search
-
-make go-svc-deploy-preflight SVC_NAME=policy-search
-make go-svc-image-load SVC_NAME=policy-search
-make go-svc-deploy SVC_NAME=policy-search
-make go-svc-deploy-verify SVC_NAME=policy-search
-```
-
-When replacing an existing local image, also export its exact reference as
-`DEPLOY_PREVIOUS_IMAGE_REF`. The preflight accepts that declared predecessor until apply; the
-post-rollout verification accepts only `DEPLOY_IMAGE_REF`. For the accepted Echo predecessor, the
-preflight also recognizes its exact older environment and deny-all-egress policy: only the two
-Elasticsearch credential variables and the DNS/Elasticsearch egress rules may be absent. Apply
-stages those query settings with the new image. Extra variables, ingress drift and any stale
-post-rollout state remain errors.
-
-The disposable target first verifies the native reader permission boundary against a
-security-enabled Elasticsearch 8.19.6 Docker node. It then builds the exact committed image and
-creates a security-enabled Elasticsearch 8.19.6 node, a hostname-verified TLS Kafka 4.1.0 broker
-and the exact query/event fixtures in a uniquely named Kind namespace. The event-enabled service
-must acquire its index-only writer and consumer assignments, project the independent registration
-oracle, and return it through HTTP. The same run exercises query HTTP/gRPC, allowed/denied
-NetworkPolicy paths, readiness loss and recovery, restart, scale-to-zero and restoration. It
-removes the namespace and qualification image while retaining only the reviewed runtime image.
-
-Commands never select an environment implicitly. Direct image load, apply and stop reject QA; QA
-is owned by Git and the shared Flux reconciliation. QA status and verification require both
-`DEPLOY_SOURCE_REVISION=<40-source-hex>` and `DEPLOY_IMAGE_DIGEST=sha256:<64-hex>`; the latter must
-match the running Policy Search container's runtime `imageID`. The QA overlay remains active under
-the shared Flux root. Provision and verify the QA query and event fixtures before merging
-configuration that references their workload-owned Secrets; Kubernetes requires each referenced
-Secret even before an enabled worker first consumes an event. See the
-[deployment runbook](../../docs/migration/phase-4/policy-search-service/deployment-runbook.md) for
-release, diagnostics, reachability, cleanup and restoration procedures.
-
-Local identity flows from the image's full OCI source revision to the
-`1.0.0-local.<12-source-hex>` tag and `git-<12-source-hex>` service version. QA instead maps the
-reviewed full release commit to a semantic registry tag, immutable runtime digest and the same
-short service version. Rollback always records both the desired image and the exact live image it
-replaces; changing only a mutable tag or a live selector is unsupported.
-
 ## Policy search RPC and HTTP gateway
 
 The generated `policysearch.v1.PolicySearchService` exposes unary `SearchPolicies`. Direct gRPC
@@ -567,4 +505,5 @@ delivery uses the configured Alloy endpoint; collector failure follows the provi
 rate-limited diagnostics and does not expose event data. Returning to the accepted query
 predecessor requires the full disabled configuration, removal of Kafka egress and event Secret
 references, and preservation of the issue-230 topics, group offsets and synthetic documents. See
-the deployment runbook for the exact setup, diagnostic and return-state commands.
+the [deployment runbook](deployment-runbook.md) for the exact setup, diagnostic and return-state
+commands.

@@ -19,8 +19,10 @@ Use this guide to define the base scope of a Java-to-Go service migration in Ins
 The goal is a working Go replacement for the service's required behavior, delivered through small,
 deployed MVP increments. Reuse the repository's established runtime, build, release, deployment
 and monitoring capabilities. Every completed migration must also own a service-specific
-observability runbook that operators can execute for validation, investigation, provisioning,
-rollback and evidence collection.
+deployment runbook and observability runbook under `services/<service>/`. Operators must be able
+to execute them for deployment and monitoring validation, investigation, provisioning, rollback
+and evidence collection. Keep the service README as the entry point and link to both runbooks
+instead of duplicating their operational procedures.
 
 The [Phase 4 implementation review](phase-4-implementation-review.md) provides technical context
 and service-specific concerns. This guide defines the delivery approach for new migration scopes:
@@ -96,9 +98,9 @@ inapplicable capability instead of building a placeholder subsystem.
 | Configuration and lifecycle | Typed validated startup settings, clear redacted errors, meaningful readiness/liveness, bounded I/O, cancellation, partial-start cleanup and graceful shutdown. Disabled workers must not acquire authority or write. |
 | Security and privacy | Preserve the agreed authentication/authorization boundary, private backend exposure, managed secrets, least privilege and verified TLS where configured. Exclude credentials and sensitive payloads from logs, labels and diagnostics. |
 | Build and release | Register module, consumers, image and deployment through existing catalogs and owning Make/CI interfaces. Keep dependency/tool pins and generated contracts reproducible. Record source revision, immutable image and configuration identity for deployed increments. |
-| Deployment and coexistence | Deploy independently through the existing local-dev/QA owners. Use distinct identities/selectors and isolated data or read-only access as needed. A Pod with no HTTP traffic can still consume events or run jobs; control those effects explicitly. |
-| Observability | Add safe structured logs, bounded metrics and trace correlation through the configured Alloy paths with each capability. Provide the [standard dashboards and alerts](go-service-dashboards-and-alerts.md), with domain-specific additions, before final qualification and cutover. Create a service-owned observability runbook using the [Product observability runbook](product-service/observability-runbook.md) as the coverage model, adapted to the service's actual dependencies and workers. Cover signal paths and ownership, configuration/identity, source and disposable validation, target preflight and stop conditions, staged provisioning/read-back, Grafana metric/log/trace investigation, concrete operating queries, loss/recovery/cardinality and disabled-mode interpretation, alert responses, rollback/cleanup and the acceptance evidence checklist. Verify every documented command and target coordinate through its current owner. |
-| Validation and operations | Focused automated checks per increment, cumulative final qualification, an executable operating procedure, final rollback/restore evidence, separately controlled ownership transfer and bounded Java retirement. |
+| Deployment and coexistence | Deploy independently through the existing local-dev/QA owners. Use distinct identities/selectors and isolated data or read-only access as needed. A Pod with no HTTP traffic can still consume events or run jobs; control those effects explicitly. Create `services/<service>/deployment-runbook.md` for source and target selection, dependency provisioning, release/reconciliation, verification, diagnostics and stop conditions, rollback/restoration, retirement and evidence collection. Keep it ticket-independent, use QA for concrete command examples and verify every command and target coordinate through its current owner. |
+| Observability | Add safe structured logs, bounded metrics and trace correlation through the configured Alloy paths with each capability. Provide the [standard dashboards and alerts](go-service-dashboards-and-alerts.md), with domain-specific additions, before final qualification and cutover. Create `services/<service>/observability-runbook.md` using the [Product observability runbook](product-service/observability-runbook.md) as the coverage model, adapted to the service's actual dependencies and workers. Cover signal paths and ownership, configuration/identity, source and disposable validation, target preflight and stop conditions, staged provisioning/read-back, Grafana metric/log/trace investigation, concrete operating queries, loss/recovery/cardinality and disabled-mode interpretation, alert responses, rollback/cleanup and the acceptance evidence checklist. Keep it ticket-independent, use QA for concrete command examples and verify every documented command and target coordinate through its current owner. |
+| Validation and operations | Focused automated checks per increment, cumulative final qualification, executable deployment and observability runbooks, final rollback/restore evidence, separately controlled ownership transfer and bounded Java retirement. Link both service-owned runbooks from `services/<service>/README.md`; keep module development and interface reference in the README without copying operational procedures. |
 
 Use domain judgment to extend this scope. Search may need exact query/projection semantics;
 pricing needs decimal and rounding correctness; documents need rendering and storage completion;
@@ -116,7 +118,7 @@ point; omit stages the service does not need and combine small stages when that 
 | 1. Smallest deployable service | Renamed scaffold, service identity, health, configuration, release/deployment registration and basic signals. Prefer a tiny real capability; use a private synthetic endpoint only when needed to prove a new deployment path. | Owning checks pass; the exact image deploys and responds through its intended private interface. Health, safe configuration, reachability and enabled signals work. No broad Java baseline or business dependency is required for a synthetic bootstrap. |
 | 2. First business capability | A useful read/query or other bounded end-to-end operation through its real dependency. | Required success and failure behavior passes; the deployed operation works; runtime/security/telemetry protections cover the new path. |
 | 3. Remaining essential capabilities | Add writes, consumers, scheduled work or other domain operations in small slices, with isolated authority until handover. | Each capability works in deployment, prior behavior still passes affected regression checks, and new side effects are controlled. |
-| 4. Complete monitoring and operational instructions | Service/domain dashboards, actionable alerts and a service-owned observability runbook for operation, validation, investigation, provisioning, rollback and evidence collection. Build these progressively; finish missing coverage here. | Queries and rules work against service data, thresholds have workload rationale, every runbook command/coordinate matches its owner, and operators can identify failures and execute the accepted recovery path for the completed service. |
+| 4. Complete monitoring and operational instructions | Service/domain dashboards, actionable alerts and service-owned deployment and observability runbooks under the service module for operation, validation, investigation, provisioning, rollback and evidence collection. Build these progressively; finish missing coverage here. | Queries and rules work against service data, thresholds have workload rationale, the service README links both ticket-independent runbooks, every command/coordinate matches its owner, QA examples are executable, and operators can identify failures and execute the accepted recovery path for the completed service. |
 | 5. Final implementation qualification | The complete migration candidate, including required capabilities, safeguards and monitoring. | Integrated behavior and practical load checks pass; deployment rollback/restore and applicable ownership-transfer rehearsal pass against the selected release and target. |
 | 6. Ownership transfer | Switch the actual caller route and any data, consumer or scheduler authority through the owning mechanism. | Observe the agreed health/business/monitoring criteria and preserve current data and progress. Use the qualified return path if abort conditions occur. |
 | 7. Legacy retirement | Remove the specific obsolete Java workload/resources after the observation/rollback window. | No required caller or initialization/job owner remains on Java; Go operates with retained data and shared dependencies. |
@@ -173,8 +175,9 @@ Keep the final test set small and outcome-driven:
 3. **Operational readiness:** Confirm access, health, lifecycle and actual log/metric/trace
    delivery, plus usable dashboards and alert behavior. Execute the service-owned observability
    runbook against the selected release and correct any inaccurate source-owned instruction before
-   acceptance. Reuse applicable increment evidence rather than repeating a full platform
-   qualification program.
+   acceptance. Execute the deployment runbook for the same release and target when validating
+   source identity, reconciliation, dependencies, diagnostics and recovery. Reuse applicable
+   increment evidence rather than repeating a full platform qualification program.
 4. **Deployment rollback and restore:** From the completed candidate, return to an identified
    compatible previous deployment/configuration through the owning mechanism, verify essential
    behavior, then restore the same candidate and verify it again. For a first deployment with no
@@ -217,11 +220,12 @@ Keep the following outside the base migration unless separately justified and ag
   accepted operational removal.
 
 A migration is complete when the agreed essential capabilities run in Go, necessary safeguards
-and monitoring work are accepted, the service-owned observability runbook is validated against the
-selected deployment, the final qualification and rollback/restore tests pass, ownership is
-transferred and observed, and the scoped Java retirement is accepted. If the requested scope ends
-at a deployed pilot, name that narrower completion boundary explicitly. A scaffold, deployed Pod
-or successful API response alone does not establish full migration completion.
+and monitoring work are accepted, both service-owned runbooks are linked from the service README
+and validated against the selected deployment, the final qualification and rollback/restore tests
+pass, ownership is transferred and observed, and the scoped Java retirement is accepted. If the
+requested scope ends at a deployed pilot, name that narrower completion boundary explicitly. A
+scaffold, deployed Pod or successful API response alone does not establish full migration
+completion.
 
 For each increment, record just the objective, included/excluded behavior, missing prerequisite
 facts, observable acceptance cases and owning checks. Keep the final qualification, cutover and
@@ -241,6 +245,9 @@ retirement outcomes distinct so implementation progress is not confused with liv
   service-owned signal paths, validation, target preflight, staged provisioning, Grafana
   investigation, operating queries, recovery, rollback and evidence collection. Adapt its
   structure to the selected service; do not copy Product coordinates or dependency semantics.
-- [Product operations](product-service/README.md) and
-  [Policy Search deployment runbook](policy-search-service/deployment-runbook.md): concrete
-  implementation examples to adapt, not mandatory research or rehearsal programs to copy wholesale.
+- [Product operations](product-service/README.md), the
+  [Policy Search deployment runbook](../../../services/policy-search-service/deployment-runbook.md)
+  and the
+  [Policy Search observability runbook](../../../services/policy-search-service/observability-runbook.md):
+  concrete implementation examples to adapt, not mandatory research or rehearsal programs to copy
+  wholesale.

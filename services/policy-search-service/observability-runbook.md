@@ -11,7 +11,7 @@
   - [Investigation queries](#investigation-queries)
   - [Idle, missing data, loss and alert response](#idle-missing-data-loss-and-alert-response)
   - [Rollback and cleanup](#rollback-and-cleanup)
-  - [Evidence and issue #235 handoff](#evidence-and-issue-235-handoff)
+  - [Evidence and operational handoff](#evidence-and-operational-handoff)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -48,10 +48,10 @@ objects or the Grafana database by hand.
 
 Workers disabled means both enabled gauges are zero, the service owns no Kafka clients and event
 alerts stay suppressed. Workers enabled and idle means enabled is one, in-flight age is zero and
-event rate may be zero. Q03 deliberately uses the fixed `registered` and `terminated` enabled and
-in-flight-age gauges: an enabled worker with age above 30 seconds for two minutes indicates a
-stalled in-flight record. Completion resets age to zero. No reliable bounded consumer-group lag
-series exists, so this runbook makes no Kafka lag claim and there is no Kafka lag alert.
+event rate may be zero. The fixed `registered` and `terminated` enabled and in-flight-age gauges
+identify an enabled worker whose age remains above 30 seconds for two minutes as a stalled
+in-flight record. Completion resets age to zero. No reliable bounded consumer-group lag series
+exists, so this runbook makes no Kafka lag claim and there is no Kafka lag alert.
 
 ## Configuration and identity
 
@@ -167,15 +167,15 @@ Render the exact objects and retain their SHA-256 hashes with the source revisio
 
 ```sh
 make -C k8s prometheus-rules-render ENV_NAME=qa SVC_NAME=policy-search \
-  > /tmp/issue-267-policy-search-rule.yaml
+  > /tmp/policy-search-rule.yaml
 make -C k8s grafana-dashboard-render ENV_NAME=qa SVC_NAME=policy-search \
-  > /tmp/issue-267-policy-search-dashboard.yaml
-sha256sum /tmp/issue-267-policy-search-rule.yaml \
-  /tmp/issue-267-policy-search-dashboard.yaml
+  > /tmp/policy-search-dashboard.yaml
+sha256sum /tmp/policy-search-rule.yaml \
+  /tmp/policy-search-dashboard.yaml
 kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=server \
-  -f /tmp/issue-267-policy-search-rule.yaml
+  -f /tmp/policy-search-rule.yaml
 kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=server \
-  -f /tmp/issue-267-policy-search-dashboard.yaml
+  -f /tmp/policy-search-dashboard.yaml
 ```
 
 The guarded apply targets repeat source validation and the server-side dry-run, select only
@@ -324,8 +324,8 @@ while isolating Alloy, Prometheus, Loki or Tempo.
 
 Exercise collector/backend loss only with the disposable harness. Expect bounded queues to recover,
 new log/trace correlation within 15 seconds, new metrics within 30 seconds and delivery backlog
-within 120 seconds. QA testing may stop only the ticket-owned temporary forward or workload; do not
-stop shared Alloy, Prometheus, Loki, Tempo, Elasticsearch or Kafka.
+within 120 seconds. QA testing may stop only the operation-owned temporary forward or workload; do
+not stop shared Alloy, Prometheus, Loki, Tempo, Elasticsearch or Kafka.
 
 Cardinality is bounded by operation, transport, outcome, HTTP/RPC status, dependency and the two
 fixed event types. The worker gauges add exactly two series each per active instance. Query text,
@@ -360,9 +360,9 @@ cleanup of every forward, process group, container, network and temporary resour
 After interruption, inspect for the exact recorded names before retrying; never use a broad process
 kill or namespace cleanup.
 
-## Evidence and issue #235 handoff
+## Evidence and operational handoff
 
-Keep sanitized evidence under the ignored `ai/artifacts/epic-4.3/issue-267/` directory. Record:
+Keep sanitized evidence in the operation's approved evidence location. Record:
 
 - UTC start/end, operator, exact command, result and whether evidence is source, fake adapter,
   collected fixture, disposable backend or shared QA;
@@ -375,11 +375,10 @@ Keep sanitized evidence under the ignored `ai/artifacts/epic-4.3/issue-267/` dir
 - correlated safe log/trace evidence, idle/disabled/missing-data interpretation, cleanup result,
   limitations and the acceptance criterion supported by each record.
 
-For issue #235, hand off the exact merged source revision, image identity, QA Deployment and Pod
-identity, worker mode, rule/dashboard hashes and UIDs, verifier result, alert inventory/state,
-controlled workload and recovery results, Product continuity, rollback point, remaining
-limitations, and links to the sanitized Step 11/12 evidence. Do not claim Kafka consumer lag
-coverage. Updating or closing #235 is a separate GitHub publication action.
+Hand off the exact merged source revision, image identity, QA Deployment and Pod identity, worker
+mode, rule/dashboard hashes and UIDs, verifier result, alert inventory/state, controlled workload
+and recovery results, Product continuity, rollback point, remaining limitations and links to the
+sanitized evidence. Do not claim Kafka consumer lag coverage.
 
 Exclude passwords, tokens, Secret YAML, credential-bearing URLs, raw query/policy/event payloads
 and arbitrary error text. Source, hosted CI, Flux reconciliation, live QA and disposable evidence
