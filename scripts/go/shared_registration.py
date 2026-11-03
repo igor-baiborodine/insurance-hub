@@ -52,6 +52,24 @@ ROOT_INPUTS = (
     ".github/workflows/go-pr-shared.yml",
     ".github/workflows/go-release-lib.yml",
 )
+SHARED_CI_PATHS = (
+    "libs/**",
+    "!libs/**/*.md",
+    "**/*-service/**/*.go",
+    "**/*-service/go.mod",
+    "scripts/go/**",
+    "scripts/python/**",
+    "go-module-topology.json",
+    "pyproject.toml",
+    "uv.lock",
+    ".python-version",
+    "Makefile",
+    ".github/workflows/go-pr-shared.yml",
+    ".github/workflows/go-release-lib.yml",
+    "!legacy/**",
+    "!services/*/*-service/**",
+    "!templates/*/*-service/**",
+)
 
 
 def strings(value: Any, label: str, empty: bool = False) -> list[str]:
@@ -242,8 +260,8 @@ def shared_ci_contract(root: Path, path: str) -> None:
     workflow = yaml.safe_load((root / path).read_text())
     events = workflow.get("on", workflow.get(True))
     require(
-        events == {"pull_request": {"branches": ["main"]}},
-        "shared workflow must cover every PR to main",
+        events == {"pull_request": {"branches": ["main"], "paths": list(SHARED_CI_PATHS)}},
+        "shared workflow path filter must cover shared runtime and registration inputs",
     )
     require(
         workflow.get("permissions") == {"contents": "read"}, "shared workflow must be read-only"

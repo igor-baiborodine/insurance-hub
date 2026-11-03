@@ -175,18 +175,21 @@ A local pass is local evidence. YAML inspection is configuration evidence. Only 
 of an active GitHub Actions workflow is hosted-CI evidence; historical results from retired
 workflows remain historical evidence.
 
-The additive `go-pr-shared.yml` runs on every PR to `main`. Its planner examines complete base/head
-ownership, both rename endpoints, discovered modules and active registration before Go/tool setup.
-Library changes validate the library and every active consumer against the exact candidate. Hosted
-consumer-only changes rely on `go-pr-mod.yml` for their normal module gate and create no duplicate
-shared module obligation. Root tooling changes run the shared tooling and topology checks; the full
-local profile additionally validates every module. When hosted planning creates no module work, the
-planner completes the workflow without validation or result-reconciliation runners. For plans with
-module work, the aggregate recomputes phase obligations and checks source, lockfile and candidate
-identities. The empty active-consumer set is an explicit initial state. Branch protection requires
-separate repository configuration; adding YAML does not establish it. The `go-release-lib.yml`
-workflow runs on library changes pushed to `main` and owns scoped source-tag publication and a
-non-draft GitHub Release marked Latest.
+The additive `go-pr-shared.yml` runs on PRs to `main` that touch the shared library, Go source or
+module manifests that can affect consumer registration, or root-owned Go/Python orchestration,
+inventory, lock and workflow inputs. Its path filter excludes unrelated documentation, including
+library Markdown, while retaining both sides of relevant renames and deletions. Once triggered,
+the planner examines complete base/head ownership, discovered modules and active registration
+before Go/tool setup. Library changes validate the library and every active consumer against the
+exact candidate. Hosted consumer-only changes rely on `go-pr-mod.yml` for their normal module gate
+and create no duplicate shared module obligation. Root tooling changes run the shared tooling and
+topology checks; the full local profile additionally validates every module. When hosted planning
+creates no module work, the planner completes the workflow without validation or
+result-reconciliation runners. For plans with module work, the aggregate recomputes phase
+obligations and checks source, lockfile and candidate identities. The empty active-consumer set is
+an explicit initial state. Branch protection requires separate repository configuration; adding
+YAML does not establish it. The `go-release-lib.yml` workflow runs on library changes pushed to
+`main` and owns scoped source-tag publication and a non-draft GitHub Release marked Latest.
 
 ## Import and consumer policy
 
