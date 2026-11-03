@@ -196,10 +196,11 @@ make verify-service-observability \
 ```
 
 Require exactly 12 Policy Search alerts, dashboard UID
-`insurance-hub-policy-search-service`, `immutable: true`, the expected sidecar labels and byte-for-
-byte dashboard JSON. Re-render and compare hashes after read-back. Confirm Product resources still
-exist unchanged, no unrelated rule/dashboard was added or removed, Prometheus accepted the rule,
-Grafana provisioned the dashboard, and no selected-service alert is unexpectedly firing.
+`insurance-hub-policy-search-service`, dashboard `editable: false`, effective Grafana provider
+`disableDeletion: true` and `allowUiUpdates: false`, the expected sidecar labels and byte-for-byte
+dashboard JSON. Re-render and compare hashes after read-back. Confirm Product resources still exist
+unchanged, no unrelated rule/dashboard was added or removed, Prometheus accepted the rule, Grafana
+provisioned the dashboard, and no selected-service alert is unexpectedly firing.
 
 ## Grafana workflow
 
@@ -333,11 +334,12 @@ change.
 
 ## Rollback and cleanup
 
-If a prior rule existed, check out its captured accepted source revision and reapply only that rule
-through the guarded target. An immutable dashboard cannot be changed in place: verify the live UID
-and resource UID still match this operation, delete only that exact ConfigMap, then apply the
-captured prior render through the guarded target. If this was the first installation and rollback
-is required, delete only resources proven to have been created by this operation:
+If prior assets existed, check out their captured accepted source revision, verify that the live
+resource names and UIDs still match this operation, then reapply only that rule and dashboard
+through their guarded targets. The source-owned dashboard ConfigMap is restored in place; Grafana's
+dashboard JSON enforces `editable: false`, while its file provider disables UI updates and UI
+deletion. If this was the first installation and rollback is required, delete only resources proven
+to have been created by this operation:
 
 ```sh
 kubectl --context qa-insurance-hub -n qa-monitoring delete \
