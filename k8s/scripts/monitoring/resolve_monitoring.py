@@ -42,12 +42,12 @@ def resolve(args: argparse.Namespace) -> dict[str, str]:
     rule = prometheus_rule_resource(assets)
     dashboard = grafana_dashboard_resource(assets)
     return {
-        "kube_context": assets.environment["kube_context"],
-        "namespace": assets.environment["monitoring_namespace"],
+        "kube_context": assets.environment.kube_context,
+        "namespace": assets.environment.monitoring_namespace,
         "prometheus_rule": rule["metadata"]["name"],
         "grafana_dashboard_config_map": dashboard["metadata"]["name"],
         "prometheus_values_path": str(
-            assets.assets_root.parent / assets.environment["prometheus_values_path"]
+            assets.assets_root.parent / assets.environment.prometheus_values_path
         ),
         "service_dir": str(assets.service_dir),
         "alerts_path": str(assets.alerts_path),

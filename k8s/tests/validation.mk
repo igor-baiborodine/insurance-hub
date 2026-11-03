@@ -17,7 +17,7 @@ PROMETHEUS_IMAGE := quay.io/prometheus/prometheus:v3.15.0-distroless
 MONITORING_CHECK_SCRIPT := $(K8S_VALIDATION_ROOT)/scripts/monitoring/check_monitoring.py
 MONITORING_CHECK_TEST := $(K8S_VALIDATION_ROOT)/scripts/monitoring/test_check_monitoring.py
 MONITORING_TEST_SCRIPT := $(K8S_VALIDATION_ROOT)/scripts/monitoring/monitoring_integration.py
-MONITORING_VERIFY_PRODUCT_SCRIPT := $(K8S_VALIDATION_ROOT)/scripts/monitoring/verify_product_observability.py
+MONITORING_VERIFY_SCRIPT := $(K8S_VALIDATION_ROOT)/scripts/monitoring/verify_product_observability.py
 MONITORING_VERIFY_PRODUCT_TEST := $(K8S_VALIDATION_ROOT)/scripts/monitoring/test_verify_product_observability.py
 MONITORING_CHECK_ENV ?= qa
 MONITORING_SERVICES ?= $(notdir $(wildcard $(MONITORING_ASSETS_ROOT)/services/*))
@@ -76,13 +76,13 @@ monitoring-tooling-test: python-toolchain-check ## Exercise generic dashboard/ru
 		-m 'not integration and not acceptance' "$(MONITORING_CHECK_TEST)"
 
 .PHONY: observability-verify-test-tooling
-observability-verify-test-tooling: python-toolchain-check ## Exercise Product live-verification guards and owned-forward cleanup
+observability-verify-test-tooling: python-toolchain-check ## Exercise service-selected live-verification guards and owned-forward cleanup
 	@cd "$(K8S_VALIDATION_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 \
 		PYTHONPATH="$(K8S_VALIDATION_ROOT)/scripts/monitoring" "$(PYTHON)" -m pytest -q \
 		-m 'not integration and not acceptance' "$(MONITORING_VERIFY_PRODUCT_TEST)"
 
-.PHONY: verify-product-observability
-verify-product-observability: _monitoring-assets-args-check ## Read-only Product QA verification (ENV_NAME, SVC_NAME, VERIFY_MODE, VERIFY_SOURCE_REVISION)
+.PHONY: _observability-verify-args-check
+_observability-verify-args-check: _monitoring-assets-args-check
 	@if [ "$(origin VERIFY_MODE)" != "command line" ] || \
 		{ [ "$(VERIFY_MODE)" != "disabled" ] && [ "$(VERIFY_MODE)" != "enabled" ]; }; then \
 		echo "ERROR: VERIFY_MODE=disabled|enabled is required on the make command line."; \
@@ -94,12 +94,27 @@ verify-product-observability: _monitoring-assets-args-check ## Read-only Product
 		exit 1; \
 	fi
 	@command -v kubectl >/dev/null || { echo "ERROR: kubectl is required."; exit 1; }
-	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_VERIFY_PRODUCT_SCRIPT)" \
+
+define run-observability-verification
+PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" "$(MONITORING_VERIFY_SCRIPT)" \
 		--assets-root "$(MONITORING_ASSETS_ROOT)" \
 		--environment "$(ENV_NAME)" \
 		--service "$(SVC_NAME)" \
 		--mode "$(VERIFY_MODE)" \
 		--source-revision "$(VERIFY_SOURCE_REVISION)"
+endef
+
+.PHONY: verify-service-observability
+verify-service-observability: _observability-verify-args-check ## Read-only selected-service QA verification (ENV_NAME, SVC_NAME, VERIFY_MODE, VERIFY_SOURCE_REVISION)
+	@$(run-observability-verification)
+
+.PHONY: verify-product-observability
+verify-product-observability: _observability-verify-args-check ## Compatibility entry point for read-only Product QA verification
+	@if [ "$(SVC_NAME)" != "product" ]; then \
+		echo "ERROR: verify-product-observability requires SVC_NAME=product."; \
+		exit 1; \
+	fi
+	@$(run-observability-verification)
 
 .PHONY: test-monitoring
 test-monitoring: _monitoring-assets-args-check ## Query one service dashboard against collected disposable Prometheus data (ENV_NAME, SVC_NAME)

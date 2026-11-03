@@ -60,15 +60,15 @@ def prometheus_targets(dashboard: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 def validate_dashboard(assets: MonitoringAssets) -> None:
     dashboard = mapping(assets.dashboard, "dashboard")
-    config = mapping(assets.contract.get("dashboard"), "monitoring dashboard contract")
-    if dashboard.get("uid") != config.get("uid"):
-        raise ValidationError(f"dashboard UID must be {config.get('uid')!r}")
-    if dashboard.get("refresh") != config.get("refresh"):
-        raise ValidationError(f"dashboard refresh must be {config.get('refresh')!r}")
-    if config.get("editable") is not False or dashboard.get("editable") is not False:
+    config = assets.contract.dashboard
+    if dashboard.get("uid") != config.uid:
+        raise ValidationError(f"dashboard UID must be {config.uid!r}")
+    if dashboard.get("refresh") != config.refresh:
+        raise ValidationError(f"dashboard refresh must be {config.refresh!r}")
+    if config.editable is not False or dashboard.get("editable") is not False:
         raise ValidationError("dashboard and monitoring.json must disable UI editing")
 
-    expected_variables = config.get("variables")
+    expected_variables = config.variables
     templating = mapping(dashboard.get("templating"), "dashboard templating")
     variable_list = sequence(templating.get("list"), "dashboard templating list")
     variables: dict[str, Mapping[str, Any]] = {}
@@ -80,11 +80,9 @@ def validate_dashboard(assets: MonitoringAssets) -> None:
         if name in variables:
             raise ValidationError(f"dashboard variable {name!r} is duplicated")
         variables[name] = variable
-    if not isinstance(expected_variables, dict) or set(variables) != set(expected_variables):
+    if set(variables) != set(expected_variables):
         raise ValidationError("dashboard variables do not match monitoring.json")
-    selector = config.get("application_selector")
-    if not isinstance(selector, str) or not selector:
-        raise ValidationError("dashboard application_selector must be configured")
+    selector = config.application_selector
     for name, label in expected_variables.items():
         query_config = variables[name].get("query", {})
         query = query_config.get("query", "") if isinstance(query_config, dict) else query_config
@@ -98,27 +96,22 @@ def validate_dashboard(assets: MonitoringAssets) -> None:
         title = mapping(panel_value, "dashboard panel").get("title")
         if not isinstance(title, str) or not title:
             raise ValidationError(f"dashboard panel {index} title must be a non-empty string")
+        if title in titles:
+            raise ValidationError(f"dashboard panel title {title!r} is duplicated")
         titles.add(title)
-    required_titles = sequence(config.get("required_panel_titles"), "required panel titles")
-    if not all(isinstance(title, str) and title for title in required_titles):
-        raise ValidationError("required panel titles must be non-empty strings")
-    expected_titles = set(required_titles)
+    expected_titles = set(config.outcomes.values())
     if titles != expected_titles:
         raise ValidationError(
             f"dashboard panels are {sorted(titles)}, expected {sorted(expected_titles)}"
         )
 
     targets = prometheus_targets(dashboard)
-    minimum_targets = config.get("minimum_prometheus_targets")
-    if not isinstance(minimum_targets, int) or len(targets) < minimum_targets:
+    minimum_targets = config.minimum_prometheus_targets
+    if len(targets) < minimum_targets:
         raise ValidationError(
             f"dashboard has {len(targets)} Prometheus targets, expected at least {minimum_targets}"
         )
-    required_filters = config.get("required_query_filters", [])
-    if not isinstance(required_filters, list) or not all(
-        isinstance(value, str) and value for value in required_filters
-    ):
-        raise ValidationError("dashboard required_query_filters must be non-empty strings")
+    required_filters = config.required_query_filters
     for index, target in enumerate(targets):
         expression = target.get("expr")
         if not isinstance(expression, str) or not expression:
@@ -133,7 +126,7 @@ def validate_dashboard(assets: MonitoringAssets) -> None:
                 )
 
     rendered = json.dumps(dashboard, sort_keys=True)
-    for marker in config.get("required_markers", []):
+    for marker in config.required_markers:
         if marker not in rendered:
             raise ValidationError(f"dashboard lacks required marker {marker!r}")
 
@@ -154,24 +147,20 @@ def load_alert_document(assets: MonitoringAssets) -> Mapping[str, Any]:
 
 def validate_alerts(assets: MonitoringAssets) -> None:
     document = load_alert_document(assets)
-    config = mapping(assets.contract.get("alerts"), "monitoring alert contract")
+    config = assets.contract.alerts
     groups = sequence(document.get("groups"), "alert groups")
     if len(groups) != 1:
         raise ValidationError("alert rules must contain exactly one group")
     group = mapping(groups[0], "alert group")
-    if group.get("name") != config.get("group"):
+    if group.get("name") != config.group_name:
         raise ValidationError("alert rule group does not match monitoring.json")
-    if group.get("interval") != config.get("interval"):
+    if group.get("interval") != config.interval:
         raise ValidationError("alert rule interval does not match monitoring.json")
 
-    expected_for = config.get("for")
-    markers = config.get("expression_markers")
-    expected_labels = config.get("labels")
-    required_annotations = config.get("required_annotations")
-    if not all(isinstance(value, Mapping) for value in (expected_for, markers, expected_labels)):
-        raise ValidationError("alert inventory, markers, and labels must be objects")
-    if not isinstance(required_annotations, list):
-        raise ValidationError("required alert annotations must be a list")
+    expected_for = config.durations
+    markers = config.expression_markers
+    expected_labels = config.common_labels
+    required_annotations = config.required_annotations
 
     alert_rules: dict[str, Mapping[str, Any]] = {}
     for index, rule_value in enumerate(sequence(group.get("rules"), "alert rules")):

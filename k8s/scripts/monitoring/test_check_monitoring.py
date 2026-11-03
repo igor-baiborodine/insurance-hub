@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import shutil
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -22,6 +24,24 @@ import monitoring_integration as harness
 
 SCRIPT_DIR = Path(__file__).parent
 ASSETS_ROOT = SCRIPT_DIR.parents[1] / "observability"
+PRODUCT_RULE_RENDER_SHA256 = "e2aa765cb64f64a0026c552c191f04b311995d1e4fda49e7a867e581761d1020"
+PRODUCT_DASHBOARD_RENDER_SHA256 = "02568b826930510071330ea954de727ce441741c4ca99f4046fb95a0bdb7b0c8"
+
+
+def copied_assets(tmp_path: Path) -> Path:
+    root = tmp_path / "observability"
+    shutil.copytree(ASSETS_ROOT, root)
+    values = tmp_path / "overlays/qa/infra/prometheus/values.yaml"
+    values.parent.mkdir(parents=True)
+    shutil.copy2(ASSETS_ROOT.parent / "overlays/qa/infra/prometheus/values.yaml", values)
+    return root
+
+
+def mutate_contract(root: Path, mutation) -> None:
+    path = root / "services/product/monitoring.json"
+    contract = json.loads(path.read_text(encoding="utf-8"))
+    mutation(contract)
+    path.write_text(json.dumps(contract), encoding="utf-8")
 
 
 class TestMonitoringTooling:
@@ -37,6 +57,185 @@ class TestMonitoringTooling:
         check.validate_dashboard(self.assets)
         check.validate_alerts(self.assets)
         check.validate_fixture(self.assets)
+
+    def test_product_render_matches_independent_step_one_baseline(self) -> None:
+        # when
+        rule = renderer.render(ASSETS_ROOT, "qa", "product")
+        dashboard = dashboard_renderer.render(ASSETS_ROOT, "qa", "product")
+
+        # then
+        assert hashlib.sha256(rule.encode()).hexdigest() == PRODUCT_RULE_RENDER_SHA256
+        assert hashlib.sha256(dashboard.encode()).hexdigest() == PRODUCT_DASHBOARD_RENDER_SHA256
+
+    @pytest.mark.parametrize(
+        ("mutation", "diagnostic"),
+        (
+            (
+                lambda contract: contract["capabilities"]["dependencies"].append("redis"),
+                "unknown capabilities",
+            ),
+            (
+                lambda contract: contract["capabilities"].update({"raw_query": "secret"}),
+                "raw_query",
+            ),
+            (
+                lambda contract: contract["dashboard"]["variables"].update(
+                    {"raw_query": "policy_id"}
+                ),
+                "must declare only environment and implementation",
+            ),
+            (
+                lambda contract: contract["capabilities"].update({"dependencies": []}),
+                "must exactly match declared dependencies",
+            ),
+            (
+                lambda contract: contract["capabilities"]["dependencies"].append("elasticsearch"),
+                "must exactly match declared dependencies",
+            ),
+        ),
+    )
+    def test_contract_rejects_unknown_or_conflicting_capabilities_before_render(
+        self, tmp_path: Path, mutation, diagnostic: str
+    ) -> None:
+        # given
+        root = copied_assets(tmp_path)
+        mutate_contract(root, mutation)
+        output = tmp_path / "rendered.yaml"
+        output.write_text("unchanged\n", encoding="utf-8")
+
+        # when
+        status = renderer.main(
+            [
+                "--assets-root",
+                str(root),
+                "--environment",
+                "qa",
+                "--service",
+                "product",
+                "--output",
+                str(output),
+            ]
+        )
+
+        # then
+        assert status == 1
+        assert output.read_text(encoding="utf-8") == "unchanged\n"
+        with pytest.raises(monitoring_assets.AssetError, match=diagnostic):
+            monitoring_assets.load_assets(root, "qa", "product")
+
+    def test_contract_rejects_escaping_asset_path_before_render(self, tmp_path: Path) -> None:
+        # given
+        root = copied_assets(tmp_path)
+        mutate_contract(
+            root,
+            lambda contract: contract["dashboard"].update({"path": "../product/dashboard.json"}),
+        )
+
+        # when / then
+        with pytest.raises(monitoring_assets.AssetError, match="direct relative child path"):
+            monitoring_assets.load_assets(root, "qa", "product")
+
+    @pytest.mark.parametrize(
+        ("field", "value", "diagnostic"),
+        (
+            ("uid", "insurance-hub-product-service", "duplicate dashboard UID"),
+            ("prometheus_rule_name", "product-service", "duplicate PrometheusRule name"),
+        ),
+    )
+    def test_registry_rejects_duplicate_resource_identity(
+        self, tmp_path: Path, field: str, value: str, diagnostic: str
+    ) -> None:
+        # given
+        root = copied_assets(tmp_path)
+        source = root / "services/product"
+        duplicate = root / "services/catalog"
+        shutil.copytree(source, duplicate)
+        path = duplicate / "monitoring.json"
+        contract = json.loads(path.read_text(encoding="utf-8"))
+        contract["service"] = "catalog"
+        contract["service_name"] = "catalog-service"
+        contract["dashboard"]["application_selector"] = 'service_name="catalog-service"'
+        if field == "uid":
+            contract["dashboard"][field] = value
+        else:
+            contract["dashboard"]["uid"] = "insurance-hub-catalog-service"
+            contract["alerts"][field] = value
+        contract["alerts"]["common_labels"]["service"] = "catalog-service"
+        contract["verification"]["probe"] = "catalog"
+        path.write_text(json.dumps(contract), encoding="utf-8")
+
+        environment_path = root / "environments/qa.json"
+        environment = json.loads(environment_path.read_text(encoding="utf-8"))
+        environment["service_verification"]["catalog"] = copy.deepcopy(
+            environment["service_verification"]["product"]
+        )
+        environment_path.write_text(json.dumps(environment), encoding="utf-8")
+
+        # when / then
+        with pytest.raises(monitoring_assets.AssetError, match=diagnostic):
+            monitoring_assets.load_assets(root, "qa", "catalog")
+
+    def test_second_service_can_declare_elasticsearch_and_event_capabilities(
+        self, tmp_path: Path
+    ) -> None:
+        # given
+        root = copied_assets(tmp_path)
+        source = root / "services/product"
+        search = root / "services/search"
+        shutil.copytree(source, search)
+        path = search / "monitoring.json"
+        contract = json.loads(path.read_text(encoding="utf-8"))
+        contract.update({"service": "search", "service_name": "search-service"})
+        contract["capabilities"] = {
+            "dependencies": ["elasticsearch"],
+            "workers": ["events"],
+        }
+        contract["dashboard"].update(
+            {
+                "uid": "insurance-hub-search-service",
+                "application_selector": 'service_name="search-service"',
+                "outcomes": {
+                    "common": {key: [f"Search {key}"] for key in monitoring_assets.COMMON_OUTCOMES},
+                    "dependencies": {"elasticsearch": ["Search dependency"]},
+                    "workers": {"events": ["Search worker"]},
+                },
+            }
+        )
+        alert_names = ["SearchCommon", "SearchDependency", "SearchWorker"]
+        contract["alerts"].update(
+            {
+                "prometheus_rule_name": "search-service",
+                "group_name": "insurance-hub-search-service",
+                "common_labels": {"service": "search-service", "severity": "warning"},
+                "inventory": {
+                    "common": [alert_names[0]],
+                    "dependencies": {"elasticsearch": [alert_names[1]]},
+                    "workers": {"events": [alert_names[2]]},
+                },
+                "for": {name: None for name in alert_names},
+                "expression_markers": {name: ["vector(0)"] for name in alert_names},
+            }
+        )
+        contract["verification"]["probe"] = "search"
+        path.write_text(json.dumps(contract), encoding="utf-8")
+
+        environment_path = root / "environments/qa.json"
+        environment = json.loads(environment_path.read_text(encoding="utf-8"))
+        environment["service_verification"]["search"] = copy.deepcopy(
+            environment["service_verification"]["product"]
+        )
+        environment_path.write_text(json.dumps(environment), encoding="utf-8")
+
+        # when
+        assets = monitoring_assets.load_assets(root, "qa", "search")
+
+        # then
+        assert assets.contract.capabilities.dependencies == ("elasticsearch",)
+        assert assets.contract.capabilities.workers == ("events",)
+        assert assets.contract.dashboard.outcomes.dependencies == {
+            "elasticsearch": ("Search dependency",)
+        }
+        assert assets.contract.dashboard.outcomes.workers == {"events": ("Search worker",)}
 
     def test_nested_dashboard_values_must_use_declared_types(self) -> None:
         # given
@@ -234,6 +433,12 @@ class TestMonitoringTooling:
         # then
         assert status == 0
         assert output == "qa-product-service\n"
+
+    def test_makefile_keeps_generic_and_product_verification_entry_points(self) -> None:
+        validation = (ASSETS_ROOT.parent / "tests/validation.mk").read_text(encoding="utf-8")
+        assert "verify-service-observability:" in validation
+        assert "verify-product-observability:" in validation
+        assert "verify-product-observability requires SVC_NAME=product" in validation
 
     def test_fixture_and_dashboard_substitution_are_service_driven(self) -> None:
         fixture = harness.MetricFixture(self.assets.fixture)

@@ -61,19 +61,48 @@
       "ProductUnavailable": "2m",
       "ProductUnexpectedRestart": null
     },
-    "group": "insurance-hub-product-service",
+    "group_name": "insurance-hub-product-service",
     "interval": "30s",
-    "labels": {
+    "common_labels": {
       "service": "product-service",
       "severity": "warning"
     },
+    "inventory": {
+      "common": [
+        "ProductServiceErrorRate",
+        "ProductHighLatency",
+        "ProductResourcePressure",
+        "ProductUnavailable",
+        "ProductTelemetryMissing",
+        "ProductTelemetryDeliveryFailure",
+        "ProductTelemetryBacklog",
+        "ProductUnexpectedRestart"
+      ],
+      "dependencies": {
+        "postgresql": [
+          "ProductDatabasePoolPressure",
+          "ProductDatabasePoolTimeouts"
+        ]
+      },
+      "workers": {}
+    },
     "path": "alerts.yaml",
+    "prometheus_rule_name": "product-service",
     "required_annotations": [
       "summary",
       "description",
       "runbook_action"
     ],
     "test_path": "alerts.test.yaml"
+  },
+  "acceptance": {
+    "path": "acceptance.json"
+  },
+  "capabilities": {
+    "dependencies": [
+      "postgresql"
+    ],
+    "workers": []
   },
   "dashboard": {
     "application_selector": "service_name=\"product-service\"",
@@ -89,20 +118,39 @@
       "missing telemetry",
       "pod!~\\\"qa-product-api-legacy-.*\\\""
     ],
-    "required_panel_titles": [
-      "Request rate",
-      "Service error rate",
-      "Request latency percentiles",
-      "Database and pool latency",
-      "Database pool pressure",
-      "Go runtime",
-      "Pod CPU and memory",
-      "Readiness and restarts",
-      "Telemetry delivery health",
-      "Failed and slow-request investigation logs",
-      "Product traces",
-      "Investigation workflow"
-    ],
+    "outcomes": {
+      "common": {
+        "availability": [
+          "Readiness and restarts"
+        ],
+        "investigation": [
+          "Failed and slow-request investigation logs",
+          "Product traces",
+          "Investigation workflow"
+        ],
+        "pod_resources": [
+          "Pod CPU and memory"
+        ],
+        "requests": [
+          "Request rate",
+          "Service error rate",
+          "Request latency percentiles"
+        ],
+        "runtime": [
+          "Go runtime"
+        ],
+        "telemetry_delivery": [
+          "Telemetry delivery health"
+        ]
+      },
+      "dependencies": {
+        "postgresql": [
+          "Database and pool latency",
+          "Database pool pressure"
+        ]
+      },
+      "workers": {}
+    },
     "required_query_filters": [
       "deployment_environment_name=~\"$environment\"",
       "service_implementation=~\"$implementation\""
@@ -114,14 +162,27 @@
     }
   },
   "fixture": {
-    "minimum_scrapes": 4,
+    "minimum_scrapes_per_series": 4,
     "path": "fixture.json"
   },
-  "prometheus_rule_name": "product-service",
-  "schema_version": 1,
+  "schema_version": 2,
   "service": "product",
   "service_name": "product-service",
   "supported_environments": [
     "qa"
-  ]
+  ],
+  "verification": {
+    "expected_signals": {
+      "logs": [
+        "trace_id"
+      ],
+      "metrics": [
+        "insurance_hub_product_requests_total"
+      ],
+      "traces": [
+        "product-service"
+      ]
+    },
+    "probe": "product"
+  }
 }
