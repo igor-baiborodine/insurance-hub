@@ -391,3 +391,85 @@ class TestProductObservabilityVerification:
         assert request.call_args_list[-1].args[1] == {
             "traceparent": "00-" + "b" * 32 + "-0123456789abcdef-01"
         }
+
+    @pytest.mark.parametrize(
+        ("configured", "observed"),
+        [("true", "1"), ("false", "0")],
+    )
+    def test_policy_search_enabled_signals_match_deployment_worker_mode(
+        self, configured: str, observed: str
+    ) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "policy-search")
+        worker_results = [
+            {
+                "metric": {"insurance_hub_policy_search_event_type": event_type},
+                "value": [0, observed],
+            }
+            for event_type in ("registered", "terminated")
+        ]
+
+        def observed_signal(description: str, _probe: object) -> object:
+            if description == "Policy Search event_workers metric":
+                return worker_results
+            if "trace" in description:
+                return [{"trace": "observed"}]
+            return [{"value": [0, "1"]}]
+
+        # when
+        with (
+            mock.patch.object(verifier, "wait_for", side_effect=observed_signal),
+            mock.patch.object(
+                verifier,
+                "request_json",
+                return_value={"data": {"result": [{"value": [0, "0"]}]}},
+            ),
+        ):
+            result = verifier.verify_policy_search_enabled_signals(
+                assets,
+                {"prometheus": 1001, "loki": 1002, "tempo": 1003},
+                "a" * 32,
+                "pod-uid",
+                {"EVENT_WORKERS_ENABLED": configured},
+            )
+
+        # then
+        assert result["metric_series"]["event_workers"] == 2
+
+    @pytest.mark.parametrize(
+        ("configured", "observed"),
+        [("true", "0"), ("false", "1")],
+    )
+    def test_policy_search_enabled_signals_reject_worker_mode_mismatch(
+        self, configured: str, observed: str
+    ) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "policy-search")
+        worker_results = [
+            {
+                "metric": {"insurance_hub_policy_search_event_type": event_type},
+                "value": [0, observed],
+            }
+            for event_type in ("registered", "terminated")
+        ]
+
+        def observed_signal(description: str, _probe: object) -> object:
+            if description == "Policy Search event_workers metric":
+                return worker_results
+            return [{"value": [0, "1"]}]
+
+        # when / then
+        with (
+            mock.patch.object(verifier, "wait_for", side_effect=observed_signal),
+            pytest.raises(
+                verifier.VerificationError,
+                match="differs from Deployment EVENT_WORKERS_ENABLED",
+            ),
+        ):
+            verifier.verify_policy_search_enabled_signals(
+                assets,
+                {"prometheus": 1001, "loki": 1002, "tempo": 1003},
+                "a" * 32,
+                "pod-uid",
+                {"EVENT_WORKERS_ENABLED": configured},
+            )

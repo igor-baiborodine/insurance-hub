@@ -422,7 +422,11 @@ def wait_for(description: str, probe: Any, timeout: float = QUERY_TIMEOUT) -> An
 
 
 def verify_product_enabled_signals(
-    assets: MonitoringAssets, ports: Mapping[str, int], trace_id: str, pod_uid: str
+    assets: MonitoringAssets,
+    ports: Mapping[str, int],
+    trace_id: str,
+    pod_uid: str,
+    _deployment_settings: Mapping[str, str],
 ) -> dict[str, Any]:
     expected = assets.contract.verification.expected_signals
     require(
@@ -490,7 +494,11 @@ def verify_product_enabled_signals(
 
 
 def verify_policy_search_enabled_signals(
-    assets: MonitoringAssets, ports: Mapping[str, int], trace_id: str, pod_uid: str
+    assets: MonitoringAssets,
+    ports: Mapping[str, int],
+    trace_id: str,
+    pod_uid: str,
+    deployment_settings: Mapping[str, str],
 ) -> dict[str, Any]:
     expected = assets.contract.verification.expected_signals
     require(
@@ -518,7 +526,7 @@ def verify_policy_search_enabled_signals(
         "event_workers": (f"insurance_hub_policy_search_event_worker_enabled{{{common}}}"),
         "runtime": f"go_goroutine_count{{{common}}}",
     }
-    metric_counts: dict[str, int] = {}
+    metric_results: dict[str, list[dict[str, Any]]] = {}
     for label, expression in queries.items():
         url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
             {"query": expression}
@@ -527,9 +535,37 @@ def verify_policy_search_enabled_signals(
             f"Policy Search {label} metric",
             lambda url=url: query_results(request_json(url)),
         )
-        metric_counts[label] = len(results)
+        metric_results[label] = results
+    metric_counts = {label: len(results) for label, results in metric_results.items()}
+    worker_mode = deployment_settings.get("EVENT_WORKERS_ENABLED")
     require(
-        metric_counts["event_workers"] == 2,
+        worker_mode in {"true", "false"},
+        "Policy Search Deployment EVENT_WORKERS_ENABLED is not a supported boolean",
+    )
+    expected_worker_value = 1.0 if worker_mode == "true" else 0.0
+    worker_types: set[str] = set()
+    for result in metric_results["event_workers"]:
+        metric = result.get("metric", {})
+        require(isinstance(metric, dict), "Policy Search event worker metric labels are malformed")
+        event_type = metric.get("insurance_hub_policy_search_event_type")
+        sample = result.get("value", [])
+        require(
+            event_type in {"registered", "terminated"}
+            and isinstance(sample, list)
+            and len(sample) == 2,
+            "Policy Search event worker metric is malformed",
+        )
+        try:
+            value = float(sample[1])
+        except (TypeError, ValueError) as error:
+            raise VerificationError("Policy Search event worker value is malformed") from error
+        require(
+            value == expected_worker_value,
+            "Policy Search event worker value differs from Deployment EVENT_WORKERS_ENABLED",
+        )
+        worker_types.add(event_type)
+    require(
+        metric_counts["event_workers"] == 2 and worker_types == {"registered", "terminated"},
         "Policy Search event worker inventory differs from registered and terminated",
     )
 
@@ -586,7 +622,9 @@ class ServiceProbe:
     service: str
     services: Callable[[KubernetesTarget], list[tuple[str, str, str, int]]]
     workload: Callable[[Mapping[str, int], str], int]
-    enabled_signals: Callable[[MonitoringAssets, Mapping[str, int], str, str], dict[str, Any]]
+    enabled_signals: Callable[
+        [MonitoringAssets, Mapping[str, int], str, str, Mapping[str, str]], dict[str, Any]
+    ]
     result_key: str
 
 
@@ -648,7 +686,13 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         if args.mode == "enabled":
             pod_uid = deployment["pods"][0]["pod_uid"]
             require(isinstance(pod_uid, str) and pod_uid, "selected service Pod UID is unavailable")
-            signals = probe.enabled_signals(assets, ports, trace_id, pod_uid)
+            signals = probe.enabled_signals(
+                assets,
+                ports,
+                trace_id,
+                pod_uid,
+                deployment["settings"],
+            )
     evidence = {
         "mode": args.mode,
         "source_revision": args.source_revision,
