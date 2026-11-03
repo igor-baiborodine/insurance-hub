@@ -4,6 +4,23 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - 'libs/**'
+      - '!libs/**/*.md'
+      - '**/*-service/**/*.go'
+      - '**/*-service/go.mod'
+      - 'scripts/go/**'
+      - 'scripts/python/**'
+      - 'go-module-topology.json'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.python-version'
+      - 'Makefile'
+      - '.github/workflows/go-pr-shared.yml'
+      - '.github/workflows/go-release-lib.yml'
+      - '!legacy/**'
+      - '!services/*/*-service/**'
+      - '!templates/*/*-service/**'
 
 permissions:
   contents: read
