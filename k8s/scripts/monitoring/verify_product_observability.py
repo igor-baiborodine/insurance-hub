@@ -77,12 +77,12 @@ def request_text(url: str, headers: Mapping[str, str] | None = None) -> str:
     request = urllib.request.Request(url, headers=dict(headers or {}))
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
-            require(response.status == 200, f"Product endpoint returned HTTP {response.status}")
+            require(response.status == 200, f"service endpoint returned HTTP {response.status}")
             return response.read().decode("utf-8")
     except VerificationError:
         raise
     except OSError as error:
-        raise VerificationError("Product endpoint was unavailable") from error
+        raise VerificationError("service endpoint was unavailable") from error
 
 
 def verification_config(assets: MonitoringAssets) -> ServiceVerification:
@@ -361,8 +361,42 @@ def product_reads(ports: Mapping[str, int], trace_id: str) -> int:
 def product_services(target: KubernetesTarget) -> list[tuple[str, str, str, int]]:
     require(target.config.management_service is not None, "Product management service is required")
     return [
-        ("product", target.service_namespace, target.config.business_service, 8081),
-        ("health", target.service_namespace, target.config.management_service, 8080),
+        ("product", target.service_namespace, target.config.business_service, 80),
+        ("health", target.service_namespace, target.config.management_service, 8081),
+    ]
+
+
+def policy_search_reads(ports: Mapping[str, int], trace_id: str) -> int:
+    require(
+        request_text(f"http://127.0.0.1:{ports['health']}/livez").strip() == "live",
+        "Policy Search liveness failed",
+    )
+    require(
+        request_text(f"http://127.0.0.1:{ports['health']}/readyz").strip() == "ready",
+        "Policy Search readiness failed",
+    )
+    query = urllib.parse.urlencode({"q": "*"})
+    body = request_text(
+        f"http://127.0.0.1:{ports['policy-search']}/policies?{query}",
+        {"traceparent": f"00-{trace_id}-0123456789abcdef-01"},
+    )
+    try:
+        response = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise VerificationError("Policy Search response is malformed") from error
+    policies = response.get("policies") if isinstance(response, dict) else None
+    require(isinstance(policies, list) and policies, "Policy Search response has no policies")
+    return len(policies)
+
+
+def policy_search_services(target: KubernetesTarget) -> list[tuple[str, str, str, int]]:
+    require(
+        target.config.management_service is not None,
+        "Policy Search management service is required",
+    )
+    return [
+        ("policy-search", target.service_namespace, target.config.business_service, 80),
+        ("health", target.service_namespace, target.config.management_service, 8081),
     ]
 
 
@@ -454,6 +488,96 @@ def verify_product_enabled_signals(
     }
 
 
+def verify_policy_search_enabled_signals(
+    assets: MonitoringAssets, ports: Mapping[str, int], trace_id: str, pod_uid: str
+) -> dict[str, Any]:
+    expected = assets.contract.verification.expected_signals
+    require(
+        len(expected.metrics) == 1
+        and len(expected.logs) == 1
+        and expected.traces == (assets.contract.service_name,),
+        "Policy Search expected signal inventory differs from its registered probe",
+    )
+    common = (
+        f'service_name="{assets.contract.service_name}",'
+        'deployment_environment_name="qa",service_implementation="go",'
+        f'service_instance_id="{pod_uid}"'
+    )
+    queries = {
+        "request": (
+            f"{expected.metrics[0]}{{{common},"
+            'insurance_hub_policy_search_transport="http",'
+            'insurance_hub_policy_search_operation="search"}'
+        ),
+        "elasticsearch": (
+            "insurance_hub_policy_search_dependencies_total"
+            f'{{{common},insurance_hub_policy_search_dependency="elasticsearch",'
+            'insurance_hub_policy_search_operation="search"}'
+        ),
+        "event_workers": (f"insurance_hub_policy_search_event_worker_enabled{{{common}}}"),
+        "runtime": f"go_goroutine_count{{{common}}}",
+    }
+    metric_counts: dict[str, int] = {}
+    for label, expression in queries.items():
+        url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
+            {"query": expression}
+        )
+        results = wait_for(
+            f"Policy Search {label} metric",
+            lambda url=url: query_results(request_json(url)),
+        )
+        metric_counts[label] = len(results)
+    require(
+        metric_counts["event_workers"] == 2,
+        "Policy Search event worker inventory differs from registered and terminated",
+    )
+
+    now = time.time_ns()
+    loki_query = (
+        f'{{service_name="{assets.contract.service_name}",deployment_environment_name="qa",'
+        f'service_implementation="go"}} | json | {expected.logs[0]}=' + json.dumps(trace_id)
+    )
+    loki_url = (
+        f"http://127.0.0.1:{ports['loki']}/loki/api/v1/query_range?"
+        + urllib.parse.urlencode(
+            {
+                "query": loki_query,
+                "start": now - 300_000_000_000,
+                "end": now + 30_000_000_000,
+                "limit": 20,
+            }
+        )
+    )
+    logs = wait_for(
+        "correlated Policy Search completion log",
+        lambda: query_results(request_json(loki_url)),
+    )
+    trace = wait_for(
+        "correlated Policy Search trace",
+        lambda: request_json(f"http://127.0.0.1:{ports['tempo']}/api/traces/{trace_id}").get(
+            "batches"
+        ),
+    )
+    alert_query = (
+        f'count(ALERTS{{service="{assets.contract.service_name}",alertstate="firing"}}) '
+        "or vector(0)"
+    )
+    alert_url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
+        {"query": alert_query}
+    )
+    alerts = query_results(request_json(alert_url))
+    require(
+        len(alerts) == 1 and float(alerts[0]["value"][1]) == 0,
+        "a selected-service Policy Search alert is firing",
+    )
+    return {
+        "metric_series": metric_counts,
+        "log_streams": len(logs),
+        "trace_batches": len(trace),
+        "firing_alerts": 0,
+    }
+
+
 @dataclass(frozen=True)
 class ServiceProbe:
     """Service-owned workload and signal checks behind generic target selection."""
@@ -466,13 +590,20 @@ class ServiceProbe:
 
 
 SERVICE_PROBES = {
+    "policy-search": ServiceProbe(
+        service="policy-search",
+        services=policy_search_services,
+        workload=policy_search_reads,
+        enabled_signals=verify_policy_search_enabled_signals,
+        result_key="policy_rows",
+    ),
     "product": ServiceProbe(
         service="product",
         services=product_services,
         workload=product_reads,
         enabled_signals=verify_product_enabled_signals,
         result_key="product_rows",
-    )
+    ),
 }
 
 

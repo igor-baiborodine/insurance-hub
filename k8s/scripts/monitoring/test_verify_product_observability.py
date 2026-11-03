@@ -47,11 +47,15 @@ class TestProductObservabilityVerification:
 
         unregistered_contract = dataclasses.replace(
             cross_contract,
-            service="policy-search",
+            service="missing-service",
+            verification=VerificationContract(
+                probe="missing-service",
+                expected_signals=self.assets.contract.verification.expected_signals,
+            ),
         )
         unregistered = dataclasses.replace(
             self.assets,
-            service="policy-search",
+            service="missing-service",
             contract=unregistered_contract,
         )
         with pytest.raises(verifier.VerificationError, match="is not registered"):
@@ -311,3 +315,27 @@ class TestProductObservabilityVerification:
         assert {"traceparent": "00-" + "a" * 32 + "-0123456789abcdef-01"} == request.call_args_list[
             -1
         ].args[1]
+
+    def test_policy_search_probe_resolves_its_own_target_and_safe_read(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "policy-search")
+        target = verifier.KubernetesTarget(assets, "a" * 40)
+        responses = ["live\n", "ready\n", '{"policies":[{"number":"SYN-267"}]}']
+
+        # when
+        probe = verifier.select_probe(assets)
+        services = probe.services(target)
+        with mock.patch.object(verifier, "request_text", side_effect=responses) as request:
+            rows = probe.workload({"health": 1001, "policy-search": 1002}, "b" * 32)
+
+        # then
+        assert probe.service == "policy-search"
+        assert services == [
+            ("policy-search", "qa-svc", "qa-policy-search-api", 80),
+            ("health", "qa-svc", "qa-policy-search-api-management", 8081),
+        ]
+        assert rows == 1
+        assert request.call_args_list[-1].args[0].endswith("/policies?q=%2A")
+        assert request.call_args_list[-1].args[1] == {
+            "traceparent": "00-" + "b" * 32 + "-0123456789abcdef-01"
+        }

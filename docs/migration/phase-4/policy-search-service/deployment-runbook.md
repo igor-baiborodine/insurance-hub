@@ -16,6 +16,10 @@
 
 # Policy Search Go deployment runbook
 
+This runbook owns service images, Elasticsearch and Kafka fixtures, worker activation and
+application rollback. Use the [observability runbook](observability-runbook.md) for monitoring
+validation, QA rule/dashboard provisioning, Grafana investigation and monitoring rollback.
+
 ## Ownership and exposure
 
 Policy Search runs beside the legacy Java workload. The Go owner creates only

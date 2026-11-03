@@ -103,7 +103,7 @@ def validate_makefile(makefile: str) -> None:
         "$(OBSERVABILITY_SERVICE_DOMAIN)-service",
         "OBSERVABILITY_SERVICE_PROBE ?= "
         "$(K8S_VALIDATION_ROOT)/scripts/alloy/"
-        "probe_$(OBSERVABILITY_SERVICE_DOMAIN).py",
+        "probe_$(subst -,_,$(OBSERVABILITY_SERVICE_DOMAIN)).py",
         '--values "$(PROMETHEUS_VALUES_PATH)"',
     )
     for fragment in required:

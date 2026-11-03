@@ -16,6 +16,18 @@
       "prometheus_service": "qa-prometheus-kube-prometh-prometheus",
       "service_namespace": "qa-svc",
       "tempo_service": "qa-tempo"
+    },
+    "policy-search": {
+      "business_service": "qa-policy-search-api",
+      "deployment": "qa-policy-search-api",
+      "flux_kustomization": "qa-svc",
+      "flux_namespace": "flux-system",
+      "flux_source": "insurance-hub",
+      "loki_service": "qa-loki",
+      "management_service": "qa-policy-search-api-management",
+      "prometheus_service": "qa-prometheus-kube-prometh-prometheus",
+      "service_namespace": "qa-svc",
+      "tempo_service": "qa-tempo"
     }
   },
   "schema_version": 2

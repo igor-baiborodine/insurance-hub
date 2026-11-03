@@ -34,6 +34,12 @@ gateway. It owns generated Go and Swagger 2.0 artifacts, Elasticsearch query and
 adapters, typed configuration, safe structured logging, optional trace and metric export,
 dependency-aware health, and bounded signal-driven shutdown.
 
+Use the
+[observability runbook](../../docs/migration/phase-4/policy-search-service/observability-runbook.md)
+for monitoring validation, QA provisioning, Grafana investigation and monitoring rollback. The
+[deployment runbook](../../docs/migration/phase-4/policy-search-service/deployment-runbook.md)
+owns service deployment and event-fixture operations.
+
 ## Prerequisites
 
 - Go 1.27.3 exactly
