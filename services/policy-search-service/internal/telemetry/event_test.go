@@ -154,6 +154,9 @@ func newEventWorkerMetricFixture(
 	if err != nil {
 		t.Fatal(err)
 	}
+	if observer.registration == nil {
+		t.Fatal("event worker metric registration was not retained")
+	}
 	return observer, reader, func() {
 		_ = tracerProvider.Shutdown(context.Background())
 		_ = meterProvider.Shutdown(context.Background())

@@ -15,12 +15,13 @@ import (
 
 // EventObserver records bounded event outcomes without event bodies or policy identities.
 type EventObserver struct {
-	logger   *slog.Logger
-	tracer   trace.Tracer
-	events   metric.Int64Counter
-	duration metric.Float64Histogram
-	now      func() time.Time
-	workers  map[string]*eventWorkerState
+	logger       *slog.Logger
+	tracer       trace.Tracer
+	events       metric.Int64Counter
+	duration     metric.Float64Histogram
+	registration metric.Registration
+	now          func() time.Time
+	workers      map[string]*eventWorkerState
 }
 
 type eventWorkerState struct {
@@ -93,7 +94,7 @@ func newEventObserver(
 	for _, eventType := range eventTypes {
 		observer.workers[eventType] = &eventWorkerState{enabled: workersEnabled}
 	}
-	_, err = meter.RegisterCallback(
+	registration, err := meter.RegisterCallback(
 		func(ctx context.Context, measurements metric.Observer) error {
 			for _, eventType := range eventTypes {
 				state := observer.workers[eventType]
@@ -123,6 +124,7 @@ func newEventObserver(
 	if err != nil {
 		return nil, errors.New("register event worker gauges")
 	}
+	observer.registration = registration
 	return observer, nil
 }
 

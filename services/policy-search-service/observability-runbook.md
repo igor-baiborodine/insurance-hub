@@ -166,9 +166,9 @@ evidence. A verifier failure is a stop, not permission to bypass its guard.
 Render the exact objects and retain their SHA-256 hashes with the source revision:
 
 ```sh
-make -C k8s prometheus-rules-render ENV_NAME=qa SVC_NAME=policy-search \
+make --no-print-directory -C k8s prometheus-rules-render ENV_NAME=qa SVC_NAME=policy-search \
   > /tmp/policy-search-rule.yaml
-make -C k8s grafana-dashboard-render ENV_NAME=qa SVC_NAME=policy-search \
+make --no-print-directory -C k8s grafana-dashboard-render ENV_NAME=qa SVC_NAME=policy-search \
   > /tmp/policy-search-dashboard.yaml
 sha256sum /tmp/policy-search-rule.yaml \
   /tmp/policy-search-dashboard.yaml
