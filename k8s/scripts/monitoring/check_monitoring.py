@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -117,6 +118,12 @@ def validate_dashboard(assets: MonitoringAssets) -> None:
         if not isinstance(expression, str) or not expression:
             raise ValidationError(
                 f"dashboard Prometheus target {index} expression must be a non-empty string"
+            )
+        service_selectors = set(re.findall(r'service_name\s*=\s*"[^"]+"', expression))
+        if service_selectors and service_selectors != {selector}:
+            raise ValidationError(
+                "application query uses a service selector outside the service contract: "
+                f"{expression}"
             )
         if selector in expression:
             missing = [value for value in required_filters if value not in expression]

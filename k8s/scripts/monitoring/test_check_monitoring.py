@@ -300,6 +300,15 @@ class TestMonitoringTooling:
         with pytest.raises(check.ValidationError, match="required filters"):
             check.validate_dashboard(replace(self.assets, dashboard=dashboard))
 
+    def test_dashboard_rejects_a_foreign_service_selector(self) -> None:
+        dashboard = copy.deepcopy(self.assets.dashboard)
+        expression = dashboard["panels"][0]["targets"][0]["expr"]
+        dashboard["panels"][0]["targets"][0]["expr"] = expression.replace(
+            'service_name="product-service"', 'service_name="policy-search-service"'
+        )
+        with pytest.raises(check.ValidationError, match="outside the service contract"):
+            check.validate_dashboard(replace(self.assets, dashboard=dashboard))
+
     def test_alert_inventory_and_labels_come_from_service_contract(self) -> None:
         rules = self.assets.alerts_path.read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as temporary:

@@ -1,0 +1,722 @@
+{
+  "common_labels": {
+    "deployment_environment_name": "qa",
+    "service_implementation": "go",
+    "service_instance_id": "fixture-pod",
+    "service_name": "policy-search-service",
+    "service_version": "fixture"
+  },
+  "dashboard_variables": {
+    "environment": "qa",
+    "implementation": "go"
+  },
+  "schema_version": 1,
+  "series": [
+    {
+      "labels": {
+        "insurance_hub_policy_search_operation": "search",
+        "insurance_hub_policy_search_outcome": "success",
+        "insurance_hub_policy_search_transport": "http"
+      },
+      "name": "insurance_hub_policy_search_requests_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_operation": "search",
+        "insurance_hub_policy_search_outcome": "success",
+        "insurance_hub_policy_search_transport": "grpc"
+      },
+      "name": "insurance_hub_policy_search_requests_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_operation": "search",
+        "insurance_hub_policy_search_outcome": "internal_error",
+        "insurance_hub_policy_search_transport": "http"
+      },
+      "name": "insurance_hub_policy_search_requests_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_operation": "search",
+        "insurance_hub_policy_search_transport": "http",
+        "le": "0.1"
+      },
+      "name": "insurance_hub_policy_search_request_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 20
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_operation": "search",
+        "insurance_hub_policy_search_transport": "http",
+        "le": "0.25"
+      },
+      "name": "insurance_hub_policy_search_request_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 20
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_operation": "search",
+        "insurance_hub_policy_search_transport": "http",
+        "le": "+Inf"
+      },
+      "name": "insurance_hub_policy_search_request_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 20
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_operation": "search",
+        "insurance_hub_policy_search_transport": "http"
+      },
+      "name": "insurance_hub_policy_search_request_duration_seconds_sum",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 1
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_operation": "search",
+        "insurance_hub_policy_search_transport": "http"
+      },
+      "name": "insurance_hub_policy_search_request_duration_seconds_count",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 20
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "search",
+        "insurance_hub_policy_search_outcome": "success"
+      },
+      "name": "insurance_hub_policy_search_dependencies_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "search",
+        "insurance_hub_policy_search_outcome": "error"
+      },
+      "name": "insurance_hub_policy_search_dependencies_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "search",
+        "le": "0.1"
+      },
+      "name": "insurance_hub_policy_search_dependency_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "search",
+        "le": "0.25"
+      },
+      "name": "insurance_hub_policy_search_dependency_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "search",
+        "le": "+Inf"
+      },
+      "name": "insurance_hub_policy_search_dependency_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "search"
+      },
+      "name": "insurance_hub_policy_search_dependency_duration_seconds_sum",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 0.5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "search"
+      },
+      "name": "insurance_hub_policy_search_dependency_duration_seconds_count",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "replace",
+        "insurance_hub_policy_search_outcome": "success"
+      },
+      "name": "insurance_hub_policy_search_dependencies_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "replace",
+        "insurance_hub_policy_search_outcome": "error"
+      },
+      "name": "insurance_hub_policy_search_dependencies_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "replace",
+        "le": "0.1"
+      },
+      "name": "insurance_hub_policy_search_dependency_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "replace",
+        "le": "0.25"
+      },
+      "name": "insurance_hub_policy_search_dependency_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "replace",
+        "le": "+Inf"
+      },
+      "name": "insurance_hub_policy_search_dependency_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "replace"
+      },
+      "name": "insurance_hub_policy_search_dependency_duration_seconds_sum",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 0.5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_dependency": "elasticsearch",
+        "insurance_hub_policy_search_operation": "replace"
+      },
+      "name": "insurance_hub_policy_search_dependency_duration_seconds_count",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered",
+        "insurance_hub_policy_search_outcome": "success"
+      },
+      "name": "insurance_hub_policy_search_events_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered",
+        "insurance_hub_policy_search_outcome": "malformed"
+      },
+      "name": "insurance_hub_policy_search_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered",
+        "insurance_hub_policy_search_outcome": "error"
+      },
+      "name": "insurance_hub_policy_search_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered",
+        "insurance_hub_policy_search_outcome": "cancelled"
+      },
+      "name": "insurance_hub_policy_search_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered",
+        "le": "0.5"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered",
+        "le": "1"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered",
+        "le": "2.5"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered",
+        "le": "+Inf"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_sum",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 1
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_count",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered"
+      },
+      "name": "insurance_hub_policy_search_event_worker_enabled",
+      "use_common_labels": true,
+      "value": 1
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "registered"
+      },
+      "name": "insurance_hub_policy_search_event_worker_in_flight_age_seconds",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated",
+        "insurance_hub_policy_search_outcome": "success"
+      },
+      "name": "insurance_hub_policy_search_events_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated",
+        "insurance_hub_policy_search_outcome": "malformed"
+      },
+      "name": "insurance_hub_policy_search_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated",
+        "insurance_hub_policy_search_outcome": "error"
+      },
+      "name": "insurance_hub_policy_search_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated",
+        "insurance_hub_policy_search_outcome": "cancelled"
+      },
+      "name": "insurance_hub_policy_search_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated",
+        "le": "0.5"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated",
+        "le": "1"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated",
+        "le": "2.5"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated",
+        "le": "+Inf"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_sum",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 1
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated"
+      },
+      "name": "insurance_hub_policy_search_event_duration_seconds_count",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated"
+      },
+      "name": "insurance_hub_policy_search_event_worker_enabled",
+      "use_common_labels": true,
+      "value": 1
+    },
+    {
+      "labels": {
+        "insurance_hub_policy_search_event_type": "terminated"
+      },
+      "name": "insurance_hub_policy_search_event_worker_in_flight_age_seconds",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {},
+      "name": "go_goroutine_count",
+      "use_common_labels": true,
+      "value": 12
+    },
+    {
+      "labels": {
+        "go_memory_type": "heap"
+      },
+      "name": "go_memory_used_bytes",
+      "use_common_labels": true,
+      "value": 67108864
+    },
+    {
+      "labels": {},
+      "name": "go_memory_gc_cycles_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 1
+      }
+    },
+    {
+      "labels": {
+        "container": "policy-search-api",
+        "namespace": "qa-svc",
+        "pod": "qa-policy-search-api-fixture"
+      },
+      "name": "container_cpu_usage_seconds_total",
+      "use_common_labels": false,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 0.02
+      }
+    },
+    {
+      "labels": {
+        "container": "policy-search-api",
+        "namespace": "qa-svc",
+        "pod": "qa-policy-search-api-fixture"
+      },
+      "name": "container_memory_working_set_bytes",
+      "use_common_labels": false,
+      "value": 104857600
+    },
+    {
+      "labels": {
+        "deployment": "qa-policy-search-api",
+        "namespace": "qa-svc"
+      },
+      "name": "kube_deployment_spec_replicas",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "deployment": "qa-policy-search-api",
+        "namespace": "qa-svc"
+      },
+      "name": "kube_deployment_status_replicas_available",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "condition": "true",
+        "namespace": "qa-svc",
+        "pod": "qa-policy-search-api-fixture"
+      },
+      "name": "kube_pod_status_ready",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "container": "policy-search-api",
+        "namespace": "qa-svc",
+        "pod": "qa-policy-search-api-fixture"
+      },
+      "name": "kube_pod_container_status_restarts_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "loki_write_dropped_entries_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_failed_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_dropped_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_pending",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_send_failed_spans_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_queue_size",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_queue_highest_sent_timestamp_seconds",
+      "use_common_labels": false,
+      "value": {
+        "kind": "unix_time"
+      }
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_queue_capacity",
+      "use_common_labels": false,
+      "value": 2048
+    }
+  ]
+}
