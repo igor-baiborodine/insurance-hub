@@ -309,6 +309,32 @@ class TestMonitoringTooling:
         with pytest.raises(check.ValidationError, match="outside the service contract"):
             check.validate_dashboard(replace(self.assets, dashboard=dashboard))
 
+    @pytest.mark.parametrize(
+        "service_matcher",
+        [
+            'service_name=~"product-service|policy-search-service"',
+            'service_name!="policy-search-service"',
+            'service_name!~"policy-search-service"',
+        ],
+    )
+    def test_dashboard_rejects_non_exact_service_matchers(self, service_matcher: str) -> None:
+        dashboard = copy.deepcopy(self.assets.dashboard)
+        expression = dashboard["panels"][0]["targets"][0]["expr"]
+        dashboard["panels"][0]["targets"][0]["expr"] = expression.replace(
+            'service_name="product-service"', service_matcher
+        )
+        with pytest.raises(check.ValidationError, match="outside the service contract"):
+            check.validate_dashboard(replace(self.assets, dashboard=dashboard))
+
+    def test_dashboard_rejects_application_metric_without_service_selector(self) -> None:
+        dashboard = copy.deepcopy(self.assets.dashboard)
+        expression = dashboard["panels"][0]["targets"][0]["expr"]
+        dashboard["panels"][0]["targets"][0]["expr"] = expression.replace(
+            'service_name="product-service",', ""
+        )
+        with pytest.raises(check.ValidationError, match="lacks required service selector"):
+            check.validate_dashboard(replace(self.assets, dashboard=dashboard))
+
     def test_alert_inventory_and_labels_come_from_service_contract(self) -> None:
         rules = self.assets.alerts_path.read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as temporary:
