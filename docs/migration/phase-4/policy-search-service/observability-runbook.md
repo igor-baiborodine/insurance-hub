@@ -66,7 +66,7 @@ The accepted QA identity is:
 | `service.instance.id` | current Pod UID |
 | `k8s.cluster.name` | `qa-insurance-hub` |
 | `k8s.namespace.name` | `qa-svc` |
-| `k8s.container.name` | `qa-policy-search-api` |
+| `k8s.container.name` | `policy-search-api` |
 
 The workload must have `OTEL_ENABLED=true`, its explicit service/environment/version/instance
 identity and the internal OTLP endpoint. The read-only verifier checks the effective ConfigMap,
@@ -283,7 +283,7 @@ kube_deployment_status_replicas_available{
 
 ```promql
 increase(kube_pod_container_status_restarts_total{
-  namespace="qa-svc",container="qa-policy-search-api"
+  namespace="qa-svc",container="policy-search-api"
 }[15m])
 ```
 
