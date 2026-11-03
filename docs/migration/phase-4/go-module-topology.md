@@ -130,9 +130,11 @@ documentation, workflow YAML, topology metadata, Codecov configuration, legacy b
 Dockerfiles, and deployment assets do not independently trigger that selected-module workflow.
 The additive shared workflow below covers module auxiliary files and root validation tooling.
 
-`.github/workflows/go-report-card.yml` uses the same qualifying path matrix for pushes to `main`
-and pull requests targeting `main`. Its manual dispatch remains available for workflow-only
-validation without making workflow YAML an independent hosted Go trigger.
+`.github/workflows/go-report-card.yml` uses the same service and scaffold qualifying path matrix for
+pushes to `main` and pull requests targeting `main`, and additionally runs for changes under
+`libs/servicekit/`. It evaluates every registered business service, public shared library and
+service scaffold. Its manual dispatch remains available for workflow-only validation without making
+workflow YAML an independent hosted Go trigger.
 
 Once triggered, the workflow compares the explicit pull-request base and head revisions and maps
 the complete diff to the scaffold or conventionally named service roots. Zero supported modules is

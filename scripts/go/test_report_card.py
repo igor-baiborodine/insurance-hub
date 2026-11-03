@@ -67,10 +67,14 @@ def test_missing_required_field_is_rejected() -> None:
 
 
 def test_topology_selection_rejects_an_omitted_eligible_module(tmp_path: Path) -> None:
-    with pytest.raises(report_card.ReportCardError, match="policy-search-service"):
+    with pytest.raises(report_card.ReportCardError, match="servicekit"):
         report_card.select_modules(
             topology(tmp_path),
-            ["templates/go-service", "services/product-service"],
+            [
+                "templates/go-service",
+                "services/product-service",
+                "services/policy-search-service",
+            ],
         )
 
 
@@ -107,8 +111,9 @@ def test_main_runs_each_module_and_appends_summary(tmp_path: Path) -> None:
 
     # then
     assert status == 0
-    assert len(calls) == 3
+    assert len(calls) == 4
     text = summary.read_text(encoding="utf-8")
+    assert "| libs/servicekit | B | 80.0% | 2 |" in text
     assert "| services/product-service | B | 80.0% | 2 |" in text
     assert "| services/policy-search-service | B | 80.0% | 2 |" in text
     assert "| templates/go-service | B | 80.0% | 2 |" in text
