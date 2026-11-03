@@ -41,9 +41,10 @@ identity.
 Durable source is under `k8s/observability/services/policy-search/`, the QA registration is in
 `k8s/observability/environments/qa.json`, and shared collection policy is in
 `k8s/overlays/qa/infra/alloy/config.alloy`. The rendered QA objects are
-`PrometheusRule/qa-policy-search-service` and immutable
-`ConfigMap/qa-policy-search-dashboard` in `qa-monitoring`. Never edit those live objects or the
-Grafana database by hand.
+`PrometheusRule/qa-policy-search-service` and the source-owned
+`ConfigMap/qa-policy-search-dashboard` in `qa-monitoring`. Grafana keeps the dashboard read-only
+with `editable=false`, while its provider disables UI updates and deletion. Never edit those live
+objects or the Grafana database by hand.
 
 Workers disabled means both enabled gauges are zero, the service owns no Kafka clients and event
 alerts stay suppressed. Workers enabled and idle means enabled is one, in-flight age is zero and
