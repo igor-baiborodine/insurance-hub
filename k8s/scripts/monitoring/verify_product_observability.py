@@ -185,7 +185,8 @@ class KubernetesTarget:
         for variable in containers[0].get("env", []):
             if isinstance(variable.get("value"), str):
                 settings[variable["name"]] = variable["value"]
-        expected = "true" if mode == "enabled" else "false"
+        telemetry_enabled = mode in {"pre-provision", "enabled"}
+        expected = "true" if telemetry_enabled else "false"
         require(
             settings.get("OTEL_ENABLED") == expected,
             f"selected service OTEL_ENABLED must be {expected}",
@@ -194,7 +195,7 @@ class KubernetesTarget:
             settings.get("SERVICE_NAME") == self.assets.contract.service_name,
             "selected service identity differs",
         )
-        if mode == "enabled":
+        if telemetry_enabled:
             require(
                 settings.get("DEPLOYMENT_ENVIRONMENT") == "qa",
                 "enabled service environment must be qa",
@@ -666,7 +667,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--assets-root", type=Path, required=True)
     parser.add_argument("--environment", required=True)
     parser.add_argument("--service", required=True)
-    parser.add_argument("--mode", choices=("disabled", "enabled"), required=True)
+    parser.add_argument("--mode", choices=("disabled", "pre-provision", "enabled"), required=True)
     parser.add_argument("--source-revision", required=True)
     return parser.parse_args(argv)
 

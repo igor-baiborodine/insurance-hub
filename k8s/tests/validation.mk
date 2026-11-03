@@ -84,8 +84,10 @@ observability-verify-test-tooling: python-toolchain-check ## Exercise service-se
 .PHONY: _observability-verify-args-check
 _observability-verify-args-check: _monitoring-assets-args-check
 	@if [ "$(origin VERIFY_MODE)" != "command line" ] || \
-		{ [ "$(VERIFY_MODE)" != "disabled" ] && [ "$(VERIFY_MODE)" != "enabled" ]; }; then \
-		echo "ERROR: VERIFY_MODE=disabled|enabled is required on the make command line."; \
+		{ [ "$(VERIFY_MODE)" != "disabled" ] && \
+		  [ "$(VERIFY_MODE)" != "pre-provision" ] && \
+		  [ "$(VERIFY_MODE)" != "enabled" ]; }; then \
+		echo "ERROR: VERIFY_MODE=disabled|pre-provision|enabled is required on the make command line."; \
 		exit 1; \
 	fi
 	@if [ "$(origin VERIFY_SOURCE_REVISION)" != "command line" ] || \

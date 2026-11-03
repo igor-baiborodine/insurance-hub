@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from argparse import Namespace
 from contextlib import nullcontext
 from pathlib import Path
 from unittest import mock
@@ -155,7 +156,8 @@ class TestProductObservabilityVerification:
             with pytest.raises(verifier.VerificationError, match="differs from the requested"):
                 target.flux_revision()
 
-    def test_deployment_uses_selected_identity_and_deployment_selector(self) -> None:
+    @pytest.mark.parametrize("mode", ["pre-provision", "enabled"])
+    def test_deployment_uses_selected_identity_and_deployment_selector(self, mode: str) -> None:
         # given
         target = verifier.KubernetesTarget(self.assets, "a" * 40)
         deployment = {
@@ -193,7 +195,7 @@ class TestProductObservabilityVerification:
 
         # when
         with mock.patch.object(target, "json", side_effect=[deployment, config_map, pods]) as query:
-            observed = target.deployment("enabled")
+            observed = target.deployment(mode)
 
         # then
         assert observed["pods"] == [
@@ -202,6 +204,56 @@ class TestProductObservabilityVerification:
         assert query.call_args_list[-1] == mock.call(
             "qa-svc", "get", "pods", "-l", "app.kubernetes.io/name=product-api"
         )
+
+    def test_pre_provision_checks_enabled_workload_without_monitoring_assets(self) -> None:
+        # given
+        args = Namespace(
+            assets_root=ASSETS_ROOT,
+            environment="qa",
+            service="product",
+            mode="pre-provision",
+            source_revision="a" * 40,
+        )
+        target = mock.Mock(spec=verifier.KubernetesTarget)
+        target.flux_revision.return_value = "main@sha1:" + "a" * 40
+        target.deployment.return_value = {
+            "pods": [{"pod_uid": "pod-uid", "image_id": "registry/product@sha256:abc"}]
+        }
+        target.monitoring_namespace = "qa-monitoring"
+        services = mock.Mock(return_value=[("product", "qa-svc", "qa-product-api", 80)])
+        workload = mock.Mock(return_value=1)
+        enabled_signals = mock.Mock()
+        probe = verifier.ServiceProbe(
+            service="product",
+            services=services,
+            workload=workload,
+            enabled_signals=enabled_signals,
+            result_key="product_rows",
+        )
+
+        # when
+        with (
+            mock.patch.object(verifier, "load_assets", return_value=self.assets),
+            mock.patch.object(verifier, "select_probe", return_value=probe),
+            mock.patch.object(verifier, "KubernetesTarget", return_value=target),
+            mock.patch.object(
+                verifier, "forwards", return_value=nullcontext({"product": 1001})
+            ) as forwarded,
+        ):
+            observed = verifier.execute(args)
+
+        # then
+        target.coordinates.assert_called_once_with()
+        target.flux_revision.assert_called_once_with()
+        target.deployment.assert_called_once_with("pre-provision")
+        target.monitoring_assets.assert_not_called()
+        forwarded.assert_called_once_with(target, [("product", "qa-svc", "qa-product-api", 80)])
+        workload.assert_called_once_with({"product": 1001}, observed["trace_id"])
+        enabled_signals.assert_not_called()
+        assert observed["mode"] == "pre-provision"
+        assert observed["monitoring"] == {}
+        assert observed["signals"] == {}
+        assert observed["product_rows"] == 1
 
     def test_deployment_rejects_missing_service_identity(self) -> None:
         # given

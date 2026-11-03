@@ -146,9 +146,13 @@ Before provisioning, run the selected-service read-only verifier:
 
 ```sh
 make verify-service-observability \
-  ENV_NAME=qa SVC_NAME=policy-search VERIFY_MODE=enabled \
+  ENV_NAME=qa SVC_NAME=policy-search VERIFY_MODE=pre-provision \
   VERIFY_SOURCE_REVISION="$POLICY_SEARCH_SOURCE_REVISION"
 ```
+
+This pre-provision mode checks the exact target, Flux revision, OTEL-enabled Deployment, immutable
+Pod image identity and safe service workload without requiring monitoring resources that have not
+been installed yet. It does not inspect PrometheusRule, dashboard or backend signals.
 
 Stop if the checkout SHA is not the reviewed merge, Flux source and applied revisions differ, the
 image/source identity is stale, the Deployment or either dependency is unhealthy, the active
@@ -185,6 +189,10 @@ kubectl --context qa-insurance-hub -n qa-monitoring get \
 make -C k8s grafana-dashboard-apply ENV_NAME=qa SVC_NAME=policy-search
 kubectl --context qa-insurance-hub -n qa-monitoring get \
   configmap/qa-policy-search-dashboard -o yaml
+
+make verify-service-observability \
+  ENV_NAME=qa SVC_NAME=policy-search VERIFY_MODE=enabled \
+  VERIFY_SOURCE_REVISION="$POLICY_SEARCH_SOURCE_REVISION"
 ```
 
 Require exactly 12 Policy Search alerts, dashboard UID
