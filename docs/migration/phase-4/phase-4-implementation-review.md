@@ -10,6 +10,7 @@
     - [Research and engineering requirements](#research-and-engineering-requirements)
   - [Detailed assessments](#detailed-assessments)
     - [Composition and lifecycle](#composition-and-lifecycle)
+      - [Composition-root follow-up (3 November 2026)](#composition-root-follow-up-3-november-2026)
     - [PostgreSQL and migrations](#postgresql-and-migrations)
     - [Configuration and secrets](#configuration-and-secrets)
     - [Transport and validation](#transport-and-validation)
@@ -52,10 +53,12 @@
 
 **Review date: 30 September 2026. Status: reviewed documentation baseline; runtime adoption remains gated.**
 
-**Product transport follow-up: 10 October 2026.** The
-[issue-132 rationale](#product-http-compatibility-decision-issue-132) records the pilot's explicit
-HTTP adapter choice using the subsequent Product baseline and implementation. Other dated findings
-and adoption gates retain their original scope; this follow-up does not refresh the full review.
+**Transport guidance update: 3 November 2026.** Use generated gRPC-Gateway for the HTTP/JSON
+boundary of migrated Go APIs, backed by versioned gRPC services. Preserve existing HTTP contracts
+through gateway mapping and compatibility customization. The
+[Product pilot rationale](#product-http-compatibility-decision-issue-132) records the historical
+10 October direct-HTTP implementation; it is superseded as guidance for selecting a transport.
+This documentation update does not claim that the Product implementation has been converted.
 
 **Monitoring guidance follow-up: 3 November 2026.** The
 [Go-service dashboards and alerts guide](go-service-dashboards-and-alerts.md) defines the common
@@ -106,8 +109,10 @@ Read by topic:
 
 Retain service boundaries, explicit constructors, typed startup configuration, versioned contracts,
 controlled SQL migrations and Make-based validation. Provisionally prefer native pgx/v5/pgxpool
-with sqlc for actual PostgreSQL adapters, Protovalidate for Protobuf request shape, IBM Sarama for
-Kafka, the official Elasticsearch v8 client, and the MinIO v7 SDK for document/payment. Use
+with sqlc for actual PostgreSQL adapters, Protovalidate for Protobuf request shape,
+the official Elasticsearch v8 client, and the MinIO v7 SDK for document/payment. For Kafka,
+reuse the implemented franz-go pattern where it meets the service's accepted processing contract;
+the [Kafka follow-up](#kafka-and-event-processing) supersedes the earlier Sarama preference. Use
 standard-library slog JSON and OpenTelemetry through Alloy. These choices require service-owned
 compatible pins and tests; they are not a universal dependency list.
 
@@ -199,12 +204,12 @@ dependencies. Standard-library choices add no separate third-party runtime packa
 | <a id="p4-05"></a>P4-05 / D19-05 | Command/query handlers implemented with GORM. [A:487](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L487) | P:408 and D address adapter/interface boundaries | **qualify** | Optional use-case handlers independent of persistence; direct methods where sufficient. No mandatory generic bus/decorator abstraction. | [Assessment](#composition-and-lifecycle); [G19-01](#g19-01), [G19-04](#g19-04) |
 | <a id="p4-06"></a>P4-06 / D19-06 | Replace synchronous REST with grpc-go. [A:131–139, 176–179, 231–237, 480](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L131) | None | **qualify** | Internal versioned Go RPCs with deadlines and safe errors; preserve Java HTTP callers through tested adapters or separately migrated clients. All Go/callers. | [Assessment](#transport-and-validation); [G19-05](#g19-05) |
 | <a id="p4-07"></a>P4-07 / D19-07 | Protobuf and generated clients/OpenAPI. [A:135–139, 160–163, 373–374, 401–402, 415–416](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L135) | None | **qualify** | Preserve presence, numbers/names, JSON and consumers; pin generators and generate only needed outputs. Schema checks cannot prove HTTP parity. | [Assessment](#transport-and-validation); [G19-01](#g19-01), [G19-05](#g19-05) |
-| <a id="p4-08"></a>P4-08 / D19-08 | grpc-gateway preserves HTTP automatically. [A:136–137, 231–237, 308–313, 327–328, 377–378, 392, 405–406, 421–422, 442–443, 481](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L136) | None | **qualify** | Choose generated v2 mapping or explicit HTTP adapter per fixture-backed route; Java gateway remains interim edge. Product #132 selects an explicit `net/http` adapter for legacy parity; see the [Product rationale](#product-http-compatibility-decision-issue-132). Include offer/search, principal override and document bytes. | [Assessment](#transport-and-validation); [G19-05](#g19-05), [G19-06](#g19-06) |
+| <a id="p4-08"></a>P4-08 / D19-08 | grpc-gateway preserves HTTP automatically. [A:136–137, 231–237, 308–313, 327–328, 377–378, 392, 405–406, 421–422, 442–443, 481](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L136) | None | **qualify** | Use generated gRPC-Gateway backed by versioned gRPC services, with tested HTTP/JSON compatibility mapping and matching OpenAPI. The Java gateway remains the interim edge. The [Product direct-HTTP rationale](#product-http-compatibility-decision-issue-132) is historical, not a current transport-selection option. Preserve offer/search, principal override and document bytes as applicable. | [Assessment](#transport-and-validation); [G19-05](#g19-05), [G19-06](#g19-06) |
 | <a id="p4-09"></a>P4-09 / D19-09 | protoc-gen-validate. [A:485](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L485) | None | **replace** | Provisional Protovalidate schema/runtime for transport shape, application/domain for invariants. Archived PGV is unsuitable as a new default; cover direct HTTP and stream entry points. | [Assessment](#transport-and-validation); [G19-01](#g19-01), [G19-05](#g19-05) |
 | <a id="p4-10"></a>P4-10 / D19-10 | GORM for seven PostgreSQL services. [A:307–313, 360–361, 375–376, 391–392, 403–404, 417–418, 482](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L307) | P directly proposes replacement | **replace** | Provisional sqlc with native pgx/v5/pgxpool for actual PG owners. GORM remains a justified local exception; no PG requirement inferred for chat/dashboard/search. | [Assessment](#postgresql-and-migrations); [G19-04](#g19-04) |
 | <a id="p4-11"></a>P4-11 / D19-11 | New JSONB migration and automatic index/performance gains. [A:107–114, 203–214, 448–459, 694–705](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L107) | P covers JSONB and direct-query exceptions | **qualify** | Java product already has JSONB mapping/default; inspect effective rows/schema/indexes and benchmark queries before claims. No second blanket MongoDB migration. | [Assessment](#postgresql-and-migrations); [G19-04](#g19-04), [G19-14](#g19-14) |
-| <a id="p4-12"></a>P4-12 / D19-12 | Kafka, Shopify Sarama or kafka-go, JSON events. [A:165–166, 221, 484](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L165) | P:335–345 touches transaction/event atomicity | **qualify** | Retain Kafka/topics/policy keys/JSON; provisional IBM Sarama, kafka-go conditional. Kafka 4.1 compatibility, partitioning, commits and external effects require proof. Policy and four consumers. | [Assessment](#kafka-and-event-processing); [G19-07](#g19-07) |
-| <a id="p4-13"></a>P4-13 / D19-13 | olivere/elastic for search/analytics. [A:111, 211, 308, 314, 368–376, 466–467](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L111) | None | **replace** | Provisional official go-elasticsearch/v8 for configured 8.19.6; typed or low-level DSL inside adapters. Preserve mappings/refresh and query semantics. Search/dashboard. | [Assessment](#search-and-dashboard); [G19-08](#g19-08) |
+| <a id="p4-12"></a>P4-12 / D19-12 | Kafka, Shopify Sarama or kafka-go, JSON events. [A:165–166, 221, 484](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L165) | P:335–345 touches transaction/event atomicity | **qualify** | Retain Kafka/topics/keys/JSON and accepted processing semantics. Reuse the implemented franz-go pattern where compatible; verify explicit service-owned settings and target compatibility. New quarantine/replay, deduplication, outbox and stronger commit guarantees require separate scope. | [Assessment](#kafka-and-event-processing); [G19-07](#g19-07) |
+| <a id="p4-13"></a>P4-13 / D19-13 | olivere/elastic for search/analytics. [A:111, 211, 308, 314, 368–376, 466–467](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L111) | None | **replace** | Reuse the implemented official go-elasticsearch/v8 pattern with a compatible target pin; typed or low-level DSL inside service-owned adapters. Preserve required mappings/refresh, query results and retry ownership. No new index recovery or query features implied. | [Assessment](#search-and-dashboard); [G19-08](#g19-08) |
 | <a id="p4-14"></a>P4-14 / D19-14 | Gorilla WebSocket plus internal streams and persisted chat. [A:307, 350–364](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L307) | D/C mention lifecycle/configuration only | **qualify** | Retain browser WebSocket; qualify Gorilla. Defer internal streams/history without a caller/retention contract. Require authenticated handshake and approved safe browser format. | [Assessment](#realtime-chat); [G19-11](#g19-11) |
 | <a id="p4-15"></a>P4-15 / D19-15 | Large document gRPC upload/download streaming. [A:389–392](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L389) | None | **defer** | Current query returns document bytes within a result; payload/consumer evidence must justify a separate streaming API. SDK streaming is an internal implementation option. | [Assessment](#object-storage); [G19-05](#g19-05), [G19-09](#g19-09) |
 | <a id="p4-16"></a>P4-16 / D19-16 | Internal-only search with streamed/paged results. [A:461–474, 783–786](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L461) | None | **qualify** | Unary bounded list with HTTP bridge for Java gateway; retain 100-hit cap then application sorting. Defer pages/streams pending real consumer/load evidence. | [Assessment](#search-and-dashboard); [G19-05](#g19-05), [G19-08](#g19-08) |
@@ -218,7 +223,7 @@ dependencies. Standard-library choices add no separate third-party runtime packa
 | Inventory / decision | Previous proposal and source | Prior study | Disposition | Reviewed choice, rationale and affected scope | Assessment / gate |
 | --- | --- | --- | --- | --- | --- |
 | <a id="p4-21"></a>P4-21 / D19-21 | Keycloak/operator replaces auth; unspecified Go JWT library. [A:306, 334–348, 810–815](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L306) | None | **defer** | Separate Phase 5 selection/cutover; first establish legacy trust/claims/permissions and verifier requirements. No presumed OIDC issuer or accepted verifier pin. | [Assessment](#security-and-phase-5); [G19-06](#g19-06) |
-| <a id="p4-22"></a>P4-22 / D19-22 | Envoy replaces gateway and owns translation/JWT. [A:305, 318–332, 816–822](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L305) | None | **defer** | Current Java gateway plus explicit service HTTP adapters during Phase 4. One translation owner per route after edge/identity/WebSocket parity and rollback. | [Assessment](#security-and-phase-5); [G19-06](#g19-06), [G19-14](#g19-14) |
+| <a id="p4-22"></a>P4-22 / D19-22 | Envoy replaces gateway and owns translation/JWT. [A:305, 318–332, 816–822](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L305) | None | **defer** | Retain the Java edge with service-owned generated gRPC-Gateway HTTP/JSON boundaries during Phase 4. One translation owner per route; Envoy adoption waits for edge/identity/WebSocket parity and rollback evidence. | [Assessment](#security-and-phase-5); [G19-06](#g19-06), [G19-14](#g19-14) |
 | <a id="p4-23"></a>P4-23 / D19-23 | Linkerd supplies universal mTLS/retries/resilience. [A:133–135, 165–168, 191–194, 824–830](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L133) | None | **defer** | No installed mesh dependency. Mixed-peer policy, workload identity and actual resilience features need separate proof; service deadlines/idempotency remain required. | [Assessment](#security-and-phase-5); [G19-06](#g19-06), [G19-14](#g19-14) |
 | <a id="p4-24"></a>P4-24 / D19-24 | Kubernetes discovery replaces Consul. [A:100–101, 181–183, 220, 637–642](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L100) | None | **qualify** | Retain Service DNS, environment naming and labels; distinct Java/Go selectors and explicit HTTP/gRPC ports. Do not equate DNS with identity, weighted routing or verified Consul retirement. | [Assessment](#deployment-comparison); [G19-03](#g19-03), [G19-14](#g19-14) |
 | <a id="p4-25"></a>P4-25 / D19-25 | OTel traces, Tempo/Jaeger and collector options. [A:144–145, 189–190, 499, 522–541](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/system-overview-and-migration-analysis.md#L144) | P:158 and D:241 touch integration | **qualify** | OTel traces through Alloy to configured Tempo path; verify Java B3/Go W3C propagation, sampling and bounded exporter shutdown. No direct backend coupling. All Go. | [Assessment](#observability); [G19-13](#g19-13) |
@@ -245,7 +250,7 @@ dependencies. Standard-library choices add no separate third-party runtime packa
 | <a id="p4-41"></a>P4-41 / D19-41 | sqlc/native pgx default and direct-query exceptions. [P:3–9, 99–111, 137–204, 298–311, 384–408](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/migration/phase-4/postgresql-data-access-strategy.md#L3) | P direct | **qualify** | Provisional for actual PG adapters; generated types stay private, dynamic SQL parameterized, tool/runtime pinned independently. No universal performance assertion. | [Assessment](#postgresql-and-migrations); [G19-01](#g19-01), [G19-04](#g19-04) |
 | <a id="p4-42"></a>P4-42 / D19-42 | database/sql, Ent, Bun, sqlx, Jet versus GORM/pgx. [P:17–28, 47–135, 347–360](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/migration/phase-4/postgresql-data-access-strategy.md#L17) | P direct | **qualify** | database/sql/pgx stdlib remains valid; use direct pgx for small/dynamic needs. Defer other stacks until representative query/maintenance evidence shows local benefit; avoid duplicate CRUD stacks. | [Assessment](#postgresql-and-migrations); [G19-04](#g19-04) |
 | <a id="p4-43"></a>P4-43 / D19-43 | Versioned release SQL, no production AutoMigrate. [P:155–161, 362–374](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/migration/phase-4/postgresql-data-access-strategy.md#L155); [G:Contracts and persistence](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/ai/rules/go-development.md) | P direct | **retain** | One controlled schema executor per DB, separate from replicas. Goose provisional; baseline populated DBs, resolve Java auto-DDL, rehearse expand/contract and forward recovery. | [Assessment](#postgresql-and-migrations); [G19-04](#g19-04) |
-| <a id="p4-44"></a>P4-44 / D19-44 | Explicit transactions/retries/idempotency/outbox/tests. [P:262–296, 315–345](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/migration/phase-4/postgresql-data-access-strategy.md#L262) | P direct | **retain** | Operation-specific isolation, exact money, conflicts and real-store tests; outbox conditional on publication guarantees, never presumed SQL/Kafka/MinIO atomicity. | [Assessment](#kafka-and-event-processing); [G19-04](#g19-04), [G19-07](#g19-07), [G19-09](#g19-09) |
+| <a id="p4-44"></a>P4-44 / D19-44 | Explicit transactions/retries/idempotency/outbox/tests. [P:262–296, 315–345](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/migration/phase-4/postgresql-data-access-strategy.md#L262) | P direct | **qualify** | Preserve accepted transaction, conflict and retry behavior with focused real-store tests. New outbox, deduplication or compensation mechanisms require separate scope; never presume SQL/Kafka/MinIO atomicity. | [Assessment](#kafka-and-event-processing); [G19-04](#g19-04), [G19-07](#g19-07), [G19-09](#g19-09) |
 | <a id="p4-45"></a>P4-45 / D19-45 | Manual constructors; Fx/dig/do alternatives. [D:3–16, 42–80, 250–289](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/migration/phase-4/dependency-injection-strategy.md#L3) | D direct | **retain** | Manual DI default; conditional Fx comparison only for repeated measured graph/lifecycle problems. No container types in domain/application. | [Assessment](#composition-and-lifecycle); [G19-01](#g19-01) |
 | <a id="p4-46"></a>P4-46 / D19-46 | Study composition root and signal/errgroup runner. [D:82–106, 150–248](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/migration/phase-4/dependency-injection-strategy.md#L82); [G:Service structure and dependencies](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/ai/rules/go-development.md) | D direct | **qualify** | Thin cmd and internal/service ownership per canonical rules; reverse partial cleanup and fresh bounded shutdown context, owned goroutines and no blanket shared runner. | [Assessment](#composition-and-lifecycle); [G19-01](#g19-01), [G19-03](#g19-03) |
 | <a id="p4-47"></a>P4-47 / D19-47 | caarlos0/env with global required policy/wrapped errors. [C:3–17, 61–108, 146–285, 489–538](https://github.com/igor-baiborodine/insurance-hub/blob/30007edfefe2d7bdc8e9eecd8951deb70ac50344/docs/migration/phase-4/configuration-strategy.md#L3) | C direct | **qualify** | Typed immutable subconfigs, per-field absence/empty/default rules, semantic validation and redacted errors; optional integrations remain optional. | [Assessment](#configuration-and-secrets); [G19-02](#g19-02) |
@@ -289,6 +294,56 @@ work, drain within the actual Pod budget, then flush/close clients and exporters
 The example's pprof shutdown uses a cancelled context; the DI study's unbounded telemetry cleanup
 is also unsuitable. HTTP shutdown does not own hijacked WebSockets; chat needs explicit connection
 tracking. Validate partial startup, fatal workers, repeated stop and force-stop under G19-03.
+
+#### Composition-root follow-up (3 November 2026)
+
+The manual-constructor direction above remains selected. The current implementation makes its
+ownership boundaries more concrete: **each service retains its own composition root in
+`internal/service`; `cmd/server` is the thin process bootstrap, and Servicekit supplies explicit
+runtime building blocks rather than a shared application runner or DI container.** The earlier
+[DI study](phase-4-dependency-injection-strategy.md) places application wiring under `cmd/`; use
+the current split below when adopting that study's constructor-injection principles.
+
+| Boundary | Current responsibility and source evidence |
+| --- | --- |
+| Process entry point | [`cmd/server`](../../../templates/go-service/cmd/server/main.go) owns signals and exit, loads validated service settings, creates the identity logger, installs enabled telemetry diagnostics and restores them after `service.Run` returns. It delegates business graph construction and resource lifetime. |
+| Service composition root | [`internal/service`](../../../templates/go-service/internal/service/service.go) explicitly constructs providers, concrete adapters, use cases, listeners, generated gateway clients and servers. It owns startup, readiness transitions, serving failures, partial-start cleanup and the overall shutdown budget. Focused helpers may split this work across files in the same package; one composition root does not mean one large function. |
+| Shared runtime mechanics | [Servicekit](../../../libs/servicekit/README.md#package-boundary) supplies configuration parsing, neutral identity, logging, health and telemetry APIs. Services explicitly call those APIs and retain configuration policy, business signals, dependency selection and lifecycle ordering. Servicekit does not discover the graph, load service configuration on import or own the service process. |
+| Business core and adapters | Application/domain code owns business behavior and the narrow ports it consumes. The composition root constructs concrete adapters and injects them. [Product wiring](../../../services/product-service/internal/service/service.go) demonstrates a reader shared by catalog use cases; Policy Search keeps [query](../../../services/policy-search-service/internal/service/query.go) and [projection](../../../services/policy-search-service/internal/service/projection.go) clients separate because their read/write authorities differ. Sharing mechanics does not require sharing every client or authority. |
+
+For the selected generated HTTP gateway composition, the root starts the actual gRPC listener,
+constructs and owns its generated-client connection, and verifies channel readiness before
+declaring the service ready. HTTP requests traverse that connection and the server interceptors.
+The gateway does not independently assemble business dependencies or call a parallel application
+handler. Keep protocol mapping in the gateway/RPC adapters and dependency construction in the root.
+The [scaffold package map and walkthrough](../../../templates/go-service/README.md#package-map-and-request-walkthrough)
+records this separation.
+
+Cleanup follows the dependency graph, not a mechanical reversal of the startup statements. In
+the scaffold, withdraw readiness and drain accepted business HTTP work while its RPC dependency
+is still available; then close the gateway connection, stop gRPC, close management resources and
+shut down telemetry. Policy Search additionally stops its owned workers and closes dependency
+clients in its [service lifecycle](../../../services/policy-search-service/internal/service/service.go).
+Use a fresh bounded cleanup context, reserve exporter cleanup time within the overall shutdown
+deadline, force-stop stalled work within that budget and preserve the original failure alongside
+cleanup errors. The process entry point restores diagnostic handlers after provider shutdown.
+Services with different resources retain an explicit, appropriate order rather than copying a
+fixed listener count or pool arrangement.
+
+No new DI-framework comparison or shared lifecycle framework is a migration prerequisite. Reuse
+the published Servicekit APIs and local composition pattern; introduce an abstraction only for a
+demonstrated need under separately agreed scope. Ordinary startup, cancellation and drain tests
+remain part of each affected increment. They are distinct from deployment rollback/restore
+rehearsals, which the [migration guide](go-service-migration-scope.md#final-implementation-testing-and-rollback)
+places in final implementation qualification.
+
+This follow-up is based on source and responsibility inspection. The scaffold's
+[composition tests](../../../templates/go-service/internal/service/service_test.go) and
+[entry-point tests](../../../templates/go-service/cmd/server/main_test.go) contain the relevant
+listener, readiness, drain, failure-cleanup and diagnostic-restoration scenarios; they were not
+rerun for this documentation update. Product remains evidence for manual composition and resource
+ownership, not evidence that its historical direct HTTP transport implements the current gateway
+requirement.
 
 ### PostgreSQL and migrations
 
@@ -393,9 +448,15 @@ defaults missing `q` to `*` and replaces caller agentLogin with authenticated Pr
 Its external `/api/policies/create` and `/terminate` are not identical to the backend routes.
 The browser's [API client](../../../legacy/web-vue/src/components/http/ApiClient.js) sends a bearer
 token to `/api/`; policy [calls pricing over HTTP](../../../legacy/policy-service/src/main/java/pl/altkom/asc/lab/micronaut/poc/policy/infrastructure/adapters/restclient/PricingClient.java).
-Generated RPC names or OpenAPI cannot reproduce these transformations alone. Choose a small HTTP
-adapter or grpc-gateway v2 per route after capturing actual method/path/status/header/content-type,
-JSON, principal and failure fixtures; migrate a Java caller to gRPC only as a tested consumer change.
+Generated RPC names or OpenAPI cannot reproduce these transformations alone. Use generated
+gRPC-Gateway with the compatibility mapping needed to preserve method/path/status/header/content-type,
+JSON, principal and failure fixtures. Follow the
+[scaffold gateway composition](../../../templates/go-service/README.md#example-rpc-and-http-gateway):
+the generated client calls the actual gRPC listener so validation, recovery, deadlines and telemetry
+execute. Keep business logic behind the RPC boundary; compatibility hooks must not create a
+parallel direct-to-application HTTP path. Migrate a Java caller to direct gRPC only as a tested
+consumer change. WebSocket and other non-HTTP/JSON protocols retain their specifically defined
+transport requirements.
 
 [Protobuf presence](https://protobuf.dev/programming-guides/field_presence/) and
 [ProtoJSON](https://protobuf.dev/programming-guides/json/) differ from Java null/default, field-name,
@@ -439,11 +500,14 @@ Go/Java/browser/OpenAPI consumer tests. No RPC performance gain or wire parity i
 
 #### Product HTTP compatibility decision (issue-132)
 
-The 10 October follow-up applies D19-08 to Product's two catalog-read operations. Issue #131's
+**Historical implementation rationale — superseded for transport selection.** The 10 October
+follow-up applied the then-current D19-08 to Product's two catalog-read operations. Issue #131's
 [contract baseline](product-service/contract-baseline.md#binding-field-mapping-and-presence-rules)
 and the #132 [service architecture](../../../services/product-service/README.md#product-catalog-architecture)
-support an explicit `net/http` adapter alongside versioned unary gRPC. This is a Product
-compatibility decision, not a blanket replacement of grpc-gateway for Phase 4.
+document the explicit `net/http` adapter alongside versioned unary gRPC used for that pilot.
+The current requirement is generated gRPC-Gateway; the HTTP compatibility cases below remain
+relevant when adapting Product to it. This section records the existing design, not an exception
+to the current direction or evidence that a conversion has already happened.
 
 The HTTP API must preserve Java's observed representation, while the
 [Product v1 schema](../../../services/product-service/api/product/v1/product_service.proto)
@@ -466,105 +530,146 @@ configuration; compatibility is achievable. However, these customizations retain
 handwritten mapping while adding gateway runtime and generation configuration. Runtime response
 rewriting can also diverge from generated OpenAPI output, as the
 [gateway customization guide](https://grpc-ecosystem.github.io/grpc-gateway/docs/mapping/customizing_your_gateway/)
-explains. For two operations, the explicit adapter makes the required transformations easier to
-inspect and test directly against the accepted fixtures.
+explains. The pilot chose a direct adapter to keep these two operations' transformations easy to
+inspect. Under the current direction, retain the required mappings in the gateway boundary and
+verify both HTTP behavior and generated OpenAPI against the accepted fixtures.
 
-Both transports call the same `ListProducts` and `GetProduct` application use cases in process.
+In the pilot implementation, both transports call the same `ListProducts` and `GetProduct`
+application use cases in process.
 The [HTTP mapper](../../../services/product-service/internal/http/mapper.go) owns legacy DTOs,
 presence and decimal rendering; the [gRPC mapper](../../../services/product-service/internal/grpc/mapper.go)
 owns protobuf values. Catalog business logic and PostgreSQL access are shared. Keeping these
 representations at their boundaries avoids coupling the legacy HTTP shape to protobuf evolution.
 
-The comparison is between direct HTTP handlers and a generated translation layer: grpc-gateway
-also uses `net/http` and supports in-process server registration, so an extra network hop is not
-inevitable. Direct handlers still require maintenance and transport-specific tests. Product's
+The historical comparison was between direct HTTP handlers and a generated translation layer.
+The current repository composition uses the actual gRPC listener rather than in-process server
+registration, so the request traverses the required interceptors. Product's historical
 [compatibility listener](../../../services/product-service/internal/http/listener.go) handles
 malformed percent escapes because the standard HTTP parser otherwise rejects them with a
 plain-text error before invoking the handler. Choosing `net/http` does not remove that complexity.
 
-Retain grpc-gateway as an option for later routes whose HTTP contracts align with protobuf
-mapping and where generated routing/OpenAPI saves substantial work. Product's choice is justified
-by contract control and limited endpoint scope, not a measured latency or throughput advantage.
-This follow-up records design and source evidence only; it runs no runtime qualification and
-closes no adoption gate. The Java gateway remains the edge and retry/fallback owner, with access,
-deployment, observability, live parity/load/rollback and cutover qualification owned by #133–#137.
+Generated gRPC-Gateway is the required HTTP/JSON translation approach for migrated Go APIs, even
+when compatibility customization is needed. The historical Product choice established no measured
+latency or throughput advantage. Any conversion must preserve these contracts and validate the
+real HTTP-to-RPC path; this documentation change performs no conversion or runtime qualification.
+The Java gateway remains the edge and retry/fallback owner during coexistence.
 
 ### Kafka and event processing
 
-Retain Kafka, JSON topics `policy-registered`/`policy-terminated` and policy-number keys. The
+**Scope follow-up: 3 November 2026.** Migrate the existing event behavior through small deployed
+increments. The earlier recommendations for poison quarantine/replay, durable deduplication,
+manual contiguous-completion commits and stale-event repair exceeded the base migration scope.
+They are not prerequisites, including through the validation scenarios or cutover gates below.
+Apply the [migration scope guide](go-service-migration-scope.md): investigate only the facts needed
+for the next capability and preserve the accepted contract and its documented limitations.
+
+Retain the selected service's topics, keys and JSON envelopes. For the existing policy events,
+these include `policy-registered`/`policy-terminated` and policy-number keys. The
 [publisher](../../../legacy/policy-service/src/main/java/pl/altkom/asc/lab/micronaut/poc/policy/infrastructure/adapters/kafka/EventPublisher.java)
 and [event DTO](../../../legacy/policy-service-api/src/main/java/pl/altkom/asc/lab/micronaut/poc/policy/service/api/v1/events/dto/PolicyDto.java)
-define the code contract; exact date/decimal/null bytes require captured events. Policy registration
-saves and publishes inside an annotated transaction, while termination lacks the same annotation.
-Neither proves SQL/broker atomicity. Both constructors currently leave event agentLogin null;
-do not infer correct dashboard attribution or silently change it. Protobuf RPC adoption does not
-authorize changing Kafka bodies.
+are starting points for focused field/date/null fixtures. Reuse accepted observations; inspect
+framework defaults only when group, reset, commit or failure behavior remains unresolved. Do not
+change event bodies, attribution, historical dates or producer behavior as a side effect of a Go
+consumer rewrite. A database transaction annotation is not proof of atomic database/Kafka effects.
 
-Provisionally prefer [IBM Sarama](https://github.com/IBM/sarama), using its current module identity,
-for explicit partitioning, acknowledgements, producer idempotence, groups, commits and rebalance
-controls. [kafka-go](https://github.com/segmentio/kafka-go) is a simpler conditional alternative,
-but its README's tested broker range does not certify configured Kafka 4.1; direct Writer defaults
-and async delivery need deliberate handling. Use FetchMessage plus commit after durable effects
-rather than ReadMessage auto-commit for these consumers. Sarama's support window also moves: select
-and test the exact client/broker/Go combination. Observed 30 September:
-[Sarama v1.61.1](https://github.com/IBM/sarama/releases) and
-[kafka-go v0.4.51](https://github.com/segmentio/kafka-go/releases), both MIT-licensed runtime clients.
-Their configuration/operational complexity and integration-test cost are justified by recovery
-requirements, not a performance benchmark. Pins/transitive advisories remain G19-01/07 work.
+The implemented [Policy Search consumer](../../../services/policy-search-service/internal/kafka/consumer.go)
+uses franz-go, pinned in its [module manifest](../../../services/policy-search-service/go.mod),
+with explicit legacy-compatible settings. Its malformed-envelope path skips the record; a handler
+failure stops the fetched batch without rewinding it. Its selected auto-commit/final-position
+commit behavior can retain the legacy loss window, while a crash before commit can redeliver
+records. These are limitations to record, not an instruction to add a recovery subsystem. Other
+services must establish their own actual behavior rather than copy either these settings or a
+stronger client default. Reuse a compatible client and owning checks; no comparative client study
+or new benchmark is a standard prerequisite.
 
-Document, payment, dashboard and search consume registration; search also consumes termination.
-EARLIEST/clientId annotations do not establish effective groups, offsets or commit timing. Capture
-them before handoff. A separate Go group repeats all side effects unless isolated; joining the Java
-group splits partitions and requires equivalent handling. Commit only the contiguous completed
-prefix, stop intake on drain and leave unfinished work replayable. Define bounded retries, poison
-quarantine/replay, lag/error alerts and durable destination deduplication. Stable policy keys do not
-prove Java/Go partition assignment, and registration/termination on separate topics have no global
-order: search needs stale-state protection or reconciliation.
+Required migration work is bounded:
 
-[Kafka delivery semantics](https://kafka.apache.org/41/design/design/) do not make SQL, Elasticsearch
-or MinIO effects exactly once. A transactional outbox is conditional on required durable publication;
-specify relay identity/order/recovery if chosen, or explicitly accept a weaker loss window and repair
-path. Account-exists checks race; document upload/DB failures may be swallowed; repeated index IDs
-can overwrite newer state. G19-07 tests broker/ISR failure, ambiguous send, crashes around each
-external effect and commit, rebalance/drain, replay and actual Java/Go group handoff. Mesh retries
-cannot replace this processing contract.
+- Record the relevant event mapping, topics/keys, group/client identities, reset/start offsets,
+  commit timing and malformed-record/handler-failure outcomes. Choose explicit Go settings that
+  preserve them; do not impose commit-after-success, retries or deduplication unless already part
+  of the accepted contract.
+- Keep test consumers disabled or give them isolated groups **and** isolated effects. A new group
+  alone does not isolate writes. Avoid sharing authoritative ownership with Java before the planned
+  transition; preserve existing data and consumer progress through handover.
+- Verify normal processing, representative malformed/failure cases, ordinary restart and duplicate
+  handling using small synthetic fixtures and real disposable dependencies. Expected outcomes
+  come from the accepted behavior, including limitations; do not assert exactly-once effects or
+  lossless recovery that the service does not provide.
+- Keep worker configuration, credentials/trust, cancellation, bounded shutdown, safe signals and
+  actionable event-health monitoring with the affected increment. Use a reliable lag/progress
+  signal before asserting a stall; monitoring does not require a repair mechanism.
+- Rehearse actual ownership transfer and deployment rollback/restore during final implementation
+  qualification, before live handover. An HTTP route rollback alone does not restore consumer
+  authority, offsets or external state. Ordinary worker stop/restart tests remain incremental.
+
+Broker redelivery during an ordinary restart is distinct from building an operator replay feature.
+Likewise, checking the existing malformed-record path does not require a quarantine topic. New
+dead-letter/quarantine/replay tooling, outbox relays, durable deduplication, exactly-once guarantees,
+manual contiguous-commit algorithms, backfill, reconciliation and stale-event/terminal guards
+require a separate behavior decision and scope; none is implied by this migration guide.
+For Policy Search, a registration applied after termination may replace that document as in Java;
+the migration must not silently introduce a new cross-topic ordering or terminal-state guarantee.
 
 ### Search and dashboard
 
-Replace [deprecated olivere/elastic](https://github.com/olivere/elastic), whose supported major is
-7, with provisional [official go-elasticsearch/v8](https://github.com/elastic/go-elasticsearch)
-for configured Elasticsearch 8.19.6. The official client publishes Apache-2.0, versus the old
-library's MIT license; its reviewed release list contains an 8.19 line. Choose a compatible v8 pin,
-not v9 from a newer example. Use typed requests when they express the legacy DSL clearly, or its
-low-level JSON API for awkward aggregates; keep both behind adapters. Raw net/http would add
-unjustified auth/retry/version/error-handling ownership. No Go example search adapter exists.
+**Scope follow-up: 3 November 2026.** Migrate one query or projection capability at a time,
+preserving the accepted results and failure behavior. Full index exports, exhaustive backend
+failure matrices and repeated Java baseline projects are not standard prerequisites. Reuse
+existing fixtures and inspect only unresolved facts needed by the next increment, following the
+[migration scope guide](go-service-migration-scope.md).
+
+Reuse the implemented official `go-elasticsearch/v8` pattern in the
+[Policy Search client](../../../services/policy-search-service/internal/elasticsearch/client.go)
+and [search adapter](../../../services/policy-search-service/internal/elasticsearch/search.go).
+Its [module](../../../services/policy-search-service/go.mod) pins v8.19.7 for the selected 8.19.6
+target. Keep the client pin compatible with the selected deployment through normal owning checks;
+a new client comparison or Elasticsearch upgrade is not part of each service migration.
+Use typed requests or the client's low-level JSON API behind service-owned adapters as appropriate
+to the existing DSL. Do not import another service's private implementation.
 
 [Policy search](../../../legacy/policy-search-service/src/main/java/pl/altkom/asc/lab/micronaut/poc/policy/search/infrastructure/adapters/db/ElasticPolicyViewRepository.java)
 queries `policy-views` using query_string on number/policyHolder with size 100 and no ES sort.
 The [assembler](../../../legacy/policy-search-service/src/main/java/pl/altkom/asc/lab/micronaut/poc/policy/search/queries/findpolicy/PolicyQueryResultAssembler.java)
 sorts only those returned hits by dateFrom descending, nulls last. Sorting all matches in Elasticsearch
-before limiting would change which 100 appear. Preserve bounded unary list and HTTP bridge first;
-stable cursor/point-in-time pagination is a separate specified behavior if consumers need it.
+before limiting would change which 100 appear. Preserve the bounded unary list through generated
+gRPC-Gateway and the actual gRPC listener. Use the accepted same-data/mapping fixtures; do not
+promise deterministic tie selection across Elasticsearch replicas. Pagination, streaming, ranking
+changes and query normalization require separately agreed scope.
 
 Dashboard uses `policy_stats`, policy-number IDs and refresh=true. Its
 [total sales](../../../legacy/dashboard-service/src/main/java/pl/altkom/asc/lab/micronaut/poc/dashboard/infrastructure/adapters/elastic/TotalSalesQueryAdapter.java),
 [trends](../../../legacy/dashboard-service/src/main/java/pl/altkom/asc/lab/micronaut/poc/dashboard/infrastructure/adapters/elastic/SalesTrendsQueryAdapter.java)
 and [agent sales](../../../legacy/dashboard-service/src/main/java/pl/altkom/asc/lab/micronaut/poc/dashboard/infrastructure/adapters/elastic/AgentSalesQueryAdapter.java)
-adapters differ in rounding and timezone conversion. Terms sizes are unspecified;
-[Elasticsearch defaults to ten buckets](https://www.elastic.co/docs/reference/aggregations/search-aggregations-bucket-terms-aggregation).
+adapters differ in rounding and timezone conversion. Preserve their omitted terms-size setting
+and verify the resulting bucket limit on the selected target with a small boundary fixture.
 Total/trend amounts round to two places, agent amounts do not apply the same rounding; histogram
-milliseconds become dates through JVM timezone. Capture >10 products/agents, >100 search hits,
-date endpoints/DST, null agent/date and decimal fixtures. Correcting incomplete totals needs an
-explicit behavior decision rather than being hidden in a client rewrite.
+milliseconds become dates through JVM timezone. Cover the selected capability with focused
+filter, date-endpoint, decimal and bucket-limit fixtures; include null or DST cases when they
+affect that contract. These are compatibility checks, not a broad timezone or data-quality audit.
+Correcting incomplete totals, standardizing rounding/timezones or repairing agent attribution
+requires an explicit behavior decision rather than being hidden in a client rewrite.
 
-Export real mappings/settings/aliases and JSON samples; no checked-in index provisioning proves
-them. Local HTTP and QA HTTPS differ; current Java factories disable certificate/hostname checks.
-Mount/trust the correct ECK CA, verify DNS and scoped credentials, and distinguish 400/401/403/404,
-409/429/5xx, TLS/cancellation and malformed data. Bound retries per operation and close response
-bodies. The search application has a literal HTTPS scheme despite the local overlay's HTTP value;
-verify effective configuration rather than assume interpolation. Dashboard's embedded ES 6.6.2
-tests do not certify 8.19.6. G19-08 requires disposable target-version query/error/rebuild tests,
-refresh visibility and stale-event protection; client adoption alone proves none of them.
+Reuse known mappings, settings, aliases and synthetic examples for the fields actually used.
+Inspect the selected target only when a missing fact affects query behavior or existing-state
+adoption; do not require a full cluster inventory or production-data export. Identify the minimum
+initialization owner needed for required fresh setup, keep it outside request-serving startup,
+and preserve usable existing indexes. Isolate test writes without requiring dual-write or shadow
+comparison infrastructure.
+
+Verify the configured endpoint scheme, scoped credentials and CA/hostname trust where TLS is
+enabled; do not copy Java's trust bypass. Bound requests, propagate cancellation, close response
+bodies and preserve safe caller-visible failure mappings. Test representative failures for the
+operations actually used, adding cases where they exercise a distinct contract or code path.
+Do not expose each Elasticsearch status as a new API outcome or add retry/fallback behavior:
+Policy Search explicitly disables client retries because its existing Java gateway owns them.
+Other services must preserve their own accepted retry ownership.
+
+[G19-08](#g19-08) requires focused real-target query/projection checks and refresh visibility as
+applicable; older embedded tests alone do not validate the selected Elasticsearch deployment.
+Reuse still-applicable evidence and qualify each environment as its increment reaches it.
+Deployment ownership transfer and rollback/restore rehearsal belong to final qualification.
+Reindex/rebuild, replay, backfill, reconciliation, stale-event guards, alias-swap automation and
+historical-data cleanup are separate enhancements, not implicit index-adoption requirements.
 
 ### Realtime chat
 
@@ -961,14 +1066,14 @@ name; its physical legacy module is `legacy/documents-service` (and `documents-s
 
 | Service | Actual boundary and reviewed implementation | Compatibility and cutover evidence |
 | --- | --- | --- |
-| document-service | Kafka registration → renderer → MinIO PDF → PostgreSQL reference; HTTP query reads mixed inline/key rows. Provisional pgx/sqlc, Sarama and MinIO SDK; interim jsreport allowed, chromedp deferred. | Preserve effective template/bytes/date rendering, object keys and Java-readable rows. Resolve server support/TLS, swallowed failures, duplicate rows/orphans and consumer ownership before effects. G19-04/07/09/10. |
+| document-service | Kafka registration → renderer → MinIO PDF → PostgreSQL reference; HTTP query reads mixed inline/key rows. Provisional pgx/sqlc, a compatible Kafka client and MinIO SDK; interim jsreport allowed, chromedp deferred. | Preserve effective template/bytes/date rendering, object keys and Java-readable rows. Resolve server support/TLS, swallowed failures, duplicate rows/orphans and consumer ownership before effects. G19-04/07/09/10. |
 | product-service | PostgreSQL JSONB catalog, two read API operations, startup seeding. Provisional pgx/sqlc behind application ports; unary gRPC plus legacy HTTP mapping. | Capture polymorphic product/cover/question JSON, decimal/null/unknown fields, empty/not-found behavior and stored rows; separate seeding/DDL from read pilot. No MongoDB retirement inferred. G19-04 and product gate under G19-14. |
 | dashboard-service | Kafka registration → Elasticsearch policy_stats → total/trend/agent POST queries. Official v8 client; no evidenced PostgreSQL settings store. | Preserve filters, refresh=true visibility, default terms bucket limits, each adapter's rounding and timezone conversion. Do not silently fix truncated totals or null agent attribution. Isolate shadow index. G19-07/08. |
-| policy-search-service | Registration and termination topics → policy-views → bounded search list; internal API has an external Java gateway caller. Official v8 client, unary RPC and HTTP bridge. | Preserve query_string fields/default q, cap before sort and empty results; prevent late registration overwriting termination; capture mappings and local scheme mismatch. G19-07/08. |
+| policy-search-service | Registration and termination topics → policy-views → bounded search list; internal API has an external Java gateway caller. Official v8 client, unary RPC and HTTP bridge. | Preserve query_string fields/default q, cap before sort, empty results and existing event replacement behavior, including registration applied after termination. Resolve necessary mappings and local scheme differences without adding stale-event guards. G19-07/08. |
 | chat-service | Vue → Nginx WebSocket upgrade → process-local room broadcast. Gorilla candidate; no existing DB/history or internal stream. | Approved safe payload/rendering and authenticated handshake with topic/origin checks; one reader/writer, bounded queues and explicit socket drain. Multi-replica fanout is a prerequisite to scaling. G19-11; Nginx route rollback separate from gateway. |
 | pricing-service | Policy's internal HTTP dependency; PostgreSQL tariffs evaluated through MVEL and BigDecimal. Go evaluator deferred, storage adapter provisional. | Effective grammar/order and intermediate per-cover value/scale parity, HALF_UP per factor, CAR factor 50 and failure behavior. Preserve original MVEL; one authoritative price/rule identity per offer. G19-04/12. |
-| policy-service | Offer/pricing call, policy writes/versioning/termination and JSON events. Provisional pgx/sqlc and Sarama with internal RPC/HTTP bridge. | Authenticated principal override, expiry, inclusive dates and scale-20 proration; transaction/concurrency/errors and event publication recovery. May call Java pricing while engine gate remains open. G19-04/07/12 (caller parity only if Java pricing retained). |
-| payment-service | Kafka account creation, PostgreSQL balances and scheduled MinIO CSV import. Provisional pgx/sqlc, Sarama and MinIO SDK. | Account uniqueness, unknown-account semantics, decimal/date/balance ordering, exact file names, single import owner and durable retry/recovery across DB/copy/delete. Verify payment route permissions. G19-04/07/09; schedule handoff under G19-14. |
+| policy-service | Offer/pricing call, policy writes/versioning/termination and JSON events. Provisional pgx/sqlc and a compatible Kafka client with internal RPC/generated HTTP gateway. | Authenticated principal override, expiry, inclusive dates and scale-20 proration; preserve transaction/concurrency/errors and accepted publication failure behavior without adding an outbox or repair path. May call Java pricing while engine gate remains open. G19-04/07/12 (caller parity only if Java pricing retained). |
+| payment-service | Kafka account creation, PostgreSQL balances and scheduled MinIO CSV import. Provisional pgx/sqlc, a compatible Kafka client and MinIO SDK. | Account uniqueness, unknown-account semantics, decimal/date/balance ordering, exact file names, single import owner and durable retry/recovery across DB/copy/delete. Verify payment route permissions. G19-04/07/09; schedule handoff under G19-14. |
 | agent-portal-gateway dependency | Retain Java edge and its route/default/principal transformations. Envoy remains Phase 5; service HTTP bridge can keep Java consumers unchanged. | Route/status/JSON and authorization matrix, direct-backend bypass tests, one translation owner and tested routing rollback. WebSocket currently traverses Vue Nginx separately. G19-05/06/14. |
 | auth-service dependency | Retain legacy issuer until a separate Keycloak/user/entitlement migration. Include its PostgreSQL schema/CREATE_DROP hazard in ownership audit; no ninth Go rewrite. | Sanitized claim/role/issuer/audience fixtures, signing-key rotation, service credential propagation and product-role mapping. Keycloak/JOSE choice needs actual tokens and overlap/rollback proof. G19-04/06. |
 
@@ -1016,7 +1121,7 @@ For every migration, distinguish these independent control planes:
 | --- | --- |
 | HTTP/gRPC | Distinct Go Service/selectors and no production route until fixtures/security pass. Specify a reversible route change in the resource owner's workflow; verify the reconciler will not undo it. Weighted percentages require a real controller and tested thresholds/dwell; a separately specified atomic route switch is an alternative. Java must still understand post-cutover state before routing back. |
 | PostgreSQL | One schema owner/executor, compatible expanded schema and explicit shared-versus-copied topology. Prevent Java auto-DDL and new Go startup migrations/seeders from competing. Contract/delete only after rollback closes; Down SQL alone cannot recover lost data. |
-| Kafka | New Pods can consume without HTTP traffic. Shadow with isolated/disabled effects and explicit groups/offsets. Real handoff defines assignments, contiguous completed offsets, replay/deduplication, cross-topic stale-event handling and producer compatibility. Rolling back routes does not rewind offsets or undo external effects. |
+| Kafka | New Pods can consume without HTTP traffic. Shadow with isolated/disabled effects and explicit groups/offsets. Final qualification rehearses assignments, existing commit/reset semantics, producer compatibility and state/progress continuity without competing writers. Do not add replay/deduplication or cross-topic stale-event guards. Rolling back routes does not rewind offsets or undo external effects. |
 | MinIO and scheduled imports | One owner of a real import/job during handoff; disable the other scheduler before enabling the new one. Use isolated keys/tenants for shadow tests, preserve Java-readable formats and prove recovery for object/SQL partial success. Restore/reconcile effects before resuming Java. |
 | WebSocket | Existing connections remain on their accepting Pod. Route percentage does not rebalance sockets or unify process-local rooms. Define stop-upgrade, bounded close/drain, browser reconnect and accepted message loss semantics; coordinate protocol/browser rollback. |
 | Pricing | Preserve original MVEL and an authoritative rule-set/price identity. Shadow calculations cannot update offers or serve divergent prices. Rollback must select compatible rules and cached state, not simply restore a container image. |
@@ -1036,8 +1141,8 @@ investigation. Detailed validation scenarios follow this table; their stable IDs
 | <a id="g19-04"></a>G19-04 | Five business PG owners plus legacy auth; DB/release owners | Export safe schema/data/seed/auto-DDL inventory; choose sharing topology and one versioned executor. Validate exact decimal/JSONB/null/date mappings and transaction/conflict/cancellation behavior with real PG. Rehearse populated baseline, expand/backfill/contract, failed nontransactional operation and forward/restore recovery. | Shared writes/schema ownership; product read pilot also needs its schema/data fixture and no-seeding boundary. |
 | <a id="g19-05"></a>G19-05 | API services, Java/Vue consumers; contract/edge owners | Capture legacy success/failure/presence/date/decimal/polymorphic/binary fixtures and effective validation. Test real HTTP/gRPC mappings, wrapped safe errors and generated consumers/contract baseline. For optional document/search streams, first show payload/consumer need and specify framing/ordering/backpressure. | First mixed call and public route cutover; streams/pages remain deferred without the additional evidence. |
 | <a id="g19-06"></a>G19-06 | All routes plus auth/gateway; security/identity owners | Capture sanitized legacy token/permission matrix, rotate exposed trust material with overlap, specify user/workload propagation and test direct backend bypass/negative permissions. Separately prove Keycloak/JWKS/verifier, Envoy translation/JWT and mixed-peer mesh policies if selected. | Reachable protected Go endpoint; Phase 5 cutovers wait for their specific fixtures and rollback, without blocking an independently proven interim design. |
-| <a id="g19-07"></a>G19-07 | Policy producer; document/payment/search/dashboard consumers | Capture JSON/topic/partition/group/offset baseline. Test chosen client on configured Kafka, ambiguous publish and DB failure, crash/replay, rebalances, poison messages, cross-topic order, contiguous commits, drain and Java/Go handoff. Decide durable publication/outbox or explicitly accepted weaker recovery semantics. | Real event publication or side-effecting Go consumption, including Pods with zero HTTP traffic. |
-| <a id="g19-08"></a>G19-08 | Search/dashboard; index/query owners | Capture 8.19 mappings/settings/fixtures and QA CA trust. Prove local scheme mapping, query cap/post-sort, refresh, aggregation limits/rounding/timezones and safe failures; rebuild/replay into isolated indices and validate stale-event guards. | Production read-model ownership and query equivalence claims; new pages/streaming needs separate caller/load proof. |
+| <a id="g19-07"></a>G19-07 | Policy producer; document/payment/search/dashboard consumers | Reuse focused event/group/reset/commit/failure facts and test explicit client settings on the selected broker. Prove ordinary processing, malformed/failure behavior, restart, bounded drain, safe signals and isolated effects. Preserve accepted duplicate/loss/order limitations; no new quarantine/replay, outbox, deduplication or manual commit algorithm is required. | Capability checks precede real publication or side-effecting consumption. Final qualification owns transfer and deployment rollback/restore rehearsal before live handover. |
+| <a id="g19-08"></a>G19-08 | Search/dashboard; index/query owners | Reuse required mappings/settings and focused fixtures for the selected capability. Verify target access/trust, applicable query cap/post-sort, refresh, aggregation/rounding/timezone behavior and representative safe failures. Preserve retry ownership and isolate test writes. No full index export, repeated Java baseline, exhaustive error matrix or new recovery/query feature is a base gate. | Capability checks accompany increments; ownership transfer and deployment rollback/restore rehearsal occur during final qualification. New pages/streams or index recovery require separate scope. |
 | <a id="g19-09"></a>G19-09 | Document/payment and proposed archive stores; storage/platform owners | Inspect actual MinIO image/exposure and support/advisory remediation; verify chosen server/operator/license, encryption/retention/backup policy and CA/SAN/least-privilege access. Test inline/key/object bytes, upload/DB reconciliation, CSV parsing/claims/duplicate credit and copy/delete/commit failures. | Go storage ownership; rendering retention does not waive this gate. Archive use also requires applicable server and recovery evidence. |
 | <a id="g19-10"></a>G19-10 | Document; renderer/service owners | Export effective template/assets/fonts/browser/license and reference PDFs. Interim jsreport needs support/capacity and event-to-PDF proof; replacement additionally needs text/visual tolerance, pinned sandboxed browser, hostile-resource tests, bounded load/timeouts/crash/drain. | Document pilot needs its interim-path evidence; chromedp selection/replacement waits for full rendering/runtime parity. |
 | <a id="g19-11"></a>G19-11 | Chat/Vue/Nginx; browser/realtime owners | Approve safe payload/rendering and handshake identity; test origin/topic denial, sender exclusion, frame limits, queues/slow readers, race/load, close/reconnect and Nginx rollback. Require explicit fanout before scaling; identify real caller/retention need before internal stream/history. | Browser chat cutover; multi-replica, history and stream adoption are independently blocked. |
@@ -1060,7 +1165,7 @@ retain their own scope and acceptance evidence.
 | DB-05-01 | Per-service owner; auth, documents, product, pricing, policy, payment — Export live/deployed schema and representative safe data from each environment; compare checked-in Java mappings, startup DDL/seeders and PostgreSQL 17 assumptions. Record DB owner and Java/Go sharing topology. |
 | DB-05-02 | First selected Go PostgreSQL service — Pin compatible pgx/sqlc/Go versions; generate from actual migration chain, review generated null/JSONB/decimal types, compile via Make, test real PostgreSQL writes/reads, cancellation, conflicts and pool settings. A document pilot must include both inline PDF and MinIO-key rows and upload/DB partial failure; a product pilot must include all stored polymorphic JSON variants. |
 | DB-05-03 | Release/deployment owner; all six clusters — Select/pin Goose or justified alternative, package a single migration executor, baseline populated DBs, stop conflicting auto-DDL, rehearse expand/backfill/contract and a failed nontransactional index build, verify permissions, status, backup/restore and Java rollback window. |
-| DB-05-04 | Policy/payment and event consumers — Reproduce Java rounding/date/version behavior, duplicate and concurrent writes, transaction failure, Kafka publish/replay and MinIO partial failures. Specify idempotency and any outbox/compensation before implementation; do not infer atomic external effects from `@Transactional`. |
+| DB-05-04 | Policy/payment and event consumers — Use focused fixtures for accepted rounding/date/version, duplicate/concurrent writes and relevant transaction, publication or storage failures. Preserve existing retry/duplicate/loss outcomes; new outbox, deduplication or compensation is separately scoped. Do not infer atomic external effects from `@Transactional`. |
 | DB-05-05 | Product/pricing owners — Compare actual JSONB predicates and tariff rows against proposed SQL and Java DTOs; use `EXPLAIN (ANALYZE, BUFFERS)` on representative safe data to select indexes, and validate dynamic filtering, nulls and decimal/rule results. Pricing engine selection remains gated by G19-12. |
 
 ### Composition validation scenarios
@@ -1106,21 +1211,21 @@ retain their own scope and acceptance evidence.
 
 | Scenario | Required evidence and adoption condition |
 | --- | --- |
-| MSG-10-01 | Pinned Go client connects to local and QA-equivalent Kafka 4.1 listener; produce/consume both event types and JSON fixtures; verify TLS path if selected, broker API/metadata, topic existence, partition counts, and Java/Go interoperability. |
-| MSG-10-02 | Broker unavailable, leader failover, ISR below minimum, publish timeout after append, and process crash between SQL commit and send: record caller result, duplicate/loss window, retries and recovery. If atomic publication is required, prove chosen outbox relay and re-delivery. |
-| MSG-10-03 | Crash before side effect, after side effect before offset commit, and during commit; replay each event and assert one effective document/account/search state. Explicitly test concurrent account creation and document-storage failure. |
-| MSG-10-04 | Interleave registration and termination on their separate topics, rebalance during a slow handler, and replay from earliest/retention boundary; assert final policy-search state, contiguous offsets, no premature commit and a defined poison-message path. |
-| MSG-10-05 | Roll Java and Go consumer instances through intended group/cutover modes; inspect actual group IDs, assignments, lag/offsets and side effects. Terminate while producer/consumer work is in flight; prove drain/flush/close or replay within the grace period. |
+| MSG-10-01 | Pinned Go client connects to the selected broker through the configured trust/access path. Exercise the event types the service actually owns using small JSON/key fixtures; verify relevant topic/group/reset settings and interoperability without requiring an unrelated producer or event type. |
+| MSG-10-02 | For a migrated producer, exercise representative publication failure or timeout and the relevant database/send boundary on a disposable target. Record the accepted caller result, retry and duplicate/loss behavior. A full broker-failure matrix or new atomic-publication/outbox system is not a standard consumer-migration prerequisite. |
+| MSG-10-03 | For a migrated consumer, test a representative side-effect failure, ordinary restart and duplicate input against isolated real dependencies. Assert the accepted commit/redelivery and resulting-state behavior, including any documented loss or duplication; do not assume one effective outcome for every service or require an operator replay tool. |
+| MSG-10-04 | Exercise relevant event order and malformed-record/handler-failure cases. For Policy Search, registration applied after termination replaces the document as in Java; verify existing reset/commit and per-partition behavior without introducing cross-topic ordering, terminal guards, quarantine or manual contiguous-completion commits. Test rebalance behavior when affected by the selected client/configuration. |
+| MSG-10-05 | During increments, verify worker enable/disable, bounded stop/close and isolated effects. During final qualification, rehearse the intended Java/Go authority handover and reverse path, inspecting actual groups, assignments, offsets and state. Preserve progress without migration-induced skips or competing writers; do not reset offsets or add a repair feature to satisfy the test. |
 
 ### Search validation scenarios
 
 | Scenario | Required evidence and adoption condition |
 | --- | --- |
-| SEARCH-11-01 | First Go search/dashboard service: pin `go-elasticsearch/v8` and toolchain through its Make targets; record license/advisory result; connect to local HTTP and QA-equivalent HTTPS 8.19.6 with real CA verification, scoped credentials, timeouts, cancellation and resource cleanup. |
-| SEARCH-11-02 | Index owner: export effective mappings/settings/aliases for both indices, capture sample documents/JSON/date/decimal forms, define index creation/rebuild and Java/Go dual-write ownership, and test refresh visibility. Resolve the local policy-search scheme mismatch by observing rendered/runtime configuration. |
-| SEARCH-11-03 | Policy-search owner: compare legacy and Go `query_string` request/result/error fixtures for default `q=*`, empty/malformed/escaped input, matching/ranking, 0/1/100/>100 hits, null dates and post-cap sort. Keep unary list initially; a page/stream contract requires separate consumer/load evidence. |
-| SEARCH-11-04 | Dashboard owner: compare exact DSL, filters, inclusive/exclusive date endpoints, term limits, count/sum, decimal rounding and histogram timezone on representative data including >10 products/agents and DST boundaries. Any correction to incomplete bucket totals needs an explicit behavior decision. |
-| SEARCH-11-05 | Adapter/operations owner: inject 400/401/403/404/409/429/5xx, TLS, timeout and cancellation failures; verify safe error mapping, bounded retries, metrics without high-cardinality customer query labels, readiness and replay/stale-event behavior. |
+| SEARCH-11-01 | Service owner: reuse the implemented official v8 client pattern and validate the selected pin/toolchain through owning Make and dependency checks. Verify access to each deployment target as the increment reaches it, including configured CA/hostname trust, scoped credentials, deadlines, cancellation and cleanup. Reuse applicable evidence; no new client study or platform upgrade is required. |
+| SEARCH-11-02 | Index owner: reuse required mappings/settings/aliases and synthetic fields; inspect only unresolved target facts. Verify existing-state adoption, required fresh initialization, isolated test writes and relevant refresh visibility. Resolve the target scheme through rendered/runtime configuration. Full exports, reindex/rebuild, replay, backfill, alias-swap automation and dual-write systems require separate scope. |
+| SEARCH-11-03 | Policy-search owner: reuse accepted request/result/error fixtures for default `q=*`, relevant empty/malformed/escaped input, the size-100 window, null dates and post-cap sorting. Use controlled same-data/mapping cases, without promising replica-independent tie selection or repeating Java discovery. Keep the bounded unary list through generated gRPC-Gateway and the actual listener; pagination, streams and ranking changes require separate scope. |
+| SEARCH-11-04 | Dashboard owner: verify the selected query's DSL and observable filters, date endpoints, bucket limits, counts/sums, rounding and timezone behavior using focused synthetic fixtures. Include an over-limit bucket case and null/DST boundaries where relevant, reusing accepted observations. No broad data-quality audit or Java benchmark is required; corrections to totals, attribution or rounding/timezone rules need a separate behavior decision. |
+| SEARCH-11-05 | Adapter/operations owner: exercise representative applicable dependency rejection/unavailability, malformed response, timeout/cancellation and configured trust failures; add cases for distinct contract/code paths rather than a blanket status matrix. Verify safe mappings, existing retry ownership, readiness and safe metrics without customer query labels. Policy Search must retain disabled client retries. Projection failure checks preserve accepted behavior without replay, reconciliation or stale-event suppression. |
 
 ### Realtime validation scenarios
 
@@ -1150,7 +1255,7 @@ retain their own scope and acceptance evidence.
 | DR-14-02 | Document/browser owner: render fixtures with both implementations using the same event fields: ordinary and long policy numbers/names, HTML metacharacters, accents/non-Latin text, empty/null values, dates across year boundaries, long/multipage content, missing font/asset and malformed template. Compare extracted text, dates, page count, typography/layout and accessible/downloadable output with documented tolerances; check PDF media type and valid file structure. |
 | DR-14-03 | Go/deployment owner: build a pinned non-root, sandboxed Chrome image with fonts and owned update path. Measure cold/warm render latency, memory/CPU/PIDs, queue saturation and throughput under one and multiple document replicas; size Pods and termination grace from results. Test missing browser/font, browser crash/hang, timeout, client cancellation and clean shutdown. |
 | DR-14-04 | Security owner: test hostile field values, edited templates, external/`file:` resources, redirects and script/network attempts. Verify contextual escaping, blocked egress/local-file access, inaccessible DevTools, sandbox active, isolated temporary profiles, no policy data in logs/artifacts and bounded resource use. Review browser/image advisories and licenses at the pinned versions. |
-| DR-14-05 | Document/event/storage owner: exercise render success/failure through Kafka, MinIO and PostgreSQL, including duplicate/replayed events and concurrent writers. Verify no document loss, silent omission, duplicate row, object overwrite or orphaned PDF across retry/rollback, and that old inline-PDF rows remain readable. Preserve public query semantics or record approved differences. |
+| DR-14-05 | Document/event/storage owner: exercise representative render success/failure and duplicate-input behavior through Kafka, MinIO and PostgreSQL. Preserve accepted row/object/query outcomes and existing inline-PDF readability; record known partial-failure limitations. New deduplication, compensation or replay is separately scoped. Prevent migration-induced state loss during the final handover rehearsal without claiming stronger ordinary delivery guarantees. |
 
 ### Pricing validation scenarios
 
