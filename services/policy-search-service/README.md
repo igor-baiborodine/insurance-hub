@@ -299,6 +299,14 @@ histogram record only `registered` or `terminated` plus `success`, `malformed`, 
 `cancelled`. Workers extract W3C trace context from Kafka headers before projection. Query text,
 event bodies, policy/customer identities, topics, groups and raw dependency errors are omitted.
 
+`insurance_hub.policy_search.event.worker.enabled` reports `0` in disabled mode and `1` for both
+configured workers. `insurance_hub.policy_search.event.worker.in_flight_age` reports zero while a
+worker is idle and the elapsed seconds for its current synchronous record. Both observable gauges
+use only the fixed `registered` and `terminated` event-type values. Completion and cancellation
+reset age to zero; process restart reconstructs enabled state from configuration and starts idle.
+Assignment loss remains a readiness failure rather than a consumer-lag estimate. These gauges do
+not expose or claim topic, group, partition or broker backlog information.
+
 The service lifecycle owns provider shutdown within the overall shutdown budget.
 `Config` embeds the shared `Runtime`, `GRPC`, `HTTPServer`, and `Telemetry` setting groups. The local identity
 type embeds `servicekit/identity.Identity` and adds service validation. Loading uses the shared
