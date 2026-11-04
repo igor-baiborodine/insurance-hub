@@ -10,16 +10,19 @@ export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/deployment.py scripts/disposable_deployment.py scripts/image_check.py \
 	scripts/elasticsearch_integration.py scripts/policy_search_deployment_checks.py scripts/scaffold_process.py \
 	scripts/event_integration.py \
+	scripts/cutover_administration.py \
 	scripts/fixture_administration.py scripts/fixture_administration_integration.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_elasticsearch_integration.py \
 	scripts/test_event_integration.py \
+	scripts/test_cutover_administration.py \
 	scripts/test_fixture_administration.py \
 	scripts/test_scaffold_process.py scripts/test_tooling.py \
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_elasticsearch_integration.py scripts/test_fixture_administration.py \
 	scripts/test_event_integration.py \
+	scripts/test_cutover_administration.py \
 	scripts/test_scaffold_process.py \
 	scripts/test_tooling_runner.py)
 
@@ -65,6 +68,8 @@ ELASTICSEARCH_CLIENT_VERSION := v8.19.7
 FRANZ_GO_VERSION := v1.22.2
 ELASTICSEARCH_IMAGE := docker.elastic.co/elasticsearch/elasticsearch:8.19.6@sha256:bfb2108076735fbfc5dcd5d49f12f5aa93fab9759034c55f7da3b4345606c903
 KAFKA_IMAGE := apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f
+LEGACY_POLICY_SEARCH_IMAGE ?= insurance-hub-policy-search-api-legacy:latest
+LEGACY_GATEWAY_IMAGE ?= insurance-hub-agent-portal-gateway-legacy:latest
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 TEST_PACKAGES ?= ./...
 COVERAGE_MINIMUM ?= 75
@@ -106,9 +111,11 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
-	image-build image-check _image-check-existing test-integration test-elasticsearch-integration test-event-integration deploy-render deploy-check \
+	image-build image-check _image-check-existing test-integration test-elasticsearch-integration \
+	test-event-integration test-cutover-rehearsal _test-event-integration deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop fixture-setup fixture-verify fixture-retire \
 	event-fixture-setup event-fixture-verify event-fixture-retire \
+	cutover-index-inspect cutover-index-ensure cutover-index-verify \
 	deploy-test-tooling deploy-test \
 	build-qualification-client \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
@@ -146,9 +153,17 @@ test-elasticsearch-integration: python-runtime-check ## Exercise the query adapt
 		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" scripts/elasticsearch_integration.py
 
-test-event-integration: python-runtime-check ## Exercise event fixtures against owned disposable Kafka and Elasticsearch
+test-event-integration: ## Exercise event fixtures against owned disposable Kafka and Elasticsearch
+	+@$(MAKE) --no-print-directory _test-event-integration EVENT_CUTOVER_REHEARSAL=0
+
+test-cutover-rehearsal: ## Exercise actual legacy images through disposable Java-to-Go-to-Java transfer
+	+@$(MAKE) --no-print-directory _test-event-integration EVENT_CUTOVER_REHEARSAL=1
+
+_test-event-integration: python-runtime-check
 	@DOCKER="$(DOCKER)" GO="$(GO)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
 		KAFKA_IMAGE="$(KAFKA_IMAGE)" EVENT_INTEGRATION_COVERAGE_FILE="$(EVENT_INTEGRATION_COVERAGE_FILE)" \
+		LEGACY_POLICY_SEARCH_IMAGE="$(LEGACY_POLICY_SEARCH_IMAGE)" LEGACY_GATEWAY_IMAGE="$(LEGACY_GATEWAY_IMAGE)" \
+		EVENT_CUTOVER_REHEARSAL="$(EVENT_CUTOVER_REHEARSAL)" \
 		EVENT_TRANSFER_REPORT="$(EVENT_TRANSFER_REPORT)" \
 		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" scripts/event_integration.py
@@ -172,6 +187,10 @@ fixture-setup fixture-verify fixture-retire: python-runtime-check
 event-fixture-setup event-fixture-verify event-fixture-retire: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/fixture_administration.py '$(@:event-fixture-%=event-%)'
+
+cutover-index-inspect cutover-index-ensure cutover-index-verify: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/cutover_administration.py '$(@:cutover-index-%=%)'
 
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed deployment guards without a cluster
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \

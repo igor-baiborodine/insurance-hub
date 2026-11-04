@@ -112,6 +112,74 @@ def test_event_mode_is_fail_closed_and_supports_flux_render_validation() -> None
     assert checks.selected_event_mode("qa", "enabled") == "enabled"
 
 
+def test_cutover_mode_is_fail_closed() -> None:
+    with pytest.raises(checks.DeploymentError, match="must be off, query or events"):
+        checks.selected_cutover_mode("unexpected")
+    assert checks.selected_cutover_mode("query") == "query"
+    assert checks.selected_cutover_mode("events") == "events"
+
+
+def test_cutover_query_and_event_renders_use_canonical_resources() -> None:
+    for environment in ("local-dev", "qa"):
+        query = checks.documents(checks.render(environment, "disabled", "query"))
+        event = checks.documents(checks.render(environment, "disabled", "events"))
+        checks.validate_render(
+            environment,
+            checks.yaml.safe_dump_all(query),
+            event_mode="disabled",
+            cutover_mode="query",
+        )
+        checks.validate_render(
+            environment,
+            checks.yaml.safe_dump_all(event),
+            event_mode="disabled",
+            cutover_mode="events",
+        )
+        query_config = next(item for item in query if item["kind"] == "ConfigMap")["data"]
+        event_config = next(item for item in event if item["kind"] == "ConfigMap")["data"]
+        query_deployment = next(item for item in query if item["kind"] == "Deployment")
+        event_deployment = next(item for item in event if item["kind"] == "Deployment")
+        query_env = {
+            item["name"]: item
+            for item in query_deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+        }
+        event_env = {
+            item["name"]: item
+            for item in event_deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+        }
+        assert query_config["ELASTICSEARCH_INDEX"] == "policy-views"
+        assert query_config["EVENT_WORKERS_ENABLED"] == "false"
+        assert (
+            "cutover-elasticsearch"
+            in query_env["ELASTICSEARCH_USERNAME"]["valueFrom"]["secretKeyRef"]["name"]
+        )
+        assert event_config["KAFKA_GROUP"] == "policy-search-service"
+        assert event_config["KAFKA_REGISTERED_TOPIC"] == "policy-registered"
+        assert event_config["KAFKA_TERMINATED_TOPIC"] == "policy-terminated"
+        assert (
+            "cutover-elasticsearch-writer"
+            in event_env["ELASTICSEARCH_WRITER_USERNAME"]["valueFrom"]["secretKeyRef"]["name"]
+        )
+
+
+def test_cutover_mode_rejects_competing_qualification_event_mode() -> None:
+    with pytest.raises(checks.DeploymentError, match="conflicts"):
+        checks.render("local-dev", "enabled", "query")
+
+
+def test_target_renders_derived_cutover_event_mode() -> None:
+    target = object.__new__(checks.Target)
+    target.environment = "local-dev"
+    target.cutover_mode = "events"
+
+    text, items, _ = target.render_contract("enabled", cutover_mode="events")
+
+    checks.validate_render("local-dev", text, event_mode="enabled", cutover_mode="events")
+    config = next(item for item in items if item["kind"] == "ConfigMap")
+    assert config["data"]["EVENT_WORKERS_ENABLED"] == "true"
+    assert config["data"]["KAFKA_GROUP"] == "policy-search-service"
+
+
 def test_qa_event_render_preserves_query_and_telemetry_egress() -> None:
     # given / when
     text = checks.render("qa", "enabled")

@@ -118,11 +118,14 @@ def test_policy_search_fixture_operations_use_the_existing_dispatch() -> None:
             "event-fixture-setup",
             "event-fixture-verify",
             "event-fixture-retire",
+            "cutover-index-inspect",
+            "cutover-index-ensure",
+            "cutover-index-verify",
         )
     ]
 
     # then
-    assert paths == ["services/policy-search-service"] * 6
+    assert paths == ["services/policy-search-service"] * 9
 
 
 @pytest.mark.parametrize("arguments", [[], ["deploy", "status"]])

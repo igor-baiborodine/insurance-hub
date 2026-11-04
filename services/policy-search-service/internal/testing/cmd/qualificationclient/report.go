@@ -1612,7 +1612,7 @@ func checkHealth(ctx context.Context, address string) error {
 }
 
 func checkTCP(ctx context.Context, address string, expectDenied bool) error {
-	connection, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
+	connection, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", address)
 	if expectDenied {
 		if err == nil {
 			_ = connection.Close()

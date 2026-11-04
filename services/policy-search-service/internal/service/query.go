@@ -79,6 +79,7 @@ func newElasticsearchClient(settings config.Elasticsearch) (*policyelasticsearch
 	}
 	client, err := policyelasticsearch.New(policyelasticsearch.Config{
 		Endpoint: settings.URL,
+		Index:    settings.Index,
 		Username: settings.Username,
 		Password: settings.Password,
 		CACert:   caCertificate,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import signal
+from pathlib import Path
 
 import event_integration as integration
 import pytest
@@ -15,6 +16,9 @@ def configure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GO", "go-controlled")
     monkeypatch.setenv("ELASTICSEARCH_IMAGE", "elasticsearch@sha256:controlled")
     monkeypatch.setenv("KAFKA_IMAGE", "kafka@sha256:controlled")
+    monkeypatch.setenv("LEGACY_POLICY_SEARCH_IMAGE", "legacy-policy-search:controlled")
+    monkeypatch.setenv("LEGACY_GATEWAY_IMAGE", "legacy-gateway:controlled")
+    monkeypatch.setenv("EVENT_CUTOVER_REHEARSAL", "0")
     monkeypatch.setenv("EVENT_INTEGRATION_COVERAGE_FILE", "controlled-coverage.txt")
     for name in (
         "POLICY_SEARCH_TEST_ELASTICSEARCH_URL",
@@ -33,8 +37,14 @@ def prepare_owned_run(
 
     def controlled_run(arguments: list[str], **_options: object) -> str:
         commands.append(list(arguments))
+        if arguments[0] == "keytool":
+            truststore = Path(arguments[arguments.index("-keystore") + 1])
+            truststore.write_bytes(b"controlled truststore")
+            return ""
         if arguments[:2] == ["docker-controlled", "port"]:
             return "127.0.0.1:49200\n"
+        if arguments[1:3] == ["image", "inspect"]:
+            return "sha256:controlled\n"
         if arguments[0] == "go-controlled":
             raise CommandError(failure)
         return ""
@@ -148,6 +158,23 @@ def test_main_starts_kafka_with_owned_tls_identity(
         and command[-2:] == ["127.0.0.1:9094", "--list"]
         for command in commands
     )
+
+
+def test_main_enables_actual_cutover_only_when_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    configure(monkeypatch)
+    monkeypatch.setenv("EVENT_CUTOVER_REHEARSAL", "1")
+    commands = prepare_owned_run(monkeypatch)
+
+    # when
+    assert integration.main() == 1
+
+    # then
+    assert any(command[0] == "keytool" for command in commands)
+    inspected = [command[3] for command in commands if command[1:3] == ["image", "inspect"]]
+    assert inspected == ["legacy-policy-search:controlled", "legacy-gateway:controlled"]
 
 
 def test_passed_tests_ignores_non_json_and_package_records() -> None:

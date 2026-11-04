@@ -22,11 +22,13 @@ import (
 type Client struct {
 	*elasticsearchapi.Client
 	transport *http.Transport
+	index     string
 }
 
 // Config keeps endpoint credentials separate from the URL and requires bounded transport waits.
 type Config struct {
 	Endpoint string
+	Index    string
 	Username string
 	Password string
 	CACert   []byte
@@ -36,6 +38,12 @@ type Config struct {
 // New constructs the official 8.19 client without performing network or index operations.
 // The Java gateway owns retries, so the Elasticsearch client's retry layer is disabled.
 func New(settings Config) (*Client, error) {
+	if settings.Index == "" {
+		settings.Index = PolicyIndex
+	}
+	if !validIndexName(settings.Index) {
+		return nil, errors.New("configure elasticsearch: invalid index name")
+	}
 	endpoint, err := url.Parse(settings.Endpoint)
 	if err != nil || endpoint == nil ||
 		(endpoint.Scheme != "http" && endpoint.Scheme != "https") ||
@@ -85,7 +93,7 @@ func New(settings Config) (*Client, error) {
 	if err != nil {
 		return nil, errors.New("configure elasticsearch: client initialization failed")
 	}
-	return &Client{Client: client, transport: transport}, nil
+	return &Client{Client: client, transport: transport, index: settings.Index}, nil
 }
 
 // Check verifies that the accepted index is visible without changing cluster state.
@@ -94,7 +102,7 @@ func (client *Client) Check(ctx context.Context) error {
 		return errors.New("check elasticsearch: client is required")
 	}
 	response, err := client.Indices.Exists(
-		[]string{PolicyIndex},
+		[]string{client.index},
 		client.Indices.Exists.WithContext(ctx),
 	)
 	if err != nil {
@@ -119,7 +127,15 @@ func (client *Client) CheckWrite(ctx context.Context) error {
 	if client == nil || client.Client == nil {
 		return errors.New("check elasticsearch writer: client is required")
 	}
-	payload := []byte(`{"index":[{"names":["` + PolicyIndex + `"],"privileges":["index"]}]}`)
+	payload, err := json.Marshal(map[string]any{
+		"index": []map[string]any{{
+			"names":      []string{client.index},
+			"privileges": []string{"index"},
+		}},
+	})
+	if err != nil {
+		return errors.New("check elasticsearch writer: build privilege request")
+	}
 	response, err := client.Security.HasPrivileges(
 		bytes.NewReader(payload),
 		client.Security.HasPrivileges.WithContext(ctx),
@@ -143,10 +159,26 @@ func (client *Client) CheckWrite(ctx context.Context) error {
 		Decode(&privileges); err != nil {
 		return errors.New("check elasticsearch writer: invalid response")
 	}
-	if !privileges.HasAllRequested || !privileges.Index[PolicyIndex]["index"] {
+	if !privileges.HasAllRequested || !privileges.Index[client.index]["index"] {
 		return errors.New("check elasticsearch writer: required privilege unavailable")
 	}
 	return nil
+}
+
+func validIndexName(value string) bool {
+	if len(value) == 0 || len(value) > 255 || value == "." || value == ".." {
+		return false
+	}
+	for index, char := range value {
+		if index == 0 && (char == '-' || char == '_' || char == '+') {
+			return false
+		}
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') &&
+			char != '-' && char != '_' && char != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 // CloseIdleConnections releases pooled connections during shutdown or startup rollback.

@@ -284,7 +284,7 @@ func transferEnvironmentFromProcess(t *testing.T) transferEnvironment {
 		broker:        os.Getenv("POLICY_SEARCH_TEST_KAFKA_BROKERS"),
 		elasticsearch: os.Getenv("POLICY_SEARCH_TEST_ELASTICSEARCH_URL"),
 		caFile:        os.Getenv("POLICY_SEARCH_TEST_KAFKA_CA_FILE"),
-		report:        os.Getenv("POLICY_SEARCH_TEST_TRANSFER_REPORT"),
+		report:        os.Getenv("POLICY_SEARCH_TEST_TRANSFER_FIXTURE_REPORT"),
 	}
 	if os.Getenv("POLICY_SEARCH_TEST_TRANSFER_REGISTERED_TOPIC") != transferRegisteredTopic ||
 		os.Getenv(
@@ -323,6 +323,10 @@ func newTransferKafkaClient(t *testing.T, environment transferEnvironment) *kgo.
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(environment.broker),
 		kgo.ClientID("issue-234-transfer-observer"),
+		kgo.RecordPartitioner(kgo.ManualPartitioner()),
+		// The pinned Alpine-based Java image cannot load its legacy snappy native library.
+		// Uncompressed records preserve the producer wire contract and exercise the real listener.
+		kgo.ProducerBatchCompression(kgo.NoCompression()),
 		kgo.DialTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}),
 	)
 	if err != nil {

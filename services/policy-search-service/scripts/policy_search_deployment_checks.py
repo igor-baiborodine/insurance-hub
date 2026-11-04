@@ -37,6 +37,9 @@ MANAGEMENT_CLIENT_LABEL = "insurance-hub.io/policy-search-management-client"
 EVENT_MODE_ENV = "DEPLOY_EVENT_MODE"
 PREVIOUS_EVENT_MODE_ENV = "DEPLOY_PREVIOUS_EVENT_MODE"
 EVENT_MODES = {"disabled", "enabled"}
+CUTOVER_MODE_ENV = "DEPLOY_CUTOVER_MODE"
+PREVIOUS_CUTOVER_MODE_ENV = "DEPLOY_PREVIOUS_CUTOVER_MODE"
+CUTOVER_MODES = {"off", "query", "events"}
 
 
 class DeploymentError(RuntimeError):
@@ -204,12 +207,26 @@ def selected_event_mode(environment: str, requested: str | None = None) -> str:
     return mode
 
 
+def selected_cutover_mode(requested: str | None = None) -> str:
+    mode = os.environ.get(CUTOVER_MODE_ENV, "off") if requested is None else requested
+    require(mode in CUTOVER_MODES, f"{CUTOVER_MODE_ENV} must be off, query or events")
+    return mode
+
+
 def event_activation_patches(environment: str) -> dict[str, Any]:
     validate_event_activation_contract(environment)
     root = ROOT / f"k8s/overlays/{environment}/svc/policy-search"
     return {
         name: yaml.safe_load((root / f"event-{name}-patch.yaml").read_text(encoding="utf-8"))
         for name in ("config", "deployment", "network-policy")
+    }
+
+
+def cutover_activation_patches(environment: str) -> dict[str, Any]:
+    root = ROOT / f"k8s/overlays/{environment}/svc/policy-search"
+    return {
+        name: yaml.safe_load((root / f"cutover-{name}-patch.yaml").read_text(encoding="utf-8"))
+        for name in ("query-config", "query-deployment", "event-config", "event-deployment")
     }
 
 
@@ -285,8 +302,19 @@ def activate_event_render(environment: str, text: str) -> str:
     return yaml.safe_dump_all(items, explicit_start=True, sort_keys=False)
 
 
-def render_overlay_mode(environment: str, *, events_enabled: bool) -> str:
+def render_overlay_mode(
+    environment: str,
+    *,
+    events_enabled: bool,
+    cutover_mode: str = "off",
+) -> str:
     validate_event_activation_contract(environment)
+    validate_cutover_activation_contract(environment)
+    cutover = selected_cutover_mode(cutover_mode)
+    require(
+        cutover == "off" or events_enabled == (cutover == "events"),
+        "cutover event mode differs",
+    )
     source_overlay = ROOT / f"k8s/overlays/{environment}/svc/policy-search"
     source_base = ROOT / "k8s/apps/svc/policy-search/base"
     with tempfile.TemporaryDirectory(prefix="policy-search-event-render-") as directory:
@@ -299,7 +327,7 @@ def render_overlay_mode(environment: str, *, events_enabled: bool) -> str:
         shutil.copytree(source_base, temporary_base)
         kustomization_path = temporary_overlay / "kustomization.yaml"
         kustomization = yaml.safe_load(kustomization_path.read_text(encoding="utf-8"))
-        event_patches = [
+        qualification_event_patches = [
             {
                 "path": "event-config-patch.yaml",
                 "target": {"kind": "ConfigMap", "name": "policy-search-config"},
@@ -313,16 +341,44 @@ def render_overlay_mode(environment: str, *, events_enabled: bool) -> str:
                 "target": {"kind": "NetworkPolicy", "name": "policy-search-api"},
             },
         ]
+        cutover_query_patches = [
+            {
+                "path": "cutover-query-config-patch.yaml",
+                "target": {"kind": "ConfigMap", "name": "policy-search-config"},
+            },
+            {
+                "path": "cutover-query-deployment-patch.yaml",
+                "target": {"kind": "Deployment", "name": "policy-search-api"},
+            },
+        ]
+        cutover_event_patches = [
+            {
+                "path": "cutover-event-config-patch.yaml",
+                "target": {"kind": "ConfigMap", "name": "policy-search-config"},
+            },
+            {
+                "path": "cutover-event-deployment-patch.yaml",
+                "target": {"kind": "Deployment", "name": "policy-search-api"},
+            },
+            qualification_event_patches[2],
+        ]
         patches = kustomization.setdefault("patches", [])
-        for event_patch in event_patches:
-            path = event_patch["path"]
+        optional_patches = (
+            qualification_event_patches + cutover_query_patches + cutover_event_patches[:2]
+        )
+        for optional_patch in optional_patches:
+            path = optional_patch["path"]
             matches = [patch for patch in patches if patch.get("path") == path]
             require(len(matches) <= 1, f"{environment} {path} is declared more than once")
             if matches:
-                require(matches[0] == event_patch, f"{environment} {path} target differs")
+                require(matches[0] == optional_patch, f"{environment} {path} target differs")
                 patches.remove(matches[0])
-            if events_enabled:
-                patches.append(event_patch)
+        if cutover == "off" and events_enabled:
+            patches.extend(qualification_event_patches)
+        if cutover != "off":
+            patches.extend(cutover_query_patches)
+            if cutover == "events":
+                patches.extend(cutover_event_patches)
         kustomization_path.write_text(
             yaml.safe_dump(kustomization, sort_keys=False), encoding="utf-8"
         )
@@ -335,6 +391,16 @@ def render_event_overlay(environment: str) -> str:
 
 def render_disabled_overlay(environment: str) -> str:
     return render_overlay_mode(environment, events_enabled=False)
+
+
+def render_cutover_overlay(environment: str, mode: str) -> str:
+    cutover = selected_cutover_mode(mode)
+    require(cutover != "off", "cutover render requires query or events mode")
+    return render_overlay_mode(
+        environment,
+        events_enabled=cutover == "events",
+        cutover_mode=cutover,
+    )
 
 
 def normalized_event_render(environment: str, text: str) -> list[dict[str, Any]]:
@@ -369,7 +435,15 @@ def validate_event_overlay_render(environment: str, disabled_text: str) -> str:
     return activated
 
 
-def render(environment: str, mode: str | None = None) -> str:
+def render(
+    environment: str,
+    mode: str | None = None,
+    cutover_mode: str | None = None,
+) -> str:
+    cutover = selected_cutover_mode(cutover_mode)
+    if cutover != "off":
+        require(mode in (None, "disabled"), f"{EVENT_MODE_ENV} conflicts with cutover mode")
+        return render_cutover_overlay(environment, cutover)
     return (
         render_event_overlay(environment)
         if selected_event_mode(environment, mode) == "enabled"
@@ -382,8 +456,14 @@ def validate_render(
     text: str,
     *,
     event_mode: str | None = None,
+    cutover_mode: str | None = None,
 ) -> list[dict[str, Any]]:
-    mode = selected_event_mode(environment, event_mode)
+    cutover = selected_cutover_mode(cutover_mode)
+    mode = "enabled" if cutover == "events" else selected_event_mode(environment, event_mode)
+    require(
+        cutover == "off" or mode == ("enabled" if cutover == "events" else "disabled"),
+        "cutover validation mode differs",
+    )
     events_enabled = mode == "enabled"
     items = documents(text)
     require(items, "overlay rendered no resources")
@@ -447,7 +527,11 @@ def validate_render(
     kafka_volume = {
         "name": "kafka-ca",
         "secret": {
-            "secretName": f"{environment}-policy-search-kafka-ca",
+            "secretName": (
+                f"{environment}-policy-search-cutover-kafka-ca"
+                if cutover != "off"
+                else f"{environment}-policy-search-kafka-ca"
+            ),
             "items": [{"key": "ca.crt", "path": "ca.crt"}],
             "defaultMode": 0o444,
         },
@@ -471,7 +555,11 @@ def validate_render(
             {
                 "name": "elasticsearch-ca",
                 "secret": {
-                    "secretName": "qa-policy-search-elasticsearch-ca",
+                    "secretName": (
+                        "qa-policy-search-cutover-elasticsearch-ca"
+                        if cutover != "off"
+                        else "qa-policy-search-elasticsearch-ca"
+                    ),
                     "items": [{"key": "ca.crt", "path": "ca.crt"}],
                     "defaultMode": 0o444,
                 },
@@ -498,7 +586,11 @@ def validate_render(
             "QA Elasticsearch CA mount differs",
         )
     env = {item.get("name"): item for item in container.get("env", [])}
-    expected_secret = f"{environment}-policy-search-elasticsearch"
+    expected_secret = (
+        f"{environment}-policy-search-cutover-elasticsearch"
+        if cutover != "off"
+        else f"{environment}-policy-search-elasticsearch"
+    )
     for name, key in (
         ("ELASTICSEARCH_USERNAME", "username"),
         ("ELASTICSEARCH_PASSWORD", "password"),
@@ -508,7 +600,11 @@ def validate_render(
             == {"name": expected_secret, "key": key},
             f"{name} Secret reference differs",
         )
-    writer_secret = f"{environment}-policy-search-elasticsearch-writer"
+    writer_secret = (
+        f"{environment}-policy-search-cutover-elasticsearch-writer"
+        if cutover != "off"
+        else f"{environment}-policy-search-elasticsearch-writer"
+    )
     for name, key in (
         ("ELASTICSEARCH_WRITER_USERNAME", "username"),
         ("ELASTICSEARCH_WRITER_PASSWORD", "password"),
@@ -588,11 +684,15 @@ def validate_render(
         "HTTP_MAX_BODY_BYTES": "4096",
         "GRPC_MAX_RECV_BYTES": "1048576",
         "GRPC_MAX_SEND_BYTES": "8388608",
+        "ELASTICSEARCH_INDEX": ("policy-views" if cutover != "off" else "policy-views-issue-229"),
         "ELASTICSEARCH_TIMEOUT": "5s",
         "EVENT_WORKERS_ENABLED": "true" if events_enabled else "false",
     }
     if events_enabled:
-        required_data.update(event_activation_patches(environment)["config"]["data"])
+        if cutover == "events":
+            required_data.update(cutover_activation_patches(environment)["event-config"]["data"])
+        else:
+            required_data.update(event_activation_patches(environment)["config"]["data"])
     require(
         all(data.get(key) == value for key, value in required_data.items()),
         "runtime budgets differ",
@@ -721,6 +821,76 @@ def validate_event_activation_contract(environment: str) -> None:
     )
 
 
+def validate_cutover_activation_contract(environment: str) -> None:
+    patches = cutover_activation_patches(environment)
+    prefix = f"{environment}-"
+    bootstrap = (
+        "local-dev-kafka-kafka-bootstrap:9093"
+        if environment == "local-dev"
+        else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
+    )
+    require(
+        patches["query-config"].get("data")
+        == {
+            "ELASTICSEARCH_INDEX": "policy-views",
+            "EVENT_WORKERS_ENABLED": "false",
+        },
+        f"{environment} cutover query configuration differs",
+    )
+    require(
+        patches["event-config"].get("data")
+        == {
+            "EVENT_WORKERS_ENABLED": "true",
+            "PROBE_TIMEOUT": "30s",
+            "KAFKA_BROKERS": bootstrap,
+            "KAFKA_GROUP": "policy-search-service",
+            "KAFKA_REGISTERED_TOPIC": "policy-registered",
+            "KAFKA_TERMINATED_TOPIC": "policy-terminated",
+            "KAFKA_CA_FILE": "/etc/policy-search/kafka/ca.crt",
+        },
+        f"{environment} cutover event configuration differs",
+    )
+    query_pod = patches["query-deployment"]["spec"]["template"]["spec"]
+    query_container = query_pod["containers"][0]
+    query_env = {item["name"]: item for item in query_container.get("env", [])}
+    reader_secret = f"{prefix}policy-search-cutover-elasticsearch"
+    for name, key in (
+        ("ELASTICSEARCH_USERNAME", "username"),
+        ("ELASTICSEARCH_PASSWORD", "password"),
+    ):
+        require(
+            query_env.get(name, {}).get("valueFrom", {}).get("secretKeyRef")
+            == {"name": reader_secret, "key": key},
+            f"{environment} cutover reader Secret reference differs",
+        )
+    if environment == "qa":
+        require(
+            query_pod.get("volumes", [])[0].get("secret", {}).get("secretName")
+            == "qa-policy-search-cutover-elasticsearch-ca",
+            "QA cutover Elasticsearch CA differs",
+        )
+    else:
+        require(not query_pod.get("volumes"), "local-dev cutover query added a volume")
+    event_pod = patches["event-deployment"]["spec"]["template"]["spec"]
+    event_container = event_pod["containers"][0]
+    event_env = {item["name"]: item for item in event_container.get("env", [])}
+    writer_secret = f"{prefix}policy-search-cutover-elasticsearch-writer"
+    for name, key in (
+        ("ELASTICSEARCH_WRITER_USERNAME", "username"),
+        ("ELASTICSEARCH_WRITER_PASSWORD", "password"),
+    ):
+        require(
+            event_env.get(name, {}).get("valueFrom", {}).get("secretKeyRef")
+            == {"name": writer_secret, "key": key},
+            f"{environment} cutover writer Secret reference differs",
+        )
+    require(
+        event_pod.get("volumes", [])[0].get("secret", {}).get("secretName")
+        == f"{prefix}policy-search-cutover-kafka-ca",
+        f"{environment} cutover Kafka CA differs",
+    )
+
+
 class Target:
     """Exact configured target selected before any cluster operation."""
 
@@ -744,7 +914,15 @@ class Target:
         self.business = f"{self.environment}-policy-search-api"
         self.management = f"{self.environment}-policy-search-api-management"
         self.kubectl_binary = os.environ.get("KUBECTL", "kubectl")
-        self.event_mode = selected_event_mode(self.environment)
+        self.cutover_mode = selected_cutover_mode()
+        self.event_mode = (
+            "enabled" if self.cutover_mode == "events" else selected_event_mode(self.environment)
+        )
+        require(
+            self.cutover_mode == "off"
+            or self.event_mode == ("enabled" if self.cutover_mode == "events" else "disabled"),
+            f"{EVENT_MODE_ENV} conflicts with cutover mode",
+        )
 
     def kubectl(
         self,
@@ -779,9 +957,17 @@ class Target:
         self,
         mode: str,
         requested_image: str = "",
+        cutover_mode: str | None = None,
     ) -> tuple[str, list[dict[str, Any]], str]:
-        text = render(self.environment, mode)
-        items = validate_render(self.environment, text, event_mode=mode)
+        cutover = self.cutover_mode if cutover_mode is None else cutover_mode
+        render_mode = "disabled" if cutover != "off" else mode
+        text = render(self.environment, render_mode, cutover)
+        items = validate_render(
+            self.environment,
+            text,
+            event_mode=mode,
+            cutover_mode=cutover,
+        )
         deployment = next(item for item in items if item.get("kind") == "Deployment")
         image = deployment["spec"]["template"]["spec"]["containers"][0]["image"]
         if requested_image:
@@ -812,25 +998,43 @@ class Target:
         return self.render_contract(
             self.event_mode,
             os.environ.get("DEPLOY_IMAGE_REF", ""),
+            self.cutover_mode,
         )
 
     def live(self, items: list[dict[str, Any]], *, require_deployment: bool) -> None:
         previous_event_mode = os.environ.get(PREVIOUS_EVENT_MODE_ENV, "")
+        previous_cutover_mode = os.environ.get(PREVIOUS_CUTOVER_MODE_ENV, "")
         require(
             not previous_event_mode or previous_event_mode in EVENT_MODES,
             f"{PREVIOUS_EVENT_MODE_ENV} must be disabled or enabled",
         )
-        if previous_event_mode:
+        require(
+            not previous_cutover_mode or previous_cutover_mode in CUTOVER_MODES,
+            f"{PREVIOUS_CUTOVER_MODE_ENV} must be off, query or events",
+        )
+        require(
+            not (previous_event_mode and previous_cutover_mode),
+            "declare only one previous deployment mode",
+        )
+        if previous_event_mode or previous_cutover_mode:
             require(
                 self.configuration["mode"] == "direct",
-                f"{PREVIOUS_EVENT_MODE_ENV} is direct-local only",
+                "previous deployment mode is direct-local only",
             )
             if not require_deployment:
                 desired_image = resource(items, "Deployment", self.deployment)["spec"]["template"][
                     "spec"
                 ]["containers"][0]["image"]
                 previous_image = os.environ.get("DEPLOY_PREVIOUS_IMAGE_REF", "") or desired_image
-                _, items, _ = self.render_contract(previous_event_mode, previous_image)
+                previous_cutover = previous_cutover_mode or "off"
+                previous_event = previous_event_mode or (
+                    "enabled" if previous_cutover == "events" else "disabled"
+                )
+                _, items, _ = self.render_contract(
+                    previous_event,
+                    previous_image,
+                    previous_cutover,
+                )
         desired_deployment = resource(items, "Deployment", self.deployment)
         desired_container = desired_deployment["spec"]["template"]["spec"]["containers"][0]
         desired_image = desired_container["image"]
@@ -928,7 +1132,12 @@ class Target:
                 continue
 
             if kind == "NetworkPolicy":
-                if previous_image and not previous_event_mode and not require_deployment:
+                if (
+                    previous_image
+                    and not previous_event_mode
+                    and not previous_cutover_mode
+                    and not require_deployment
+                ):
                     require(
                         matching_echo_predecessor_network_policy(
                             actual.get("spec"), desired.get("spec")
@@ -1038,6 +1247,7 @@ class Target:
                     field == "env"
                     and previous_image
                     and not previous_event_mode
+                    and not previous_cutover_mode
                     and not require_deployment
                 ):
                     require(
@@ -1301,6 +1511,21 @@ def stop(target: Target, _items: list[dict[str, Any]]) -> None:
     require(role_snapshot(target) == before, "Java resource identity changed during stop")
 
 
+def validate_gateway_business_admission(environment: str) -> None:
+    overlay = ROOT / f"k8s/overlays/{environment}/svc/agent-portal-gateway/legacy"
+    items = documents(run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)]))
+    deployment = resource(
+        items,
+        "Deployment",
+        f"{environment}-agent-portal-gateway-legacy",
+    )
+    labels = deployment["spec"]["template"].get("metadata", {}).get("labels", {})
+    require(
+        labels.get(BUSINESS_CLIENT_LABEL) == "true",
+        f"{environment} gateway lacks Policy Search business admission",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     require(
@@ -1312,11 +1537,27 @@ def main(argv: list[str] | None = None) -> int:
     for environment in environments:
         require(environment in {"local-dev", "qa"}, "DEPLOY_ENV is invalid")
         mode = selected_event_mode(environment)
-        text = render(environment, mode)
-        validate_render(environment, text, event_mode=mode)
+        cutover = selected_cutover_mode()
+        text = render(environment, mode, cutover)
+        validate_render(
+            environment,
+            text,
+            event_mode=mode,
+            cutover_mode=cutover,
+        )
         validate_event_activation_contract(environment)
+        validate_cutover_activation_contract(environment)
         disabled = render(environment, "disabled")
         validate_event_overlay_render(environment, disabled)
+        for cutover_phase in ("query", "events"):
+            cutover_text = render(environment, "disabled", cutover_phase)
+            validate_render(
+                environment,
+                cutover_text,
+                event_mode="disabled",
+                cutover_mode=cutover_phase,
+            )
+        validate_gateway_business_admission(environment)
         if arguments[0] == "render":
             sys.stdout.write(text)
     if arguments[0] == "check":

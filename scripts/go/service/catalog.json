@@ -123,6 +123,9 @@
         "event-fixture-setup",
         "event-fixture-verify",
         "event-fixture-retire",
+        "cutover-index-inspect",
+        "cutover-index-ensure",
+        "cutover-index-verify",
         "deploy-test-tooling",
         "deploy-test"
       ],
@@ -144,6 +147,17 @@
           "registeredTopic": "policy-registered-issue-230",
           "terminatedTopic": "policy-terminated-issue-230",
           "consumerGroup": "policy-search-service-issue-230"
+        },
+        "cutover": {
+          "owner": "issue-235",
+          "index": "policy-views",
+          "readerRole": "go_policy_search_cutover_reader",
+          "readerUser": "go_policy_search_cutover_reader",
+          "writerRole": "go_policy_search_cutover_writer",
+          "writerUser": "go_policy_search_cutover_writer",
+          "registeredTopic": "policy-registered",
+          "terminatedTopic": "policy-terminated",
+          "consumerGroup": "policy-search-service"
         }
       },
       "deploymentTargets": {
@@ -158,6 +172,10 @@
             "adminSecret": "local-dev-elasticsearch-es-elastic-user",
             "workloadSecret": "local-dev-policy-search-elasticsearch",
             "eventWriterSecret": "local-dev-policy-search-elasticsearch-writer",
+            "cutoverReaderSecret": "local-dev-policy-search-cutover-elasticsearch",
+            "cutoverWriterSecret": "local-dev-policy-search-cutover-elasticsearch-writer",
+            "cutoverElasticsearchCASecret": "",
+            "cutoverKafkaCASecret": "local-dev-policy-search-cutover-kafka-ca",
             "kafkaCluster": "local-dev-kafka",
             "kafkaBootstrap": "local-dev-kafka-kafka-bootstrap:9093",
             "kafkaPublicCASecret": "local-dev-kafka-cluster-ca-cert",
@@ -180,6 +198,10 @@
             "workloadCASecret": "qa-policy-search-elasticsearch-ca",
             "serverName": "qa-elasticsearch-es-http.qa-data.svc",
             "eventWriterSecret": "qa-policy-search-elasticsearch-writer",
+            "cutoverReaderSecret": "qa-policy-search-cutover-elasticsearch",
+            "cutoverWriterSecret": "qa-policy-search-cutover-elasticsearch-writer",
+            "cutoverElasticsearchCASecret": "qa-policy-search-cutover-elasticsearch-ca",
+            "cutoverKafkaCASecret": "qa-policy-search-cutover-kafka-ca",
             "kafkaCluster": "qa-kafka",
             "kafkaBootstrap": "qa-kafka-kafka-bootstrap.qa-data.svc:9093",
             "kafkaPublicCASecret": "qa-kafka-cluster-ca-cert",

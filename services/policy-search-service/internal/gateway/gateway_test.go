@@ -79,6 +79,28 @@ func TestHandler_PreservesEmptyWhitespaceAndZeroResponseOmission(t *testing.T) {
 	}
 }
 
+func TestHandler_AcceptsLegacyGatewayTrailingSlash(t *testing.T) {
+	client := &fakeClient{response: &policysearchv1.SearchPoliciesResponse{}}
+	handler := newTestHandler(t, client, time.Second)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/policies/?q=legacy-gateway", nil),
+	)
+
+	if recorder.Code != http.StatusOK || strings.TrimSpace(recorder.Body.String()) != `{}` {
+		t.Fatalf(
+			"trailing-slash response = (%d, %q)",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+	if len(client.requests) != 1 || client.requests[0].GetQ() != "legacy-gateway" {
+		t.Fatalf("requests = %#v", client.requests)
+	}
+}
+
 func TestHandler_RejectsMissingAndMalformedQueryBeforeRPC(t *testing.T) {
 	client := &fakeClient{response: &policysearchv1.SearchPoliciesResponse{}}
 	handler := newTestHandler(t, client, time.Second)

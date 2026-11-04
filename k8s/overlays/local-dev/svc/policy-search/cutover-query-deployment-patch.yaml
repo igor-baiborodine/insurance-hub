@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: policy-search-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: policy-search-api
+          env:
+            - name: ELASTICSEARCH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-policy-search-cutover-elasticsearch
+                  key: username
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-policy-search-cutover-elasticsearch
+                  key: password

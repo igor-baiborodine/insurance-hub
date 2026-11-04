@@ -19,6 +19,7 @@ const (
 	EnvHTTPMaxHeaderBytes       = "HTTP_MAX_HEADER_BYTES"
 	EnvHTTPMaxBodyBytes         = "HTTP_MAX_BODY_BYTES"
 	EnvElasticsearchURL         = "ELASTICSEARCH_URL"
+	EnvElasticsearchIndex       = "ELASTICSEARCH_INDEX"
 	EnvElasticsearchUsername    = "ELASTICSEARCH_USERNAME"
 	EnvElasticsearchPassword    = "ELASTICSEARCH_PASSWORD"
 	EnvElasticsearchCAFile      = "ELASTICSEARCH_CA_FILE"
@@ -34,6 +35,7 @@ const (
 	defaultMaxHeaderBytes       = 16384
 	defaultMaxBodyBytes         = 4096
 	defaultElasticsearchURL     = "http://127.0.0.1:9200"
+	defaultElasticsearchIndex   = "policy-views-issue-229"
 	defaultElasticsearchTimeout = 5 * time.Second
 	defaultKafkaGroup           = "policy-search-service"
 	defaultRegisteredTopic      = "policy-registered"
@@ -59,6 +61,7 @@ type Config struct {
 // Elasticsearch contains the bounded read-only dependency settings.
 type Elasticsearch struct {
 	URL      string
+	Index    string
 	Username string
 	Password string
 	CAFile   string
@@ -409,6 +412,16 @@ func loadElasticsearch(lookup lookupEnv) (Elasticsearch, error) {
 			"must be an HTTP or HTTPS origin without credentials or a path",
 		)
 	}
+	index, err := settingOrDefault(lookup, EnvElasticsearchIndex, defaultElasticsearchIndex)
+	if err != nil {
+		return Elasticsearch{}, err
+	}
+	if !validElasticsearchIndex(index) {
+		return Elasticsearch{}, kitconfig.Invalid(
+			EnvElasticsearchIndex,
+			"must be a lowercase Elasticsearch index name",
+		)
+	}
 	username, err := optionalSetting(lookup, EnvElasticsearchUsername)
 	if err != nil {
 		return Elasticsearch{}, err
@@ -449,11 +462,28 @@ func loadElasticsearch(lookup lookupEnv) (Elasticsearch, error) {
 	}
 	return Elasticsearch{
 		URL:      endpoint,
+		Index:    index,
 		Username: username,
 		Password: password,
 		CAFile:   caFile,
 		Timeout:  timeout,
 	}, nil
+}
+
+func validElasticsearchIndex(value string) bool {
+	if len(value) == 0 || len(value) > 255 || value == "." || value == ".." {
+		return false
+	}
+	for index, char := range value {
+		if index == 0 && (char == '-' || char == '_' || char == '+') {
+			return false
+		}
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') &&
+			char != '-' && char != '_' && char != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 func optionalSetting(lookup lookupEnv, name string) (string, error) {

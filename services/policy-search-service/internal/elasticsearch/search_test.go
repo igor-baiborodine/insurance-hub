@@ -16,6 +16,7 @@ import (
 
 func TestSearcher_UsesAcceptedIndexFieldsAndLimitAndPreservesHitOrder(t *testing.T) {
 	// given
+	const configuredIndex = "policy-views"
 	var captured searchRequest
 	var capturedKeys map[string]json.RawMessage
 	server := httptest.NewServer(
@@ -23,7 +24,7 @@ func TestSearcher_UsesAcceptedIndexFieldsAndLimitAndPreservesHitOrder(t *testing
 			w.Header().Set("X-Elastic-Product", "Elasticsearch")
 			w.Header().Set("Content-Type", "application/json")
 			if request.Method != http.MethodPost ||
-				request.URL.Path != "/"+PolicyIndex+"/_search" {
+				request.URL.Path != "/"+configuredIndex+"/_search" {
 				t.Errorf("request = %s %s", request.Method, request.URL.Path)
 			}
 			body, err := io.ReadAll(request.Body)
@@ -44,7 +45,11 @@ func TestSearcher_UsesAcceptedIndexFieldsAndLimitAndPreservesHitOrder(t *testing
 		}),
 	)
 	defer server.Close()
-	client, err := New(Config{Endpoint: server.URL, Timeout: time.Second})
+	client, err := New(Config{
+		Endpoint: server.URL,
+		Index:    configuredIndex,
+		Timeout:  time.Second,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
