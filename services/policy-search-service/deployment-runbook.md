@@ -60,10 +60,12 @@ The legacy agent-portal gateway Pod carries the business-client label so a later
 change can reach Go. The label grants NetworkPolicy admission but does not change the gateway's
 configured Java route.
 
-The active QA render enables both event workers and references only the separately owned query and
-event inputs. The checked-in local-dev render keeps workers disabled by default and references no
-event resources. In either environment, disabled mode must remove the writer and Kafka Secret
-references, Kafka CA mount, Kafka egress and consumer authority as one reviewed state.
+The active QA render selects the canonical `policy-views` index and cutover reader while keeping
+both event workers disabled. It retains the Java gateway route and sole Java consumer ownership
+until a later reviewed Git change. The checked-in local-dev render keeps workers disabled by
+default and references no event resources. In either environment, disabled mode must remove the
+writer and Kafka Secret references, Kafka CA mount, Kafka egress and consumer authority as one
+reviewed state.
 
 ## Repository validation
 
@@ -275,7 +277,9 @@ operation. Set `DEPLOY_PREVIOUS_IMAGE_REF` as described above when activation al
 image. QA rejects these direct apply operations and changes event mode only through reviewed Git
 and Flux reconciliation.
 
-The issue-235 cutover phases remain inactive in the checked-in overlays. For a local-dev rehearsal,
+The checked-in QA overlay selects the issue-235 canonical query phase. Its referenced cutover
+reader and CA Secrets must exist before Flux reconciles that revision. The gateway remains routed
+to Java until the query phase passes the required readiness checkpoint. For a local-dev rehearsal,
 select the canonical query phase first and declare the current qualification phase:
 
 ```sh

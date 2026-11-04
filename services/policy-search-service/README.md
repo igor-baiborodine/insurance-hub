@@ -489,13 +489,15 @@ management and telemetry resources within the shared deadline.
 ### Event processing and diagnostics walkthrough
 
 The checked-in local-dev overlay keeps `EVENT_WORKERS_ENABLED=false`, so its default query
-operation never depends on event Secrets or Kafka. The active QA overlay enables the workers with
-the exact issue-230 topics/group, TLS 9093 bootstrap, a cert-only Kafka CA mount, separate writer
-credentials, a bounded 30-second initial assignment budget and one broker-only TCP 9093 egress
-rule. The egress input is a JSON patch that appends to the active policy, and QA activation remains
-Git/Flux owned. Deployment checks render both the enabled and disabled forms through Kustomize,
-compare them with the deployment composition, and reject undeclared transitions, duplicate patches
-or event references in the disabled render.
+operation never depends on event Secrets or Kafka. The active QA overlay also keeps workers
+disabled while selecting the canonical `policy-views` index and cutover reader credentials. It
+contains no Kafka CA mount, writer credentials or Kafka egress; Java retains sole consumer
+ownership. Event activation uses the exact selected topics/group, TLS 9093 bootstrap, a cert-only
+Kafka CA mount, separate writer credentials, a bounded 30-second initial assignment budget and one
+broker-only TCP 9093 egress rule. The egress input is a JSON patch that appends to the active
+policy, and QA activation remains Git/Flux owned. Deployment checks render both the enabled and
+disabled forms through Kustomize, compare them with the deployment composition, and reject
+undeclared transitions, duplicate patches or event references in the disabled render.
 
 When enabled, each worker extracts incoming W3C trace headers, records a fixed event-type span,
 decodes the existing envelope and synchronously replaces the number-keyed Elasticsearch document.
