@@ -40,18 +40,6 @@ patches:
     target:
       kind: NetworkPolicy
       name: policy-search-api
-  - path: cutover-event-config-patch.yaml
-    target:
-      kind: ConfigMap
-      name: policy-search-config
-  - path: cutover-event-deployment-patch.yaml
-    target:
-      kind: Deployment
-      name: policy-search-api
-  - path: event-network-policy-patch.yaml
-    target:
-      kind: NetworkPolicy
-      name: policy-search-api
 replacements:
   - source:
       kind: ConfigMap
