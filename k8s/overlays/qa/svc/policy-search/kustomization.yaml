@@ -21,6 +21,14 @@ configMapGenerator:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
       - ELASTICSEARCH_URL=https://qa-elasticsearch-es-http.qa-data.svc:9200
       - ELASTICSEARCH_CA_FILE=/etc/policy-search/elasticsearch/ca.crt
+      - ELASTICSEARCH_INDEX=policy-views
+      - EVENT_WORKERS_ENABLED=true
+      - PROBE_TIMEOUT=30s
+      - KAFKA_BROKERS=qa-kafka-kafka-bootstrap.qa-data.svc:9093
+      - KAFKA_GROUP=policy-search-service
+      - KAFKA_REGISTERED_TOPIC=policy-registered
+      - KAFKA_TERMINATED_TOPIC=policy-terminated
+      - KAFKA_CA_FILE=/etc/policy-search/kafka/ca.crt
       - DEPLOYMENT_ENVIRONMENT=qa
       - SERVICE_VERSION=git-dfa4cb1a35c1
 patches:
@@ -28,27 +36,7 @@ patches:
     target:
       kind: Deployment
       name: policy-search-api
-  - path: cutover-query-config-patch.yaml
-    target:
-      kind: ConfigMap
-      name: policy-search-config
-  - path: cutover-query-deployment-patch.yaml
-    target:
-      kind: Deployment
-      name: policy-search-api
   - path: network-policy-patch.yaml
-    target:
-      kind: NetworkPolicy
-      name: policy-search-api
-  - path: cutover-event-config-patch.yaml
-    target:
-      kind: ConfigMap
-      name: policy-search-config
-  - path: cutover-event-deployment-patch.yaml
-    target:
-      kind: Deployment
-      name: policy-search-api
-  - path: event-network-policy-patch.yaml
     target:
       kind: NetworkPolicy
       name: policy-search-api

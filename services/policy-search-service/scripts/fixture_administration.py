@@ -291,25 +291,42 @@ class Target:
         require(fixture, "fixture administration is not configured")
         expected_event_target = {
             "local-dev": {
-                "eventWriterSecret": "local-dev-policy-search-elasticsearch-writer",
+                "workloadSecret": "local-dev-policy-search-qualification-elasticsearch",
+                "eventWriterSecret": "local-dev-policy-search-qualification-elasticsearch-writer",
                 "kafkaCluster": "local-dev-kafka",
                 "kafkaBootstrap": "local-dev-kafka-kafka-bootstrap:9093",
                 "kafkaPublicCASecret": "local-dev-kafka-cluster-ca-cert",
-                "kafkaWorkloadCASecret": "local-dev-policy-search-kafka-ca",
+                "kafkaWorkloadCASecret": "local-dev-policy-search-qualification-kafka-ca",
                 "kafkaReplicas": 1,
             },
             "qa": {
-                "eventWriterSecret": "qa-policy-search-elasticsearch-writer",
+                "workloadSecret": "qa-policy-search-qualification-elasticsearch",
+                "workloadCASecret": "qa-policy-search-qualification-elasticsearch-ca",
+                "eventWriterSecret": "qa-policy-search-qualification-elasticsearch-writer",
                 "kafkaCluster": "qa-kafka",
                 "kafkaBootstrap": "qa-kafka-kafka-bootstrap.qa-data.svc:9093",
                 "kafkaPublicCASecret": "qa-kafka-cluster-ca-cert",
-                "kafkaWorkloadCASecret": "qa-policy-search-kafka-ca",
+                "kafkaWorkloadCASecret": "qa-policy-search-qualification-kafka-ca",
                 "kafkaReplicas": 3,
             },
         }[self.environment]
         require(
             all(fixture.get(key) == value for key, value in expected_event_target.items()),
             "event target catalog contract differs",
+        )
+        qualification_secrets = (
+            fixture["workloadSecret"],
+            fixture["eventWriterSecret"],
+            fixture["kafkaWorkloadCASecret"],
+            fixture.get("workloadCASecret", ""),
+        )
+        require(
+            all(not name or "-qualification-" in name for name in qualification_secrets),
+            "qualification Secret names differ",
+        )
+        require(
+            all("cutover" not in name for name in qualification_secrets),
+            "qualification Secret names must not contain cutover",
         )
         self.context = selected["context"]
         self.namespace = selected["namespace"]

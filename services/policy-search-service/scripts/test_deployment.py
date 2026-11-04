@@ -33,7 +33,7 @@ def target_environment(name: str = "local-dev") -> dict[str, str]:
 
 
 def rendered_items(environment: str = "local-dev") -> list[dict]:
-    return checks.documents(checks.render(environment, "disabled"))
+    return checks.documents(checks.render(environment))
 
 
 def test_target_rejects_wrong_coordinates_before_cluster_access() -> None:
@@ -60,7 +60,7 @@ def test_qa_mutation_is_rejected_before_coordinates() -> None:
         fake.coordinates.assert_not_called()
 
 
-def test_render_rejects_java_ownership_and_kafka_dependency() -> None:
+def test_render_rejects_java_ownership() -> None:
     items = rendered_items()
     checks.validate_render(
         "local-dev", "\n---\n".join(checks.yaml.safe_dump(item) for item in items)
@@ -71,214 +71,73 @@ def test_render_rejects_java_ownership_and_kafka_dependency() -> None:
         checks.validate_render(
             "local-dev", "\n---\n".join(checks.yaml.safe_dump(item) for item in java)
         )
-    dependency = deepcopy(items)
-    dependency[0].setdefault("data", {})["KAFKA_URL"] = "http://synthetic"
-    with pytest.raises(checks.DeploymentError, match="Kafka"):
-        checks.validate_render(
-            "local-dev", "\n---\n".join(checks.yaml.safe_dump(item) for item in dependency)
-        )
 
 
-def test_event_activation_contract_uses_exact_writer_trust_and_kafka_egress() -> None:
-    for environment in ("local-dev", "qa"):
-        checks.validate_event_activation_contract(environment)
-
-
-def test_local_event_render_composes_complete_activation_boundary() -> None:
-    text = checks.render("local-dev", "enabled")
-    items = checks.validate_render("local-dev", text, event_mode="enabled")
+@pytest.mark.parametrize(("environment", "egress_count"), [("local-dev", 3), ("qa", 4)])
+def test_steady_state_render_uses_canonical_resources(environment: str, egress_count: int) -> None:
+    items = checks.validate_render(environment, checks.render(environment))
     config = next(item for item in items if item["kind"] == "ConfigMap")
     deployment = next(item for item in items if item["kind"] == "Deployment")
     policy = next(item for item in items if item["kind"] == "NetworkPolicy")
-    container = deployment["spec"]["template"]["spec"]["containers"][0]
+    pod = deployment["spec"]["template"]["spec"]
+    env = {item["name"]: item for item in pod["containers"][0]["env"]}
 
-    assert config["data"]["EVENT_WORKERS_ENABLED"] == "true"
-    assert config["data"]["PROBE_TIMEOUT"] == "30s"
-    assert {item["name"] for item in container["env"]} >= {
-        "ELASTICSEARCH_USERNAME",
-        "ELASTICSEARCH_PASSWORD",
-        "ELASTICSEARCH_WRITER_USERNAME",
-        "ELASTICSEARCH_WRITER_PASSWORD",
-    }
-    assert deployment["spec"]["template"]["spec"]["volumes"][0]["name"] == "kafka-ca"
-    assert len(policy["spec"]["egress"]) == 3
-    assert policy["spec"]["egress"][-1]["ports"] == [{"port": 9093, "protocol": "TCP"}]
-
-
-def test_event_mode_is_fail_closed_and_supports_flux_render_validation() -> None:
-    # given / when / then
-    with pytest.raises(checks.DeploymentError, match="must be disabled or enabled"):
-        checks.selected_event_mode("local-dev", "unexpected")
-    assert checks.selected_event_mode("qa", "enabled") == "enabled"
-
-
-def test_cutover_mode_is_fail_closed() -> None:
-    with pytest.raises(checks.DeploymentError, match="must be off, query or events"):
-        checks.selected_cutover_mode("unexpected")
-    assert checks.selected_cutover_mode("query") == "query"
-    assert checks.selected_cutover_mode("events") == "events"
-
-
-def test_cutover_query_and_event_renders_use_canonical_resources() -> None:
-    for environment in ("local-dev", "qa"):
-        query = checks.documents(checks.render(environment, "disabled", "query"))
-        event = checks.documents(checks.render(environment, "disabled", "events"))
-        checks.validate_render(
-            environment,
-            checks.yaml.safe_dump_all(query),
-            event_mode="disabled",
-            cutover_mode="query",
-        )
-        checks.validate_render(
-            environment,
-            checks.yaml.safe_dump_all(event),
-            event_mode="disabled",
-            cutover_mode="events",
-        )
-        query_config = next(item for item in query if item["kind"] == "ConfigMap")["data"]
-        event_config = next(item for item in event if item["kind"] == "ConfigMap")["data"]
-        query_deployment = next(item for item in query if item["kind"] == "Deployment")
-        event_deployment = next(item for item in event if item["kind"] == "Deployment")
-        query_env = {
-            item["name"]: item
-            for item in query_deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+    assert (
+        config["data"]
+        | {
+            "ELASTICSEARCH_INDEX": "policy-views",
+            "EVENT_WORKERS_ENABLED": "true",
+            "KAFKA_GROUP": "policy-search-service",
+            "KAFKA_REGISTERED_TOPIC": "policy-registered",
+            "KAFKA_TERMINATED_TOPIC": "policy-terminated",
         }
-        event_env = {
-            item["name"]: item
-            for item in event_deployment["spec"]["template"]["spec"]["containers"][0]["env"]
-        }
-        assert query_config["ELASTICSEARCH_INDEX"] == "policy-views"
-        assert query_config["EVENT_WORKERS_ENABLED"] == "false"
-        assert (
-            "cutover-elasticsearch"
-            in query_env["ELASTICSEARCH_USERNAME"]["valueFrom"]["secretKeyRef"]["name"]
-        )
-        assert event_config["KAFKA_GROUP"] == "policy-search-service"
-        assert event_config["KAFKA_REGISTERED_TOPIC"] == "policy-registered"
-        assert event_config["KAFKA_TERMINATED_TOPIC"] == "policy-terminated"
-        assert (
-            "cutover-elasticsearch-writer"
-            in event_env["ELASTICSEARCH_WRITER_USERNAME"]["valueFrom"]["secretKeyRef"]["name"]
-        )
+        == config["data"]
+    )
+    assert env["ELASTICSEARCH_USERNAME"]["valueFrom"]["secretKeyRef"]["name"] == (
+        f"{environment}-policy-search-elasticsearch"
+    )
+    assert env["ELASTICSEARCH_WRITER_USERNAME"]["valueFrom"]["secretKeyRef"]["name"] == (
+        f"{environment}-policy-search-elasticsearch-writer"
+    )
+    referenced_secrets = [
+        value["valueFrom"]["secretKeyRef"]["name"]
+        for value in env.values()
+        if "valueFrom" in value and "secretKeyRef" in value["valueFrom"]
+    ] + [volume["secret"]["secretName"] for volume in pod["volumes"] if "secret" in volume]
+    assert all("cutover" not in name for name in referenced_secrets)
+    assert any(volume["name"] == "kafka-ca" for volume in pod["volumes"])
+    assert len(policy["spec"]["egress"]) == egress_count
+    assert policy["spec"]["egress"][-1] == checks.expected_kafka_egress(environment)
 
 
-def test_cutover_mode_rejects_competing_qualification_event_mode() -> None:
-    with pytest.raises(checks.DeploymentError, match="conflicts"):
-        checks.render("local-dev", "enabled", "query")
-
-
-def test_render_entrypoint_accepts_selected_cutover_event_mode(capsys) -> None:
-    environment = {
-        "DEPLOY_ENV": "qa",
-        "DEPLOY_CUTOVER_MODE": "events",
-        "PATH": os.environ["PATH"],
-    }
-    with patch.dict(os.environ, environment, clear=True):
+def test_render_entrypoint_returns_steady_state(capsys) -> None:
+    with patch.dict(os.environ, {"DEPLOY_ENV": "qa", "PATH": os.environ["PATH"]}, clear=True):
         assert checks.main(["render"]) == 0
 
     items = checks.documents(capsys.readouterr().out)
     config = next(item for item in items if item["kind"] == "ConfigMap")
-    assert config["data"]["ELASTICSEARCH_INDEX"] == "policy-views"
     assert config["data"]["EVENT_WORKERS_ENABLED"] == "true"
     assert config["data"]["KAFKA_GROUP"] == "policy-search-service"
 
 
-def test_deployed_search_accepts_empty_only_during_canonical_query_phase() -> None:
-    checks.validate_deployed_search("query", 200, b"{}")
-    checks.validate_deployed_search("query", 200, b'{"policies":[]}')
-    checks.validate_deployed_search("off", 200, b'{"policies":[{"number":"SYN-229"}]}')
+def test_deployed_search_requires_nonempty_canonical_results() -> None:
+    checks.validate_deployed_search(200, b'{"policies":[{"number":"SYN-236"}]}')
 
-    for mode in ("off", "events"):
+    for body in (b"{}", b'{"policies":[]}'):
         with pytest.raises(checks.DeploymentError, match="deployed search differs"):
-            checks.validate_deployed_search(mode, 200, b"{}")
+            checks.validate_deployed_search(200, body)
 
 
-def test_target_renders_derived_cutover_event_mode() -> None:
+def test_target_renders_steady_state_contract() -> None:
     target = object.__new__(checks.Target)
     target.environment = "local-dev"
-    target.cutover_mode = "events"
 
-    text, items, _ = target.render_contract("enabled", cutover_mode="events")
+    text, items, _ = target.render_contract()
 
-    checks.validate_render("local-dev", text, event_mode="enabled", cutover_mode="events")
+    checks.validate_render("local-dev", text)
     config = next(item for item in items if item["kind"] == "ConfigMap")
     assert config["data"]["EVENT_WORKERS_ENABLED"] == "true"
     assert config["data"]["KAFKA_GROUP"] == "policy-search-service"
-
-
-def test_qa_event_render_preserves_query_and_telemetry_egress() -> None:
-    # given / when
-    text = checks.render("qa", "enabled")
-    items = checks.validate_render("qa", text, event_mode="enabled")
-    policy = next(item for item in items if item["kind"] == "NetworkPolicy")
-
-    # then
-    assert len(policy["spec"]["egress"]) == 4
-    encoded = checks.json.dumps(policy["spec"]["egress"], sort_keys=True)
-    assert "qa-elasticsearch" in encoded
-    assert "kube-dns" in encoded
-    assert "qa-alloy" in encoded
-    assert "qa-kafka" in encoded
-
-
-def test_qa_checked_in_activation_preserves_disabled_return_render() -> None:
-    # given / when
-    enabled = checks.documents(checks.render("qa", "enabled"))
-    disabled = checks.documents(checks.render("qa", "disabled"))
-
-    # then
-    enabled_config = next(item for item in enabled if item["kind"] == "ConfigMap")
-    disabled_config = next(item for item in disabled if item["kind"] == "ConfigMap")
-    enabled_deployment = next(item for item in enabled if item["kind"] == "Deployment")
-    disabled_deployment = next(item for item in disabled if item["kind"] == "Deployment")
-    enabled_policy = next(item for item in enabled if item["kind"] == "NetworkPolicy")
-    disabled_policy = next(item for item in disabled if item["kind"] == "NetworkPolicy")
-
-    assert enabled_config["data"]["EVENT_WORKERS_ENABLED"] == "true"
-    assert disabled_config["data"]["EVENT_WORKERS_ENABLED"] == "false"
-    assert len(enabled_deployment["spec"]["template"]["spec"]["volumes"]) == 2
-    assert len(disabled_deployment["spec"]["template"]["spec"]["volumes"]) == 1
-    assert len(enabled_policy["spec"]["egress"]) == 4
-    assert len(disabled_policy["spec"]["egress"]) == 3
-
-
-def test_live_state_requires_declared_event_mode_transition() -> None:
-    disabled = rendered_items()
-    enabled = checks.documents(checks.render("local-dev", "enabled"))
-    checks.validate_render("local-dev", checks.yaml.safe_dump_all(enabled), event_mode="enabled")
-    deployment = next(item for item in enabled if item["kind"] == "Deployment")
-    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in disabled}
-    target = object.__new__(checks.Target)
-    target.environment = "local-dev"
-    target.event_mode = "enabled"
-    target.deployment = deployment["metadata"]["name"]
-    target.configuration = {"mode": "direct"}
-    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual.get((kind, name), {}))
-    target.render_contract = Mock(
-        return_value=(checks.yaml.safe_dump_all(disabled), disabled, "unused")
-    )
-
-    with patch.dict(os.environ, {}, clear=True):
-        with pytest.raises(checks.DeploymentError):
-            target.live(enabled, require_deployment=False)
-
-    with patch.dict(
-        os.environ,
-        {checks.PREVIOUS_EVENT_MODE_ENV: "disabled"},
-        clear=True,
-    ):
-        target.live(enabled, require_deployment=False)
-        with pytest.raises(checks.DeploymentError):
-            target.live(enabled, require_deployment=True)
-
-        actual.clear()
-        actual.update(
-            {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in enabled}
-        )
-        actual[("deployment", deployment["metadata"]["name"])]["spec"]["template"]["spec"][
-            "containers"
-        ][0]["env"].reverse()
-        target.live(enabled, require_deployment=True)
 
 
 def test_echo_predecessor_environment_accepts_only_equivalent_or_query_omitted_entries() -> None:
@@ -318,6 +177,49 @@ def test_render_rejects_wrong_elasticsearch_secret_and_egress() -> None:
         checks.validate_render(
             "local-dev", "\n---\n".join(checks.yaml.safe_dump(item) for item in items)
         )
+
+
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+def test_render_rejects_obsolete_cutover_secret_reference(environment: str) -> None:
+    items = rendered_items(environment)
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    username = next(
+        item
+        for item in deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+        if item["name"] == "ELASTICSEARCH_USERNAME"
+    )
+    username["valueFrom"]["secretKeyRef"]["name"] = (
+        f"{environment}-policy-search-cutover-elasticsearch"
+    )
+
+    with pytest.raises(checks.DeploymentError, match="Secret reference"):
+        checks.validate_render(environment, checks.yaml.safe_dump_all(items))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ELASTICSEARCH_INDEX", "foreign-index"),
+        ("KAFKA_GROUP", "foreign-group"),
+        ("KAFKA_REGISTERED_TOPIC", "foreign-topic"),
+    ],
+)
+def test_render_rejects_noncanonical_state_coordinates(field: str, value: str) -> None:
+    items = rendered_items()
+    config = next(item for item in items if item["kind"] == "ConfigMap")
+    config["data"][field] = value
+
+    with pytest.raises(checks.DeploymentError, match="runtime budgets"):
+        checks.validate_render("local-dev", checks.yaml.safe_dump_all(items))
+
+
+def test_render_rejects_wrong_kafka_egress() -> None:
+    items = rendered_items()
+    policy = next(item for item in items if item["kind"] == "NetworkPolicy")
+    policy["spec"]["egress"][-1]["ports"][0]["port"] = 9092
+
+    with pytest.raises(checks.DeploymentError, match="Kafka egress"):
+        checks.validate_render("local-dev", checks.yaml.safe_dump_all(items))
 
 
 def test_render_rejects_missing_network_policy() -> None:
@@ -445,7 +347,7 @@ def test_release_preparation_produces_valid_qa_render(tmp_path) -> None:
             str(tmp_path / "k8s/overlays/qa/svc/policy-search"),
         ]
     )
-    items = checks.validate_render("qa", rendered, event_mode="disabled", cutover_mode="events")
+    items = checks.validate_render("qa", rendered)
 
     # then release and telemetry identities satisfy the same QA render contract.
     deployment = next(item for item in items if item["kind"] == "Deployment")

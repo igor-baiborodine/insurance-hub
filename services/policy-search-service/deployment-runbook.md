@@ -31,18 +31,20 @@ commands.
 
 ## Ownership and exposure
 
-Policy Search runs beside the legacy Java workload. The Go owner creates only
+Until the separately reviewed Java retirement change reconciles, Policy Search runs beside the
+zero-replica legacy Java workload. The Go owner creates only
 `<environment>-policy-search-api`, its business and management Services, ConfigMap and
-NetworkPolicy. The
-query fixture owner creates only `policy-views-issue-229`, native role/user
-`go_policy_search_reader` and workload-owned Elasticsearch Secrets. The event fixture owner
+NetworkPolicy. The query qualification fixture owner creates only `policy-views-issue-229`, native
+role/user `go_policy_search_reader` and explicitly named `*-policy-search-qualification-*`
+Elasticsearch Secrets. The event fixture owner
 creates only `policy-registered-issue-230`, `policy-terminated-issue-230`,
-`go_policy_search_writer`, its workload Secret and a cert-only Kafka CA Secret. Neither owner
+`go_policy_search_writer`, its qualification workload Secret and a cert-only qualification Kafka
+CA Secret. Neither owner
 modifies the Java `policy-search-api-legacy` Deployment or Service, creates an Ingress, or accesses
 shared application indices.
 
-The issue-235 cutover owner is separate. It may create the absent canonical `policy-views` index
-with the accepted mapping, and it owns `go_policy_search_cutover_reader`,
+The canonical-state owner is separate. It owns the `policy-views` index with the accepted mapping,
+`go_policy_search_cutover_reader`,
 `go_policy_search_cutover_writer` and their workload trust Secrets. It never copies qualification
 documents, resets offsets, changes the legacy topics/group, deletes canonical state or retires
 Java. If the index appears with documents, aliases or an incompatible mapping, the owner stops for
@@ -61,11 +63,10 @@ routes Policy Search queries to the Go business Service while preserving the exi
 edge and HTTP-to-RPC translation. The label grants the required NetworkPolicy admission; local-dev
 continues inheriting its Java Policy Search route.
 
-The active QA render selects the canonical `policy-views` index and cutover reader while keeping
-both event workers disabled. Java retains sole consumer ownership until a later reviewed Git
-change. The checked-in local-dev render keeps workers disabled by default and references no event
-resources. In either environment, disabled mode must remove the writer and Kafka Secret
-references, Kafka CA mount, Kafka egress and consumer authority as one reviewed state.
+The active QA and local-dev renders select the canonical `policy-views` index, canonical topics
+`policy-registered` and `policy-terminated`, group `policy-search-service`, reader/writer
+identities and trust mounts. Event workers and Kafka egress are part of this ordinary steady state.
+The retained Java Deployment remains at zero replicas and does not own the canonical consumer.
 
 ## Repository validation
 
@@ -183,13 +184,18 @@ writer's exact-index document-write boundary while read, index administration, o
 security privileges remain denied. It does not reset the query fixture or inspect Java topics or
 groups.
 
-For QA, provision and verify the dependency resources before merging configuration that references
-their workload-owned Secrets. For local-dev, provision them before a direct event-mode rollout.
+These fixture commands own only the isolated qualification coordinates. Run them when explicitly
+qualifying that retained return path; they are not prerequisites for the ordinary canonical
+deployment.
+
+For QA, provision and verify required canonical dependency resources before merging configuration
+that references their workload-owned Secrets. For local-dev, provision them before a direct
+rollout.
 Kubernetes requires each referenced Secret to exist before an enabled worker first consumes an
 event.
 
-Prepare the canonical cutover state only after the issue-235 handover decision is synchronized.
-Inspection is read-only. Ensure requires its exact confirmation and aborts before role or Secret
+Prepare the canonical state only after the handover decision is synchronized. Inspection is
+read-only. Ensure requires its exact confirmation and aborts before role or Secret
 changes when an existing index has mapping/alias drift or documents lacking an accepted complete
 manifest:
 
@@ -201,9 +207,35 @@ unset CUTOVER_CONFIRM
 make go-svc-cutover-index-verify SVC_NAME=policy-search
 ```
 
-The ensure operation creates no Kafka topic or group and changes no gateway route. It prepares
-distinct cutover reader/writer and CA Secrets, leaving qualification identities usable for return.
+The ensure operation creates no Kafka topic or group and changes no gateway route. It prepares the
+retained canonical reader/writer and CA Secret identities under the ordinary
+`<environment>-policy-search-*` names, while leaving the distinct
+`<environment>-policy-search-qualification-*` identities usable for qualification.
 Do not run it against QA without the separately authorized concrete operation proposal.
+
+For the one-time issue #236 QA transition, first record and authorize the exact obsolete source
+Secrets through G236-03. Copy their data to the ordinary canonical names before reconciling a
+Deployment that references those names:
+
+```sh
+export POLICY_SEARCH_READER_SOURCE_SECRET=qa-policy-search-cutover-elasticsearch
+export POLICY_SEARCH_WRITER_SOURCE_SECRET=qa-policy-search-cutover-elasticsearch-writer
+export POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET=qa-policy-search-cutover-elasticsearch-ca
+export POLICY_SEARCH_KAFKA_CA_SOURCE_SECRET=qa-policy-search-cutover-kafka-ca
+export SECRET_MIGRATION_CONFIRM=migrate-qa-policy-search-secrets
+make go-svc-canonical-secrets-migrate SVC_NAME=policy-search
+unset POLICY_SEARCH_READER_SOURCE_SECRET POLICY_SEARCH_WRITER_SOURCE_SECRET
+unset POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET POLICY_SEARCH_KAFKA_CA_SOURCE_SECRET
+unset SECRET_MIGRATION_CONFIRM
+```
+
+The migration rejects a source outside the selected environment's obsolete Policy Search Secret
+boundary, unexpected keys, wrong canonical usernames, short passwords, target collisions and any
+post-apply data difference. It copies values in process memory and reports names/results only. For
+local-dev, use the corresponding `local-dev-policy-search-cutover-*` source names, omit
+`POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET`, and confirm
+`migrate-local-dev-policy-search-secrets`. This operation does not change the canonical index,
+Elasticsearch roles/users, Kafka topics/group, offsets or a workload reference.
 
 ## Deploy or reconcile the release
 
@@ -211,7 +243,7 @@ The QA release uses
 `ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:<semantic-version>`. The release owner
 updates the QA overlay image tag from the semantic version and sets `SERVICE_VERSION` to
 `git-<12-source-hex>` from the full release source commit. Review the rendered Deployment,
-ConfigMap, Services and NetworkPolicy together with the dependency and event mode they select.
+ConfigMap, Services and NetworkPolicy together with their canonical dependencies.
 
 Merge the reviewed Git change and let the shared `qa-svc` Flux Kustomization reconcile it. Direct
 image load, deployment and stop operations reject QA. Do not patch the live Deployment, selectors,
@@ -256,61 +288,19 @@ unset DEPLOY_PREVIOUS_IMAGE_REF
 make go-svc-deploy-verify SVC_NAME=policy-search
 ```
 
-To enable local-dev event workers, first provision the event resources, then set
-`DEPLOY_EVENT_MODE=enabled` and declare `DEPLOY_PREVIOUS_EVENT_MODE=disabled` through the apply.
-The owner composes worker settings, Secret references, the Kafka CA mount and Kafka egress as one
-state:
-
-```sh
-export DEPLOY_EVENT_MODE=enabled
-export DEPLOY_PREVIOUS_EVENT_MODE=disabled
-make go-svc-deploy-preflight SVC_NAME=policy-search
-make go-svc-image-load SVC_NAME=policy-search
-make go-svc-deploy SVC_NAME=policy-search
-unset DEPLOY_PREVIOUS_EVENT_MODE
-make go-svc-deploy-status SVC_NAME=policy-search
-make go-svc-deploy-verify SVC_NAME=policy-search
-```
-
-Keep `DEPLOY_EVENT_MODE=enabled` for later status and verification, then unset it after the bounded
-operation. Set `DEPLOY_PREVIOUS_IMAGE_REF` as described above when activation also changes the
-image. QA rejects these direct apply operations and changes event mode only through reviewed Git
-and Flux reconciliation.
-
-The checked-in QA overlay selects the issue-235 canonical query phase. Its referenced cutover
-reader and CA Secrets must exist before Flux reconciles that revision. The gateway remains routed
-to Java until the query phase passes the required readiness checkpoint. For a local-dev rehearsal,
-select the canonical query phase first and declare the current qualification phase:
-
-```sh
-export DEPLOY_CUTOVER_MODE=query
-export DEPLOY_PREVIOUS_CUTOVER_MODE=off
-make go-svc-deploy-preflight SVC_NAME=policy-search
-make go-svc-deploy SVC_NAME=policy-search
-unset DEPLOY_PREVIOUS_CUTOVER_MODE
-make go-svc-deploy-verify SVC_NAME=policy-search
-```
-
-After the query phase is accepted, move the same workload to the canonical legacy event contract
-by setting `DEPLOY_CUTOVER_MODE=events` and `DEPLOY_PREVIOUS_CUTOVER_MODE=query`. Reverse those
-values to return to query-only mode, then move from `query` to `off` to restore qualification.
-Keep the selected cutover mode exported through status and verification. Do not combine a cutover
-mode with `DEPLOY_EVENT_MODE=enabled`, and declare only one of `DEPLOY_PREVIOUS_CUTOVER_MODE` or
-`DEPLOY_PREVIOUS_EVENT_MODE`. QA selects these phases only through a reviewed Git/Flux change.
+The ordinary render already includes canonical query and event configuration. Its canonical
+reader/writer and CA Secrets must exist before apply or Flux reconciliation. There is no deployment
+mode variable: a source revision owns the index, identities, workers, topics, trust and egress as
+one reviewed state.
 
 ## Verify the selected deployment
 
 Run the catalog-selected status and verification owners with the selected environment variables
-still exported. QA requires its source revision and digest; local-dev requires its image reference
-and the selected event mode:
+still exported. QA requires its source revision and digest; local-dev requires its image reference:
 
 ```sh
 make go-svc-deploy-status SVC_NAME=policy-search
 make go-svc-deploy-verify SVC_NAME=policy-search
-make go-svc-fixture-verify SVC_NAME=policy-search
-# Run this only when event resources are selected.
-make go-svc-event-fixture-verify SVC_NAME=policy-search
-# Run this when a canonical cutover phase is selected.
 make go-svc-cutover-index-verify SVC_NAME=policy-search
 ```
 
@@ -341,9 +331,8 @@ kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" \
   logs deployment/"${DEPLOY_ENV}-policy-search-api" --tail=200
 kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" \
   describe deployment/"${DEPLOY_ENV}-policy-search-api"
-# Run this only when event resources are selected.
 kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_DATA_NS" \
-  get kafkatopic policy-registered-issue-230 policy-terminated-issue-230
+  get kafkatopic policy-registered policy-terminated
 ```
 
 Safe worker messages are `policy event completed`, `malformed policy event skipped`,
@@ -361,12 +350,10 @@ bypass a failure.
 ## Rollback and restoration
 
 Rollback is a reviewed Git change through the same QA overlay and Flux owner. Identify the
-compatible predecessor source, semantic image tag, immutable digest, configuration, event mode and
-cutover mode before changing Git. For a canonical event-to-query return, disable workers and remove
-the cutover writer/Kafka Secret references, Kafka CA mount and Kafka egress together while retaining
-the canonical index and cutover reader identity. A query-to-qualification return restores the
-isolated index and qualification reader Secret together. Preserve both indices, all topics, group
-offsets, fixtures and documents.
+compatible predecessor source, semantic image tag, immutable digest and complete configuration
+before changing Git. The reviewed predecessor must carry its index, identities, workers, topics,
+trust and egress as one source-owned state. Preserve both indices, all topics, group offsets,
+fixtures and documents.
 
 After the rollback revision reconciles, set `DEPLOY_SOURCE_REVISION` and `DEPLOY_IMAGE_DIGEST` to
 that reviewed predecessor and repeat status, deployment verification and applicable fixture
@@ -381,11 +368,8 @@ both revisions, both image digests and the resource identities before and after 
 Local-dev rollback uses the same direct owner instead of Git/Flux. Set `DEPLOY_IMAGE_REF` to the
 compatible predecessor, declare the currently running candidate through
 `DEPLOY_PREVIOUS_IMAGE_REF`, then run preflight, image load, deploy and verification. Restore by
-reversing those two image values and repeating the sequence. When event mode changes, declare both
-`DEPLOY_EVENT_MODE` and `DEPLOY_PREVIOUS_EVENT_MODE` so worker settings, Secrets, trust and egress
-move together. When a cutover phase changes, use `DEPLOY_CUTOVER_MODE` and
-`DEPLOY_PREVIOUS_CUTOVER_MODE` so the index, identities, workers, topics, trust and egress move
-together. For a first-install removal/redeployment check, `make go-svc-stop
+reversing those two image values and repeating the sequence. For a first-install
+removal/redeployment check, `make go-svc-stop
 SVC_NAME=policy-search` scales only the local Go Deployment to zero; rerun the guarded deploy and
 verification sequence to restore it. Direct stop is rejected for QA.
 
@@ -414,9 +398,10 @@ This removes only `policy-views-issue-229`, `go_policy_search_reader` and the wo
 Secrets. Read back the exact resource absence and verify that shared indices, Java resources and
 unrelated Secrets remain unchanged.
 
-There is no cutover retirement command in issue-235. Issue #236 owns retirement of the canonical
-cutover identities, Secrets, Java resources and any obsolete state after the accepted observation
-and dependency checks, with separate authorization for its concrete removal operation.
+The canonical `policy-views` index, topics, group, reader/writer identities and trust Secrets are
+active steady-state resources and are not retired by issue #236. Issue #236 retires only the
+authorized Java desired-state resources in its separate retirement change. The complete legacy
+manifest source trees remain intact.
 
 ## Evidence checklist
 
@@ -425,7 +410,7 @@ Record sanitized evidence in the operation's approved evidence location:
 - UTC start/end, operator, exact command and result;
 - full source SHA, desired and running image identities and, for QA, the Flux source/applied
   revision, semantic image tag and immutable digest;
-- Deployment generation, ConfigMap identity, Pod UIDs, ready replicas and effective worker mode;
+- Deployment generation, ConfigMap identity, Pod UIDs, ready replicas and worker state;
 - query/event resource identities and least-privilege verification results;
 - private reachability, health, query/event outcome and Java-owner continuity;
 - rollback predecessor, restored candidate, both reconciliation results and cleanup state; and

@@ -22,6 +22,38 @@ class FakeClient:
         return self.responses.pop(0)
 
 
+@pytest.mark.parametrize(
+    ("environment", "context", "namespace", "data_namespace"),
+    [
+        ("local-dev", "kind-local-dev-insurance-hub", "local-dev-all", "local-dev-all"),
+        ("qa", "qa-insurance-hub", "qa-svc", "qa-data"),
+    ],
+)
+def test_fixture_target_uses_distinct_qualification_secret_names(
+    environment: str, context: str, namespace: str, data_namespace: str
+) -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "DEPLOY_ENV": environment,
+            "DEPLOY_CONTEXT": context,
+            "DEPLOY_SVC_NS": namespace,
+            "DEPLOY_DATA_NS": data_namespace,
+        },
+        clear=True,
+    ):
+        target = administration.Target()
+
+    secret_names = (
+        target.workload_secret,
+        target.workload_ca_secret,
+        target.event_writer_secret,
+        target.kafka_workload_ca_secret,
+    )
+    assert all(not name or "-qualification-" in name for name in secret_names)
+    assert all("cutover" not in name for name in secret_names)
+
+
 def test_fixture_asset_expands_exact_bounded_dataset() -> None:
     # when
     fixture = administration.load_fixture()

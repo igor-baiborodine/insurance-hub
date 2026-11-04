@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 from unittest.mock import Mock, patch
 
@@ -29,6 +30,40 @@ def canonical_definition() -> dict:
             "mappings": administration.MAPPING,
         }
     }
+
+
+@pytest.mark.parametrize(
+    ("environment", "context", "namespace", "data_namespace"),
+    [
+        ("local-dev", "kind-local-dev-insurance-hub", "local-dev-all", "local-dev-all"),
+        ("qa", "qa-insurance-hub", "qa-svc", "qa-data"),
+    ],
+)
+def test_canonical_target_uses_only_ordinary_secret_names(
+    environment: str, context: str, namespace: str, data_namespace: str
+) -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "DEPLOY_ENV": environment,
+            "DEPLOY_CONTEXT": context,
+            "DEPLOY_SVC_NS": namespace,
+            "DEPLOY_DATA_NS": data_namespace,
+        },
+        clear=True,
+    ):
+        target = administration.Target()
+
+    secret_names = (
+        target.reader_secret,
+        target.writer_secret,
+        target.elasticsearch_ca_secret,
+        target.kafka_ca_secret,
+    )
+    assert all("cutover" not in name for name in secret_names)
+    assert target.reader_secret == f"{environment}-policy-search-elasticsearch"
+    assert target.writer_secret == f"{environment}-policy-search-elasticsearch-writer"
+    assert target.kafka_ca_secret == f"{environment}-policy-search-kafka-ca"
 
 
 def test_inspect_accepts_absent_or_exact_empty_index() -> None:
@@ -136,4 +171,82 @@ def test_ensure_requires_confirmation_before_target_contact() -> None:
         pytest.raises(administration.AdministrationError, match="CUTOVER_CONFIRM"),
     ):
         administration.execute("ensure")
+    target.assert_not_called()
+
+
+def test_migrate_secret_preserves_exact_credentials_without_exposing_data() -> None:
+    encoded = {
+        "username": base64.b64encode(administration.READER.encode()).decode(),
+        "password": base64.b64encode(b"controlled-password-value-with-32-bytes").decode(),
+    }
+    target = Mock()
+    target.environment = "qa"
+    target.json.side_effect = [{"data": encoded}, {"data": encoded}]
+
+    with patch.dict(
+        os.environ,
+        {"POLICY_SEARCH_READER_SOURCE_SECRET": "qa-policy-search-cutover-elasticsearch"},
+        clear=True,
+    ):
+        migration = administration.migrate_secret(
+            target,
+            "POLICY_SEARCH_READER_SOURCE_SECRET",
+            "qa-policy-search-elasticsearch",
+            ("username", "password"),
+            "canonical-elasticsearch-reader",
+            administration.READER,
+        )
+
+    assert migration == (
+        "qa-policy-search-cutover-elasticsearch",
+        "qa-policy-search-elasticsearch",
+    )
+    target.apply_secret.assert_called_once_with(
+        "qa-policy-search-elasticsearch",
+        {
+            "username": administration.READER,
+            "password": "controlled-password-value-with-32-bytes",
+        },
+        "canonical-elasticsearch-reader",
+        force_conflicts=True,
+    )
+
+
+def test_migrate_secret_rejects_wrong_identity_before_apply() -> None:
+    target = Mock()
+    target.environment = "qa"
+    target.json.return_value = {
+        "data": {
+            "username": base64.b64encode(b"qualification-reader").decode(),
+            "password": base64.b64encode(b"controlled-password-value-with-32-bytes").decode(),
+        }
+    }
+
+    with (
+        patch.dict(
+            os.environ,
+            {"POLICY_SEARCH_READER_SOURCE_SECRET": "qa-policy-search-cutover-elasticsearch"},
+            clear=True,
+        ),
+        pytest.raises(administration.AdministrationError, match="username differs"),
+    ):
+        administration.migrate_secret(
+            target,
+            "POLICY_SEARCH_READER_SOURCE_SECRET",
+            "qa-policy-search-elasticsearch",
+            ("username", "password"),
+            "canonical-elasticsearch-reader",
+            administration.READER,
+        )
+
+    target.apply_secret.assert_not_called()
+
+
+def test_migrate_requires_confirmation_before_target_contact() -> None:
+    with (
+        patch.dict(os.environ, {"DEPLOY_ENV": "qa"}, clear=True),
+        patch.object(administration, "Target", return_value=Mock()) as target,
+        pytest.raises(administration.AdministrationError, match="SECRET_MIGRATION_CONFIRM"),
+    ):
+        administration.execute("migrate-secrets")
     target.assert_not_called()
