@@ -426,7 +426,7 @@ def normalized_event_render(environment: str, text: str) -> list[dict[str, Any]]
 def validate_event_overlay_render(environment: str, disabled_text: str) -> str:
     composed = activate_event_render(environment, disabled_text)
     activated = render_event_overlay(environment)
-    validate_render(environment, activated, event_mode="enabled")
+    validate_render(environment, activated, event_mode="enabled", cutover_mode="off")
     require(
         normalized_event_render(environment, activated)
         == normalized_event_render(environment, composed),
@@ -1564,7 +1564,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         validate_event_activation_contract(environment)
         validate_cutover_activation_contract(environment)
-        disabled = render(environment, "disabled")
+        disabled = render(environment, "disabled", "off")
         validate_event_overlay_render(environment, disabled)
         for cutover_phase in ("query", "events"):
             cutover_text = render(environment, "disabled", cutover_phase)
