@@ -22,6 +22,7 @@ func TestNew_RejectsUnsafeConfigurationWithoutEchoingSecrets(t *testing.T) {
 		{Endpoint: "http://example.test:9200/private", Timeout: time.Second},
 		{Endpoint: "ftp://example.test:9200", Timeout: time.Second},
 		{Endpoint: "http://example.test:9200", Timeout: 0},
+		{Endpoint: "http://example.test:9200", Index: "Policy-Views", Timeout: time.Second},
 		{Endpoint: "http://example.test:9200", Username: privateMarker, Timeout: time.Second},
 		{Endpoint: "http://example.test:9200", CACert: []byte(privateMarker), Timeout: time.Second},
 		{Endpoint: "https://example.test:9200", CACert: []byte(privateMarker), Timeout: time.Second},
@@ -180,6 +181,7 @@ func TestClient_Check_PropagatesCancellation(t *testing.T) {
 
 func TestClient_CheckWrite_UsesSelfPrivilegeCheckWithoutIndexRead(t *testing.T) {
 	// given
+	const configuredIndex = "policy-views"
 	var gotPath string
 	var gotBody map[string]any
 	server := httptest.NewServer(
@@ -190,12 +192,14 @@ func TestClient_CheckWrite_UsesSelfPrivilegeCheckWithoutIndexRead(t *testing.T) 
 			}
 			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
 			_, _ = writer.Write([]byte(
-				`{"has_all_requested":true,"index":{"policy-views-issue-229":{"index":true}}}`,
+				`{"has_all_requested":true,"index":{"policy-views":{"index":true}}}`,
 			))
 		}),
 	)
 	defer server.Close()
-	client, err := New(Config{Endpoint: server.URL, Timeout: time.Second})
+	client, err := New(
+		Config{Endpoint: server.URL, Index: configuredIndex, Timeout: time.Second},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +211,7 @@ func TestClient_CheckWrite_UsesSelfPrivilegeCheckWithoutIndexRead(t *testing.T) 
 	indices, _ := gotBody["index"].([]any)
 	requested, _ := indices[0].(map[string]any)
 	if err != nil || gotPath != "/_security/user/_has_privileges" ||
-		!reflect.DeepEqual(requested["names"], []any{PolicyIndex}) ||
+		!reflect.DeepEqual(requested["names"], []any{configuredIndex}) ||
 		!reflect.DeepEqual(requested["privileges"], []any{"index"}) {
 		t.Fatalf("writer check = path:%q body:%v error:%v", gotPath, gotBody, err)
 	}

@@ -69,6 +69,7 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Errorf("Telemetry.ExporterTimeout = %v, want 2s", got.ExporterTimeout)
 	}
 	if got.Elasticsearch.URL != "http://127.0.0.1:9200" ||
+		got.Elasticsearch.Index != "policy-views-issue-229" ||
 		got.Elasticsearch.Timeout != 5*time.Second || got.Elasticsearch.Username != "" ||
 		got.Elasticsearch.Password != "" || got.Elasticsearch.CAFile != "" {
 		t.Errorf("Elasticsearch defaults = %+v", got.Elasticsearch)
@@ -302,6 +303,7 @@ func TestLoad_ValidOverrides(t *testing.T) {
 		kitconfig.EnvOTELExporterOTLPEndpoint: "https://alloy.monitoring.svc:4317/",
 		kitconfig.EnvOTELExporterOTLPTimeout:  "750ms",
 		EnvElasticsearchURL:                   "https://elasticsearch.example:9243",
+		EnvElasticsearchIndex:                 "policy-views",
 		EnvElasticsearchUsername:              "reader",
 		EnvElasticsearchPassword:              "private-password",
 		EnvElasticsearchCAFile:                "/var/run/ca.crt",
@@ -331,6 +333,7 @@ func TestLoad_ValidOverrides(t *testing.T) {
 		t.Errorf("unexpected telemetry: %+v", got.Telemetry)
 	}
 	if got.Elasticsearch.URL != "https://elasticsearch.example:9243" ||
+		got.Elasticsearch.Index != "policy-views" ||
 		got.Elasticsearch.Username != "reader" ||
 		got.Elasticsearch.Password != "private-password" ||
 		got.Elasticsearch.CAFile != "/var/run/ca.crt" ||
@@ -364,6 +367,16 @@ func TestLoad_RejectsUnsafeElasticsearchSettingsWithoutValues(t *testing.T) {
 			"unsupported scheme",
 			map[string]string{EnvElasticsearchURL: "ftp://" + privateMarker + ":9200"},
 			EnvElasticsearchURL,
+		},
+		{
+			"unsafe index",
+			map[string]string{EnvElasticsearchIndex: "Policy-Views-" + privateMarker},
+			EnvElasticsearchIndex,
+		},
+		{
+			"empty index",
+			map[string]string{EnvElasticsearchIndex: ""},
+			EnvElasticsearchIndex,
 		},
 		{
 			"empty username",

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: policy-search-config
+data:
+  EVENT_WORKERS_ENABLED: "true"
+  PROBE_TIMEOUT: 30s
+  KAFKA_BROKERS: qa-kafka-kafka-bootstrap.qa-data.svc:9093
+  KAFKA_GROUP: policy-search-service
+  KAFKA_REGISTERED_TOPIC: policy-registered
+  KAFKA_TERMINATED_TOPIC: policy-terminated
+  KAFKA_CA_FILE: /etc/policy-search/kafka/ca.crt

@@ -16,7 +16,10 @@ import (
 var ErrWriteFailed = errors.New("elasticsearch policy replacement failed")
 
 // Writer implements whole-document replacement for the policy projection port.
-type Writer struct{ client *elasticsearchapi.Client }
+type Writer struct {
+	client *elasticsearchapi.Client
+	index  string
+}
 
 var _ application.PolicyViewWriter = (*Writer)(nil)
 
@@ -24,7 +27,7 @@ func NewWriter(client *Client) (*Writer, error) {
 	if client == nil || client.Client == nil {
 		return nil, ErrClientRequired
 	}
-	return &Writer{client: client.Client}, nil
+	return &Writer{client: client.Client, index: client.index}, nil
 }
 
 func (writer *Writer) ReplacePolicy(ctx context.Context, policy domain.Policy) error {
@@ -36,7 +39,7 @@ func (writer *Writer) ReplacePolicy(ctx context.Context, policy domain.Policy) e
 		return ErrWriteFailed
 	}
 	response, err := writer.client.Index(
-		PolicyIndex,
+		writer.index,
 		bytes.NewReader(payload),
 		writer.client.Index.WithContext(ctx),
 		writer.client.Index.WithDocumentID(policy.Number),

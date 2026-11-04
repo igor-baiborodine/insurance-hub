@@ -41,6 +41,13 @@ creates only `policy-registered-issue-230`, `policy-terminated-issue-230`,
 modifies the Java `policy-search-api-legacy` Deployment or Service, creates an Ingress, or accesses
 shared application indices.
 
+The issue-235 cutover owner is separate. It may create the absent canonical `policy-views` index
+with the accepted mapping, and it owns `go_policy_search_cutover_reader`,
+`go_policy_search_cutover_writer` and their workload trust Secrets. It never copies qualification
+documents, resets offsets, changes the legacy topics/group, deletes canonical state or retires
+Java. If the index appears with documents, aliases or an incompatible mapping, the owner stops for
+an accepted manifest or revised plan before changing identities.
+
 Business ports are reachable only from same-namespace Pods labeled
 `insurance-hub.io/policy-search-business-client=true`. Management port 8081 requires
 `insurance-hub.io/policy-search-management-client=true`; kubelet probe traffic follows Kubernetes
@@ -48,6 +55,10 @@ node-origin semantics. Egress permits cluster DNS and the selected environment's
 service. When event workers are enabled, it also permits the selected Kafka bootstrap service. QA
 adds OTLP/gRPC egress to the selected Alloy Pods in `qa-monitoring`; local-dev telemetry is disabled
 and has no collector dependency.
+
+The legacy agent-portal gateway Pod carries the business-client label so a later route-only Git
+change can reach Go. The label grants NetworkPolicy admission but does not change the gateway's
+configured Java route.
 
 The active QA render enables both event workers and references only the separately owned query and
 event inputs. The checked-in local-dev render keeps workers disabled by default and references no
@@ -175,6 +186,23 @@ their workload-owned Secrets. For local-dev, provision them before a direct even
 Kubernetes requires each referenced Secret to exist before an enabled worker first consumes an
 event.
 
+Prepare the canonical cutover state only after the issue-235 handover decision is synchronized.
+Inspection is read-only. Ensure requires its exact confirmation and aborts before role or Secret
+changes when an existing index has mapping/alias drift or documents lacking an accepted complete
+manifest:
+
+```sh
+make go-svc-cutover-index-inspect SVC_NAME=policy-search
+export CUTOVER_CONFIRM=ensure-policy-views
+make go-svc-cutover-index-ensure SVC_NAME=policy-search
+unset CUTOVER_CONFIRM
+make go-svc-cutover-index-verify SVC_NAME=policy-search
+```
+
+The ensure operation creates no Kafka topic or group and changes no gateway route. It prepares
+distinct cutover reader/writer and CA Secrets, leaving qualification identities usable for return.
+Do not run it against QA without the separately authorized concrete operation proposal.
+
 ## Deploy or reconcile the release
 
 The QA release uses
@@ -247,6 +275,25 @@ operation. Set `DEPLOY_PREVIOUS_IMAGE_REF` as described above when activation al
 image. QA rejects these direct apply operations and changes event mode only through reviewed Git
 and Flux reconciliation.
 
+The issue-235 cutover phases remain inactive in the checked-in overlays. For a local-dev rehearsal,
+select the canonical query phase first and declare the current qualification phase:
+
+```sh
+export DEPLOY_CUTOVER_MODE=query
+export DEPLOY_PREVIOUS_CUTOVER_MODE=off
+make go-svc-deploy-preflight SVC_NAME=policy-search
+make go-svc-deploy SVC_NAME=policy-search
+unset DEPLOY_PREVIOUS_CUTOVER_MODE
+make go-svc-deploy-verify SVC_NAME=policy-search
+```
+
+After the query phase is accepted, move the same workload to the canonical legacy event contract
+by setting `DEPLOY_CUTOVER_MODE=events` and `DEPLOY_PREVIOUS_CUTOVER_MODE=query`. Reverse those
+values to return to query-only mode, then move from `query` to `off` to restore qualification.
+Keep the selected cutover mode exported through status and verification. Do not combine a cutover
+mode with `DEPLOY_EVENT_MODE=enabled`, and declare only one of `DEPLOY_PREVIOUS_CUTOVER_MODE` or
+`DEPLOY_PREVIOUS_EVENT_MODE`. QA selects these phases only through a reviewed Git/Flux change.
+
 ## Verify the selected deployment
 
 Run the catalog-selected status and verification owners with the selected environment variables
@@ -259,6 +306,8 @@ make go-svc-deploy-verify SVC_NAME=policy-search
 make go-svc-fixture-verify SVC_NAME=policy-search
 # Run this only when event resources are selected.
 make go-svc-event-fixture-verify SVC_NAME=policy-search
+# Run this when a canonical cutover phase is selected.
+make go-svc-cutover-index-verify SVC_NAME=policy-search
 ```
 
 Status and verification check exact live inventory, source/image identity, private exposure,
@@ -308,10 +357,12 @@ bypass a failure.
 ## Rollback and restoration
 
 Rollback is a reviewed Git change through the same QA overlay and Flux owner. Identify the
-compatible predecessor source, semantic image tag, immutable digest, configuration and event mode
-before changing Git. For an event-to-query return, disable workers and remove the writer/Kafka
-Secret references, Kafka CA mount and Kafka egress together. Preserve the topics, group offsets,
-query fixture and synthetic documents.
+compatible predecessor source, semantic image tag, immutable digest, configuration, event mode and
+cutover mode before changing Git. For a canonical event-to-query return, disable workers and remove
+the cutover writer/Kafka Secret references, Kafka CA mount and Kafka egress together while retaining
+the canonical index and cutover reader identity. A query-to-qualification return restores the
+isolated index and qualification reader Secret together. Preserve both indices, all topics, group
+offsets, fixtures and documents.
 
 After the rollback revision reconciles, set `DEPLOY_SOURCE_REVISION` and `DEPLOY_IMAGE_DIGEST` to
 that reviewed predecessor and repeat status, deployment verification and applicable fixture
@@ -328,7 +379,9 @@ compatible predecessor, declare the currently running candidate through
 `DEPLOY_PREVIOUS_IMAGE_REF`, then run preflight, image load, deploy and verification. Restore by
 reversing those two image values and repeating the sequence. When event mode changes, declare both
 `DEPLOY_EVENT_MODE` and `DEPLOY_PREVIOUS_EVENT_MODE` so worker settings, Secrets, trust and egress
-move together. For a first-install removal/redeployment check, `make go-svc-stop
+move together. When a cutover phase changes, use `DEPLOY_CUTOVER_MODE` and
+`DEPLOY_PREVIOUS_CUTOVER_MODE` so the index, identities, workers, topics, trust and egress move
+together. For a first-install removal/redeployment check, `make go-svc-stop
 SVC_NAME=policy-search` scales only the local Go Deployment to zero; rerun the guarded deploy and
 verification sequence to restore it. Direct stop is rejected for QA.
 
@@ -356,6 +409,10 @@ unset FIXTURE_CONFIRM
 This removes only `policy-views-issue-229`, `go_policy_search_reader` and the workload-owned query
 Secrets. Read back the exact resource absence and verify that shared indices, Java resources and
 unrelated Secrets remain unchanged.
+
+There is no cutover retirement command in issue-235. Issue #236 owns retirement of the canonical
+cutover identities, Secrets, Java resources and any obsolete state after the accepted observation
+and dependency checks, with separate authorization for its concrete removal operation.
 
 ## Evidence checklist
 

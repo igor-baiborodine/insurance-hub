@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: policy-search-config
+data:
+  ELASTICSEARCH_INDEX: policy-views
+  EVENT_WORKERS_ENABLED: "false"

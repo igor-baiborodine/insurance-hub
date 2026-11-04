@@ -25,8 +25,11 @@ var (
 	ErrInvalidResponse = errors.New("invalid elasticsearch search response")
 )
 
-// Searcher implements the application search port against the isolated policy index.
-type Searcher struct{ client *elasticsearchapi.Client }
+// Searcher implements the application search port against the configured policy index.
+type Searcher struct {
+	client *elasticsearchapi.Client
+	index  string
+}
 
 var _ application.PolicySearcher = (*Searcher)(nil)
 
@@ -34,7 +37,7 @@ func NewSearcher(client *Client) (*Searcher, error) {
 	if client == nil || client.Client == nil {
 		return nil, ErrClientRequired
 	}
-	return &Searcher{client: client.Client}, nil
+	return &Searcher{client: client.Client, index: client.index}, nil
 }
 
 func (searcher *Searcher) SearchPolicies(
@@ -56,7 +59,7 @@ func (searcher *Searcher) SearchPolicies(
 	}
 	response, err := searcher.client.Search(
 		searcher.client.Search.WithContext(ctx),
-		searcher.client.Search.WithIndex(PolicyIndex),
+		searcher.client.Search.WithIndex(searcher.index),
 		searcher.client.Search.WithBody(bytes.NewReader(body)),
 	)
 	if err != nil {

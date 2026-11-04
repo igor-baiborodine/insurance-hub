@@ -97,6 +97,9 @@ These operations are explicit and are never hidden inside `check`:
 | `make event-fixture-setup` | Idempotently creates only the two issue-230 `KafkaTopic` resources, the separate Elasticsearch writer role/user, and workload-owned writer/Kafka CA Secrets. It does not recreate or reset the issue-229 query index. | Exact catalog coordinates, Strimzi/ECK administrative resources and `FIXTURE_CONFIRM=event-setup-policy-views-issue-229`. |
 | `make event-fixture-verify` | Verifies topic ownership, cert-only Kafka trust and the writer's exact-index document-write boundary, including read, unrelated-index and security denials. | Exact catalog coordinates and workload-owned Secrets; no setup or retirement is implied. |
 | `make event-fixture-retire` | Removes only the issue-230 topics, writer role/user and event workload Secrets; it preserves the query index, reader identity and Java resources. | Exact catalog coordinates, ECK administrative Secret and `FIXTURE_CONFIRM=event-retire-policy-views-issue-229`. |
+| `make cutover-index-inspect` | Reads the canonical `policy-views` presence, exact mapping, alias state and document count without changing it. | Exact catalog coordinates, current Kubernetes context and ECK administrative Secret. |
+| `make cutover-index-ensure` | Creates `policy-views` only when absent, preserves an existing compatible empty index, and creates issue-235 reader/writer identities plus workload trust Secrets. It never copies, deletes or rewrites documents. | Exact catalog coordinates, ECK administrative Secret and `CUTOVER_CONFIRM=ensure-policy-views`; rejects mapping/alias drift or existing documents pending a separately accepted complete manifest. |
+| `make cutover-index-verify` | Uses only the cutover workload identities to verify the exact-index reader/writer boundary and unrelated-index/security denials. | Exact catalog coordinates and cutover workload Secrets; no mutation is implied. |
 
 Generated bindings must never be edited by hand. `gen-proto` owns only:
 
@@ -257,6 +260,7 @@ do not repeat its supplied value.
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Required when telemetry is enabled. An `http` or `https` OTLP/gRPC URL with host and numeric port; credentials, query, fragment and HTTP path are rejected. |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | `2s` | Positive duration reserved at the end of `SHUTDOWN_TIMEOUT`. |
 | `ELASTICSEARCH_URL` | `http://127.0.0.1:9200` | An `http` or `https` origin without credentials, path, query or fragment. |
+| `ELASTICSEARCH_INDEX` | `policy-views-issue-229` | Lowercase Elasticsearch index name. Query, projection writes, readiness and writer privilege checks use this one value. The inactive cutover phases select `policy-views`. |
 | `ELASTICSEARCH_USERNAME` | unset | Optional workload username; must be set together with `ELASTICSEARCH_PASSWORD`. |
 | `ELASTICSEARCH_PASSWORD` | unset | Optional workload password; must be set together with `ELASTICSEARCH_USERNAME`. |
 | `ELASTICSEARCH_CA_FILE` | unset | Optional public CA file for HTTPS only. The file is read during startup. |

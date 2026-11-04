@@ -16,6 +16,7 @@ import (
 
 func TestWriter_ReplacesExactNumberKeyedDocument(t *testing.T) {
 	// given
+	const configuredIndex = "policy-views"
 	var gotMethod string
 	var gotPath string
 	var gotDocument policyDocument
@@ -32,7 +33,11 @@ func TestWriter_ReplacesExactNumberKeyedDocument(t *testing.T) {
 		},
 	))
 	defer server.Close()
-	client, err := New(Config{Endpoint: server.URL, Timeout: time.Second})
+	client, err := New(Config{
+		Endpoint: server.URL,
+		Index:    configuredIndex,
+		Timeout:  time.Second,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +65,7 @@ func TestWriter_ReplacesExactNumberKeyedDocument(t *testing.T) {
 		PolicyHolder: "Synthetic Holder A",
 	}
 	if err != nil || gotMethod != http.MethodPut ||
-		gotPath != "/"+PolicyIndex+"/_doc/SYN-230-001" ||
+		gotPath != "/"+configuredIndex+"/_doc/SYN-230-001" ||
 		!reflect.DeepEqual(gotDocument, want) {
 		t.Fatalf(
 			"replacement = %s %s %+v, %v; want %+v",
