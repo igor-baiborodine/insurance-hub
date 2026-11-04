@@ -12,22 +12,22 @@ spec:
             - name: ELASTICSEARCH_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: qa-policy-search-cutover-elasticsearch
+                  name: qa-policy-search-elasticsearch
                   key: username
             - name: ELASTICSEARCH_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: qa-policy-search-cutover-elasticsearch
+                  name: qa-policy-search-elasticsearch
                   key: password
             - name: ELASTICSEARCH_WRITER_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: qa-policy-search-cutover-elasticsearch-writer
+                  name: qa-policy-search-elasticsearch-writer
                   key: username
             - name: ELASTICSEARCH_WRITER_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: qa-policy-search-cutover-elasticsearch-writer
+                  name: qa-policy-search-elasticsearch-writer
                   key: password
           volumeMounts:
             - name: elasticsearch-ca
@@ -39,14 +39,14 @@ spec:
       volumes:
         - name: elasticsearch-ca
           secret:
-            secretName: qa-policy-search-cutover-elasticsearch-ca
+            secretName: qa-policy-search-elasticsearch-ca
             items:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 292
         - name: kafka-ca
           secret:
-            secretName: qa-policy-search-cutover-kafka-ca
+            secretName: qa-policy-search-kafka-ca
             items:
               - key: ca.crt
                 path: ca.crt

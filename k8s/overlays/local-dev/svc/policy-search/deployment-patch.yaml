@@ -12,22 +12,22 @@ spec:
             - name: ELASTICSEARCH_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: local-dev-policy-search-cutover-elasticsearch
+                  name: local-dev-policy-search-elasticsearch
                   key: username
             - name: ELASTICSEARCH_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: local-dev-policy-search-cutover-elasticsearch
+                  name: local-dev-policy-search-elasticsearch
                   key: password
             - name: ELASTICSEARCH_WRITER_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: local-dev-policy-search-cutover-elasticsearch-writer
+                  name: local-dev-policy-search-elasticsearch-writer
                   key: username
             - name: ELASTICSEARCH_WRITER_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: local-dev-policy-search-cutover-elasticsearch-writer
+                  name: local-dev-policy-search-elasticsearch-writer
                   key: password
           volumeMounts:
             - name: kafka-ca
@@ -36,7 +36,7 @@ spec:
       volumes:
         - name: kafka-ca
           secret:
-            secretName: local-dev-policy-search-cutover-kafka-ca
+            secretName: local-dev-policy-search-kafka-ca
             items:
               - key: ca.crt
                 path: ca.crt

@@ -288,7 +288,7 @@ def validate_render(
     kafka_volume = {
         "name": "kafka-ca",
         "secret": {
-            "secretName": f"{environment}-policy-search-cutover-kafka-ca",
+            "secretName": f"{environment}-policy-search-kafka-ca",
             "items": [{"key": "ca.crt", "path": "ca.crt"}],
             "defaultMode": 0o444,
         },
@@ -312,7 +312,7 @@ def validate_render(
             {
                 "name": "elasticsearch-ca",
                 "secret": {
-                    "secretName": "qa-policy-search-cutover-elasticsearch-ca",
+                    "secretName": "qa-policy-search-elasticsearch-ca",
                     "items": [{"key": "ca.crt", "path": "ca.crt"}],
                     "defaultMode": 0o444,
                 },
@@ -338,7 +338,7 @@ def validate_render(
             "QA Elasticsearch CA mount differs",
         )
     env = {item.get("name"): item for item in container.get("env", [])}
-    expected_secret = f"{environment}-policy-search-cutover-elasticsearch"
+    expected_secret = f"{environment}-policy-search-elasticsearch"
     for name, key in (
         ("ELASTICSEARCH_USERNAME", "username"),
         ("ELASTICSEARCH_PASSWORD", "password"),
@@ -348,7 +348,7 @@ def validate_render(
             == {"name": expected_secret, "key": key},
             f"{name} Secret reference differs",
         )
-    writer_secret = f"{environment}-policy-search-cutover-elasticsearch-writer"
+    writer_secret = f"{environment}-policy-search-elasticsearch-writer"
     for name, key in (
         ("ELASTICSEARCH_WRITER_USERNAME", "username"),
         ("ELASTICSEARCH_WRITER_PASSWORD", "password"),

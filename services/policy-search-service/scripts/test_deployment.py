@@ -94,11 +94,17 @@ def test_steady_state_render_uses_canonical_resources(environment: str, egress_c
         == config["data"]
     )
     assert env["ELASTICSEARCH_USERNAME"]["valueFrom"]["secretKeyRef"]["name"] == (
-        f"{environment}-policy-search-cutover-elasticsearch"
+        f"{environment}-policy-search-elasticsearch"
     )
     assert env["ELASTICSEARCH_WRITER_USERNAME"]["valueFrom"]["secretKeyRef"]["name"] == (
-        f"{environment}-policy-search-cutover-elasticsearch-writer"
+        f"{environment}-policy-search-elasticsearch-writer"
     )
+    referenced_secrets = [
+        value["valueFrom"]["secretKeyRef"]["name"]
+        for value in env.values()
+        if "valueFrom" in value and "secretKeyRef" in value["valueFrom"]
+    ] + [volume["secret"]["secretName"] for volume in pod["volumes"] if "secret" in volume]
+    assert all("cutover" not in name for name in referenced_secrets)
     assert any(volume["name"] == "kafka-ca" for volume in pod["volumes"])
     assert len(policy["spec"]["egress"]) == egress_count
     assert policy["spec"]["egress"][-1] == checks.expected_kafka_egress(environment)
@@ -171,6 +177,23 @@ def test_render_rejects_wrong_elasticsearch_secret_and_egress() -> None:
         checks.validate_render(
             "local-dev", "\n---\n".join(checks.yaml.safe_dump(item) for item in items)
         )
+
+
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+def test_render_rejects_obsolete_cutover_secret_reference(environment: str) -> None:
+    items = rendered_items(environment)
+    deployment = next(item for item in items if item["kind"] == "Deployment")
+    username = next(
+        item
+        for item in deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+        if item["name"] == "ELASTICSEARCH_USERNAME"
+    )
+    username["valueFrom"]["secretKeyRef"]["name"] = (
+        f"{environment}-policy-search-cutover-elasticsearch"
+    )
+
+    with pytest.raises(checks.DeploymentError, match="Secret reference"):
+        checks.validate_render(environment, checks.yaml.safe_dump_all(items))
 
 
 @pytest.mark.parametrize(

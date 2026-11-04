@@ -99,13 +99,15 @@ def render(
     pod = deployment["spec"]["template"]["spec"]
     container = pod["containers"][0]
     container["image"] = image
-    for variable in container["env"]:
-        reference = variable.get("valueFrom", {}).get("secretKeyRef", {})
-        secret_name = reference.get("name", "")
-        if secret_name.startswith("local-dev-policy-search-cutover-"):
-            reference["name"] = secret_name.replace("-cutover", "", 1)
     kafka_volume = next(volume for volume in pod["volumes"] if volume["name"] == "kafka-ca")
-    kafka_volume["secret"]["secretName"] = "local-dev-policy-search-kafka-ca"
+    referenced_secrets = [
+        variable.get("valueFrom", {}).get("secretKeyRef", {}).get("name", "")
+        for variable in container["env"]
+    ] + [kafka_volume["secret"]["secretName"]]
+    require(
+        all("cutover" not in name for name in referenced_secrets),
+        "disposable render contains a cutover Secret reference",
+    )
     config = next(item for item in items if item["kind"] == "ConfigMap")
     config["data"]["SERVICE_VERSION"] = f"git-{source_short}"
     config["data"].update(

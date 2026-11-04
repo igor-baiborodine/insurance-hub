@@ -85,13 +85,35 @@ class Target:
         for name in (
             "service",
             "adminSecret",
-            "cutoverReaderSecret",
-            "cutoverWriterSecret",
-            "cutoverElasticsearchCASecret",
-            "cutoverKafkaCASecret",
+            "canonicalReaderSecret",
+            "canonicalWriterSecret",
+            "canonicalElasticsearchCASecret",
+            "canonicalKafkaCASecret",
             "kafkaPublicCASecret",
         ):
-            require(name in administration, f"cutover target is missing {name}")
+            require(name in administration, f"canonical target is missing {name}")
+        expected_secret_target = {
+            "local-dev": {
+                "canonicalReaderSecret": "local-dev-policy-search-elasticsearch",
+                "canonicalWriterSecret": "local-dev-policy-search-elasticsearch-writer",
+                "canonicalElasticsearchCASecret": "",
+                "canonicalKafkaCASecret": "local-dev-policy-search-kafka-ca",
+            },
+            "qa": {
+                "canonicalReaderSecret": "qa-policy-search-elasticsearch",
+                "canonicalWriterSecret": "qa-policy-search-elasticsearch-writer",
+                "canonicalElasticsearchCASecret": "qa-policy-search-elasticsearch-ca",
+                "canonicalKafkaCASecret": "qa-policy-search-kafka-ca",
+            },
+        }[self.environment]
+        require(
+            all(administration.get(key) == value for key, value in expected_secret_target.items()),
+            "canonical Secret catalog contract differs",
+        )
+        require(
+            all("cutover" not in value for value in expected_secret_target.values()),
+            "canonical Secret names must not contain cutover",
+        )
         self.context = selected["context"]
         self.namespace = selected["namespace"]
         self.data_namespace = selected["dataNamespace"]
@@ -99,11 +121,11 @@ class Target:
         self.admin_secret = administration["adminSecret"]
         self.public_ca_secret = administration.get("publicCASecret", "")
         self.server_name = administration.get("serverName", "")
-        self.reader_secret = administration["cutoverReaderSecret"]
-        self.writer_secret = administration["cutoverWriterSecret"]
-        self.elasticsearch_ca_secret = administration["cutoverElasticsearchCASecret"]
+        self.reader_secret = administration["canonicalReaderSecret"]
+        self.writer_secret = administration["canonicalWriterSecret"]
+        self.elasticsearch_ca_secret = administration["canonicalElasticsearchCASecret"]
         self.kafka_public_ca_secret = administration["kafkaPublicCASecret"]
-        self.kafka_ca_secret = administration["cutoverKafkaCASecret"]
+        self.kafka_ca_secret = administration["canonicalKafkaCASecret"]
         self.kubectl = os.environ.get("KUBECTL", "kubectl")
 
     def run(
@@ -156,19 +178,30 @@ class Target:
         except ValueError as error:
             raise AdministrationError(f"Secret/{name} has malformed {key}") from error
 
-    def optional_password(self, name: str) -> str:
+    def optional_password(self, name: str, expected_identity: str) -> str:
         secret = self.json("get", "secret", name, "--ignore-not-found")
+        data = secret.get("data", {})
+        encoded_username = data.get("username")
         encoded = secret.get("data", {}).get("password")
         if not encoded:
             return ""
         try:
+            username = base64.b64decode(encoded_username, validate=True).decode("utf-8")
             password = base64.b64decode(encoded, validate=True).decode("utf-8")
-        except (ValueError, UnicodeDecodeError) as error:
-            raise AdministrationError("cutover Secret password is malformed") from error
-        require(len(password) >= 32, "cutover Secret password is too short")
+        except (TypeError, ValueError, UnicodeDecodeError) as error:
+            raise AdministrationError("canonical Secret credentials are malformed") from error
+        require(username == expected_identity, "canonical Secret username differs")
+        require(len(password) >= 32, "canonical Secret password is too short")
         return password
 
-    def apply_secret(self, name: str, data: dict[str, str], component: str) -> None:
+    def apply_secret(
+        self,
+        name: str,
+        data: dict[str, str],
+        component: str,
+        *,
+        force_conflicts: bool = False,
+    ) -> None:
         secret = {
             "apiVersion": "v1",
             "kind": "Secret",
@@ -184,10 +217,15 @@ class Target:
             "type": "Opaque",
             "stringData": data,
         }
-        self.run(
+        arguments = [
             "apply",
             "--server-side",
-            "--field-manager=policy-search-cutover",
+            "--field-manager=policy-search-canonical",
+        ]
+        if force_conflicts:
+            arguments.append("--force-conflicts")
+        self.run(
+            *arguments,
             "-f",
             "-",
             input_text=json.dumps(secret),
@@ -315,14 +353,139 @@ def workload_client(target: Target, name: str, identity: str, port: int) -> Elas
     return client_for(target, username, password, port)
 
 
+def migrate_secret(
+    target: Target,
+    source_variable: str,
+    target_name: str,
+    keys: tuple[str, ...],
+    component: str,
+    identity: str = "",
+) -> tuple[str, str]:
+    source_name = os.environ.get(source_variable, "")
+    require(source_name, f"{source_variable} is required")
+    require(
+        source_name.startswith(f"{target.environment}-policy-search-")
+        and "-cutover-" in source_name,
+        f"{source_variable} is outside the obsolete Policy Search Secret boundary",
+    )
+    require(source_name != target_name, f"{source_variable} must differ from its target")
+    source = target.json("get", "secret", source_name)
+    encoded = source.get("data", {})
+    require(
+        isinstance(encoded, dict) and set(encoded) == set(keys),
+        f"Secret/{source_name} keys differ",
+    )
+    decoded: dict[str, str] = {}
+    try:
+        for key in keys:
+            decoded[key] = base64.b64decode(encoded[key], validate=True).decode("utf-8")
+    except (TypeError, ValueError, UnicodeDecodeError) as error:
+        raise AdministrationError(f"Secret/{source_name} data is malformed") from error
+    if identity:
+        require(decoded["username"] == identity, f"Secret/{source_name} username differs")
+        require(len(decoded["password"]) >= 32, f"Secret/{source_name} password is too short")
+    target.apply_secret(
+        target_name,
+        decoded,
+        component,
+        force_conflicts=True,
+    )
+    migrated = target.json("get", "secret", target_name)
+    require(migrated.get("data") == encoded, f"Secret/{target_name} data differs after migration")
+    return source_name, target_name
+
+
+def migrate_secrets(target: Target) -> list[tuple[str, str]]:
+    specifications = [
+        (
+            "POLICY_SEARCH_READER_SOURCE_SECRET",
+            target.reader_secret,
+            ("username", "password"),
+            "canonical-elasticsearch-reader",
+            READER,
+        ),
+        (
+            "POLICY_SEARCH_WRITER_SOURCE_SECRET",
+            target.writer_secret,
+            ("username", "password"),
+            "canonical-elasticsearch-writer",
+            WRITER,
+        ),
+        (
+            "POLICY_SEARCH_KAFKA_CA_SOURCE_SECRET",
+            target.kafka_ca_secret,
+            ("ca.crt",),
+            "canonical-kafka-trust",
+            "",
+        ),
+    ]
+    elasticsearch_ca_source = os.environ.get("POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET", "")
+    if target.elasticsearch_ca_secret:
+        require(
+            elasticsearch_ca_source,
+            "POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET is required",
+        )
+        specifications.append(
+            (
+                "POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET",
+                target.elasticsearch_ca_secret,
+                ("ca.crt",),
+                "canonical-elasticsearch-trust",
+                "",
+            )
+        )
+    else:
+        require(
+            not elasticsearch_ca_source,
+            "POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET must be empty for this target",
+        )
+    sources = [os.environ.get(specification[0], "") for specification in specifications]
+    destinations = [specification[1] for specification in specifications]
+    for specification, source in zip(specifications, sources, strict=True):
+        require(source, f"{specification[0]} is required")
+    require(
+        len(set(sources)) == len(sources),
+        "canonical Secret migration source names collide",
+    )
+    require(
+        len(set(destinations)) == len(destinations),
+        "canonical Secret migration target names collide",
+    )
+    return [migrate_secret(target, *specification) for specification in specifications]
+
+
 def execute(operation: str) -> None:
     if operation == "ensure":
         require(
             os.environ.get("CUTOVER_CONFIRM") == "ensure-policy-views",
             "CUTOVER_CONFIRM must equal ensure-policy-views",
         )
+    if operation == "migrate-secrets":
+        environment = os.environ.get("DEPLOY_ENV", "")
+        require(environment in {"local-dev", "qa"}, "DEPLOY_ENV is invalid")
+        expected = f"migrate-{environment}-policy-search-secrets"
+        require(
+            os.environ.get("SECRET_MIGRATION_CONFIRM") == expected,
+            f"SECRET_MIGRATION_CONFIRM must equal {expected}",
+        )
     target = Target()
     target.verify_boundary()
+    if operation == "migrate-secrets":
+        migrations = migrate_secrets(target)
+        print(
+            json.dumps(
+                {
+                    "environment": target.environment,
+                    "migrations": [
+                        {"source": source, "target": destination}
+                        for source, destination in migrations
+                    ],
+                    "migrate-secrets": "passed",
+                },
+                sort_keys=True,
+            )
+        )
+        return
     if operation == "verify":
         with PortForward(target) as port:
             reader = workload_client(target, target.reader_secret, READER, port)
@@ -354,10 +517,10 @@ def execute(operation: str) -> None:
             state = inspect_index(admin)
         else:
             reader_password = target.optional_password(
-                target.reader_secret
+                target.reader_secret, READER
             ) or secrets.token_urlsafe(32)
             writer_password = target.optional_password(
-                target.writer_secret
+                target.writer_secret, WRITER
             ) or secrets.token_urlsafe(32)
             state = ensure_index_and_access(admin, reader_password, writer_password)
             target.apply_secret(
@@ -405,7 +568,7 @@ def execute(operation: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     require(
-        len(arguments) == 1 and arguments[0] in {"inspect", "ensure", "verify"},
+        len(arguments) == 1 and arguments[0] in {"inspect", "ensure", "verify", "migrate-secrets"},
         "unsupported cutover operation",
     )
     execute(arguments[0])

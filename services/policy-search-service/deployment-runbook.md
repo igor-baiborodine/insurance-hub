@@ -35,10 +35,11 @@ Until the separately reviewed Java retirement change reconciles, Policy Search r
 zero-replica legacy Java workload. The Go owner creates only
 `<environment>-policy-search-api`, its business and management Services, ConfigMap and
 NetworkPolicy. The query qualification fixture owner creates only `policy-views-issue-229`, native
-role/user
-`go_policy_search_reader` and workload-owned Elasticsearch Secrets. The event fixture owner
+role/user `go_policy_search_reader` and explicitly named `*-policy-search-qualification-*`
+Elasticsearch Secrets. The event fixture owner
 creates only `policy-registered-issue-230`, `policy-terminated-issue-230`,
-`go_policy_search_writer`, its workload Secret and a cert-only Kafka CA Secret. Neither owner
+`go_policy_search_writer`, its qualification workload Secret and a cert-only qualification Kafka
+CA Secret. Neither owner
 modifies the Java `policy-search-api-legacy` Deployment or Service, creates an Ingress, or accesses
 shared application indices.
 
@@ -207,9 +208,34 @@ make go-svc-cutover-index-verify SVC_NAME=policy-search
 ```
 
 The ensure operation creates no Kafka topic or group and changes no gateway route. It prepares the
-retained canonical reader/writer and CA Secret identities, whose names still contain `cutover`,
-while leaving qualification identities usable for return.
+retained canonical reader/writer and CA Secret identities under the ordinary
+`<environment>-policy-search-*` names, while leaving the distinct
+`<environment>-policy-search-qualification-*` identities usable for qualification.
 Do not run it against QA without the separately authorized concrete operation proposal.
+
+For the one-time issue #236 QA transition, first record and authorize the exact obsolete source
+Secrets through G236-03. Copy their data to the ordinary canonical names before reconciling a
+Deployment that references those names:
+
+```sh
+export POLICY_SEARCH_READER_SOURCE_SECRET=qa-policy-search-cutover-elasticsearch
+export POLICY_SEARCH_WRITER_SOURCE_SECRET=qa-policy-search-cutover-elasticsearch-writer
+export POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET=qa-policy-search-cutover-elasticsearch-ca
+export POLICY_SEARCH_KAFKA_CA_SOURCE_SECRET=qa-policy-search-cutover-kafka-ca
+export SECRET_MIGRATION_CONFIRM=migrate-qa-policy-search-secrets
+make go-svc-canonical-secrets-migrate SVC_NAME=policy-search
+unset POLICY_SEARCH_READER_SOURCE_SECRET POLICY_SEARCH_WRITER_SOURCE_SECRET
+unset POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET POLICY_SEARCH_KAFKA_CA_SOURCE_SECRET
+unset SECRET_MIGRATION_CONFIRM
+```
+
+The migration rejects a source outside the selected environment's obsolete Policy Search Secret
+boundary, unexpected keys, wrong canonical usernames, short passwords, target collisions and any
+post-apply data difference. It copies values in process memory and reports names/results only. For
+local-dev, use the corresponding `local-dev-policy-search-cutover-*` source names, omit
+`POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET`, and confirm
+`migrate-local-dev-policy-search-secrets`. This operation does not change the canonical index,
+Elasticsearch roles/users, Kafka topics/group, offsets or a workload reference.
 
 ## Deploy or reconcile the release
 

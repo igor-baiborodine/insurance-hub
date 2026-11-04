@@ -115,7 +115,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	test-event-integration test-cutover-rehearsal _test-event-integration deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop fixture-setup fixture-verify fixture-retire \
 	event-fixture-setup event-fixture-verify event-fixture-retire \
-	cutover-index-inspect cutover-index-ensure cutover-index-verify \
+	cutover-index-inspect cutover-index-ensure cutover-index-verify canonical-secrets-migrate \
 	deploy-test-tooling deploy-test \
 	build-qualification-client \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
@@ -191,6 +191,10 @@ event-fixture-setup event-fixture-verify event-fixture-retire: python-runtime-ch
 cutover-index-inspect cutover-index-ensure cutover-index-verify: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/cutover_administration.py '$(@:cutover-index-%=%)'
+
+canonical-secrets-migrate: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/cutover_administration.py migrate-secrets
 
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed deployment guards without a cluster
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \

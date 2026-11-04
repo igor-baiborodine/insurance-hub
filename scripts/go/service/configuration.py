@@ -110,14 +110,28 @@ def target_record(root: Path, record: dict[str, Any], name: str) -> dict[str, An
     fixture = target.get("fixtureAdministration")
     if fixture is not None:
         require(isinstance(fixture, dict), "invalid fixture administration configuration")
-        for field in ("service", "adminSecret", "workloadSecret"):
+        for field in (
+            "service",
+            "adminSecret",
+            "workloadSecret",
+            "eventWriterSecret",
+            "kafkaPublicCASecret",
+            "kafkaWorkloadCASecret",
+            "canonicalReaderSecret",
+            "canonicalWriterSecret",
+            "canonicalKafkaCASecret",
+        ):
             require(
                 bool(re.fullmatch(r"[a-z][a-z0-9-]{0,62}", fixture.get(field, ""))),
                 f"invalid fixture {field}",
             )
-        for field in ("publicCASecret", "workloadCASecret"):
+        for field in (
+            "publicCASecret",
+            "workloadCASecret",
+            "canonicalElasticsearchCASecret",
+        ):
             value = fixture.get(field)
-            if value is not None:
+            if value:
                 require(
                     bool(re.fullmatch(r"[a-z][a-z0-9-]{0,62}", value)),
                     f"invalid fixture {field}",

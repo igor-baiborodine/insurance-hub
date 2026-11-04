@@ -121,11 +121,12 @@ def test_policy_search_fixture_operations_use_the_existing_dispatch() -> None:
             "cutover-index-inspect",
             "cutover-index-ensure",
             "cutover-index-verify",
+            "canonical-secrets-migrate",
         )
     ]
 
     # then
-    assert paths == ["services/policy-search-service"] * 9
+    assert paths == ["services/policy-search-service"] * 10
 
 
 @pytest.mark.parametrize("arguments", [[], ["deploy", "status"]])
