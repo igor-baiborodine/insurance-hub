@@ -403,6 +403,16 @@ active steady-state resources and are not retired by issue #236. Issue #236 reti
 authorized Java desired-state resources in its separate retirement change. The complete legacy
 manifest source trees remain intact.
 
+The QA retirement source change removes only `./policy-search/legacy` from
+`k8s/overlays/qa/svc/kustomization.yaml`. Before merging it, compare the complete QA aggregate
+render with the accepted predecessor and require the removal set to contain only the generated
+legacy ConfigMap, `qa-policy-search-api-legacy` Service and zero-replica Deployment. Flux pruning
+owns their live deletion. Preserve the Go resources, canonical index and documents, topics, group
+and offsets, active credentials and trust, unrelated services, and every file under the legacy
+base and environment overlay directories. Recovery restores the aggregate reference through a
+separately reviewed Git change after current consumer progress is checked; do not patch or recreate
+the Java objects directly.
+
 ## Evidence checklist
 
 Record sanitized evidence in the operation's approved evidence location:

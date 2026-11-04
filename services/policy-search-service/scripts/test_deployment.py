@@ -120,6 +120,18 @@ def test_render_entrypoint_returns_steady_state(capsys) -> None:
     assert config["data"]["KAFKA_GROUP"] == "policy-search-service"
 
 
+def test_qa_aggregate_uses_only_go_policy_search() -> None:
+    # given
+    resources = ["./policy-search", "./product"]
+
+    # when / then
+    checks.validate_qa_aggregate(resources)
+    with pytest.raises(checks.DeploymentError, match="legacy overlay remains active"):
+        checks.validate_qa_aggregate(resources + ["./policy-search/legacy"])
+    with pytest.raises(checks.DeploymentError, match="Go Policy Search overlay is missing"):
+        checks.validate_qa_aggregate(["./product"])
+
+
 def test_deployed_search_requires_nonempty_canonical_results() -> None:
     checks.validate_deployed_search(200, b'{"policies":[{"number":"SYN-236"}]}')
 
