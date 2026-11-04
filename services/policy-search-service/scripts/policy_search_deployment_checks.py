@@ -1065,6 +1065,15 @@ def validate_gateway_business_admission(environment: str) -> None:
         require(route is None, "local-dev gateway Policy Search route must remain inherited")
 
 
+def validate_qa_aggregate(resources: Any) -> None:
+    require(isinstance(resources, list), "active QA aggregate resources differ")
+    require("./policy-search" in resources, "active QA Go Policy Search overlay is missing")
+    require(
+        "./policy-search/legacy" not in resources,
+        "retired QA Policy Search legacy overlay remains active",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     require(
@@ -1082,10 +1091,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(text)
     if arguments[0] == "check":
         qa_root = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
-        require(
-            {"./policy-search", "./policy-search/legacy"} <= set(qa_root.get("resources", [])),
-            "active QA Policy Search or retained legacy overlay is missing",
-        )
+        validate_qa_aggregate(qa_root.get("resources"))
         print("policy-search-deployment-check: local-dev and QA renders passed")
     return 0
 
