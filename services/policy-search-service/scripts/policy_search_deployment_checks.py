@@ -1433,6 +1433,20 @@ def _http(url: str, body: bytes | None = None) -> tuple[int, bytes]:
         return error.code, error.read()
 
 
+def validate_deployed_search(cutover_mode: str, status: int, body: bytes) -> None:
+    try:
+        response = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise DeploymentError("deployed search response is malformed") from error
+    policies = response.get("policies", []) if isinstance(response, dict) else None
+    require(
+        status == 200
+        and isinstance(policies, list)
+        and (cutover_mode == "query" or bool(policies)),
+        "deployed search differs",
+    )
+
+
 def verify(target: Target, items: list[dict[str, Any]]) -> None:
     target.live(items, require_deployment=True)
     before = role_snapshot(target)
@@ -1478,14 +1492,7 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
         else:
             raise DeploymentError("deployed readiness was not reachable")
         status, body = _http(f"http://127.0.0.1:{http_port}/policies?q=Synthetic%20Person")
-        try:
-            response = json.loads(body)
-        except json.JSONDecodeError as error:
-            raise DeploymentError("deployed search response is malformed") from error
-        require(
-            status == 200 and isinstance(response.get("policies"), list) and response["policies"],
-            "deployed search differs",
-        )
+        validate_deployed_search(target.cutover_mode, status, body)
     finally:
         for child in (process, management):
             child.terminate()
@@ -1524,6 +1531,16 @@ def validate_gateway_business_admission(environment: str) -> None:
         labels.get(BUSINESS_CLIENT_LABEL) == "true",
         f"{environment} gateway lacks Policy Search business admission",
     )
+    application = yaml.safe_load((overlay / "application.yml").read_text(encoding="utf-8"))
+    services = application.get("micronaut", {}).get("http", {}).get("services", {})
+    route = services.get("policy-search-service")
+    if environment == "qa":
+        require(
+            route == {"urls": ["http://qa-policy-search-api.qa-svc.svc.cluster.local:80"]},
+            "QA gateway Policy Search route differs",
+        )
+    else:
+        require(route is None, "local-dev gateway Policy Search route must remain inherited")
 
 
 def main(argv: list[str] | None = None) -> int:

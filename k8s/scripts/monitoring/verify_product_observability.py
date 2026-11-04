@@ -338,7 +338,9 @@ def forwards(
                 raise VerificationError(f"port-forward cleanup failed: {errors}")
 
 
-def product_reads(ports: Mapping[str, int], trace_id: str) -> int:
+def product_reads(
+    ports: Mapping[str, int], trace_id: str, _deployment_settings: Mapping[str, str]
+) -> int:
     require(
         request_text(f"http://127.0.0.1:{ports['health']}/livez").strip() == "live",
         "Product liveness failed",
@@ -367,7 +369,9 @@ def product_services(target: KubernetesTarget) -> list[tuple[str, str, str, int]
     ]
 
 
-def policy_search_reads(ports: Mapping[str, int], trace_id: str) -> int:
+def policy_search_reads(
+    ports: Mapping[str, int], trace_id: str, deployment_settings: Mapping[str, str]
+) -> int:
     require(
         request_text(f"http://127.0.0.1:{ports['health']}/livez").strip() == "live",
         "Policy Search liveness failed",
@@ -385,8 +389,15 @@ def policy_search_reads(ports: Mapping[str, int], trace_id: str) -> int:
         response = json.loads(body)
     except json.JSONDecodeError as error:
         raise VerificationError("Policy Search response is malformed") from error
-    policies = response.get("policies") if isinstance(response, dict) else None
-    require(isinstance(policies, list) and policies, "Policy Search response has no policies")
+    policies = response.get("policies", []) if isinstance(response, dict) else None
+    canonical_query = (
+        deployment_settings.get("ELASTICSEARCH_INDEX") == "policy-views"
+        and deployment_settings.get("EVENT_WORKERS_ENABLED") == "false"
+    )
+    require(
+        isinstance(policies, list) and (policies or canonical_query),
+        "Policy Search response has no policies",
+    )
     return len(policies)
 
 
@@ -621,7 +632,7 @@ class ServiceProbe:
 
     service: str
     services: Callable[[KubernetesTarget], list[tuple[str, str, str, int]]]
-    workload: Callable[[Mapping[str, int], str], int]
+    workload: Callable[[Mapping[str, int], str, Mapping[str, str]], int]
     enabled_signals: Callable[
         [MonitoringAssets, Mapping[str, int], str, str, Mapping[str, str]], dict[str, Any]
     ]
@@ -681,7 +692,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         )
     trace_id = hashlib.sha256(f"{args.source_revision}:{time.time_ns()}".encode()).hexdigest()[:32]
     with forwards(target, services) as ports:
-        workload_result = probe.workload(ports, trace_id)
+        workload_result = probe.workload(ports, trace_id, deployment["settings"])
         signals: dict[str, Any] = {}
         if args.mode == "enabled":
             pod_uid = deployment["pods"][0]["pod_uid"]

@@ -167,6 +167,16 @@ def test_cutover_mode_rejects_competing_qualification_event_mode() -> None:
         checks.render("local-dev", "enabled", "query")
 
 
+def test_deployed_search_accepts_empty_only_during_canonical_query_phase() -> None:
+    checks.validate_deployed_search("query", 200, b"{}")
+    checks.validate_deployed_search("query", 200, b'{"policies":[]}')
+    checks.validate_deployed_search("off", 200, b'{"policies":[{"number":"SYN-229"}]}')
+
+    for mode in ("off", "events"):
+        with pytest.raises(checks.DeploymentError, match="deployed search differs"):
+            checks.validate_deployed_search(mode, 200, b"{}")
+
+
 def test_target_renders_derived_cutover_event_mode() -> None:
     target = object.__new__(checks.Target)
     target.environment = "local-dev"
