@@ -3,7 +3,6 @@ kind: Deployment
 metadata:
   name: policy-search-api-legacy
 spec:
-  replicas: 0
   template:
     spec:
       containers:
