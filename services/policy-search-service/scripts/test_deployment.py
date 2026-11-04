@@ -167,6 +167,19 @@ def test_cutover_mode_rejects_competing_qualification_event_mode() -> None:
         checks.render("local-dev", "enabled", "query")
 
 
+def test_target_renders_derived_cutover_event_mode() -> None:
+    target = object.__new__(checks.Target)
+    target.environment = "local-dev"
+    target.cutover_mode = "events"
+
+    text, items, _ = target.render_contract("enabled", cutover_mode="events")
+
+    checks.validate_render("local-dev", text, event_mode="enabled", cutover_mode="events")
+    config = next(item for item in items if item["kind"] == "ConfigMap")
+    assert config["data"]["EVENT_WORKERS_ENABLED"] == "true"
+    assert config["data"]["KAFKA_GROUP"] == "policy-search-service"
+
+
 def test_qa_event_render_preserves_query_and_telemetry_egress() -> None:
     # given / when
     text = checks.render("qa", "enabled")

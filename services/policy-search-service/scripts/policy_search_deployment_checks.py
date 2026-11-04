@@ -960,7 +960,8 @@ class Target:
         cutover_mode: str | None = None,
     ) -> tuple[str, list[dict[str, Any]], str]:
         cutover = self.cutover_mode if cutover_mode is None else cutover_mode
-        text = render(self.environment, mode, cutover)
+        render_mode = "disabled" if cutover != "off" else mode
+        text = render(self.environment, render_mode, cutover)
         items = validate_render(
             self.environment,
             text,
