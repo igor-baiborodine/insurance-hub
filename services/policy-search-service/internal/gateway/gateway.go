@@ -153,7 +153,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	)
 	defer cancel()
 	request = request.WithContext(requestCtx)
-	if facts.originalPath == "/policies" && request.Method == http.MethodGet {
+	if isSearchPath(facts.originalPath) && request.Method == http.MethodGet {
 		handler.search.ServeHTTP(writer, request)
 		return
 	}
@@ -196,12 +196,13 @@ func (handler *Handler) serveSearch(writer http.ResponseWriter, request *http.Re
 	}
 	query["q"] = values[:1]
 	request.URL.RawQuery = query.Encode()
+	request.URL.Path = "/policies"
 	handler.mux.ServeHTTP(writer, request)
 }
 
 func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http.Request) {
 	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
-	if facts.originalPath == "/policies" {
+	if isSearchPath(facts.originalPath) {
 		writer.Header().Set("Allow", http.MethodGet)
 		writeLegacyError(
 			writer,
@@ -214,6 +215,8 @@ func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http
 	}
 	writeLegacyError(writer, http.StatusNotFound, "Not Found", "", facts.originalPath)
 }
+
+func isSearchPath(path string) bool { return path == "/policies" || path == "/policies/" }
 
 func sanitizeRequest(request *http.Request) *http.Request {
 	request = request.Clone(request.Context())
