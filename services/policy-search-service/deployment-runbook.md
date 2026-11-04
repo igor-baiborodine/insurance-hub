@@ -56,16 +56,16 @@ service. When event workers are enabled, it also permits the selected Kafka boot
 adds OTLP/gRPC egress to the selected Alloy Pods in `qa-monitoring`; local-dev telemetry is disabled
 and has no collector dependency.
 
-The legacy agent-portal gateway Pod carries the business-client label so a later route-only Git
-change can reach Go. The label grants NetworkPolicy admission but does not change the gateway's
-configured Java route.
+The legacy agent-portal gateway Pod carries the business-client label. The active QA configuration
+routes Policy Search queries to the Go business Service while preserving the existing Java HTTP
+edge and HTTP-to-RPC translation. The label grants the required NetworkPolicy admission; local-dev
+continues inheriting its Java Policy Search route.
 
 The active QA render selects the canonical `policy-views` index and cutover reader while keeping
-both event workers disabled. It retains the Java gateway route and sole Java consumer ownership
-until a later reviewed Git change. The checked-in local-dev render keeps workers disabled by
-default and references no event resources. In either environment, disabled mode must remove the
-writer and Kafka Secret references, Kafka CA mount, Kafka egress and consumer authority as one
-reviewed state.
+both event workers disabled. Java retains sole consumer ownership until a later reviewed Git
+change. The checked-in local-dev render keeps workers disabled by default and references no event
+resources. In either environment, disabled mode must remove the writer and Kafka Secret
+references, Kafka CA mount, Kafka egress and consumer authority as one reviewed state.
 
 ## Repository validation
 

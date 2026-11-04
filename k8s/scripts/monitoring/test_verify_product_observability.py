@@ -217,7 +217,8 @@ class TestProductObservabilityVerification:
         target = mock.Mock(spec=verifier.KubernetesTarget)
         target.flux_revision.return_value = "main@sha1:" + "a" * 40
         target.deployment.return_value = {
-            "pods": [{"pod_uid": "pod-uid", "image_id": "registry/product@sha256:abc"}]
+            "pods": [{"pod_uid": "pod-uid", "image_id": "registry/product@sha256:abc"}],
+            "settings": {},
         }
         target.monitoring_namespace = "qa-monitoring"
         services = mock.Mock(return_value=[("product", "qa-svc", "qa-product-api", 80)])
@@ -248,7 +249,7 @@ class TestProductObservabilityVerification:
         target.deployment.assert_called_once_with("pre-provision")
         target.monitoring_assets.assert_not_called()
         forwarded.assert_called_once_with(target, [("product", "qa-svc", "qa-product-api", 80)])
-        workload.assert_called_once_with({"product": 1001}, observed["trace_id"])
+        workload.assert_called_once_with({"product": 1001}, observed["trace_id"], {})
         enabled_signals.assert_not_called()
         assert observed["mode"] == "pre-provision"
         assert observed["monitoring"] == {}
@@ -360,7 +361,7 @@ class TestProductObservabilityVerification:
 
         # when
         with mock.patch.object(verifier, "request_text", side_effect=responses) as request:
-            rows = verifier.product_reads({"health": 1001, "product": 1002}, "a" * 32)
+            rows = verifier.product_reads({"health": 1001, "product": 1002}, "a" * 32, {})
 
         # then
         assert 1 == rows
@@ -378,7 +379,14 @@ class TestProductObservabilityVerification:
         probe = verifier.select_probe(assets)
         services = probe.services(target)
         with mock.patch.object(verifier, "request_text", side_effect=responses) as request:
-            rows = probe.workload({"health": 1001, "policy-search": 1002}, "b" * 32)
+            rows = probe.workload(
+                {"health": 1001, "policy-search": 1002},
+                "b" * 32,
+                {
+                    "ELASTICSEARCH_INDEX": "policy-views-issue-229",
+                    "EVENT_WORKERS_ENABLED": "true",
+                },
+            )
 
         # then
         assert probe.service == "policy-search"
@@ -391,6 +399,32 @@ class TestProductObservabilityVerification:
         assert request.call_args_list[-1].args[1] == {
             "traceparent": "00-" + "b" * 32 + "-0123456789abcdef-01"
         }
+
+    def test_policy_search_probe_accepts_empty_canonical_query_phase_only(self) -> None:
+        responses = ["live\n", "ready\n", "{}"]
+        with mock.patch.object(verifier, "request_text", side_effect=responses):
+            rows = verifier.policy_search_reads(
+                {"health": 1001, "policy-search": 1002},
+                "b" * 32,
+                {
+                    "ELASTICSEARCH_INDEX": "policy-views",
+                    "EVENT_WORKERS_ENABLED": "false",
+                },
+            )
+        assert rows == 0
+
+        with (
+            mock.patch.object(verifier, "request_text", side_effect=responses),
+            pytest.raises(verifier.VerificationError, match="has no policies"),
+        ):
+            verifier.policy_search_reads(
+                {"health": 1001, "policy-search": 1002},
+                "b" * 32,
+                {
+                    "ELASTICSEARCH_INDEX": "policy-views-issue-229",
+                    "EVENT_WORKERS_ENABLED": "true",
+                },
+            )
 
     @pytest.mark.parametrize(
         ("configured", "observed"),
