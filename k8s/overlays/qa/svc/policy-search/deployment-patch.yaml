@@ -12,21 +12,41 @@ spec:
             - name: ELASTICSEARCH_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: qa-policy-search-elasticsearch
+                  name: qa-policy-search-cutover-elasticsearch
                   key: username
             - name: ELASTICSEARCH_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: qa-policy-search-elasticsearch
+                  name: qa-policy-search-cutover-elasticsearch
+                  key: password
+            - name: ELASTICSEARCH_WRITER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: qa-policy-search-cutover-elasticsearch-writer
+                  key: username
+            - name: ELASTICSEARCH_WRITER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: qa-policy-search-cutover-elasticsearch-writer
                   key: password
           volumeMounts:
             - name: elasticsearch-ca
               mountPath: /etc/policy-search/elasticsearch
               readOnly: true
+            - name: kafka-ca
+              mountPath: /etc/policy-search/kafka
+              readOnly: true
       volumes:
         - name: elasticsearch-ca
           secret:
-            secretName: qa-policy-search-elasticsearch-ca
+            secretName: qa-policy-search-cutover-elasticsearch-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 292
+        - name: kafka-ca
+          secret:
+            secretName: qa-policy-search-cutover-kafka-ca
             items:
               - key: ca.crt
                 path: ca.crt
