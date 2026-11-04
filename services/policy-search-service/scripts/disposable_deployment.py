@@ -80,10 +80,9 @@ def render(
     cluster: Cluster,
     image: str,
     source_short: str,
-    event_mode: str = "disabled",
 ) -> tuple[str, list[dict[str, Any]]]:
-    text = deployment_checks.render("local-dev", event_mode)
-    deployment_checks.validate_render("local-dev", text, event_mode=event_mode)
+    text = deployment_checks.render("local-dev")
+    deployment_checks.validate_render("local-dev", text)
     items = [item for item in yaml.safe_load_all(text) if isinstance(item, dict)]
     require(
         {item.get("kind") for item in items}
@@ -97,9 +96,26 @@ def render(
     deployment["spec"]["template"]["metadata"].setdefault("labels", {})[OWNER_LABEL] = (
         cluster.namespace
     )
-    deployment["spec"]["template"]["spec"]["containers"][0]["image"] = image
+    pod = deployment["spec"]["template"]["spec"]
+    container = pod["containers"][0]
+    container["image"] = image
+    for variable in container["env"]:
+        reference = variable.get("valueFrom", {}).get("secretKeyRef", {})
+        secret_name = reference.get("name", "")
+        if secret_name.startswith("local-dev-policy-search-cutover-"):
+            reference["name"] = secret_name.replace("-cutover", "", 1)
+    kafka_volume = next(volume for volume in pod["volumes"] if volume["name"] == "kafka-ca")
+    kafka_volume["secret"]["secretName"] = "local-dev-policy-search-kafka-ca"
     config = next(item for item in items if item["kind"] == "ConfigMap")
     config["data"]["SERVICE_VERSION"] = f"git-{source_short}"
+    config["data"].update(
+        {
+            "ELASTICSEARCH_INDEX": "policy-views-issue-229",
+            "KAFKA_GROUP": "policy-search-service-issue-230",
+            "KAFKA_REGISTERED_TOPIC": REGISTERED_TOPIC,
+            "KAFKA_TERMINATED_TOPIC": TERMINATED_TOPIC,
+        }
+    )
     config["data"]["ELASTICSEARCH_URL"] = (
         f"http://local-dev-elasticsearch-es-http.{cluster.namespace}.svc:9200"
     )
@@ -977,7 +993,7 @@ def main() -> int:
             writer_password,
         )
         setup_kafka(cluster, kafka_image)
-        rendered, _items = render(cluster, image, source_short, event_mode="enabled")
+        rendered, _items = render(cluster, image, source_short)
         cluster.kubectl("apply", "-f", "-", input_text=rendered)
         cluster.kubectl(
             "rollout",
