@@ -392,7 +392,7 @@ def test_qa_render_image_guard_accepts_release_owner_semver(image: str, accepted
 
 
 def test_release_preparation_produces_valid_qa_render(tmp_path) -> None:
-    # given the active event-enabled Policy Search QA overlay and release catalog entry.
+    # given the active canonical query-only Policy Search QA overlay and release catalog entry.
     catalog = tmp_path / "scripts/go/service/catalog.json"
     catalog.parent.mkdir(parents=True)
     shutil.copy2(checks.ROOT / "scripts/go/service/catalog.json", catalog)
@@ -419,7 +419,7 @@ def test_release_preparation_produces_valid_qa_render(tmp_path) -> None:
             str(tmp_path / "k8s/overlays/qa/svc/policy-search"),
         ]
     )
-    items = checks.validate_render("qa", rendered, event_mode="enabled")
+    items = checks.validate_render("qa", rendered, event_mode="disabled", cutover_mode="query")
 
     # then release and telemetry identities satisfy the same QA render contract.
     deployment = next(item for item in items if item["kind"] == "Deployment")
@@ -429,7 +429,8 @@ def test_release_preparation_produces_valid_qa_render(tmp_path) -> None:
         == "ghcr.io/igor-baiborodine/insurance-hub/policy-search-api:1.27.305"
     )
     assert config["data"]["SERVICE_VERSION"] == "git-aaaaaaaaaaaa"
-    assert config["data"]["EVENT_WORKERS_ENABLED"] == "true"
+    assert config["data"]["ELASTICSEARCH_INDEX"] == "policy-views"
+    assert config["data"]["EVENT_WORKERS_ENABLED"] == "false"
     assert (
         deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"]
         == "git-aaaaaaaaaaaa"
