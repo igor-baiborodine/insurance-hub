@@ -658,8 +658,11 @@ def role_snapshot(target: Target) -> dict[str, Any]:
                     item.get("spec", {}).get("type") == "ClusterIP"
                     and item.get("spec", {}).get("selector")
                     == {
-                        "app.kubernetes.io/name": suffix,
                         "app.kubernetes.io/component": "api",
+                        "app.kubernetes.io/managed-by": "kustomize",
+                        "app.kubernetes.io/name": suffix,
+                        "app.kubernetes.io/part-of": "insurance-hub",
+                        "environment": target.environment,
                     },
                     f"authoritative Java Service/{name} differs",
                 )
@@ -825,7 +828,7 @@ def stop(target: Target, _items: list[dict[str, Any]]) -> None:
 def validate_qa_aggregate(resources: Any) -> None:
     require(isinstance(resources, list), "active QA aggregate resources differ")
     require("./dashboard/legacy" in resources, "QA Java Dashboard overlay is missing")
-    require("./dashboard" not in resources, "QA Go Dashboard overlay must remain inactive in PR1")
+    require("./dashboard" in resources, "QA Go Dashboard overlay is missing")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -845,7 +848,7 @@ def main(argv: list[str] | None = None) -> int:
     if arguments[0] == "check":
         qa_root = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
         validate_qa_aggregate(qa_root.get("resources"))
-        print("dashboard-deployment-check: local-dev and inactive QA renders passed")
+        print("dashboard-deployment-check: local-dev and active QA renders passed")
     return 0
 
 
