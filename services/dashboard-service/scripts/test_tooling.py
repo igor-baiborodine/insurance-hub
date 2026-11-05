@@ -24,7 +24,9 @@ TOOL_NAMES = (
     "govulncheck",
 )
 IGNORED_DIRECTORIES = {".git", ".tools", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
-COVERAGE_OUTPUTS = frozenset({"coverage.txt", "integration-coverage.txt"})
+COVERAGE_OUTPUTS = frozenset(
+    {"coverage.txt", "integration-coverage.txt", "elasticsearch-integration-coverage.txt"}
+)
 PROTO_SCHEMA = Path("api/dashboard/v1/dashboard_service.proto")
 GENERATED_PACKAGE = Path("gen/dashboard/v1")
 
