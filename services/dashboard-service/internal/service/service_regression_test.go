@@ -462,7 +462,9 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
 		t.Fatalf("private marker escaped into telemetry: %s", combined)
 	}
 	if !strings.Contains(combined, "POST /dashboard/totalsales") ||
-		!strings.Contains(combined, "insurance_hub.dashboard.requests") {
+		!strings.Contains(combined, "insurance_hub.dashboard.requests") ||
+		!strings.Contains(combined, "insurance_hub.dashboard.dependencies") ||
+		!strings.Contains(combined, "Elasticsearch search") {
 		t.Errorf("missing HTTP-to-RPC completion signals: %s", combined)
 	}
 }

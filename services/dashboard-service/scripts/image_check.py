@@ -54,6 +54,18 @@ def command(
     return result.stdout.strip()
 
 
+def container_logs(docker: str, container: str) -> str:
+    result = run_command(
+        [docker, "logs", container],
+        cwd=MODULE_ROOT,
+        env=child_environment(),
+        timeout_seconds=30,
+        teardown_seconds=10,
+        activity="read Dashboard image logs",
+    )
+    return "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
+
+
 def mapped_port(docker: str, container: str, port: int) -> int:
     value = command([docker, "port", container, f"{port}/tcp"], "resolve image port")
     require(bool(re.fullmatch(r"127\.0\.0\.1:[0-9]+", value)), "unexpected port binding")
@@ -107,6 +119,22 @@ def elasticsearch_request(url: str, method: str, path: str, body: dict[str, obje
     require(
         status in {200, 201},
         f"Elasticsearch setup {path} failed with HTTP {status}: {response[:256]!r}",
+    )
+
+
+def reader_request(
+    url: str,
+    method: str,
+    path: str,
+    body: dict[str, object] | None = None,
+) -> tuple[int, bytes]:
+    authorization = base64.b64encode(f"{READER_USERNAME}:{READER_PASSWORD}".encode()).decode()
+    payload = None if body is None else json.dumps(body, separators=(",", ":")).encode()
+    return request(
+        url + path,
+        payload,
+        method=method,
+        headers={"Authorization": f"Basic {authorization}"},
     )
 
 
@@ -174,6 +202,51 @@ def create_elasticsearch_fixture(url: str) -> None:
         "/policy_stats/_doc/image-fixture?refresh=true",
         {"productCode": "SAFE", "from": "2019-06-01", "totalPremium": 1000.0},
     )
+    elasticsearch_request(
+        url,
+        "PUT",
+        "/unrelated_stats",
+        {"settings": {"number_of_shards": 1, "number_of_replicas": 0}},
+    )
+
+
+def verify_reader_permissions(url: str) -> None:
+    checks = (
+        (
+            "write",
+            reader_request(
+                url,
+                "PUT",
+                "/policy_stats/_doc/denied-write",
+                {"productCode": "DENIED", "from": "2019-06-01", "totalPremium": 1.0},
+            ),
+        ),
+        ("cluster administration", reader_request(url, "GET", "/_cluster/settings")),
+        ("unrelated index", reader_request(url, "GET", "/unrelated_stats/_search")),
+    )
+    for capability, (status, response) in checks:
+        require(
+            status == 403,
+            f"Dashboard reader {capability} was not denied: HTTP {status}: {response[:256]!r}",
+        )
+
+
+def verify_runtime_identity(logs: str, version: str) -> None:
+    entries: list[dict[str, object]] = []
+    for line in logs.splitlines():
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict):
+            entries.append(entry)
+    require(
+        any(
+            entry.get("msg") == "service started" and entry.get("service_version") == version
+            for entry in entries
+        ),
+        "runtime startup log does not contain the exact source version",
+    )
 
 
 def cleanup(docker: str, arguments: list[str], activity: str) -> bool:
@@ -189,6 +262,7 @@ def main() -> int:
     docker = os.environ.get("DOCKER", "docker")
     image = os.environ.get("IMAGE_REF", "")
     version = os.environ.get("SOURCE_VERSION", "")
+    revision = os.environ.get("SOURCE_REVISION", "")
     elasticsearch_image = os.environ.get("ELASTICSEARCH_IMAGE", "")
     suffix = str(os.getpid())
     network = f"dashboard-image-network-{suffix}"
@@ -201,7 +275,15 @@ def main() -> int:
     try:
         require(bool(image), "IMAGE_REF is required")
         require(bool(elasticsearch_image), "ELASTICSEARCH_IMAGE is required")
-        require(bool(re.fullmatch(r"git-[0-9a-f]{12}", version)), "SOURCE_VERSION is invalid")
+        require(
+            bool(re.fullmatch(r"git-(?!0{12})[0-9a-f]{12}", version)),
+            "SOURCE_VERSION is invalid",
+        )
+        require(
+            bool(re.fullmatch(r"(?!0{40})[0-9a-f]{40}", revision)),
+            "SOURCE_REVISION is invalid",
+        )
+        require(version == f"git-{revision[:12]}", "SOURCE_VERSION differs from SOURCE_REVISION")
         command([docker, "info"], "check Docker daemon", 30)
         command([docker, "network", "create", network], "create image-check network", 30)
         network_owned = True
@@ -239,6 +321,7 @@ def main() -> int:
         elasticsearch_url = f"http://127.0.0.1:{elasticsearch_port}"
         wait_for_elasticsearch(elasticsearch_url)
         create_elasticsearch_fixture(elasticsearch_url)
+        verify_reader_permissions(elasticsearch_url)
         dashboard_owned = True
         command(
             [
@@ -301,6 +384,24 @@ def main() -> int:
             },
             "image total-sales response differs",
         )
+        command(
+            [docker, "stop", "--time", "10", elasticsearch_container],
+            "stop image-check Elasticsearch",
+            20,
+        )
+        wait_status(f"http://127.0.0.1:{management_port}/readyz", (503, b"not ready\n"))
+        require(
+            request(f"http://127.0.0.1:{management_port}/livez") == (200, b"live\n"),
+            "liveness failed after dependency loss",
+        )
+        status, body = request(
+            f"http://127.0.0.1:{http_port}/dashboard/totalsales",
+            json.dumps({"saleDateFrom": "2019-01-01", "saleDateTo": "2020-01-01"}).encode(),
+        )
+        require(
+            status == 503 and body == b'{"code":14,"message":"service unavailable","details":[]}',
+            "dependency failure response differs",
+        )
         started = time.monotonic()
         command(
             [docker, "stop", "--time", "10", dashboard_container],
@@ -313,8 +414,9 @@ def main() -> int:
             "inspect Dashboard image exit",
         )
         require(exit_code == "0", "image exited unsuccessfully")
-        logs = command([docker, "logs", dashboard_container], "read Dashboard image logs")
+        logs = container_logs(docker, dashboard_container)
         require("configuration failed" not in logs, "image reported configuration failure")
+        verify_runtime_identity(logs, version)
     except (ImageCheckError, CommandError, OSError, ValueError, json.JSONDecodeError) as error:
         print(f"dashboard-image-check: {error}", file=sys.stderr)
         failed = True

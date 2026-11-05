@@ -104,6 +104,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	test-coverage-tooling test-integration test-elasticsearch-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
 	image-build image-check _image-check-existing deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
+	_deploy-test-rpc \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
 	shared-candidate-generated shared-candidate-breaking shared-candidate-integration \
@@ -144,7 +145,15 @@ deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Dashboard de
 
 deploy-test: python-toolchain-check image-build ## Exercise Dashboard in an owned disposable Kind namespace
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" \
+		ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" GO="$(GO)" MAKE_COMMAND="$(MAKE)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_disposable_deployment.py
+
+_deploy-test-rpc: verify-tools
+	@test -n "$${DASHBOARD_DEPLOYMENT_GRPC_ADDR:-}" || { \
+		echo '_deploy-test-rpc: DASHBOARD_DEPLOYMENT_GRPC_ADDR is required' >&2; exit 1; \
+	}
+	@GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
+		-run='^TestDeployedDirectRPC$$' -json ./internal/service
 
 python-tooling-format-check: python-toolchain-check
 	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \

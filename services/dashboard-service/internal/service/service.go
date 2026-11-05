@@ -224,12 +224,22 @@ func run(
 	if err != nil {
 		return fail(err)
 	}
+	dependencyObserver, err := telemetry.NewDependencyObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+	)
+	if err != nil {
+		return fail(err)
+	}
 	reader, search, err := deps.newSearch(settings.Elasticsearch)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize Elasticsearch: %w", err))
 	}
 	runtime.search = search
-	totalSales, err := application.NewGetTotalSales(reader)
+	totalSales, err := application.NewGetTotalSales(
+		newObservedTotalSalesReader(reader, dependencyObserver),
+	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize total-sales use case: %w", err))
 	}

@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
@@ -47,6 +49,39 @@ func TestNew_DisabledProviderAndW3CPropagation(t *testing.T) {
 		extracted.TraceID() != traceID ||
 		!extracted.IsRemote() {
 		t.Errorf("gRPC trace context was not preserved: %v", carrier)
+	}
+}
+
+func TestNew_UsesStandardOTLPTimeoutWithoutSDKParseError(t *testing.T) {
+	// given
+	t.Setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "750")
+	var mu sync.Mutex
+	var reported []error
+	previous := otel.GetErrorHandler()
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		mu.Lock()
+		reported = append(reported, err)
+		mu.Unlock()
+	}))
+	t.Cleanup(func() { otel.SetErrorHandler(previous) })
+
+	// when
+	provider, err := New(
+		context.Background(),
+		"dashboard-service",
+		testTelemetrySettings(750*time.Millisecond),
+	)
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = provider.Shutdown(context.Background())
+	mu.Lock()
+	defer mu.Unlock()
+	for _, reportedError := range reported {
+		if strings.Contains(reportedError.Error(), "parse duration") {
+			t.Fatalf("OTel SDK rejected the timeout: %v", reportedError)
+		}
 	}
 }
 
