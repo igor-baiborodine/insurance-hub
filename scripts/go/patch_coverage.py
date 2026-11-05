@@ -10,8 +10,10 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
+import yaml
+
 SHA = re.compile(r"[0-9a-f]{40}")
-PROFILE_ENTRY = re.compile(r"(.+?):(\d+)\.\d+,(\d+)\.\d+\s+\d+\s+(\d+)$")
+PROFILE_ENTRY = re.compile(r"(.+?):(\d+)\.(\d+),(\d+)\.(\d+)\s+\d+\s+(\d+)$")
 HUNK = re.compile(r"^@@ .* \+(\d+)(?:,(\d+))? @@")
 
 
@@ -91,6 +93,45 @@ def changed_lines(
     return result
 
 
+def codecov_exclusions(
+    root: Path,
+    base: str,
+    config_path: PurePosixPath,
+    module_dir: PurePosixPath,
+) -> tuple[PurePosixPath, ...]:
+    """Return simple module subtrees ignored by Codecov at the exact PR base."""
+    require(SHA.fullmatch(base), "patch-coverage-check: base must be a full Git SHA")
+    git(root, "cat-file", "-e", f"{base}^{{commit}}")
+    source = git(root, "show", f"{base}:{config_path.as_posix()}")
+    try:
+        document = yaml.safe_load(source)
+    except yaml.YAMLError as error:
+        raise PatchCoverageError(
+            f"patch-coverage-check: invalid base Codecov configuration: {error}"
+        ) from error
+    require(
+        isinstance(document, dict),
+        "patch-coverage-check: base Codecov configuration must be a mapping",
+    )
+    ignored = document.get("ignore", [])
+    require(
+        isinstance(ignored, list) and all(isinstance(item, str) for item in ignored),
+        "patch-coverage-check: base Codecov ignore must be a string list",
+    )
+    prefix = f"{module_dir.as_posix()}/"
+    exclusions: list[PurePosixPath] = []
+    for pattern in ignored:
+        if not pattern.startswith(prefix):
+            continue
+        relative = pattern.removeprefix(prefix)
+        require(
+            relative.endswith("/**") and "*" not in relative.removesuffix("/**"),
+            f"patch-coverage-check: unsupported module Codecov ignore pattern: {pattern}",
+        )
+        exclusions.append(safe_relative(relative.removesuffix("/**"), "Codecov exclusion"))
+    return tuple(exclusions)
+
+
 def profile_lines(
     root: Path,
     module_dir: PurePosixPath,
@@ -119,7 +160,7 @@ def profile_lines(
                 f"patch-coverage-check: invalid profile entry at {profile_path}:{line_number}",
             )
             assert match is not None
-            source, start, end, count = match.groups()
+            source, start, _start_column, end, end_column, count = match.groups()
             require(
                 marker in source,
                 f"patch-coverage-check: profile source is outside selected module: {source}",
@@ -131,7 +172,11 @@ def profile_lines(
                 for exclusion in exclusions
             ):
                 continue
-            for source_line in range(int(start), int(end) + 1):
+            # Go profile end coordinates are exclusive. An end column of one
+            # therefore belongs to the following line and must not inflate the
+            # executable-line denominator.
+            stop = int(end) + (1 if int(end_column) > 1 else 0)
+            for source_line in range(int(start), stop):
                 coordinate = (repository_source.as_posix(), source_line)
                 executable.add(coordinate)
                 if int(count) > 0:
@@ -166,7 +211,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--head", required=True)
     result.add_argument("--module-dir", required=True)
     result.add_argument("--profiles", required=True)
-    result.add_argument("--exclusions", default="")
+    result.add_argument("--codecov-config", default="codecov.yml")
     result.add_argument("--minimum", type=int, default=75)
     return result
 
@@ -177,8 +222,11 @@ def main(argv: list[str] | None = None) -> int:
     root = Path.cwd()
     module_dir = safe_relative(arguments.module_dir, "module directory")
     profiles = csv_paths(arguments.profiles, "profiles")
-    exclusions = tuple(
-        safe_relative(value, "exclusion") for value in arguments.exclusions.split(",") if value
+    exclusions = codecov_exclusions(
+        root,
+        arguments.base,
+        safe_relative(arguments.codecov_config, "Codecov configuration"),
+        module_dir,
     )
     changed = changed_lines(root, arguments.base, arguments.head, module_dir)
     executable, covered = profile_lines(root, module_dir, profiles, exclusions)

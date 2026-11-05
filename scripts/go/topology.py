@@ -669,7 +669,6 @@ def expected_selector_outputs(module: dict[str, Any], merge_base: str) -> dict[s
         "format_base": merge_base,
         "coverage_file": coverage_file,
         "coverage_files": coverage_files,
-        "coverage_exclusions": ",".join(select_pr_module.CODECOV_EXCLUSIONS.get(directory, ())),
         "coverage_flag": directory.rsplit("/", 1)[-1],
     }
 
@@ -770,15 +769,17 @@ def ci_check(root: Path, inventory: dict[str, Any]) -> None:
             ("fail_ci_if_error: true", "selected-module validation contract"),
             ("scripts/go/patch_coverage.py", "blocking patch coverage check"),
             ("PATCH_COVERAGE_MINIMUM: '75'", "75% patch coverage threshold"),
-            (
-                "steps.select.outputs.coverage_exclusions",
-                "selected-module coverage exclusions",
-            ),
+            ('--base "$FORMAT_BASE" --head "$PR_HEAD"', "exact patch coverage revisions"),
         ):
             require_literal(text, workflow, literal, description)
         require(
             text.count("steps.select.outputs.module_role != 'service-scaffold'") == 2,
             f"workflow {workflow} has invalid selected-module validation contract",
+        )
+        require(
+            text.index("scripts/go/patch_coverage.py")
+            < text.index("uses: codecov/codecov-action@v7"),
+            f"workflow {workflow} must enforce patch coverage before asynchronous upload",
         )
         triggers = pull_request_paths(text)
         for module in (item for item in inventory["modules"] if item["ciWorkflow"] == workflow):

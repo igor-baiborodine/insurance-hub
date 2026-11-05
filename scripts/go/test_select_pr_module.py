@@ -73,7 +73,6 @@ def test_policy_search_uploads_every_check_go_pr_coverage_profile() -> None:
         "services/policy-search-service/elasticsearch-integration-coverage.txt",
         "services/policy-search-service/event-integration-coverage.txt",
     ]
-    assert result["coverage_exclusions"].split(",") == ["gen", "internal/testing"]
 
 
 def test_product_service_keeps_its_owned_coverage_profiles() -> None:
@@ -87,11 +86,6 @@ def test_product_service_keeps_its_owned_coverage_profiles() -> None:
     assert result["coverage_files"].split(",") == [
         "services/product-service/coverage.txt",
         "services/product-service/integration-coverage.txt",
-    ]
-    assert result["coverage_exclusions"].split(",") == [
-        "gen",
-        "internal/postgres/dbgen",
-        "internal/testing",
     ]
 
 
@@ -107,7 +101,6 @@ def test_dashboard_service_selects_standard_business_service_coverage() -> None:
         "services/dashboard-service/coverage.txt",
         "services/dashboard-service/integration-coverage.txt",
     ]
-    assert result["coverage_exclusions"].split(",") == ["gen", "internal/testing"]
     assert result["coverage_flag"] == "dashboard-service"
 
 

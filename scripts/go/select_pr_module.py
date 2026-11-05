@@ -26,11 +26,6 @@ POLICY_SEARCH_ADDITIONAL_COVERAGE_FILES = (
     "elasticsearch-integration-coverage.txt",
     "event-integration-coverage.txt",
 )
-CODECOV_EXCLUSIONS = {
-    "services/dashboard-service": ("gen", "internal/testing"),
-    "services/product-service": ("gen", "internal/postgres/dbgen", "internal/testing"),
-    "services/policy-search-service": ("gen", "internal/testing"),
-}
 
 
 class SelectionError(RuntimeError):
@@ -119,7 +114,6 @@ def selection_outputs(paths: list[str], merge_base: str) -> dict[str, str]:
         "format_base": merge_base,
         "coverage_file": coverage_file,
         "coverage_files": ",".join(coverage_files),
-        "coverage_exclusions": ",".join(CODECOV_EXCLUSIONS.get(module_dir, ())),
         "coverage_flag": module_dir.rsplit("/", 1)[-1],
     }
 

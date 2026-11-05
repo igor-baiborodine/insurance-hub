@@ -27,6 +27,9 @@ def repository(tmp_path: Path) -> tuple[str, str]:
     module.mkdir(parents=True)
     source = module / "main.go"
     source.write_text("package example\n", encoding="utf-8")
+    (tmp_path / "codecov.yml").write_text(
+        'ignore:\n  - "services/example-service/gen/**"\n', encoding="utf-8"
+    )
     git(tmp_path, "add", ".")
     git(tmp_path, "commit", "--quiet", "-m", "base")
     base = git(tmp_path, "rev-parse", "HEAD")
@@ -42,6 +45,7 @@ def repository(tmp_path: Path) -> tuple[str, str]:
 
 def write_profile(root: Path, name: str, entries: str) -> PurePosixPath:
     path = root / "services" / "example-service" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"mode: atomic\n{entries}", encoding="utf-8")
     return PurePosixPath("services/example-service") / name
 
@@ -95,6 +99,66 @@ def test_profile_exclusions_remove_generated_subtree(tmp_path: Path) -> None:
     # then
     assert executable == set()
     assert covered == set()
+
+
+def test_profile_end_at_column_one_does_not_count_following_line(tmp_path: Path) -> None:
+    # given
+    profile = write_profile(
+        tmp_path,
+        "coverage.txt",
+        "example.invalid/services/example-service/main.go:3.1,5.1 1 1\n",
+    )
+
+    # when
+    executable, covered = patch_coverage.profile_lines(
+        tmp_path,
+        PurePosixPath("services/example-service"),
+        [profile],
+        (),
+    )
+
+    # then
+    assert (
+        executable
+        == covered
+        == {
+            ("services/example-service/main.go", 3),
+            ("services/example-service/main.go", 4),
+        }
+    )
+
+
+def test_codecov_exclusions_come_from_exact_base_revision(tmp_path: Path) -> None:
+    # given
+    base, _head = repository(tmp_path)
+    (tmp_path / "codecov.yml").write_text(
+        'ignore:\n  - "services/example-service/internal/testing/**"\n', encoding="utf-8"
+    )
+
+    # when
+    exclusions = patch_coverage.codecov_exclusions(
+        tmp_path,
+        base,
+        PurePosixPath("codecov.yml"),
+        PurePosixPath("services/example-service"),
+    )
+
+    # then
+    assert exclusions == (PurePosixPath("gen"),)
+
+
+def test_reported_codecov_regression_is_below_required_minimum() -> None:
+    # given
+    changed = {("source.go", line) for line in range(1, 1096)}
+    executable = changed.copy()
+    covered = {("source.go", line) for line in range(1, 755)}
+
+    # when / then
+    with pytest.raises(
+        patch_coverage.PatchCoverageError,
+        match=r"below minimum \(754/1095 lines; minimum 75%\)",
+    ):
+        patch_coverage.evaluate(changed, executable, covered, 75)
 
 
 @pytest.mark.parametrize("value", ["", "/absolute", "../escape", "path/../escape"])
