@@ -128,13 +128,14 @@ def _string_assignment(block: str, field: str) -> str:
     return matches[0]
 
 
-def validate_service_log_registrations(config: str) -> None:
+def service_log_registrations(config: str) -> dict[str, dict[str, str]]:
     names = re.findall(r'(?m)^service_json_logs\s+"([^"]+)"\s*\{', config)
     if not names:
         raise ValidationError("at least one service log registration is required")
     if len(names) != len(set(names)):
         raise ValidationError("service log registration names must be unique")
 
+    registrations: dict[str, dict[str, str]] = {}
     for name in names:
         if not re.fullmatch(r"[a-z][a-z0-9_]*", name):
             raise ValidationError(f"invalid service log registration name: {name}")
@@ -147,14 +148,17 @@ def validate_service_log_registrations(config: str) -> None:
                 f"{name} log registration must use shared qa_service_pods targets"
             )
 
+        workload_name = _string_assignment(block, "workload_name")
         container_name = _string_assignment(block, "container_name")
         port_name = _string_assignment(block, "port_name")
         service_name = _string_assignment(block, "service_name")
         service_slug = name.replace("_", "-")
-        if container_name != f"{service_slug}-api":
+        if workload_name != f"{service_slug}-api":
             raise ValidationError(
-                f"{name} log container is {container_name}, expected {service_slug}-api"
+                f"{name} log workload is {workload_name}, expected {service_slug}-api"
             )
+        if not re.fullmatch(r"[a-z][a-z0-9-]*", container_name):
+            raise ValidationError(f"{name} log container name is invalid: {container_name}")
         if service_name != f"{service_slug}-service":
             raise ValidationError(
                 f"{name} log service is {service_name}, expected {service_slug}-service"
@@ -165,6 +169,48 @@ def validate_service_log_registrations(config: str) -> None:
         stream_matches = re.findall(r"(?m)^\s*max_streams\s*=\s*([0-9]+)\s*$", block)
         if len(stream_matches) != 1 or int(stream_matches[0]) < 1:
             raise ValidationError(f"{name} log registration must set a positive max_streams once")
+        registrations[name] = {
+            "workload_name": workload_name,
+            "container_name": container_name,
+            "port_name": port_name,
+            "service_name": service_name,
+        }
+    return registrations
+
+
+def validate_service_log_registrations(config: str) -> None:
+    service_log_registrations(config)
+
+
+def validate_service_log_deployments(config: str, deployments: Mapping[str, str]) -> None:
+    registrations = service_log_registrations(config)
+    for name, registration in registrations.items():
+        service_slug = name.replace("_", "-")
+        deployment = deployments.get(service_slug)
+        if deployment is None:
+            raise ValidationError(f"{name} log registration has no owning Deployment")
+        workload_names = set(
+            re.findall(r"(?m)^\s+app\.kubernetes\.io/name:\s*([a-z][a-z0-9-]*)\s*$", deployment)
+        )
+        container_names = set(
+            re.findall(r"(?m)^        - name:\s*([a-z][a-z0-9-]*)\s*$", deployment)
+        )
+        port_names = set(
+            re.findall(r"(?m)^            - name:\s*([a-z][a-z0-9-]*)\s*$", deployment)
+        )
+        if workload_names != {registration["workload_name"]}:
+            raise ValidationError(
+                f"{name} log workload does not match its Deployment: {sorted(workload_names)}"
+            )
+        if registration["container_name"] not in container_names:
+            raise ValidationError(
+                f"{name} log container does not exist in its Deployment: "
+                f"{registration['container_name']}"
+            )
+        if registration["port_name"] not in port_names:
+            raise ValidationError(
+                f"{name} log port does not exist in its Deployment: {registration['port_name']}"
+            )
 
 
 def validate_log_target_policy(config: str) -> None:
@@ -186,7 +232,7 @@ def validate_log_target_policy(config: str) -> None:
         keep_rules[source_label] = regex_match.group(1)
 
     expected = {
-        "__meta_kubernetes_pod_label_app_kubernetes_io_name": ("argument.container_name.value"),
+        "__meta_kubernetes_pod_label_app_kubernetes_io_name": "argument.workload_name.value",
         "__meta_kubernetes_pod_label_environment": '"qa"',
         "__meta_kubernetes_pod_container_name": "argument.container_name.value",
         "__meta_kubernetes_pod_container_port_name": "argument.port_name.value",
@@ -218,6 +264,7 @@ def validate_source_policy(config: str, values: str, makefile: str, operations: 
         "set(links, nil)",
         'discovery.kubernetes "qa_service_pods"',
         'declare "service_json_logs"',
+        "regex = argument.workload_name.value",
         "regex = argument.container_name.value",
         "regex = argument.port_name.value",
         "(eq .record_service_name .target_service_name)",
@@ -666,6 +713,7 @@ def sanitize_datapoint(
 
 def select_service_targets(
     targets: Iterable[Mapping[str, str]],
+    workload_name: str,
     container_name: str,
     port_name: str,
     service_name: str,
@@ -674,7 +722,7 @@ def select_service_targets(
     for target in targets:
         if (
             target.get("namespace") == QA_SERVICE_NAMESPACE
-            and target.get("app_name") == container_name
+            and target.get("app_name") == workload_name
             and target.get("environment") == "qa"
             and target.get("container") == container_name
             and target.get("port") == port_name
@@ -713,6 +761,11 @@ def run_check(args: argparse.Namespace) -> None:
     config = args.config.read_text(encoding="utf-8")
     makefile = "\n".join(path.read_text(encoding="utf-8") for path in args.makefile)
     validate_source_policy(config, values, makefile, args.operations.read_text(encoding="utf-8"))
+    deployments = {
+        path.parent.parent.name: path.read_text(encoding="utf-8")
+        for path in args.service_deployment
+    }
+    validate_service_log_deployments(config, deployments)
     rendered = (
         sys.stdin.read()
         if str(args.rendered_rbac) == "-"
@@ -727,6 +780,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--makefile", type=Path, required=True, action="append")
     parser.add_argument("--operations", type=Path, required=True)
+    parser.add_argument("--service-deployment", type=Path, required=True, action="append")
     parser.add_argument("--rendered-rbac", type=Path, required=True)
     return parser.parse_args(argv)
 

@@ -85,6 +85,34 @@
       "ciWorkflow": ".github/workflows/go-pr-mod.yml"
     },
     {
+      "directory": "services/dashboard-service",
+      "modulePath": "github.com/igor-baiborodine/insurance-hub/services/dashboard-service",
+      "role": "business-service",
+      "owner": "Dashboard service maintainers",
+      "supportedModes": [
+        "standalone"
+      ],
+      "validationTarget": "check-go-pr",
+      "validationVariables": [
+        "FORMAT_SCOPE",
+        "FORMAT_BASE"
+      ],
+      "packageScope": "all Dashboard packages under ./..., the server executable, owned Dashboard v1 Echo contract and generated gateway/Swagger output, independent HTTP contract, real-listener lifecycle checks and module dependency metadata",
+      "prerequisites": [
+        "Go 1.27.3",
+        "managed CPython 3.14.8",
+        "pinned Dashboard Go tools installed by make -C services/dashboard-service bootstrap-go-tools",
+        "GCC for race-enabled tests",
+        "Docker Engine, Kind and kubectl access for runtime image and disposable deployment checks",
+        "public module, schema, tool, vulnerability and container services unless cached"
+      ],
+      "consumers": [
+        "github.com/igor-baiborodine/insurance-hub/services/dashboard-service"
+      ],
+      "localReplacements": [],
+      "ciWorkflow": ".github/workflows/go-pr-mod.yml"
+    },
+    {
       "directory": "libs/servicekit",
       "modulePath": "github.com/igor-baiborodine/insurance-hub/libs/servicekit",
       "role": "public-shared",
@@ -108,7 +136,8 @@
       "consumers": [
         "github.com/igor-baiborodine/insurance-hub/templates/go-service",
         "github.com/igor-baiborodine/insurance-hub/services/product-service",
-        "github.com/igor-baiborodine/insurance-hub/services/policy-search-service"
+        "github.com/igor-baiborodine/insurance-hub/services/policy-search-service",
+        "github.com/igor-baiborodine/insurance-hub/services/dashboard-service"
       ],
       "localReplacements": [],
       "ciWorkflow": ".github/workflows/go-pr-shared.yml"
@@ -485,6 +514,118 @@
       },
       "applicability": {
         "copy": "Policy Search is an independently built service, not a reusable source scaffold."
+      }
+    },
+    {
+      "module": "github.com/igor-baiborodine/insurance-hub/services/dashboard-service",
+      "directory": "services/dashboard-service",
+      "owner": "Dashboard service maintainers",
+      "status": "active",
+      "required_dependency": "github.com/igor-baiborodine/insurance-hub/libs/servicekit",
+      "workflows": [
+        {
+          "path": ".github/workflows/go-pr-mod.yml",
+          "job": "validate"
+        },
+        {
+          "path": ".github/workflows/go-pr-shared.yml",
+          "job": "validate"
+        }
+      ],
+      "candidate_phases": [
+        "format",
+        "lint",
+        "unit",
+        "race",
+        "build",
+        "dependency",
+        "vulnerability",
+        "generated",
+        "breaking",
+        "integration",
+        "image"
+      ],
+      "phase_bindings": {
+        "format": {
+          "target": "shared-candidate-format",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "lint": {
+          "target": "shared-candidate-lint",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "unit": {
+          "target": "shared-fast-unit",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "race": {
+          "target": "shared-candidate-race",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "build": {
+          "target": "shared-fast-build",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "dependency": {
+          "target": "shared-candidate-dependency",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "vulnerability": {
+          "target": "shared-candidate-vulnerability",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "generated": {
+          "target": "shared-candidate-generated",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "breaking": {
+          "target": "shared-candidate-breaking",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "integration": {
+          "target": "shared-candidate-integration",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "image": {
+          "target": "shared-candidate-image",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        }
+      },
+      "applicability": {
+        "copy": "Dashboard is an independently built service, not a reusable source scaffold."
       }
     }
   ]

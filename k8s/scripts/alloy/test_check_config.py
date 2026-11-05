@@ -12,6 +12,13 @@ import check_config as alloy_check
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 
+def service_deployments() -> dict[str, str]:
+    return {
+        path.parent.parent.name: path.read_text(encoding="utf-8")
+        for path in (REPOSITORY_ROOT / "k8s/apps/svc").glob("*/base/deployment.yaml")
+    }
+
+
 def test_source_policy_requires_python_chart_injection_after_migration() -> None:
     # given
     values = (REPOSITORY_ROOT / "k8s/overlays/qa/infra/alloy/values.yaml").read_text(
@@ -45,8 +52,24 @@ def test_source_policy_registers_each_active_go_service_log_stream() -> None:
     )
 
     alloy_check.validate_service_log_registrations(config)
+    alloy_check.validate_service_log_deployments(config, service_deployments())
+    assert 'service_json_logs "dashboard"' in config
     assert 'service_json_logs "product"' in config
     assert 'service_json_logs "policy_search"' in config
+
+
+def test_service_log_registrations_match_their_owning_deployments() -> None:
+    config = (REPOSITORY_ROOT / "k8s/overlays/qa/infra/alloy/config.alloy").read_text(
+        encoding="utf-8"
+    )
+    deployments = service_deployments()
+
+    alloy_check.validate_service_log_deployments(config, deployments)
+    deployments["dashboard"] = deployments["dashboard"].replace(
+        "        - name: dashboard-service", "        - name: wrong-container", 1
+    )
+    with pytest.raises(alloy_check.ValidationError, match="container does not exist"):
+        alloy_check.validate_service_log_deployments(config, deployments)
 
 
 # Product data below is limited to the transitional legacy-Java contract. Shared Go
@@ -338,7 +361,7 @@ discovery.relabel "logs" {
   rule {
     source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
     action = "keep"
-    regex = argument.container_name.value
+    regex = argument.workload_name.value
   }
   rule {
     source_labels = ["__meta_kubernetes_pod_label_environment"]
@@ -378,7 +401,9 @@ discovery.relabel "logs" {
         }
         targets = [dict(common, port=port) for port in ("http", "grpc", "management")]
         targets.append(dict(common, port="http"))
-        selected = alloy_check.select_service_targets(targets, "alpha-api", "http", "alpha-service")
+        selected = alloy_check.select_service_targets(
+            targets, "alpha-api", "alpha-api", "http", "alpha-service"
+        )
         assert 1 == len(selected)
         assert "http" == selected[0]["port"]
 
@@ -392,7 +417,7 @@ discovery.relabel "logs" {
             "pod_uid": "pod-a",
         }
         selected = alloy_check.select_service_targets(
-            [allowed], "alpha-api", "http", "alpha-service"
+            [allowed], "alpha-api", "alpha-api", "http", "alpha-service"
         )
         assert 1 == len(selected)
 
@@ -406,6 +431,7 @@ discovery.relabel "logs" {
         for field, value in mismatches.items():
             rejected = alloy_check.select_service_targets(
                 [dict(allowed, **{field: value})],
+                "alpha-api",
                 "alpha-api",
                 "http",
                 "alpha-service",
@@ -454,6 +480,7 @@ discovery.relabel "logs" {
         registration_config = """
 service_json_logs "multi_part" {
   targets        = discovery.kubernetes.qa_service_pods.targets
+  workload_name  = "multi-part-api"
   container_name = "multi-part-api"
   port_name      = "http"
   service_name   = "multi-part-service"
@@ -482,7 +509,7 @@ service_json_logs "multi_part" {
             for port in ("http", "grpc")
         ]
         selected = alloy_check.select_service_targets(
-            targets, "multi-part-api", "http", "multi-part-service"
+            targets, "multi-part-api", "multi-part-api", "http", "multi-part-service"
         )
         assert 1 == len(selected)
 

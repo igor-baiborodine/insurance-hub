@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dashboard-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dashboard-api
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              insurance-hub.io/dashboard-business-client: "true"
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              insurance-hub.io/dashboard-management-client: "true"
+      ports:
+        - port: 8081
+          protocol: TCP
+  egress: []

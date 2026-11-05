@@ -23,6 +23,9 @@ flag_management:
     - name: policy-search-service
       paths:
         - services/policy-search-service/
+    - name: dashboard-service
+      paths:
+        - services/dashboard-service/
 
 ignore:
   - "services/product-service/gen/**"
@@ -30,3 +33,5 @@ ignore:
   - "services/product-service/internal/testing/**"
   - "services/policy-search-service/gen/**"
   - "services/policy-search-service/internal/testing/**"
+  - "services/dashboard-service/gen/**"
+  - "services/dashboard-service/internal/testing/**"

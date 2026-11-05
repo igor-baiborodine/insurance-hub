@@ -47,6 +47,11 @@
       - [issue-215-N12 Additional guarded search administration automation](#issue-215-n12-additional-guarded-search-administration-automation)
       - [issue-215-N13 Java policy-search retirement](#issue-215-n13-java-policy-search-retirement)
       - [issue-215-N14 Authoritative Go-era recovery](#issue-215-n14-authoritative-go-era-recovery)
+  - [Sub-epic 4.4 Dashboard migration to Go](#sub-epic-44-dashboard-migration-to-go)
+    - [Issue 266 Migrate Dashboard using Policy Search principles](#issue-266-migrate-dashboard-using-policy-search-principles)
+      - [issue-266-N01 Dashboard analytics corrections](#issue-266-n01-dashboard-analytics-corrections)
+      - [issue-266-N02 Additional Dashboard analytics and delivery capabilities](#issue-266-n02-additional-dashboard-analytics-and-delivery-capabilities)
+      - [issue-266-N04 Dashboard recovery and stronger event guarantees](#issue-266-n04-dashboard-recovery-and-stronger-event-guarantees)
   - [Ad hoc repository improvements](#ad-hoc-repository-improvements)
     - [Commit-message policy enforcement](#commit-message-policy-enforcement)
       - [adhoc-commit-msg-N01 Commit-message hook](#adhoc-commit-msg-n01-commit-message-hook)
@@ -888,6 +893,90 @@ retention contract, proves a consistent snapshot/replay boundary and isolated re
 covers interrupted restart and missing-publication repair, and rejects history gaps or inconsistent
 watermarks. Preserve index isolation, permissions and data privacy. Kafka's current seven-day
 delete retention and PostgreSQL logical WAL setting alone do not establish this capability.
+
+## Sub-epic 4.4 Dashboard migration to Go
+
+Parent: [issue 266](https://github.com/igor-baiborodine/insurance-hub/issues/266).
+The migration preserves existing Dashboard behavior through deployed MVP increments, with
+separately gated ownership transfer and Java retirement. The optional improvements below do not
+change that base scope.
+
+### Issue 266 Migrate Dashboard using Policy Search principles
+
+Origin: issue-266 requirements assessment N01, N02 and N04, retained here at the user's request
+on 2026-11-04. Source IDs are preserved; N03 (Java/Go comparative benchmarking) remains only in
+the local assessment.
+
+Source ticket: [issue 266](https://github.com/igor-baiborodine/insurance-hub/issues/266).
+Local assessment: `ai/artifacts/epic-4.4/issue-266-requirements.md` (ignored local evidence).
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-266-N01](#issue-266-n01-dashboard-analytics-corrections) | Dashboard analytics corrections | Deferred | Unassigned; requires approved before/after behavior |
+| [issue-266-N02](#issue-266-n02-additional-dashboard-analytics-and-delivery-capabilities) | Additional analytics, export, pagination or streaming | Deferred | Unassigned; select for a concrete consumer need |
+| [issue-266-N04](#issue-266-n04-dashboard-recovery-and-stronger-event-guarantees) | Dashboard recovery and stronger event guarantees | Deferred | Unassigned; separately scope beyond migration semantics |
+
+#### issue-266-N01 Dashboard analytics corrections
+
+**Requirement:** Separately select corrections to truncated total/product or agent buckets,
+standardized rounding or timezone behavior, or missing agent attribution. Define each selected
+change's before/after analytics contract and any producer or historical-data work it requires.
+
+**Why deferred:** These changes alter business results or producer/history ownership. The base
+migration preserves totals accumulated from returned product buckets, default terms limits,
+operation-specific rounding, existing date conversion and null agent attribution. A language or
+client rewrite does not authorize correcting those limitations.
+
+**Reconsider when:** The product owner explicitly requests a correction and approves its expected
+behavior and affected consumers.
+
+**Acceptance evidence:** Independent query/event fixtures establish the approved revised results,
+including relevant over-limit buckets, fractional amounts, date/timezone boundaries and missing
+agent cases. Document historical-data treatment and producer ownership where affected; verify
+existing HTTP/gRPC and dashboard consumers against the accepted compatibility contract.
+
+#### issue-266-N02 Additional Dashboard analytics and delivery capabilities
+
+**Requirement:** Add selected analytics, export, pagination or streaming capabilities when a
+concrete Dashboard consumer needs them. Define the new request/result contract, data-access
+boundary and bounded workload for each selected capability.
+
+**Why deferred:** The existing three analytics queries meet the migration's caller requirements.
+New query surfaces or delivery modes add product and operational behavior without an established
+consumer or volume need.
+
+**Reconsider when:** A named consumer or demonstrated data-volume constraint establishes a
+specific capability requirement.
+
+**Acceptance evidence:** Approved consumer contracts and independent fixtures verify results,
+ordering and limits as applicable. A bounded workload demonstrates the selected delivery mode;
+access/privacy and HTTP/gRPC compatibility checks cover affected consumers. Selecting one
+capability does not commit the others.
+
+#### issue-266-N04 Dashboard recovery and stronger event guarantees
+
+**Requirement:** Separately assess Dashboard projection replay, rebuild, reconciliation,
+quarantine or stronger event-processing guarantees when an accepted recovery or business objective
+requires them. Define the selected state, source-history and authority model for `policy_stats`
+and its registration consumer before introducing new recovery behavior.
+
+**Why deferred:** These capabilities exceed the accepted migration's event semantics. Preserving
+existing documents and consumer progress during ordinary processing, handover and retirement
+remains mandatory; those obligations do not imply a new recovery subsystem or stronger ordering,
+deduplication or delivery guarantees.
+
+**Reconsider when:** An accepted business or operational requirement identifies a recovery or
+event-guarantee gap beyond existing behavior. Cutover or Java retirement alone is not a trigger.
+
+**Acceptance evidence:** The receiving ticket defines state/source ownership, retention,
+permissions and the precise guarantee. Independent failure cases and operator validation prove
+the selected recovery path, interruption/restart behavior and preservation of unrelated state;
+history gaps and unsupported guarantees are reported explicitly.
+
+**Related entries:** [issue-215-N14](#issue-215-n14-authoritative-go-era-recovery) concerns the
+Policy Search projection, while [issue-215-N11](#issue-215-n11-durable-policy-event-publication)
+owns the optional producer-publication improvement. Reuse or coordinate those scopes if needed;
+this Dashboard entry does not duplicate their delivery commitments or select a producer redesign.
 
 ## Ad hoc repository improvements
 

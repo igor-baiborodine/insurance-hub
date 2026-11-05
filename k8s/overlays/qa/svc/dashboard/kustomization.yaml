@@ -1,0 +1,42 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: qa-svc
+namePrefix: qa-
+labels:
+  - includeSelectors: false
+    includeTemplates: true
+    pairs:
+      environment: qa
+resources:
+  - ../../../../apps/svc/dashboard/base
+images:
+  - name: insurance-hub-dashboard-api
+    newName: ghcr.io/igor-baiborodine/insurance-hub/dashboard-api
+    newTag: 1.0.0
+configMapGenerator:
+  - name: dashboard-config
+    behavior: merge
+    literals:
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
+      - DEPLOYMENT_ENVIRONMENT=qa
+      - SERVICE_VERSION=git-7091b35cae12
+patches:
+  - path: network-policy-patch.yaml
+    target:
+      kind: NetworkPolicy
+      name: dashboard-api
+replacements:
+  - source:
+      kind: ConfigMap
+      name: dashboard-config
+      fieldPath: data.SERVICE_VERSION
+    targets:
+      - select:
+          kind: Deployment
+          name: dashboard-api
+        fieldPaths:
+          - metadata.labels.app\.kubernetes\.io/version
+          - spec.template.metadata.labels.app\.kubernetes\.io/version
+        options:
+          create: true

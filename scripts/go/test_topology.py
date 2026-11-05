@@ -271,19 +271,19 @@ jobs:
           rm -f -- "$MODULE_DIR/integration-coverage.txt"
           make -C "$MODULE_DIR" "$VALIDATION_TARGET" FORMAT_SCOPE=changed FORMAT_BASE="$FORMAT_BASE"
       - if: steps.select.outputs.module_role != 'service-scaffold'
+        env:
+          PATCH_COVERAGE_MINIMUM: '75'
+        run: >-
+          ./.venv/bin/python scripts/go/patch_coverage.py
+          --base "$FORMAT_BASE" --head "$PR_HEAD"
+          --minimum "$PATCH_COVERAGE_MINIMUM"
+      - if: steps.select.outputs.module_role != 'service-scaffold'
         uses: codecov/codecov-action@v7
         with:
           files: ${{{{ steps.select.outputs.coverage_files }}}}
           flags: ${{{{ steps.select.outputs.coverage_flag }}}}
           disable_search: true
           fail_ci_if_error: true
-      - if: steps.select.outputs.module_role != 'service-scaffold'
-        env:
-          COVERAGE_EXCLUSIONS: ${{{{ steps.select.outputs.coverage_exclusions }}}}
-          PATCH_COVERAGE_MINIMUM: '75'
-        run: >-
-          ./.venv/bin/python scripts/go/patch_coverage.py
-          --exclusions "$COVERAGE_EXCLUSIONS" --minimum "$PATCH_COVERAGE_MINIMUM"
 """
 
 
@@ -509,11 +509,7 @@ def test_topology_reports_controlled_manifest_failures(
             "PATCH_COVERAGE_MINIMUM: '70'",
             "75% patch coverage threshold",
         ),
-        (
-            "steps.select.outputs.coverage_exclusions",
-            "steps.select.outputs.unexpected_exclusions",
-            "selected-module coverage exclusions",
-        ),
+        ('--base "$FORMAT_BASE"', '--base "$PR_HEAD"', "exact patch coverage revisions"),
         (
             "permissions:\n",
             "permissions:\n      - uses: actions/setup-java@v5\n",

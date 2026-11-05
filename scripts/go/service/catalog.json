@@ -221,6 +221,65 @@
           }
         }
       }
+    },
+    "dashboard": {
+      "repositoryRoot": "services",
+      "modulePath": "services/dashboard-service",
+      "localImage": "insurance-hub-dashboard-api",
+      "registryImage": "ghcr.io/igor-baiborodine/insurance-hub/dashboard-api",
+      "kustomizeBase": "k8s/apps/svc/dashboard/base",
+      "overlays": {
+        "local-dev": "k8s/overlays/local-dev/svc/dashboard",
+        "qa": "k8s/overlays/qa/svc/dashboard"
+      },
+      "environments": [
+        "local-dev",
+        "qa"
+      ],
+      "capabilities": [
+        "image-build",
+        "image-check",
+        "deploy-render",
+        "deploy-check",
+        "deploy-preflight",
+        "deploy-status",
+        "image-load",
+        "deploy",
+        "deploy-verify",
+        "stop",
+        "deploy-test-tooling",
+        "deploy-test"
+      ],
+      "releaseTargets": [
+        "qa"
+      ],
+      "deploymentTargets": {
+        "local-dev": {
+          "mode": "direct",
+          "context": "kind-local-dev-insurance-hub",
+          "namespace": "local-dev-all",
+          "dataNamespace": "local-dev-all",
+          "overlay": "k8s/overlays/local-dev/svc/dashboard",
+          "kindCluster": "local-dev-insurance-hub"
+        },
+        "qa": {
+          "mode": "flux",
+          "context": "qa-insurance-hub",
+          "namespace": "qa-svc",
+          "dataNamespace": "qa-svc",
+          "overlay": "k8s/overlays/qa/svc/dashboard",
+          "flux": {
+            "namespace": "flux-system",
+            "sourcePrefix": "qa-dashboard-release",
+            "apiName": "qa-dashboard-api",
+            "bundle": "k8s/flux/qa/releases/dashboard/release.yaml",
+            "sharedSource": "insurance-hub",
+            "sharedOwner": "qa-svc",
+            "sharedPath": "./k8s/overlays/qa/svc",
+            "branch": "main"
+          }
+        }
+      }
     }
   }
 }

@@ -298,6 +298,10 @@ def alloy_check(args: argparse.Namespace, runner: Runner) -> None:
     rbac = runner.run(
         [*command, "--show-only", "templates/rbac.yaml"], label="Alloy RBAC template", timeout=240
     )
+    service_deployments = sorted((K8S / "apps/svc").glob("*/base/deployment.yaml"))
+    deployment_arguments = [
+        argument for path in service_deployments for argument in ("--service-deployment", str(path))
+    ]
     runner.run(
         [
             sys.executable,
@@ -312,6 +316,7 @@ def alloy_check(args: argparse.Namespace, runner: Runner) -> None:
             str(K8S / "tests/validation.mk"),
             "--operations",
             str(K8S / "scripts/monitoring/operations.py"),
+            *deployment_arguments,
             "--rendered-rbac",
             "-",
         ],

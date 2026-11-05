@@ -1,0 +1,291 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Create a renamed service from the Go scaffold](#create-a-renamed-service-from-the-go-scaffold)
+  - [1. Copy only committed template files](#1-copy-only-committed-template-files)
+  - [2. Replace every active identity](#2-replace-every-active-identity)
+  - [3. Bootstrap tools and regenerate owned content](#3-bootstrap-tools-and-regenerate-owned-content)
+  - [4. Reject stale active identities](#4-reject-stale-active-identities)
+  - [5. Validate the independent module without mutation](#5-validate-the-independent-module-without-mutation)
+  - [6. Run the automated copy proof for scaffold changes](#6-run-the-automated-copy-proof-for-scaffold-changes)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
+# Create a renamed service from the Go scaffold
+
+This guide travels with the template and intentionally names the original scaffold identities.
+Those mentions are provenance and copy instructions; they are not runtime imports or generated
+contract identities in a completed copy.
+
+The concrete example below creates `services/example-copy`. Choose service-specific values before
+creating a real service, then use the same replacement categories consistently.
+
+| Identity                       | Scaffold value                                                   | Example copy value                                                |
+|--------------------------------|------------------------------------------------------------------|-------------------------------------------------------------------|
+| Repository directory           | `templates/go-service`                                           | `services/example-copy`                                           |
+| Go module/import prefix        | `github.com/igor-baiborodine/insurance-hub/templates/go-service` | `github.com/igor-baiborodine/insurance-hub/services/example-copy` |
+| Runtime `SERVICE_NAME` default | `go-service`                                                     | `example-copy`                                                    |
+| Protobuf package               | `scaffold.v1`                                                    | `examplecopy.v1`                                                  |
+| Schema/generated path          | `scaffold/v1`                                                    | `examplecopy/v1`                                                  |
+| Generated Go package           | `scaffoldv1`                                                     | `examplecopyv1`                                                   |
+
+Retain the exact published `libs/servicekit` version and its checksums in the renamed copy; never
+replace it with a sibling checkout. Business HTTP, management HTTP and gRPC retain the private
+defaults `127.0.0.1:8080`, `127.0.0.1:8081` and `127.0.0.1:9090`.
+The copied service also retains the explicitly owned same-process gateway connection with grpc-go
+channel idleness disabled. Do not generalize that lifetime choice to remote client connections.
+
+Use a valid Protobuf identifier without a hyphen. The generic `ExampleService`, `EchoRequest`,
+`EchoResponse`, `Echo`, and `cmd/server` names may remain until the service defines a real contract.
+
+## 1. Copy only committed template files
+
+Run these commands from the Insurance Hub repository root. Set `destination` to a path that does not
+exist; the guard prevents silently overlaying another service.
+
+```sh
+source_revision=HEAD
+destination=services/example-copy
+
+test ! -e "$destination"
+mkdir -p "$destination"
+git archive --format=tar "${source_revision}:templates/go-service" |
+  tar -xf - -C "$destination"
+cd "$destination"
+```
+
+`git archive` copies tracked template content only. It excludes ignored `.tools/`, local binaries,
+caches, and repository-local ticket artifacts. The copied ignore rule protects Go tools installed
+later. Keep the generated service in this repository: its Makefile resolves the root Python
+environment and shared Go tooling through `INSURANCE_HUB_ROOT` instead of copying those resources.
+
+## 2. Replace every active identity
+
+Delete generated output before changing schema identity. Never edit generated Go files.
+
+```sh
+generated_backup=$(mktemp -d)
+mv gen "$generated_backup/gen"
+printf 'original generated files moved to %s\n' "$generated_backup/gen"
+mkdir -p api/examplecopy/v1 testdata/contract-baseline/api/examplecopy/v1
+mv api/scaffold/v1/example_service.proto api/examplecopy/v1/example_service.proto
+mv \
+  testdata/contract-baseline/api/scaffold/v1/example_service.proto \
+  testdata/contract-baseline/api/examplecopy/v1/example_service.proto
+rmdir \
+  api/scaffold/v1 \
+  api/scaffold \
+  testdata/contract-baseline/api/scaffold/v1 \
+  testdata/contract-baseline/api/scaffold
+```
+
+Keep that backup outside the module until regeneration and validation succeed, then remove it during
+normal temporary-file cleanup. The copy procedure never needs to overwrite generated files in place.
+
+Apply the concrete example replacements below. They cover the Go module and imports, runtime and
+test identities, schema and generated paths, the checked-in golangci-lint configuration, tooling
+scripts that remain applicable, Make-owned output paths, and the isolated compatibility baseline.
+`COPYING.md` is excluded because it must retain the source values needed to create another
+independent copy.
+
+```sh
+rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
+  'github\.com/igor-baiborodine/insurance-hub/templates/go-service' . |
+  xargs -0 -r sed -i \
+    's|github\.com/igor-baiborodine/insurance-hub/templates/go-service|github.com/igor-baiborodine/insurance-hub/services/example-copy|g'
+
+rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
+  'templates/go-service' . |
+  xargs -0 -r sed -i 's|templates/go-service|services/example-copy|g'
+
+rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
+  'scaffold/v1' . |
+  xargs -0 -r sed -i 's|scaffold/v1|examplecopy/v1|g'
+
+rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
+  'scaffold\.v1' . |
+  xargs -0 -r sed -i 's|scaffold\.v1|examplecopy.v1|g'
+
+rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
+  'scaffoldv1' . |
+  xargs -0 -r sed -i 's|scaffoldv1|examplecopyv1|g'
+
+rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
+  'go-service' . |
+  xargs -0 -r sed -i 's|go-service|example-copy|g'
+
+sed -i 's/^# Go service scaffold$/# Example copy service/' README.md
+```
+
+The source scaffold's `check-copy` and `check-foundations` targets support source maintenance, but are not service-owned
+validation capabilities. Remove those targets and scripts from the copy, and replace the scaffold-only
+root-delegate and CI sections with the copied module's actual onboarding boundary:
+
+```sh
+sed -i 's/ check-copy//g; s/ check-foundations//g' Makefile
+awk '
+  /^(check-copy|check-foundations):/ { skipping = 1; next }
+  skipping && /^\t/ { next }
+  { skipping = 0; print }
+' Makefile > Makefile.copy
+mv Makefile.copy Makefile
+awk '
+  /^# BEGIN SOURCE-SCAFFOLD CANDIDATE PHASES$/ { skipping = 1; next }
+  /^# END SOURCE-SCAFFOLD CANDIDATE PHASES$/ { skipping = 0; next }
+  !skipping { print }
+' Makefile > Makefile.copy
+mv Makefile.copy Makefile
+rm scripts/check_copy.py scripts/test_check_copy.py scripts/check_foundations.py scripts/test_check_foundations.py scripts/shared_phase.py
+
+sed -i \
+  -e '/check-foundations/d' \
+  -e '/^| `make check-copy`/d' \
+  -e '/^make check-copy$/d' \
+  README.md
+awk '
+  /^### Root scaffold delegates$/ {
+    print "### Repository onboarding"
+    print ""
+    print "The scaffold-only `go-scaffold-*` root delegates do not cover this copied module."
+    print "When installed as an immediate `services/*-service` directory, the generic Go PR"
+    print "workflow selects its qualifying inputs. Complete the inventory and ownership onboarding"
+    print "documented in ../../docs/migration/phase-4/go-module-topology.md."
+    skipping = 1
+    next
+  }
+  skipping && /^## Create a repository-owned service$/ { skipping = 0 }
+  !skipping { print }
+' README.md > README.md.copy
+mv README.md.copy README.md
+```
+
+The root `go-scaffold-*` delegates still point to `templates/go-service`. When the copy is installed
+as an immediate `services/<name>-service` directory, the Go PR workflow automatically matches its
+qualifying paths and derives its module selection, cache, and coverage metadata. Repository support
+still requires the inventory, ownership, consumers, and controlled topology fixtures to be reviewed
+together.
+
+Review `README.md` and replace the template introduction with the real service purpose when it is
+known. Update any service-specific ports or configuration defaults required by the service ticket.
+The replacements above update the Makefile-owned Go, gateway and Swagger paths. The `buf.gen.yaml`
+output roots remain identity-neutral; do not change them unless the schema layout or tooling
+contract changes.
+
+## 3. Bootstrap tools and regenerate owned content
+
+Run setup, dependency maintenance, generation, and formatting only through the copied module's
+owning Make targets. These commands may use the network and mutate only their documented paths.
+
+```sh
+GOWORK=off make bootstrap-tools
+GOWORK=off make update-proto-deps
+GOWORK=off make gen-proto
+GOWORK=off make update-deps
+GOWORK=off make format FORMAT_SCOPE=all
+```
+
+Generation must create only:
+
+```text
+gen/examplecopy/v1/example_service.pb.go
+gen/examplecopy/v1/example_service.pb.gw.go
+gen/examplecopy/v1/example_service_grpc.pb.go
+gen/openapiv2/examplecopy/v1/example_service.swagger.json
+```
+
+`bootstrap-tools` uses the repository's root `.python-version`, `pyproject.toml`, `uv.lock`, and
+ignored `.venv/`, then installs the module's pinned Go tools. A caller may set `PYTHON` to an
+already provisioned CPython 3.14.8 environment that satisfies the same root lock checks. Commit the
+regenerated files, changed schema, manifests, lock files, configuration, tests, and documentation
+together. Do not add `.tools/`.
+
+## 4. Reject stale active identities
+
+Run this scan from the copied module root. A match outside `COPYING.md` is stale and must be resolved
+before validation.
+
+```sh
+if rg -n --hidden --glob '!COPYING.md' --glob '!.tools/**' \
+  'github\.com/igor-baiborodine/insurance-hub/templates/go-service|templates/go-service|go-service|scaffold\.v1|scaffold_v1|scaffoldv1|scaffold/v1' .
+then
+  exit 1
+fi
+
+test ! -e go.work
+if rg -n '^replace([[:space:]]|$)' go.mod
+then
+  exit 1
+fi
+
+test "$(sed -n '1s/^module //p' go.mod)" = \
+  'github.com/igor-baiborodine/insurance-hub/services/example-copy'
+test -f api/examplecopy/v1/example_service.proto
+test -f gen/examplecopy/v1/example_service.pb.go
+test -f gen/examplecopy/v1/example_service.pb.gw.go
+test -f gen/examplecopy/v1/example_service_grpc.pb.go
+test -f gen/openapiv2/examplecopy/v1/example_service.swagger.json
+```
+
+The generated-identity checks inspect the runtime descriptor package, file path, `go_package`,
+gateway registration, Swagger definitions and paths, service name, and full RPC method. Logger and
+configuration tests capture and assert the renamed `example-copy` identity. These checks prevent a
+mutually consistent but stale HTTP client, RPC server or OpenAPI document from hiding an incomplete
+rename.
+
+## 5. Validate the independent module without mutation
+
+Capture the module inventory after explicit setup, run the owning Make checks from the copied
+module root, and prove those checks did not rewrite it. The aggregate covers tool/configuration
+verification, formatting, Protobuf formatting and lint, static analysis, race-enabled tests, build,
+dependency drift, generated-output drift and reproducibility, contract compatibility, and reachable
+vulnerabilities. Run `test` separately to exercise the non-race test entry point too.
+
+```sh
+inventory_before=$(mktemp)
+inventory_after=$(mktemp)
+trap 'rm -f "$inventory_before" "$inventory_after"' EXIT
+
+find . -type f ! -path './.tools/*' -print0 |
+  sort -z | xargs -0 sha256sum >"$inventory_before"
+
+GOWORK=off make test \
+  TEST_PACKAGES='./internal/service -run ^TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst$'
+GOWORK=off make test
+GOWORK=off make check FORMAT_SCOPE=all
+
+find . -type f ! -path './.tools/*' -print0 |
+  sort -z | xargs -0 sha256sum >"$inventory_after"
+cmp "$inventory_before" "$inventory_after"
+```
+
+The copy remains a standalone Go module: it must have no `go.work`, filesystem `replace` directive,
+import of the source scaffold, or dependency on its private implementation. Its development tools
+remain repository-owned. This procedure does not add the copy to the canonical inventory or CI;
+complete repository onboarding before claiming root aggregate or hosted coverage.
+
+## 6. Run the automated copy proof for scaffold changes
+
+When changing the source scaffold or this procedure, run the owning proof from the original module.
+It creates a temporary `services/example-copy`, applies every identity replacement above, verifies
+that the copy uses the repository Python environment and shared Go tooling, bootstraps its pinned Go
+tools, regenerates all Go/gateway/Swagger output, and runs explicit copied HTTP→RPC, direct-RPC and
+health acceptance before `test` and the complete non-mutating `check`. It rejects stale generated
+identity, removes scaffold-only copy tooling and coverage claims, compares inventories, and removes
+the temporary tree. Its finite phases report 30-second heartbeats, share a 40-minute work deadline,
+and use a separate 15-second process-group teardown budget.
+
+```sh
+make check-copy
+```
+
+From the repository root, the narrowly scoped equivalent is:
+
+```sh
+make go-scaffold-check-copy
+```
+
+The Go PR workflow automatically covers qualifying inputs when the copy is installed as an
+immediate `services/<name>-service` directory with the standard Make targets. Follow the
+[Go module topology onboarding guide](../../docs/migration/phase-4/go-module-topology.md): record
+ownership and resolution mode, add its owning validation target and consumers, add positive and
+negative boundary fixtures, and run both root topology targets before claiming repository support.
