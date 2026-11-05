@@ -675,7 +675,7 @@ service_json_logs "policy_search" {
 service_json_logs "dashboard" {
   targets        = discovery.kubernetes.qa_service_pods.targets
   workload_name  = "dashboard-api"
-  container_name = "dashboard-service"
+  container_name = "dashboard-api"
   port_name      = "http"
   service_name   = "dashboard-service"
   max_streams    = 8

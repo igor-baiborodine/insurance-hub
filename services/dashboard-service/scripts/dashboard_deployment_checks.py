@@ -254,7 +254,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(len(containers) == 1, "container inventory differs")
     container = containers[0]
     require(
-        container.get("name") == "dashboard-service"
+        container.get("name") == "dashboard-api"
         and container.get("securityContext")
         == {
             "allowPrivilegeEscalation": False,

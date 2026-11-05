@@ -254,6 +254,14 @@ def test_live_state_accepts_api_server_defaulted_probe_fields() -> None:
         (
             "Deployment",
             "local-dev-dashboard-api",
+            lambda item: item["spec"]["template"]["spec"]["containers"][0].__setitem__(
+                "name", "dashboard-service"
+            ),
+            "container name differs",
+        ),
+        (
+            "Deployment",
+            "local-dev-dashboard-api",
             lambda item: item["spec"]["template"]["spec"]["containers"][0]["resources"][
                 "limits"
             ].__setitem__("cpu", "500m"),
@@ -311,7 +319,7 @@ def test_qa_live_state_requires_running_pod_digest(
         "status": {
             "phase": "Running",
             "conditions": [{"type": "Ready", "status": "True"}],
-            "containerStatuses": [{"name": "dashboard-service", "imageID": image_id}],
+            "containerStatuses": [{"name": "dashboard-api", "imageID": image_id}],
         },
     }
 
