@@ -282,9 +282,9 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "runtime identity environment differs",
     )
     probes = {
-        "startupProbe": ({"path": "/livez", "port": "management"}, 2, 2, 30),
-        "livenessProbe": ({"path": "/livez", "port": "management"}, 10, 2, 3),
-        "readinessProbe": ({"path": "/readyz", "port": "management"}, 5, 2, 2),
+        "startupProbe": ({"path": "/livez", "port": "management", "scheme": "HTTP"}, 2, 2, 30),
+        "livenessProbe": ({"path": "/livez", "port": "management", "scheme": "HTTP"}, 10, 2, 3),
+        "readinessProbe": ({"path": "/readyz", "port": "management", "scheme": "HTTP"}, 5, 2, 2),
     }
     for name, (http_get, period, timeout, failures) in probes.items():
         require(

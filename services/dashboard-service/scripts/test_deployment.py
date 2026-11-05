@@ -12,9 +12,9 @@ from unittest.mock import Mock, patch
 import dashboard_deployment_checks as checks
 import pytest
 import yaml
-from scripts.go.service import deployment as lifecycle
 
 import deployment
+from scripts.go.service import deployment as lifecycle
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -207,6 +207,18 @@ def target_with_live_resources(
 def test_live_state_accepts_the_complete_rendered_contract() -> None:
     items = rendered_resources()
     target, _actual = target_with_live_resources(items)
+    target.live(items, require_deployment=True)
+
+
+def test_live_state_accepts_api_server_defaulted_probe_fields() -> None:
+    items = rendered_resources()
+    target, actual = target_with_live_resources(items)
+    deployment = actual[("deployment", "local-dev-dashboard-api")]
+    container = deployment["spec"]["template"]["spec"]["containers"][0]
+    for name in ("startupProbe", "livenessProbe", "readinessProbe"):
+        container[name]["httpGet"]["scheme"] = "HTTP"
+        container[name]["successThreshold"] = 1
+
     target.live(items, require_deployment=True)
 
 
