@@ -179,7 +179,8 @@ update-deps:
 	GOWORK=off $(GO) get github.com/igor-baiborodine/insurance-hub/libs/servicekit@$(SERVICEKIT_VERSION)
 	GOWORK=off $(GO) mod tidy
 
-check-go-pr: verify-tools format-check format-proto-check lint lint-proto test-race build \
+check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
+check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \
 	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
 
 check-gateway-contract: python-runtime-check
