@@ -1,0 +1,146 @@
+groups:
+- interval: 30s
+  name: insurance-hub-dashboard-service
+  rules:
+  - alert: DashboardServiceErrorRate
+    annotations:
+      description: More than 10% of at least 20 Dashboard requests failed unexpectedly
+        in five minutes.
+      runbook_action: Split failures by transport and status, inspect safe logs and
+        traces, and verify Elasticsearch before rollback.
+      summary: Dashboard error rate exceeds the pilot threshold
+    expr: sum(rate(insurance_hub_dashboard_requests_total{service_name="dashboard-service",insurance_hub_dashboard_outcome=~"internal_error|deadline_exceeded"}[5m]))
+      / clamp_min(sum(rate(insurance_hub_dashboard_requests_total{service_name="dashboard-service"}[5m])),
+      0.000001) > 0.1 and sum(increase(insurance_hub_dashboard_requests_total{service_name="dashboard-service"}[5m]))
+      >= 20
+    for: 2m
+    labels:
+      service: dashboard-service
+      severity: warning
+  - alert: DashboardHighLatency
+    annotations:
+      description: Aggregate Dashboard request p95 exceeded 250ms with at least 20
+        requests in five minutes.
+      runbook_action: Split latency by transport, then inspect Elasticsearch duration
+        and a representative slow trace.
+      summary: Dashboard request latency exceeds the pilot threshold
+    expr: "histogram_quantile(0.95,\n  sum by (le) (rate(insurance_hub_dashboard_request_duration_seconds_bucket{service_name=\"\
+      dashboard-service\"}[5m]))) > 0.25\nand sum(increase(insurance_hub_dashboard_requests_total{service_name=\"\
+      dashboard-service\"}[5m])) >= 20"
+    for: 5m
+    labels:
+      service: dashboard-service
+      severity: warning
+  - alert: DashboardElasticsearchFailure
+    annotations:
+      description: More than 5% of at least 20 Elasticsearch operations failed in
+        five minutes.
+      runbook_action: Split total-sales read failures by outcome and verify Elasticsearch
+        readiness, TLS, and reader privileges.
+      summary: Dashboard Elasticsearch failure rate exceeds the pilot threshold
+    expr: sum(rate(insurance_hub_dashboard_dependencies_total{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",insurance_hub_dashboard_outcome=~"error|deadline_exceeded"}[5m]))
+      / clamp_min(sum(rate(insurance_hub_dashboard_dependencies_total{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch"}[5m])),
+      0.000001) > 0.05 and sum(increase(insurance_hub_dashboard_dependencies_total{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch"}[5m]))
+      >= 20
+    for: 2m
+    labels:
+      service: dashboard-service
+      severity: warning
+  - alert: DashboardElasticsearchHighLatency
+    annotations:
+      description: Aggregate Elasticsearch operation p95 exceeded 250ms with at least
+        20 operations in five minutes.
+      runbook_action: Inspect total-sales read latency, Elasticsearch health, and a
+        correlated slow trace.
+      summary: Dashboard Elasticsearch latency exceeds the pilot threshold
+    expr: "histogram_quantile(0.95,\n  sum by (le) (rate(insurance_hub_dashboard_dependency_duration_seconds_bucket{service_name=\"\
+      dashboard-service\",insurance_hub_dashboard_dependency=\"elasticsearch\"}[5m])))\
+      \ > 0.25\nand sum(increase(insurance_hub_dashboard_dependencies_total{service_name=\"\
+      dashboard-service\",insurance_hub_dashboard_dependency=\"elasticsearch\"}[5m]))\
+      \ >= 20"
+    for: 5m
+    labels:
+      service: dashboard-service
+      severity: warning
+  - alert: DashboardResourcePressure
+    annotations:
+      description: Dashboard memory exceeded 80% of 256MiB or CPU exceeded 80% of
+        300m for five minutes.
+      runbook_action: Inspect request and dependency load, runtime memory, throttling, pod
+        events, and rollout identity.
+      summary: Dashboard resource use exceeds the pilot budget
+    expr: sum(container_memory_working_set_bytes{namespace="qa-svc",pod=~"qa-dashboard-api-.*",pod!~"qa-dashboard-api-legacy-.*",container="dashboard-api"})
+      > 214748364.8 or sum(rate(container_cpu_usage_seconds_total{namespace="qa-svc",pod=~"qa-dashboard-api-.*",pod!~"qa-dashboard-api-legacy-.*",container="dashboard-api"}[5m]))
+      > 0.24
+    for: 5m
+    labels:
+      service: dashboard-service
+      severity: warning
+  - alert: DashboardUnavailable
+    annotations:
+      description: The QA Dashboard Deployment has been unavailable or under-replicated
+        for two minutes.
+      runbook_action: Check rollout, readiness, configuration, Elasticsearch reachability,
+        and reader privileges before rollback.
+      summary: Dashboard has fewer available replicas than desired
+    expr: sum(kube_deployment_spec_replicas{namespace="qa-svc",deployment="qa-dashboard-api"})
+      > sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-dashboard-api"})
+    for: 2m
+    labels:
+      service: dashboard-service
+      severity: warning
+  - alert: DashboardTelemetryMissing
+    annotations:
+      description: A Dashboard replica is available, but no bounded Go runtime sample
+        has arrived for two minutes.
+      runbook_action: Verify OTLP configuration, Alloy receiver, and remote-write
+        health before changing the rule.
+      summary: Dashboard is available but runtime telemetry is missing
+    expr: sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-dashboard-api"})
+      > 0 and on() absent_over_time(go_goroutine_count{service_name="dashboard-service",deployment_environment_name="qa",service_implementation="go"}[2m])
+    for: 1m
+    labels:
+      service: dashboard-service
+      severity: warning
+  - alert: DashboardTelemetryDeliveryFailure
+    annotations:
+      description: Alloy reported a Loki drop, Prometheus remote-write failure, or
+        OTLP span export failure in five minutes.
+      runbook_action: Identify the failed signal and backend, inspect bounded retry
+        and drop counters, and preserve service availability.
+      summary: The shared Dashboard telemetry path dropped or failed data
+    expr: sum(increase(loki_write_dropped_entries_total{job=~".*alloy.*"}[5m])) >
+      0 or sum(increase(prometheus_remote_storage_samples_failed_total{job=~".*alloy.*"}[5m]))
+      > 0 or sum(increase(prometheus_remote_storage_samples_dropped_total{job=~".*alloy.*"}[5m]))
+      > 0 or sum(increase(otelcol_exporter_send_failed_spans_total{job=~".*alloy.*"}[5m]))
+      > 0
+    labels:
+      service: dashboard-service
+      severity: warning
+  - alert: DashboardTelemetryBacklog
+    annotations:
+      description: Remote-write lag exceeded 30 seconds while samples were pending,
+        or an OTLP exporter queue exceeded 80%.
+      runbook_action: Check backend reachability and Alloy queue or WAL health, then
+        verify recovery within two minutes.
+      summary: The shared Dashboard telemetry path has a sustained backlog
+    expr: "(sum(prometheus_remote_storage_samples_pending{job=~\".*alloy.*\"}) > 0\n\
+      \  and\n  time() - (max(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job=~\"\
+      .*alloy.*\"}) or vector(0)) > 30)\nor sum(otelcol_exporter_queue_size{job=~\"\
+      .*alloy.*\"})\n  /\n  clamp_min(sum(otelcol_exporter_queue_capacity{job=~\"\
+      .*alloy.*\"}), 1) > 0.8"
+    for: 2m
+    labels:
+      service: dashboard-service
+      severity: warning
+  - alert: DashboardUnexpectedRestart
+    annotations:
+      description: A Dashboard container restarted during the last 15 minutes.
+      runbook_action: Inspect prior state, safe logs, pod events, resource pressure,
+        and rollout identity before rollback.
+      summary: Dashboard restarted unexpectedly
+    expr: sum(increase(kube_pod_container_status_restarts_total{namespace="qa-svc",pod=~"qa-dashboard-api-.*",pod!~"qa-dashboard-api-legacy-.*",container="dashboard-api"}[15m]))
+      > 0
+    labels:
+      service: dashboard-service
+      severity: warning

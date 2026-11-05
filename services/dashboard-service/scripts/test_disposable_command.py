@@ -28,7 +28,24 @@ def rendered_items() -> list[dict[str, object]]:
             "spec": {
                 "template": {
                     "metadata": {"labels": {}},
-                    "spec": {"containers": [{"image": "old", "env": []}]},
+                    "spec": {
+                        "containers": [
+                            {
+                                "image": "old",
+                                "env": [
+                                    {
+                                        "name": "ELASTICSEARCH_PASSWORD",
+                                        "valueFrom": {
+                                            "secretKeyRef": {
+                                                "name": "local-dev-dashboard-elasticsearch",
+                                                "key": "password",
+                                            }
+                                        },
+                                    }
+                                ],
+                            }
+                        ]
+                    },
                 }
             },
         },
@@ -36,7 +53,20 @@ def rendered_items() -> list[dict[str, object]]:
             "apiVersion": "networking.k8s.io/v1",
             "kind": "NetworkPolicy",
             "metadata": {**deepcopy(metadata), "name": "local-dev-dashboard-api"},
-            "spec": {"egress": []},
+            "spec": {
+                "ingress": [
+                    {
+                        "from": [
+                            {
+                                "namespaceSelector": {
+                                    "matchLabels": {"kubernetes.io/metadata.name": "local-dev-all"}
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "egress": [],
+            },
         },
     ]
 
@@ -69,13 +99,43 @@ def test_render_adds_owned_dependency_reader_secret_and_exact_identity(
     )["data"]
     assert config["SERVICE_VERSION"] == "git-0123456789ab"
     assert config["ELASTICSEARCH_USERNAME"] == disposable_deployment.READER_USERNAME
+    environment = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+    credential_entries = [
+        item
+        for item in environment
+        if item.get("name") in {"ELASTICSEARCH_USERNAME", "ELASTICSEARCH_PASSWORD"}
+    ]
+    assert credential_entries == [
+        {
+            "name": "ELASTICSEARCH_USERNAME",
+            "valueFrom": {
+                "secretKeyRef": {
+                    "name": disposable_deployment.ELASTICSEARCH_NAME,
+                    "key": "username",
+                }
+            },
+        },
+        {
+            "name": "ELASTICSEARCH_PASSWORD",
+            "valueFrom": {
+                "secretKeyRef": {
+                    "name": disposable_deployment.ELASTICSEARCH_NAME,
+                    "key": "reader-password",
+                }
+            },
+        },
+    ]
     secret = disposable_deployment.checks.resource(
         actual, "Secret", disposable_deployment.ELASTICSEARCH_NAME
     )
+    assert secret["stringData"]["username"] == disposable_deployment.READER_USERNAME
     assert secret["stringData"]["reader-password"] == disposable_deployment.READER_PASSWORD
     policy = disposable_deployment.checks.resource(
         actual, "NetworkPolicy", "local-dev-dashboard-api"
     )
+    assert policy["spec"]["ingress"][0]["from"][0]["namespaceSelector"]["matchLabels"] == {
+        "kubernetes.io/metadata.name": cluster.namespace
+    }
     assert policy["spec"]["egress"][1]["ports"] == [{"port": 9200, "protocol": "TCP"}]
 
 

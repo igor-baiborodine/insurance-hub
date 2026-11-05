@@ -1,0 +1,191 @@
+{
+  "alerts": {
+    "expression_markers": {
+      "DashboardServiceErrorRate": [
+        "> 0.1",
+        ">= 20",
+        "[5m]"
+      ],
+      "DashboardHighLatency": [
+        "histogram_quantile(0.95",
+        "> 0.25",
+        ">= 20"
+      ],
+      "DashboardElasticsearchFailure": [
+        "insurance_hub_dashboard_dependency=\"elasticsearch\"",
+        "> 0.05",
+        ">= 20"
+      ],
+      "DashboardElasticsearchHighLatency": [
+        "insurance_hub_dashboard_dependency_duration_seconds_bucket",
+        "> 0.25",
+        ">= 20"
+      ],
+      "DashboardResourcePressure": [
+        "> 214748364.8",
+        "> 0.24"
+      ],
+      "DashboardUnavailable": [
+        "kube_deployment_spec_replicas",
+        "kube_deployment_status_replicas_available"
+      ],
+      "DashboardTelemetryMissing": [
+        "absent_over_time",
+        "go_goroutine_count",
+        "[2m]"
+      ],
+      "DashboardTelemetryDeliveryFailure": [
+        "loki_write_dropped_entries_total",
+        "prometheus_remote_storage_samples_failed_total",
+        "prometheus_remote_storage_samples_dropped_total",
+        "otelcol_exporter_send_failed_spans_total"
+      ],
+      "DashboardTelemetryBacklog": [
+        "prometheus_remote_storage_samples_pending",
+        "highest_sent_timestamp_seconds",
+        "otelcol_exporter_queue_size",
+        "> 0.8"
+      ],
+      "DashboardUnexpectedRestart": [
+        "kube_pod_container_status_restarts_total",
+        "[15m]"
+      ]
+    },
+    "for": {
+      "DashboardServiceErrorRate": "2m",
+      "DashboardHighLatency": "5m",
+      "DashboardElasticsearchFailure": "2m",
+      "DashboardElasticsearchHighLatency": "5m",
+      "DashboardResourcePressure": "5m",
+      "DashboardUnavailable": "2m",
+      "DashboardTelemetryMissing": "1m",
+      "DashboardTelemetryDeliveryFailure": null,
+      "DashboardTelemetryBacklog": "2m",
+      "DashboardUnexpectedRestart": null
+    },
+    "group_name": "insurance-hub-dashboard-service",
+    "interval": "30s",
+    "common_labels": {
+      "service": "dashboard-service",
+      "severity": "warning"
+    },
+    "inventory": {
+      "common": [
+        "DashboardServiceErrorRate",
+        "DashboardHighLatency",
+        "DashboardResourcePressure",
+        "DashboardUnavailable",
+        "DashboardTelemetryMissing",
+        "DashboardTelemetryDeliveryFailure",
+        "DashboardTelemetryBacklog",
+        "DashboardUnexpectedRestart"
+      ],
+      "dependencies": {
+        "elasticsearch": [
+          "DashboardElasticsearchFailure",
+          "DashboardElasticsearchHighLatency"
+        ]
+      },
+      "workers": {}
+    },
+    "path": "alerts.yaml",
+    "prometheus_rule_name": "dashboard-service",
+    "required_annotations": [
+      "summary",
+      "description",
+      "runbook_action"
+    ],
+    "test_path": "alerts.test.yaml"
+  },
+  "acceptance": {
+    "path": "acceptance.json"
+  },
+  "capabilities": {
+    "dependencies": [
+      "elasticsearch"
+    ],
+    "workers": []
+  },
+  "dashboard": {
+    "application_selector": "service_name=\"dashboard-service\"",
+    "editable": false,
+    "minimum_prometheus_targets": 24,
+    "path": "dashboard.json",
+    "refresh": "30s",
+    "required_markers": [
+      "\"type\": \"loki\"",
+      "\"type\": \"tempo\"",
+      "trace_id",
+      "Legitimate idle time",
+      "missing telemetry",
+      "pod!~\\\"qa-dashboard-api-legacy-.*\\\""
+    ],
+    "outcomes": {
+      "common": {
+        "availability": [
+          "Readiness and restarts"
+        ],
+        "investigation": [
+          "Failed request investigation logs",
+          "Dashboard traces",
+          "Investigation workflow"
+        ],
+        "pod_resources": [
+          "Pod CPU and memory"
+        ],
+        "requests": [
+          "Request rate",
+          "Service error rate",
+          "Request latency percentiles"
+        ],
+        "runtime": [
+          "Go runtime"
+        ],
+        "telemetry_delivery": [
+          "Telemetry delivery health"
+        ]
+      },
+      "dependencies": {
+        "elasticsearch": [
+          "Elasticsearch outcomes",
+          "Elasticsearch latency percentiles"
+        ]
+      },
+      "workers": {}
+    },
+    "required_query_filters": [
+      "deployment_environment_name=~\"$environment\"",
+      "service_implementation=~\"$implementation\""
+    ],
+    "uid": "insurance-hub-dashboard-service",
+    "variables": {
+      "environment": "deployment_environment_name",
+      "implementation": "service_implementation"
+    }
+  },
+  "fixture": {
+    "minimum_scrapes_per_series": 4,
+    "path": "fixture.json"
+  },
+  "schema_version": 2,
+  "service": "dashboard",
+  "service_name": "dashboard-service",
+  "supported_environments": [
+    "qa"
+  ],
+  "verification": {
+    "expected_signals": {
+      "logs": [
+        "trace_id"
+      ],
+      "metrics": [
+        "insurance_hub_dashboard_requests_total",
+        "insurance_hub_dashboard_dependencies_total"
+      ],
+      "traces": [
+        "dashboard-service"
+      ]
+    },
+    "probe": "dashboard"
+  }
+}

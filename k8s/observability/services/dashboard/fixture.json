@@ -1,0 +1,446 @@
+{
+  "common_labels": {
+    "deployment_environment_name": "qa",
+    "service_implementation": "go",
+    "service_instance_id": "fixture-pod",
+    "service_name": "dashboard-service",
+    "service_version": "fixture"
+  },
+  "dashboard_variables": {
+    "environment": "qa",
+    "implementation": "go"
+  },
+  "schema_version": 1,
+  "series": [
+    {
+      "labels": {
+        "insurance_hub_dashboard_operation": "total_sales",
+        "insurance_hub_dashboard_outcome": "success",
+        "insurance_hub_dashboard_transport": "http"
+      },
+      "name": "insurance_hub_dashboard_requests_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_operation": "total_sales",
+        "insurance_hub_dashboard_outcome": "success",
+        "insurance_hub_dashboard_transport": "grpc"
+      },
+      "name": "insurance_hub_dashboard_requests_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_operation": "total_sales",
+        "insurance_hub_dashboard_outcome": "internal_error",
+        "insurance_hub_dashboard_transport": "http"
+      },
+      "name": "insurance_hub_dashboard_requests_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_operation": "total_sales",
+        "insurance_hub_dashboard_transport": "http",
+        "le": "0.1"
+      },
+      "name": "insurance_hub_dashboard_request_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 20
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_operation": "total_sales",
+        "insurance_hub_dashboard_transport": "http",
+        "le": "0.25"
+      },
+      "name": "insurance_hub_dashboard_request_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 20
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_operation": "total_sales",
+        "insurance_hub_dashboard_transport": "http",
+        "le": "+Inf"
+      },
+      "name": "insurance_hub_dashboard_request_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 20
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_operation": "total_sales",
+        "insurance_hub_dashboard_transport": "http"
+      },
+      "name": "insurance_hub_dashboard_request_duration_seconds_sum",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 1
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_operation": "total_sales",
+        "insurance_hub_dashboard_transport": "http"
+      },
+      "name": "insurance_hub_dashboard_request_duration_seconds_count",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 20
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_dependency": "elasticsearch",
+        "insurance_hub_dashboard_operation": "search",
+        "insurance_hub_dashboard_outcome": "success"
+      },
+      "name": "insurance_hub_dashboard_dependencies_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_dependency": "elasticsearch",
+        "insurance_hub_dashboard_operation": "search",
+        "insurance_hub_dashboard_outcome": "error"
+      },
+      "name": "insurance_hub_dashboard_dependencies_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_dependency": "elasticsearch",
+        "insurance_hub_dashboard_operation": "search",
+        "le": "0.1"
+      },
+      "name": "insurance_hub_dashboard_dependency_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_dependency": "elasticsearch",
+        "insurance_hub_dashboard_operation": "search",
+        "le": "0.25"
+      },
+      "name": "insurance_hub_dashboard_dependency_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_dependency": "elasticsearch",
+        "insurance_hub_dashboard_operation": "search",
+        "le": "+Inf"
+      },
+      "name": "insurance_hub_dashboard_dependency_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_dependency": "elasticsearch",
+        "insurance_hub_dashboard_operation": "search"
+      },
+      "name": "insurance_hub_dashboard_dependency_duration_seconds_sum",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 0.5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_dependency": "elasticsearch",
+        "insurance_hub_dashboard_operation": "search"
+      },
+      "name": "insurance_hub_dashboard_dependency_duration_seconds_count",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_event_type": "registered",
+        "insurance_hub_dashboard_outcome": "success"
+      },
+      "name": "insurance_hub_dashboard_events_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_event_type": "registered",
+        "insurance_hub_dashboard_outcome": "malformed"
+      },
+      "name": "insurance_hub_dashboard_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_event_type": "registered",
+        "insurance_hub_dashboard_outcome": "error"
+      },
+      "name": "insurance_hub_dashboard_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_event_type": "registered",
+        "insurance_hub_dashboard_outcome": "cancelled"
+      },
+      "name": "insurance_hub_dashboard_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_event_type": "terminated",
+        "insurance_hub_dashboard_outcome": "success"
+      },
+      "name": "insurance_hub_dashboard_events_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_event_type": "terminated",
+        "insurance_hub_dashboard_outcome": "malformed"
+      },
+      "name": "insurance_hub_dashboard_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_event_type": "terminated",
+        "insurance_hub_dashboard_outcome": "error"
+      },
+      "name": "insurance_hub_dashboard_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_event_type": "terminated",
+        "insurance_hub_dashboard_outcome": "cancelled"
+      },
+      "name": "insurance_hub_dashboard_events_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {},
+      "name": "go_goroutine_count",
+      "use_common_labels": true,
+      "value": 12
+    },
+    {
+      "labels": {
+        "go_memory_type": "heap"
+      },
+      "name": "go_memory_used_bytes",
+      "use_common_labels": true,
+      "value": 67108864
+    },
+    {
+      "labels": {},
+      "name": "go_memory_gc_cycles_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 1
+      }
+    },
+    {
+      "labels": {
+        "container": "dashboard-api",
+        "namespace": "qa-svc",
+        "pod": "qa-dashboard-api-fixture"
+      },
+      "name": "container_cpu_usage_seconds_total",
+      "use_common_labels": false,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 0.02
+      }
+    },
+    {
+      "labels": {
+        "container": "dashboard-api",
+        "namespace": "qa-svc",
+        "pod": "qa-dashboard-api-fixture"
+      },
+      "name": "container_memory_working_set_bytes",
+      "use_common_labels": false,
+      "value": 104857600
+    },
+    {
+      "labels": {
+        "deployment": "qa-dashboard-api",
+        "namespace": "qa-svc"
+      },
+      "name": "kube_deployment_spec_replicas",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "deployment": "qa-dashboard-api",
+        "namespace": "qa-svc"
+      },
+      "name": "kube_deployment_status_replicas_available",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "condition": "true",
+        "namespace": "qa-svc",
+        "pod": "qa-dashboard-api-fixture"
+      },
+      "name": "kube_pod_status_ready",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "container": "dashboard-api",
+        "namespace": "qa-svc",
+        "pod": "qa-dashboard-api-fixture"
+      },
+      "name": "kube_pod_container_status_restarts_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "loki_write_dropped_entries_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_failed_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_dropped_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_pending",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_send_failed_spans_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_queue_size",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_queue_highest_sent_timestamp_seconds",
+      "use_common_labels": false,
+      "value": {
+        "kind": "unix_time"
+      }
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_queue_capacity",
+      "use_common_labels": false,
+      "value": 2048
+    }
+  ]
+}

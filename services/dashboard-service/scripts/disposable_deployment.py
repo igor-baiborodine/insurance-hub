@@ -138,6 +138,7 @@ def dependency_resources(namespace: str, image: str) -> list[dict[str, Any]]:
             "type": "Opaque",
             "stringData": {
                 "admin-password": ADMIN_PASSWORD,
+                "username": READER_USERNAME,
                 "reader-password": READER_PASSWORD,
             },
         },
@@ -228,13 +229,32 @@ def render(
             "ELASTICSEARCH_TIMEOUT": "5s",
         }
     )
-    deployment["spec"]["template"]["spec"]["containers"][0]["env"].append(
-        {
-            "name": "ELASTICSEARCH_PASSWORD",
-            "valueFrom": {"secretKeyRef": {"name": ELASTICSEARCH_NAME, "key": "reader-password"}},
-        }
+    environment = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+    environment[:] = [
+        item
+        for item in environment
+        if item.get("name") not in {"ELASTICSEARCH_USERNAME", "ELASTICSEARCH_PASSWORD"}
+    ]
+    environment.extend(
+        [
+            {
+                "name": "ELASTICSEARCH_USERNAME",
+                "valueFrom": {"secretKeyRef": {"name": ELASTICSEARCH_NAME, "key": "username"}},
+            },
+            {
+                "name": "ELASTICSEARCH_PASSWORD",
+                "valueFrom": {
+                    "secretKeyRef": {"name": ELASTICSEARCH_NAME, "key": "reader-password"}
+                },
+            },
+        ]
     )
     policy = checks.resource(items, "NetworkPolicy", "local-dev-dashboard-api")
+    for rule in policy["spec"]["ingress"]:
+        for source in rule["from"]:
+            source["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"] = (
+                cluster.namespace
+            )
     policy["spec"]["egress"] = [
         {
             "to": [
@@ -283,7 +303,13 @@ def probe(
         "metadata": {
             "name": name,
             "namespace": cluster.namespace,
-            "labels": {OWNER_LABEL: cluster.namespace, **(labels or {})},
+            "labels": {
+                OWNER_LABEL: cluster.namespace,
+                "app.kubernetes.io/name": "dashboard-qualification",
+                "app.kubernetes.io/component": "probe",
+                "insurance-hub.io/owner": "issue-287",
+                **(labels or {}),
+            },
         },
         "spec": {
             "automountServiceAccountToken": False,
