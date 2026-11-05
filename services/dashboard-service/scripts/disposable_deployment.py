@@ -326,7 +326,7 @@ def run() -> None:
         wait_for("Dashboard endpoint ready", lambda: endpoint_count(cluster) == 1)
         probe(
             cluster,
-            "business-echo",
+            "business-total-sales",
             [
                 "--fail-with-body",
                 "--silent",
@@ -334,8 +334,8 @@ def run() -> None:
                 "--header",
                 "Content-Type: application/json",
                 "--data",
-                '{"message":"disposable-dashboard"}',
-                "http://local-dev-dashboard-api/v1/example/echo",
+                '{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}',
+                "http://local-dev-dashboard-api/dashboard/totalsales",
             ],
             labels={checks.BUSINESS_CLIENT_LABEL: "true"},
         )
@@ -349,7 +349,12 @@ def run() -> None:
         probe(
             cluster,
             "unlabeled-denied",
-            ["--max-time", "3", "--silent", "http://local-dev-dashboard-api/v1/example/echo"],
+            [
+                "--max-time",
+                "3",
+                "--silent",
+                "http://local-dev-dashboard-api/dashboard/totalsales",
+            ],
             expect_success=False,
         )
         pod = cluster.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api")["items"][0][
@@ -365,7 +370,7 @@ def run() -> None:
             activity="wait for replacement Dashboard rollout",
         )
         wait_for("Dashboard endpoint recovered", lambda: endpoint_count(cluster) == 1)
-        print("dashboard-disposable: Echo, health, CNI denial and restart passed")
+        print("dashboard-disposable: total sales, health, CNI denial and restart passed")
     finally:
         if created:
             command(

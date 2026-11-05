@@ -42,7 +42,7 @@ func TestRequestObserver_RecordsBoundedGRPCOutcomes(t *testing.T) {
 				Finish(context.Background(), test.status)
 
 			record := decodeCompletion(t, output)
-			assertLogValue(t, record, "operation", "echo")
+			assertLogValue(t, record, "operation", "total_sales")
 			assertLogValue(t, record, "transport", "grpc")
 			assertLogValue(t, record, "outcome", test.outcome)
 			assertLogValue(t, record, "rpc_status_code", test.logged)
@@ -63,11 +63,11 @@ func TestRequestObserver_RecordsBoundedHTTPOutcomes(t *testing.T) {
 		outcome   string
 		level     string
 	}{
-		{name: "success", route: "POST /v1/example/echo", status: 200, operation: "echo", outcome: "success", level: "INFO"},
+		{name: "success", route: "POST /dashboard/totalsales", status: 200, operation: "total_sales", outcome: "success", level: "INFO"},
 		{name: "invalid request", route: "POST /unknown", status: 400, operation: "unknown", outcome: "invalid_request", level: "INFO"},
-		{name: "cancelled", route: "POST /v1/example/echo", status: 499, operation: "echo", outcome: "cancelled", level: "WARN"},
-		{name: "deadline", route: "POST /v1/example/echo", status: 504, operation: "echo", outcome: "deadline_exceeded", level: "WARN"},
-		{name: "internal", route: "POST /v1/example/echo", status: 500, operation: "echo", outcome: "internal_error", level: "ERROR"},
+		{name: "cancelled", route: "POST /dashboard/totalsales", status: 499, operation: "total_sales", outcome: "cancelled", level: "WARN"},
+		{name: "deadline", route: "POST /dashboard/totalsales", status: 504, operation: "total_sales", outcome: "deadline_exceeded", level: "WARN"},
+		{name: "internal", route: "POST /dashboard/totalsales", status: 500, operation: "total_sales", outcome: "internal_error", level: "ERROR"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			observer, output := requestObserver(t)

@@ -1,4 +1,4 @@
-// Package gateway owns the strict public HTTP-to-gRPC boundary.
+// Package gateway owns the strict private HTTP-to-gRPC boundary.
 package gateway
 
 import (
@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math/big"
 	"mime"
 	"net/http"
 	"strconv"
@@ -28,7 +29,10 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
 )
 
-const echoRoute = "POST /v1/example/echo"
+const (
+	totalSalesPath  = "/dashboard/totalsales"
+	totalSalesRoute = "POST " + totalSalesPath
+)
 
 type Settings struct {
 	RequestTimeout time.Duration
@@ -39,15 +43,15 @@ type Settings struct {
 	Observer       *telemetry.RequestObserver
 }
 
-// NewHandler registers the generated client while retaining a strict HTTP contract.
-func NewHandler(client dashboardv1.ExampleServiceClient, settings Settings) (http.Handler, error) {
+// NewHandler registers the generated Dashboard client while retaining the accepted HTTP contract.
+func NewHandler(
+	client dashboardv1.DashboardServiceClient,
+	settings Settings,
+) (http.Handler, error) {
 	if client == nil || !validSettings(settings) {
 		return nil, errors.New("create gateway: all dependencies and limits are required")
 	}
-	marshaler := &runtime.JSONPb{
-		MarshalOptions:   protojson.MarshalOptions{},
-		UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: false},
-	}
+	marshaler := newLegacyMarshaler()
 	mux := runtime.NewServeMux(
 		runtime.WithMarshalerOption(runtime.MIMEWildcard, marshaler),
 		runtime.WithIncomingHeaderMatcher(denyHeader),
@@ -57,7 +61,7 @@ func NewHandler(client dashboardv1.ExampleServiceClient, settings Settings) (htt
 		runtime.WithDisableHTTPMethodOverride(),
 		runtime.WithDisablePathLengthFallback(),
 	)
-	if err := dashboardv1.RegisterExampleServiceHandlerClient(
+	if err := dashboardv1.RegisterDashboardServiceHandlerClient(
 		context.Background(),
 		mux,
 		client,
@@ -65,7 +69,10 @@ func NewHandler(client dashboardv1.ExampleServiceClient, settings Settings) (htt
 		return nil, errors.New("create gateway: register generated handler")
 	}
 	handler := &Handler{mux: mux, settings: settings}
-	handler.echo = handler.instrument(echoRoute, http.HandlerFunc(handler.serveEcho))
+	handler.totalSales = handler.instrument(
+		totalSalesRoute,
+		http.HandlerFunc(handler.serveTotalSales),
+	)
 	handler.unmatched = handler.instrument(
 		"unmatched",
 		http.HandlerFunc(handler.serveUnmatched),
@@ -73,7 +80,7 @@ func NewHandler(client dashboardv1.ExampleServiceClient, settings Settings) (htt
 	return handler, nil
 }
 
-// NewUnavailableHandler creates the instrumented fixed-envelope response used after drain starts.
+// NewUnavailableHandler creates the fixed-envelope response used after drain starts.
 func NewUnavailableHandler(settings Settings) (http.Handler, error) {
 	if !validSettings(settings) {
 		return nil, errors.New(
@@ -101,21 +108,19 @@ func validSettings(settings Settings) bool {
 }
 
 type Handler struct {
-	mux       http.Handler
-	settings  Settings
-	echo      http.Handler
-	unmatched http.Handler
+	mux        http.Handler
+	settings   Settings
+	totalSales http.Handler
+	unmatched  http.Handler
 }
 
-type requestFacts struct {
-	originalPath string
-	hadQuery     bool
-}
-
-type factsKey struct{}
+type (
+	requestFacts struct{ originalPath string }
+	factsKey     struct{}
+)
 
 func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	facts := requestFacts{originalPath: request.URL.Path, hadQuery: request.URL.RawQuery != ""}
+	facts := requestFacts{originalPath: request.URL.Path}
 	request = sanitizeRequest(
 		request.WithContext(context.WithValue(request.Context(), factsKey{}, facts)),
 	)
@@ -125,8 +130,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	)
 	defer cancel()
 	request = request.WithContext(requestCtx)
-	if facts.originalPath == "/v1/example/echo" && request.Method == http.MethodPost {
-		handler.echo.ServeHTTP(writer, request)
+	if facts.originalPath == totalSalesPath && request.Method == http.MethodPost {
+		handler.totalSales.ServeHTTP(writer, request)
 		return
 	}
 	request.URL.Path = "/unmatched"
@@ -150,20 +155,7 @@ func (handler *Handler) instrument(route string, next http.Handler) http.Handler
 	)
 }
 
-func (handler *Handler) serveEcho(writer http.ResponseWriter, request *http.Request) {
-	if facts, _ := request.Context().Value(factsKey{}).(requestFacts); facts.hadQuery {
-		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
-		return
-	}
-	if !acceptsJSON(request.Header.Get("Accept")) {
-		writeError(
-			writer,
-			http.StatusNotAcceptable,
-			codes.InvalidArgument,
-			"not acceptable",
-		)
-		return
-	}
+func (handler *Handler) serveTotalSales(writer http.ResponseWriter, request *http.Request) {
 	if !isJSON(request.Header.Get("Content-Type")) {
 		writeError(
 			writer,
@@ -187,17 +179,19 @@ func (handler *Handler) serveEcho(writer http.ResponseWriter, request *http.Requ
 		)
 		return
 	}
-	if !validRequestJSON(body) {
+	normalized, ok := normalizeRequestJSON(body)
+	if !ok {
 		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
 		return
 	}
-	request.Body = io.NopCloser(bytes.NewReader(body))
+	request.Body = io.NopCloser(bytes.NewReader(normalized))
 	handler.mux.ServeHTTP(writer, request)
 }
 
 func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http.Request) {
 	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
-	if facts.originalPath == "/v1/example/echo" {
+	if facts.originalPath == totalSalesPath {
+		writer.Header().Set("Allow", http.MethodPost)
 		writeError(
 			writer,
 			http.StatusMethodNotAllowed,
@@ -228,7 +222,7 @@ func sanitizeRequest(request *http.Request) *http.Request {
 
 func denyHeader(string) (string, bool) { return "", false }
 
-// ClearApplicationMetadata removes gateway-created application metadata before otelgrpc injects trace context.
+// ClearApplicationMetadata removes gateway-created metadata before trace injection.
 func ClearApplicationMetadata(
 	ctx context.Context,
 	method string,
@@ -243,7 +237,8 @@ func ClearApplicationMetadata(
 		request,
 		reply,
 		connection,
-		options...)
+		options...,
+	)
 }
 
 func safeGatewayError(
@@ -264,8 +259,6 @@ func safeGatewayError(
 		writeError(writer, http.StatusGatewayTimeout, code, "deadline exceeded")
 	case codes.Unavailable:
 		writeError(writer, http.StatusServiceUnavailable, code, "service unavailable")
-	case codes.ResourceExhausted:
-		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
 	default:
 		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
 	}
@@ -274,13 +267,9 @@ func safeGatewayError(
 func writeError(writer http.ResponseWriter, httpStatus int, code codes.Code, message string) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(httpStatus)
-	_, _ = io.WriteString(
-		writer,
-		`{"code":`+jsonNumber(int32(code))+`,"message":"`+message+`","details":[]}`,
-	)
+	_, _ = io.WriteString(writer, `{"code":`+strconv.FormatInt(int64(code), 10)+
+		`,"message":"`+message+`","details":[]}`)
 }
-
-func jsonNumber(value int32) string { return strconv.FormatInt(int64(value), 10) }
 
 func readBounded(body io.ReadCloser, maximum int) ([]byte, bool, error) {
 	defer func() { _ = body.Close() }()
@@ -288,34 +277,66 @@ func readBounded(body io.ReadCloser, maximum int) ([]byte, bool, error) {
 	return data, len(data) > maximum, err
 }
 
-func validRequestJSON(data []byte) bool {
+type normalizedRequest struct {
+	ProductCode  *string `json:"productCode,omitempty"`
+	SaleDateFrom string  `json:"saleDateFrom"`
+	SaleDateTo   string  `json:"saleDateTo"`
+}
+
+func normalizeRequestJSON(data []byte) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
-		return false
+		return nil, false
 	}
-	seen := false
+	request := normalizedRequest{}
+	var fromSet, toSet bool
 	for decoder.More() {
 		name, err := decoder.Token()
-		if err != nil || name != "message" || seen {
-			return false
+		if err != nil {
+			return nil, false
 		}
-		seen = true
-		var value any
+		var value json.RawMessage
 		if err := decoder.Decode(&value); err != nil {
-			return false
+			return nil, false
 		}
-		if value != nil {
-			if _, ok := value.(string); !ok {
-				return false
+		switch name {
+		case "productCode":
+			if bytes.Equal(value, []byte("null")) {
+				request.ProductCode = nil
+				continue
 			}
+			var product string
+			if err := json.Unmarshal(value, &product); err != nil {
+				return nil, false
+			}
+			request.ProductCode = &product
+		case "saleDateFrom":
+			if bytes.Equal(value, []byte("null")) {
+				return nil, false
+			}
+			if err := json.Unmarshal(value, &request.SaleDateFrom); err != nil {
+				return nil, false
+			}
+			fromSet = true
+		case "saleDateTo":
+			if bytes.Equal(value, []byte("null")) {
+				return nil, false
+			}
+			if err := json.Unmarshal(value, &request.SaleDateTo); err != nil {
+				return nil, false
+			}
+			toSet = true
 		}
 	}
 	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
-		return false
+		return nil, false
 	}
-	_, err = decoder.Token()
-	return errors.Is(err, io.EOF)
+	if _, err = decoder.Token(); !errors.Is(err, io.EOF) || !fromSet || !toSet {
+		return nil, false
+	}
+	normalized, err := json.Marshal(request)
+	return normalized, err == nil
 }
 
 func isJSON(value string) bool {
@@ -329,18 +350,99 @@ func isJSON(value string) bool {
 	return len(parameters) == 1 && strings.EqualFold(parameters["charset"], "utf-8")
 }
 
-func acceptsJSON(value string) bool {
-	if value == "" {
-		return true
+type legacyMarshaler struct{ *runtime.JSONPb }
+
+func newLegacyMarshaler() *legacyMarshaler {
+	return &legacyMarshaler{JSONPb: &runtime.JSONPb{
+		MarshalOptions:   protojson.MarshalOptions{},
+		UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: true},
+	}}
+}
+
+func (marshaler *legacyMarshaler) Marshal(value any) ([]byte, error) {
+	if response, ok := value.(*dashboardv1.GetTotalSalesResponse); ok {
+		return marshalLegacyResponse(response)
 	}
-	for item := range strings.SplitSeq(value, ",") {
-		mediaType, parameters, err := mime.ParseMediaType(strings.TrimSpace(item))
-		if err == nil && len(parameters) == 0 &&
-			(mediaType == "application/json" || mediaType == "*/*") {
-			return true
+	return marshaler.JSONPb.Marshal(value)
+}
+
+func (marshaler *legacyMarshaler) NewEncoder(writer io.Writer) runtime.Encoder {
+	return encoderFunc(func(value any) error {
+		data, err := marshaler.Marshal(value)
+		if err != nil {
+			return err
+		}
+		_, err = writer.Write(data)
+		return err
+	})
+}
+
+type encoderFunc func(any) error
+
+func (encoder encoderFunc) Encode(value any) error { return encoder(value) }
+
+type legacyHTTPValue struct {
+	PoliciesCount int64           `json:"policiesCount"`
+	PremiumAmount json.RawMessage `json:"premiumAmount"`
+}
+
+type legacyHTTPResponse struct {
+	Total           legacyHTTPValue            `json:"total"`
+	PerProductTotal map[string]legacyHTTPValue `json:"perProductTotal,omitempty"`
+}
+
+func marshalLegacyResponse(response *dashboardv1.GetTotalSalesResponse) ([]byte, error) {
+	if response == nil || response.Total == nil {
+		return nil, errors.New("marshal total sales: missing total")
+	}
+	withScale := len(response.PerProductTotal) > 0
+	result := legacyHTTPResponse{
+		Total: legacyValue(response.Total, withScale),
+	}
+	if withScale {
+		result.PerProductTotal = make(
+			map[string]legacyHTTPValue,
+			len(response.PerProductTotal),
+		)
+		for product, value := range response.PerProductTotal {
+			if value == nil {
+				return nil, errors.New("marshal total sales: missing product value")
+			}
+			result.PerProductTotal[product] = legacyValue(value, true)
 		}
 	}
-	return false
+	return json.Marshal(result)
+}
+
+func legacyValue(value *dashboardv1.SalesValue, withScale bool) legacyHTTPValue {
+	return legacyHTTPValue{
+		PoliciesCount: value.GetPoliciesCount(),
+		PremiumAmount: json.RawMessage(
+			formatMinorUnits(value.GetPremiumAmountMinorUnits(), withScale),
+		),
+	}
+}
+
+func formatMinorUnits(value int64, withScale bool) string {
+	if value == 0 && !withScale {
+		return "0"
+	}
+	integer := big.NewInt(value)
+	sign := ""
+	if integer.Sign() < 0 {
+		sign = "-"
+		integer.Abs(integer)
+	}
+	whole, fraction := new(big.Int), new(big.Int)
+	whole.QuoRem(integer, big.NewInt(100), fraction)
+	return sign + whole.String() + "." + leftPadTwo(fraction.String())
+}
+
+func leftPadTwo(value string) string {
+	if len(value) == 1 {
+		return "0" + value
+	}
+	return value
 }
 
 type statusWriter struct {

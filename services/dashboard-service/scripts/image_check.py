@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the Dashboard image Echo, health, identity and bounded shutdown."""
+"""Validate the Dashboard image total-sales path, health, identity and bounded shutdown."""
 
 from __future__ import annotations
 
@@ -119,12 +119,12 @@ def main() -> int:
             "liveness differs",
         )
         status, body = request(
-            f"http://127.0.0.1:{http_port}/v1/example/echo",
-            json.dumps({"message": "dashboard-image-echo"}).encode(),
+            f"http://127.0.0.1:{http_port}/dashboard/totalsales",
+            json.dumps({"saleDateFrom": "2019-01-01", "saleDateTo": "2020-01-01"}).encode(),
         )
         require(
-            status == 200 and json.loads(body) == {"message": "dashboard-image-echo"},
-            "image Echo differs",
+            status == 200 and "total" in json.loads(body),
+            "image total-sales response differs",
         )
         started = time.monotonic()
         command([docker, "stop", "--time", "10", container], "stop Dashboard image", 20)
@@ -149,7 +149,7 @@ def main() -> int:
                 print("dashboard-image-check: container cleanup failed", file=sys.stderr)
     if failed:
         return 1
-    print("dashboard-image-check: Echo, health, identity and shutdown passed")
+    print("dashboard-image-check: total sales, health, identity and shutdown passed")
     return 0
 
 

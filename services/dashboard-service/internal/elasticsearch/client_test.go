@@ -77,11 +77,13 @@ func TestNew_RequiresExactBoundedReadOnlyConfiguration(t *testing.T) {
 func TestClient_DoesNotRetryRejectedSearch(t *testing.T) {
 	// given
 	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		requests++
-		writer.Header().Set("X-Elastic-Product", "Elasticsearch")
-		writer.WriteHeader(http.StatusServiceUnavailable)
-	}))
+	server := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			requests++
+			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
+			writer.WriteHeader(http.StatusServiceUnavailable)
+		}),
+	)
 	defer server.Close()
 	client, err := New(Config{Endpoint: server.URL, Index: PolicyIndex, Timeout: time.Second})
 	if err != nil {

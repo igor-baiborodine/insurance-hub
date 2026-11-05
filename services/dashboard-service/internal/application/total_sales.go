@@ -11,6 +11,7 @@ import (
 
 var (
 	ErrTotalSalesReaderRequired = errors.New("total-sales reader is required")
+	ErrTotalSalesUnavailable    = errors.New("total-sales dependency unavailable")
 	ErrDuplicateProduct         = errors.New("duplicate total-sales product")
 )
 

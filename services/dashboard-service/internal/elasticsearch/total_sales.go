@@ -66,7 +66,7 @@ func (reader *Reader) ReadTotalSales(
 		if contextErr := ctx.Err(); contextErr != nil {
 			return nil, contextErr
 		}
-		return nil, ErrSearchUnavailable
+		return nil, errors.Join(application.ErrTotalSalesUnavailable, ErrSearchUnavailable)
 	}
 	if response == nil || response.Body == nil {
 		return nil, ErrInvalidResponse

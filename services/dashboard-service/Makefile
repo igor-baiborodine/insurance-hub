@@ -113,7 +113,7 @@ image-build: python-runtime-check ## Build the pinned linux/amd64 Dashboard runt
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" build
 
-image-check: image-build ## Build and validate Dashboard image identity, Echo, health and shutdown
+image-check: image-build ## Build and validate Dashboard image identity, total sales, health and shutdown
 	@$(MAKE) --no-print-directory _image-check-existing
 
 _image-check-existing: python-runtime-check
