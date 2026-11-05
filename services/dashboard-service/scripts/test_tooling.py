@@ -234,6 +234,17 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
             encoding="utf-8",
         )
         return "test", ": test] Error", ("TEST_PACKAGES=./internal/service",)
+    if case == "source-version":
+        path = fixture / "internal" / "config" / "config.go"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("return !allZero", "return true", 1),
+            encoding="utf-8",
+        )
+        return (
+            "test",
+            ": test] Error",
+            ("TEST_PACKAGES=./internal/config",),
+        )
     generated = fixture / GENERATED_PACKAGE
     if case == "generated-modified":
         path = generated / "example_service.pb.go"
@@ -302,6 +313,7 @@ def test_non_race_test_target_passes_without_mutation(tooling: Tooling) -> None:
         "proto-breaking",
         "gateway-contract",
         "gateway-startup",
+        "source-version",
         "generated-modified",
         "generated-unexpected",
         "generated-missing",

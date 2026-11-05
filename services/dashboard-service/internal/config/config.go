@@ -70,6 +70,12 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	if serviceName != DefaultServiceName {
+		return Config{}, kitconfig.Invalid(
+			kitconfig.EnvServiceName,
+			"must identify the Dashboard service",
+		)
+	}
 
 	grpcAddress, err := kitconfig.LoadAddress(
 		lookup, kitconfig.EnvGRPCAddress, kitconfig.DefaultGRPCAddress,
@@ -307,7 +313,30 @@ func (identity Identity) Validate(enabled bool) error {
 			"must use explicit non-development environment, version and instance when enabled",
 		)
 	}
+	if identity.Environment != "development" && !validSourceVersion(identity.ServiceVersion) {
+		return kitconfig.Invalid(
+			kitconfig.EnvServiceVersion,
+			"must be git- followed by 12 nonzero lowercase source revision characters",
+		)
+	}
 	return nil
+}
+
+func validSourceVersion(value string) bool {
+	if len(value) != len("git-")+12 || !strings.HasPrefix(value, "git-") {
+		return false
+	}
+	suffix := strings.TrimPrefix(value, "git-")
+	allZero := true
+	for _, ch := range suffix {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+		if ch != '0' {
+			allZero = false
+		}
+	}
+	return !allZero
 }
 
 func validIdentityValue(value string) bool {

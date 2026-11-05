@@ -185,9 +185,9 @@ func TestLoad_ValidOverrides(t *testing.T) {
 	// given
 	values := map[string]string{
 		kitconfig.EnvDeploymentEnvironment:    "test",
-		kitconfig.EnvServiceVersion:           "test-revision",
+		kitconfig.EnvServiceVersion:           "git-123456789abc",
 		kitconfig.EnvServiceInstanceID:        "test-instance",
-		kitconfig.EnvServiceName:              "copy-service",
+		kitconfig.EnvServiceName:              "dashboard-service",
 		kitconfig.EnvGRPCAddress:              "[::1]:0",
 		kitconfig.EnvHealthAddress:            "localhost:0",
 		kitconfig.EnvLogLevel:                 "DEBUG+2",
@@ -204,7 +204,7 @@ func TestLoad_ValidOverrides(t *testing.T) {
 		t.Fatalf("load overrides: %v", err)
 	}
 
-	if got.ServiceName != "copy-service" || got.GRPCAddress.String() != "[::1]:0" ||
+	if got.ServiceName != "dashboard-service" || got.GRPCAddress.String() != "[::1]:0" ||
 		got.HealthAddress.String() != "localhost:0" {
 		t.Errorf("unexpected identity or addresses: %+v", got)
 	}
@@ -232,6 +232,11 @@ func TestLoad_RejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
 		{
 			name:    "empty service",
 			values:  map[string]string{kitconfig.EnvServiceName: ""},
+			setting: kitconfig.EnvServiceName,
+		},
+		{
+			name:    "wrong service",
+			values:  map[string]string{kitconfig.EnvServiceName: "other-service"},
 			setting: kitconfig.EnvServiceName,
 		},
 		{
@@ -394,7 +399,7 @@ func TestLoad_RuntimeBoundsAndIdentity(t *testing.T) {
 		kitconfig.EnvOTELEnabled:              "true",
 		kitconfig.EnvOTELExporterOTLPEndpoint: "http://127.0.0.1:4317",
 		kitconfig.EnvDeploymentEnvironment:    "staging",
-		kitconfig.EnvServiceVersion:           "sha-1234567",
+		kitconfig.EnvServiceVersion:           "git-123456789abc",
 		kitconfig.EnvServiceInstanceID:        "instance-123",
 		kitconfig.EnvRequestTimeout:           "3s",
 		kitconfig.EnvProbeTimeout:             "250ms",
@@ -437,6 +442,55 @@ func TestLoad_RuntimeBoundsAndIdentity(t *testing.T) {
 			// then
 			if err == nil || strings.Contains(err.Error(), "private-marker") {
 				t.Fatalf("unsafe or absent rejection: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoad_RequiresSourceDerivedVersionOutsideDevelopment(t *testing.T) {
+	// given
+	valid := map[string]string{
+		kitconfig.EnvDeploymentEnvironment: "local-dev",
+		kitconfig.EnvServiceVersion:        "git-123456789abc",
+		kitconfig.EnvServiceInstanceID:     "dashboard-pod-123",
+	}
+	versions := []string{
+		"development",
+		"git-000000000000",
+		"git-123456789AB",
+		"git-123456789ab",
+		"sha-123456789abc",
+	}
+
+	// when
+	got, err := load(mapLookup(valid))
+
+	// then
+	if err != nil || got.Identity.ServiceVersion != "git-123456789abc" {
+		t.Fatalf("source-derived version rejected: (%+v, %v)", got.Identity, err)
+	}
+	for _, version := range versions {
+		t.Run(version, func(t *testing.T) {
+			// given
+			values := make(map[string]string, len(valid))
+			for key, value := range valid {
+				values[key] = value
+			}
+			values[kitconfig.EnvServiceVersion] = version
+			// when
+			_, err := load(mapLookup(values))
+			// then
+			if err == nil {
+				t.Fatalf("unresolved or malformed version %q accepted", version)
+			}
+			setting, _ := kitconfig.ErrorDetails(err)
+			if setting != kitconfig.EnvServiceVersion {
+				t.Errorf(
+					"setting = %q, want %q: %v",
+					setting,
+					kitconfig.EnvServiceVersion,
+					err,
+				)
 			}
 		})
 	}

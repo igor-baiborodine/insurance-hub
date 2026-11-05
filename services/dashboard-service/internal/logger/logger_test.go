@@ -217,7 +217,7 @@ func TestNewIdentity_RedactsErrorsAndUsesUTC(t *testing.T) {
 	serviceIdentity := identity.Identity{
 		ServiceNamespace: "insurance-hub",
 		ServiceName:      "dashboard-service",
-		ServiceVersion:   "sha-1234567",
+		ServiceVersion:   "git-123456789abc",
 		ServiceInstance:  "instance-123",
 		Environment:      "staging",
 		Implementation:   "go",
@@ -239,7 +239,7 @@ func TestNewIdentity_RedactsErrorsAndUsesUTC(t *testing.T) {
 		t.Fatal(err)
 	}
 	for key, want := range map[string]string{
-		"service_namespace": "insurance-hub", "service_name": "dashboard-service", "service_version": "sha-1234567",
+		"service_namespace": "insurance-hub", "service_name": "dashboard-service", "service_version": "git-123456789abc",
 		"service_instance_id": "instance-123", "deployment_environment_name": "staging", "service_implementation": "go",
 		"error": "[REDACTED]", "msg": "request completed", "level": "INFO",
 	} {

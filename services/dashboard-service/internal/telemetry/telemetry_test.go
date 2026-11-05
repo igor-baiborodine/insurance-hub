@@ -69,6 +69,9 @@ func TestNew_RejectsDashboardIdentityAndExporterSettings(t *testing.T) {
 		{"development identity", func(s *config.Telemetry) {
 			s.Identity = config.DevelopmentIdentity("dashboard-service").Identity
 		}, "dashboard-service"},
+		{"unresolved version", func(s *config.Telemetry) {
+			s.Identity.ServiceVersion = "git-000000000000"
+		}, "dashboard-service"},
 		{"wrong namespace", func(s *config.Telemetry) { s.Identity.ServiceNamespace = "other" }, "dashboard-service"},
 		{"wrong implementation", func(s *config.Telemetry) { s.Identity.Implementation = "java" }, "dashboard-service"},
 		{"invalid instance", func(s *config.Telemetry) { s.Identity.ServiceInstance = "private-marker\n" }, "dashboard-service"},
@@ -99,7 +102,7 @@ func enabledIdentity() identity.Identity {
 	return identity.Identity{
 		ServiceNamespace: "insurance-hub",
 		ServiceName:      "dashboard-service",
-		ServiceVersion:   "test-revision",
+		ServiceVersion:   "git-123456789abc",
 		ServiceInstance:  "test-instance",
 		Environment:      "test",
 		Implementation:   "go",

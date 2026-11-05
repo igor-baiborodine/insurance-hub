@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -908,6 +909,32 @@ func TestRun_PartialBindFailureClosesEarlierListeners(t *testing.T) {
 	}
 }
 
+func TestRun_PartialStartupShutsDownTelemetryExactlyOnce(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	deps := productionDependencies()
+	provider := &recordingProvider{
+		tracerProvider: sdktrace.NewTracerProvider(),
+		meterProvider:  metricnoop.NewMeterProvider(),
+	}
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return provider, nil
+	}
+	bindFailure := errors.New("gRPC bind failed")
+	deps.listen = func(string, string) (net.Listener, error) { return nil, bindFailure }
+
+	// when
+	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
+	if !errors.Is(err, bindFailure) {
+		t.Fatalf("run error = %v, want bind failure", err)
+	}
+	if provider.shutdowns.Load() != 1 {
+		t.Errorf("telemetry shutdowns = %d, want exactly one", provider.shutdowns.Load())
+	}
+}
+
 func TestInternalDialTarget_NormalizesWildcardFamilies(t *testing.T) {
 	// given
 	for _, test := range []struct{ input, want string }{
@@ -1098,6 +1125,7 @@ func (address testAddress) String() string { return string(address) }
 type recordingProvider struct {
 	tracerProvider *sdktrace.TracerProvider
 	meterProvider  metric.MeterProvider
+	shutdowns      atomic.Int32
 }
 
 type statefulGatewayConnection struct {
@@ -1183,5 +1211,6 @@ func (*recordingProvider) GRPCPropagator() propagation.TextMapPropagator {
 }
 
 func (provider *recordingProvider) Shutdown(ctx context.Context) error {
+	provider.shutdowns.Add(1)
 	return provider.tracerProvider.Shutdown(ctx)
 }

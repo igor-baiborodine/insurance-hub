@@ -176,6 +176,50 @@ func TestExampleService_Echo_Boundaries(t *testing.T) {
 	}
 }
 
+func TestExampleService_Echo_AcceptsEveryAllowedASCIIByteLength(t *testing.T) {
+	// given
+	var calls atomic.Int64
+	client := newExampleClient(
+		t,
+		func(ctx context.Context, message string) (string, error) {
+			calls.Add(1)
+			return transport.IdentityEcho(ctx, message)
+		},
+		noop.NewTracerProvider(),
+		propagation.TraceContext{},
+		new(bytes.Buffer),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// when / then
+	for size := 1; size <= 128; size++ {
+		message := strings.Repeat("a", size)
+		response, err := client.Echo(ctx, &dashboardv1.EchoRequest{Message: message})
+		if err != nil || response.GetMessage() != message {
+			t.Fatalf(
+				"%d-byte message = (%q, %v), want unchanged success",
+				size,
+				response.GetMessage(),
+				err,
+			)
+		}
+	}
+	response, err := client.Echo(
+		ctx,
+		&dashboardv1.EchoRequest{Message: strings.Repeat("a", 129)},
+	)
+	if response != nil || status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("129-byte message = (%v, %v), want invalid argument", response, err)
+	}
+	if calls.Load() != 128 {
+		t.Errorf(
+			"handler calls = %d, want one for every accepted byte length",
+			calls.Load(),
+		)
+	}
+}
+
 func TestExampleService_Echo_PreservesCancellation(t *testing.T) {
 	// given
 	started := make(chan struct{})

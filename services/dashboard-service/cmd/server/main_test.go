@@ -20,7 +20,7 @@ import (
 func TestRun_LogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 	// given
 	const privateMarker = "private-credential-marker"
-	t.Setenv("SERVICE_NAME", "configured-service")
+	t.Setenv("SERVICE_NAME", "dashboard-service")
 	t.Setenv("GRPC_ADDR", "127.0.0.1:0")
 	t.Setenv("HEALTH_ADDR", "127.0.0.1:0")
 	t.Setenv("LOG_LEVEL", "info")
