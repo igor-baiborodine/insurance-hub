@@ -24,6 +24,7 @@ TOOL_NAMES = (
     "govulncheck",
 )
 IGNORED_DIRECTORIES = {".git", ".tools", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+COVERAGE_OUTPUTS = frozenset({"coverage.txt", "integration-coverage.txt"})
 PROTO_SCHEMA = Path("api/dashboard/v1/example_service.proto")
 GENERATED_PACKAGE = Path("gen/dashboard/v1")
 
@@ -40,7 +41,7 @@ class Tooling:
 
 
 def _ignore(_: str, names: list[str]) -> set[str]:
-    return {name for name in names if name in IGNORED_DIRECTORIES}
+    return {name for name in names if name in IGNORED_DIRECTORIES or name in COVERAGE_OUTPUTS}
 
 
 def inventory(root: Path) -> dict[str, str]:
@@ -107,6 +108,7 @@ def run_target(
     target: str,
     *variables: str,
     expect_failure: str | None = None,
+    allowed_mutations: frozenset[str] = frozenset(),
 ) -> None:
     before = inventory(fixture)
     log = tooling.temporary_root / "logs" / f"{name}.log"
@@ -153,7 +155,11 @@ def run_target(
                 log_path=log,
             )
         assert expect_failure in log.read_text(encoding="utf-8")
-    assert before == inventory(fixture), f"{name} mutated its disposable checkout"
+    after = inventory(fixture)
+    for path in allowed_mutations:
+        before.pop(path, None)
+        after.pop(path, None)
+    assert before == after, f"{name} mutated its disposable checkout"
 
 
 def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]:
@@ -335,14 +341,23 @@ def test_controlled_defect_is_rejected_without_mutation(tooling: Tooling, case: 
     run_target(tooling, fixture, case, target, *variables, expect_failure=diagnostic)
 
 
-def test_dashboard_pr_check_passes_without_coverage(tooling: Tooling) -> None:
+def test_dashboard_pr_check_runs_required_coverage(tooling: Tooling) -> None:
     # given
     fixture = new_fixture(tooling, "dashboard-pr-check")
 
     # when
-    run_target(tooling, fixture, "dashboard-pr-check", "check-go-pr", "FORMAT_SCOPE=all")
+    run_target(
+        tooling,
+        fixture,
+        "dashboard-pr-check",
+        "check-go-pr",
+        "FORMAT_SCOPE=all",
+        allowed_mutations=COVERAGE_OUTPUTS,
+    )
 
     # then
     log = (tooling.temporary_root / "logs" / "dashboard-pr-check.log").read_text(encoding="utf-8")
-    assert "-coverprofile=" not in log
-    assert not (fixture / "coverage.txt").exists()
+    assert '-coverprofile="coverage.txt"' in log
+    assert '-coverprofile="integration-coverage.txt"' in log
+    for output in COVERAGE_OUTPUTS:
+        assert (fixture / output).stat().st_size > 0
