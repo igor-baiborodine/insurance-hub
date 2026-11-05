@@ -190,12 +190,19 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
 
     config = resource(items, "ConfigMap", prefix + "dashboard-config")
     data = config.get("data", {})
-    required_config = {
+    version = data.get("SERVICE_VERSION", "")
+    require(
+        bool(re.fullmatch(r"git-[0-9a-f]{12}", version)),
+        "runtime version is unresolved",
+    )
+    expected_config = {
         "SERVICE_NAME": "dashboard-service",
         "DEPLOYMENT_ENVIRONMENT": environment,
+        "SERVICE_VERSION": version,
         "HTTP_ADDR": "0.0.0.0:8080",
         "GRPC_ADDR": "0.0.0.0:9090",
         "HEALTH_ADDR": "0.0.0.0:8081",
+        "LOG_LEVEL": "info",
         "REQUEST_TIMEOUT": "8s",
         "PROBE_TIMEOUT": "2s",
         "SHUTDOWN_TIMEOUT": "10s",
@@ -208,25 +215,13 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "HTTP_IDLE_TIMEOUT": "30s",
         "GRPC_MAX_RECV_BYTES": "1048576",
         "GRPC_MAX_SEND_BYTES": "8388608",
+        "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
     }
-    require(
-        all(data.get(key) == value for key, value in required_config.items()),
-        "runtime budgets differ",
-    )
-    require(
-        bool(re.fullmatch(r"git-[0-9a-f]{12}", data.get("SERVICE_VERSION", ""))),
-        "runtime version is unresolved",
-    )
-    if environment == "local-dev":
-        require(data.get("OTEL_ENABLED") == "false", "local telemetry configuration differs")
-        require("OTEL_EXPORTER_OTLP_ENDPOINT" not in data, "local telemetry endpoint is forbidden")
-    else:
-        require(
-            data.get("OTEL_ENABLED") == "true"
-            and data.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-            == "http://qa-alloy.qa-monitoring.svc.cluster.local:4317",
-            "QA telemetry configuration differs",
+    if environment == "qa":
+        expected_config["OTEL_EXPORTER_OTLP_ENDPOINT"] = (
+            "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
         )
+    require(data == expected_config, "runtime configuration differs")
 
     deployment = resource(items, "Deployment", prefix + "dashboard-api")
     spec = deployment.get("spec", {})

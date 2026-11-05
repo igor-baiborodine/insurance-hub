@@ -12,9 +12,9 @@ from unittest.mock import Mock, patch
 import dashboard_deployment_checks as checks
 import pytest
 import yaml
+from scripts.go.service import deployment as lifecycle
 
 import deployment
-from scripts.go.service import deployment as lifecycle
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -149,6 +149,24 @@ def test_render_requires_the_runtime_config_map_linkage() -> None:
     deployment_item["spec"]["template"]["spec"]["containers"][0].pop("envFrom")
     with pytest.raises(checks.DeploymentError, match="container security or resources"):
         checks.validate_render("local-dev", yaml.safe_dump_all(items))
+
+
+@pytest.mark.parametrize(
+    ("environment", "key"),
+    [
+        ("local-dev", "PASSWORD"),
+        ("qa", "TOKEN"),
+        ("local-dev", "ADMINISTRATION_MODE"),
+        ("qa", "DEPENDENCY_ENDPOINT"),
+    ],
+)
+def test_render_rejects_undeclared_runtime_configuration(environment: str, key: str) -> None:
+    items = checks.documents(checks.render(environment))
+    config = checks.resource(items, "ConfigMap", f"{environment}-dashboard-config")
+    config["data"][key] = "private-or-undeclared-value"
+
+    with pytest.raises(checks.DeploymentError, match="runtime configuration differs"):
+        checks.validate_render(environment, yaml.safe_dump_all(items))
 
 
 def test_live_state_rejects_wrong_resource_identity() -> None:
