@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.12-20260825204119-511051f7f437.1
 	buf.build/go/protovalidate v1.4.0
+	github.com/elastic/go-elasticsearch/v8 v8.19.7
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0
 	github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.0.1
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.71.0
@@ -26,6 +27,7 @@ require (
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/elastic/elastic-transport-go/v8 v8.9.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

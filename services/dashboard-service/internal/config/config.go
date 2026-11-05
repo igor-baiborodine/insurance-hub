@@ -1,9 +1,11 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 	kitidentity "github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
@@ -13,11 +15,20 @@ import (
 const DefaultServiceName = "dashboard-service"
 
 const (
-	EnvHTTPAddress        = "HTTP_ADDR"
-	EnvHTTPMaxHeaderBytes = "HTTP_MAX_HEADER_BYTES"
-	EnvHTTPMaxBodyBytes   = "HTTP_MAX_BODY_BYTES"
-	defaultMaxHeaderBytes = 16384
-	defaultMaxBodyBytes   = 4096
+	EnvHTTPAddress              = "HTTP_ADDR"
+	EnvHTTPMaxHeaderBytes       = "HTTP_MAX_HEADER_BYTES"
+	EnvHTTPMaxBodyBytes         = "HTTP_MAX_BODY_BYTES"
+	EnvElasticsearchURL         = "ELASTICSEARCH_URL"
+	EnvElasticsearchIndex       = "ELASTICSEARCH_INDEX"
+	EnvElasticsearchUsername    = "ELASTICSEARCH_USERNAME"
+	EnvElasticsearchPassword    = "ELASTICSEARCH_PASSWORD"
+	EnvElasticsearchCAFile      = "ELASTICSEARCH_CA_FILE"
+	EnvElasticsearchTimeout     = "ELASTICSEARCH_TIMEOUT"
+	defaultMaxHeaderBytes       = 16384
+	defaultMaxBodyBytes         = 4096
+	defaultElasticsearchURL     = "http://127.0.0.1:9200"
+	defaultElasticsearchIndex   = "policy_stats"
+	defaultElasticsearchTimeout = 5 * time.Second
 )
 
 // Config contains settings parsed and validated once during process startup.
@@ -32,6 +43,17 @@ type Config struct {
 	HealthAddress      Address
 	HTTPMaxHeaderBytes int
 	HTTPMaxBodyBytes   int
+	Elasticsearch      Elasticsearch
+}
+
+// Elasticsearch contains the bounded read-only dependency settings.
+type Elasticsearch struct {
+	URL      string
+	Index    string
+	Username string
+	Password string
+	CAFile   string
+	Timeout  time.Duration
 }
 
 // Address uses the shared TCP address parser and preserves ephemeral ports.
@@ -182,6 +204,10 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	elasticsearchSettings, err := loadElasticsearch(lookup)
+	if err != nil {
+		return Config{}, err
+	}
 	runtime := kitconfig.Runtime{
 		RequestTimeout:  requestTimeout,
 		ProbeTimeout:    probeTimeout,
@@ -254,8 +280,110 @@ func load(lookup lookupEnv) (Config, error) {
 		HealthAddress:      healthAddress,
 		HTTPMaxHeaderBytes: maxHeaderBytes,
 		HTTPMaxBodyBytes:   maxBodyBytes,
+		Elasticsearch:      elasticsearchSettings,
 		Telemetry:          telemetry,
 	}, nil
+}
+
+func loadElasticsearch(lookup lookupEnv) (Elasticsearch, error) {
+	endpoint, err := kitconfig.ValueOrDefault(
+		lookup,
+		EnvElasticsearchURL,
+		defaultElasticsearchURL,
+	)
+	if err != nil {
+		return Elasticsearch{}, err
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed == nil ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		parsed.Hostname() == "" || parsed.User != nil || parsed.Path != "" ||
+		parsed.RawQuery != "" || parsed.Fragment != "" {
+		return Elasticsearch{}, kitconfig.Invalid(
+			EnvElasticsearchURL,
+			"must be an HTTP or HTTPS origin without credentials or a path",
+		)
+	}
+	index, err := kitconfig.ValueOrDefault(
+		lookup,
+		EnvElasticsearchIndex,
+		defaultElasticsearchIndex,
+	)
+	if err != nil {
+		return Elasticsearch{}, err
+	}
+	if !validElasticsearchIndex(index) || index != defaultElasticsearchIndex {
+		return Elasticsearch{}, kitconfig.Invalid(
+			EnvElasticsearchIndex,
+			"must be policy_stats",
+		)
+	}
+	username, err := optionalSetting(lookup, EnvElasticsearchUsername)
+	if err != nil {
+		return Elasticsearch{}, err
+	}
+	password, err := optionalSetting(lookup, EnvElasticsearchPassword)
+	if err != nil {
+		return Elasticsearch{}, err
+	}
+	if (username == "") != (password == "") {
+		return Elasticsearch{}, kitconfig.Invalid(
+			EnvElasticsearchUsername,
+			"must be configured together with ELASTICSEARCH_PASSWORD",
+		)
+	}
+	caFile, err := optionalSetting(lookup, EnvElasticsearchCAFile)
+	if err != nil {
+		return Elasticsearch{}, err
+	}
+	if caFile != "" && parsed.Scheme != "https" {
+		return Elasticsearch{}, kitconfig.Invalid(
+			EnvElasticsearchCAFile,
+			"requires an HTTPS Elasticsearch URL",
+		)
+	}
+	timeout, err := kitconfig.LoadPositiveDuration(
+		lookup,
+		EnvElasticsearchTimeout,
+		defaultElasticsearchTimeout.String(),
+	)
+	if err != nil {
+		return Elasticsearch{}, err
+	}
+	if timeout > defaultElasticsearchTimeout {
+		return Elasticsearch{}, kitconfig.Invalid(
+			EnvElasticsearchTimeout,
+			"must not exceed 5s",
+		)
+	}
+	return Elasticsearch{
+		URL: endpoint, Index: index, Username: username, Password: password,
+		CAFile: caFile, Timeout: timeout,
+	}, nil
+}
+
+func validElasticsearchIndex(value string) bool {
+	if len(value) == 0 || len(value) > 255 || value == "." || value == ".." {
+		return false
+	}
+	for index, char := range value {
+		if index == 0 && (char == '-' || char == '_' || char == '+') {
+			return false
+		}
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') &&
+			char != '-' && char != '_' && char != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func optionalSetting(lookup lookupEnv, name string) (string, error) {
+	value, present := lookup(name)
+	if present && value == "" {
+		return "", kitconfig.Invalid(name, "must not be empty when set")
+	}
+	return value, nil
 }
 
 func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity, error) {
