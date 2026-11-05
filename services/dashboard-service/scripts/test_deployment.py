@@ -392,8 +392,11 @@ def java_resources(
             "spec": {
                 "type": "ClusterIP",
                 "selector": {
-                    "app.kubernetes.io/name": "dashboard-api-legacy",
                     "app.kubernetes.io/component": "api",
+                    "app.kubernetes.io/managed-by": "kustomize",
+                    "app.kubernetes.io/name": "dashboard-api-legacy",
+                    "app.kubernetes.io/part-of": "insurance-hub",
+                    "environment": "local-dev",
                 },
             },
         },
@@ -426,7 +429,7 @@ def test_java_snapshot_requires_declared_stable_available_resources() -> None:
         }
 
 
-@pytest.mark.parametrize("defect", ["absent", "replaced", "unavailable"])
+@pytest.mark.parametrize("defect", ["absent", "replaced", "selector", "unavailable"])
 def test_invalid_java_owner_prevents_go_apply(defect: str) -> None:
     resources = java_resources()
     expected_deployment_uid = "deployment-uid"
@@ -434,6 +437,8 @@ def test_invalid_java_owner_prevents_go_apply(defect: str) -> None:
         resources["deployment"] = {}
     elif defect == "replaced":
         resources["deployment"]["metadata"]["uid"] = "replacement-uid"
+    elif defect == "selector":
+        resources["service"]["spec"]["selector"].pop("environment")
     else:
         resources["deployment"]["status"] = {
             "availableReplicas": 0,
@@ -460,12 +465,12 @@ def test_invalid_java_owner_prevents_go_apply(defect: str) -> None:
     apply.assert_not_called()
 
 
-def test_qa_aggregate_remains_inactive_beside_java() -> None:
-    checks.validate_qa_aggregate(["./dashboard/legacy", "./product"])
-    with pytest.raises(checks.DeploymentError, match="must remain inactive"):
-        checks.validate_qa_aggregate(["./dashboard/legacy", "./dashboard"])
+def test_qa_aggregate_requires_go_beside_java() -> None:
+    checks.validate_qa_aggregate(["./dashboard", "./dashboard/legacy", "./product"])
+    with pytest.raises(checks.DeploymentError, match="Go Dashboard"):
+        checks.validate_qa_aggregate(["./dashboard/legacy", "./product"])
     with pytest.raises(checks.DeploymentError, match="Java Dashboard"):
-        checks.validate_qa_aggregate(["./product"])
+        checks.validate_qa_aggregate(["./dashboard", "./product"])
 
 
 def test_deployment_adapter_maps_interrupt_to_shell_status(monkeypatch) -> None:
