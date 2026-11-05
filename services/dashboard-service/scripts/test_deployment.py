@@ -169,6 +169,15 @@ def test_render_rejects_undeclared_runtime_configuration(environment: str, key: 
         checks.validate_render(environment, yaml.safe_dump_all(items))
 
 
+def test_render_requires_the_application_exporter_timeout_default() -> None:
+    items = checks.documents(checks.render("local-dev"))
+    config = checks.resource(items, "ConfigMap", "local-dev-dashboard-config")
+    config["data"]["OTEL_EXPORTER_OTLP_TIMEOUT"] = "2000"
+
+    with pytest.raises(checks.DeploymentError, match="application default"):
+        checks.validate_render("local-dev", yaml.safe_dump_all(items))
+
+
 def test_live_state_rejects_wrong_resource_identity() -> None:
     target = object.__new__(checks.Target)
     target.namespace = "local-dev-all"
