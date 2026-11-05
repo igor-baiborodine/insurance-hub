@@ -206,7 +206,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "REQUEST_TIMEOUT": "8s",
         "PROBE_TIMEOUT": "2s",
         "SHUTDOWN_TIMEOUT": "10s",
-        "OTEL_EXPORTER_OTLP_TIMEOUT": "2s",
+        "OTEL_EXPORTER_OTLP_TIMEOUT": "2000",
         "HTTP_MAX_HEADER_BYTES": "16384",
         "HTTP_MAX_BODY_BYTES": "4096",
         "HTTP_READ_HEADER_TIMEOUT": "5s",

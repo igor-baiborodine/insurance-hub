@@ -150,11 +150,7 @@ func load(lookup lookupEnv) (Config, error) {
 		return Config{}, err
 	}
 
-	otelTimeout, err := kitconfig.LoadPositiveDuration(
-		lookup,
-		kitconfig.EnvOTELExporterOTLPTimeout,
-		telemetryDefaults.ExporterTimeout.String(),
-	)
+	otelTimeout, err := loadOTLPTimeout(lookup, telemetryDefaults.ExporterTimeout)
 	if err != nil {
 		return Config{}, err
 	}
@@ -283,6 +279,25 @@ func load(lookup lookupEnv) (Config, error) {
 		Elasticsearch:      elasticsearchSettings,
 		Telemetry:          telemetry,
 	}, nil
+}
+
+func loadOTLPTimeout(lookup lookupEnv, fallback time.Duration) (time.Duration, error) {
+	value, err := kitconfig.ValueOrDefault(
+		lookup,
+		kitconfig.EnvOTELExporterOTLPTimeout,
+		strconv.FormatInt(fallback.Milliseconds(), 10),
+	)
+	if err != nil {
+		return 0, err
+	}
+	milliseconds, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || milliseconds <= 0 || milliseconds > int64((1<<63-1)/time.Millisecond) {
+		return 0, kitconfig.Invalid(
+			kitconfig.EnvOTELExporterOTLPTimeout,
+			"must be a positive integer number of milliseconds",
+		)
+	}
+	return time.Duration(milliseconds) * time.Millisecond, nil
 }
 
 func loadElasticsearch(lookup lookupEnv) (Elasticsearch, error) {

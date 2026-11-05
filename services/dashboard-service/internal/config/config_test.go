@@ -194,7 +194,7 @@ func TestLoad_ValidOverrides(t *testing.T) {
 		kitconfig.EnvShutdownTimeout:          "15s",
 		kitconfig.EnvOTELEnabled:              "true",
 		kitconfig.EnvOTELExporterOTLPEndpoint: "https://alloy.monitoring.svc:4317/",
-		kitconfig.EnvOTELExporterOTLPTimeout:  "750ms",
+		kitconfig.EnvOTELExporterOTLPTimeout:  "750",
 	}
 
 	// when
@@ -218,6 +218,30 @@ func TestLoad_ValidOverrides(t *testing.T) {
 	if !got.Enabled || got.ExporterEndpoint.String() !=
 		"https://alloy.monitoring.svc:4317" {
 		t.Errorf("unexpected telemetry: %+v", got.Telemetry)
+	}
+}
+
+func TestLoad_RejectsNonstandardOTLPTimeoutWithoutExposingValue(t *testing.T) {
+	// given
+	const privateMarker = "private-timeout-marker"
+	values := map[string]string{
+		kitconfig.EnvOTELExporterOTLPTimeout: privateMarker + "2s",
+	}
+
+	// when
+	_, err := load(mapLookup(values))
+
+	// then
+	if err == nil {
+		t.Fatal("nonstandard OTLP timeout accepted")
+	}
+	setting, reason := kitconfig.ErrorDetails(err)
+	if setting != kitconfig.EnvOTELExporterOTLPTimeout ||
+		reason != "must be a positive integer number of milliseconds" {
+		t.Errorf("error details = (%q, %q)", setting, reason)
+	}
+	if strings.Contains(err.Error(), privateMarker) {
+		t.Fatalf("configuration value disclosed: %v", err)
 	}
 }
 
