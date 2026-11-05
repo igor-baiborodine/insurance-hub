@@ -37,7 +37,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: dashboard-service
+        - name: dashboard-api
           image: insurance-hub-dashboard-api:unconfigured
           imagePullPolicy: IfNotPresent
           securityContext:

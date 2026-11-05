@@ -66,7 +66,7 @@ def test_service_log_registrations_match_their_owning_deployments() -> None:
 
     alloy_check.validate_service_log_deployments(config, deployments)
     deployments["dashboard"] = deployments["dashboard"].replace(
-        "        - name: dashboard-service", "        - name: wrong-container", 1
+        "        - name: dashboard-api", "        - name: wrong-container", 1
     )
     with pytest.raises(alloy_check.ValidationError, match="container does not exist"):
         alloy_check.validate_service_log_deployments(config, deployments)
