@@ -618,6 +618,27 @@ failure matrices and repeated Java baseline projects are not standard prerequisi
 existing fixtures and inspect only unresolved facts needed by the next increment, following the
 [migration scope guide](go-service-migration-scope.md).
 
+**Dashboard identity follow-up: 5 November 2026.** The names describe different identities,
+matching Policy Search:
+
+| Boundary | Dashboard | Policy Search |
+| --- | --- | --- |
+| Kubernetes workload/container/image | `dashboard-api` | `policy-search-api` |
+| Application and telemetry service | `dashboard-service` | `policy-search-service` |
+
+This distinction is intentional because Alloy maps the Kubernetes `*-api` identity to the logical
+OpenTelemetry `*-service` identity. The then-current `dashboard-service` container name broke that
+shared rule and caused Alloy to drop Dashboard metrics and traces.
+
+Use these identities consistently:
+
+- Container, Deployment, Services and image: `dashboard-api`.
+- Module, `SERVICE_NAME`, logs and OpenTelemetry `service.name`: `dashboard-service`.
+
+Specifications must state these identities separately instead of using the ambiguous phrase
+“runtime/container `dashboard-service`.” No source edits were made while this naming decision was
+under discussion.
+
 Reuse the implemented official `go-elasticsearch/v8` pattern in the
 [Policy Search client](../../../services/policy-search-service/internal/elasticsearch/client.go)
 and [search adapter](../../../services/policy-search-service/internal/elasticsearch/search.go).
