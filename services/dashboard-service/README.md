@@ -141,17 +141,25 @@ The guarded local-dev sequence uses catalog service `dashboard`, context
 `kind-local-dev-insurance-hub` and namespace coordinate `local-dev-all`:
 
 ```sh
-make go-svc-deploy-preflight SVC_NAME=dashboard ENV_NAME=local-dev
-make go-svc-image-load SVC_NAME=dashboard ENV_NAME=local-dev
-make go-svc-deploy SVC_NAME=dashboard ENV_NAME=local-dev
-make go-svc-deploy-status SVC_NAME=dashboard ENV_NAME=local-dev
-make go-svc-deploy-verify SVC_NAME=dashboard ENV_NAME=local-dev
+export DEPLOY_ENV=local-dev
+export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
+export DEPLOY_SVC_NS=local-dev-all
+export DEPLOY_DATA_NS=local-dev-all
+export DEPLOY_IMAGE_REF=insurance-hub-dashboard-api:1.0.0-local.<12-source-hex>
+export DEPLOY_JAVA_DEPLOYMENT_UID=<recorded-local-dev-Java-Deployment-UID>
+export DEPLOY_JAVA_SERVICE_UID=<recorded-local-dev-Java-Service-UID>
+
+make go-svc-deploy-preflight SVC_NAME=dashboard
+make go-svc-image-load SVC_NAME=dashboard
+make go-svc-deploy SVC_NAME=dashboard
+make go-svc-deploy-status SVC_NAME=dashboard
+make go-svc-deploy-verify SVC_NAME=dashboard
 ```
 
 `go-svc-stop` scales only the Go Dashboard Deployment to zero. A guarded redeploy restores the
 same accepted image. Java Dashboard resources, routes, configuration and data/event authority stay
-unchanged. `deployment-runbook.md` owns the complete deployment and return procedure after those
-owners are onboarded.
+unchanged. The [Dashboard deployment runbook](../../docs/migration/phase-4/dashboard-service/deployment-runbook.md)
+owns the complete deployment and return procedure after those owners are onboarded.
 
 ## Generated inventory and provenance
 
