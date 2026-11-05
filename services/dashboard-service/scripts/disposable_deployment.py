@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import dashboard_deployment_checks as checks
 import yaml
@@ -38,10 +38,19 @@ ADMIN_PASSWORD = "issue-287-disposable-admin-password"
 READER_USERNAME = "dashboard_disposable_reader"
 READER_PASSWORD = "issue-287-disposable-reader-password"
 ELASTICSEARCH_NAME = "dashboard-disposable-elasticsearch"
+HTTP_STATUS_MARKER = "__INSURANCE_HUB_HTTP_STATUS__="
+MAX_HTTP_BODY_BYTES = 4096
 
 
 class CheckFailed(RuntimeError):
     """The disposable Dashboard deployment differed from its owned contract."""
+
+
+class HTTPProbeResponse(NamedTuple):
+    """A bounded HTTP response captured by a disposable curl Pod."""
+
+    status: int
+    body: str
 
 
 def require(condition: object, message: str) -> None:
@@ -259,7 +268,7 @@ def probe(
     labels: dict[str, str] | None = None,
     expect_success: bool = True,
     seconds: int = 45,
-) -> None:
+) -> str:
     pod = {
         "apiVersion": "v1",
         "kind": "Pod",
@@ -299,8 +308,72 @@ def probe(
 
     wait_for(f"probe {name}", finished, seconds)
     status = terminal["status"]["containerStatuses"][0]["state"]["terminated"]
+    logs = cluster.kubectl("logs", name)
     succeeded = status.get("exitCode") == 0
-    require(succeeded is expect_success, f"probe {name} returned unexpected status")
+    diagnostic = logs.strip().replace("\n", " ")[:400]
+    require(
+        succeeded is expect_success,
+        f"probe {name} returned exit {status.get('exitCode')}; output={diagnostic!r}",
+    )
+    return logs
+
+
+def http_probe(
+    cluster: Cluster,
+    name: str,
+    arguments: list[str],
+    *,
+    labels: dict[str, str] | None = None,
+    seconds: int = 45,
+) -> HTTPProbeResponse:
+    logs = probe(
+        cluster,
+        name,
+        [
+            "--silent",
+            "--show-error",
+            "--max-filesize",
+            str(MAX_HTTP_BODY_BYTES),
+            "--write-out",
+            f"\n{HTTP_STATUS_MARKER}%{{http_code}}",
+            *arguments,
+        ],
+        labels=labels,
+        seconds=seconds,
+    )
+    body, separator, raw_status = logs.rpartition(f"\n{HTTP_STATUS_MARKER}")
+    require(bool(separator), f"HTTP probe {name} did not report a response status")
+    raw_status = raw_status.strip()
+    require(bool(re.fullmatch(r"[1-5][0-9]{2}", raw_status)), f"HTTP probe {name} status differs")
+    require(
+        len(body.encode("utf-8")) <= MAX_HTTP_BODY_BYTES,
+        f"HTTP probe {name} response body exceeded its bound",
+    )
+    return HTTPProbeResponse(int(raw_status), body)
+
+
+def require_http_response(
+    name: str, response: HTTPProbeResponse, expected_status: int, expected_body: str
+) -> None:
+    require(
+        response.status == expected_status and response.body == expected_body,
+        f"HTTP probe {name} response differs: status={response.status}; body={response.body!r}",
+    )
+
+
+def require_elasticsearch_permission_denied(name: str, response: HTTPProbeResponse) -> None:
+    try:
+        payload = json.loads(response.body)
+    except json.JSONDecodeError as error:
+        raise CheckFailed(f"Elasticsearch probe {name} denial body is not JSON") from error
+    error = payload.get("error", {}) if isinstance(payload, dict) else {}
+    require(
+        response.status == 403
+        and payload.get("status") == 403
+        and isinstance(error, dict)
+        and error.get("type") == "security_exception",
+        f"Elasticsearch probe {name} did not return the expected permission denial",
+    )
 
 
 def endpoint_count(cluster: Cluster) -> int:
@@ -373,9 +446,6 @@ def setup_elasticsearch(cluster: Cluster, suffix: str = "") -> None:
 
 def verify_reader_permissions(cluster: Cluster) -> None:
     base = [
-        "--fail-with-body",
-        "--silent",
-        "--show-error",
         "--user",
         f"{READER_USERNAME}:{READER_PASSWORD}",
         "--header",
@@ -388,12 +458,12 @@ def verify_reader_permissions(cluster: Cluster) -> None:
     )
     for name, arguments in requests:
         path = arguments[-1]
-        probe(
+        response = http_probe(
             cluster,
             name,
             [*base, *arguments[:-1], f"http://{ELASTICSEARCH_NAME}:9200{path}"],
-            expect_success=False,
         )
+        require_elasticsearch_permission_denied(name, response)
 
 
 def verify_runtime_identity(cluster: Cluster, version: str, image: str) -> None:
@@ -593,13 +663,10 @@ def run() -> None:
         )
         wait_for("Dashboard endpoint ready", lambda: endpoint_count(cluster) == 1)
         verify_reader_permissions(cluster)
-        probe(
+        response = http_probe(
             cluster,
             "business-total-sales",
             [
-                "--fail-with-body",
-                "--silent",
-                "--show-error",
                 "--header",
                 "Content-Type: application/json",
                 "--data",
@@ -608,14 +675,22 @@ def run() -> None:
             ],
             labels={checks.BUSINESS_CLIENT_LABEL: "true"},
         )
+        require_http_response(
+            "business-total-sales",
+            response,
+            200,
+            '{"total":{"policiesCount":1,"premiumAmount":1000.00},'
+            '"perProductTotal":{"SAFE":{"policiesCount":1,"premiumAmount":1000.00}}}',
+        )
         direct_rpc(cluster)
         verify_runtime_identity(cluster, f"git-{source_short}", image)
-        probe(
+        response = http_probe(
             cluster,
             "management-health",
-            ["--fail", "--silent", "http://local-dev-dashboard-api-management:8081/readyz"],
+            ["http://local-dev-dashboard-api-management:8081/readyz"],
             labels={checks.MANAGEMENT_CLIENT_LABEL: "true"},
         )
+        require_http_response("management-health", response, 200, "ready\n")
         probe(
             cluster,
             "unlabeled-denied",
@@ -633,25 +708,24 @@ def run() -> None:
         dashboard_ip = dashboard_pod["status"]["podIP"]
         cluster.kubectl("scale", f"deployment/{ELASTICSEARCH_NAME}", "--replicas=0")
         wait_for("Dashboard endpoint withdrawn", lambda: endpoint_count(cluster) == 0)
-        probe(
+        response = http_probe(
             cluster,
             "dependency-ready-denied",
-            ["--fail", "--silent", f"http://{dashboard_ip}:8081/readyz"],
+            [f"http://{dashboard_ip}:8081/readyz"],
             labels={checks.MANAGEMENT_CLIENT_LABEL: "true"},
-            expect_success=False,
         )
-        probe(
+        require_http_response("dependency-ready-denied", response, 503, "not ready\n")
+        response = http_probe(
             cluster,
             "dependency-live",
-            ["--fail", "--silent", f"http://{dashboard_ip}:8081/livez"],
+            [f"http://{dashboard_ip}:8081/livez"],
             labels={checks.MANAGEMENT_CLIENT_LABEL: "true"},
         )
-        probe(
+        require_http_response("dependency-live", response, 200, "live\n")
+        response = http_probe(
             cluster,
             "dependency-total-sales-safe",
             [
-                "--fail-with-body",
-                "--silent",
                 "--header",
                 "Content-Type: application/json",
                 "--data",
@@ -659,7 +733,12 @@ def run() -> None:
                 f"http://{dashboard_ip}:8080/dashboard/totalsales",
             ],
             labels={checks.BUSINESS_CLIENT_LABEL: "true"},
-            expect_success=False,
+        )
+        require_http_response(
+            "dependency-total-sales-safe",
+            response,
+            503,
+            '{"code":14,"message":"service unavailable","details":[]}',
         )
         cluster.kubectl("scale", f"deployment/{ELASTICSEARCH_NAME}", "--replicas=1")
         cluster.kubectl(

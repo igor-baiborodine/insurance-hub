@@ -106,6 +106,38 @@ def test_selected_deployed_rpc_must_execute_and_pass() -> None:
             disposable_deployment.require_go_test_passed(output, "TestDeployedDirectRPC")
 
 
+def test_reader_permission_denial_rejects_wrong_outcomes() -> None:
+    denied = disposable_deployment.HTTPProbeResponse(
+        403,
+        '{"error":{"type":"security_exception"},"status":403}',
+    )
+    disposable_deployment.require_elasticsearch_permission_denied("reader-write", denied)
+
+    for response in (
+        disposable_deployment.HTTPProbeResponse(0, "connection refused"),
+        disposable_deployment.HTTPProbeResponse(401, denied.body),
+        disposable_deployment.HTTPProbeResponse(404, denied.body),
+        disposable_deployment.HTTPProbeResponse(403, '{"error":{"type":"other"},"status":403}'),
+    ):
+        with pytest.raises(disposable_deployment.CheckFailed, match="permission denial|not JSON"):
+            disposable_deployment.require_elasticsearch_permission_denied("reader-write", response)
+
+
+def test_dependency_failure_requires_exact_safe_response() -> None:
+    safe = '{"code":14,"message":"service unavailable","details":[]}'
+    expected = disposable_deployment.HTTPProbeResponse(503, safe)
+    disposable_deployment.require_http_response("dependency-total-sales", expected, 503, safe)
+
+    for response in (
+        disposable_deployment.HTTPProbeResponse(500, safe),
+        disposable_deployment.HTTPProbeResponse(503, '{"message":"private dependency failure"}'),
+    ):
+        with pytest.raises(disposable_deployment.CheckFailed, match="response differs"):
+            disposable_deployment.require_http_response(
+                "dependency-total-sales", response, 503, safe
+            )
+
+
 def assert_reaped(pid_file: Path) -> None:
     deadline = time.monotonic() + 2
     pid = int(pid_file.read_text(encoding="utf-8"))
