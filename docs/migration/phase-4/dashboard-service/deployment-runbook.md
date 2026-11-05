@@ -1,7 +1,7 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Dashboard Echo Deployment Runbook](#dashboard-echo-deployment-runbook)
+- [Dashboard Total-Sales Deployment Runbook](#dashboard-total-sales-deployment-runbook)
   - [Deployment coordinates](#deployment-coordinates)
   - [Qualify the candidate](#qualify-the-candidate)
   - [Deploy to local development](#deploy-to-local-development)
@@ -11,19 +11,20 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# Dashboard Echo Deployment Runbook
+# Dashboard Total-Sales Deployment Runbook
 
-This runbook owns the temporary Go Dashboard Echo deployment introduced by issue 286. The Go
-workload runs beside the Java Dashboard and has no data, event, public route or customer-data
-authority. Issue 291 completes the service operating handoff. Issue 292 owns the later full
-removal and restoration rehearsal.
+This runbook owns qualification and guarded operation of the private Go Dashboard total-sales
+reader. The Go workload runs beside the Java Dashboard and reads the existing `policy_stats`
+Elasticsearch index. Java retains writer, setup, edge retry, public route and event authority.
+Issue 291 completes the service operating handoff. Issue 292 owns the later full removal and
+restoration rehearsal.
 
 ## Deployment coordinates
 
 Use catalog service `dashboard` only. Local development uses context
-`kind-local-dev-insurance-hub`, namespace `local-dev-all` and Kind cluster
-`local-dev-insurance-hub`. QA uses context `qa-insurance-hub`, namespace `qa-svc` and the shared
-Flux source on branch `main` at `./k8s/overlays/qa/svc`.
+`kind-local-dev-insurance-hub`, service/data namespace `local-dev-all` and Kind cluster
+`local-dev-insurance-hub`. QA uses context `qa-insurance-hub`, service namespace `qa-svc`, data
+namespace `qa-data` and the shared Flux source on branch `main` at `./k8s/overlays/qa/svc`.
 
 The Go resources are `dashboard-api`, `dashboard-api-management`, `dashboard-config` and the
 `dashboard-api` NetworkPolicy after the environment prefix is applied. The protected Java
@@ -41,13 +42,23 @@ make go-svc-deploy-test SVC_NAME=dashboard
 
 The disposable test loads the candidate image into the existing configured
 `local-dev-insurance-hub` Kind cluster, then creates and removes one uniquely owned namespace. It
-does not create or delete the cluster. A render or fake adapter pass does not establish live CNI
-behavior.
+also loads the pinned Elasticsearch image, creates a fixture index through an administrator test
+identity, and gives Dashboard an exact-index reader with no cluster privileges. It proves total
+sales, reader write/admin/unrelated-index denial, readiness and safe response behavior during
+dependency loss, independent liveness, recovery, network denial and pod replacement. It does not
+create or delete the cluster. A render, fake adapter or disposable pass does not establish a
+local-dev or QA deployment result.
 
 ## Deploy to local development
 
-Build and validate the image first. Record its full OCI revision, local reference and image ID.
-The reference must end in the first 12 hexadecimal characters of that revision.
+Use this guarded sequence only after the target Elasticsearch Secret, exact-index reader and
+NetworkPolicy resources have passed the target-specific deployment gate. Candidate and disposable
+qualification alone do not authorize or prepare the shared local-dev namespace.
+
+Build and validate the image first. Record its full OCI revision, source-derived version, local
+reference and image ID. The version is `git-<first-12-source-hex>` and the local reference ends in
+the same 12 hexadecimal characters. Reject zero, `unconfigured`, `development`, mismatched or
+tag-only evidence.
 
 ```sh
 make go-svc-image-check SVC_NAME=dashboard
@@ -74,10 +85,12 @@ make go-svc-deploy-verify SVC_NAME=dashboard
 ```
 
 Before and after deployment, record the Java Deployment and Service UIDs and availability. Verify
-the permitted HTTP Echo, direct gRPC Echo and management endpoints, then use labeled and unlabeled
-probe Pods to establish NetworkPolicy behavior. Confirm that runtime, Pod, ConfigMap and image
-version identities agree and that no Elasticsearch or Kafka setting, credential, connection,
-topic, group or index exists.
+the permitted HTTP total-sales request, direct `GetTotalSales` RPC and management endpoints, then
+use labeled and unlabeled probe Pods to establish NetworkPolicy behavior. Confirm that OCI,
+runtime, Pod and ConfigMap versions agree; retain the full OCI revision, image tag and immutable
+digest separately. Verify exact-index reads, write/admin/unrelated-index denials, readiness during
+Elasticsearch loss and independent liveness. No Kafka setting, credential, topic or group belongs
+to the Go reader.
 
 ## Stop and return in local development
 
@@ -107,7 +120,7 @@ source and applied revision:
 export DEPLOY_ENV=qa
 export DEPLOY_CONTEXT=qa-insurance-hub
 export DEPLOY_SVC_NS=qa-svc
-export DEPLOY_DATA_NS=qa-svc
+export DEPLOY_DATA_NS=qa-data
 export DEPLOY_SOURCE_REVISION=<40-flux-source-applied-hex>
 export DEPLOY_IMAGE_DIGEST=sha256:<64-hex-registry-digest>
 export DEPLOY_JAVA_DEPLOYMENT_UID=<recorded-QA-Java-Deployment-UID>
@@ -124,8 +137,9 @@ verification fail when the digest is absent or malformed, when the selected read
 differs, or when any running `dashboard-service` container reports another image ID.
 
 QA acceptance records the Flux source and applied revision, semantic and digest-qualified image,
-Pod image ID, runtime identity, labeled and denied network probes, health and Echo results, and
-Alloy delivery. Configuration or disposable evidence alone does not establish a QA result.
+Pod image ID, runtime identity, labeled and denied network probes, health and total-sales results,
+reader permission denials, dependency behavior and Alloy delivery. Configuration or disposable
+evidence alone does not establish a QA result.
 
 ## Return from QA activation
 

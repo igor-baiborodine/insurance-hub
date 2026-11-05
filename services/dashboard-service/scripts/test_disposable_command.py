@@ -5,10 +5,93 @@ from __future__ import annotations
 import os
 import sys
 import time
+from copy import deepcopy
 from pathlib import Path
 
 import disposable_deployment
 import pytest
+
+
+def rendered_items() -> list[dict[str, object]]:
+    metadata = {"namespace": "local-dev-all", "labels": {}}
+    return [
+        {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {**deepcopy(metadata), "name": "local-dev-dashboard-config"},
+            "data": {"SERVICE_VERSION": "git-aaaaaaaaaaaa"},
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {**deepcopy(metadata), "name": "local-dev-dashboard-api"},
+            "spec": {
+                "template": {
+                    "metadata": {"labels": {}},
+                    "spec": {"containers": [{"image": "old", "env": []}]},
+                }
+            },
+        },
+        {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "NetworkPolicy",
+            "metadata": {**deepcopy(metadata), "name": "local-dev-dashboard-api"},
+            "spec": {"egress": []},
+        },
+    ]
+
+
+def test_render_adds_owned_dependency_reader_secret_and_exact_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    items = rendered_items()
+    monkeypatch.setattr(disposable_deployment.checks, "render", lambda _environment: "rendered")
+    monkeypatch.setattr(
+        disposable_deployment.checks,
+        "validate_render",
+        lambda _environment, _text: deepcopy(items),
+    )
+    cluster = disposable_deployment.Cluster("dashboard-disposable-test")
+
+    _rendered, actual = disposable_deployment.render(
+        cluster,
+        "insurance-hub-dashboard-api:1.0.0-local.0123456789ab",
+        "0123456789ab",
+        "elasticsearch@example@sha256:" + "a" * 64,
+    )
+
+    deployment = disposable_deployment.checks.resource(
+        actual, "Deployment", "local-dev-dashboard-api"
+    )
+    assert deployment["spec"]["template"]["spec"]["containers"][0]["image"].endswith("0123456789ab")
+    config = disposable_deployment.checks.resource(
+        actual, "ConfigMap", "local-dev-dashboard-config"
+    )["data"]
+    assert config["SERVICE_VERSION"] == "git-0123456789ab"
+    assert config["ELASTICSEARCH_USERNAME"] == disposable_deployment.READER_USERNAME
+    secret = disposable_deployment.checks.resource(
+        actual, "Secret", disposable_deployment.ELASTICSEARCH_NAME
+    )
+    assert secret["stringData"]["reader-password"] == disposable_deployment.READER_PASSWORD
+    policy = disposable_deployment.checks.resource(
+        actual, "NetworkPolicy", "local-dev-dashboard-api"
+    )
+    assert policy["spec"]["egress"][1]["ports"] == [{"port": 9200, "protocol": "TCP"}]
+
+
+def test_run_rejects_missing_digest_qualified_dependency_before_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMAGE_REF", "insurance-hub-dashboard-api:1.0.0-local.0123456789ab")
+    monkeypatch.delenv("ELASTICSEARCH_IMAGE", raising=False)
+    monkeypatch.setattr(
+        disposable_deployment,
+        "command",
+        lambda *_args, **_kwargs: pytest.fail("command must not run"),
+    )
+
+    with pytest.raises(disposable_deployment.CheckFailed, match="digest-qualified"):
+        disposable_deployment.run()
 
 
 def assert_reaped(pid_file: Path) -> None:

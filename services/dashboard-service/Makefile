@@ -144,6 +144,7 @@ deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Dashboard de
 
 deploy-test: python-toolchain-check image-build ## Exercise Dashboard in an owned disposable Kind namespace
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" \
+		ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_disposable_deployment.py
 
 python-tooling-format-check: python-toolchain-check

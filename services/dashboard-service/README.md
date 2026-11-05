@@ -121,12 +121,28 @@ tools, update dependencies, rewrite generated output or deploy.
 ```sh
 make -C services/dashboard-service check FORMAT_SCOPE=all
 make -C services/dashboard-service test-tooling
+make -C services/dashboard-service image-check
+
+make go-svc-deploy-check SVC_NAME=dashboard
+make go-svc-deploy-test-tooling SVC_NAME=dashboard
+make go-svc-deploy-test SVC_NAME=dashboard
 ```
 
 `check` covers exact pins, Go/protobuf formatting and lint, race-enabled tests, build, dependency
 consistency, generated-output drift, protobuf compatibility, gateway/Swagger agreement, Python
 tooling, Servicekit selection and reachable vulnerabilities. `test-tooling` uses disposable copies
-to show that controlled defects fail the owning gates.
+to show that controlled defects fail the owning gates. `image-check` builds the exact HEAD image,
+checks its OCI source identity and non-root runtime, and exercises total sales against an owned
+Elasticsearch fixture. It proves the reader cannot write, administer the cluster or read another
+index; dependency loss withdraws readiness while liveness remains available and the business
+response stays safe; shutdown remains bounded.
+
+`go-svc-deploy-test` loads that exact image and a digest-pinned Elasticsearch image into the
+configured Kind cluster, then creates one uniquely owned namespace. Its fixture setup is explicit
+test administration; the Dashboard process receives only reader credentials and never creates or
+seeds state. The test removes its namespace and does not establish a local-dev or QA deployment
+result. The deployment target, credentials, TLS and target-specific network policy remain owned by
+the guarded deployment stage.
 
 Run locally with accepted identity values:
 
