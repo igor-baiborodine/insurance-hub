@@ -12,7 +12,7 @@ resources:
 images:
   - name: insurance-hub-dashboard-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/dashboard-api
-    newTag: 1.0.1
+    newTag: 1.1.0
 configMapGenerator:
   - name: dashboard-config
     behavior: merge
@@ -20,7 +20,7 @@ configMapGenerator:
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
       - DEPLOYMENT_ENVIRONMENT=qa
-      - SERVICE_VERSION=git-6be7d4e8f504
+      - SERVICE_VERSION=git-f9f4c4700ae3
 patches:
   - path: network-policy-patch.yaml
     target:
