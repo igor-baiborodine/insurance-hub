@@ -6,9 +6,12 @@ import (
 	"errors"
 	"io"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elastic/go-elasticsearch/v8/esapi"
 
@@ -19,6 +22,68 @@ import (
 type trackingBody struct {
 	io.Reader
 	closed bool
+}
+
+func TestReader_BoundsResponseBodyAndPreservesShorterCallerDeadline(t *testing.T) {
+	tests := []struct {
+		name           string
+		clientTimeout  time.Duration
+		callerTimeout  time.Duration
+		maximumElapsed time.Duration
+	}{
+		{
+			name:           "client timeout bounds body",
+			clientTimeout:  50 * time.Millisecond,
+			maximumElapsed: time.Second,
+		},
+		{
+			name:           "shorter caller deadline wins",
+			clientTimeout:  time.Second,
+			callerTimeout:  40 * time.Millisecond,
+			maximumElapsed: 500 * time.Millisecond,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(
+				http.HandlerFunc(
+					func(writer http.ResponseWriter, request *http.Request) {
+						writer.Header().
+							Set("X-Elastic-Product", "Elasticsearch")
+						writer.WriteHeader(http.StatusOK)
+						writer.(http.Flusher).Flush()
+						<-request.Context().Done()
+					},
+				),
+			)
+			defer server.Close()
+			client, err := New(Config{
+				Endpoint: server.URL,
+				Index:    PolicyIndex,
+				Timeout:  test.clientTimeout,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reader, err := NewReader(client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			if test.callerTimeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, test.callerTimeout)
+				defer cancel()
+			}
+
+			started := time.Now()
+			_, err = reader.ReadTotalSales(ctx, application.TotalSalesQuery{})
+			if !errors.Is(err, context.DeadlineExceeded) ||
+				time.Since(started) > test.maximumElapsed {
+				t.Fatalf("ReadTotalSales() = %v after %s", err, time.Since(started))
+			}
+		})
+	}
 }
 
 func (body *trackingBody) Close() error {

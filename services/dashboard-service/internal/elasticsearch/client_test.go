@@ -218,3 +218,61 @@ func TestClient_CheckRejectsAliasAndIncompatibleState(t *testing.T) {
 		})
 	}
 }
+
+func TestClient_CheckUsesOneTimeoutForCompleteReadiness(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
+			switch request.URL.Path {
+			case "/_resolve/index/policy_stats":
+				time.Sleep(35 * time.Millisecond)
+				_, _ = writer.Write(
+					[]byte(
+						`{"indices":[{"name":"policy_stats","attributes":["open"]}],"aliases":[],"data_streams":[]}`,
+					),
+				)
+			case "/policy_stats/_mapping":
+				<-request.Context().Done()
+			default:
+				t.Errorf("unexpected request = %s", request.URL.Path)
+			}
+		}),
+	)
+	defer server.Close()
+	client, err := New(Config{
+		Endpoint: server.URL, Index: PolicyIndex, Timeout: 60 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	err = client.Check(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
+		t.Fatalf("Check() = %v after %s", err, time.Since(started))
+	}
+}
+
+func TestClient_CheckBoundsResponseBody(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
+			writer.WriteHeader(http.StatusOK)
+			writer.(http.Flusher).Flush()
+			<-request.Context().Done()
+		}),
+	)
+	defer server.Close()
+	client, err := New(Config{
+		Endpoint: server.URL, Index: PolicyIndex, Timeout: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	err = client.Check(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
+		t.Fatalf("Check() = %v after %s", err, time.Since(started))
+	}
+}

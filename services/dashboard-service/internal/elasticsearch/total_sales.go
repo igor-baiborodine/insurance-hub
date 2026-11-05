@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/big"
 	"strconv"
+	"time"
 
 	"github.com/elastic/go-elasticsearch/v8/esapi"
 
@@ -31,7 +32,10 @@ var (
 type searchFunc func(context.Context, string, io.Reader) (*esapi.Response, error)
 
 // Reader implements the application total-sales port against policy_stats.
-type Reader struct{ search searchFunc }
+type Reader struct {
+	search  searchFunc
+	timeout time.Duration
+}
 
 var _ application.TotalSalesReader = (*Reader)(nil)
 
@@ -47,6 +51,7 @@ func NewReader(client *Client) (*Reader, error) {
 				client.Search.WithBody(body),
 			)
 		},
+		timeout: client.timeout,
 	}, nil
 }
 
@@ -57,13 +62,15 @@ func (reader *Reader) ReadTotalSales(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	operationCtx, cancel := withOperationTimeout(ctx, reader.timeout)
+	defer cancel()
 	body, err := buildTotalSalesRequest(query)
 	if err != nil {
 		return nil, ErrInvalidResponse
 	}
-	response, err := reader.search(ctx, PolicyIndex, bytes.NewReader(body))
+	response, err := reader.search(operationCtx, PolicyIndex, bytes.NewReader(body))
 	if err != nil {
-		if contextErr := ctx.Err(); contextErr != nil {
+		if contextErr := operationCtx.Err(); contextErr != nil {
 			return nil, contextErr
 		}
 		return nil, errors.Join(application.ErrTotalSalesUnavailable, ErrSearchUnavailable)
@@ -77,6 +84,9 @@ func (reader *Reader) ReadTotalSales(
 		return nil, ErrSearchRejected
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maximumResponseBytes+1))
+	if contextErr := operationCtx.Err(); contextErr != nil {
+		return nil, contextErr
+	}
 	if err != nil || len(data) > maximumResponseBytes {
 		return nil, ErrInvalidResponse
 	}

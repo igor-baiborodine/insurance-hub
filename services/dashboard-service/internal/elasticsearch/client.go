@@ -29,6 +29,7 @@ type Client struct {
 	*elasticsearchapi.Client
 	transport *http.Transport
 	index     string
+	timeout   time.Duration
 }
 
 // Config keeps credentials outside the endpoint and requires bounded transport waits.
@@ -96,7 +97,12 @@ func New(settings Config) (*Client, error) {
 	if err != nil {
 		return nil, errors.New("configure elasticsearch: client initialization failed")
 	}
-	return &Client{Client: client, transport: transport, index: settings.Index}, nil
+	return &Client{
+		Client:    client,
+		transport: transport,
+		index:     settings.Index,
+		timeout:   settings.Timeout,
+	}, nil
 }
 
 // Check verifies exact-index compatibility without creating or changing cluster state.
@@ -104,16 +110,28 @@ func (client *Client) Check(ctx context.Context) error {
 	if client == nil || client.Client == nil {
 		return errors.New("check elasticsearch: client is required")
 	}
-	if err := client.checkExactOpenIndex(ctx); err != nil {
+	operationCtx, cancel := withOperationTimeout(ctx, client.timeout)
+	defer cancel()
+	if err := client.checkExactOpenIndex(operationCtx); err != nil {
 		return err
 	}
-	if err := client.checkMapping(ctx); err != nil {
+	if err := client.checkMapping(operationCtx); err != nil {
 		return err
 	}
-	if err := client.checkFieldCapabilities(ctx); err != nil {
+	if err := client.checkFieldCapabilities(operationCtx); err != nil {
 		return err
 	}
-	return client.checkCompatibilityQuery(ctx)
+	return client.checkCompatibilityQuery(operationCtx)
+}
+
+func withOperationTimeout(
+	ctx context.Context,
+	timeout time.Duration,
+) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
 }
 
 func (client *Client) checkExactOpenIndex(ctx context.Context) error {
@@ -280,6 +298,9 @@ func decodeCheckResponse(
 	}
 	defer func() { _ = response.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(response.Body, maximumCheckResponseBytes+1))
+	if contextErr := ctx.Err(); contextErr != nil {
+		return contextErr
+	}
 	if err != nil || len(data) > maximumCheckResponseBytes {
 		return errors.New("check elasticsearch: invalid response")
 	}
