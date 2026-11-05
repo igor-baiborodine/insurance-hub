@@ -12,9 +12,9 @@ from unittest.mock import Mock, patch
 import dashboard_deployment_checks as checks
 import pytest
 import yaml
-from scripts.go.service import deployment as lifecycle
 
 import deployment
+from scripts.go.service import deployment as lifecycle
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -29,18 +29,34 @@ def target_environment(name: str = "local-dev") -> dict[str, str]:
         "DEPLOY_ENV": name,
         "DEPLOY_CONTEXT": "qa-insurance-hub",
         "DEPLOY_SVC_NS": "qa-svc",
-        "DEPLOY_DATA_NS": "qa-data",
+        "DEPLOY_DATA_NS": "qa-svc",
     }
 
 
 def test_target_rejects_wrong_coordinates_before_cluster_access() -> None:
-    for name, value in (("DEPLOY_ENV", "unknown"), ("DEPLOY_CONTEXT", "qa-insurance-hub")):
-        environment = target_environment()
+    for target, name, value in (
+        ("local-dev", "DEPLOY_ENV", "unknown"),
+        ("local-dev", "DEPLOY_CONTEXT", "qa-insurance-hub"),
+        ("qa", "DEPLOY_DATA_NS", "qa-data"),
+    ):
+        environment = target_environment(target)
         environment[name] = value
         with patch.dict(os.environ, environment, clear=True), patch.object(checks, "run") as run:
             with pytest.raises(checks.DeploymentError):
                 checks.Target()
             run.assert_not_called()
+
+
+def test_qa_target_uses_only_the_non_data_service_coordinate() -> None:
+    with (
+        patch.dict(os.environ, target_environment("qa"), clear=True),
+        patch.object(checks, "run") as run,
+    ):
+        target = checks.Target()
+
+    assert target.namespace == "qa-svc"
+    assert target.configuration["dataNamespace"] == target.namespace
+    run.assert_not_called()
 
 
 def test_qa_mutation_is_rejected_before_coordinates() -> None:

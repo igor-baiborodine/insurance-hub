@@ -266,7 +266,7 @@
           "mode": "flux",
           "context": "qa-insurance-hub",
           "namespace": "qa-svc",
-          "dataNamespace": "qa-data",
+          "dataNamespace": "qa-svc",
           "overlay": "k8s/overlays/qa/svc/dashboard",
           "flux": {
             "namespace": "flux-system",

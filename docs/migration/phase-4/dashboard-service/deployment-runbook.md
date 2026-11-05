@@ -104,7 +104,7 @@ QA. Read-only status and verification require the exact published source revisio
 export DEPLOY_ENV=qa
 export DEPLOY_CONTEXT=qa-insurance-hub
 export DEPLOY_SVC_NS=qa-svc
-export DEPLOY_DATA_NS=qa-data
+export DEPLOY_DATA_NS=qa-svc
 export DEPLOY_SOURCE_REVISION=<40-source-hex>
 export DEPLOY_IMAGE_DIGEST=sha256:<64-hex-registry-digest>
 export DEPLOY_JAVA_DEPLOYMENT_UID=<recorded-QA-Java-Deployment-UID>

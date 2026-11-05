@@ -161,6 +161,10 @@ def test_dashboard_supports_only_its_no_data_capabilities() -> None:
     assert record["releaseTargets"] == ["qa"]
     assert "administration" not in record
     assert all("initialization" not in target for target in record["deploymentTargets"].values())
+    assert all(
+        target["dataNamespace"] == target["namespace"]
+        for target in record["deploymentTargets"].values()
+    )
     assert paths == ["services/dashboard-service"] * len(expected)
     for unsupported in ("fixture-setup", "deploy-test-flux", "initialize"):
         with pytest.raises(resolve.DispatchError, match="does not support capability"):
