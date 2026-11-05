@@ -109,16 +109,44 @@ func TestClient_DoesNotRetryRejectedSearch(t *testing.T) {
 
 func TestClient_CheckUsesExactIndexAndVerifiedTLS(t *testing.T) {
 	// given
-	requests := 0
+	requests := make([]string, 0, 4)
 	server := httptest.NewTLSServer(
 		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			requests++
-			if request.Method != http.MethodHead ||
-				request.URL.Path != "/policy_stats" {
-				t.Errorf("request = %s %s", request.Method, request.URL.Path)
-			}
+			requests = append(requests, request.Method+" "+request.URL.Path)
 			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
-			writer.WriteHeader(http.StatusOK)
+			switch request.URL.Path {
+			case "/_resolve/index/policy_stats":
+				_, _ = writer.Write(
+					[]byte(
+						`{"indices":[{"name":"policy_stats","attributes":["open"]}],"aliases":[],"data_streams":[]}`,
+					),
+				)
+			case "/policy_stats/_mapping":
+				_, _ = writer.Write(
+					[]byte(
+						`{"policy_stats":{"mappings":{"properties":{"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},"from":{"type":"date"},"totalPremium":{"type":"double"}}}}}`,
+					),
+				)
+			case "/policy_stats/_field_caps":
+				_, _ = writer.Write(
+					[]byte(
+						`{"fields":{"productCode.keyword":{"keyword":{"searchable":true,"aggregatable":true}},"from":{"date":{"searchable":true,"aggregatable":true}},"totalPremium":{"double":{"searchable":true,"aggregatable":true}}}}`,
+					),
+				)
+			case "/policy_stats/_search":
+				_, _ = writer.Write(
+					[]byte(
+						`{"aggregations":{"products":{"doc_count_error_upper_bound":0,"buckets":[]}}}`,
+					),
+				)
+			default:
+				t.Errorf(
+					"unexpected request = %s %s",
+					request.Method,
+					request.URL.Path,
+				)
+				writer.WriteHeader(http.StatusNotFound)
+			}
 		}),
 	)
 	defer server.Close()
@@ -139,7 +167,54 @@ func TestClient_CheckUsesExactIndexAndVerifiedTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requests != 1 {
-		t.Fatalf("request count = %d, want 1", requests)
+	wantRequests := []string{
+		"GET /_resolve/index/policy_stats",
+		"GET /policy_stats/_mapping",
+		"POST /policy_stats/_field_caps",
+		"POST /policy_stats/_search",
+	}
+	if strings.Join(requests, "\n") != strings.Join(wantRequests, "\n") {
+		t.Fatalf("requests = %q, want %q", requests, wantRequests)
+	}
+}
+
+func TestClient_CheckRejectsAliasAndIncompatibleState(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+	}{
+		{
+			name:     "alias",
+			response: `{"indices":[],"aliases":[{"name":"policy_stats","indices":["actual"]}],"data_streams":[]}`,
+		},
+		{
+			name:     "closed index",
+			response: `{"indices":[{"name":"policy_stats","attributes":["closed"]}],"aliases":[],"data_streams":[]}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(
+				http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+					writer.Header().Set("X-Elastic-Product", "Elasticsearch")
+					_, _ = writer.Write([]byte(test.response))
+				}),
+			)
+			defer server.Close()
+			client, err := New(
+				Config{
+					Endpoint: server.URL,
+					Index:    PolicyIndex,
+					Timeout:  time.Second,
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := client.Check(context.Background()); err == nil {
+				t.Fatal("Check() accepted incompatible index identity")
+			}
+		})
 	}
 }

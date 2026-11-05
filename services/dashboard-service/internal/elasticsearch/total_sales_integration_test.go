@@ -70,6 +70,9 @@ func TestElasticsearchReader_AcceptedAggregationMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := client.Check(context.Background()); err != nil {
+		t.Fatalf("compatible readiness = %v", err)
+	}
 
 	// when
 	known := executeTotalSales(t, useCase, domain.AllProducts(), "2018-01-01", "2018-12-31")
@@ -120,6 +123,7 @@ func TestElasticsearchReader_AcceptedAggregationMatrix(t *testing.T) {
 		context.Background(),
 		totalSalesQuery(t, domain.AllProducts(), "2019-01-01", "2019-12-31"),
 	)
+	absentCheckErr := client.Check(context.Background())
 
 	// then
 	assertTotal(t, known, 5, 500000, 1)
@@ -137,8 +141,106 @@ func TestElasticsearchReader_AcceptedAggregationMatrix(t *testing.T) {
 	if _, present := all.PerProductTotal["J"]; present {
 		t.Fatal("over-limit product J was returned")
 	}
-	if !errors.Is(authErr, ErrSearchRejected) || !errors.Is(absentErr, ErrSearchRejected) {
-		t.Fatalf("auth/absent errors = (%v, %v)", authErr, absentErr)
+	if !errors.Is(authErr, ErrSearchRejected) || !errors.Is(absentErr, ErrSearchRejected) ||
+		absentCheckErr == nil {
+		t.Fatalf(
+			"auth/absent errors = (%v, %v, readiness=%v)",
+			authErr,
+			absentErr,
+			absentCheckErr,
+		)
+	}
+}
+
+func TestElasticsearchReadiness_RejectsIncompatibleState(t *testing.T) {
+	endpoint := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_URL")
+	username := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_USERNAME")
+	password := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_PASSWORD")
+	if endpoint == "" || username == "" || password == "" {
+		t.Fatal("owned Elasticsearch endpoint and paired credentials are required")
+	}
+	client, err := New(Config{
+		Endpoint: endpoint, Index: PolicyIndex, Username: username, Password: password,
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+
+	tests := []struct {
+		name       string
+		index      string
+		definition string
+		closeIndex bool
+	}{
+		{
+			name:  "alias",
+			index: "policy_stats_actual",
+			definition: `{"settings":{"number_of_replicas":0},"aliases":{"policy_stats":{}},` +
+				`"mappings":{"properties":{"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
+				`"from":{"type":"date"},"totalPremium":{"type":"double"}}}}`,
+		},
+		{
+			name:  "non-aggregatable product keyword",
+			index: PolicyIndex,
+			definition: `{"settings":{"number_of_replicas":0},"mappings":{"properties":{` +
+				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword","doc_values":false}}},` +
+				`"from":{"type":"date"},"totalPremium":{"type":"double"}}}}`,
+		},
+		{
+			name:  "missing premium field",
+			index: PolicyIndex,
+			definition: `{"settings":{"number_of_replicas":0},"mappings":{"properties":{` +
+				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
+				`"from":{"type":"date"}}}}`,
+		},
+		{
+			name:  "wrong premium type",
+			index: PolicyIndex,
+			definition: `{"settings":{"number_of_replicas":0},"mappings":{"properties":{` +
+				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
+				`"from":{"type":"date"},"totalPremium":{"type":"keyword"}}}}`,
+		},
+		{
+			name:  "date rejects date-only input",
+			index: PolicyIndex,
+			definition: `{"settings":{"number_of_replicas":0},"mappings":{"properties":{` +
+				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
+				`"from":{"type":"date","format":"strict_date_time"},"totalPremium":{"type":"double"}}}}`,
+		},
+		{
+			name:       "closed index",
+			index:      PolicyIndex,
+			closeIndex: true,
+			definition: `{"settings":{"number_of_replicas":0},"mappings":{"properties":{` +
+				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
+				`"from":{"type":"date"},"totalPremium":{"type":"double"}}}}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			adminRequest(
+				t, http.MethodPut, endpoint+"/"+test.index, test.definition,
+				username, password, http.StatusOK,
+			)
+			t.Cleanup(func() {
+				adminRequest(
+					t, http.MethodDelete, endpoint+"/"+test.index, "",
+					username, password, http.StatusOK,
+				)
+			})
+			if test.closeIndex {
+				adminRequest(
+					t, http.MethodPost, endpoint+"/"+test.index+"/_close", "",
+					username, password, http.StatusOK,
+				)
+			}
+
+			if err := client.Check(context.Background()); err == nil {
+				t.Fatal("Check() accepted incompatible Elasticsearch state")
+			}
+		})
 	}
 }
 

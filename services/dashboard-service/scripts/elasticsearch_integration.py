@@ -145,7 +145,7 @@ def main() -> int:
                 f"-coverprofile={coverage}",
                 "-json",
                 "-run",
-                "^TestElasticsearchReader_AcceptedAggregationMatrix$",
+                "^TestElasticsearch(Reader_AcceptedAggregationMatrix|Readiness_RejectsIncompatibleState)$",
                 "./internal/elasticsearch",
             ],
             cwd=MODULE_ROOT,
@@ -160,12 +160,17 @@ def main() -> int:
             teardown_seconds=20,
             activity="run Dashboard Elasticsearch integration",
             capture=True,
+            reveal_failure_output=True,
         )
         sys.stdout.write(output)
         discovered = passed_tests(output)
         require(
             "TestElasticsearchReader_AcceptedAggregationMatrix" in discovered,
             f"query suite missed expected test; passed={sorted(discovered)}",
+        )
+        require(
+            "TestElasticsearchReadiness_RejectsIncompatibleState" in discovered,
+            f"readiness suite missed expected test; passed={sorted(discovered)}",
         )
         require(coverage_path.is_file(), "integration coverage profile was not produced")
     except (IntegrationError, CommandError, OSError) as error:
@@ -187,7 +192,7 @@ def main() -> int:
                 status = 1
     if status:
         return status
-    print("test-elasticsearch-integration: selected=1 auth=passed cleanup=passed")
+    print("test-elasticsearch-integration: selected=2 auth=passed cleanup=passed")
     return 0
 
 
