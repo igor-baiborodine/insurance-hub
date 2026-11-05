@@ -234,6 +234,11 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
         by_name["dashboard-qualification-cross-namespace-denied"]["metadata"]["namespace"]
         == f"issue-287-dashboard-denied-{environment}"
     )
+    for name in checks.DENIED_QUALIFICATION_PODS:
+        denial_script = by_name[name]["spec"]["containers"][0]["args"][0]
+        assert "--write-out '%{http_code}'" in denial_script
+        assert '"exit_code"' in denial_script
+        assert "--fail" not in denial_script
     reader = by_name["dashboard-qualification-reader"]["spec"]["containers"][0]
     encoded = json.dumps(reader)
     script = reader["args"][0]
@@ -301,6 +306,48 @@ def test_effective_reader_privileges_reject_additional_authority(mutation) -> No
 
     with pytest.raises(checks.DeploymentError, match="effective privileges differ"):
         checks.validate_effective_reader_privileges(json.dumps(privileges))
+
+
+def test_cni_denial_accepts_only_the_expected_connection_timeout() -> None:
+    checks.validate_cni_denial(
+        json.dumps({"exit_code": 28, "http_status": "000", "response_bytes": 0})
+    )
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "http_status", "response_bytes"),
+    [
+        (0, "400", 32),
+        (0, "401", 32),
+        (0, "404", 32),
+        (0, "405", 32),
+        (0, "500", 32),
+        (6, "000", 0),
+        (7, "000", 0),
+        (28, "000", 1),
+    ],
+)
+def test_cni_denial_rejects_reachable_http_and_other_failures(
+    exit_code: int, http_status: str, response_bytes: int
+) -> None:
+    output = json.dumps(
+        {
+            "exit_code": exit_code,
+            "http_status": http_status,
+            "response_bytes": response_bytes,
+        }
+    )
+
+    with pytest.raises(checks.DeploymentError, match="CNI denial result differs"):
+        checks.validate_cni_denial(output)
+
+
+@pytest.mark.parametrize("name", sorted(checks.DENIED_QUALIFICATION_PODS))
+def test_denied_qualification_pods_reject_a_reachable_http_response(name: str) -> None:
+    output = json.dumps({"exit_code": 0, "http_status": "405", "response_bytes": 32})
+
+    with pytest.raises(checks.DeploymentError, match="CNI denial result differs"):
+        checks.validate_qualification_output(name, output)
 
 
 def test_access_qualification_cleans_owned_resources_after_probe_failure() -> None:

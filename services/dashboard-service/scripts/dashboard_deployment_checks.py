@@ -33,6 +33,11 @@ EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
 BUSINESS_CLIENT_LABEL = "insurance-hub.io/dashboard-business-client"
 MANAGEMENT_CLIENT_LABEL = "insurance-hub.io/dashboard-management-client"
 JAVA_NAMES = {"dashboard-api-legacy"}
+DENIED_QUALIFICATION_PODS = {
+    "dashboard-qualification-marker-only",
+    "dashboard-qualification-business-management-denied",
+    "dashboard-qualification-cross-namespace-denied",
+}
 FORBIDDEN_TEXT = ("kafka", "postgres", "database", "insecure_skip_verify")
 PROBE_IMAGE = (
     "docker.io/curlimages/curl:8.16.0@"
@@ -1180,6 +1185,24 @@ def validate_effective_reader_privileges(output: str) -> None:
     )
 
 
+def validate_cni_denial(output: str) -> None:
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError as error:
+        raise DeploymentError("CNI denial result is malformed") from error
+    require(
+        result == {"exit_code": 28, "http_status": "000", "response_bytes": 0},
+        "CNI denial result differs",
+    )
+
+
+def validate_qualification_output(name: str, output: str) -> None:
+    if name == "dashboard-qualification-reader":
+        validate_effective_reader_privileges(output)
+    elif name in DENIED_QUALIFICATION_PODS:
+        validate_cni_denial(output)
+
+
 def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, Any]]:
     business_url = f"http://{target.business}.{target.namespace}.svc/dashboard/totalsales"
     management_url = f"http://{target.management}.{target.namespace}.svc:8081"
@@ -1210,11 +1233,19 @@ def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, 
     )
 
     def denied(url: str) -> str:
-        return (
-            "set -eu\n"
-            f"if curl --fail --silent --show-error --connect-timeout 2 --max-time 4 '{url}' "
-            ">/dev/null 2>&1; then exit 31; fi\n"
-        )
+        return f"""set -eu
+response=/tmp/denied-response
+trap 'rm -f "$response"' EXIT
+: >"$response"
+set +e
+status=$(curl --silent --connect-timeout 2 --max-time 4 \
+  --output "$response" --write-out '%{{http_code}}' '{url}' 2>/dev/null)
+exit_code=$?
+set -e
+response_bytes=$(wc -c <"$response" | tr -d '[:space:]')
+printf '{{"exit_code":%s,"http_status":"%s","response_bytes":%s}}\n' \
+  "$exit_code" "$status" "$response_bytes"
+"""
 
     return [
         qualification_pod(
@@ -1322,11 +1353,11 @@ def run_access_qualification(target: Target) -> None:
                     input_text=yaml.safe_dump(pod, sort_keys=False),
                 )
                 wait_for_probe(target, namespace_name, name)
-                if name == "dashboard-qualification-reader":
+                if name == "dashboard-qualification-reader" or name in DENIED_QUALIFICATION_PODS:
                     output = target.namespace_kubectl(
                         namespace_name, "logs", f"pod/{name}", timeout=10
                     )
-                    validate_effective_reader_privileges(output)
+                    validate_qualification_output(name, output)
             except DeploymentError as error:
                 logs = target.namespace_kubectl(namespace_name, "logs", f"pod/{name}", timeout=10)
                 raise DeploymentError(f"{error}; sanitized probe output: {logs[-1000:]}") from error
