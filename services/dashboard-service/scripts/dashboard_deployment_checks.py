@@ -192,7 +192,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     data = config.get("data", {})
     required_config = {
         "SERVICE_NAME": "dashboard-service",
-        "SERVICE_ENV": environment,
+        "DEPLOYMENT_ENVIRONMENT": environment,
         "HTTP_ADDR": "0.0.0.0:8080",
         "GRPC_ADDR": "0.0.0.0:9090",
         "HEALTH_ADDR": "0.0.0.0:8081",
@@ -206,8 +206,8 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "HTTP_READ_TIMEOUT": "10s",
         "HTTP_WRITE_TIMEOUT": "10s",
         "HTTP_IDLE_TIMEOUT": "30s",
-        "GRPC_MAX_RECV_MSG_SIZE": "1048576",
-        "GRPC_MAX_SEND_MSG_SIZE": "8388608",
+        "GRPC_MAX_RECV_BYTES": "1048576",
+        "GRPC_MAX_SEND_BYTES": "8388608",
     }
     require(
         all(data.get(key) == value for key, value in required_config.items()),

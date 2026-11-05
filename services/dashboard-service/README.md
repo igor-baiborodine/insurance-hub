@@ -83,7 +83,7 @@ value.
 | Request and probes | `REQUEST_TIMEOUT=8s`, `PROBE_TIMEOUT=2s`, `SHUTDOWN_TIMEOUT=10s` |
 | HTTP limits | Header/body `16384`/`4096` bytes; read-header/read/write/idle `5s`/`10s`/`10s`/`30s` |
 | gRPC limits | Receive/send `1048576`/`8388608` bytes |
-| Telemetry | `OTEL_ENABLED=false`, optional `OTEL_ENDPOINT`, `OTEL_EXPORT_TIMEOUT=2s` |
+| Telemetry | `OTEL_ENABLED=false`, optional `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_TIMEOUT=2s` |
 | Logging | `LOG_LEVEL=info`; safe structured fields only |
 
 `git-000000000000`, `unconfigured` and `development` are unresolved templates. Image, deployment

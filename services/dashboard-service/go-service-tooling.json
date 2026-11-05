@@ -19,7 +19,7 @@
         "HTTP_ADDR": "0.0.0.0:8080",
         "GRPC_ADDR": "0.0.0.0:9090",
         "HEALTH_ADDR": "0.0.0.0:8081",
-        "SERVICE_ENV": "development",
+        "DEPLOYMENT_ENVIRONMENT": "development",
         "SERVICE_VERSION": "development"
       },
       "stopSeconds": 10

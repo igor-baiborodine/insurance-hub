@@ -101,7 +101,7 @@ def main() -> int:
                 "--env",
                 "HEALTH_ADDR=0.0.0.0:8081",
                 "--env",
-                "SERVICE_ENV=local-dev",
+                "DEPLOYMENT_ENVIRONMENT=local-dev",
                 "--env",
                 f"SERVICE_VERSION={version}",
                 "--env",
