@@ -104,10 +104,15 @@ export DEPLOY_CONTEXT=qa-insurance-hub
 export DEPLOY_SVC_NS=qa-svc
 export DEPLOY_DATA_NS=qa-data
 export DEPLOY_SOURCE_REVISION=<40-source-hex>
+export DEPLOY_IMAGE_DIGEST=sha256:<64-hex-registry-digest>
 
 make go-svc-deploy-status SVC_NAME=dashboard
 make go-svc-deploy-verify SVC_NAME=dashboard
 ```
+
+Use the immutable digest recorded by the reviewed release. Status and verification fail when the
+digest is absent or malformed, when the selected ready Pod inventory differs, or when any running
+`dashboard-service` container reports another image ID.
 
 QA acceptance records the Flux source and applied revision, semantic and digest-qualified image,
 Pod image ID, runtime identity, labeled and denied network probes, health and Echo results, and

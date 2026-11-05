@@ -153,8 +153,8 @@ def test_live_state_rejects_wrong_resource_identity() -> None:
         target.live([desired], require_deployment=True)
 
 
-def rendered_local_resources() -> list[dict[str, object]]:
-    return checks.validate_render("local-dev", checks.render("local-dev"))
+def rendered_resources(environment: str = "local-dev") -> list[dict[str, object]]:
+    return checks.validate_render(environment, checks.render(environment))
 
 
 def target_with_live_resources(
@@ -165,12 +165,13 @@ def target_with_live_resources(
     }
     target = object.__new__(checks.Target)
     target.namespace = "local-dev-all"
+    target.configuration = {"mode": "direct"}
     target.json = Mock(side_effect=lambda _get, kind, name, _ignore: actual[(kind, name)])
     return target, actual
 
 
 def test_live_state_accepts_the_complete_rendered_contract() -> None:
-    items = rendered_local_resources()
+    items = rendered_resources()
     target, _actual = target_with_live_resources(items)
     target.live(items, require_deployment=True)
 
@@ -223,12 +224,75 @@ def test_live_state_accepts_the_complete_rendered_contract() -> None:
 def test_live_state_rejects_foreign_or_drifted_resources(
     kind: str, name: str, mutation, message: str
 ) -> None:
-    items = rendered_local_resources()
+    items = rendered_resources()
     target, actual = target_with_live_resources(items)
     mutation(actual[(kind.lower(), name)])
 
     with pytest.raises(checks.DeploymentError, match=message):
         target.live(items, require_deployment=True)
+
+
+@pytest.mark.parametrize(
+    ("expected", "image_id", "pod_count", "message"),
+    [
+        (
+            "sha256:" + "a" * 64,
+            "ghcr.io/igor-baiborodine/insurance-hub/dashboard-api@sha256:" + "a" * 64,
+            1,
+            "",
+        ),
+        (
+            "sha256:" + "a" * 64,
+            "ghcr.io/igor-baiborodine/insurance-hub/dashboard-api@sha256:" + "b" * 64,
+            1,
+            "image digest differs",
+        ),
+        ("", "sha256:" + "a" * 64, 1, "DEPLOY_IMAGE_DIGEST is required"),
+        ("sha256:short", "sha256:" + "a" * 64, 1, "DEPLOY_IMAGE_DIGEST is required"),
+        ("sha256:" + "a" * 64, "sha256:" + "a" * 64, 0, "Pod inventory differs"),
+    ],
+)
+def test_qa_live_state_requires_running_pod_digest(
+    expected: str, image_id: str, pod_count: int, message: str
+) -> None:
+    items = rendered_resources("qa")
+    deployment_item = checks.resource(items, "Deployment", "qa-dashboard-api")
+    actual = {
+        (str(item["kind"]).lower(), str(item["metadata"]["name"])): deepcopy(item) for item in items
+    }
+    pod = {
+        "metadata": {"name": "qa-dashboard-api-abc"},
+        "status": {
+            "phase": "Running",
+            "conditions": [{"type": "Ready", "status": "True"}],
+            "containerStatuses": [{"name": "dashboard-service", "imageID": image_id}],
+        },
+    }
+
+    def live_json(_operation, kind, *arguments):
+        if kind == "pods":
+            return {"items": [pod] * pod_count}
+        return actual[(kind, arguments[0])]
+
+    target = object.__new__(checks.Target)
+    target.namespace = "qa-svc"
+    target.deployment = deployment_item["metadata"]["name"]
+    target.configuration = {"mode": "flux"}
+    target.json = Mock(side_effect=live_json)
+    environment = {"DEPLOY_IMAGE_DIGEST": expected} if expected else {}
+
+    with patch.dict(os.environ, environment, clear=True):
+        if message:
+            with pytest.raises(checks.DeploymentError, match=message):
+                target.live(items, require_deployment=True)
+        else:
+            target.live(items, require_deployment=True)
+            target.json.assert_any_call(
+                "get",
+                "pods",
+                "-l",
+                "app.kubernetes.io/component=api,app.kubernetes.io/name=dashboard-api",
+            )
 
 
 def test_live_rejection_prevents_server_side_apply() -> None:
