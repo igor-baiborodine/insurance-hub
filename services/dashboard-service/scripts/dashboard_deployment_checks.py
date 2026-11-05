@@ -423,42 +423,125 @@ class Target:
 
     def live(self, items: list[dict[str, Any]], *, require_deployment: bool) -> None:
         for desired in items:
-            kind = str(desired["kind"])
-            name = desired["metadata"]["name"]
+            kind = str(desired.get("kind", ""))
+            metadata = desired.get("metadata", {})
+            name = metadata.get("name", "")
             actual = self.json("get", kind.lower(), name, "--ignore-not-found")
             if not actual:
                 require(not require_deployment, f"{kind}/{name} is absent")
                 continue
+            actual_metadata = actual.get("metadata", {})
             require(
                 actual.get("kind") == kind
-                and actual.get("metadata", {}).get("name") == name
-                and actual.get("metadata", {}).get("namespace") == self.namespace,
-                f"live {kind}/{name} identity differs",
+                and actual_metadata.get("name") == name
+                and actual_metadata.get("namespace") == metadata.get("namespace") == self.namespace
+                and labels_include(actual_metadata.get("labels"), metadata.get("labels"))
+                and not actual_metadata.get("ownerReferences")
+                and not actual_metadata.get("deletionTimestamp"),
+                f"live {kind}/{name} identity differs from rendered identity",
             )
-            if kind == "Deployment":
-                desired_spec = desired["spec"]
-                actual_spec = actual.get("spec", {})
+
+            if kind == "ConfigMap":
                 require(
-                    actual_spec.get("selector") == desired_spec.get("selector")
-                    and actual_spec.get("strategy") == desired_spec.get("strategy")
-                    and actual_spec.get("minReadySeconds") == desired_spec.get("minReadySeconds")
-                    and actual_spec.get("replicas") in ({1} if require_deployment else {0, 1}),
-                    f"live Deployment/{name} rollout differs",
+                    actual.get("data") == desired.get("data")
+                    and not actual.get("binaryData")
+                    and actual.get("immutable") in (None, False),
+                    f"live ConfigMap/{name} differs from rendered configuration",
                 )
-                desired_container = desired_spec["template"]["spec"]["containers"][0]
-                actual_containers = (
-                    actual_spec.get("template", {}).get("spec", {}).get("containers", [])
-                )
+                continue
+
+            if kind == "Service":
+                spec = actual.get("spec", {})
+                desired_spec = desired.get("spec", {})
                 require(
-                    len(actual_containers) == 1
-                    and actual_containers[0].get("image") == desired_container.get("image"),
-                    f"live Deployment/{name} image differs",
+                    spec.get("type") == "ClusterIP"
+                    and spec.get("selector") == desired_spec.get("selector")
+                    and spec.get("ports") == desired_spec.get("ports")
+                    and not any(
+                        field in spec for field in ("externalIPs", "loadBalancerIP", "externalName")
+                    )
+                    and all("nodePort" not in port for port in spec.get("ports", [])),
+                    f"live Service/{name} has drift or external exposure",
                 )
-            elif kind == "NetworkPolicy":
+                continue
+
+            if kind == "NetworkPolicy":
                 require(
                     normalized_policy_spec(actual.get("spec"))
                     == normalized_policy_spec(desired.get("spec")),
-                    f"live NetworkPolicy/{name} differs",
+                    f"live NetworkPolicy/{name} differs from rendered policy",
+                )
+                continue
+
+            require(kind == "Deployment", f"unsupported live resource kind: {kind}")
+            desired_spec = desired.get("spec", {})
+            actual_spec = actual.get("spec", {})
+            require(
+                actual_spec.get("selector") == desired_spec.get("selector")
+                and actual_spec.get("strategy") == desired_spec.get("strategy")
+                and actual_spec.get("minReadySeconds") == desired_spec.get("minReadySeconds")
+                and actual_spec.get("progressDeadlineSeconds")
+                == desired_spec.get("progressDeadlineSeconds")
+                and actual_spec.get("replicas")
+                in ({desired_spec.get("replicas")} if require_deployment else {0, 1}),
+                f"live Deployment/{name} rollout settings differ",
+            )
+            desired_template = desired_spec.get("template", {})
+            template = actual_spec.get("template", {})
+            require(
+                labels_include(
+                    template.get("metadata", {}).get("labels"),
+                    desired_template.get("metadata", {}).get("labels"),
+                ),
+                f"live Deployment/{name} Pod identity differs",
+            )
+            desired_pod = desired_template.get("spec", {})
+            pod = template.get("spec", {})
+            require(
+                pod.get("automountServiceAccountToken") is False
+                and pod.get("enableServiceLinks") == desired_pod.get("enableServiceLinks")
+                and pod.get("terminationGracePeriodSeconds")
+                == desired_pod.get("terminationGracePeriodSeconds")
+                and pod.get("securityContext") == desired_pod.get("securityContext")
+                and pod.get("hostNetwork") is not True
+                and pod.get("hostPID") is not True
+                and pod.get("hostIPC") is not True
+                and pod.get("serviceAccountName") in (None, "default")
+                and not pod.get("initContainers")
+                and not pod.get("volumes"),
+                f"live Deployment/{name} Pod security settings differ",
+            )
+            desired_containers = desired_pod.get("containers", [])
+            containers = pod.get("containers", [])
+            require(
+                len(desired_containers) == len(containers) == 1,
+                f"live Deployment/{name} has an unexpected container inventory",
+            )
+            desired_container = desired_containers[0]
+            container = containers[0]
+            for field in (
+                "name",
+                "image",
+                "imagePullPolicy",
+                "securityContext",
+                "ports",
+                "env",
+                "envFrom",
+                "resources",
+                "command",
+                "args",
+                "workingDir",
+                "volumeMounts",
+                "lifecycle",
+            ):
+                require(
+                    container.get(field) == desired_container.get(field),
+                    f"live Deployment/{name} container {field} differs",
+                )
+            for field in ("startupProbe", "livenessProbe", "readinessProbe"):
+                require(
+                    matching_probe(container.get(field), desired_container.get(field)),
+                    f"live Deployment/{name} container {field} differs",
                 )
 
 

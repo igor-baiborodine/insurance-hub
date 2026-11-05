@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -150,6 +151,100 @@ def test_live_state_rejects_wrong_resource_identity() -> None:
     }
     with pytest.raises(checks.DeploymentError, match="identity differs"):
         target.live([desired], require_deployment=True)
+
+
+def rendered_local_resources() -> list[dict[str, object]]:
+    return checks.validate_render("local-dev", checks.render("local-dev"))
+
+
+def target_with_live_resources(
+    items: list[dict[str, object]],
+) -> tuple[checks.Target, dict[tuple[str, str], dict[str, object]]]:
+    actual = {
+        (str(item["kind"]).lower(), str(item["metadata"]["name"])): deepcopy(item) for item in items
+    }
+    target = object.__new__(checks.Target)
+    target.namespace = "local-dev-all"
+    target.json = Mock(side_effect=lambda _get, kind, name, _ignore: actual[(kind, name)])
+    return target, actual
+
+
+def test_live_state_accepts_the_complete_rendered_contract() -> None:
+    items = rendered_local_resources()
+    target, _actual = target_with_live_resources(items)
+    target.live(items, require_deployment=True)
+
+
+@pytest.mark.parametrize(
+    ("kind", "name", "mutation", "message"),
+    [
+        (
+            "ConfigMap",
+            "local-dev-dashboard-config",
+            lambda item: item["data"].__setitem__("FOREIGN_SETTING", "true"),
+            "rendered configuration",
+        ),
+        (
+            "Service",
+            "local-dev-dashboard-api",
+            lambda item: item["spec"].__setitem__("externalIPs", ["203.0.113.10"]),
+            "external exposure",
+        ),
+        (
+            "Deployment",
+            "local-dev-dashboard-api",
+            lambda item: item["metadata"].__setitem__(
+                "ownerReferences", [{"kind": "Foreign", "name": "owner"}]
+            ),
+            "rendered identity",
+        ),
+        (
+            "Deployment",
+            "local-dev-dashboard-api",
+            lambda item: item["spec"]["template"]["spec"].__setitem__("hostNetwork", True),
+            "Pod security settings",
+        ),
+        (
+            "Deployment",
+            "local-dev-dashboard-api",
+            lambda item: item["spec"]["template"]["spec"]["containers"][0]["resources"][
+                "limits"
+            ].__setitem__("cpu", "500m"),
+            "container resources differs",
+        ),
+        (
+            "NetworkPolicy",
+            "local-dev-dashboard-api",
+            lambda item: item["spec"].__setitem__("ingress", []),
+            "rendered policy",
+        ),
+    ],
+)
+def test_live_state_rejects_foreign_or_drifted_resources(
+    kind: str, name: str, mutation, message: str
+) -> None:
+    items = rendered_local_resources()
+    target, actual = target_with_live_resources(items)
+    mutation(actual[(kind.lower(), name)])
+
+    with pytest.raises(checks.DeploymentError, match=message):
+        target.live(items, require_deployment=True)
+
+
+def test_live_rejection_prevents_server_side_apply() -> None:
+    target = Mock()
+    target.configuration = {"mode": "direct"}
+    target.rendered.return_value = ("rendered", [], "image")
+    target.live.side_effect = checks.DeploymentError("live ConfigMap drift")
+    with (
+        patch.object(checks, "Target", return_value=target),
+        patch.object(checks, "check_render"),
+        patch.object(checks, "secret_and_image"),
+        patch.object(lifecycle, "apply") as apply,
+        pytest.raises(checks.DeploymentError, match="ConfigMap drift"),
+    ):
+        lifecycle.execute(checks, ["deploy"])
+    apply.assert_not_called()
 
 
 def test_qa_aggregate_remains_inactive_beside_java() -> None:
