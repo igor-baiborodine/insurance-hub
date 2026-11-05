@@ -431,6 +431,18 @@ def free_port() -> int:
         return int(listener.getsockname()[1])
 
 
+def require_go_test_passed(output: str, test_name: str) -> None:
+    passed = False
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("Test") == test_name and event.get("Action") == "pass":
+            passed = True
+    require(passed, f"selected Go test did not execute and pass: {test_name}")
+
+
 def direct_rpc(cluster: Cluster) -> None:
     port = free_port()
     process = subprocess.Popen(
@@ -462,25 +474,23 @@ def direct_rpc(cluster: Cluster) -> None:
                 return False
 
         wait_for("direct-RPC port-forward", reachable, 20)
-        command(
+        test_name = "TestDeployedDirectRPC"
+        output = command(
             [
-                "go",
+                os.environ.get("MAKE_COMMAND", "make"),
+                "--no-print-directory",
                 "-C",
                 "services/dashboard-service",
-                "test",
-                "-mod=readonly",
-                "-count=1",
-                "-run=^TestDeployedDirectRPC$",
-                "./internal/service",
+                "_deploy-test-rpc",
             ],
             timeout=60,
             environment={
-                "GOWORK": "off",
+                "GO": os.environ.get("GO", "go"),
                 "DASHBOARD_DEPLOYMENT_GRPC_ADDR": f"127.0.0.1:{port}",
-                "DASHBOARD_DEPLOYMENT_GRPC_MESSAGE": "disposable-dashboard-rpc",
             },
             activity="verify deployed direct Dashboard RPC",
         )
+        require_go_test_passed(output, test_name)
         print("PASS deployed direct RPC", flush=True)
     finally:
         require(

@@ -94,6 +94,18 @@ def test_run_rejects_missing_digest_qualified_dependency_before_commands(
         disposable_deployment.run()
 
 
+def test_selected_deployed_rpc_must_execute_and_pass() -> None:
+    passed = '{"Action":"pass","Test":"TestDeployedDirectRPC"}'
+    disposable_deployment.require_go_test_passed(passed, "TestDeployedDirectRPC")
+
+    for output in (
+        '{"Action":"pass","Package":"example/internal/service"}',
+        '{"Action":"pass","Test":"TestRenamedDeployedDirectRPC"}',
+    ):
+        with pytest.raises(disposable_deployment.CheckFailed, match="did not execute"):
+            disposable_deployment.require_go_test_passed(output, "TestDeployedDirectRPC")
+
+
 def assert_reaped(pid_file: Path) -> None:
     deadline = time.monotonic() + 2
     pid = int(pid_file.read_text(encoding="utf-8"))
