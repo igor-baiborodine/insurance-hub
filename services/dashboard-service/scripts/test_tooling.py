@@ -24,8 +24,10 @@ TOOL_NAMES = (
     "govulncheck",
 )
 IGNORED_DIRECTORIES = {".git", ".tools", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
-COVERAGE_OUTPUTS = frozenset({"coverage.txt", "integration-coverage.txt"})
-PROTO_SCHEMA = Path("api/dashboard/v1/example_service.proto")
+COVERAGE_OUTPUTS = frozenset(
+    {"coverage.txt", "integration-coverage.txt", "elasticsearch-integration-coverage.txt"}
+)
+PROTO_SCHEMA = Path("api/dashboard/v1/dashboard_service.proto")
 GENERATED_PACKAGE = Path("gen/dashboard/v1")
 
 
@@ -199,24 +201,26 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
     if case == "proto-format":
         path = fixture / PROTO_SCHEMA
         path.write_text(
-            path.read_text(encoding="utf-8").replace("  rpc Echo", "rpc Echo"),
+            path.read_text(encoding="utf-8").replace("  rpc GetTotalSales", "rpc GetTotalSales"),
             encoding="utf-8",
         )
-        return "format-proto-check", "rpc Echo", ()
+        return "format-proto-check", "rpc GetTotalSales", ()
     if case == "proto-lint":
         path = fixture / PROTO_SCHEMA
         path.write_text(
-            path.read_text(encoding="utf-8").replace("string message = 1", "string BadName = 1", 1),
+            path.read_text(encoding="utf-8").replace(
+                "string sale_date_from = 2", "string BadName = 2", 1
+            ),
             encoding="utf-8",
         )
         return "lint-proto", "should be lower_snake_case", ()
     if case == "proto-breaking":
         path = fixture / PROTO_SCHEMA
         content = path.read_text(encoding="utf-8")
-        start = content.index("message EchoResponse {")
+        start = content.index("message SalesValue {")
         path.write_text(
             content[:start]
-            + content[start:].replace("string message = 1;", "string message = 2;", 1),
+            + content[start:].replace("int64 policies_count = 1;", "int64 policies_count = 3;", 1),
             encoding="utf-8",
         )
         return "check-proto-breaking", 'Previously present field "1"', ()
@@ -224,11 +228,11 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
         path = fixture / "testdata" / "http-contract.json"
         path.write_text(
             path.read_text(encoding="utf-8").replace(
-                '"path": "/v1/example/echo"', '"path": "/v1/example/changed"'
+                '"path": "/dashboard/totalsales"', '"path": "/dashboard/changed"'
             ),
             encoding="utf-8",
         )
-        return "check-gateway-contract", "paths must contain only /v1/example/changed", ()
+        return "check-gateway-contract", "paths must contain only /dashboard/changed", ()
     if case == "gateway-startup":
         path = fixture / "internal" / "service" / "service.go"
         path.write_text(
@@ -253,7 +257,7 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
         )
     generated = fixture / GENERATED_PACKAGE
     if case == "generated-modified":
-        path = generated / "example_service.pb.go"
+        path = generated / "dashboard_service.pb.go"
         path.write_text(
             path.read_text(encoding="utf-8") + "\n// controlled drift\n", encoding="utf-8"
         )
@@ -264,17 +268,17 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
         )
         return "check-proto-drift", "unexpected output in generated tree", ()
     if case == "generated-missing":
-        (generated / "example_service_grpc.pb.go").unlink()
+        (generated / "dashboard_service_grpc.pb.go").unlink()
         return "check-proto-drift", "missing expected output", ()
     if case == "generated-gateway-modified":
-        path = generated / "example_service.pb.gw.go"
+        path = generated / "dashboard_service.pb.gw.go"
         path.write_text(
             path.read_text(encoding="utf-8") + "\n// controlled gateway drift\n",
             encoding="utf-8",
         )
         return "check-proto-drift", "generated output differs from regeneration", ()
     if case == "generated-gateway-missing":
-        (generated / "example_service.pb.gw.go").unlink()
+        (generated / "dashboard_service.pb.gw.go").unlink()
         return "check-proto-drift", "missing expected output", ()
     if case == "generated-gateway-extra":
         (generated / "unexpected.pb.gw.go").write_text(
@@ -284,11 +288,11 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
         return "check-proto-drift", "stale generated output is no longer declared", ()
     openapi = fixture / "gen/openapiv2/dashboard/v1"
     if case == "generated-openapi-modified":
-        path = openapi / "example_service.swagger.json"
+        path = openapi / "dashboard_service.swagger.json"
         path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
         return "check-proto-drift", "generated output differs from regeneration", ()
     if case == "generated-openapi-missing":
-        (openapi / "example_service.swagger.json").unlink()
+        (openapi / "dashboard_service.swagger.json").unlink()
         return "check-proto-drift", "missing expected output", ()
     if case == "generated-openapi-extra":
         (openapi / "unexpected.swagger.json").write_text("{}\n", encoding="utf-8")

@@ -1,25 +1,18 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -30,264 +23,176 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
 )
 
-func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
-	// given
-	tests := []struct {
-		name, method, path, body, contentType, accept string
-		wantStatus, wantCalls                         int
-		wantBody                                      string
+func TestHandler_MapsAcceptedRequestsAndLegacyNumericResponses(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		body        string
+		query       string
+		accept      string
+		wantProduct *string
+		response    *dashboardv1.GetTotalSalesResponse
+		wantBody    string
 	}{
 		{
-			"valid",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"hello"}`,
-			"application/json",
-			"application/json",
-			200,
-			1,
-			`{"message":"hello"}`,
+			name: "unknown ignored, duplicate last wins, query and accept ignored",
+			body: `{"productCode":"first","aggregationUnitCode":"MONTH",` +
+				`"productCode":" SAFE ","saleDateFrom":"2019-01-01",` +
+				`"saleDateTo":"2020-01-01"}`,
+			query:       "productCode=ignored",
+			accept:      "text/plain",
+			wantProduct: stringPointer(" SAFE "),
+			response: &dashboardv1.GetTotalSalesResponse{
+				Total: &dashboardv1.SalesValue{PoliciesCount: 5, PremiumAmountMinorUnits: 500000},
+				PerProductTotal: map[string]*dashboardv1.SalesValue{
+					"SAFE_FARM": {PoliciesCount: 1, PremiumAmountMinorUnits: 100000},
+				},
+			},
+			wantBody: `{"total":{"policiesCount":5,"premiumAmount":5000.00},` +
+				`"perProductTotal":{"SAFE_FARM":{"policiesCount":1,"premiumAmount":1000.00}}}`,
 		},
 		{
-			"valid charset",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"é"}`,
-			"application/json; charset=utf-8",
-			"*/*",
-			200,
-			1,
-			`{"message":"é"}`,
+			name:     "null product means all and empty result omits map",
+			body:     `{"productCode":null,"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+			response: &dashboardv1.GetTotalSalesResponse{Total: &dashboardv1.SalesValue{}},
+			wantBody: `{"total":{"policiesCount":0,"premiumAmount":0}}`,
 		},
 		{
-			"missing value reaches RPC",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{}`,
-			"application/json",
-			"",
-			400,
-			1,
-			errorBody(3, "invalid request"),
+			name:        "empty product remains exact",
+			body:        `{"productCode":"","saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+			wantProduct: stringPointer(""),
+			response:    &dashboardv1.GetTotalSalesResponse{Total: &dashboardv1.SalesValue{}},
+			wantBody:    `{"total":{"policiesCount":0,"premiumAmount":0}}`,
 		},
-		{
-			"malformed",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"duplicate",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a","message":"b"}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"unknown member",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a","secret":"b"}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"wrong type",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":7}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"query",
-			http.MethodPost,
-			"/v1/example/echo?secret=value",
-			`{"message":"a"}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"unknown route",
-			http.MethodPost,
-			"/private/value",
-			`{}`,
-			"application/json",
-			"",
-			404,
-			0,
-			errorBody(5, "not found"),
-		},
-		{
-			"trailing slash",
-			http.MethodPost,
-			"/v1/example/echo/",
-			`{}`,
-			"application/json",
-			"",
-			404,
-			0,
-			errorBody(5, "not found"),
-		},
-		{
-			"method",
-			http.MethodGet,
-			"/v1/example/echo",
-			"",
-			"",
-			"",
-			405,
-			0,
-			errorBody(12, "method not allowed"),
-		},
-		{
-			"unacceptable",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"application/json",
-			"text/plain",
-			406,
-			0,
-			errorBody(3, "not acceptable"),
-		},
-		{
-			"zero quality response",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"application/json",
-			"application/json;q=0",
-			406,
-			0,
-			errorBody(3, "not acceptable"),
-		},
-		{
-			"parameterized response",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"application/json",
-			"application/json;profile=private",
-			406,
-			0,
-			errorBody(3, "not acceptable"),
-		},
-		{
-			"unsupported",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"text/plain",
-			"",
-			415,
-			0,
-			errorBody(3, "unsupported media type"),
-		},
-		{
-			"too large",
-			http.MethodPost,
-			"/v1/example/echo",
-			strings.Repeat("x", 65),
-			"application/json",
-			"",
-			413,
-			0,
-			errorBody(8, "request body too large"),
-		},
-	}
-	for _, test := range tests {
+	} {
 		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{}
-			handler := newTestHandler(t, client, 64)
+			client := &fakeClient{response: test.response}
+			handler := newTestHandler(t, client, 4096)
+			request := httptest.NewRequest(
+				http.MethodPost,
+				totalSalesPath+map[bool]string{true: "?" + test.query}[test.query != ""],
+				strings.NewReader(test.body),
+			)
+			request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+			request.Header.Set("Accept", test.accept)
+			request.Header.Set("Authorization", "private")
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusOK ||
+				recorder.Header().Get("Content-Type") != "application/json" ||
+				recorder.Body.String() != test.wantBody {
+				t.Fatalf(
+					"response = (%d, %q, %q)",
+					recorder.Code,
+					recorder.Header(),
+					recorder.Body.String(),
+				)
+			}
+			if client.calls != 1 ||
+				!sameStringPointer(client.request.ProductCode, test.wantProduct) ||
+				client.request.GetSaleDateFrom() != "2019-01-01" ||
+				client.request.GetSaleDateTo() != "2020-01-01" {
+				t.Fatalf(
+					"forwarded request = %+v; calls = %d",
+					client.request,
+					client.calls,
+				)
+			}
+		})
+	}
+}
+
+func TestHandler_RejectsInvalidBodiesBeforeRPC(t *testing.T) {
+	for _, body := range []string{
+		``, `null`, `{`, `{}`,
+		`{"saleDateFrom":null,"saleDateTo":"2020-01-01"}`,
+		`{"saleDateFrom":123,"saleDateTo":"2020-01-01"}`,
+		`{"productCode":123,"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+		`{"saleDateFrom":"2019-01-01"}`,
+		`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"} trailing`,
+	} {
+		client := &fakeClient{response: emptyResponse()}
+		handler := newTestHandler(t, client, 4096)
+		request := httptest.NewRequest(
+			http.MethodPost,
+			totalSalesPath,
+			strings.NewReader(body),
+		)
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, request)
+
+		assertError(
+			t,
+			recorder,
+			http.StatusBadRequest,
+			`{"code":3,"message":"invalid request","details":[]}`,
+		)
+		if client.calls != 0 {
+			t.Errorf("body %q reached RPC", body)
+		}
+	}
+}
+
+func TestHandler_EnforcesMediaMethodRouteAndBodyLimit(t *testing.T) {
+	valid := `{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`
+	for _, test := range []struct {
+		name        string
+		method      string
+		path        string
+		contentType string
+		body        string
+		limit       int
+		wantStatus  int
+		wantBody    string
+		wantAllow   string
+	}{
+		{
+			name: "media", method: http.MethodPost, path: totalSalesPath, contentType: "text/plain",
+			body: valid, limit: 4096, wantStatus: http.StatusUnsupportedMediaType,
+			wantBody: `{"code":3,"message":"unsupported media type","details":[]}`,
+		},
+		{
+			name: "method", method: http.MethodGet, path: totalSalesPath, contentType: "application/json",
+			limit: 4096, wantStatus: http.StatusMethodNotAllowed, wantAllow: http.MethodPost,
+			wantBody: `{"code":12,"message":"method not allowed","details":[]}`,
+		},
+		{
+			name: "route", method: http.MethodPost, path: "/dashboard/unknown", contentType: "application/json",
+			limit: 4096, wantStatus: http.StatusNotFound,
+			wantBody: `{"code":5,"message":"not found","details":[]}`,
+		},
+		{
+			name: "too large", method: http.MethodPost, path: totalSalesPath, contentType: "application/json",
+			body: valid + " ", limit: len(valid), wantStatus: http.StatusRequestEntityTooLarge,
+			wantBody: `{"code":8,"message":"request body too large","details":[]}`,
+		},
+		{
+			name: "exact limit", method: http.MethodPost, path: totalSalesPath, contentType: "application/json",
+			body: valid, limit: len(valid), wantStatus: http.StatusOK,
+			wantBody: `{"total":{"policiesCount":0,"premiumAmount":0}}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeClient{response: emptyResponse()}
+			handler := newTestHandler(t, client, test.limit)
 			request := httptest.NewRequest(
 				test.method,
 				test.path,
 				strings.NewReader(test.body),
 			)
-			if test.contentType != "" {
-				request.Header.Set("Content-Type", test.contentType)
-			}
-			if test.accept != "" {
-				request.Header.Set("Accept", test.accept)
-			}
+			request.Header.Set("Content-Type", test.contentType)
 			recorder := httptest.NewRecorder()
-			// when
 			handler.ServeHTTP(recorder, request)
-			// then
 			if recorder.Code != test.wantStatus ||
-				recorder.Body.String() != test.wantBody {
-				t.Errorf(
-					"response = (%d, %q), want (%d, %q)",
+				recorder.Body.String() != test.wantBody ||
+				recorder.Header().Get("Allow") != test.wantAllow {
+				t.Fatalf(
+					"response = (%d, %q, %q)",
 					recorder.Code,
-					recorder.Body.String(),
-					test.wantStatus,
-					test.wantBody,
-				)
-			}
-			if client.callCount() != test.wantCalls {
-				t.Errorf(
-					"RPC calls = %d, want %d",
-					client.callCount(),
-					test.wantCalls,
-				)
-			}
-		})
-	}
-}
-
-func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
-	// given
-	privateMarker := "private-upstream-marker"
-	for _, test := range []struct {
-		name string
-		err  error
-		want int
-		body string
-	}{
-		{"unavailable", status.Error(codes.Unavailable, privateMarker), 503, errorBody(14, "service unavailable")},
-		{"deadline", status.Error(codes.DeadlineExceeded, privateMarker), 504, errorBody(4, "deadline exceeded")},
-		{"canceled", status.Error(codes.Canceled, privateMarker), 499, errorBody(1, "request canceled")},
-		{"resource exhausted", status.Error(codes.ResourceExhausted, privateMarker), 500, errorBody(13, "internal error")},
-		{"internal", status.Error(codes.Internal, privateMarker), 500, errorBody(13, "internal error")},
-		{"unknown", errors.New(privateMarker), 500, errorBody(13, "internal error")},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{err: test.err}
-			handler := newTestHandler(t, client, 4096)
-			request := httptest.NewRequest(
-				http.MethodPost,
-				"/v1/example/echo",
-				strings.NewReader(`{"message":"hello"}`),
-			)
-			request.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != test.want || recorder.Body.String() != test.body ||
-				strings.Contains(recorder.Body.String(), privateMarker) {
-				t.Errorf(
-					"unsafe response = (%d, %q)",
-					recorder.Code,
+					recorder.Header(),
 					recorder.Body.String(),
 				)
 			}
@@ -295,130 +200,115 @@ func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
 	}
 }
 
-func TestHandler_PreservesMessageByteBoundaries(t *testing.T) {
-	// given
+func TestHandler_MapsRPCFailuresWithoutLeakingDetails(t *testing.T) {
 	for _, test := range []struct {
-		name    string
-		message string
-		status  int
+		code       codes.Code
+		wantStatus int
+		wantBody   string
 	}{
-		{"ASCII maximum", strings.Repeat("a", 128), http.StatusOK},
-		{"ASCII over", strings.Repeat("a", 129), http.StatusBadRequest},
-		{"UTF-8 maximum", strings.Repeat("é", 64), http.StatusOK},
-		{"UTF-8 over", strings.Repeat("é", 64) + "a", http.StatusBadRequest},
+		{codes.InvalidArgument, 400, `{"code":3,"message":"invalid request","details":[]}`},
+		{codes.Canceled, 499, `{"code":1,"message":"request canceled","details":[]}`},
+		{codes.DeadlineExceeded, 504, `{"code":4,"message":"deadline exceeded","details":[]}`},
+		{codes.Unavailable, 503, `{"code":14,"message":"service unavailable","details":[]}`},
+		{codes.ResourceExhausted, 500, `{"code":13,"message":"internal error","details":[]}`},
+		{codes.Internal, 500, `{"code":13,"message":"internal error","details":[]}`},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{}
-			handler := newTestHandler(t, client, 4096)
-			request := httptest.NewRequest(
-				http.MethodPost,
-				"/v1/example/echo",
-				strings.NewReader(`{"message":"`+test.message+`"}`),
-			)
-			request.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != test.status || client.callCount() != 1 {
-				t.Errorf(
-					"result = (status %d, calls %d), want (%d, 1)",
-					recorder.Code,
-					client.callCount(),
-					test.status,
-				)
-			}
-			if test.status == http.StatusOK &&
-				recorder.Body.String() != `{"message":"`+test.message+`"}` {
-				t.Errorf("Echo changed value: %q", recorder.Body.String())
-			}
-		})
+		client := &fakeClient{err: status.Error(test.code, "private-upstream-detail")}
+		handler := newTestHandler(t, client, 4096)
+		request := httptest.NewRequest(http.MethodPost, totalSalesPath, strings.NewReader(
+			`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+		))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		assertError(t, recorder, test.wantStatus, test.wantBody)
+		if strings.Contains(recorder.Body.String(), "private") {
+			t.Fatal("private RPC detail leaked")
+		}
 	}
 }
 
-func TestHandler_UsesShorterOfCallerAndServiceDeadline(t *testing.T) {
-	// given
+func TestHandler_UsesShorterDeadlineAndPropagatesCancellation(t *testing.T) {
 	for _, test := range []struct {
 		name          string
 		callerTimeout time.Duration
+		cancel        bool
 		maximum       time.Duration
+		wantStatus    int
 	}{
-		{"service deadline ignores Grpc-Timeout", 0, 150 * time.Millisecond},
-		{"shorter caller deadline", 10 * time.Millisecond, 100 * time.Millisecond},
+		{
+			name: "service deadline", maximum: 200 * time.Millisecond,
+			wantStatus: http.StatusGatewayTimeout,
+		},
+		{
+			name: "shorter caller deadline", callerTimeout: 20 * time.Millisecond,
+			maximum: 150 * time.Millisecond, wantStatus: http.StatusGatewayTimeout,
+		},
+		{
+			name: "caller cancellation", cancel: true, maximum: 150 * time.Millisecond,
+			wantStatus: 499,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{waitForContext: true}
+			client := &fakeClient{waitForContext: true, started: make(chan struct{})}
 			handler := newTestHandlerWithTimeout(t, client, 40*time.Millisecond)
 			ctx := context.Background()
-			var cancel context.CancelFunc
+			cancel := context.CancelFunc(func() {})
 			if test.callerTimeout > 0 {
 				ctx, cancel = context.WithTimeout(ctx, test.callerTimeout)
-				defer cancel()
+			} else if test.cancel {
+				ctx, cancel = context.WithCancel(ctx)
 			}
-			request := httptest.NewRequest(http.MethodPost, "/v1/example/echo", strings.NewReader(`{"message":"hello"}`)).
-				WithContext(ctx)
+			defer cancel()
+			request := httptest.NewRequest(
+				http.MethodPost,
+				totalSalesPath,
+				strings.NewReader(
+					`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+				),
+			).WithContext(ctx)
 			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("Grpc-Timeout", "999H")
 			recorder := httptest.NewRecorder()
+			done := make(chan struct{})
 			started := time.Now()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != http.StatusGatewayTimeout {
-				t.Errorf("status = %d, want 504", recorder.Code)
+			go func() {
+				handler.ServeHTTP(recorder, request)
+				close(done)
+			}()
+			select {
+			case <-client.started:
+			case <-time.After(time.Second):
+				t.Fatal("RPC did not start")
 			}
-			if elapsed := time.Since(started); elapsed > test.maximum {
-				t.Errorf(
-					"deadline completed in %v, want within %v",
-					elapsed,
-					test.maximum,
+			if test.cancel {
+				cancel()
+			}
+			select {
+			case <-done:
+			case <-time.After(test.maximum):
+				t.Fatal("bounded request did not finish")
+			}
+			if recorder.Code != test.wantStatus || time.Since(started) > test.maximum {
+				t.Fatalf(
+					"response = %d after %s",
+					recorder.Code,
+					time.Since(started),
 				)
 			}
 		})
 	}
 }
 
-func TestHandler_PropagatesCallerCancellation(t *testing.T) {
-	// given
-	started := make(chan struct{})
-	client := &fakeClient{waitForContext: true, started: started}
-	handler := newTestHandlerWithTimeout(t, client, time.Second)
-	ctx, cancel := context.WithCancel(context.Background())
-	request := httptest.NewRequest(http.MethodPost, "/v1/example/echo", strings.NewReader(`{"message":"hello"}`)).
-		WithContext(ctx)
-	request.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-	done := make(chan struct{})
-	// when
-	go func() {
-		handler.ServeHTTP(recorder, request)
-		close(done)
-	}()
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("RPC did not start")
+func TestHandler_StripsApplicationMetadataAndDeniesRPCMetadata(t *testing.T) {
+	client := &fakeClient{
+		response:         emptyResponse(),
+		responseMetadata: metadata.Pairs("private-header", "private-value"),
 	}
-	cancel()
-	// then
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("canceled request did not finish")
-	}
-	if recorder.Code != 499 || recorder.Body.String() != errorBody(1, "request canceled") {
-		t.Errorf("canceled response = (%d, %q)", recorder.Code, recorder.Body.String())
-	}
-}
-
-func TestHandler_StripsIdentityAndTimeoutHeaders(t *testing.T) {
-	// given
-	client := &fakeClient{}
 	handler := newTestHandler(t, client, 4096)
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
+		totalSalesPath,
+		strings.NewReader(`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer private")
@@ -429,216 +319,148 @@ func TestHandler_StripsIdentityAndTimeoutHeaders(t *testing.T) {
 	request.Header.Set("X-Forwarded-Host", "private.example")
 	request.Header.Set("X-Real-IP", "203.0.113.44")
 	recorder := httptest.NewRecorder()
-	// when
+
 	handler.ServeHTTP(recorder, request)
-	// then
+
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d", recorder.Code)
 	}
-	for _, marker := range []string{"private", "forged", "203.0.113.44", "private.example", "999H"} {
-		if strings.Contains(fmt.Sprint(client.lastMetadata()), marker) {
-			t.Errorf(
-				"injected marker %q escaped in metadata: %v",
-				marker,
-				client.lastMetadata(),
-			)
+	for _, marker := range []string{
+		"private", "forged", "203.0.113.44", "private.example", "999H",
+	} {
+		if strings.Contains(fmt.Sprint(client.requestMetadata), marker) {
+			t.Errorf("injected marker %q escaped: %v", marker, client.requestMetadata)
 		}
-	}
-}
-
-func TestClearApplicationMetadata_DropsAllApplicationValues(t *testing.T) {
-	// given
-	ctx := metadata.NewOutgoingContext(
-		context.Background(),
-		metadata.Pairs("authorization", "private", "principal", "forged"),
-	)
-	called := false
-	// when
-	err := ClearApplicationMetadata(
-		ctx,
-		"/example",
-		nil,
-		nil,
-		nil,
-		func(ctx context.Context, _ string, _, _ any, _ *grpc.ClientConn, _ ...grpc.CallOption) error {
-			called = true
-			md, _ := metadata.FromOutgoingContext(ctx)
-			if len(md) != 0 {
-				t.Errorf("outgoing metadata = %v, want empty", md)
-			}
-			return nil
-		},
-	)
-	// then
-	if err != nil || !called {
-		t.Fatalf("interceptor = (%t, %v)", called, err)
-	}
-}
-
-func TestHandler_DeniesUpstreamHeadersAndTrailers(t *testing.T) {
-	// given
-	client := &fakeClient{responseMetadata: metadata.Pairs("private-header", "private-value")}
-	handler := newTestHandler(t, client, 4096)
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
-	)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("TE", "trailers")
-	recorder := httptest.NewRecorder()
-	// when
-	handler.ServeHTTP(recorder, request)
-	// then
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d", recorder.Code)
 	}
 	for name, values := range recorder.Header() {
 		if strings.Contains(strings.ToLower(name), "private") ||
-			strings.Contains(fmt.Sprint(values), "private-value") {
+			strings.Contains(strings.Join(values, ","), "private-value") {
 			t.Errorf("response metadata escaped: %s=%v", name, values)
 		}
 	}
 }
 
-func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *testing.T) {
-	// given
-	const marker = "private-sensitive-marker"
-	var logs bytes.Buffer
-	reader := sdkmetric.NewManualReader()
-	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	spanRecorder := tracetest.NewSpanRecorder()
-	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
-	observer, err := telemetry.NewRequestObserver(
-		slog.New(slog.NewJSONHandler(&logs, nil)), meterProvider,
+func TestClearApplicationMetadata_DropsAllApplicationValues(t *testing.T) {
+	ctx := metadata.NewOutgoingContext(
+		context.Background(),
+		metadata.Pairs("authorization", "private", "principal", "forged"),
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler, err := NewHandler(&fakeClient{}, Settings{
-		RequestTimeout: time.Second, MaxBodyBytes: 4096,
-		TracerProvider: tracerProvider, MeterProvider: meterProvider,
-		Propagator: propagation.TraceContext{}, Observer: observer,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	unknown := httptest.NewRequest(http.MethodGet, "/"+marker+"?value="+marker, nil)
-	unknown.Header.Set("X-Custom", marker)
-	// when
-	handler.ServeHTTP(httptest.NewRecorder(), unknown)
-	malformed := httptest.NewRequest(
-		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"`+marker),
+	called := false
+	err := ClearApplicationMetadata(
+		ctx,
+		"/dashboard.v1.DashboardService/GetTotalSales",
+		nil,
+		nil,
+		nil,
+		func(
+			ctx context.Context,
+			_ string,
+			_, _ any,
+			_ *grpc.ClientConn,
+			_ ...grpc.CallOption,
+		) error {
+			called = true
+			outgoing, _ := metadata.FromOutgoingContext(ctx)
+			if len(outgoing) != 0 {
+				t.Errorf("outgoing metadata = %v, want empty", outgoing)
+			}
+			return nil
+		},
 	)
-	malformed.Header.Set("Content-Type", "application/json")
-	handler.ServeHTTP(httptest.NewRecorder(), malformed)
-
-	// then
-	var metrics metricdata.ResourceMetrics
-	if err := reader.Collect(context.Background(), &metrics); err != nil {
-		t.Fatal(err)
-	}
-	combined := logs.String() + fmt.Sprint(metrics)
-	for _, span := range spanRecorder.Ended() {
-		combined += span.Name() + fmt.Sprint(span.Attributes(), span.Events())
-	}
-	if strings.Contains(combined, marker) {
-		t.Fatalf("sensitive marker escaped into telemetry: %s", combined)
-	}
-	if !strings.Contains(combined, "POST /v1/example/echo") ||
-		!strings.Contains(combined, "unmatched") ||
-		!strings.Contains(combined, "insurance_hub.dashboard.requests") {
-		t.Errorf("missing bounded HTTP failure signals: %s", combined)
+	if err != nil || !called {
+		t.Fatalf("interceptor = (%t, %v)", called, err)
 	}
 }
 
-func TestUnavailableHandler_WritesFixedEnvelopeAndTelemetry(t *testing.T) {
-	// given
-	var logs bytes.Buffer
-	reader := sdkmetric.NewManualReader()
-	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	spanRecorder := tracetest.NewSpanRecorder()
-	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
-	observer, err := telemetry.NewRequestObserver(
-		slog.New(slog.NewJSONHandler(&logs, nil)), meterProvider,
-	)
+func TestMarshalLegacyResponse_HandlesSignedMinorUnitExtremes(t *testing.T) {
+	response := &dashboardv1.GetTotalSalesResponse{
+		Total: &dashboardv1.SalesValue{
+			PoliciesCount:           1,
+			PremiumAmountMinorUnits: -9223372036854775808,
+		},
+		PerProductTotal: map[string]*dashboardv1.SalesValue{
+			"x": {PoliciesCount: 1, PremiumAmountMinorUnits: 5},
+		},
+	}
+	data, err := marshalLegacyResponse(response)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewUnavailableHandler(Settings{
-		RequestTimeout: time.Second, MaxBodyBytes: 4096,
-		TracerProvider: tracerProvider, MeterProvider: meterProvider,
-		Propagator: propagation.TraceContext{}, Observer: observer,
-	})
-	if err != nil {
-		t.Fatal(err)
+	if string(data) != `{"total":{"policiesCount":1,"premiumAmount":-92233720368547758.08},`+
+		`"perProductTotal":{"x":{"policiesCount":1,"premiumAmount":0.05}}}` {
+		t.Fatalf("response = %s", data)
 	}
-	recorder := httptest.NewRecorder()
+}
 
-	// when
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/example/echo", nil))
+type fakeClient struct {
+	request          *dashboardv1.GetTotalSalesRequest
+	response         *dashboardv1.GetTotalSalesResponse
+	err              error
+	calls            int
+	waitForContext   bool
+	started          chan struct{}
+	requestMetadata  metadata.MD
+	responseMetadata metadata.MD
+}
 
-	// then
-	if recorder.Code != http.StatusServiceUnavailable ||
-		recorder.Header().Get("Content-Type") != "application/json" ||
-		recorder.Body.String() != errorBody(int(codes.Unavailable), "service unavailable") {
-		t.Fatalf(
-			"unavailable response = (%d, %q, %q)",
-			recorder.Code,
-			recorder.Header().Get("Content-Type"),
-			recorder.Body.String(),
-		)
+func (client *fakeClient) GetTotalSales(
+	ctx context.Context,
+	request *dashboardv1.GetTotalSalesRequest,
+	options ...grpc.CallOption,
+) (*dashboardv1.GetTotalSalesResponse, error) {
+	client.calls++
+	client.request = request
+	client.requestMetadata, _ = metadata.FromOutgoingContext(ctx)
+	for _, option := range options {
+		switch value := option.(type) {
+		case grpc.HeaderCallOption:
+			*value.HeaderAddr = client.responseMetadata.Copy()
+		case grpc.TrailerCallOption:
+			*value.TrailerAddr = client.responseMetadata.Copy()
+		}
 	}
-	var metrics metricdata.ResourceMetrics
-	if err := reader.Collect(context.Background(), &metrics); err != nil {
-		t.Fatal(err)
+	if client.started != nil {
+		close(client.started)
 	}
-	combined := logs.String() + fmt.Sprint(metrics)
-	for _, span := range spanRecorder.Ended() {
-		combined += span.Name() + fmt.Sprint(span.Attributes())
+	if client.waitForContext {
+		<-ctx.Done()
+		return nil, status.FromContextError(ctx.Err()).Err()
 	}
-	if !strings.Contains(combined, "unmatched") ||
-		!strings.Contains(combined, "insurance_hub.dashboard.requests") {
-		t.Errorf("missing drain-rejection telemetry: %s", combined)
-	}
+	return client.response, client.err
 }
 
 func newTestHandler(
 	t *testing.T,
-	client dashboardv1.ExampleServiceClient,
-	maxBody int,
+	client dashboardv1.DashboardServiceClient,
+	limit int,
 ) http.Handler {
-	return newTestHandlerWithSettings(t, client, maxBody, time.Second)
+	return newTestHandlerWithTimeout(t, client, time.Second, limit)
 }
 
 func newTestHandlerWithTimeout(
 	t *testing.T,
-	client dashboardv1.ExampleServiceClient,
+	client dashboardv1.DashboardServiceClient,
 	timeout time.Duration,
-) http.Handler {
-	return newTestHandlerWithSettings(t, client, 4096, timeout)
-}
-
-func newTestHandlerWithSettings(
-	t *testing.T,
-	client dashboardv1.ExampleServiceClient,
-	maxBody int,
-	timeout time.Duration,
+	limits ...int,
 ) http.Handler {
 	t.Helper()
-	meter := metricnoop.NewMeterProvider()
+	limit := 4096
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
 	observer, err := telemetry.NewRequestObserver(
-		slog.New(slog.NewTextHandler(io.Discard, nil)), meter,
+		slog.New(slog.NewJSONHandler(io.Discard, nil)), metricnoop.NewMeterProvider(),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	handler, err := NewHandler(client, Settings{
-		RequestTimeout: timeout, MaxBodyBytes: maxBody,
-		TracerProvider: noop.NewTracerProvider(), MeterProvider: meter,
-		Propagator: propagation.TraceContext{}, Observer: observer,
+		RequestTimeout: timeout,
+		MaxBodyBytes:   limit,
+		TracerProvider: noop.NewTracerProvider(),
+		MeterProvider:  metricnoop.NewMeterProvider(),
+		Propagator:     propagation.TraceContext{},
+		Observer:       observer,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -646,61 +468,27 @@ func newTestHandlerWithSettings(
 	return handler
 }
 
-type fakeClient struct {
-	mu               sync.Mutex
-	calls            int
-	metadata         metadata.MD
-	err              error
-	responseMetadata metadata.MD
-	waitForContext   bool
-	started          chan struct{}
+func emptyResponse() *dashboardv1.GetTotalSalesResponse {
+	return &dashboardv1.GetTotalSalesResponse{Total: &dashboardv1.SalesValue{}}
 }
 
-func (client *fakeClient) Echo(
-	ctx context.Context,
-	request *dashboardv1.EchoRequest,
-	options ...grpc.CallOption,
-) (*dashboardv1.EchoResponse, error) {
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	client.calls++
-	client.metadata, _ = metadata.FromOutgoingContext(ctx)
-	for _, option := range options {
-		switch selected := option.(type) {
-		case grpc.HeaderCallOption:
-			*selected.HeaderAddr = client.responseMetadata.Copy()
-		case grpc.TrailerCallOption:
-			*selected.TrailerAddr = client.responseMetadata.Copy()
-		}
+func assertError(t *testing.T, recorder *httptest.ResponseRecorder, status int, body string) {
+	t.Helper()
+	if recorder.Code != status || recorder.Header().Get("Content-Type") != "application/json" ||
+		recorder.Body.String() != body {
+		t.Fatalf(
+			"response = (%d, %q, %q)",
+			recorder.Code,
+			recorder.Header(),
+			recorder.Body.String(),
+		)
 	}
-	if client.err != nil {
-		return nil, client.err
-	}
-	if client.waitForContext {
-		if client.started != nil {
-			close(client.started)
-		}
-		<-ctx.Done()
-		return nil, status.FromContextError(ctx.Err()).Err()
-	}
-	if request.GetMessage() == "" || len([]byte(request.GetMessage())) > 128 {
-		return nil, status.Error(codes.InvalidArgument, "invalid request")
-	}
-	return &dashboardv1.EchoResponse{Message: request.GetMessage()}, nil
 }
 
-func (client *fakeClient) callCount() int {
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	return client.calls
+func sameStringPointer(left, right *string) bool {
+	return (left == nil && right == nil) || (left != nil && right != nil && *left == *right)
 }
 
-func (client *fakeClient) lastMetadata() metadata.MD {
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	return client.metadata.Copy()
-}
+func stringPointer(value string) *string { return &value }
 
-func errorBody(code int, message string) string {
-	return fmt.Sprintf(`{"code":%d,"message":"%s","details":[]}`, code, message)
-}
+var _ dashboardv1.DashboardServiceClient = (*fakeClient)(nil)

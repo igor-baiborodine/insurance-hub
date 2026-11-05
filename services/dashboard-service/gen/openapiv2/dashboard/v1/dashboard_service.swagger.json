@@ -1,12 +1,13 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "dashboard/v1/example_service.proto",
+    "title": "dashboard/v1/dashboard_service.proto",
     "version": "version not set"
   },
   "tags": [
     {
-      "name": "ExampleService"
+      "name": "DashboardService",
+      "description": "DashboardService exposes the private read-only Dashboard query boundary."
     }
   ],
   "consumes": [
@@ -16,18 +17,28 @@
     "application/json"
   ],
   "paths": {
-    "/v1/example/echo": {
+    "/dashboard/totalsales": {
       "post": {
-        "operationId": "ExampleService_Echo",
+        "summary": "GetTotalSales returns the accepted legacy total-sales aggregation.",
+        "operationId": "DashboardService_GetTotalSales",
         "responses": {
           "200": {
-            "description": "The unchanged Echo message.",
+            "description": "The legacy numeric total-sales envelope.",
             "schema": {
-              "$ref": "#/definitions/v1EchoResponse"
+              "$ref": "#/definitions/v1TotalSalesHTTPResponse"
             },
             "examples": {
               "application/json": {
-                "message": "hello"
+                "total": {
+                  "policiesCount": 5,
+                  "premiumAmount": 5000.00
+                },
+                "perProductTotal": {
+                  "SAFE_FARM": {
+                    "policiesCount": 1,
+                    "premiumAmount": 1000.00
+                  }
+                }
               }
             }
           },
@@ -40,19 +51,6 @@
               "application/json": {
                 "code": 3,
                 "message": "invalid request",
-                "details": []
-              }
-            }
-          },
-          "406": {
-            "description": "The requested response media type is not available.",
-            "schema": {
-              "$ref": "#/definitions/rpcStatus"
-            },
-            "examples": {
-              "application/json": {
-                "code": 3,
-                "message": "not acceptable",
                 "details": []
               }
             }
@@ -142,12 +140,12 @@
             "in": "body",
             "required": true,
             "schema": {
-              "$ref": "#/definitions/v1EchoRequest"
+              "$ref": "#/definitions/v1GetTotalSalesRequest"
             }
           }
         ],
         "tags": [
-          "ExampleService"
+          "DashboardService"
         ],
         "consumes": [
           "application/json"
@@ -187,21 +185,75 @@
         }
       }
     },
-    "v1EchoRequest": {
+    "v1GetTotalSalesRequest": {
       "type": "object",
       "properties": {
-        "message": {
+        "productCode": {
+          "type": "string"
+        },
+        "saleDateFrom": {
+          "type": "string"
+        },
+        "saleDateTo": {
           "type": "string"
         }
       }
     },
-    "v1EchoResponse": {
+    "v1GetTotalSalesResponse": {
       "type": "object",
       "properties": {
-        "message": {
-          "type": "string"
+        "total": {
+          "$ref": "#/definitions/v1SalesValue"
+        },
+        "perProductTotal": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/v1SalesValue"
+          }
         }
       }
+    },
+    "v1SalesValue": {
+      "type": "object",
+      "properties": {
+        "policiesCount": {
+          "type": "string",
+          "format": "int64"
+        },
+        "premiumAmountMinorUnits": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
+    },
+    "v1TotalSalesHTTPResponse": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "$ref": "#/definitions/v1TotalSalesHTTPValue"
+        },
+        "perProductTotal": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/v1TotalSalesHTTPValue"
+          }
+        }
+      },
+      "description": "TotalSalesHTTPResponse is documentation-only; the RPC response retains exact minor units."
+    },
+    "v1TotalSalesHTTPValue": {
+      "type": "object",
+      "properties": {
+        "policiesCount": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "premiumAmount": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "description": "TotalSalesHTTPValue documents the legacy JSON representation written by the gateway adapter."
     }
   }
 }

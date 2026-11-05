@@ -14,10 +14,9 @@
 # Dashboard service
 
 `dashboard-service` is the first private Go Dashboard process. It runs beside the authoritative
-Java Dashboard and exposes only the temporary synthetic `ExampleService/Echo` capability used to
-prove the runtime, image and deployment foundation. Issue 287 replaces this bootstrap contract
-with the first Dashboard query. This module has no Elasticsearch, Kafka, database, customer-data
-or traffic-authority responsibility.
+Java Dashboard and exposes the read-only total-sales query backed by the existing `policy_stats`
+Elasticsearch index. Java retains writer, setup, edge retry and traffic authority. This module does
+not create, seed, remap or write Elasticsearch state and has no Kafka responsibility.
 
 The standalone module is
 `github.com/igor-baiborodine/insurance-hub/services/dashboard-service`. It resolves the published
@@ -26,23 +25,27 @@ service.
 
 ## Capabilities and request path
 
-The editable protobuf source is `api/dashboard/v1/example_service.proto`; generated gRPC, gateway
+The editable protobuf source is `api/dashboard/v1/dashboard_service.proto`; generated gRPC, gateway
 and Swagger 2.0 outputs live under `gen/dashboard/v1` and `gen/openapiv2/dashboard/v1`.
 
-- Direct gRPC: `dashboard.v1.ExampleService/Echo`.
-- Private HTTP gateway: `POST /v1/example/echo` with JSON `{"message":"hello"}`.
+- Direct gRPC: `dashboard.v1.DashboardService/GetTotalSales`.
+- Private HTTP gateway: `POST /dashboard/totalsales` with date-only `saleDateFrom` and
+  `saleDateTo` strings plus optional exact `productCode`.
 - Management: `GET /livez` and `GET /readyz` on the separate management listener.
 
-The HTTP adapter validates the strict request and media contract, then calls the actual local gRPC
-listener. Messages must contain 1–128 UTF-8 bytes. Diagnostics never include the message body or
-arbitrary metadata.
+The HTTP adapter validates the accepted 4,096-byte request and media contract, then calls the
+actual local gRPC listener. It maps exact RPC minor units to the legacy numeric JSON envelope.
+Diagnostics never include request values, credentials, query bodies or upstream response content.
 
 ```mermaid
 flowchart LR
     caller["Private HTTP caller"] -->|":8080"| gateway["internal/gateway"]
     gateway -->|"generated client over loopback"| listener["gRPC listener :9090"]
     direct["Private RPC caller"] -->|":9090"| listener
-    listener --> echo["internal/grpc Echo"]
+    listener --> query["internal/grpc total sales"]
+    query --> usecase["internal/application"]
+    usecase --> reader["internal/elasticsearch"]
+    reader --> es["policy_stats"]
     probes["Kubelet or management caller"] -->|":8081"| health["livez and readyz"]
     entry["cmd/server"] --> composition["internal/service"]
     composition --> gateway
@@ -60,10 +63,13 @@ then shuts them down in the documented HTTP-first order.
 | Package or path | Responsibility |
 | --- | --- |
 | `cmd/server` | Load settings, construct identity-aware logging and telemetry, own signals and exit |
-| `internal/config` | Compose typed common settings and Dashboard identity policy |
+| `internal/config` | Compose typed common settings, Dashboard identity and Elasticsearch policy |
 | `internal/gateway` | Strict HTTP decoding, generated client registration, metadata stripping and safe errors |
-| `internal/grpc` | Register generated Echo, enforce request validation and map safe gRPC statuses |
-| `internal/service` | Compose listeners/providers, track readiness and own partial-start rollback and drain |
+| `internal/grpc` | Register total sales, enforce request validation and map safe gRPC statuses |
+| `internal/application` | Own the total-sales use case and narrow reader port |
+| `internal/domain` | Own date, product presence, count and exact minor-unit values |
+| `internal/elasticsearch` | Execute the bounded read-only `policy_stats` aggregation |
+| `internal/service` | Compose listeners/providers/query dependencies, readiness, rollback and drain |
 | `internal/logger` | Emit safe completion records with Dashboard runtime identity |
 | `internal/telemetry` | Own bounded HTTP/RPC metrics and traces over Servicekit providers |
 | `api/dashboard/v1` | Editable protobuf and HTTP annotation source |
@@ -83,14 +89,15 @@ value.
 | Request and probes | `REQUEST_TIMEOUT=8s`, `PROBE_TIMEOUT=2s`, `SHUTDOWN_TIMEOUT=10s` |
 | HTTP limits | Header/body `16384`/`4096` bytes; read-header/read/write/idle `5s`/`10s`/`10s`/`30s` |
 | gRPC limits | Receive/send `1048576`/`8388608` bytes |
+| Elasticsearch | `ELASTICSEARCH_URL=http://127.0.0.1:9200`, fixed `ELASTICSEARCH_INDEX=policy_stats`, optional paired `ELASTICSEARCH_USERNAME`/`ELASTICSEARCH_PASSWORD`, HTTPS-only `ELASTICSEARCH_CA_FILE`, `ELASTICSEARCH_TIMEOUT=5s` maximum |
 | Telemetry | `OTEL_ENABLED=false`, optional `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_TIMEOUT=2s` |
 | Logging | `LOG_LEVEL=info`; safe structured fields only |
 
 `git-000000000000`, `unconfigured` and `development` are unresolved templates. Image, deployment
 and runtime acceptance owners must replace them with the verified source-derived version, Pod or
 process identity and target environment. Wildcard binds are normalized to loopback for the
-process-owned gateway. Readiness reflects listeners and gateway-channel state; liveness is
-independent of an optional collector.
+process-owned gateway. Readiness requires the gateway channel and read-only visibility of the exact
+Elasticsearch index; liveness remains independent of Elasticsearch and an optional collector.
 
 ## Development commands
 
@@ -166,10 +173,10 @@ owns the complete deployment and return procedure after those owners are onboard
 Generation owns exactly:
 
 ```text
-gen/dashboard/v1/example_service.pb.go
-gen/dashboard/v1/example_service.pb.gw.go
-gen/dashboard/v1/example_service_grpc.pb.go
-gen/openapiv2/dashboard/v1/example_service.swagger.json
+gen/dashboard/v1/dashboard_service.pb.go
+gen/dashboard/v1/dashboard_service.pb.gw.go
+gen/dashboard/v1/dashboard_service_grpc.pb.go
+gen/openapiv2/dashboard/v1/dashboard_service.swagger.json
 ```
 
 `COPYING.md` intentionally retains source-template identities as historical provenance. It is not a

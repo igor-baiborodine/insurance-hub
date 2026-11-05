@@ -9,12 +9,16 @@ INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py scripts/deployment.py \
 	scripts/disposable_deployment.py scripts/image_check.py scripts/service_process.py \
+	scripts/test_image_check.py \
+	scripts/elasticsearch_integration.py scripts/test_elasticsearch_integration.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_disposable_deployment.py \
 	scripts/test_disposable_command.py \
 	scripts/test_service_process.py scripts/test_tooling.py \
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
+	scripts/test_elasticsearch_integration.py \
+	scripts/test_image_check.py \
 	scripts/test_deployment.py \
 	scripts/test_disposable_command.py \
 	scripts/test_service_process.py \
@@ -33,13 +37,13 @@ GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 GOLANGCI_CONFIG := .golangci.yml
 
-PROTO_SCHEMA := api/dashboard/v1/example_service.proto
+PROTO_SCHEMA := api/dashboard/v1/dashboard_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := \
-	gen/dashboard/v1/example_service.pb.go \
-	gen/dashboard/v1/example_service.pb.gw.go \
-	gen/dashboard/v1/example_service_grpc.pb.go \
-	gen/openapiv2/dashboard/v1/example_service.swagger.json
+	gen/dashboard/v1/dashboard_service.pb.go \
+	gen/dashboard/v1/dashboard_service.pb.gw.go \
+	gen/dashboard/v1/dashboard_service_grpc.pb.go \
+	gen/openapiv2/dashboard/v1/dashboard_service.swagger.json
 
 GO_VERSION := 1.27.3
 BUF_VERSION := v1.73.0
@@ -58,10 +62,13 @@ OTEL_GRPC_VERSION := v0.71.0
 OTEL_HTTP_VERSION := v0.70.0
 X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.0.1
+ELASTICSEARCH_CLIENT_VERSION := v8.19.7
+ELASTICSEARCH_IMAGE := docker.elastic.co/elasticsearch/elasticsearch:8.19.6@sha256:bfb2108076735fbfc5dcd5d49f12f5aa93fab9759034c55f7da3b4345606c903
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 TEST_PACKAGES ?= ./...
 COVERAGE_EXCLUDE_PATHS := gen internal/testing
 INTEGRATION_COVERAGE_FILE ?=
+ELASTICSEARCH_INTEGRATION_COVERAGE_FILE ?= elasticsearch-integration-coverage.txt
 HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
@@ -94,7 +101,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
-	test-coverage-tooling test-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
+	test-coverage-tooling test-integration test-elasticsearch-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
 	image-build image-check _image-check-existing deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
@@ -108,7 +115,7 @@ image-build: python-runtime-check ## Build the pinned linux/amd64 Dashboard runt
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" build
 
-image-check: image-build ## Build and validate Dashboard image identity, Echo, health and shutdown
+image-check: image-build ## Build and validate Dashboard image identity, total sales, health and shutdown
 	@$(MAKE) --no-print-directory _image-check-existing
 
 _image-check-existing: python-runtime-check
@@ -116,7 +123,8 @@ _image-check-existing: python-runtime-check
 		DOCKER="$(DOCKER)" "$(PYTHON)" -m scripts.go.service.image \
 		--config "$(GO_SERVICE_TOOLING_CONFIG)" inspect
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		DOCKER="$(DOCKER)" "$(PYTHON)" scripts/image_check.py
+		DOCKER="$(DOCKER)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
+		"$(PYTHON)" scripts/image_check.py
 
 deploy-render: ## Render one Dashboard overlay without applying it
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
@@ -154,7 +162,8 @@ python-tooling-lint-fix: python-toolchain-check
 		--config "$(PYTHON_REPOSITORY_ROOT)/pyproject.toml" -- $(PYTHON_TOOLING_FILES)
 
 python-tooling-test-fast: python-toolchain-check
-	@cd "$(CURDIR)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
+	@cd "$(CURDIR)" && PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
 		-c "$(PYTHON_REPOSITORY_ROOT)/pyproject.toml" --rootdir "$(CURDIR)" \
 		-m 'not integration and not acceptance' $(PYTHON_FAST_TEST_FILES)
 
@@ -166,6 +175,7 @@ update-deps:
 	GOWORK=off $(GO) get \
 		buf.build/go/protovalidate@$(PROTOVALIDATE_GO_VERSION) \
 		buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go@$(PROTOVALIDATE_SCHEMA_GO_VERSION) \
+		github.com/elastic/go-elasticsearch/v8@$(ELASTICSEARCH_CLIENT_VERSION) \
 		github.com/grpc-ecosystem/grpc-gateway/v2@$(GRPC_GATEWAY_VERSION) \
 		go.opentelemetry.io/otel@$(OTEL_VERSION) \
 		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
@@ -182,13 +192,14 @@ update-deps:
 	GOWORK=off $(GO) mod tidy
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
-check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \
+check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration \
+	test-elasticsearch-integration build \
 	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
 
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
 		--contract testdata/http-contract.json \
-		--swagger gen/openapiv2/dashboard/v1/example_service.swagger.json
+		--swagger gen/openapiv2/dashboard/v1/dashboard_service.swagger.json
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
@@ -210,6 +221,12 @@ test-integration: ## Exercise real Dashboard HTTP-to-RPC composition and lifecyc
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./internal/service \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
+
+test-elasticsearch-integration: python-runtime-check ## Exercise total-sales against owned disposable Elasticsearch
+	@DOCKER="$(DOCKER)" GO="$(GO)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
+		ELASTICSEARCH_INTEGRATION_COVERAGE_FILE="$(ELASTICSEARCH_INTEGRATION_COVERAGE_FILE)" \
+		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" scripts/elasticsearch_integration.py
 
 shared-fast-build:
 	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \

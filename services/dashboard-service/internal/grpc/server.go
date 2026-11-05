@@ -19,20 +19,16 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	dashboardv1 "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/gen/dashboard/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
 )
 
 const internalMessage = "internal error"
 
-// Echo handles the example's single responsibility independently of transport details.
-type Echo func(context.Context, string) (string, error)
-
-// IdentityEcho returns the supplied message while preserving a canceled request context.
-func IdentityEcho(ctx context.Context, message string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	return message, nil
+// TotalSalesExecutor is the application boundary used by the RPC transport.
+type TotalSalesExecutor interface {
+	Execute(context.Context, application.TotalSalesQuery) (application.TotalSalesResult, error)
 }
 
 type Settings struct {
@@ -43,13 +39,13 @@ type Settings struct {
 	MeterProvider   metric.MeterProvider
 }
 
-// NewServer constructs the instrumented server and registers the generated ExampleService.
+// NewServer constructs the instrumented server and registers DashboardService.
 func NewServer(
 	logger *slog.Logger,
 	tracerProvider trace.TracerProvider,
 	propagator propagation.TextMapPropagator,
 	settings Settings,
-	echo Echo,
+	totalSales TotalSalesExecutor,
 ) (*grpcgo.Server, error) {
 	if logger == nil {
 		return nil, errors.New("create gRPC server: logger is required")
@@ -60,10 +56,9 @@ func NewServer(
 	if propagator == nil {
 		return nil, errors.New("create gRPC server: propagator is required")
 	}
-	if echo == nil {
-		return nil, errors.New("create gRPC server: echo handler is required")
+	if totalSales == nil {
+		return nil, errors.New("create gRPC server: total-sales executor is required")
 	}
-
 	if settings.RequestTimeout <= 0 || settings.MaxReceiveBytes <= 0 ||
 		settings.MaxSendBytes <= 0 {
 		return nil, errors.New(
@@ -72,7 +67,7 @@ func NewServer(
 	}
 
 	validator, err := protovalidate.New(
-		protovalidate.WithMessages(&dashboardv1.EchoRequest{}),
+		protovalidate.WithMessages(&dashboardv1.GetTotalSalesRequest{}),
 		protovalidate.WithDisableLazy(),
 	)
 	if err != nil {
@@ -86,62 +81,98 @@ func NewServer(
 	server := grpcgo.NewServer(
 		grpcgo.MaxRecvMsgSize(settings.MaxReceiveBytes),
 		grpcgo.MaxSendMsgSize(settings.MaxSendBytes),
-		grpcgo.StatsHandler(
-			&requestStatsHandler{
-				observer: settings.Observer,
-				Handler: otelgrpc.NewServerHandler(
-					otelgrpc.WithTracerProvider(tracerProvider),
-					otelgrpc.WithPropagators(propagator),
-					otelgrpc.WithMeterProvider(meterProvider),
-					otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
-						return info.FullMethodName == dashboardv1.ExampleService_Echo_FullMethodName
-					}),
-				),
-			},
-		),
+		grpcgo.StatsHandler(&requestStatsHandler{
+			observer: settings.Observer,
+			Handler: otelgrpc.NewServerHandler(
+				otelgrpc.WithTracerProvider(tracerProvider),
+				otelgrpc.WithPropagators(propagator),
+				otelgrpc.WithMeterProvider(meterProvider),
+				otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
+					return info.FullMethodName == dashboardv1.DashboardService_GetTotalSales_FullMethodName
+				}),
+			),
+		}),
 		grpcgo.UnaryInterceptor(validationInterceptor(logger, validator)),
 	)
-	dashboardv1.RegisterExampleServiceServer(server, &exampleServer{
-		logger:         logger,
-		requestTimeout: settings.RequestTimeout,
-		echo:           echo,
+	dashboardv1.RegisterDashboardServiceServer(server, &dashboardServer{
+		logger: logger, requestTimeout: settings.RequestTimeout, totalSales: totalSales,
 	})
 	return server, nil
 }
 
-type exampleServer struct {
-	dashboardv1.UnimplementedExampleServiceServer
+type dashboardServer struct {
+	dashboardv1.UnimplementedDashboardServiceServer
 	logger         *slog.Logger
 	requestTimeout time.Duration
-	echo           Echo
+	totalSales     TotalSalesExecutor
 }
 
-func (server *exampleServer) Echo(
+func (server *dashboardServer) GetTotalSales(
 	ctx context.Context,
-	request *dashboardv1.EchoRequest,
-) (*dashboardv1.EchoResponse, error) {
+	request *dashboardv1.GetTotalSalesRequest,
+) (*dashboardv1.GetTotalSalesResponse, error) {
+	dateFrom, err := domain.ParseDate(request.GetSaleDateFrom())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+	dateTo, err := domain.ParseDate(request.GetSaleDateTo())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+	product := domain.AllProducts()
+	if request.ProductCode != nil {
+		product = domain.ExactProduct(request.GetProductCode())
+	}
+
 	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
 	defer cancel()
-	message, err := server.echo(requestCtx, request.GetMessage())
+	result, err := server.totalSales.Execute(requestCtx, application.TotalSalesQuery{
+		Product: product, DateFrom: dateFrom, DateTo: dateTo,
+	})
 	if err == nil {
 		err = requestCtx.Err()
 	}
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil, status.Error(codes.Canceled, context.Canceled.Error())
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, status.Error(
-				codes.DeadlineExceeded,
-				context.DeadlineExceeded.Error(),
-			)
-		}
-		server.logger.ErrorContext(ctx, "echo request failed",
-			slog.String("rpc", dashboardv1.ExampleService_Echo_FullMethodName),
-		)
-		return nil, status.Error(codes.Internal, internalMessage)
+		return nil, server.mapError(ctx, err)
 	}
-	return &dashboardv1.EchoResponse{Message: message}, nil
+	response := &dashboardv1.GetTotalSalesResponse{
+		Total: &dashboardv1.SalesValue{
+			PoliciesCount:           result.Total.PoliciesCount(),
+			PremiumAmountMinorUnits: result.Total.PremiumAmount().MinorUnits(),
+		},
+		PerProductTotal: make(
+			map[string]*dashboardv1.SalesValue,
+			len(result.PerProductTotal),
+		),
+	}
+	for productCode, value := range result.PerProductTotal {
+		response.PerProductTotal[productCode] = &dashboardv1.SalesValue{
+			PoliciesCount:           value.PoliciesCount(),
+			PremiumAmountMinorUnits: value.PremiumAmount().MinorUnits(),
+		}
+	}
+	return response, nil
+}
+
+func (server *dashboardServer) mapError(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, context.Canceled.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
+	case errors.Is(err, application.ErrTotalSalesUnavailable):
+		return status.Error(codes.Unavailable, "service unavailable")
+	default:
+		server.logger.ErrorContext(
+			ctx,
+			"total-sales request failed",
+			slog.String(
+				"rpc",
+				dashboardv1.DashboardService_GetTotalSales_FullMethodName,
+			),
+		)
+		return status.Error(codes.Internal, internalMessage)
+	}
 }
 
 func validationInterceptor(
@@ -156,7 +187,9 @@ func validationInterceptor(
 	) (any, error) {
 		message, ok := request.(proto.Message)
 		if !ok {
-			logger.ErrorContext(ctx, "request validation failed",
+			logger.ErrorContext(
+				ctx,
+				"request validation failed",
 				slog.String("rpc", info.FullMethod),
 			)
 			return nil, status.Error(codes.Internal, internalMessage)
@@ -165,7 +198,9 @@ func validationInterceptor(
 			if _, ok := errors.AsType[*protovalidate.ValidationError](err); ok {
 				return nil, status.Error(codes.InvalidArgument, "invalid request")
 			}
-			logger.ErrorContext(ctx, "request validation failed",
+			logger.ErrorContext(
+				ctx,
+				"request validation failed",
 				slog.String("rpc", info.FullMethod),
 			)
 			return nil, status.Error(codes.Internal, internalMessage)
@@ -187,7 +222,7 @@ func (handler *requestStatsHandler) TagRPC(
 ) context.Context {
 	ctx = handler.Handler.TagRPC(ctx, info)
 	if handler.observer != nil &&
-		info.FullMethodName == dashboardv1.ExampleService_Echo_FullMethodName {
+		info.FullMethodName == dashboardv1.DashboardService_GetTotalSales_FullMethodName {
 		return context.WithValue(ctx, requestStateKey{}, handler.observer.StartGRPC(ctx))
 	}
 	return ctx

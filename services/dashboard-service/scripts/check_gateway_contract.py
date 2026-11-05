@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the generated Echo Swagger against the independent HTTP contract fixture."""
+"""Verify generated total-sales Swagger against the independent HTTP contract fixture."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 
 
 class ContractError(ValueError):
-    """The fixture or generated Swagger violates the owned Echo contract."""
+    """The fixture or generated Swagger violates the owned total-sales contract."""
 
 
 def require(condition: bool, message: str) -> None:
@@ -45,8 +45,11 @@ def require_schema(
     for field, expected_type in expected_properties.items():
         value = properties[field]
         require(isinstance(value, dict), f"Swagger property {name}.{field} must be an object")
+        actual_type = value.get("type")
+        if actual_type is None and isinstance(value.get("$ref"), str):
+            actual_type = "object"
         require(
-            value.get("type") == expected_type,
+            actual_type == expected_type,
             f"Swagger property {name}.{field} must have type {expected_type}",
         )
 
@@ -77,7 +80,7 @@ def check_contract(contract_path: Path, swagger_path: Path) -> None:
     require(isinstance(path_item, dict), f"Swagger path {path} must be an object")
     require(set(path_item) == {method}, f"Swagger path {path} must expose only {method}")
     operation = path_item[method]
-    require(isinstance(operation, dict), "Swagger Echo operation must be an object")
+    require(isinstance(operation, dict), "Swagger total-sales operation must be an object")
     assert isinstance(operation, dict)
 
     require(
@@ -149,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     except ContractError as error:
         print(f"check-gateway-contract: {error}", file=sys.stderr)
         return 1
-    print("check-gateway-contract: generated Swagger matches the independent Echo contract")
+    print("check-gateway-contract: generated Swagger matches the independent total-sales contract")
     return 0
 
 

@@ -793,12 +793,12 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
         else:
             raise DeploymentError("deployed readiness was not reachable")
         status, body = _http(
-            f"http://127.0.0.1:{http_port}/v1/example/echo",
-            json.dumps({"message": "dashboard-deploy-echo"}).encode(),
+            f"http://127.0.0.1:{http_port}/dashboard/totalsales",
+            json.dumps({"saleDateFrom": "2019-01-01", "saleDateTo": "2020-01-01"}).encode(),
         )
         require(
-            status == 200 and json.loads(body) == {"message": "dashboard-deploy-echo"},
-            "deployed Echo differs",
+            status == 200 and "total" in json.loads(body),
+            "deployed total-sales response differs",
         )
     finally:
         for child in processes:

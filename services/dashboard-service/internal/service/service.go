@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -22,7 +24,9 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
 
 	dashboardv1 "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/gen/dashboard/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/elasticsearch"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/grpc"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
@@ -63,16 +67,21 @@ type gatewayConnection interface {
 	Close() error
 }
 
+type searchDependency interface {
+	Check(context.Context) error
+	CloseIdleConnections()
+}
+
 type dependencies struct {
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
+	newSearch      func(config.Elasticsearch) (application.TotalSalesReader, searchDependency, error)
+	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.TotalSalesExecutor) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
-	newGateway     func(dashboardv1.ExampleServiceClient, gateway.Settings) (http.Handler, error)
+	newGateway     func(dashboardv1.DashboardServiceClient, gateway.Settings) (http.Handler, error)
 	newUnavailable func(gateway.Settings) (http.Handler, error)
 	newBusiness    func(http.Handler, config.Config) httpServer
 	newManagement  func(*health.State) httpServer
-	echo           transport.Echo
 }
 
 func productionDependencies() dependencies {
@@ -81,8 +90,9 @@ func productionDependencies() dependencies {
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
-		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, echo transport.Echo) (grpcServer, error) {
-			return transport.NewServer(logger, tracer, propagator, settings, echo)
+		newSearch: newSearchDependency,
+		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, totalSales transport.TotalSalesExecutor) (grpcServer, error) {
+			return transport.NewServer(logger, tracer, propagator, settings, totalSales)
 		},
 		newConnection:  newGatewayConnection,
 		newGateway:     gateway.NewHandler,
@@ -98,8 +108,50 @@ func productionDependencies() dependencies {
 			}
 		},
 		newManagement: func(state *health.State) httpServer { return health.NewManagementServer(state) },
-		echo:          transport.IdentityEcho,
 	}
+}
+
+func newSearchDependency(
+	settings config.Elasticsearch,
+) (application.TotalSalesReader, searchDependency, error) {
+	var caCertificate []byte
+	if settings.CAFile != "" {
+		var err error
+		caCertificate, err = readBoundedFile(settings.CAFile, 1<<20)
+		if err != nil {
+			return nil, nil, errors.New("load Elasticsearch CA certificate")
+		}
+	}
+	client, err := elasticsearch.New(elasticsearch.Config{
+		Endpoint: settings.URL,
+		Index:    settings.Index,
+		Username: settings.Username,
+		Password: settings.Password,
+		CACert:   caCertificate,
+		Timeout:  settings.Timeout,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	reader, err := elasticsearch.NewReader(client)
+	if err != nil {
+		client.CloseIdleConnections()
+		return nil, nil, err
+	}
+	return reader, client, nil
+}
+
+func readBoundedFile(path string, maximum int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, maximum+1))
+	if err != nil || int64(len(data)) > maximum {
+		return nil, errors.New("file exceeds accepted certificate size")
+	}
+	return data, nil
 }
 
 func newGatewayConnection(
@@ -131,6 +183,7 @@ func newGatewayConnection(
 type runningService struct {
 	state              *health.State
 	provider           telemetryProvider
+	search             searchDependency
 	grpcServer         grpcServer
 	grpcListener       net.Listener
 	connection         gatewayConnection
@@ -171,6 +224,15 @@ func run(
 	if err != nil {
 		return fail(err)
 	}
+	reader, search, err := deps.newSearch(settings.Elasticsearch)
+	if err != nil {
+		return fail(fmt.Errorf("run service: initialize Elasticsearch: %w", err))
+	}
+	runtime.search = search
+	totalSales, err := application.NewGetTotalSales(reader)
+	if err != nil {
+		return fail(fmt.Errorf("run service: initialize total-sales use case: %w", err))
+	}
 	runtime.grpcServer, err = deps.newGRPCServer(
 		logger, provider.TracerProvider(), provider.GRPCPropagator(),
 		transport.Settings{
@@ -179,7 +241,7 @@ func run(
 			MaxSendBytes:    settings.MaxSendBytes,
 			Observer:        observer,
 			MeterProvider:   provider.MeterProvider(),
-		}, deps.echo,
+		}, totalSales,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize gRPC transport: %w", err))
@@ -215,15 +277,18 @@ func run(
 	}
 	readyContext, cancelReady := context.WithTimeout(ctx, settings.ProbeTimeout)
 	err = waitForConnection(readyContext, runtime.connection)
+	if err == nil {
+		err = runtime.search.Check(readyContext)
+	}
 	cancelReady()
 	if err != nil {
-		return fail(fmt.Errorf("run service: gateway connection not ready: %w", err))
+		return fail(fmt.Errorf("run service: dependency not ready: %w", err))
 	}
-	state, err := health.NewState(settings.ProbeTimeout, func(context.Context) error {
+	state, err := health.NewState(settings.ProbeTimeout, func(ctx context.Context) error {
 		if runtime.connection.GetState() != connectivity.Ready {
 			return errors.New("gateway connection is not ready")
 		}
-		return nil
+		return runtime.search.Check(ctx)
 	})
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
@@ -238,7 +303,7 @@ func run(
 		Observer:       observer,
 	}
 	handler, err := deps.newGateway(
-		dashboardv1.NewExampleServiceClient(runtime.connection),
+		dashboardv1.NewDashboardServiceClient(runtime.connection),
 		gatewaySettings,
 	)
 	if err != nil {
@@ -424,6 +489,9 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 		); err != nil {
 			shutdownErrors = append(shutdownErrors, err)
 		}
+	}
+	if runtime.search != nil {
+		runtime.search.CloseIdleConnections()
 	}
 	if runtime.provider != nil {
 		if err := runtime.provider.Shutdown(overall); err != nil {
