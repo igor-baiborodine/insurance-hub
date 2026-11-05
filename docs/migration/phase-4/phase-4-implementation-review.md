@@ -122,6 +122,29 @@ actual domain and dependencies, and supply accepted operational evidence before 
 or traffic transfer. Product provides the implemented reference; #267 owns the reusable contract
 and Policy Search adoption.
 
+**Go service identity follow-up: 5 November 2026.** Every migrated Go service uses two related
+identities. For a service domain represented below as `<service>`, apply this convention:
+
+| Boundary | Convention | Dashboard example | Policy Search example |
+| --- | --- | --- | --- |
+| Kubernetes workload/container/image and Service base | `<service>-api` | `dashboard-api` | `policy-search-api` |
+| Go module and application/telemetry service | `<service>-service` | `dashboard-service` | `policy-search-service` |
+
+Alloy deliberately maps the Kubernetes `*-api` identity to the logical OpenTelemetry `*-service`
+identity. It rejects Go metrics and traces when these identities do not correspond. A container
+named `*-service` therefore breaks the shared rule even when the application correctly emits
+`service.name=*-service`.
+
+Use the identities consistently for every migrated Go service:
+
+- Deployment, container and image use `<service>-api`; Kubernetes Services use that identity as
+  their base name.
+- Module, `SERVICE_NAME`, logs and OpenTelemetry `service.name` use `<service>-service`.
+
+Specifications must state the Kubernetes and application identities separately instead of using
+an ambiguous combined phrase such as “runtime/container `<service>-service`.” The Dashboard
+decision that established this general rule was completed before its corresponding source edits.
+
 Replace the blanket Wire, Viper, GORM, protoc-gen-validate and olivere/elastic defaults. Defer the
 pricing evaluator, chromedp adoption, unnecessary streaming/history capabilities, Keycloak/Envoy/mesh
 cutovers and weighted traffic-shift mechanism until their evidence exists. Keep explicit HTTP
@@ -617,27 +640,6 @@ preserving the accepted results and failure behavior. Full index exports, exhaus
 failure matrices and repeated Java baseline projects are not standard prerequisites. Reuse
 existing fixtures and inspect only unresolved facts needed by the next increment, following the
 [migration scope guide](go-service-migration-scope.md).
-
-**Dashboard identity follow-up: 5 November 2026.** The names describe different identities,
-matching Policy Search:
-
-| Boundary | Dashboard | Policy Search |
-| --- | --- | --- |
-| Kubernetes workload/container/image | `dashboard-api` | `policy-search-api` |
-| Application and telemetry service | `dashboard-service` | `policy-search-service` |
-
-This distinction is intentional because Alloy maps the Kubernetes `*-api` identity to the logical
-OpenTelemetry `*-service` identity. The then-current `dashboard-service` container name broke that
-shared rule and caused Alloy to drop Dashboard metrics and traces.
-
-Use these identities consistently:
-
-- Container, Deployment, Services and image: `dashboard-api`.
-- Module, `SERVICE_NAME`, logs and OpenTelemetry `service.name`: `dashboard-service`.
-
-Specifications must state these identities separately instead of using the ambiguous phrase
-“runtime/container `dashboard-service`.” No source edits were made while this naming decision was
-under discussion.
 
 Reuse the implemented official `go-elasticsearch/v8` pattern in the
 [Policy Search client](../../../services/policy-search-service/internal/elasticsearch/client.go)
