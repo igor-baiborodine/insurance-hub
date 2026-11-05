@@ -27,6 +27,7 @@ POLICY_SEARCH_ADDITIONAL_COVERAGE_FILES = (
     "event-integration-coverage.txt",
 )
 CODECOV_EXCLUSIONS = {
+    "services/dashboard-service": ("gen", "internal/testing"),
     "services/product-service": ("gen", "internal/postgres/dbgen", "internal/testing"),
     "services/policy-search-service": ("gen", "internal/testing"),
 }

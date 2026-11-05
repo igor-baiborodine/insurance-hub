@@ -71,7 +71,11 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
-	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-servicekit run
+	test-coverage-tooling test-integration build vulncheck check-go-pr check test-tooling check-servicekit run \
+	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
+	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
+	shared-candidate-generated shared-candidate-breaking shared-candidate-integration \
+	shared-candidate-image
 
 python-tooling-format-check: python-toolchain-check
 	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \
@@ -132,6 +136,46 @@ check-servicekit:
 	@echo "check-servicekit: selected public servicekit $(SERVICEKIT_VERSION) with verified modules"
 
 check: check-go-pr
+
+test-integration: ## Exercise real Dashboard HTTP-to-RPC composition and lifecycle on owned listeners
+	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
+		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
+	fi
+	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./internal/service \
+		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
+
+shared-fast-build:
+	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
+		SERVICEKIT_PHASE=build PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go" "$(PYTHON)" "$(INSURANCE_HUB_ROOT)/scripts/go/shared_cli.py" phase; \
+	else $(MAKE) --no-print-directory build; fi
+
+shared-fast-unit:
+	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
+		SERVICEKIT_PHASE=unit PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go" "$(PYTHON)" "$(INSURANCE_HUB_ROOT)/scripts/go/shared_cli.py" phase; \
+	else $(MAKE) --no-print-directory test; fi
+
+shared-candidate-format:
+shared-candidate-lint:
+shared-candidate-race:
+shared-candidate-dependency:
+shared-candidate-vulnerability:
+shared-candidate-format shared-candidate-lint shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability:
+	@phase="$(@:shared-candidate-%=%)"; \
+	if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
+		SERVICEKIT_PHASE="$$phase" PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go" "$(PYTHON)" "$(INSURANCE_HUB_ROOT)/scripts/go/shared_cli.py" phase; \
+	else case "$$phase" in format) target=format-check;; race) target=test-race;; dependency) target=check-deps;; vulnerability) target=vulncheck;; *) target="$$phase";; esac; \
+		$(MAKE) --no-print-directory "$$target"; fi
+
+shared-candidate-generated:
+shared-candidate-breaking:
+shared-candidate-integration:
+shared-candidate-image:
+shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image:
+	@phase="$(@:shared-candidate-%=%)"; \
+	if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
+		SERVICEKIT_PHASE="$$phase" PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go" "$(PYTHON)" "$(INSURANCE_HUB_ROOT)/scripts/go/shared_cli.py" phase; \
+	else case "$$phase" in generated) target=check-proto-drift;; breaking) target=check-proto-breaking;; integration) target=test-integration;; image) target=build;; esac; \
+		$(MAKE) --no-print-directory "$$target"; fi
 
 
 test-tooling: verify-tools python-toolchain-check

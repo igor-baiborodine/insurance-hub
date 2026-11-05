@@ -249,6 +249,32 @@ def test_prepare_respects_target_capabilities(
         assert initialize["spec"]["healthChecks"][0]["namespace"] == environment + "-apps"
 
 
+def test_dashboard_release_uses_the_no_initialization_path(tmp_path: Path) -> None:
+    # given
+    create_service(tmp_path, "dashboard", initialization=False)
+    catalog_path = tmp_path / "scripts/go/service/catalog.json"
+    catalog = json.loads(catalog_path.read_text())
+    record = catalog["services"]["dashboard"]
+    overlay = tmp_path / "k8s/overlays/qa/svc/dashboard/kustomization.yaml"
+
+    # when
+    selected = release.select_service(
+        ["services/dashboard-service/internal/service/echo.go"], tmp_path, REPOSITORY
+    )
+    paths = release.prepare_release(
+        tmp_path, "dashboard", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST
+    )
+
+    # then
+    assert selected.service == "dashboard"
+    assert selected.module_path == "services/dashboard-service"
+    assert selected.registry_image == f"ghcr.io/{REPOSITORY}/dashboard-api"
+    assert "administration" not in record
+    assert "initialization" not in record["deploymentTargets"]["qa"]
+    assert paths == [overlay]
+    assert "newTag: 1.2.3" in overlay.read_text()
+
+
 def test_prepare_updates_optional_runtime_version_with_source_commit(tmp_path: Path) -> None:
     # given
     create_service(tmp_path, "policy-search")

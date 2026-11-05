@@ -45,6 +45,10 @@ jobs:
             role: business-service
             coverage_files: services/policy-search-service/coverage.txt,services/policy-search-service/integration-coverage.txt
             flag: policy-search-service
+          - module: services/dashboard-service
+            role: business-service
+            coverage_files: services/dashboard-service/coverage.txt,services/dashboard-service/integration-coverage.txt
+            flag: dashboard-service
     steps:
       - name: Checkout exact main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

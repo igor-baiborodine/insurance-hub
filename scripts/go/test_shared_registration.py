@@ -307,6 +307,7 @@ def test_root_tooling_conservatively_selects_all_modules(tmp_path: Path) -> None
         "templates/go-service",
         "services/product-service",
         "services/policy-search-service",
+        "services/dashboard-service",
     }
 
 
