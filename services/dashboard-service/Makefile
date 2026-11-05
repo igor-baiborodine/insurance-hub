@@ -33,13 +33,13 @@ GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 GOLANGCI_CONFIG := .golangci.yml
 
-PROTO_SCHEMA := api/dashboard/v1/example_service.proto
+PROTO_SCHEMA := api/dashboard/v1/dashboard_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := \
-	gen/dashboard/v1/example_service.pb.go \
-	gen/dashboard/v1/example_service.pb.gw.go \
-	gen/dashboard/v1/example_service_grpc.pb.go \
-	gen/openapiv2/dashboard/v1/example_service.swagger.json
+	gen/dashboard/v1/dashboard_service.pb.go \
+	gen/dashboard/v1/dashboard_service.pb.gw.go \
+	gen/dashboard/v1/dashboard_service_grpc.pb.go \
+	gen/openapiv2/dashboard/v1/dashboard_service.swagger.json
 
 GO_VERSION := 1.27.3
 BUF_VERSION := v1.73.0
@@ -188,7 +188,7 @@ check-go-pr: verify-tools format-check format-proto-check lint lint-proto covera
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
 		--contract testdata/http-contract.json \
-		--swagger gen/openapiv2/dashboard/v1/example_service.swagger.json
+		--swagger gen/openapiv2/dashboard/v1/dashboard_service.swagger.json
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac

@@ -1,4 +1,4 @@
-"""Independent fixtures for the generated Echo Swagger contract check."""
+"""Independent fixtures for the generated total-sales Swagger contract check."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pytest
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 CONTRACT = MODULE_ROOT / "testdata" / "http-contract.json"
-SWAGGER = MODULE_ROOT / "gen/openapiv2/dashboard/v1/example_service.swagger.json"
+SWAGGER = MODULE_ROOT / "gen/openapiv2/dashboard/v1/dashboard_service.swagger.json"
 
 
 def test_current_generated_swagger_matches_contract() -> None:
@@ -21,17 +21,25 @@ def test_current_generated_swagger_matches_contract() -> None:
 
 
 def change_path(swagger: dict[str, Any]) -> None:
-    swagger["paths"]["/v1/example/changed"] = swagger["paths"].pop("/v1/example/echo")
+    swagger["paths"]["/dashboard/changed"] = swagger["paths"].pop("/dashboard/totalsales")
 
 
 def change_status_example(swagger: dict[str, Any]) -> None:
-    swagger["paths"]["/v1/example/echo"]["post"]["responses"]["503"]["examples"][
+    swagger["paths"]["/dashboard/totalsales"]["post"]["responses"]["503"]["examples"][
         "application/json"
     ]["message"] = "raw upstream failure"
 
 
 def add_response(swagger: dict[str, Any]) -> None:
-    swagger["paths"]["/v1/example/echo"]["post"]["responses"]["418"] = {"description": "unexpected"}
+    swagger["paths"]["/dashboard/totalsales"]["post"]["responses"]["418"] = {
+        "description": "unexpected"
+    }
+
+
+def quote_policy_count(swagger: dict[str, Any]) -> None:
+    swagger["definitions"]["v1TotalSalesHTTPValue"]["properties"]["policiesCount"]["type"] = (
+        "string"
+    )
 
 
 @pytest.mark.parametrize(
@@ -40,6 +48,7 @@ def add_response(swagger: dict[str, Any]) -> None:
         (change_path, "paths must contain only"),
         (change_status_example, "response 503 example differs"),
         (add_response, "response status set differs"),
+        (quote_policy_count, "v1TotalSalesHTTPValue.policiesCount must have type integer"),
     ],
 )
 def test_contract_check_rejects_controlled_swagger_drift(

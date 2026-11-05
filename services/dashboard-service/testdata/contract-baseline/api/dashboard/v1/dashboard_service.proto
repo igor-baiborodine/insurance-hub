@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package dashboard.v1;
+
+option go_package = "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/gen/dashboard/v1;dashboardv1";
+
+service DashboardService {
+  rpc GetTotalSales(GetTotalSalesRequest) returns (GetTotalSalesResponse);
+}
+
+message GetTotalSalesRequest {
+  optional string product_code = 1;
+  string sale_date_from = 2;
+  string sale_date_to = 3;
+}
+
+message SalesValue {
+  int64 policies_count = 1;
+  int64 premium_amount_minor_units = 2;
+}
+
+message GetTotalSalesResponse {
+  SalesValue total = 1;
+  map<string, SalesValue> per_product_total = 2;
+}
+
+message TotalSalesHTTPValue {
+  int64 policies_count = 1;
+  double premium_amount = 2;
+}
+
+message TotalSalesHTTPResponse {
+  TotalSalesHTTPValue total = 1;
+  map<string, TotalSalesHTTPValue> per_product_total = 2;
+}

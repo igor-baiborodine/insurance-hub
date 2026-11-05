@@ -8,10 +8,12 @@ import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/gen/dashboard/v1;dashboardv1";
 
-service ExampleService {
-  rpc Echo(EchoRequest) returns (EchoResponse) {
+// DashboardService exposes the private read-only Dashboard query boundary.
+service DashboardService {
+  // GetTotalSales returns the accepted legacy total-sales aggregation.
+  rpc GetTotalSales(GetTotalSalesRequest) returns (GetTotalSalesResponse) {
     option (google.api.http) = {
-      post: "/v1/example/echo"
+      post: "/dashboard/totalsales"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -20,13 +22,13 @@ service ExampleService {
       responses: {
         key: "200"
         value: {
-          description: "The unchanged Echo message."
+          description: "The legacy numeric total-sales envelope."
           schema: {
-            json_schema: {ref: ".dashboard.v1.EchoResponse"}
+            json_schema: {ref: ".dashboard.v1.TotalSalesHTTPResponse"}
           }
           examples: {
             key: "application/json"
-            value: "{\"message\":\"hello\"}"
+            value: "{\"total\":{\"policiesCount\":5,\"premiumAmount\":5000.00},\"perProductTotal\":{\"SAFE_FARM\":{\"policiesCount\":1,\"premiumAmount\":1000.00}}}"
           }
         }
       }
@@ -40,19 +42,6 @@ service ExampleService {
           examples: {
             key: "application/json"
             value: "{\"code\":3,\"message\":\"invalid request\",\"details\":[]}"
-          }
-        }
-      }
-      responses: {
-        key: "406"
-        value: {
-          description: "The requested response media type is not available."
-          schema: {
-            json_schema: {ref: ".google.rpc.Status"}
-          }
-          examples: {
-            key: "application/json"
-            value: "{\"code\":3,\"message\":\"not acceptable\",\"details\":[]}"
           }
         }
       }
@@ -138,13 +127,36 @@ service ExampleService {
   }
 }
 
-message EchoRequest {
-  string message = 1 [(buf.validate.field).string = {
-    min_bytes: 1
-    max_bytes: 128
+message GetTotalSalesRequest {
+  optional string product_code = 1;
+  string sale_date_from = 2 [(buf.validate.field).string = {pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}];
+  string sale_date_to = 3 [(buf.validate.field).string = {pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}];
+}
+
+message SalesValue {
+  int64 policies_count = 1;
+  int64 premium_amount_minor_units = 2;
+}
+
+message GetTotalSalesResponse {
+  SalesValue total = 1;
+  map<string, SalesValue> per_product_total = 2;
+}
+
+// TotalSalesHTTPValue documents the legacy JSON representation written by the gateway adapter.
+message TotalSalesHTTPValue {
+  int64 policies_count = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    type: INTEGER
+    format: "int64"
+  }];
+  double premium_amount = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    type: NUMBER
+    format: "double"
   }];
 }
 
-message EchoResponse {
-  string message = 1;
+// TotalSalesHTTPResponse is documentation-only; the RPC response retains exact minor units.
+message TotalSalesHTTPResponse {
+  TotalSalesHTTPValue total = 1;
+  map<string, TotalSalesHTTPValue> per_product_total = 2;
 }
