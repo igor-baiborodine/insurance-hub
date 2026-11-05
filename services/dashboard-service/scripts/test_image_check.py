@@ -19,6 +19,7 @@ def configure(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_main_rejects_missing_dependency_image_without_commands(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # given
     configure(monkeypatch)
     monkeypatch.delenv("ELASTICSEARCH_IMAGE")
     commands: list[list[str]] = []
@@ -28,13 +29,18 @@ def test_main_rejects_missing_dependency_image_without_commands(
         lambda arguments, *_args, **_kwargs: commands.append(list(arguments)) or "",
     )
 
-    assert image_check.main() == 1
+    # when
+    result = image_check.main()
+
+    # then
+    assert result == 1
     assert commands == []
 
 
 def test_main_owns_dependency_network_reader_configuration_and_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # given
     configure(monkeypatch)
     commands: list[list[str]] = []
     environments: list[dict[str, str]] = []
@@ -83,7 +89,11 @@ def test_main_owns_dependency_network_reader_configuration_and_cleanup(
 
     monkeypatch.setattr(image_check, "request", controlled_request)
 
-    assert image_check.main() == 0
+    # when
+    result = image_check.main()
+
+    # then
+    assert result == 0
     assert fixture_urls == ["http://127.0.0.1:49200"]
     flattened = "\n".join(" ".join(command) for command in commands)
     assert "--network-alias elasticsearch" in flattened
@@ -103,6 +113,7 @@ def test_main_owns_dependency_network_reader_configuration_and_cleanup(
 def test_main_cleans_dependency_and_network_after_dashboard_start_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # given
     configure(monkeypatch)
     monkeypatch.setattr(image_check.os, "getpid", lambda: 4343)
     commands: list[list[str]] = []
@@ -119,7 +130,11 @@ def test_main_cleans_dependency_and_network_after_dashboard_start_failure(
     monkeypatch.setattr(image_check, "wait_for_elasticsearch", lambda _url: None)
     monkeypatch.setattr(image_check, "create_elasticsearch_fixture", lambda _url: None)
 
-    assert image_check.main() == 1
+    # when
+    result = image_check.main()
+
+    # then
+    assert result == 1
     assert [command[1:3] for command in commands[-3:]] == [
         ["rm", "--force"],
         ["rm", "--force"],

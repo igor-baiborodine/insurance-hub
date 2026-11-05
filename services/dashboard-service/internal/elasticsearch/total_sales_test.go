@@ -274,3 +274,46 @@ func TestReader_MapsCancellationAvailabilityAndUnsafeResponses(t *testing.T) {
 		})
 	}
 }
+
+func TestReader_MapsUntrustedTLSAsRejectedDependencyFailure(t *testing.T) {
+	// given
+	server := httptest.NewTLSServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
+			_, _ = writer.Write(
+				[]byte(
+					`{"aggregations":{"agg_filter":{"count_by_product":{"buckets":[]}}}}`,
+				),
+			)
+		}),
+	)
+	defer server.Close()
+	client, err := New(Config{
+		Endpoint: server.URL,
+		Index:    PolicyIndex,
+		Timeout:  time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+	reader, err := NewReader(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from, _ := domain.ParseDate("2019-01-01")
+	to, _ := domain.ParseDate("2020-01-01")
+
+	// when
+	_, err = reader.ReadTotalSales(context.Background(), application.TotalSalesQuery{
+		Product:  domain.AllProducts(),
+		DateFrom: from,
+		DateTo:   to,
+	})
+
+	// then
+	if !errors.Is(err, ErrSearchRejected) ||
+		errors.Is(err, application.ErrTotalSalesUnavailable) {
+		t.Fatalf("ReadTotalSales() error = %v, want rejected non-unavailable failure", err)
+	}
+}

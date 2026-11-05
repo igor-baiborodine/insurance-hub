@@ -24,6 +24,7 @@ import (
 )
 
 func TestHandler_MapsAcceptedRequestsAndLegacyNumericResponses(t *testing.T) {
+	// given
 	for _, test := range []struct {
 		name        string
 		body        string
@@ -65,6 +66,7 @@ func TestHandler_MapsAcceptedRequestsAndLegacyNumericResponses(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			client := &fakeClient{response: test.response}
 			handler := newTestHandler(t, client, 4096)
 			request := httptest.NewRequest(
@@ -77,8 +79,10 @@ func TestHandler_MapsAcceptedRequestsAndLegacyNumericResponses(t *testing.T) {
 			request.Header.Set("Authorization", "private")
 			recorder := httptest.NewRecorder()
 
+			// when
 			handler.ServeHTTP(recorder, request)
 
+			// then
 			if recorder.Code != http.StatusOK ||
 				recorder.Header().Get("Content-Type") != "application/json" ||
 				recorder.Body.String() != test.wantBody {
@@ -104,6 +108,7 @@ func TestHandler_MapsAcceptedRequestsAndLegacyNumericResponses(t *testing.T) {
 }
 
 func TestHandler_RejectsInvalidBodiesBeforeRPC(t *testing.T) {
+	// given
 	for _, body := range []string{
 		``, `null`, `{`, `{}`,
 		`{"saleDateFrom":null,"saleDateTo":"2020-01-01"}`,
@@ -112,6 +117,7 @@ func TestHandler_RejectsInvalidBodiesBeforeRPC(t *testing.T) {
 		`{"saleDateFrom":"2019-01-01"}`,
 		`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"} trailing`,
 	} {
+		// given
 		client := &fakeClient{response: emptyResponse()}
 		handler := newTestHandler(t, client, 4096)
 		request := httptest.NewRequest(
@@ -122,8 +128,10 @@ func TestHandler_RejectsInvalidBodiesBeforeRPC(t *testing.T) {
 		request.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 
+		// when
 		handler.ServeHTTP(recorder, request)
 
+		// then
 		assertError(
 			t,
 			recorder,
@@ -137,6 +145,7 @@ func TestHandler_RejectsInvalidBodiesBeforeRPC(t *testing.T) {
 }
 
 func TestHandler_EnforcesMediaMethodRouteAndBodyLimit(t *testing.T) {
+	// given
 	valid := `{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`
 	for _, test := range []struct {
 		name        string
@@ -176,6 +185,7 @@ func TestHandler_EnforcesMediaMethodRouteAndBodyLimit(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			client := &fakeClient{response: emptyResponse()}
 			handler := newTestHandler(t, client, test.limit)
 			request := httptest.NewRequest(
@@ -185,7 +195,11 @@ func TestHandler_EnforcesMediaMethodRouteAndBodyLimit(t *testing.T) {
 			)
 			request.Header.Set("Content-Type", test.contentType)
 			recorder := httptest.NewRecorder()
+
+			// when
 			handler.ServeHTTP(recorder, request)
+
+			// then
 			if recorder.Code != test.wantStatus ||
 				recorder.Body.String() != test.wantBody ||
 				recorder.Header().Get("Allow") != test.wantAllow {
@@ -201,6 +215,7 @@ func TestHandler_EnforcesMediaMethodRouteAndBodyLimit(t *testing.T) {
 }
 
 func TestHandler_MapsRPCFailuresWithoutLeakingDetails(t *testing.T) {
+	// given
 	for _, test := range []struct {
 		code       codes.Code
 		wantStatus int
@@ -213,6 +228,7 @@ func TestHandler_MapsRPCFailuresWithoutLeakingDetails(t *testing.T) {
 		{codes.ResourceExhausted, 500, `{"code":13,"message":"internal error","details":[]}`},
 		{codes.Internal, 500, `{"code":13,"message":"internal error","details":[]}`},
 	} {
+		// given
 		client := &fakeClient{err: status.Error(test.code, "private-upstream-detail")}
 		handler := newTestHandler(t, client, 4096)
 		request := httptest.NewRequest(http.MethodPost, totalSalesPath, strings.NewReader(
@@ -220,7 +236,11 @@ func TestHandler_MapsRPCFailuresWithoutLeakingDetails(t *testing.T) {
 		))
 		request.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
+
+		// when
 		handler.ServeHTTP(recorder, request)
+
+		// then
 		assertError(t, recorder, test.wantStatus, test.wantBody)
 		if strings.Contains(recorder.Body.String(), "private") {
 			t.Fatal("private RPC detail leaked")
@@ -229,6 +249,7 @@ func TestHandler_MapsRPCFailuresWithoutLeakingDetails(t *testing.T) {
 }
 
 func TestHandler_UsesShorterDeadlineAndPropagatesCancellation(t *testing.T) {
+	// given
 	for _, test := range []struct {
 		name          string
 		callerTimeout time.Duration
@@ -250,6 +271,7 @@ func TestHandler_UsesShorterDeadlineAndPropagatesCancellation(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			client := &fakeClient{waitForContext: true, started: make(chan struct{})}
 			handler := newTestHandlerWithTimeout(t, client, 40*time.Millisecond)
 			ctx := context.Background()
@@ -271,6 +293,8 @@ func TestHandler_UsesShorterDeadlineAndPropagatesCancellation(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			done := make(chan struct{})
 			started := time.Now()
+
+			// when
 			go func() {
 				handler.ServeHTTP(recorder, request)
 				close(done)
@@ -283,6 +307,8 @@ func TestHandler_UsesShorterDeadlineAndPropagatesCancellation(t *testing.T) {
 			if test.cancel {
 				cancel()
 			}
+
+			// then
 			select {
 			case <-done:
 			case <-time.After(test.maximum):
@@ -300,6 +326,7 @@ func TestHandler_UsesShorterDeadlineAndPropagatesCancellation(t *testing.T) {
 }
 
 func TestHandler_StripsApplicationMetadataAndDeniesRPCMetadata(t *testing.T) {
+	// given
 	client := &fakeClient{
 		response:         emptyResponse(),
 		responseMetadata: metadata.Pairs("private-header", "private-value"),
@@ -320,8 +347,10 @@ func TestHandler_StripsApplicationMetadataAndDeniesRPCMetadata(t *testing.T) {
 	request.Header.Set("X-Real-IP", "203.0.113.44")
 	recorder := httptest.NewRecorder()
 
+	// when
 	handler.ServeHTTP(recorder, request)
 
+	// then
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d", recorder.Code)
 	}
@@ -341,11 +370,14 @@ func TestHandler_StripsApplicationMetadataAndDeniesRPCMetadata(t *testing.T) {
 }
 
 func TestClearApplicationMetadata_DropsAllApplicationValues(t *testing.T) {
+	// given
 	ctx := metadata.NewOutgoingContext(
 		context.Background(),
 		metadata.Pairs("authorization", "private", "principal", "forged"),
 	)
 	called := false
+
+	// when
 	err := ClearApplicationMetadata(
 		ctx,
 		"/dashboard.v1.DashboardService/GetTotalSales",
@@ -367,12 +399,15 @@ func TestClearApplicationMetadata_DropsAllApplicationValues(t *testing.T) {
 			return nil
 		},
 	)
+
+	// then
 	if err != nil || !called {
 		t.Fatalf("interceptor = (%t, %v)", called, err)
 	}
 }
 
 func TestMarshalLegacyResponse_HandlesSignedMinorUnitExtremes(t *testing.T) {
+	// given
 	response := &dashboardv1.GetTotalSalesResponse{
 		Total: &dashboardv1.SalesValue{
 			PoliciesCount:           1,
@@ -382,7 +417,10 @@ func TestMarshalLegacyResponse_HandlesSignedMinorUnitExtremes(t *testing.T) {
 			"x": {PoliciesCount: 1, PremiumAmountMinorUnits: 5},
 		},
 	}
+
+	// when
 	data, err := marshalLegacyResponse(response)
+	// then
 	if err != nil {
 		t.Fatal(err)
 	}
