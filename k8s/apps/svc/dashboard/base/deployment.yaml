@@ -62,6 +62,9 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: metadata.uid
+          envFrom:
+            - configMapRef:
+                name: dashboard-config
           resources:
             requests:
               cpu: 100m

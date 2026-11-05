@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 import dashboard_deployment_checks as checks
 import pytest
+import yaml
 from scripts.go.service import deployment as lifecycle
 
 import deployment
@@ -123,6 +124,14 @@ def test_render_rejects_data_dependencies_and_incomplete_inventory() -> None:
             "local-dev",
             "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: local-dev-dashboard-config\n",
         )
+
+
+def test_render_requires_the_runtime_config_map_linkage() -> None:
+    items = checks.documents(checks.render("local-dev"))
+    deployment_item = checks.resource(items, "Deployment", "local-dev-dashboard-api")
+    deployment_item["spec"]["template"]["spec"]["containers"][0].pop("envFrom")
+    with pytest.raises(checks.DeploymentError, match="container security or resources"):
+        checks.validate_render("local-dev", yaml.safe_dump_all(items))
 
 
 def test_live_state_rejects_wrong_resource_identity() -> None:

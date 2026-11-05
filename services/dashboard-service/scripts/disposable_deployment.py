@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import subprocess
 import sys
 import time
@@ -35,7 +36,23 @@ def require(condition: object, message: str) -> None:
         raise CheckFailed(message)
 
 
-def command(arguments: list[str], *, input_text: str | None = None, timeout: int = 60) -> str:
+def safe_environment(extra: dict[str, str] | None = None) -> dict[str, str]:
+    environment = {
+        name: os.environ[name]
+        for name in ("HOME", "KUBECONFIG", "PATH", "TMPDIR")
+        if name in os.environ
+    }
+    environment.update(extra or {})
+    return environment
+
+
+def command(
+    arguments: list[str],
+    *,
+    input_text: str | None = None,
+    timeout: int = 60,
+    environment: dict[str, str] | None = None,
+) -> str:
     try:
         result = subprocess.run(
             arguments,
@@ -45,11 +62,7 @@ def command(arguments: list[str], *, input_text: str | None = None, timeout: int
             capture_output=True,
             timeout=timeout,
             check=False,
-            env={
-                name: os.environ[name]
-                for name in ("HOME", "KUBECONFIG", "PATH", "TMPDIR")
-                if name in os.environ
-            },
+            env=safe_environment(environment),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise CheckFailed(f"command unavailable or timed out: {arguments[0]}") from error
@@ -171,6 +184,70 @@ def endpoint_count(cluster: Cluster) -> int:
     )
 
 
+def free_port() -> int:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def direct_rpc(cluster: Cluster) -> None:
+    port = free_port()
+    process = subprocess.Popen(
+        [
+            "kubectl",
+            "--context",
+            CONTEXT,
+            "--namespace",
+            cluster.namespace,
+            "port-forward",
+            "service/local-dev-dashboard-api",
+            f"{port}:9090",
+        ],
+        cwd=ROOT,
+        env=safe_environment(),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+
+        def reachable() -> bool:
+            if process.poll() is not None:
+                raise CheckFailed("direct-RPC port-forward exited early")
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    return True
+            except OSError:
+                return False
+
+        wait_for("direct-RPC port-forward", reachable, 20)
+        command(
+            [
+                "go",
+                "-C",
+                "services/dashboard-service",
+                "test",
+                "-mod=readonly",
+                "-count=1",
+                "-run=^TestDeployedDirectRPC$",
+                "./internal/service",
+            ],
+            timeout=60,
+            environment={
+                "GOWORK": "off",
+                "DASHBOARD_DEPLOYMENT_GRPC_ADDR": f"127.0.0.1:{port}",
+                "DASHBOARD_DEPLOYMENT_GRPC_MESSAGE": "disposable-dashboard-rpc",
+            },
+        )
+        print("PASS deployed direct RPC", flush=True)
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
 def run() -> None:
     image = os.environ.get("IMAGE_REF", "")
     require(
@@ -235,6 +312,7 @@ def run() -> None:
             ],
             labels={checks.BUSINESS_CLIENT_LABEL: "true"},
         )
+        direct_rpc(cluster)
         probe(
             cluster,
             "management-health",

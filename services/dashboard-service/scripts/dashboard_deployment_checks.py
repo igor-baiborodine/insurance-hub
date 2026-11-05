@@ -272,7 +272,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "limits": {"cpu": "300m", "memory": "256Mi"},
         }
         and not container.get("volumeMounts")
-        and not container.get("envFrom"),
+        and container.get("envFrom") == [{"configMapRef": {"name": prefix + "dashboard-config"}}],
         "container security or resources differ",
     )
     ports = {(item.get("name"), item.get("containerPort")) for item in container.get("ports", [])}

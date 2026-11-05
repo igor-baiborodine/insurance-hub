@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,34 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/gateway"
 )
+
+func TestDeployedDirectRPC(t *testing.T) {
+	address := os.Getenv("DASHBOARD_DEPLOYMENT_GRPC_ADDR")
+	if address == "" {
+		t.Skip("DASHBOARD_DEPLOYMENT_GRPC_ADDR is not set")
+	}
+	message := os.Getenv("DASHBOARD_DEPLOYMENT_GRPC_MESSAGE")
+	if message == "" {
+		t.Fatal("DASHBOARD_DEPLOYMENT_GRPC_MESSAGE is not set")
+	}
+	connection, err := grpc.NewClient(
+		address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	response, err := dashboardv1.NewExampleServiceClient(connection).Echo(
+		ctx,
+		&dashboardv1.EchoRequest{Message: message},
+	)
+	if err != nil || response.GetMessage() != message {
+		t.Fatalf("deployed direct Echo = (%v, %v)", response, err)
+	}
+}
 
 func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *testing.T) {
 	// given
