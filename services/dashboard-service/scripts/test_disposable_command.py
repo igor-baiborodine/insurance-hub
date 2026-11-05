@@ -138,6 +138,46 @@ def test_dependency_failure_requires_exact_safe_response() -> None:
             )
 
 
+def test_runtime_image_content_must_match_local_image() -> None:
+    digest = "sha256:" + "a" * 64
+    image = "insurance-hub-dashboard-api:1.0.0-local.0123456789ab"
+    containerd = {
+        "status": {
+            "id": digest,
+            "repoTags": [f"docker.io/library/{image}"],
+        }
+    }
+    identity = disposable_deployment.require_matching_image_content(
+        digest,
+        image,
+        containerd,
+        f"docker.io/library/{image}@{digest}",
+    )
+    assert identity.local == identity.containerd == identity.pod == digest
+
+    other = "sha256:" + "b" * 64
+    for local_id, pod_id in ((other, digest), (digest, other)):
+        with pytest.raises(disposable_deployment.CheckFailed, match="content differs"):
+            disposable_deployment.require_matching_image_content(
+                local_id,
+                image,
+                containerd,
+                pod_id,
+            )
+
+
+def test_runtime_image_content_requires_exact_loaded_tag() -> None:
+    digest = "sha256:" + "a" * 64
+    image = "insurance-hub-dashboard-api:1.0.0-local.0123456789ab"
+    with pytest.raises(disposable_deployment.CheckFailed, match="tag differs"):
+        disposable_deployment.require_matching_image_content(
+            digest,
+            image,
+            {"status": {"id": digest, "repoTags": ["docker.io/library/other:latest"]}},
+            digest,
+        )
+
+
 def assert_reaped(pid_file: Path) -> None:
     deadline = time.monotonic() + 2
     pid = int(pid_file.read_text(encoding="utf-8"))

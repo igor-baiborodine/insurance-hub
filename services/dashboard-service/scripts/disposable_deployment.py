@@ -53,6 +53,14 @@ class HTTPProbeResponse(NamedTuple):
     body: str
 
 
+class ImageContentIdentity(NamedTuple):
+    """Comparable local, node-runtime and Pod image content digests."""
+
+    local: str
+    containerd: str
+    pod: str
+
+
 def require(condition: object, message: str) -> None:
     if not condition:
         raise CheckFailed(message)
@@ -376,6 +384,43 @@ def require_elasticsearch_permission_denied(name: str, response: HTTPProbeRespon
     )
 
 
+def image_content_digest(value: str, surface: str) -> str:
+    match = re.search(r"(?:^|@)(sha256:[0-9a-f]{64})$", value)
+    require(bool(match), f"{surface} image content digest is invalid")
+    return match.group(1) if match else ""
+
+
+def require_matching_image_content(
+    local_image_id: str,
+    image: str,
+    containerd_image: dict[str, Any],
+    pod_image_id: str,
+) -> ImageContentIdentity:
+    require(isinstance(containerd_image, dict), "containerd image inspection is invalid")
+    containerd_status = containerd_image.get("status", {})
+    require(isinstance(containerd_status, dict), "containerd image status is absent")
+    expected_tag = f"docker.io/library/{image}"
+    repo_tags = containerd_status.get("repoTags", [])
+    require(
+        isinstance(repo_tags, list) and expected_tag in repo_tags,
+        "containerd image tag differs from the loaded Dashboard image",
+    )
+    identity = ImageContentIdentity(
+        image_content_digest(local_image_id, "local Docker"),
+        image_content_digest(str(containerd_status.get("id", "")), "containerd"),
+        image_content_digest(pod_image_id, "Pod runtime"),
+    )
+    require(
+        identity.local == identity.containerd,
+        "Kind containerd content differs from the local Dashboard image",
+    )
+    require(
+        identity.pod == identity.containerd,
+        "running Pod content differs from the loaded Dashboard image",
+    )
+    return identity
+
+
 def endpoint_count(cluster: Cluster) -> int:
     items = cluster.json(
         "get", "endpointslices", "-l", "kubernetes.io/service-name=local-dev-dashboard-api"
@@ -466,12 +511,28 @@ def verify_reader_permissions(cluster: Cluster) -> None:
         require_elasticsearch_permission_denied(name, response)
 
 
-def verify_runtime_identity(cluster: Cluster, version: str, image: str) -> None:
+def verify_runtime_identity(
+    cluster: Cluster, version: str, image: str, local_image_id: str
+) -> None:
     pod = cluster.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api")["items"][0]
     configured_image = pod["spec"]["containers"][0]["image"]
-    status = pod["status"]["containerStatuses"][0]
+    pod_status = pod["status"]["containerStatuses"][0]
     require(configured_image == image, "deployed Dashboard image reference differs")
-    require(bool(status.get("imageID")), "deployed Dashboard image ID is absent")
+    node = pod["spec"].get("nodeName", "")
+    require(bool(node), "deployed Dashboard node identity is absent")
+    containerd_image = json.loads(
+        command(
+            ["docker", "exec", node, "crictl", "inspecti", configured_image],
+            timeout=30,
+            activity="inspect loaded Dashboard image in Kind containerd",
+        )
+    )
+    content = require_matching_image_content(
+        local_image_id,
+        image,
+        containerd_image,
+        str(pod_status.get("imageID", "")),
+    )
     logs = cluster.kubectl("logs", pod["metadata"]["name"])
     entries = []
     for line in logs.splitlines():
@@ -490,7 +551,8 @@ def verify_runtime_identity(cluster: Cluster, version: str, image: str) -> None:
     )
     print(
         f"PASS runtime identity {version}; configured={configured_image}; "
-        f"runtime={status.get('image')}; imageID={status['imageID']}",
+        f"node={node}; runtime={pod_status.get('image')}; "
+        f"localID={content.local}; containerdID={content.containerd}; podID={content.pod}",
         flush=True,
     )
 
@@ -588,6 +650,8 @@ def run() -> None:
     require(command(["kubectl", "config", "current-context"]).strip() == CONTEXT, "wrong context")
     inspected = json.loads(command(["docker", "image", "inspect", image]))
     require(len(inspected) == 1, "Dashboard image is absent")
+    local_image_id = str(inspected[0].get("Id", ""))
+    image_content_digest(local_image_id, "local Docker")
     revision = (
         inspected[0]
         .get("Config", {})
@@ -683,7 +747,7 @@ def run() -> None:
             '"perProductTotal":{"SAFE":{"policiesCount":1,"premiumAmount":1000.00}}}',
         )
         direct_rpc(cluster)
-        verify_runtime_identity(cluster, f"git-{source_short}", image)
+        verify_runtime_identity(cluster, f"git-{source_short}", image, local_image_id)
         response = http_probe(
             cluster,
             "management-health",
