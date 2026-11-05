@@ -240,7 +240,7 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
     assert f"{environment}-dashboard-elasticsearch" in encoded
     assert "go_dashboard_total_sales_reader" in script
     assert "_security/user/_privileges" in script
-    assert '"write"' in script and '"manage"' in script
+    assert "cat /tmp/response" in script
     assert "-u " not in script
     assert "ES_PASSWORD" in script
     if environment == "qa":
@@ -248,6 +248,59 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
         assert any(mount["name"] == "elasticsearch-ca" for mount in reader["volumeMounts"])
     else:
         assert "--cacert" not in script
+
+
+def accepted_effective_reader_privileges() -> dict[str, object]:
+    return {
+        "cluster": [],
+        "global": [],
+        "indices": [
+            {
+                "names": ["policy_stats"],
+                "privileges": ["read", "view_index_metadata"],
+                "allow_restricted_indices": False,
+            }
+        ],
+        "applications": [],
+        "run_as": [],
+        "remote_indices": [],
+        "remote_cluster": [],
+    }
+
+
+def test_effective_reader_privileges_accept_the_exact_q06_role() -> None:
+    checks.validate_effective_reader_privileges(json.dumps(accepted_effective_reader_privileges()))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["indices"].append(
+            {"names": ["other-sensitive-index"], "privileges": ["delete_index"]}
+        ),
+        lambda value: value["indices"][0]["privileges"].append("create_index"),
+        lambda value: value["applications"].append(
+            {"application": "dashboard", "privileges": ["admin"], "resources": ["*"]}
+        ),
+        lambda value: value["run_as"].append("elastic"),
+        lambda value: value["remote_indices"].append(
+            {
+                "clusters": ["remote"],
+                "names": ["policy_stats"],
+                "privileges": ["read"],
+            }
+        ),
+        lambda value: value["remote_cluster"].append(
+            {"clusters": ["remote"], "privileges": ["monitor_enrich"]}
+        ),
+    ],
+)
+def test_effective_reader_privileges_reject_additional_authority(mutation) -> None:
+    privileges = accepted_effective_reader_privileges()
+    mutation(privileges)
+
+    with pytest.raises(checks.DeploymentError, match="effective privileges differ"):
+        checks.validate_effective_reader_privileges(json.dumps(privileges))
 
 
 def test_access_qualification_cleans_owned_resources_after_probe_failure() -> None:

@@ -1133,21 +1133,51 @@ request() {{
 {missing_ca}test "$(request "{url}/policy_stats/_count")" = 200
 test "$(request "{url}/policy_stats/_mapping")" = 200
 test "$(request "{url}/_security/user/_privileges")" = 200
-compact=$(tr -d '[:space:]' </tmp/response)
-case "$compact" in *'"cluster":[]'*) ;; *) exit 22 ;; esac
-case "$compact" in *'"names":["policy_stats"]'*) ;; *) exit 23 ;; esac
-case "$compact" in
-  *'"privileges":["read","view_index_metadata"]'*|\
-  *'"privileges":["view_index_metadata","read"]'*) ;;
-  *) exit 24 ;;
-esac
-case "$compact" in
-  *'"names":["*"]'*|*'"write"'*|*'"manage"'*|*'"all"'*) exit 25 ;;
-esac
+cat /tmp/response
 test "$(request "{url}/issue-287-unrelated/_search")" = 403
 test "$(request "{url}/_cluster/health")" = 403
 test "$(request "{url}/_security/role/go_dashboard_total_sales_reader")" = 403
 """
+
+
+def validate_effective_reader_privileges(output: str) -> None:
+    try:
+        privileges = json.loads(output)
+    except json.JSONDecodeError as error:
+        raise DeploymentError("reader effective privileges are malformed") from error
+    require(isinstance(privileges, dict), "reader effective privileges differ")
+    allowed_fields = {
+        "cluster",
+        "global",
+        "indices",
+        "applications",
+        "run_as",
+        "remote_indices",
+        "remote_cluster",
+    }
+    require(set(privileges).issubset(allowed_fields), "reader effective privileges differ")
+    for field in (
+        "cluster",
+        "global",
+        "applications",
+        "run_as",
+        "remote_indices",
+        "remote_cluster",
+    ):
+        require(privileges.get(field, []) == [], "reader effective privileges differ")
+    indices = privileges.get("indices")
+    require(isinstance(indices, list) and len(indices) == 1, "reader effective privileges differ")
+    index = indices[0]
+    require(
+        isinstance(index, dict)
+        and set(index).issubset({"names", "privileges", "allow_restricted_indices"})
+        and index.get("names") == ["policy_stats"]
+        and isinstance(index.get("privileges"), list)
+        and len(index["privileges"]) == 2
+        and set(index["privileges"]) == {"read", "view_index_metadata"}
+        and index.get("allow_restricted_indices", False) is False,
+        "reader effective privileges differ",
+    )
 
 
 def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, Any]]:
@@ -1292,6 +1322,11 @@ def run_access_qualification(target: Target) -> None:
                     input_text=yaml.safe_dump(pod, sort_keys=False),
                 )
                 wait_for_probe(target, namespace_name, name)
+                if name == "dashboard-qualification-reader":
+                    output = target.namespace_kubectl(
+                        namespace_name, "logs", f"pod/{name}", timeout=10
+                    )
+                    validate_effective_reader_privileges(output)
             except DeploymentError as error:
                 logs = target.namespace_kubectl(namespace_name, "logs", f"pod/{name}", timeout=10)
                 raise DeploymentError(f"{error}; sanitized probe output: {logs[-1000:]}") from error
