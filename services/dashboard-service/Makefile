@@ -1,14 +1,20 @@
 .DEFAULT_GOAL := help
 
 GO ?= go
+DOCKER ?= docker
+KUBECTL ?= kubectl
+DEPLOY_ENV ?=
 INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
-PYTHON_TOOLING_FILES := $(wildcard scripts/service_process.py \
+PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py scripts/deployment.py \
+	scripts/disposable_deployment.py scripts/image_check.py scripts/service_process.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
+	scripts/test_deployment.py scripts/test_disposable_deployment.py \
 	scripts/test_service_process.py scripts/test_tooling.py \
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
+	scripts/test_deployment.py \
 	scripts/test_service_process.py \
 	scripts/test_tooling_runner.py)
 
@@ -52,6 +58,21 @@ X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.0.1
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 TEST_PACKAGES ?= ./...
+COVERAGE_EXCLUDE_PATHS := gen internal/testing
+INTEGRATION_COVERAGE_FILE ?=
+HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
+HEAD_SHORT := $(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
+HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
+HEAD_VERSION := git-$(HEAD_SHORT)
+IMAGE_NAME ?= insurance-hub-dashboard-api
+SOURCE_REVISION ?= $(HEAD_REVISION)
+SOURCE_CREATED ?= $(HEAD_CREATED)
+SOURCE_REPOSITORY ?= https://github.com/igor-baiborodine/insurance-hub
+SOURCE_VERSION ?= $(HEAD_VERSION)
+IMAGE_TAG ?= 1.0.0-local.$(HEAD_SHORT)
+IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
+TARGET_PLATFORM ?= linux/amd64
+GO_SERVICE_TOOLING_CONFIG := $(CURDIR)/go-service-tooling.json
 
 EXTRA_TOOL_PACKAGES := \
 	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@$(GRPC_GATEWAY_VERSION) \
@@ -71,11 +92,49 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
-	test-coverage-tooling test-integration build vulncheck check-go-pr check test-tooling check-servicekit run \
+	test-coverage-tooling test-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
+	image-build image-check _image-check-existing deploy-render deploy-check \
+	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
 	shared-candidate-generated shared-candidate-breaking shared-candidate-integration \
 	shared-candidate-image
+
+export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
+
+image-build: python-runtime-check ## Build the pinned linux/amd64 Dashboard runtime image
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
+		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" build
+
+image-check: image-build ## Build and validate Dashboard image identity, Echo, health and shutdown
+	@$(MAKE) --no-print-directory _image-check-existing
+
+_image-check-existing: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		DOCKER="$(DOCKER)" "$(PYTHON)" -m scripts.go.service.image \
+		--config "$(GO_SERVICE_TOOLING_CONFIG)" inspect
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		DOCKER="$(DOCKER)" "$(PYTHON)" scripts/image_check.py
+
+deploy-render: ## Render one Dashboard overlay without applying it
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/dashboard_deployment_checks.py render
+
+deploy-check: python-runtime-check ## Validate isolated Dashboard overlays and Java preservation
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/dashboard_deployment_checks.py check
+
+deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" scripts/deployment.py '$@'
+
+deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Dashboard deployment guards
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" -m pytest -q scripts/test_deployment.py
+
+deploy-test: python-toolchain-check image-build ## Exercise Dashboard in an owned disposable Kind namespace
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" \
+		"$(PYTHON)" -m pytest -q -m integration scripts/test_disposable_deployment.py
 
 python-tooling-format-check: python-toolchain-check
 	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \
@@ -135,6 +194,11 @@ check-servicekit:
 	@GOWORK=off $(GO) mod verify
 	@echo "check-servicekit: selected public servicekit $(SERVICEKIT_VERSION) with verified modules"
 
+check-candidate-servicekit:
+	@test -n "$${SERVICEKIT_CANDIDATE_LIBRARY:-}" && test -d "$$SERVICEKIT_CANDIDATE_LIBRARY" || { echo 'check-candidate-servicekit: candidate library missing' >&2; exit 1; }
+	@test "$$(GOWORK=off $(GO) list -m -f '{{.Replace.Dir}}' github.com/igor-baiborodine/insurance-hub/libs/servicekit)" = "$$SERVICEKIT_CANDIDATE_LIBRARY" || { echo 'check-candidate-servicekit: wrong library source selected' >&2; exit 1; }
+	@echo 'check-candidate-servicekit: selected verified candidate directory'
+
 check: check-go-pr
 
 test-integration: ## Exercise real Dashboard HTTP-to-RPC composition and lifecycle on owned listeners
@@ -173,8 +237,10 @@ shared-candidate-image:
 shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image:
 	@phase="$(@:shared-candidate-%=%)"; \
 	if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
-		SERVICEKIT_PHASE="$$phase" PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go" "$(PYTHON)" "$(INSURANCE_HUB_ROOT)/scripts/go/shared_cli.py" phase; \
-	else case "$$phase" in generated) target=check-proto-drift;; breaking) target=check-proto-breaking;; integration) target=test-integration;; image) target=build;; esac; \
+		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+			"$(PYTHON)" -m scripts.go.service.shared_phase \
+			--config "$(GO_SERVICE_TOOLING_CONFIG)" "$$phase"; \
+	else case "$$phase" in generated) target=check-proto-drift;; breaking) target=check-proto-breaking;; integration) target=test-integration;; image) target=image-check;; esac; \
 		$(MAKE) --no-print-directory "$$target"; fi
 
 

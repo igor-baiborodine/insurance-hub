@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "service": "dashboard",
+  "modulePath": "services/dashboard-service",
+  "image": {
+    "name": "insurance-hub-dashboard-api",
+    "title": "Insurance Hub Dashboard API",
+    "localTagPrefix": "1.0.0-local.",
+    "entrypoint": [
+      "/dashboard-service"
+    ],
+    "user": "65532:65532",
+    "platform": "linux/amd64",
+    "lifecycle": {
+      "containerPort": 8081,
+      "path": "/livez",
+      "expectedBody": "live\n",
+      "environment": {
+        "HTTP_ADDR": "0.0.0.0:8080",
+        "GRPC_ADDR": "0.0.0.0:9090",
+        "HEALTH_ADDR": "0.0.0.0:8081",
+        "SERVICE_ENV": "development",
+        "SERVICE_VERSION": "development"
+      },
+      "stopSeconds": 10
+    }
+  },
+  "candidate": {
+    "copyPaths": [
+      "cmd",
+      "gen",
+      "internal"
+    ],
+    "excludePaths": [],
+    "phaseTargets": {
+      "generated": [
+        "check-proto-drift"
+      ],
+      "breaking": [
+        "check-proto-breaking"
+      ],
+      "integration": [
+        "test-integration"
+      ]
+    },
+    "imageCheckTarget": "_image-check-existing"
+  }
+}
