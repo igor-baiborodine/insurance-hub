@@ -311,6 +311,109 @@ def test_live_rejection_prevents_server_side_apply() -> None:
     apply.assert_not_called()
 
 
+def java_resources(
+    deployment_uid: str = "deployment-uid",
+    service_uid: str = "service-uid",
+    available: int = 1,
+) -> dict[str, dict[str, object]]:
+    labels = {
+        "app.kubernetes.io/name": "dashboard-api-legacy",
+        "app.kubernetes.io/instance": "insurance-hub-dashboard-api-legacy",
+        "app.kubernetes.io/component": "api",
+    }
+    return {
+        "deployment": {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {
+                "name": "local-dev-dashboard-api-legacy",
+                "namespace": "local-dev-all",
+                "uid": deployment_uid,
+                "labels": labels,
+            },
+            "spec": {"replicas": 1},
+            "status": {"availableReplicas": available, "readyReplicas": available},
+        },
+        "service": {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {
+                "name": "local-dev-dashboard-api-legacy",
+                "namespace": "local-dev-all",
+                "uid": service_uid,
+                "labels": labels,
+            },
+            "spec": {
+                "type": "ClusterIP",
+                "selector": {
+                    "app.kubernetes.io/name": "dashboard-api-legacy",
+                    "app.kubernetes.io/component": "api",
+                },
+            },
+        },
+    }
+
+
+def java_target(resources: dict[str, dict[str, object]]) -> Mock:
+    target = Mock()
+    target.environment = "local-dev"
+    target.namespace = "local-dev-all"
+    target.configuration = {"mode": "direct"}
+    target.rendered.return_value = ("rendered", [], "image")
+    target.json.side_effect = lambda _get, kind, _name, _ignore: resources.get(kind, {})
+    return target
+
+
+def test_java_snapshot_requires_declared_stable_available_resources() -> None:
+    target = java_target(java_resources())
+    with patch.dict(
+        os.environ,
+        {
+            "DEPLOY_JAVA_DEPLOYMENT_UID": "deployment-uid",
+            "DEPLOY_JAVA_SERVICE_UID": "service-uid",
+        },
+        clear=True,
+    ):
+        assert checks.role_snapshot(target) == {
+            "deployment/local-dev-dashboard-api-legacy": "deployment-uid",
+            "service/local-dev-dashboard-api-legacy": "service-uid",
+        }
+
+
+@pytest.mark.parametrize("defect", ["absent", "replaced", "unavailable"])
+def test_invalid_java_owner_prevents_go_apply(defect: str) -> None:
+    resources = java_resources()
+    expected_deployment_uid = "deployment-uid"
+    if defect == "absent":
+        resources["deployment"] = {}
+    elif defect == "replaced":
+        resources["deployment"]["metadata"]["uid"] = "replacement-uid"
+    else:
+        resources["deployment"]["status"] = {
+            "availableReplicas": 0,
+            "readyReplicas": 0,
+            "unavailableReplicas": 1,
+        }
+    target = java_target(resources)
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "DEPLOY_JAVA_DEPLOYMENT_UID": expected_deployment_uid,
+                "DEPLOY_JAVA_SERVICE_UID": "service-uid",
+            },
+            clear=True,
+        ),
+        patch.object(checks, "Target", return_value=target),
+        patch.object(checks, "check_render"),
+        patch.object(checks, "secret_and_image"),
+        patch.object(lifecycle, "apply") as apply,
+        pytest.raises(checks.DeploymentError, match="authoritative Java"),
+    ):
+        lifecycle.execute(checks, ["deploy"])
+    apply.assert_not_called()
+
+
 def test_qa_aggregate_remains_inactive_beside_java() -> None:
     checks.validate_qa_aggregate(["./dashboard/legacy", "./product"])
     with pytest.raises(checks.DeploymentError, match="must remain inactive"):

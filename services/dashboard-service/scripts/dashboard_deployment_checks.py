@@ -619,11 +619,56 @@ def secret_and_image(target: Target, image: str) -> None:
 
 def role_snapshot(target: Target) -> dict[str, Any]:
     values: dict[str, Any] = {}
+    expected_uids = {
+        "deployment": os.environ.get("DEPLOY_JAVA_DEPLOYMENT_UID", ""),
+        "service": os.environ.get("DEPLOY_JAVA_SERVICE_UID", ""),
+    }
     for kind in ("deployment", "service"):
         for suffix in JAVA_NAMES:
             name = f"{target.environment}-{suffix}"
             item = target.json("get", kind, name, "--ignore-not-found")
-            values[f"{kind}/{name}"] = item.get("metadata", {}).get("uid", "")
+            metadata = item.get("metadata", {})
+            uid = metadata.get("uid", "")
+            require(
+                item.get("kind") == kind.title()
+                and metadata.get("name") == name
+                and metadata.get("namespace") == target.namespace
+                and isinstance(uid, str)
+                and bool(uid)
+                and uid == expected_uids[kind]
+                and not metadata.get("deletionTimestamp")
+                and labels_include(
+                    metadata.get("labels"),
+                    {
+                        "app.kubernetes.io/name": suffix,
+                        "app.kubernetes.io/instance": f"insurance-hub-{suffix}",
+                        "app.kubernetes.io/component": "api",
+                    },
+                ),
+                f"authoritative Java {kind}/{name} identity differs",
+            )
+            if kind == "deployment":
+                replicas = item.get("spec", {}).get("replicas")
+                status = item.get("status", {})
+                require(
+                    isinstance(replicas, int)
+                    and replicas > 0
+                    and status.get("availableReplicas") == replicas
+                    and status.get("readyReplicas") == replicas
+                    and status.get("unavailableReplicas", 0) == 0,
+                    f"authoritative Java Deployment/{name} is unavailable",
+                )
+            else:
+                require(
+                    item.get("spec", {}).get("type") == "ClusterIP"
+                    and item.get("spec", {}).get("selector")
+                    == {
+                        "app.kubernetes.io/name": suffix,
+                        "app.kubernetes.io/component": "api",
+                    },
+                    f"authoritative Java Service/{name} differs",
+                )
+            values[f"{kind}/{name}"] = uid
     return values
 
 

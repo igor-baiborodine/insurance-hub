@@ -61,6 +61,8 @@ export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
 export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
 export DEPLOY_IMAGE_REF=insurance-hub-dashboard-api:1.0.0-local.<12-source-hex>
+export DEPLOY_JAVA_DEPLOYMENT_UID=<recorded-local-dev-Java-Deployment-UID>
+export DEPLOY_JAVA_SERVICE_UID=<recorded-local-dev-Java-Service-UID>
 
 make go-svc-deploy-preflight SVC_NAME=dashboard
 make go-svc-image-load SVC_NAME=dashboard
@@ -105,6 +107,8 @@ export DEPLOY_SVC_NS=qa-svc
 export DEPLOY_DATA_NS=qa-data
 export DEPLOY_SOURCE_REVISION=<40-source-hex>
 export DEPLOY_IMAGE_DIGEST=sha256:<64-hex-registry-digest>
+export DEPLOY_JAVA_DEPLOYMENT_UID=<recorded-QA-Java-Deployment-UID>
+export DEPLOY_JAVA_SERVICE_UID=<recorded-QA-Java-Service-UID>
 
 make go-svc-deploy-status SVC_NAME=dashboard
 make go-svc-deploy-verify SVC_NAME=dashboard
