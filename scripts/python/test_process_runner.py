@@ -12,6 +12,18 @@ import pytest
 import process_runner
 
 
+def test_nonpositive_heartbeat_is_rejected_before_process_start(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="positive work, heartbeat, and teardown"):
+        process_runner.run_command(
+            [sys.executable, "-c", "raise SystemExit('must not run')"],
+            cwd=tmp_path,
+            env={"PATH": os.environ.get("PATH", "")},
+            timeout_seconds=5,
+            heartbeat_seconds=0,
+            activity="invalid heartbeat",
+        )
+
+
 def test_success_returns_captured_output(tmp_path: Path) -> None:
     # when
     result = process_runner.run_command(

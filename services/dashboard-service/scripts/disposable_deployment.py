@@ -18,6 +18,14 @@ import dashboard_deployment_checks as checks
 import yaml
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
+sys.path.insert(0, str(ROOT))
+
+from scripts.python.process_runner import (  # noqa: E402
+    CommandError,
+    run_command,
+    terminate_process_group,
+)
+
 CONTEXT = "kind-local-dev-insurance-hub"
 KIND_CLUSTER = "local-dev-insurance-hub"
 OWNER_LABEL = "insurance-hub.io/dashboard-disposable"
@@ -50,27 +58,29 @@ def command(
     arguments: list[str],
     *,
     input_text: str | None = None,
-    timeout: int = 60,
+    timeout: float = 60,
     environment: dict[str, str] | None = None,
+    activity: str | None = None,
+    heartbeat: float = 30,
+    teardown: float = 10,
 ) -> str:
     try:
-        result = subprocess.run(
+        result = run_command(
             arguments,
             cwd=ROOT,
-            input=input_text,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
             env=safe_environment(environment),
+            timeout_seconds=timeout,
+            teardown_seconds=teardown,
+            heartbeat_seconds=heartbeat,
+            activity=activity or f"{arguments[0]} operation",
+            input_text=input_text,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise CheckFailed(f"command unavailable or timed out: {arguments[0]}") from error
-    if result.returncode:
-        diagnostic = (result.stderr or result.stdout).strip().replace("\n", " ")[:400]
-        raise CheckFailed(
-            f"command failed: {arguments[0]} (exit {result.returncode}): {diagnostic}"
-        )
+    except CommandError as error:
+        diagnostic = (error.stderr or error.stdout).strip().replace("\n", " ")[:400]
+        detail = f": {diagnostic}" if diagnostic else ""
+        raise CheckFailed(f"{error}{detail}") from error
+    except OSError as error:
+        raise CheckFailed(f"command unavailable: {arguments[0]}") from error
     return result.stdout
 
 
@@ -78,11 +88,18 @@ class Cluster:
     def __init__(self, namespace: str) -> None:
         self.namespace = namespace
 
-    def kubectl(self, *arguments: str, input_text: str | None = None, timeout: int = 60) -> str:
+    def kubectl(
+        self,
+        *arguments: str,
+        input_text: str | None = None,
+        timeout: int = 60,
+        activity: str | None = None,
+    ) -> str:
         return command(
             ["kubectl", "--context", CONTEXT, "--namespace", self.namespace, *arguments],
             input_text=input_text,
             timeout=timeout,
+            activity=activity or f"kubectl {arguments[0]}",
         )
 
     def json(self, *arguments: str) -> dict[str, Any]:
@@ -207,6 +224,7 @@ def direct_rpc(cluster: Cluster) -> None:
         env=safe_environment(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     try:
 
@@ -237,15 +255,14 @@ def direct_rpc(cluster: Cluster) -> None:
                 "DASHBOARD_DEPLOYMENT_GRPC_ADDR": f"127.0.0.1:{port}",
                 "DASHBOARD_DEPLOYMENT_GRPC_MESSAGE": "disposable-dashboard-rpc",
             },
+            activity="verify deployed direct Dashboard RPC",
         )
         print("PASS deployed direct RPC", flush=True)
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+        require(
+            terminate_process_group(process, 10),
+            "direct-RPC port-forward cleanup exceeded its deadline",
+        )
 
 
 def run() -> None:
@@ -273,7 +290,11 @@ def run() -> None:
     cluster = Cluster(namespace)
     created = False
     try:
-        command(["kind", "load", "docker-image", image, "--name", KIND_CLUSTER], timeout=120)
+        command(
+            ["kind", "load", "docker-image", image, "--name", KIND_CLUSTER],
+            timeout=120,
+            activity="load Dashboard image into existing Kind cluster",
+        )
         namespace_item = {
             "apiVersion": "v1",
             "kind": "Namespace",
@@ -282,6 +303,7 @@ def run() -> None:
         command(
             ["kubectl", "--context", CONTEXT, "apply", "-f", "-"],
             input_text=json.dumps(namespace_item),
+            activity="create disposable Dashboard namespace",
         )
         created = True
         rendered, _items = render(cluster, image, source_short)
@@ -294,7 +316,12 @@ def run() -> None:
             input_text=rendered,
         )
         cluster.kubectl(
-            "rollout", "status", "deployment/local-dev-dashboard-api", "--timeout=180s", timeout=210
+            "rollout",
+            "status",
+            "deployment/local-dev-dashboard-api",
+            "--timeout=180s",
+            timeout=210,
+            activity="wait for disposable Dashboard rollout",
         )
         wait_for("Dashboard endpoint ready", lambda: endpoint_count(cluster) == 1)
         probe(
@@ -330,7 +357,12 @@ def run() -> None:
         ]["name"]
         cluster.kubectl("delete", "pod", pod, "--wait=false")
         cluster.kubectl(
-            "rollout", "status", "deployment/local-dev-dashboard-api", "--timeout=180s", timeout=210
+            "rollout",
+            "status",
+            "deployment/local-dev-dashboard-api",
+            "--timeout=180s",
+            timeout=210,
+            activity="wait for replacement Dashboard rollout",
         )
         wait_for("Dashboard endpoint recovered", lambda: endpoint_count(cluster) == 1)
         print("dashboard-disposable: Echo, health, CNI denial and restart passed")
@@ -348,6 +380,7 @@ def run() -> None:
                     "--timeout=120s",
                 ],
                 timeout=150,
+                activity="delete disposable Dashboard namespace",
             )
             require(
                 not command(

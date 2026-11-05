@@ -49,7 +49,10 @@ def _wait_for_process_group(process: subprocess.Popen[str], deadline: float) -> 
         time.sleep(min(remaining, 0.01))
 
 
-def _terminate(process: subprocess.Popen[str], teardown_seconds: float) -> bool:
+def terminate_process_group(process: subprocess.Popen[str], teardown_seconds: float) -> bool:
+    """Terminate and reap one process group within a bounded teardown budget."""
+    if teardown_seconds <= 0:
+        raise ValueError("a positive teardown deadline is required")
     deadline = time.monotonic() + teardown_seconds
     term_deadline = time.monotonic() + teardown_seconds / 2
     try:
@@ -77,8 +80,10 @@ def run_command(
     teardown_seconds: float = 5,
 ) -> subprocess.CompletedProcess[str]:
     """Capture a bounded child while reporting progress and owning its process group."""
-    if not arguments or timeout_seconds <= 0 or teardown_seconds <= 0:
-        raise ValueError("command and positive work/teardown deadlines are required")
+    if not arguments or timeout_seconds <= 0 or heartbeat_seconds <= 0 or teardown_seconds <= 0:
+        raise ValueError(
+            "command and positive work, heartbeat, and teardown deadlines are required"
+        )
     started = time.monotonic()
     deadline = started + timeout_seconds
     heartbeat = started + heartbeat_seconds
@@ -111,9 +116,9 @@ def run_command(
                     print(f"{activity}: still running after {elapsed:.0f}s", file=sys.stderr)
                     heartbeat = time.monotonic() + heartbeat_seconds
     except BaseException:
-        _terminate(process, teardown_seconds)
+        terminate_process_group(process, teardown_seconds)
         raise
-    if _process_group_exists(process) and not _terminate(process, teardown_seconds):
+    if _process_group_exists(process) and not terminate_process_group(process, teardown_seconds):
         raise CommandError(f"{activity} cleanup exceeded its {teardown_seconds:g}-second deadline")
     result = subprocess.CompletedProcess(list(arguments), process.returncode, stdout, stderr)
     if result.returncode != 0:

@@ -11,10 +11,12 @@ PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py script
 	scripts/disposable_deployment.py scripts/image_check.py scripts/service_process.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_disposable_deployment.py \
+	scripts/test_disposable_command.py \
 	scripts/test_service_process.py scripts/test_tooling.py \
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py \
+	scripts/test_disposable_command.py \
 	scripts/test_service_process.py \
 	scripts/test_tooling_runner.py)
 

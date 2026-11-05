@@ -39,8 +39,10 @@ make go-svc-deploy-test-tooling SVC_NAME=dashboard
 make go-svc-deploy-test SVC_NAME=dashboard
 ```
 
-The disposable test creates and removes its own Kind cluster and namespace. A render or fake
-adapter pass does not establish live CNI behavior.
+The disposable test loads the candidate image into the existing configured
+`local-dev-insurance-hub` Kind cluster, then creates and removes one uniquely owned namespace. It
+does not create or delete the cluster. A render or fake adapter pass does not establish live CNI
+behavior.
 
 ## Deploy to local development
 
