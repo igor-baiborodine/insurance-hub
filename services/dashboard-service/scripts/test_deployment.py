@@ -216,7 +216,7 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
 
     pods = checks.qualification_pods(target, f"issue-287-dashboard-denied-{environment}")
 
-    assert len(pods) == 6
+    assert len(pods) == 9
     assert all(pod["spec"]["containers"][0]["image"] == checks.PROBE_IMAGE for pod in pods)
     by_name = {pod["metadata"]["name"]: pod for pod in pods}
     assert by_name["dashboard-qualification-business"]["metadata"]["labels"] == {
@@ -234,6 +234,15 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
         by_name["dashboard-qualification-cross-namespace-denied"]["metadata"]["namespace"]
         == f"issue-287-dashboard-denied-{environment}"
     )
+    assert (
+        by_name["dashboard-qualification-cross-namespace-grpc-denied"]["metadata"]["namespace"]
+        == f"issue-287-dashboard-denied-{environment}"
+    )
+    grpc_reachable = by_name[checks.GRPC_REACHABLE_QUALIFICATION_POD]["spec"]["containers"][0][
+        "args"
+    ][0]
+    assert '"num_connects"' in grpc_reachable
+    assert ":9090" in grpc_reachable
     for name in checks.DENIED_QUALIFICATION_PODS:
         denial_script = by_name[name]["spec"]["containers"][0]["args"][0]
         assert "--write-out '%{http_code}'" in denial_script
@@ -348,6 +357,125 @@ def test_denied_qualification_pods_reject_a_reachable_http_response(name: str) -
 
     with pytest.raises(checks.DeploymentError, match="CNI denial result differs"):
         checks.validate_qualification_output(name, output)
+
+
+def test_grpc_reachability_accepts_the_expected_listener_connection() -> None:
+    checks.validate_grpc_reachability(
+        json.dumps(
+            {
+                "exit_code": 1,
+                "remote_ip": "10.96.42.17",
+                "remote_port": 9090,
+                "num_connects": 1,
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"exit_code": 28, "remote_ip": "", "remote_port": 0, "num_connects": 0},
+        {"exit_code": 6, "remote_ip": "", "remote_port": 0, "num_connects": 0},
+        {"exit_code": 7, "remote_ip": "10.96.42.17", "remote_port": 0, "num_connects": 0},
+        {
+            "exit_code": 0,
+            "remote_ip": "10.96.42.17",
+            "remote_port": 9090,
+            "num_connects": 1,
+            "unexpected": True,
+        },
+    ],
+)
+def test_grpc_reachability_rejects_other_transport_outcomes(result: dict[str, object]) -> None:
+    with pytest.raises(checks.DeploymentError, match="gRPC reachability result differs"):
+        checks.validate_grpc_reachability(json.dumps(result))
+
+
+def direct_rpc_output(action: str = "pass", test_name: str = "TestDeployedDirectRPC") -> str:
+    return "\n".join(
+        [
+            json.dumps({"Action": "run", "Test": test_name}),
+            json.dumps({"Action": action, "Test": test_name}),
+        ]
+    )
+
+
+def test_direct_rpc_output_requires_the_selected_scenario_to_pass_once() -> None:
+    checks.validate_direct_rpc_output(direct_rpc_output())
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "",
+        direct_rpc_output(test_name="TestRenamedDirectRPC"),
+        direct_rpc_output(action="fail"),
+        direct_rpc_output()
+        + "\n"
+        + json.dumps({"Action": "pass", "Test": "TestDeployedDirectRPC"}),
+    ],
+)
+def test_direct_rpc_output_rejects_missing_renamed_failed_or_duplicate_results(output: str) -> None:
+    with pytest.raises(checks.DeploymentError, match="did not execute and pass exactly once"):
+        checks.validate_direct_rpc_output(output)
+
+
+def test_direct_rpc_invokes_the_service_owner_with_the_selected_address() -> None:
+    with patch.object(checks, "run", return_value=direct_rpc_output()) as command:
+        checks.run_deployed_direct_rpc(19090)
+
+    command.assert_called_once_with(
+        [
+            "make",
+            "--no-print-directory",
+            "-C",
+            "services/dashboard-service",
+            "_deploy-test-rpc",
+        ],
+        timeout=60,
+        environment={"GO": "go", "DASHBOARD_DEPLOYMENT_GRPC_ADDR": "127.0.0.1:19090"},
+        activity="verify deployed direct Dashboard RPC",
+    )
+
+
+@pytest.mark.parametrize("failure", [checks.DeploymentError("RPC failed"), KeyboardInterrupt()])
+def test_verify_cleans_every_port_forward_when_direct_rpc_stops(failure: BaseException) -> None:
+    target = Mock(
+        kubectl_binary="kubectl",
+        context="kind-local-dev-insurance-hub",
+        namespace="local-dev-all",
+        business="local-dev-dashboard-api",
+        management="local-dev-dashboard-api-management",
+    )
+    processes = [Mock(), Mock(), Mock()]
+    for process in processes:
+        process.wait.return_value = 0
+    with (
+        patch.object(checks, "workload_dependencies"),
+        patch.object(checks, "role_snapshot", return_value={"java": "unchanged"}),
+        patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
+        patch.object(checks.subprocess, "Popen", side_effect=processes) as popen,
+        patch.object(checks, "_wait_for_port_forward"),
+        patch.object(
+            checks,
+            "_http",
+            side_effect=[(200, b"ready\n"), (200, b'{"total":{"policiesCount":1}}')],
+        ),
+        patch.object(checks, "run_deployed_direct_rpc", side_effect=failure),
+        patch.object(checks, "run_access_qualification"),
+        pytest.raises(type(failure)),
+    ):
+        checks.verify(target, [])
+
+    assert popen.call_count == 3
+    assert popen.call_args_list[2].args[0][-2:] == [
+        "service/local-dev-dashboard-api",
+        "19090:9090",
+    ]
+    for process in processes:
+        process.terminate.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=5)
 
 
 def test_access_qualification_cleans_owned_resources_after_probe_failure() -> None:

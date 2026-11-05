@@ -103,13 +103,16 @@ Elasticsearch loss and independent liveness. No Kafka setting, credential, topic
 to the Go reader.
 
 `go-svc-deploy-verify` is a bounded target operation, not a read-only status command. It creates
-six fixed-name qualification Pods and one fixed-name untrusted namespace, requires each name to be
+nine fixed-name qualification Pods and one fixed-name untrusted namespace, requires each name to be
 absent first, and removes every created resource. The probes use the pinned curl image, exercise
-allowed business and management identities, marker-only and business-to-management denial, and a
-copied complete identity in the untrusted namespace. The reader probe mounts the workload Secret
-inside Kubernetes, verifies exact-index count/mapping and the authenticated effective-privilege
-response, and checks unrelated-index, cluster-health and security-role denial with read-only
-requests. It does not attempt a write that could mutate canonical state if permissions drift.
+allowed business, gRPC-listener and management identities, marker-only and
+business-to-management denial, and copied complete HTTP/gRPC identities in the untrusted
+namespace. The verifier also calls the deployed `GetTotalSales` RPC through the business Service
+and requires the exact owner-selected Go scenario and result. The reader probe mounts the workload
+Secret inside Kubernetes, verifies exact-index count/mapping and the authenticated
+effective-privilege response, and checks unrelated-index, cluster-health and security-role denial
+with read-only requests. It does not attempt a write that could mutate canonical state if
+permissions drift.
 
 ## Stop and return in local development
 

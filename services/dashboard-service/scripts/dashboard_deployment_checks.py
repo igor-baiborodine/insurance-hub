@@ -35,9 +35,12 @@ MANAGEMENT_CLIENT_LABEL = "insurance-hub.io/dashboard-management-client"
 JAVA_NAMES = {"dashboard-api-legacy"}
 DENIED_QUALIFICATION_PODS = {
     "dashboard-qualification-marker-only",
+    "dashboard-qualification-marker-only-grpc-denied",
     "dashboard-qualification-business-management-denied",
     "dashboard-qualification-cross-namespace-denied",
+    "dashboard-qualification-cross-namespace-grpc-denied",
 }
+GRPC_REACHABLE_QUALIFICATION_POD = "dashboard-qualification-business-grpc"
 FORBIDDEN_TEXT = ("kafka", "postgres", "database", "insecure_skip_verify")
 PROBE_IMAGE = (
     "docker.io/curlimages/curl:8.16.0@"
@@ -59,14 +62,23 @@ def safe_environment() -> dict[str, str]:
     return {name: os.environ[name] for name in allowed if name in os.environ}
 
 
-def run(argv: list[str], *, input_text: str | None = None, timeout: int = 30) -> str:
+def run(
+    argv: list[str],
+    *,
+    input_text: str | None = None,
+    timeout: int = 30,
+    environment: dict[str, str] | None = None,
+    activity: str = "Dashboard deployment command",
+) -> str:
+    command_environment = safe_environment()
+    command_environment.update(environment or {})
     result = run_command(
         argv,
         cwd=ROOT,
-        env=safe_environment(),
+        env=command_environment,
         timeout_seconds=timeout,
         teardown_seconds=10,
-        activity="Dashboard deployment command",
+        activity=activity,
         input_text=input_text,
     )
     return result.stdout
@@ -1196,15 +1208,35 @@ def validate_cni_denial(output: str) -> None:
     )
 
 
+def validate_grpc_reachability(output: str) -> None:
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError as error:
+        raise DeploymentError("gRPC reachability result is malformed") from error
+    require(
+        isinstance(result, dict)
+        and set(result) == {"exit_code", "remote_ip", "remote_port", "num_connects"}
+        and isinstance(result.get("exit_code"), int)
+        and isinstance(result.get("remote_ip"), str)
+        and bool(result["remote_ip"])
+        and result.get("remote_port") == 9090
+        and result.get("num_connects") == 1,
+        "gRPC reachability result differs",
+    )
+
+
 def validate_qualification_output(name: str, output: str) -> None:
     if name == "dashboard-qualification-reader":
         validate_effective_reader_privileges(output)
+    elif name == GRPC_REACHABLE_QUALIFICATION_POD:
+        validate_grpc_reachability(output)
     elif name in DENIED_QUALIFICATION_PODS:
         validate_cni_denial(output)
 
 
 def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, Any]]:
     business_url = f"http://{target.business}.{target.namespace}.svc/dashboard/totalsales"
+    grpc_url = f"http://{target.business}.{target.namespace}.svc:9090"
     management_url = f"http://{target.management}.{target.namespace}.svc:8081"
     full_business = {
         "app.kubernetes.io/name": "dashboard-qualification",
@@ -1247,6 +1279,16 @@ printf '{{"exit_code":%s,"http_status":"%s","response_bytes":%s}}\n' \
   "$exit_code" "$status" "$response_bytes"
 """
 
+    grpc_reachable = f"""set -eu
+set +e
+result=$(curl --silent --connect-timeout 2 --max-time 4 --output /dev/null \
+  --write-out '{{"exit_code":%{{exitcode}},"remote_ip":"%{{remote_ip}}",\
+"remote_port":%{{remote_port}},"num_connects":%{{num_connects}}}}' \
+  '{grpc_url}' 2>/dev/null)
+set -e
+printf '%s\n' "$result"
+"""
+
     return [
         qualification_pod(
             target,
@@ -1262,9 +1304,21 @@ printf '{{"exit_code":%s,"http_status":"%s","response_bytes":%s}}\n' \
         ),
         qualification_pod(
             target,
+            GRPC_REACHABLE_QUALIFICATION_POD,
+            full_business,
+            grpc_reachable,
+        ),
+        qualification_pod(
+            target,
             "dashboard-qualification-marker-only",
             {BUSINESS_CLIENT_LABEL: "true"},
             denied(business_url),
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-marker-only-grpc-denied",
+            {BUSINESS_CLIENT_LABEL: "true"},
+            denied(grpc_url),
         ),
         qualification_pod(
             target,
@@ -1277,6 +1331,13 @@ printf '{{"exit_code":%s,"http_status":"%s","response_bytes":%s}}\n' \
             "dashboard-qualification-cross-namespace-denied",
             full_business,
             denied(business_url),
+            namespace=denied_namespace,
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-cross-namespace-grpc-denied",
+            full_business,
+            denied(grpc_url),
             namespace=denied_namespace,
         ),
         qualification_pod(
@@ -1353,7 +1414,11 @@ def run_access_qualification(target: Target) -> None:
                     input_text=yaml.safe_dump(pod, sort_keys=False),
                 )
                 wait_for_probe(target, namespace_name, name)
-                if name == "dashboard-qualification-reader" or name in DENIED_QUALIFICATION_PODS:
+                if (
+                    name == "dashboard-qualification-reader"
+                    or name == GRPC_REACHABLE_QUALIFICATION_POD
+                    or name in DENIED_QUALIFICATION_PODS
+                ):
                     output = target.namespace_kubectl(
                         namespace_name, "logs", f"pod/{name}", timeout=10
                     )
@@ -1420,11 +1485,66 @@ def run_access_qualification(target: Target) -> None:
             )
 
 
+def validate_direct_rpc_output(output: str) -> None:
+    test_name = "TestDeployedDirectRPC"
+    selected_runs = 0
+    selected_passes = 0
+    selected_failed = False
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("Test") != test_name:
+            continue
+        if event.get("Action") == "run":
+            selected_runs += 1
+        elif event.get("Action") == "pass":
+            selected_passes += 1
+        elif event.get("Action") == "fail":
+            selected_failed = True
+    require(
+        selected_runs == 1 and selected_passes == 1 and not selected_failed,
+        "deployed direct-RPC scenario did not execute and pass exactly once",
+    )
+
+
+def run_deployed_direct_rpc(port: int) -> None:
+    output = run(
+        [
+            os.environ.get("MAKE_COMMAND", "make"),
+            "--no-print-directory",
+            "-C",
+            "services/dashboard-service",
+            "_deploy-test-rpc",
+        ],
+        timeout=60,
+        environment={
+            "GO": os.environ.get("GO", "go"),
+            "DASHBOARD_DEPLOYMENT_GRPC_ADDR": f"127.0.0.1:{port}",
+        },
+        activity="verify deployed direct Dashboard RPC",
+    )
+    validate_direct_rpc_output(output)
+
+
+def _wait_for_port_forward(process: subprocess.Popen[bytes], port: int, name: str) -> None:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        require(process.poll() is None, f"{name} port-forward exited early")
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                return
+        except OSError:
+            time.sleep(0.2)
+    raise DeploymentError(f"{name} port-forward was not reachable")
+
+
 def verify(target: Target, items: list[dict[str, Any]]) -> None:
     workload_dependencies(target)
     target.live(items, require_deployment=True)
     before = role_snapshot(target)
-    http_port, management_port = _free_port(), _free_port()
+    http_port, management_port, grpc_port = _free_port(), _free_port(), _free_port()
     processes = [
         subprocess.Popen(
             [
@@ -1456,8 +1576,24 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         ),
+        subprocess.Popen(
+            [
+                target.kubectl_binary,
+                "--context",
+                target.context,
+                "--namespace",
+                target.namespace,
+                "port-forward",
+                f"service/{target.business}",
+                f"{grpc_port}:9090",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        ),
     ]
     try:
+        _wait_for_port_forward(processes[2], grpc_port, "direct-RPC")
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             try:
@@ -1475,6 +1611,7 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             status == 200 and "total" in json.loads(body),
             "deployed total-sales response differs",
         )
+        run_deployed_direct_rpc(grpc_port)
     finally:
         for child in processes:
             child.terminate()
