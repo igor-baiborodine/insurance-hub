@@ -50,7 +50,7 @@ func New(ctx context.Context, serviceName string, settings config.Telemetry) (*P
 		RuntimeScope: "insurance-hub/service/runtime",
 		MetricViews: []sdkmetric.View{
 			kittelemetry.HistogramView(
-				"insurance_hub.service.request.duration",
+				"insurance_hub.dashboard.request.duration",
 				requestBuckets,
 			),
 		},
