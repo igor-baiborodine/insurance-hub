@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "evidence": {
+    "source": "issue-287 accepted signal contract and local transport/dependency tests",
+    "limitation": "Thresholds are initial QA pilot operating limits derived from the bounded Dashboard resource contract and require Step 11 target qualification; they are not production SLOs."
+  },
+  "workload": {
+    "query_shapes": 1,
+    "query_transports": [
+      "http",
+      "grpc"
+    ],
+    "query_concurrency": [
+      1,
+      4
+    ],
+    "query_measured_blocks": 5,
+    "query_cycles_per_block": 10
+  },
+  "resource_budget": {
+    "cpu_limit_cores": 0.3,
+    "memory_limit_bytes": 268435456,
+    "cpu_alert_cores": 0.24,
+    "memory_alert_bytes": 214748364.8
+  },
+  "rules": {
+    "DashboardServiceErrorRate": {
+      "threshold": 0.1,
+      "comparison": ">",
+      "window": "5m",
+      "for": "2m",
+      "minimum_requests": 20,
+      "severity": "warning",
+      "just_below": 0.1,
+      "just_above": 0.11,
+      "suppression": "Fewer than 20 requests or only success/invalid_request outcomes.",
+      "recovery": "The five-minute unexpected-error ratio returns to 10% or lower.",
+      "response": "Split failures by transport and status, inspect safe logs/traces, and verify Elasticsearch readiness, TLS and reader privileges before rollback."
+    },
+    "DashboardHighLatency": {
+      "threshold_seconds": 0.25,
+      "quantile": 0.95,
+      "comparison": ">",
+      "window": "5m",
+      "for": "5m",
+      "minimum_requests": 20,
+      "severity": "warning",
+      "just_below_seconds": 0.25,
+      "just_above_seconds": 0.3,
+      "suppression": "Fewer than 20 requests.",
+      "recovery": "The five-minute request p95 returns to 250ms or lower.",
+      "response": "Split latency by transport and inspect Elasticsearch duration and a representative trace."
+    },
+    "DashboardElasticsearchFailure": {
+      "threshold": 0.05,
+      "comparison": ">",
+      "window": "5m",
+      "for": "2m",
+      "minimum_operations": 20,
+      "severity": "warning",
+      "just_below": 0.05,
+      "just_above": 0.06,
+      "suppression": "Fewer than 20 total-sales read operations.",
+      "recovery": "The five-minute dependency failure ratio returns to 5% or lower.",
+      "response": "Split total-sales read failures by outcome and verify Elasticsearch readiness, TLS and reader privileges."
+    },
+    "DashboardElasticsearchHighLatency": {
+      "threshold_seconds": 0.25,
+      "quantile": 0.95,
+      "comparison": ">",
+      "window": "5m",
+      "for": "5m",
+      "minimum_operations": 20,
+      "severity": "warning",
+      "just_below_seconds": 0.25,
+      "just_above_seconds": 0.3,
+      "suppression": "Fewer than 20 total-sales read operations.",
+      "recovery": "The five-minute dependency p95 returns to 250ms or lower.",
+      "response": "Split total-sales read latency, inspect Elasticsearch health and correlate a slow trace."
+    },
+    "DashboardResourcePressure": {
+      "cpu_threshold_cores": 0.24,
+      "memory_threshold_bytes": 214748364.8,
+      "comparison": ">",
+      "window": "5m",
+      "for": "5m",
+      "severity": "warning",
+      "cpu_just_below_cores": 0.24,
+      "cpu_just_above_cores": 0.25,
+      "memory_just_below_bytes": 214748364.8,
+      "memory_just_above_bytes": 220000000,
+      "suppression": "Both CPU and memory remain at or below 80% of their deployment limits.",
+      "recovery": "Both resource signals remain below their thresholds.",
+      "response": "Inspect total-sales load, runtime memory, throttling, pod events and rollout identity."
+    },
+    "DashboardUnavailable": {
+      "for": "2m",
+      "severity": "warning",
+      "suppression": "Available replicas equal desired replicas.",
+      "recovery": "The deployment returns to its desired available replica count.",
+      "response": "Inspect rollout, readiness, configuration, Elasticsearch assignment before rollback."
+    },
+    "DashboardTelemetryMissing": {
+      "absence_window": "2m",
+      "for": "1m",
+      "severity": "warning",
+      "suppression": "The deployment is unavailable or runtime samples are present.",
+      "recovery": "A bounded Go runtime sample resumes.",
+      "response": "Verify OTLP configuration, Alloy receiver and remote-write health before changing the rule."
+    },
+    "DashboardTelemetryDeliveryFailure": {
+      "window": "5m",
+      "for": null,
+      "severity": "warning",
+      "suppression": "Delivery failure/drop counters do not increase; missing exporter series do not fabricate failure.",
+      "recovery": "All five-minute failure/drop increases return to zero.",
+      "response": "Identify the failed signal/backend and inspect bounded retry/drop counters while preserving service availability."
+    },
+    "DashboardTelemetryBacklog": {
+      "remote_write_lag_seconds": 30,
+      "queue_ratio": 0.8,
+      "for": "2m",
+      "severity": "warning",
+      "suppression": "No samples are pending and exporter queue use is 80% or lower; absent series do not fabricate backlog.",
+      "recovery": "Pending samples clear and exporter queues return to 80% or lower.",
+      "response": "Check backend reachability and Alloy queue/WAL health, then verify recovery within two minutes."
+    },
+    "DashboardUnexpectedRestart": {
+      "window": "15m",
+      "threshold": 0,
+      "comparison": ">",
+      "for": null,
+      "severity": "warning",
+      "just_below": 0,
+      "just_above": 1,
+      "suppression": "No container restart occurred in 15 minutes.",
+      "recovery": "The last restart ages out of the 15-minute window.",
+      "response": "Inspect prior state, safe logs, pod events, resource pressure and rollout identity."
+    }
+  },
+  "delivery": {
+    "metric_export_interval_seconds": 10,
+    "rule_evaluation_interval_seconds": 30,
+    "expected_signal_seconds": 30,
+    "expected_recovery_seconds": 120
+  }
+}

@@ -1,0 +1,330 @@
+rule_files:
+- /fixture/alerts.yaml
+evaluation_interval: 30s
+tests:
+- name: request errors respect the two minute window and recover
+  interval: 30s
+  input_series:
+  - series: insurance_hub_dashboard_requests_total{service_name="dashboard-service",insurance_hub_dashboard_outcome="success"}
+    values: 0+8x30
+  - series: insurance_hub_dashboard_requests_total{service_name="dashboard-service",insurance_hub_dashboard_outcome="internal_error"}
+    values: 0+2x16 32+0x14
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardServiceErrorRate",alertstate="firing"})
+      or vector(0)
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="DashboardServiceErrorRate",alertstate="firing"})
+      or vector(0)
+    eval_time: 4m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardServiceErrorRate",alertstate="firing"})
+      or vector(0)
+    eval_time: 14m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: request alerts stay inactive below twenty requests
+  interval: 30s
+  input_series:
+  - series: insurance_hub_dashboard_requests_total{service_name="dashboard-service",insurance_hub_dashboard_outcome="success"}
+    values: 0+0.4x20
+  - series: insurance_hub_dashboard_requests_total{service_name="dashboard-service",insurance_hub_dashboard_outcome="internal_error"}
+    values: 0+0.1x20
+  - series: insurance_hub_dashboard_request_duration_seconds_bucket{service_name="dashboard-service",le="0.25"}
+    values: 0+0x20
+  - series: insurance_hub_dashboard_request_duration_seconds_bucket{service_name="dashboard-service",le="1"}
+    values: 0+0.5x20
+  - series: insurance_hub_dashboard_request_duration_seconds_bucket{service_name="dashboard-service",le="+Inf"}
+    values: 0+0.5x20
+  promql_expr_test:
+  - expr: count(ALERTS{alertname=~"DashboardServiceErrorRate|DashboardHighLatency",alertstate="firing"})
+      or vector(0)
+    eval_time: 9m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: request latency respects the five minute window and recovers
+  interval: 30s
+  input_series:
+  - series: insurance_hub_dashboard_requests_total{service_name="dashboard-service",insurance_hub_dashboard_outcome="success"}
+    values: 0+10x36
+  - series: insurance_hub_dashboard_request_duration_seconds_bucket{service_name="dashboard-service",le="0.25"}
+    values: 0+1x18 18+10x18
+  - series: insurance_hub_dashboard_request_duration_seconds_bucket{service_name="dashboard-service",le="1"}
+    values: 0+10x36
+  - series: insurance_hub_dashboard_request_duration_seconds_bucket{service_name="dashboard-service",le="+Inf"}
+    values: 0+10x36
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardHighLatency",alertstate="firing"}) or vector(0)
+    eval_time: 4m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="DashboardHighLatency",alertstate="firing"}) or vector(0)
+    eval_time: 7m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardHighLatency",alertstate="firing"}) or vector(0)
+    eval_time: 17m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: Elasticsearch failures fire above five percent and recover
+  interval: 30s
+  input_series:
+  - series: insurance_hub_dashboard_dependencies_total{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",insurance_hub_dashboard_outcome="success"}
+    values: 0+18x30
+  - series: insurance_hub_dashboard_dependencies_total{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",insurance_hub_dashboard_outcome="error"}
+    values: 0+2x16 32+0x14
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardElasticsearchFailure",alertstate="firing"})
+      or vector(0)
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="DashboardElasticsearchFailure",alertstate="firing"})
+      or vector(0)
+    eval_time: 4m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardElasticsearchFailure",alertstate="firing"})
+      or vector(0)
+    eval_time: 14m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: Elasticsearch alerts stay inactive below twenty operations
+  interval: 30s
+  input_series:
+  - series: insurance_hub_dashboard_dependencies_total{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",insurance_hub_dashboard_outcome="success"}
+    values: 0+0.4x20
+  - series: insurance_hub_dashboard_dependencies_total{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",insurance_hub_dashboard_outcome="error"}
+    values: 0+0.1x20
+  - series: insurance_hub_dashboard_dependency_duration_seconds_bucket{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",le="0.25"}
+    values: 0+0x20
+  - series: insurance_hub_dashboard_dependency_duration_seconds_bucket{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",le="1"}
+    values: 0+0.5x20
+  - series: insurance_hub_dashboard_dependency_duration_seconds_bucket{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",le="+Inf"}
+    values: 0+0.5x20
+  promql_expr_test:
+  - expr: count(ALERTS{alertname=~"DashboardElasticsearchFailure|DashboardElasticsearchHighLatency",alertstate="firing"})
+      or vector(0)
+    eval_time: 9m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: Elasticsearch latency fires with traffic and recovers
+  interval: 30s
+  input_series:
+  - series: insurance_hub_dashboard_dependencies_total{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",insurance_hub_dashboard_outcome="success"}
+    values: 0+10x36
+  - series: insurance_hub_dashboard_dependency_duration_seconds_bucket{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",le="0.25"}
+    values: 0+1x18 18+10x18
+  - series: insurance_hub_dashboard_dependency_duration_seconds_bucket{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",le="1"}
+    values: 0+10x36
+  - series: insurance_hub_dashboard_dependency_duration_seconds_bucket{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",le="+Inf"}
+    values: 0+10x36
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardElasticsearchHighLatency",alertstate="firing"})
+      or vector(0)
+    eval_time: 4m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="DashboardElasticsearchHighLatency",alertstate="firing"})
+      or vector(0)
+    eval_time: 7m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardElasticsearchHighLatency",alertstate="firing"})
+      or vector(0)
+    eval_time: 17m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: resource pressure fires and recovers
+  interval: 30s
+  input_series:
+  - series: container_memory_working_set_bytes{namespace="qa-svc",pod="qa-dashboard-api-fixture",container="dashboard-api"}
+    values: 220000000x14 100000000x10
+  - series: container_cpu_usage_seconds_total{namespace="qa-svc",pod="qa-dashboard-api-fixture",container="dashboard-api"}
+    values: 0+0.01x24
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardResourcePressure",alertstate="firing"})
+      or vector(0)
+    eval_time: 4m30s
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="DashboardResourcePressure",alertstate="firing"})
+      or vector(0)
+    eval_time: 6m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardResourcePressure",alertstate="firing"})
+      or vector(0)
+    eval_time: 8m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: unavailable deployment fires independently of telemetry absence and recovers
+  interval: 30s
+  input_series:
+  - series: kube_deployment_spec_replicas{namespace="qa-svc",deployment="qa-dashboard-api"}
+    values: 1x24
+  - series: kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-dashboard-api"}
+    values: 0x14 1x10
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardUnavailable",alertstate="firing"}) or vector(0)
+    eval_time: 1m30s
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="DashboardUnavailable",alertstate="firing"}) or vector(0)
+    eval_time: 3m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardTelemetryMissing",alertstate="firing"})
+      or vector(0)
+    eval_time: 3m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="DashboardUnavailable",alertstate="firing"}) or vector(0)
+    eval_time: 8m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: available deployment with missing runtime data fires and recovers
+  interval: 30s
+  input_series:
+  - series: kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-dashboard-api"}
+    values: 1x20
+  - series: go_goroutine_count{service_name="dashboard-service",deployment_environment_name="qa",service_implementation="go"}
+    values: _x10 12x10
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardTelemetryMissing",alertstate="firing"})
+      or vector(0)
+    eval_time: 30s
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="DashboardTelemetryMissing",alertstate="firing"})
+      or vector(0)
+    eval_time: 4m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardTelemetryMissing",alertstate="firing"})
+      or vector(0)
+    eval_time: 7m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: genuine idle traffic and enabled idle workers are healthy
+  interval: 30s
+  input_series:
+  - series: kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-dashboard-api"}
+    values: 1x20
+  - series: go_goroutine_count{service_name="dashboard-service",deployment_environment_name="qa",service_implementation="go"}
+    values: 12x20
+  promql_expr_test:
+  - expr: count(ALERTS{alertname=~"DashboardServiceErrorRate|DashboardHighLatency|DashboardTelemetryMissing",alertstate="firing"})
+      or vector(0)
+    eval_time: 9m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: telemetry delivery failure fires and recovers
+  interval: 30s
+  input_series:
+  - series: prometheus_remote_storage_samples_failed_total{job="qa-alloy"}
+    values: 0+1x10 10+0x24
+  - series: loki_write_dropped_entries_total{job="qa-alloy"}
+    values: 0+0x34
+  - series: prometheus_remote_storage_samples_dropped_total{job="qa-alloy"}
+    values: 0+0x34
+  - series: otelcol_exporter_send_failed_spans_total{job="qa-alloy"}
+    values: 0+0x34
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardTelemetryDeliveryFailure",alertstate="firing"})
+      or vector(0)
+    eval_time: 4m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardTelemetryDeliveryFailure",alertstate="firing"})
+      or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: absent exporter series do not fabricate delivery failure or backlog
+  interval: 30s
+  promql_expr_test:
+  - expr: count(ALERTS{alertname=~"DashboardTelemetryDeliveryFailure|DashboardTelemetryBacklog",alertstate="firing"})
+      or vector(0)
+    eval_time: 9m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  input_series: []
+- name: telemetry backlog fires on lag and recovers
+  interval: 30s
+  input_series:
+  - series: prometheus_remote_storage_samples_pending{job="qa-alloy"}
+    values: 1x10 0x12
+  - series: prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job="qa-alloy"}
+    values: '0x22'
+  - series: otelcol_exporter_queue_size{job="qa-alloy"}
+    values: '0x22'
+  - series: otelcol_exporter_queue_capacity{job="qa-alloy"}
+    values: 2048x22
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardTelemetryBacklog",alertstate="firing"})
+      or vector(0)
+    eval_time: 2m30s
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="DashboardTelemetryBacklog",alertstate="firing"})
+      or vector(0)
+    eval_time: 3m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardTelemetryBacklog",alertstate="firing"})
+      or vector(0)
+    eval_time: 7m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: unexpected restart fires and ages out
+  interval: 30s
+  input_series:
+  - series: kube_pod_container_status_restarts_total{namespace="qa-svc",pod="qa-dashboard-api-fixture",container="dashboard-api"}
+    values: 0+1x4 4+0x42
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardUnexpectedRestart",alertstate="firing"})
+      or vector(0)
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardUnexpectedRestart",alertstate="firing"})
+      or vector(0)
+    eval_time: 20m
+    exp_samples:
+    - labels: '{}'
+      value: 0

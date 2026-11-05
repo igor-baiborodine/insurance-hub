@@ -19,9 +19,15 @@ configMapGenerator:
     literals:
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
+      - ELASTICSEARCH_URL=https://qa-elasticsearch-es-http.qa-data.svc:9200
+      - ELASTICSEARCH_CA_FILE=/etc/dashboard/elasticsearch/ca.crt
       - DEPLOYMENT_ENVIRONMENT=qa
       - SERVICE_VERSION=git-82a99eb943a5
 patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: dashboard-api
   - path: network-policy-patch.yaml
     target:
       kind: NetworkPolicy

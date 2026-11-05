@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import re
@@ -31,7 +33,11 @@ EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
 BUSINESS_CLIENT_LABEL = "insurance-hub.io/dashboard-business-client"
 MANAGEMENT_CLIENT_LABEL = "insurance-hub.io/dashboard-management-client"
 JAVA_NAMES = {"dashboard-api-legacy"}
-FORBIDDEN_TEXT = ("elasticsearch", "kafka", "postgres", "database", "secretKeyRef")
+FORBIDDEN_TEXT = ("kafka", "postgres", "database", "insecure_skip_verify")
+PROBE_IMAGE = (
+    "docker.io/curlimages/curl:8.16.0@"
+    "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
+)
 
 
 class DeploymentError(RuntimeError):
@@ -109,24 +115,112 @@ def render(environment: str) -> str:
     return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(ROOT / target["overlay"])])
 
 
-def expected_egress(environment: str) -> list[dict[str, Any]]:
-    if environment == "local-dev":
-        return []
+def expected_ingress(environment: str) -> list[dict[str, Any]]:
+    namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
+    peer_namespace = {
+        "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": namespace}}
+    }
     return [
         {
-            "to": [
-                {
-                    "namespaceSelector": {
-                        "matchLabels": {"kubernetes.io/metadata.name": "kube-system"}
-                    },
-                    "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
+            "from": [
+                peer_namespace
+                | {
+                    "podSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "agent-portal-gateway-legacy",
+                            "app.kubernetes.io/instance": (
+                                "insurance-hub-agent-portal-gateway-legacy"
+                            ),
+                            "app.kubernetes.io/component": "gateway",
+                            "environment": environment,
+                            BUSINESS_CLIENT_LABEL: "true",
+                        }
+                    }
                 }
             ],
             "ports": [
-                {"port": 53, "protocol": "UDP"},
-                {"port": 53, "protocol": "TCP"},
+                {"port": 8080, "protocol": "TCP"},
+                {"port": 9090, "protocol": "TCP"},
             ],
         },
+        {
+            "from": [
+                peer_namespace
+                | {
+                    "podSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "dashboard-qualification",
+                            "app.kubernetes.io/component": "probe",
+                            "insurance-hub.io/owner": "issue-287",
+                            BUSINESS_CLIENT_LABEL: "true",
+                        }
+                    }
+                }
+            ],
+            "ports": [
+                {"port": 8080, "protocol": "TCP"},
+                {"port": 9090, "protocol": "TCP"},
+            ],
+        },
+        {
+            "from": [
+                peer_namespace
+                | {
+                    "podSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "dashboard-qualification",
+                            "app.kubernetes.io/component": "probe",
+                            "insurance-hub.io/owner": "issue-287",
+                            MANAGEMENT_CLIENT_LABEL: "true",
+                        }
+                    }
+                }
+            ],
+            "ports": [{"port": 8081, "protocol": "TCP"}],
+        },
+    ]
+
+
+def dns_egress() -> dict[str, Any]:
+    return {
+        "to": [
+            {
+                "namespaceSelector": {
+                    "matchLabels": {"kubernetes.io/metadata.name": "kube-system"}
+                },
+                "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
+            }
+        ],
+        "ports": [
+            {"port": 53, "protocol": "UDP"},
+            {"port": 53, "protocol": "TCP"},
+        ],
+    }
+
+
+def elasticsearch_egress(environment: str) -> dict[str, Any]:
+    namespace = "local-dev-all" if environment == "local-dev" else "qa-data"
+    return {
+        "to": [
+            {
+                "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": namespace}},
+                "podSelector": {
+                    "matchLabels": {
+                        "elasticsearch.k8s.elastic.co/cluster-name": f"{environment}-elasticsearch"
+                    }
+                },
+            }
+        ],
+        "ports": [{"port": 9200, "protocol": "TCP"}],
+    }
+
+
+def expected_egress(environment: str) -> list[dict[str, Any]]:
+    if environment == "local-dev":
+        return [dns_egress(), elasticsearch_egress(environment)]
+    return [
+        elasticsearch_egress(environment),
+        dns_egress(),
         {
             "to": [
                 {
@@ -214,12 +308,20 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "HTTP_IDLE_TIMEOUT": "30s",
         "GRPC_MAX_RECV_BYTES": "1048576",
         "GRPC_MAX_SEND_BYTES": "8388608",
+        "ELASTICSEARCH_URL": (
+            "http://local-dev-elasticsearch-es-http.local-dev-all.svc:9200"
+            if environment == "local-dev"
+            else "https://qa-elasticsearch-es-http.qa-data.svc:9200"
+        ),
+        "ELASTICSEARCH_INDEX": "policy_stats",
+        "ELASTICSEARCH_TIMEOUT": "5s",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
     }
     if environment == "qa":
         expected_config["OTEL_EXPORTER_OTLP_ENDPOINT"] = (
             "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
         )
+        expected_config["ELASTICSEARCH_CA_FILE"] = "/etc/dashboard/elasticsearch/ca.crt"
     require(
         "OTEL_EXPORTER_OTLP_TIMEOUT" not in data,
         "exporter timeout must use the application default",
@@ -249,7 +351,21 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "fsGroup": 65532,
             "seccompProfile": {"type": "RuntimeDefault"},
         }
-        and not pod.get("volumes")
+        and pod.get("volumes", [])
+        == (
+            []
+            if environment == "local-dev"
+            else [
+                {
+                    "name": "elasticsearch-ca",
+                    "secret": {
+                        "secretName": "qa-dashboard-elasticsearch-ca",
+                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                        "defaultMode": 292,
+                    },
+                }
+            ]
+        )
         and not pod.get("initContainers"),
         "Pod security or data boundary differs",
     )
@@ -258,6 +374,8 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     container = containers[0]
     require(
         container.get("name") == "dashboard-api"
+        and container.get("imagePullPolicy")
+        == ("Never" if environment == "local-dev" else "Always")
         and container.get("securityContext")
         == {
             "allowPrivilegeEscalation": False,
@@ -269,7 +387,18 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "requests": {"cpu": "100m", "memory": "64Mi"},
             "limits": {"cpu": "300m", "memory": "256Mi"},
         }
-        and not container.get("volumeMounts")
+        and container.get("volumeMounts", [])
+        == (
+            []
+            if environment == "local-dev"
+            else [
+                {
+                    "name": "elasticsearch-ca",
+                    "mountPath": "/etc/dashboard/elasticsearch",
+                    "readOnly": True,
+                }
+            ]
+        )
         and container.get("envFrom") == [{"configMapRef": {"name": prefix + "dashboard-config"}}],
         "container security or resources differ",
     )
@@ -281,7 +410,16 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(
         env.get("SERVICE_INSTANCE_ID", {}).get("valueFrom", {}).get("fieldRef", {}).get("fieldPath")
         == "metadata.uid"
-        and set(env) == {"SERVICE_INSTANCE_ID"},
+        and env.get("ELASTICSEARCH_USERNAME", {}).get("valueFrom", {}).get("secretKeyRef")
+        == {"name": f"{environment}-dashboard-elasticsearch", "key": "username"}
+        and env.get("ELASTICSEARCH_PASSWORD", {}).get("valueFrom", {}).get("secretKeyRef")
+        == {"name": f"{environment}-dashboard-elasticsearch", "key": "password"}
+        and set(env)
+        == {
+            "SERVICE_INSTANCE_ID",
+            "ELASTICSEARCH_USERNAME",
+            "ELASTICSEARCH_PASSWORD",
+        },
         "runtime identity environment differs",
     )
     probes = {
@@ -324,23 +462,11 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
 
     policy = resource(items, "NetworkPolicy", prefix + "dashboard-api")
     policy_spec = policy.get("spec", {})
-    ingress = policy_spec.get("ingress", [])
     require(policy_spec.get("policyTypes") == ["Ingress", "Egress"], "NetworkPolicy types differ")
-    require(len(ingress) == 2, "NetworkPolicy ingress differs")
-    expected_ingress = {
-        BUSINESS_CLIENT_LABEL: {8080, 9090},
-        MANAGEMENT_CLIENT_LABEL: {8081},
-    }
-    actual_ingress: dict[str, set[int]] = {}
-    for rule in ingress:
-        peers = rule.get("from", [])
-        require(len(peers) == 1, "NetworkPolicy peer differs")
-        labels = peers[0].get("podSelector", {}).get("matchLabels", {})
-        require(len(labels) == 1, "NetworkPolicy label differs")
-        label, value = next(iter(labels.items()))
-        require(value == "true", "NetworkPolicy client label value differs")
-        actual_ingress[label] = {port.get("port") for port in rule.get("ports", [])}
-    require(actual_ingress == expected_ingress, "NetworkPolicy admission differs")
+    require(
+        policy_spec.get("ingress", []) == expected_ingress(environment),
+        "NetworkPolicy admission differs",
+    )
     require(
         policy_spec.get("egress", []) == expected_egress(environment),
         "NetworkPolicy egress differs",
@@ -366,6 +492,7 @@ class Target:
             require(os.environ.get(name, "") == value, f"{name} differs from the catalog")
         self.context = expected["DEPLOY_CONTEXT"]
         self.namespace = expected["DEPLOY_SVC_NS"]
+        self.data_namespace = expected["DEPLOY_DATA_NS"]
         self.deployment = f"{self.environment}-dashboard-api"
         self.business = f"{self.environment}-dashboard-api"
         self.management = f"{self.environment}-dashboard-api-management"
@@ -381,6 +508,46 @@ class Target:
     def json(self, *args: str) -> dict[str, Any]:
         return json.loads(self.kubectl(*args, "-o", "json") or "{}")
 
+    def data_json(self, *args: str) -> dict[str, Any]:
+        return json.loads(
+            run(
+                [
+                    self.kubectl_binary,
+                    "--context",
+                    self.context,
+                    "--namespace",
+                    self.data_namespace,
+                    *args,
+                    "-o",
+                    "json",
+                ]
+            )
+            or "{}"
+        )
+
+    def namespace_kubectl(
+        self,
+        namespace: str,
+        *args: str,
+        input_text: str | None = None,
+        timeout: int = 30,
+    ) -> str:
+        return run(
+            [
+                self.kubectl_binary,
+                "--context",
+                self.context,
+                "--namespace",
+                namespace,
+                *args,
+            ],
+            input_text=input_text,
+            timeout=timeout,
+        )
+
+    def namespace_json(self, namespace: str, *args: str) -> dict[str, Any]:
+        return json.loads(self.namespace_kubectl(namespace, *args, "-o", "json") or "{}")
+
     def coordinates(self) -> None:
         require(
             run([self.kubectl_binary, "config", "current-context"]).strip() == self.context,
@@ -388,6 +555,12 @@ class Target:
         )
         namespace = self.json("get", "namespace", self.namespace)
         require(namespace.get("metadata", {}).get("name") == self.namespace, "namespace differs")
+        if self.data_namespace != self.namespace:
+            data_namespace = self.data_json("get", "namespace", self.data_namespace)
+            require(
+                data_namespace.get("metadata", {}).get("name") == self.data_namespace,
+                "data namespace differs",
+            )
 
     def rendered(self) -> tuple[str, list[dict[str, Any]], str]:
         text = render(self.environment)
@@ -506,7 +679,7 @@ class Target:
                 and pod.get("hostIPC") is not True
                 and pod.get("serviceAccountName") in (None, "default")
                 and not pod.get("initContainers")
-                and not pod.get("volumes"),
+                and pod.get("volumes", []) == desired_pod.get("volumes", []),
                 f"live Deployment/{name} Pod security settings differ",
             )
             desired_containers = desired_pod.get("containers", [])
@@ -586,8 +759,80 @@ def check_render() -> None:
     validate_render(environment, render(environment))
 
 
+def secret_values(item: dict[str, Any], name: str, keys: set[str]) -> dict[str, bytes]:
+    metadata = item.get("metadata", {})
+    data = item.get("data", {})
+    require(
+        item.get("kind") == "Secret"
+        and metadata.get("name") == name
+        and isinstance(data, dict)
+        and set(data) == keys,
+        f"Secret/{name} keys or identity differ",
+    )
+    values: dict[str, bytes] = {}
+    try:
+        for key, encoded in data.items():
+            require(isinstance(encoded, str) and bool(encoded), f"Secret/{name} data is empty")
+            values[key] = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise DeploymentError(f"Secret/{name} data is malformed") from error
+    require(all(values.values()), f"Secret/{name} data is empty")
+    return values
+
+
+def workload_dependencies(target: Target) -> None:
+    reader_name = f"{target.environment}-dashboard-elasticsearch"
+    reader = target.json("get", "secret", reader_name, "--ignore-not-found")
+    require(
+        reader.get("metadata", {}).get("namespace") == target.namespace,
+        f"Secret/{reader_name} namespace differs",
+    )
+    credentials = secret_values(reader, reader_name, {"username", "password"})
+    require(
+        credentials["username"] == b"go_dashboard_total_sales_reader"
+        and len(credentials["password"]) >= 32,
+        f"Secret/{reader_name} reader identity differs",
+    )
+
+    service_name = f"{target.environment}-elasticsearch-es-http"
+    service = target.data_json("get", "service", service_name, "--ignore-not-found")
+    service_spec = service.get("spec", {})
+    require(
+        service.get("kind") == "Service"
+        and service.get("metadata", {}).get("name") == service_name
+        and service.get("metadata", {}).get("namespace") == target.data_namespace
+        and service_spec.get("type") == "ClusterIP"
+        and service_spec.get("selector", {}).get("elasticsearch.k8s.elastic.co/cluster-name")
+        == f"{target.environment}-elasticsearch"
+        and any(
+            port.get("port") == 9200 and port.get("protocol", "TCP") == "TCP"
+            for port in service_spec.get("ports", [])
+        ),
+        f"Service/{service_name} dependency identity differs",
+    )
+
+    if target.environment == "local-dev":
+        return
+    source_name = "qa-elasticsearch-es-http-certs-public"
+    source = target.data_json("get", "secret", source_name, "--ignore-not-found")
+    require(
+        source.get("metadata", {}).get("namespace") == target.data_namespace,
+        f"Secret/{source_name} namespace differs",
+    )
+    source_ca = secret_values(source, source_name, {"ca.crt"})["ca.crt"]
+    workload_name = "qa-dashboard-elasticsearch-ca"
+    workload = target.json("get", "secret", workload_name, "--ignore-not-found")
+    require(
+        workload.get("metadata", {}).get("namespace") == target.namespace,
+        f"Secret/{workload_name} namespace differs",
+    )
+    workload_ca = secret_values(workload, workload_name, {"ca.crt"})["ca.crt"]
+    require(workload_ca == source_ca, "Dashboard Elasticsearch CA differs from the ECK public CA")
+
+
 def secret_and_image(target: Target, image: str) -> None:
     require(not os.environ.get("DEPLOY_SECRET"), "Dashboard accepts no deployment Secret")
+    workload_dependencies(target)
     if target.configuration["mode"] == "flux":
         require(
             bool(
@@ -749,7 +994,348 @@ def _http(url: str, body: bytes | None = None) -> tuple[int, bytes]:
         return error.code, error.read()
 
 
+def qualification_pod(
+    target: Target,
+    name: str,
+    labels: dict[str, str],
+    script: str,
+    *,
+    namespace: str | None = None,
+    elasticsearch: bool = False,
+) -> dict[str, Any]:
+    selected_namespace = namespace or target.namespace
+    container: dict[str, Any] = {
+        "name": "probe",
+        "image": PROBE_IMAGE,
+        "imagePullPolicy": "IfNotPresent",
+        "command": ["/bin/sh", "-ec"],
+        "args": [script],
+        "securityContext": {
+            "allowPrivilegeEscalation": False,
+            "readOnlyRootFilesystem": True,
+            "capabilities": {"drop": ["ALL"]},
+        },
+        "resources": {
+            "requests": {"cpu": "10m", "memory": "16Mi"},
+            "limits": {"cpu": "100m", "memory": "64Mi"},
+        },
+        "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}],
+    }
+    volumes: list[dict[str, Any]] = [{"name": "tmp", "emptyDir": {}}]
+    if elasticsearch:
+        container["env"] = [
+            {
+                "name": "ES_USER",
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": f"{target.environment}-dashboard-elasticsearch",
+                        "key": "username",
+                    }
+                },
+            },
+            {
+                "name": "ES_PASSWORD",
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": f"{target.environment}-dashboard-elasticsearch",
+                        "key": "password",
+                    }
+                },
+            },
+        ]
+        if target.environment == "qa":
+            container["volumeMounts"].append(
+                {
+                    "name": "elasticsearch-ca",
+                    "mountPath": "/etc/dashboard/elasticsearch",
+                    "readOnly": True,
+                }
+            )
+            volumes.append(
+                {
+                    "name": "elasticsearch-ca",
+                    "secret": {
+                        "secretName": "qa-dashboard-elasticsearch-ca",
+                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                        "defaultMode": 292,
+                    },
+                }
+            )
+    return {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": name,
+            "namespace": selected_namespace,
+            "labels": labels | {"insurance-hub.io/qualification": "issue-287"},
+        },
+        "spec": {
+            "activeDeadlineSeconds": 60,
+            "automountServiceAccountToken": False,
+            "enableServiceLinks": False,
+            "restartPolicy": "Never",
+            "securityContext": {
+                "runAsNonRoot": True,
+                "runAsUser": 65532,
+                "runAsGroup": 65532,
+                "seccompProfile": {"type": "RuntimeDefault"},
+            },
+            "containers": [container],
+            "volumes": volumes,
+        },
+    }
+
+
+def permission_probe_script(target: Target) -> str:
+    url = (
+        "http://local-dev-elasticsearch-es-http.local-dev-all.svc:9200"
+        if target.environment == "local-dev"
+        else "https://qa-elasticsearch-es-http.qa-data.svc:9200"
+    )
+    trust = "--cacert /etc/dashboard/elasticsearch/ca.crt" if target.environment == "qa" else ""
+    missing_ca = ""
+    if target.environment == "qa":
+        missing_ca = f"""
+if curl --config "$config" --silent --max-time 5 \
+  "{url}/policy_stats/_count" >/dev/null 2>&1; then
+  exit 21
+fi
+"""
+    return f"""set -eu
+config=/tmp/elasticsearch-curl.conf
+umask 077
+printf 'user = "%s:%s"\\n' "$ES_USER" "$ES_PASSWORD" >"$config"
+trap 'rm -f "$config" /tmp/response' EXIT
+request() {{
+  curl --config "$config" --silent --show-error --max-time 5 {trust} \
+    --output /tmp/response --write-out '%{{http_code}}' "$@"
+}}
+{missing_ca}test "$(request "{url}/policy_stats/_count")" = 200
+test "$(request "{url}/policy_stats/_mapping")" = 200
+test "$(request "{url}/_security/user/_privileges")" = 200
+compact=$(tr -d '[:space:]' </tmp/response)
+case "$compact" in *'"cluster":[]'*) ;; *) exit 22 ;; esac
+case "$compact" in *'"names":["policy_stats"]'*) ;; *) exit 23 ;; esac
+case "$compact" in
+  *'"privileges":["read","view_index_metadata"]'*|\
+  *'"privileges":["view_index_metadata","read"]'*) ;;
+  *) exit 24 ;;
+esac
+case "$compact" in
+  *'"names":["*"]'*|*'"write"'*|*'"manage"'*|*'"all"'*) exit 25 ;;
+esac
+test "$(request "{url}/issue-287-unrelated/_search")" = 403
+test "$(request "{url}/_cluster/health")" = 403
+test "$(request "{url}/_security/role/go_dashboard_total_sales_reader")" = 403
+"""
+
+
+def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, Any]]:
+    business_url = f"http://{target.business}.{target.namespace}.svc/dashboard/totalsales"
+    management_url = f"http://{target.management}.{target.namespace}.svc:8081"
+    full_business = {
+        "app.kubernetes.io/name": "dashboard-qualification",
+        "app.kubernetes.io/component": "probe",
+        "insurance-hub.io/owner": "issue-287",
+        BUSINESS_CLIENT_LABEL: "true",
+    }
+    full_management = {
+        "app.kubernetes.io/name": "dashboard-qualification",
+        "app.kubernetes.io/component": "probe",
+        "insurance-hub.io/owner": "issue-287",
+        MANAGEMENT_CLIENT_LABEL: "true",
+    }
+    payload = '{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}'
+    allowed_business = (
+        "set -eu\n"
+        f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
+        f"--data '{payload}' '{business_url}' | grep -q '\"total\"'\n"
+    )
+    allowed_management = (
+        "set -eu\n"
+        f"test \"$(curl --fail --silent --show-error --max-time 5 '{management_url}/livez')\" "
+        '= "alive"\n'
+        f"test \"$(curl --fail --silent --show-error --max-time 5 '{management_url}/readyz')\" "
+        '= "ready"\n'
+    )
+
+    def denied(url: str) -> str:
+        return (
+            "set -eu\n"
+            f"if curl --fail --silent --show-error --connect-timeout 2 --max-time 4 '{url}' "
+            ">/dev/null 2>&1; then exit 31; fi\n"
+        )
+
+    return [
+        qualification_pod(
+            target,
+            "dashboard-qualification-business",
+            full_business,
+            allowed_business,
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-management",
+            full_management,
+            allowed_management,
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-marker-only",
+            {BUSINESS_CLIENT_LABEL: "true"},
+            denied(business_url),
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-business-management-denied",
+            full_business,
+            denied(management_url + "/livez"),
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-cross-namespace-denied",
+            full_business,
+            denied(business_url),
+            namespace=denied_namespace,
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-reader",
+            full_business,
+            permission_probe_script(target),
+            elasticsearch=True,
+        ),
+    ]
+
+
+def wait_for_probe(target: Target, namespace: str, name: str) -> None:
+    deadline = time.monotonic() + 75
+    while time.monotonic() < deadline:
+        pod = target.namespace_json(namespace, "get", "pod", name)
+        phase = pod.get("status", {}).get("phase")
+        if phase == "Succeeded":
+            return
+        if phase == "Failed":
+            raise DeploymentError(f"qualification Pod/{name} failed")
+        time.sleep(1)
+    raise DeploymentError(f"qualification Pod/{name} exceeded 75 seconds")
+
+
+def run_access_qualification(target: Target) -> None:
+    denied_namespace = f"issue-287-dashboard-denied-{target.environment}"
+    namespace = {
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {
+            "name": denied_namespace,
+            "labels": {"insurance-hub.io/qualification": "issue-287"},
+        },
+    }
+    existing = run(
+        [
+            target.kubectl_binary,
+            "--context",
+            target.context,
+            "get",
+            "namespace",
+            denied_namespace,
+            "--ignore-not-found",
+            "-o",
+            "json",
+        ]
+    )
+    require(not existing.strip(), f"qualification namespace/{denied_namespace} already exists")
+    try:
+        target.kubectl("create", "-f", "-", input_text=yaml.safe_dump(namespace, sort_keys=False))
+        for pod in qualification_pods(target, denied_namespace):
+            metadata = pod["metadata"]
+            name = metadata["name"]
+            namespace_name = metadata["namespace"]
+            require(
+                not target.namespace_kubectl(
+                    namespace_name,
+                    "get",
+                    "pod",
+                    name,
+                    "--ignore-not-found",
+                    "-o",
+                    "name",
+                ).strip(),
+                f"qualification Pod/{name} already exists",
+            )
+            try:
+                target.namespace_kubectl(
+                    namespace_name,
+                    "create",
+                    "-f",
+                    "-",
+                    input_text=yaml.safe_dump(pod, sort_keys=False),
+                )
+                wait_for_probe(target, namespace_name, name)
+            except DeploymentError as error:
+                logs = target.namespace_kubectl(namespace_name, "logs", f"pod/{name}", timeout=10)
+                raise DeploymentError(f"{error}; sanitized probe output: {logs[-1000:]}") from error
+            finally:
+                current = target.namespace_json(
+                    namespace_name, "get", "pod", name, "--ignore-not-found"
+                )
+                if current:
+                    require(
+                        current.get("metadata", {})
+                        .get("labels", {})
+                        .get("insurance-hub.io/qualification")
+                        == "issue-287",
+                        f"qualification Pod/{name} cleanup ownership differs",
+                    )
+                    target.namespace_kubectl(
+                        namespace_name,
+                        "delete",
+                        "pod",
+                        name,
+                        "--wait=true",
+                        "--timeout=30s",
+                        timeout=40,
+                    )
+    finally:
+        current = json.loads(
+            run(
+                [
+                    target.kubectl_binary,
+                    "--context",
+                    target.context,
+                    "get",
+                    "namespace",
+                    denied_namespace,
+                    "--ignore-not-found",
+                    "-o",
+                    "json",
+                ]
+            )
+            or "{}"
+        )
+        if current:
+            require(
+                current.get("metadata", {}).get("labels", {}).get("insurance-hub.io/qualification")
+                == "issue-287",
+                f"qualification namespace/{denied_namespace} cleanup ownership differs",
+            )
+            run(
+                [
+                    target.kubectl_binary,
+                    "--context",
+                    target.context,
+                    "delete",
+                    "namespace",
+                    denied_namespace,
+                    "--wait=true",
+                    "--timeout=60s",
+                ],
+                timeout=70,
+            )
+
+
 def verify(target: Target, items: list[dict[str, Any]]) -> None:
+    workload_dependencies(target)
     target.live(items, require_deployment=True)
     before = role_snapshot(target)
     http_port, management_port = _free_port(), _free_port()
@@ -811,6 +1397,7 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             except subprocess.TimeoutExpired:
                 child.kill()
                 child.wait(timeout=5)
+    run_access_qualification(target)
     require(role_snapshot(target) == before, "Java resource identity changed during verification")
 
 
@@ -834,6 +1421,30 @@ def validate_qa_aggregate(resources: Any) -> None:
     require("./dashboard" in resources, "QA Go Dashboard overlay is missing")
 
 
+def validate_java_edge_identity(environment: str) -> None:
+    overlay = ROOT / f"k8s/overlays/{environment}/svc/agent-portal-gateway/legacy"
+    items = documents(run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)]))
+    deployment = resource(
+        items,
+        "Deployment",
+        f"{environment}-agent-portal-gateway-legacy",
+    )
+    labels = deployment.get("spec", {}).get("template", {}).get("metadata", {}).get("labels", {})
+    require(
+        labels_include(
+            labels,
+            {
+                "app.kubernetes.io/name": "agent-portal-gateway-legacy",
+                "app.kubernetes.io/instance": "insurance-hub-agent-portal-gateway-legacy",
+                "app.kubernetes.io/component": "gateway",
+                "environment": environment,
+                BUSINESS_CLIENT_LABEL: "true",
+            },
+        ),
+        "authoritative Java edge Dashboard caller identity differs",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     require(
@@ -851,6 +1462,8 @@ def main(argv: list[str] | None = None) -> int:
     if arguments[0] == "check":
         qa_root = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
         validate_qa_aggregate(qa_root.get("resources"))
+        for environment in ("local-dev", "qa"):
+            validate_java_edge_identity(environment)
         print("dashboard-deployment-check: local-dev and active QA renders passed")
     return 0
 

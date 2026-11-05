@@ -141,8 +141,12 @@ response stays safe; shutdown remains bounded.
 configured Kind cluster, then creates one uniquely owned namespace. Its fixture setup is explicit
 test administration; the Dashboard process receives only reader credentials and never creates or
 seeds state. The test removes its namespace and does not establish a local-dev or QA deployment
-result. The deployment target, credentials, TLS and target-specific network policy remain owned by
-the guarded deployment stage.
+result. The guarded deployment stage requires the exact target ECK Service, reader Secret and QA
+public-CA copy before mutation. `go-svc-deploy-verify` creates and removes bounded qualification
+Pods and one untrusted namespace to prove allowed and denied caller identities plus the reader's
+effective read-only privileges. The
+[deployment runbook](../../docs/migration/phase-4/dashboard-service/deployment-runbook.md) records
+those side effects, coordinates and cleanup.
 
 Run locally with accepted identity values:
 

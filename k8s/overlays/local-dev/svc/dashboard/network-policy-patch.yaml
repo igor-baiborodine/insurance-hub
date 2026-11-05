@@ -1,0 +1,73 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dashboard-api
+spec:
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-portal-gateway-legacy
+              app.kubernetes.io/instance: insurance-hub-agent-portal-gateway-legacy
+              app.kubernetes.io/component: gateway
+              environment: local-dev
+              insurance-hub.io/dashboard-business-client: "true"
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dashboard-qualification
+              app.kubernetes.io/component: probe
+              insurance-hub.io/owner: issue-287
+              insurance-hub.io/dashboard-business-client: "true"
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dashboard-qualification
+              app.kubernetes.io/component: probe
+              insurance-hub.io/owner: issue-287
+              insurance-hub.io/dashboard-management-client: "true"
+      ports:
+        - port: 8081
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              elasticsearch.k8s.elastic.co/cluster-name: local-dev-elasticsearch
+      ports:
+        - port: 9200
+          protocol: TCP

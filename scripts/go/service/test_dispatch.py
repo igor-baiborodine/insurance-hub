@@ -129,7 +129,7 @@ def test_policy_search_fixture_operations_use_the_existing_dispatch() -> None:
     assert paths == ["services/policy-search-service"] * 10
 
 
-def test_dashboard_supports_only_its_no_data_capabilities() -> None:
+def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() -> None:
     # given
     script_dir = Path(resolve.__file__).resolve().parent
     root = script_dir.parents[2]
@@ -161,10 +161,8 @@ def test_dashboard_supports_only_its_no_data_capabilities() -> None:
     assert record["releaseTargets"] == ["qa"]
     assert "administration" not in record
     assert all("initialization" not in target for target in record["deploymentTargets"].values())
-    assert all(
-        target["dataNamespace"] == target["namespace"]
-        for target in record["deploymentTargets"].values()
-    )
+    assert record["deploymentTargets"]["local-dev"]["dataNamespace"] == "local-dev-all"
+    assert record["deploymentTargets"]["qa"]["dataNamespace"] == "qa-data"
     assert paths == ["services/dashboard-service"] * len(expected)
     for unsupported in ("fixture-setup", "deploy-test-flux", "initialize"):
         with pytest.raises(resolve.DispatchError, match="does not support capability"):

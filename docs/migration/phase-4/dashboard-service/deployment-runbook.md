@@ -38,6 +38,8 @@ Run these read-only or disposable checks from the repository root:
 make go-svc-deploy-check SVC_NAME=dashboard
 make go-svc-deploy-test-tooling SVC_NAME=dashboard
 make go-svc-deploy-test SVC_NAME=dashboard
+make monitoring-assets-check ENV_NAME=qa SVC_NAME=dashboard
+make test-monitoring ENV_NAME=qa SVC_NAME=dashboard
 ```
 
 The disposable test loads the candidate image into the existing configured
@@ -48,6 +50,9 @@ sales, reader write/admin/unrelated-index denial, readiness and safe response be
 dependency loss, independent liveness, recovery, network denial and pod replacement. It does not
 create or delete the cluster. A render, fake adapter or disposable pass does not establish a
 local-dev or QA deployment result.
+
+The monitoring checks validate the Dashboard-owned request and Elasticsearch dashboards, alerts,
+Prometheus rule tests and collected disposable fixture. They do not prove QA Alloy delivery.
 
 ## Deploy to local development
 
@@ -84,6 +89,11 @@ make go-svc-deploy-status SVC_NAME=dashboard
 make go-svc-deploy-verify SVC_NAME=dashboard
 ```
 
+Preflight requires the namespace-local `local-dev-dashboard-elasticsearch` Secret to contain only
+the exact reader username and password, requires the reader identity
+`go_dashboard_total_sales_reader`, and verifies the selected ECK HTTP Service before image or
+workload mutation. It never prints or passes credential values on a host command line.
+
 Before and after deployment, record the Java Deployment and Service UIDs and availability. Verify
 the permitted HTTP total-sales request, direct `GetTotalSales` RPC and management endpoints, then
 use labeled and unlabeled probe Pods to establish NetworkPolicy behavior. Confirm that OCI,
@@ -91,6 +101,15 @@ runtime, Pod and ConfigMap versions agree; retain the full OCI revision, image t
 digest separately. Verify exact-index reads, write/admin/unrelated-index denials, readiness during
 Elasticsearch loss and independent liveness. No Kafka setting, credential, topic or group belongs
 to the Go reader.
+
+`go-svc-deploy-verify` is a bounded target operation, not a read-only status command. It creates
+six fixed-name qualification Pods and one fixed-name untrusted namespace, requires each name to be
+absent first, and removes every created resource. The probes use the pinned curl image, exercise
+allowed business and management identities, marker-only and business-to-management denial, and a
+copied complete identity in the untrusted namespace. The reader probe mounts the workload Secret
+inside Kubernetes, verifies exact-index count/mapping and the authenticated effective-privilege
+response, and checks unrelated-index, cluster-health and security-role denial with read-only
+requests. It does not attempt a write that could mutate canonical state if permissions drift.
 
 ## Stop and return in local development
 
@@ -106,15 +125,15 @@ verify commands above. Leave the Go workload ready after the issue 286 stop scen
 
 ## Stage and observe QA
 
-PR1 leaves `k8s/overlays/qa/svc/dashboard` inactive. The shared QA aggregate must continue to
-contain `./dashboard/legacy` and must not contain `./dashboard`. The release owner later publishes
-the reviewed semantic image, records its immutable digest and exact image source revision, and
-updates the inactive overlay before a reviewed Git change adds `./dashboard` beside the Java
-resource. Flux performs the QA mutation.
+The shared QA aggregate contains both `./dashboard` and `./dashboard/legacy`. The release owner
+publishes the reviewed semantic image, records its immutable digest and exact image source revision,
+and updates the Go overlay through the guarded release workflow. Flux performs the persistent QA
+mutation while the Java resource and route remain authoritative.
 
 Do not apply, delete, load an image, scale a workload, live-patch desired state or suspend Flux in
-QA. Read-only status and verification require the full commit reported by the shared `qa-svc` Flux
-source and applied revision:
+QA. Status is read-only. Verification requires separate authorization for its short-lived probe
+Pods and namespace, plus the full commit reported by the shared `qa-svc` Flux source and applied
+revision:
 
 ```sh
 export DEPLOY_ENV=qa
@@ -129,6 +148,12 @@ export DEPLOY_JAVA_SERVICE_UID=<recorded-QA-Java-Service-UID>
 make go-svc-deploy-status SVC_NAME=dashboard
 make go-svc-deploy-verify SVC_NAME=dashboard
 ```
+
+QA preflight and verification require `qa-dashboard-elasticsearch` with only the exact reader
+username/password and `qa-dashboard-elasticsearch-ca` with only `ca.crt`. The latter must equal the
+`ca.crt` value in `qa-data/qa-elasticsearch-es-http-certs-public`. The workload verifies
+`qa-elasticsearch-es-http.qa-data.svc` with TLS 1.2 or newer; no insecure or server-name override is
+supported.
 
 `DEPLOY_SOURCE_REVISION` is the Git commit reconciled by the shared Flux owner; it is not the image's
 OCI source revision after a later release-preparation or activation commit. Record the published

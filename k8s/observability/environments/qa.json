@@ -5,6 +5,18 @@
   "prometheus_release": "qa-prometheus",
   "prometheus_values_path": "overlays/qa/infra/prometheus/values.yaml",
   "service_verification": {
+    "dashboard": {
+      "business_service": "qa-dashboard-api",
+      "deployment": "qa-dashboard-api",
+      "flux_kustomization": "qa-svc",
+      "flux_namespace": "flux-system",
+      "flux_source": "insurance-hub",
+      "loki_service": "qa-loki",
+      "management_service": "qa-dashboard-api-management",
+      "prometheus_service": "qa-prometheus-kube-prometh-prometheus",
+      "service_namespace": "qa-svc",
+      "tempo_service": "qa-tempo"
+    },
     "product": {
       "business_service": "qa-product-api",
       "deployment": "qa-product-api",

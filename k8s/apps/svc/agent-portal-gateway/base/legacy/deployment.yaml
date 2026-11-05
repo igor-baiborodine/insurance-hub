@@ -20,6 +20,7 @@ spec:
         app.kubernetes.io/instance: insurance-hub-agent-portal-gateway-legacy
         app.kubernetes.io/version: "latest"
         app.kubernetes.io/component: gateway
+        insurance-hub.io/dashboard-business-client: "true"
         insurance-hub.io/policy-search-business-client: "true"
     spec:
       containers:
