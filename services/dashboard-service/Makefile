@@ -9,6 +9,7 @@ INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py scripts/deployment.py \
 	scripts/disposable_deployment.py scripts/image_check.py scripts/service_process.py \
+	scripts/test_image_check.py \
 	scripts/elasticsearch_integration.py scripts/test_elasticsearch_integration.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_disposable_deployment.py \
@@ -17,6 +18,7 @@ PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py script
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_elasticsearch_integration.py \
+	scripts/test_image_check.py \
 	scripts/test_deployment.py \
 	scripts/test_disposable_command.py \
 	scripts/test_service_process.py \
@@ -121,7 +123,8 @@ _image-check-existing: python-runtime-check
 		DOCKER="$(DOCKER)" "$(PYTHON)" -m scripts.go.service.image \
 		--config "$(GO_SERVICE_TOOLING_CONFIG)" inspect
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		DOCKER="$(DOCKER)" "$(PYTHON)" scripts/image_check.py
+		DOCKER="$(DOCKER)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
+		"$(PYTHON)" scripts/image_check.py
 
 deploy-render: ## Render one Dashboard overlay without applying it
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
