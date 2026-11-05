@@ -780,6 +780,26 @@ def secret_values(item: dict[str, Any], name: str, keys: set[str]) -> dict[str, 
     return values
 
 
+def secret_value(item: dict[str, Any], name: str, key: str) -> bytes:
+    metadata = item.get("metadata", {})
+    data = item.get("data", {})
+    require(
+        item.get("kind") == "Secret"
+        and metadata.get("name") == name
+        and isinstance(data, dict)
+        and key in data,
+        f"Secret/{name} key or identity differs",
+    )
+    encoded = data[key]
+    try:
+        require(isinstance(encoded, str) and bool(encoded), f"Secret/{name} data is empty")
+        value = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise DeploymentError(f"Secret/{name} data is malformed") from error
+    require(bool(value), f"Secret/{name} data is empty")
+    return value
+
+
 def workload_dependencies(target: Target) -> None:
     reader_name = f"{target.environment}-dashboard-elasticsearch"
     reader = target.json("get", "secret", reader_name, "--ignore-not-found")
@@ -819,7 +839,7 @@ def workload_dependencies(target: Target) -> None:
         source.get("metadata", {}).get("namespace") == target.data_namespace,
         f"Secret/{source_name} namespace differs",
     )
-    source_ca = secret_values(source, source_name, {"ca.crt"})["ca.crt"]
+    source_ca = secret_value(source, source_name, "ca.crt")
     workload_name = "qa-dashboard-elasticsearch-ca"
     workload = target.json("get", "secret", workload_name, "--ignore-not-found")
     require(

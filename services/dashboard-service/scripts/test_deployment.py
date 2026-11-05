@@ -190,7 +190,11 @@ def test_workload_dependencies_require_exact_reader_service_and_ca(environment: 
         (
             "secret",
             "qa-elasticsearch-es-http-certs-public",
-        ): encoded_secret("qa-elasticsearch-es-http-certs-public", "qa-data", {"ca.crt": b"ca"}),
+        ): encoded_secret(
+            "qa-elasticsearch-es-http-certs-public",
+            "qa-data",
+            {"ca.crt": b"ca", "tls.crt": b"public certificate"},
+        ),
     }[(kind, name)]
 
     checks.workload_dependencies(target)
