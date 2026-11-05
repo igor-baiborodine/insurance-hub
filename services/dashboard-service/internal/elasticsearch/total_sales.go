@@ -3,6 +3,8 @@ package elasticsearch
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
@@ -73,6 +75,9 @@ func (reader *Reader) ReadTotalSales(
 		if contextErr := operationCtx.Err(); contextErr != nil {
 			return nil, contextErr
 		}
+		if isCertificateVerificationError(err) {
+			return nil, ErrSearchRejected
+		}
 		return nil, errors.Join(application.ErrTotalSalesUnavailable, ErrSearchUnavailable)
 	}
 	if response == nil || response.Body == nil {
@@ -91,6 +96,27 @@ func (reader *Reader) ReadTotalSales(
 		return nil, ErrInvalidResponse
 	}
 	return decodeTotalSalesResponse(data)
+}
+
+func isCertificateVerificationError(err error) bool {
+	var tlsError *tls.CertificateVerificationError
+	if errors.As(err, &tlsError) {
+		return true
+	}
+	var unknownAuthorityError x509.UnknownAuthorityError
+	if errors.As(err, &unknownAuthorityError) {
+		return true
+	}
+	var hostnameError x509.HostnameError
+	if errors.As(err, &hostnameError) {
+		return true
+	}
+	var certificateInvalidError x509.CertificateInvalidError
+	if errors.As(err, &certificateInvalidError) {
+		return true
+	}
+	var systemRootsError x509.SystemRootsError
+	return errors.As(err, &systemRootsError)
 }
 
 func buildTotalSalesRequest(query application.TotalSalesQuery) ([]byte, error) {

@@ -51,6 +51,7 @@ func TestDashboardService_UsesGeneratedRPCAndPreservesProductPresence(t *testing
 		{name: "exact value", product: stringPointer(" SAFE "), present: true, value: " SAFE "},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			client := newClient(t, executorFunc(func(
 				_ context.Context,
 				query application.TotalSalesQuery,
@@ -73,6 +74,7 @@ func TestDashboardService_UsesGeneratedRPCAndPreservesProductPresence(t *testing
 					},
 				}, nil
 			}))
+			// when
 			response, err := client.GetTotalSales(
 				context.Background(),
 				&dashboardv1.GetTotalSalesRequest{
@@ -81,6 +83,7 @@ func TestDashboardService_UsesGeneratedRPCAndPreservesProductPresence(t *testing
 					SaleDateTo:   "2020-01-01",
 				},
 			)
+			// then
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -94,6 +97,7 @@ func TestDashboardService_UsesGeneratedRPCAndPreservesProductPresence(t *testing
 }
 
 func TestDashboardService_RejectsMissingMalformedAndInvalidDatesBeforeUseCase(t *testing.T) {
+	// given
 	var calls int
 	client := newClient(t, executorFunc(func(
 		context.Context,
@@ -107,7 +111,10 @@ func TestDashboardService_RejectsMissingMalformedAndInvalidDatesBeforeUseCase(t 
 		{SaleDateFrom: "2019-01-01", SaleDateTo: ""},
 		{SaleDateFrom: "2019-02-30", SaleDateTo: "2020-01-01"},
 	} {
+		// when
 		_, err := client.GetTotalSales(context.Background(), request)
+
+		// then
 		if status.Code(err) != codes.InvalidArgument {
 			t.Errorf("error = %v, want INVALID_ARGUMENT", err)
 		}
@@ -118,6 +125,7 @@ func TestDashboardService_RejectsMissingMalformedAndInvalidDatesBeforeUseCase(t 
 }
 
 func TestDashboardService_MapsBoundedFailures(t *testing.T) {
+	// given
 	for _, test := range []struct {
 		name string
 		err  error
@@ -127,13 +135,17 @@ func TestDashboardService_MapsBoundedFailures(t *testing.T) {
 		{name: "internal", err: errors.New("private-upstream-body"), code: codes.Internal},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			client := newClient(t, executorFunc(func(
 				context.Context,
 				application.TotalSalesQuery,
 			) (application.TotalSalesResult, error) {
 				return application.TotalSalesResult{}, test.err
 			}))
+			// when
 			_, err := client.GetTotalSales(context.Background(), validRequest())
+
+			// then
 			if status.Code(err) != test.code ||
 				(test.code == codes.Internal && status.Convert(err).Message() != "internal error") {
 				t.Fatalf("error = %v", err)
@@ -143,6 +155,7 @@ func TestDashboardService_MapsBoundedFailures(t *testing.T) {
 }
 
 func TestDashboardService_PropagatesCallerCancellationAndDeadline(t *testing.T) {
+	// given
 	client := newClient(t, executorFunc(func(
 		ctx context.Context,
 		_ application.TotalSalesQuery,
@@ -153,20 +166,29 @@ func TestDashboardService_PropagatesCallerCancellationAndDeadline(t *testing.T) 
 
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
+
+	// when
 	_, err := client.GetTotalSales(cancelled, validRequest())
+
+	// then
 	if status.Code(err) != codes.Canceled {
 		t.Errorf("cancel error = %v", err)
 	}
 
 	deadline, stop := context.WithTimeout(context.Background(), time.Millisecond)
 	defer stop()
+
+	// when
 	_, err = client.GetTotalSales(deadline, validRequest())
+
+	// then
 	if status.Code(err) != codes.DeadlineExceeded {
 		t.Errorf("deadline error = %v", err)
 	}
 }
 
 func TestNewServer_RequiresDependenciesAndPositiveLimits(t *testing.T) {
+	// given
 	settings := transport.Settings{
 		RequestTimeout: time.Second, MaxReceiveBytes: 4096, MaxSendBytes: 4096,
 		MeterProvider: metricnoop.NewMeterProvider(),
@@ -190,7 +212,11 @@ func TestNewServer_RequiresDependenciesAndPositiveLimits(t *testing.T) {
 			return err
 		},
 	} {
-		if err := call(); err == nil {
+		// when
+		err := call()
+
+		// then
+		if err == nil {
 			t.Error("invalid server dependencies accepted")
 		}
 	}

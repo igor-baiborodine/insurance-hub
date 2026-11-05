@@ -33,6 +33,7 @@ import (
 )
 
 func TestRun_PropagatesDeadlineCancellationAndStripsMetadata(t *testing.T) {
+	// given
 	settings := testSettings(t)
 	settings.RequestTimeout = 70 * time.Millisecond
 	started := make(chan string, 2)
@@ -64,7 +65,10 @@ func TestRun_PropagatesDeadlineCancellationAndStripsMetadata(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer private")
 	request.Header.Set("Grpc-Metadata-Principal", "forged")
 	request.Header.Set("Forwarded", "for=203.0.113.44")
+
+	// when
 	response, err := client.Do(request)
+	// then
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,6 +142,7 @@ func TestRun_PropagatesDeadlineCancellationAndStripsMetadata(t *testing.T) {
 }
 
 func TestRun_ReportsElasticsearchReadinessLossAndRecovery(t *testing.T) {
+	// given
 	settings := testSettings(t)
 	search := &controlledSearch{}
 	_, _, healthAddress, cancel, runResult := startRegressionService(
@@ -149,7 +154,10 @@ func TestRun_ReportsElasticsearchReadinessLossAndRecovery(t *testing.T) {
 	client := &http.Client{Timeout: time.Second}
 	waitForStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
+	// when
 	search.setCheckError(errors.New("private Elasticsearch loss"))
+
+	// then
 	waitForStatus(
 		t,
 		client,
@@ -167,6 +175,7 @@ func TestRun_ReportsElasticsearchReadinessLossAndRecovery(t *testing.T) {
 }
 
 func TestRun_DrainsAcceptedHTTPBeforeRPCShutdown(t *testing.T) {
+	// given
 	settings := testSettings(t)
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -194,6 +203,8 @@ func TestRun_DrainsAcceptedHTTPBeforeRPCShutdown(t *testing.T) {
 	responseResult := make(chan *http.Response, 1)
 	errorResult := make(chan error, 1)
 	request := totalSalesRequest(t, context.Background(), httpAddress, "DRAIN")
+
+	// when
 	go func() {
 		response, err := client.Do(request)
 		if err != nil {
@@ -204,6 +215,7 @@ func TestRun_DrainsAcceptedHTTPBeforeRPCShutdown(t *testing.T) {
 	}()
 	receiveSignalWithin(t, started, "accepted request did not reach reader")
 
+	// then
 	cancel()
 	waitForStatus(
 		t,
@@ -240,6 +252,7 @@ func TestRun_DrainsAcceptedHTTPBeforeRPCShutdown(t *testing.T) {
 }
 
 func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
+	// given
 	settings := testSettings(t)
 	settings.RequestTimeout = 50 * time.Millisecond
 	settings.ShutdownTimeout = 200 * time.Millisecond
@@ -274,11 +287,14 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 	}()
 	receiveSignalWithin(t, started, "stalled request did not start")
 
+	// when
 	shutdownStarted := time.Now()
 	cancel()
 	err := receiveValue(t, runResult, "forced shutdown did not complete")
 	elapsed := time.Since(shutdownStarted)
 	close(release)
+
+	// then
 	if elapsed > settings.ShutdownTimeout+200*time.Millisecond {
 		t.Errorf("shutdown took %v, budget %v", elapsed, settings.ShutdownTimeout)
 	}
@@ -289,6 +305,7 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 }
 
 func TestRun_PartialStartupClosesResourcesExactlyOnce(t *testing.T) {
+	// given
 	settings := testSettings(t)
 	search := &controlledSearch{}
 	provider := &countingTelemetry{}
@@ -312,7 +329,10 @@ func TestRun_PartialStartupClosesResourcesExactlyOnce(t *testing.T) {
 		return listener, err
 	}
 
+	// when
 	err := run(context.Background(), settings, slog.Default(), deps)
+
+	// then
 	if !errors.Is(err, bindFailure) {
 		t.Fatalf("run error = %v", err)
 	}
@@ -331,6 +351,7 @@ func TestRun_PartialStartupClosesResourcesExactlyOnce(t *testing.T) {
 }
 
 func TestRun_EnforcesHeaderAndGatewayReceiveLimits(t *testing.T) {
+	// given
 	settings := testSettings(t)
 	settings.MaxSendBytes = 1
 	search := &controlledSearch{}
@@ -344,9 +365,11 @@ func TestRun_EnforcesHeaderAndGatewayReceiveLimits(t *testing.T) {
 	waitForStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 	assertOversizedHeader(t, httpAddress, settings.HTTPMaxHeaderBytes+5000)
 
+	// when
 	response, err := client.Do(
 		totalSalesRequest(t, context.Background(), httpAddress, "SAFE"),
 	)
+	// then
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,6 +386,7 @@ func TestRun_EnforcesHeaderAndGatewayReceiveLimits(t *testing.T) {
 }
 
 func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
+	// given
 	const marker = "private-total-sales-marker"
 	settings := testSettings(t)
 	search := &controlledSearch{
@@ -407,9 +431,11 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
 	client := &http.Client{Timeout: time.Second}
 	waitForStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
+	// when
 	response, err := client.Do(
 		totalSalesRequest(t, context.Background(), httpAddress, "FAIL"),
 	)
+	// then
 	if err != nil {
 		t.Fatal(err)
 	}
