@@ -411,6 +411,8 @@ discovery.kubernetes "qa_service_pods" {
 declare "service_json_logs" {
   argument "targets" { }
 
+  argument "workload_name" { }
+
   argument "container_name" { }
 
   argument "port_name" { }
@@ -427,7 +429,7 @@ declare "service_json_logs" {
     rule {
       source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
       action        = "keep"
-      regex         = argument.container_name.value
+      regex         = argument.workload_name.value
     }
 
     rule {
@@ -652,6 +654,7 @@ declare "service_json_logs" {
 // Product service log policy registration.
 service_json_logs "product" {
   targets        = discovery.kubernetes.qa_service_pods.targets
+  workload_name  = "product-api"
   container_name = "product-api"
   port_name      = "http"
   service_name   = "product-service"
@@ -661,6 +664,7 @@ service_json_logs "product" {
 // Policy Search service log policy registration.
 service_json_logs "policy_search" {
   targets        = discovery.kubernetes.qa_service_pods.targets
+  workload_name  = "policy-search-api"
   container_name = "policy-search-api"
   port_name      = "http"
   service_name   = "policy-search-service"
@@ -670,7 +674,8 @@ service_json_logs "policy_search" {
 // Dashboard service log policy registration.
 service_json_logs "dashboard" {
   targets        = discovery.kubernetes.qa_service_pods.targets
-  container_name = "dashboard-api"
+  workload_name  = "dashboard-api"
+  container_name = "dashboard-service"
   port_name      = "http"
   service_name   = "dashboard-service"
   max_streams    = 8
