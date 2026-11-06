@@ -13,4 +13,5 @@
     </root>
 
     <logger name="io.micronaut.http.client" level="DEBUG"/>
+    <logger name="io.micronaut.retry.intercept.RecoveryInterceptor" level="OFF"/>
 </configuration>
