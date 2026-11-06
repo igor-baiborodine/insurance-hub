@@ -1436,7 +1436,7 @@ def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, 
     allowed_management = (
         "set -eu\n"
         f"test \"$(curl --fail --silent --show-error --max-time 5 '{management_url}/livez')\" "
-        '= "alive"\n'
+        '= "live"\n'
         f"test \"$(curl --fail --silent --show-error --max-time 5 '{management_url}/readyz')\" "
         '= "ready"\n'
     )

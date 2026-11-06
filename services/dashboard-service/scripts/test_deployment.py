@@ -250,6 +250,12 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
     assert "grep -q '\"total\"'" in total_allowed
     assert "/dashboard/agentssales" in agent_allowed
     assert "grep -q '\"perAgentTotal\"'" in agent_allowed
+    management_allowed = by_name["dashboard-qualification-management"]["spec"]["containers"][0][
+        "args"
+    ][0]
+    assert '= "live"' in management_allowed
+    assert '= "alive"' not in management_allowed
+    assert '= "ready"' in management_allowed
     grpc_reachable = by_name[checks.GRPC_REACHABLE_QUALIFICATION_POD]["spec"]["containers"][0][
         "args"
     ][0]
