@@ -148,6 +148,25 @@ make go-svc-deploy-status SVC_NAME=dashboard
 make go-svc-deploy-verify SVC_NAME=dashboard
 ```
 
+For a local-dev replacement, capture the running image before preflight and keep it declared until
+the new image is applied:
+
+```sh
+export DEPLOY_PREVIOUS_IMAGE_REF="$(kubectl --context "$DEPLOY_CONTEXT" \
+  -n "$DEPLOY_SVC_NS" get deployment/local-dev-dashboard-api \
+  -o jsonpath='{.spec.template.spec.containers[0].image}')"
+make go-svc-deploy-preflight SVC_NAME=dashboard
+make go-svc-image-load SVC_NAME=dashboard
+make go-svc-deploy SVC_NAME=dashboard
+unset DEPLOY_PREVIOUS_IMAGE_REF
+make go-svc-deploy-status SVC_NAME=dashboard
+make go-svc-deploy-verify SVC_NAME=dashboard
+```
+
+The predecessor input accepts only a source-derived local Dashboard image. It permits that exact
+image, Deployment version labels and ConfigMap `SERVICE_VERSION` only before apply. Final status
+and verification require the selected replacement identity everywhere.
+
 Preflight requires the namespace-local `local-dev-dashboard-elasticsearch` Secret to contain only
 the exact reader username and password, requires the reader identity
 `go_dashboard_total_sales_reader`, and verifies the selected ECK HTTP Service before image or
