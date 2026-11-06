@@ -144,6 +144,9 @@ def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() 
         "deploy",
         "deploy-verify",
         "stop",
+        "reader-ensure",
+        "reader-verify",
+        "reader-rotate",
         "deploy-test-tooling",
         "deploy-test",
     ]

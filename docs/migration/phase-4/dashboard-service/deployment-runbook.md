@@ -4,6 +4,7 @@
 - [Dashboard Total-Sales Deployment Runbook](#dashboard-total-sales-deployment-runbook)
   - [Deployment coordinates](#deployment-coordinates)
   - [Qualify the candidate](#qualify-the-candidate)
+  - [Provision reader prerequisites](#provision-reader-prerequisites)
   - [Deploy to local development](#deploy-to-local-development)
   - [Stop and return in local development](#stop-and-return-in-local-development)
   - [Stage and observe QA](#stage-and-observe-qa)
@@ -53,6 +54,64 @@ local-dev or QA deployment result.
 
 The monitoring checks validate the Dashboard-owned request and Elasticsearch dashboards, alerts,
 Prometheus rule tests and collected disposable fixture. They do not prove QA Alloy delivery.
+
+## Provision reader prerequisites
+
+The Dashboard environment administrator owns one guarded reader operation before deployment. It
+uses the target ECK administrator Secret only in host memory, sends workload Secret values through
+Kubernetes API stdin, and emits sanitized identity/status output. It never creates, seeds, remaps
+or writes `policy_stats`.
+
+Set the exact target coordinates and make that context current. For local development:
+
+```sh
+export DEPLOY_ENV=local-dev
+export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
+export DEPLOY_SVC_NS=local-dev-all
+export DEPLOY_DATA_NS=local-dev-all
+export DASHBOARD_READER_CONFIRM=ensure-local-dev-dashboard-reader
+
+make go-svc-reader-ensure SVC_NAME=dashboard
+unset DASHBOARD_READER_CONFIRM
+make go-svc-reader-verify SVC_NAME=dashboard
+```
+
+For QA:
+
+```sh
+export DEPLOY_ENV=qa
+export DEPLOY_CONTEXT=qa-insurance-hub
+export DEPLOY_SVC_NS=qa-svc
+export DEPLOY_DATA_NS=qa-data
+export DASHBOARD_READER_CONFIRM=ensure-qa-dashboard-reader
+
+make go-svc-reader-ensure SVC_NAME=dashboard
+unset DASHBOARD_READER_CONFIRM
+make go-svc-reader-verify SVC_NAME=dashboard
+```
+
+Ensure verifies the concrete compatible `policy_stats` mapping before mutation, creates the exact
+`go_dashboard_total_sales_reader` role/user, and grants only `read` plus
+`view_index_metadata` on that index. It creates the namespace-local workload Secret with only
+`username` and `password`. In QA it also copies only `ca.crt` from the ECK public CA Secret to
+`qa-dashboard-elasticsearch-ca` and verifies exact equality. Existing identities or Secrets not
+owned by issue 287 fail closed.
+
+If an interrupted first attempt leaves an owned reader role/user without a recoverable workload
+Secret, use explicit rotation instead of rerunning ensure:
+
+```sh
+export DASHBOARD_READER_CONFIRM=rotate-${DEPLOY_ENV}-dashboard-reader
+make go-svc-reader-rotate SVC_NAME=dashboard
+unset DASHBOARD_READER_CONFIRM
+make go-svc-reader-verify SVC_NAME=dashboard
+```
+
+Rotation generates a new credential, updates the dedicated identity, applies the workload Secret
+and verifies the effective privilege boundary. When an earlier owned Secret exists, a failed Secret
+apply or verification restores its credential. Do not hand-create, copy or print credential data.
+After QA ensure succeeds, leave the shared Flux owner active and wait for it to reconcile; do not
+apply the Dashboard workload directly.
 
 ## Deploy to local development
 

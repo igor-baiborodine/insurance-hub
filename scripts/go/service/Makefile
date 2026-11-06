@@ -22,6 +22,7 @@ export SVC_NAME
 .PHONY: go-svc-image-build go-svc-image-check go-svc-deploy-render go-svc-deploy-check \
 	go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test \
+	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
 	go-svc-fixture-setup go-svc-fixture-verify go-svc-fixture-retire \
 	go-svc-event-fixture-setup go-svc-event-fixture-verify go-svc-event-fixture-retire \
 	go-svc-cutover-index-inspect go-svc-cutover-index-ensure go-svc-cutover-index-verify \
@@ -57,6 +58,9 @@ go-svc-image-load: ## Load the selected image into its configured Kind target
 go-svc-deploy: ## Apply the selected direct target with bounded rollout
 go-svc-deploy-verify: ## Verify selected Go resources, reader permissions and HTTP/gRPC reads
 go-svc-stop: ## Stop only the selected direct-target Deployment
+go-svc-reader-ensure: ## Idempotently provision the selected service's guarded reader prerequisites
+go-svc-reader-verify: ## Verify the selected service's reader identity and workload Secrets
+go-svc-reader-rotate: ## Explicitly rotate and recover the selected service's reader credentials
 go-svc-fixture-setup: ## Create the selected service's accepted fixture and least-privilege identity
 go-svc-fixture-verify: ## Verify the selected service's fixture and reader permission boundary
 go-svc-fixture-retire: ## Remove only the selected service's accepted fixture and identity
@@ -72,6 +76,7 @@ go-svc-deploy-test: ## Exercise one service in an owned disposable Kind namespac
 go-svc-deploy-test-flux: ## Exercise one service with pinned Flux/CNPG in an owned Kind cluster
 go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-test \
+	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
 	go-svc-deploy-test-flux go-svc-fixture-setup go-svc-fixture-verify \
 	go-svc-fixture-retire go-svc-event-fixture-setup go-svc-event-fixture-verify \
 	go-svc-event-fixture-retire go-svc-cutover-index-inspect go-svc-cutover-index-ensure \
