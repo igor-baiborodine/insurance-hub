@@ -43,10 +43,12 @@ and Swagger 2.0 outputs live under `gen/dashboard/v1` and `gen/openapiv2/dashboa
 
 The HTTP adapter validates the accepted 4,096-byte request and media contract, then calls the
 actual local gRPC listener. Total sales maps exact RPC minor units to its legacy two-place numeric
-envelope. Agent sales and sales trends preserve canonical decimal tokens through RPC and emit them
-as legacy JSON numbers without rounding. Trend periods use the configured IANA time zone and retain
-the legacy numeric UTC date-array envelope. Diagnostics never include request values, periods,
-agent logins, amounts, credentials, query bodies or upstream response content.
+envelope. Agent sales preserves canonical decimal tokens through RPC and emits them as legacy JSON
+numbers without rounding. Sales trends converts the Elasticsearch aggregate once with
+Java-compatible HALF_UP rounding and emits a two-place legacy JSON number. A trend `periodDate`
+array uses the configured IANA time zone, while `period` retains the independent UTC backend label.
+Diagnostics never include request values, periods, agent logins, amounts, credentials, query bodies
+or upstream response content.
 
 ```mermaid
 flowchart LR
