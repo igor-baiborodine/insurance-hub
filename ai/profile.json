@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "upstream_ref": "refs/tags/v1.2.0",
+  "upstream_ref": "refs/tags/v1.2.2",
   "consumer": "insurance-hub",
   "framework_path": "ai/framework",
   "components": [
