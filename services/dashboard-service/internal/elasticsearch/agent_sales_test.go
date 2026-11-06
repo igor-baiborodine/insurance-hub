@@ -96,7 +96,15 @@ func TestAgentPremiumAmount_PreservesJavaEquivalentTokens(t *testing.T) {
 		{name: "fraction", value: 1.005, want: "1.005"},
 		{name: "negative fraction", value: -1.005, want: "-1.005"},
 		{name: "binary residue", value: 0.30000000000000004, want: "0.30000000000000004"},
+		{name: "small plain one", value: 0.0001, want: "0.00010"},
+		{name: "small plain five", value: 0.0005, want: "0.00050"},
+		{name: "small plain lower boundary", value: 0.000001, want: "0.0000010"},
 		{name: "small exponent", value: 0.0000001, want: "1.0E-7"},
+		{name: "large exponent one", value: 1.0e7, want: "1.0E+7"},
+		{name: "large exponent fraction", value: 1.2e7, want: "1.2E+7"},
+		{name: "large plain integer", value: 12345678.0, want: "12345678"},
+		{name: "large plain fraction", value: 12345678.9, want: "12345678.9"},
+		{name: "large plain boundary", value: 10000000.5, want: "10000000.5"},
 		{name: "zero", value: math.Copysign(0, -1), want: "0.0"},
 		{name: "minimum", value: math.SmallestNonzeroFloat64, want: "4.9E-324"},
 		{name: "maximum", value: math.MaxFloat64, want: "1.7976931348623157E+308"},
@@ -117,6 +125,29 @@ func TestAgentPremiumAmount_PreservesJavaEquivalentTokens(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestReader_ReadAgentSales_AcceptsJavaNotationBoundaryBucket(t *testing.T) {
+	// given — expected tokens were observed from JDK 14 BigDecimal.valueOf(double).toString().
+	reader := &Reader{
+		search: func(context.Context, string, io.Reader) (*esapi.Response, error) {
+			return responseWithBody(`{
+				"aggregations":{"agg_filter":{"count_by_agent":{"buckets":[
+					{"key":"small","doc_count":1,"total_premium":{"value":0.0001}},
+					{"key":"large","doc_count":1,"total_premium":{"value":12345678.9}}
+				]}}}}`), nil
+		},
+	}
+
+	// when
+	buckets, err := reader.ReadAgentSales(context.Background(), application.AgentSalesQuery{})
+
+	// then
+	if err != nil || len(buckets) != 2 ||
+		buckets[0].Value.PremiumAmount().String() != "0.00010" ||
+		buckets[1].Value.PremiumAmount().String() != "12345678.9" {
+		t.Fatalf("ReadAgentSales() = (%#v, %v)", buckets, err)
 	}
 }
 

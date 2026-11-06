@@ -339,8 +339,7 @@
           "format": "int64"
         },
         "premiumAmount": {
-          "type": "number",
-          "format": "double"
+          "type": "number"
         }
       },
       "description": "AgentSalesHTTPValue documents the legacy numeric JSON representation."

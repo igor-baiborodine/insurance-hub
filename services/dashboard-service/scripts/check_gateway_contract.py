@@ -29,7 +29,7 @@ def load_object(path: Path, label: str) -> dict[str, Any]:
 
 
 def require_schema(
-    definitions: dict[str, Any], name: str, expected_properties: dict[str, str]
+    definitions: dict[str, Any], name: str, expected_properties: dict[str, Any]
 ) -> None:
     schema = definitions.get(name)
     require(isinstance(schema, dict), f"Swagger definition is missing: {name}")
@@ -42,9 +42,19 @@ def require_schema(
         set(properties) == set(expected_properties),
         f"Swagger definition {name} properties differ from the contract",
     )
-    for field, expected_type in expected_properties.items():
+    for field, expected in expected_properties.items():
         value = properties[field]
         require(isinstance(value, dict), f"Swagger property {name}.{field} must be an object")
+        if isinstance(expected, str):
+            expected_type = expected
+            expected_format: object = ...
+        else:
+            require(
+                isinstance(expected, dict) and isinstance(expected.get("type"), str),
+                f"HTTP contract schema {name}.{field} must declare a type",
+            )
+            expected_type = expected["type"]
+            expected_format = expected.get("format", ...)
         actual_type = value.get("type")
         if actual_type is None and isinstance(value.get("$ref"), str):
             actual_type = "object"
@@ -52,6 +62,11 @@ def require_schema(
             actual_type == expected_type,
             f"Swagger property {name}.{field} must have type {expected_type}",
         )
+        if expected_format is not ...:
+            require(
+                value.get("format") == expected_format,
+                f"Swagger property {name}.{field} format must be absent",
+            )
 
 
 def check_contract(contract_path: Path, swagger_path: Path) -> None:

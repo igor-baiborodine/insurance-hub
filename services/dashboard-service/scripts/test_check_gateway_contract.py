@@ -48,6 +48,12 @@ def quote_agent_money(swagger: dict[str, Any]) -> None:
     )
 
 
+def format_agent_money_as_double(swagger: dict[str, Any]) -> None:
+    swagger["definitions"]["v1AgentSalesHTTPValue"]["properties"]["premiumAmount"]["format"] = (
+        "double"
+    )
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
@@ -56,6 +62,7 @@ def quote_agent_money(swagger: dict[str, Any]) -> None:
         (add_response, "total_sales response status set differs"),
         (quote_policy_count, "v1TotalSalesHTTPValue.policiesCount must have type integer"),
         (quote_agent_money, "v1AgentSalesHTTPValue.premiumAmount must have type number"),
+        (format_agent_money_as_double, "v1AgentSalesHTTPValue.premiumAmount format must be absent"),
     ],
 )
 def test_contract_check_rejects_controlled_swagger_drift(

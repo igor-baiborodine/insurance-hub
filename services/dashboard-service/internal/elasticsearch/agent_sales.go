@@ -155,14 +155,10 @@ func agentPremiumAmount(value float64) (domain.AgentPremiumAmount, error) {
 	}
 	negative := math.Signbit(value)
 	absolute := math.Abs(value)
-	if absolute == math.SmallestNonzeroFloat64 {
-		token := "4.9E-324"
-		if negative {
-			token = "-" + token
-		}
-		return domain.NewAgentPremiumAmount(token)
-	}
 	raw := strconv.FormatFloat(absolute, 'e', -1, 64)
+	if absolute == math.SmallestNonzeroFloat64 {
+		raw = "4.9e-324"
+	}
 	mantissa, exponentText, present := strings.Cut(raw, "e")
 	if !present {
 		return domain.AgentPremiumAmount{}, ErrInvalidResponse
@@ -171,33 +167,32 @@ func agentPremiumAmount(value float64) (domain.AgentPremiumAmount, error) {
 	if err != nil {
 		return domain.AgentPremiumAmount{}, ErrInvalidResponse
 	}
-	digits := strings.ReplaceAll(mantissa, ".", "")
-	var token string
+	whole, fraction, hasPoint := strings.Cut(mantissa, ".")
+	digits := whole + fraction
+	var scale int
 	if exponent >= -3 && exponent < 7 {
 		position := exponent + 1
 		switch {
 		case position <= 0:
-			token = "0." + strings.Repeat("0", -position) + digits
+			scale = len(digits) - position
 		case position >= len(digits):
-			token = digits + strings.Repeat("0", position-len(digits)) + ".0"
+			digits += strings.Repeat("0", position-len(digits)) + "0"
+			scale = 1
 		default:
-			token = digits[:position] + "." + digits[position:]
+			scale = len(digits) - position
 		}
 	} else {
-		token = digits[:1] + "."
-		if len(digits) == 1 {
-			token += "0"
-		} else {
-			token += digits[1:]
+		if !hasPoint {
+			digits += "0"
 		}
-		token += "E"
-		if exponent >= 0 {
-			token += "+"
-		}
-		token += strconv.Itoa(exponent)
+		scale = len(digits) - 1 - exponent
+	}
+	coefficient, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil {
+		return domain.AgentPremiumAmount{}, ErrInvalidResponse
 	}
 	if negative {
-		token = "-" + token
+		coefficient = -coefficient
 	}
-	return domain.NewAgentPremiumAmount(token)
+	return domain.NewAgentPremiumAmountFromCoefficientScale(coefficient, scale)
 }

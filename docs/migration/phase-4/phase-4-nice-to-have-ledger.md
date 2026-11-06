@@ -52,6 +52,8 @@
       - [issue-266-N01 Dashboard analytics corrections](#issue-266-n01-dashboard-analytics-corrections)
       - [issue-266-N02 Additional Dashboard analytics and delivery capabilities](#issue-266-n02-additional-dashboard-analytics-and-delivery-capabilities)
       - [issue-266-N04 Dashboard recovery and stronger event guarantees](#issue-266-n04-dashboard-recovery-and-stronger-event-guarantees)
+    - [Issue 288 Exact Dashboard monetary storage](#issue-288-exact-dashboard-monetary-storage)
+      - [issue-288-N01 Exact monetary storage and aggregation semantics](#issue-288-n01-exact-monetary-storage-and-aggregation-semantics)
   - [Ad hoc repository improvements](#ad-hoc-repository-improvements)
     - [Commit-message policy enforcement](#commit-message-policy-enforcement)
       - [adhoc-commit-msg-N01 Commit-message hook](#adhoc-commit-msg-n01-commit-message-hook)
@@ -977,6 +979,48 @@ history gaps and unsupported guarantees are reported explicitly.
 Policy Search projection, while [issue-215-N11](#issue-215-n11-durable-policy-event-publication)
 owns the optional producer-publication improvement. Reuse or coordinate those scopes if needed;
 this Dashboard entry does not duplicate their delivery commitments or select a producer redesign.
+
+### Issue 288 Exact Dashboard monetary storage
+
+Origin: issue-288 PR1 independent review and maintainer follow-up on 2026-11-06. The current agent
+sales increment deliberately preserves the legacy Elasticsearch `double` aggregation and Java
+`BigDecimal.valueOf(double)` output contract; this entry records the separately scoped data-model
+improvement without changing PR1 parity.
+
+Source ticket: [issue 288](https://github.com/igor-baiborodine/insurance-hub/issues/288).
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-288-N01](#issue-288-n01-exact-monetary-storage-and-aggregation-semantics) | Exact monetary storage and aggregation semantics | Deferred | Unassigned; requires an approved currency/scale contract and data migration |
+
+#### issue-288-N01 Exact monetary storage and aggregation semantics
+
+**Requirement:** Define the authoritative monetary unit, currency handling, maximum magnitude and
+required fractional scale for Dashboard premiums. Replace binary floating-point storage and
+aggregation in `policy_stats` with an explicit exact representation, preferably signed `long` minor
+units when one fixed business scale is accepted, or a separately justified fixed-scale mapping.
+Update every producer, mapping, reader and consumer together; preserve currency identity where more
+than one currency can occur.
+
+**Why deferred:** Issue 288 is a behavior-preserving migration. Its accepted oracle intentionally
+retains legacy values such as `1.005`, `1.0E-7` and `0.30000000000000004`; selecting cents or another
+scale would change results. The current ticket does not own the projection writer, historical
+reindexing or a product decision about rounding and fractional precision. Elasticsearch
+`scaled_float` also rounds to its configured factor and can saturate at `long` limits, so adopting it
+without those bounds would replace one implicit precision rule with another.
+
+**Reconsider when:** The product/data owner defines premium currency and scale, a measured precision
+error affects accepted analytics, or the Dashboard projection writer and reindex lifecycle are
+selected for coordinated change.
+
+**Acceptance evidence:** A decision record compares explicit minor units and any fixed-scale
+alternative against representative production ranges and currencies. Independent fixtures prove
+write, reindex, sum, filter and API behavior at fractional, rounding, negative, zero, maximum-total
+and overflow boundaries; totals remain exact within the selected aggregation range. Delivery
+identifies the authoritative writer, dual-read or cutover sequence, historical-data treatment,
+index/template and least-privilege changes, consumer compatibility, rollback and post-cutover
+verification. Elasticsearch's double-based aggregation limits and `scaled_float` rounding/saturation
+are measured rather than assumed away.
 
 ## Ad hoc repository improvements
 

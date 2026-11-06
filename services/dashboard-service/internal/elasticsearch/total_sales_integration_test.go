@@ -236,6 +236,157 @@ func TestElasticsearchReader_AcceptedAggregationMatrix(t *testing.T) {
 	}
 }
 
+func TestElasticsearchReader_AcceptedAgentOracle(t *testing.T) {
+	// given — fixtures replay C03-E01–E04/E07 and independent JDK 14 decimal boundaries.
+	endpoint := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_URL")
+	username := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_USERNAME")
+	password := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_PASSWORD")
+	if endpoint == "" || username == "" || password == "" {
+		t.Fatal("owned Elasticsearch endpoint and paired credentials are required")
+	}
+	adminRequest(t, http.MethodPut, endpoint+"/"+PolicyIndex, `{
+		"settings":{"number_of_shards":1,"number_of_replicas":0},
+		"mappings":{"properties":{
+			"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},
+			"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},
+			"from":{"type":"date"},
+			"totalPremium":{"type":"double"}
+		}}
+	}`, username, password, http.StatusOK)
+	t.Cleanup(func() {
+		request, err := http.NewRequest(http.MethodDelete, endpoint+"/"+PolicyIndex, nil)
+		if err == nil {
+			request.SetBasicAuth(username, password)
+			response, requestErr := (&http.Client{Timeout: 10 * time.Second}).Do(
+				request,
+			)
+			if requestErr == nil {
+				_ = response.Body.Close()
+			}
+		}
+	})
+	adminRequest(
+		t,
+		http.MethodPost,
+		endpoint+"/"+PolicyIndex+"/_bulk?refresh=true",
+		acceptedAgentOracleFixture,
+		username,
+		password,
+		http.StatusOK,
+	)
+	readerUsername := "dashboard_reader"
+	readerPassword := "issue-288-reader-password"
+	adminRequest(
+		t,
+		http.MethodPut,
+		endpoint+"/_security/role/dashboard_reader",
+		`{"indices":[{"names":["policy_stats"],"privileges":["read","view_index_metadata"]}]}`,
+		username,
+		password,
+		http.StatusOK,
+	)
+	adminRequest(
+		t,
+		http.MethodPut,
+		endpoint+"/_security/user/"+readerUsername,
+		`{"password":"`+readerPassword+`","roles":["dashboard_reader"]}`,
+		username,
+		password,
+		http.StatusOK,
+	)
+	client, err := New(Config{
+		Endpoint: endpoint, Index: PolicyIndex, Username: readerUsername,
+		Password: readerPassword, Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+	reader, err := NewReader(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	useCase, err := application.NewGetAgentSales(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// when
+	all := executeAgentSales(
+		t, useCase, domain.AllAgents(), domain.AllProducts(),
+		"2019-01-01", "2019-12-31",
+	)
+	house := executeAgentSales(
+		t, useCase, domain.AllAgents(), domain.ExactProduct("SAFE_HOUSE"),
+		"2019-01-01", "2019-12-31",
+	)
+	mSmith := executeAgentSales(
+		t, useCase, domain.ExactAgent("m.smith"), domain.AllProducts(),
+		"2019-01-01", "2019-12-31",
+	)
+	mSmithCar := executeAgentSales(
+		t, useCase, domain.ExactAgent("m.smith"), domain.ExactProduct("SAFE_CAR"),
+		"2019-01-01", "2019-12-31",
+	)
+	firstQuarter := executeAgentSales(
+		t, useCase, domain.AllAgents(), domain.AllProducts(),
+		"2019-01-01", "2019-03-31",
+	)
+	february := executeAgentSales(
+		t, useCase, domain.AllAgents(), domain.AllProducts(),
+		"2019-02-01", "2019-03-01",
+	)
+	buckets := executeAgentSales(
+		t, useCase, domain.AllAgents(), domain.ExactProduct("BUCKETS"),
+		"2020-01-01", "2021-01-01",
+	)
+	boundaries := executeAgentSales(
+		t, useCase, domain.AllAgents(), domain.ExactProduct("BOUNDARIES"),
+		"2023-01-01", "2024-01-01",
+	)
+
+	// then
+	if len(all.PerAgentTotal) != 2 || len(house.PerAgentTotal) != 2 ||
+		len(mSmith.PerAgentTotal) != 1 || len(mSmithCar.PerAgentTotal) != 1 ||
+		len(firstQuarter.PerAgentTotal) != 2 || len(february.PerAgentTotal) != 2 {
+		t.Fatal("accepted five-policy oracle returned an unexpected agent set")
+	}
+	assertAgentValue(t, all, "m.smith", 3, "3000.0")
+	assertAgentValue(t, all, "a.smith", 2, "2000.0")
+	assertAgentValue(t, house, "m.smith", 1, "1000.0")
+	assertAgentValue(t, house, "a.smith", 1, "1000.0")
+	assertAgentValue(t, mSmith, "m.smith", 3, "3000.0")
+	assertAgentValue(t, mSmithCar, "m.smith", 1, "1000.0")
+	assertAgentValue(t, firstQuarter, "m.smith", 2, "2000.0")
+	assertAgentValue(t, firstQuarter, "a.smith", 2, "2000.0")
+	assertAgentValue(t, february, "m.smith", 1, "1000.0")
+	assertAgentValue(t, february, "a.smith", 1, "1000.0")
+
+	wantBuckets := map[string]struct {
+		count  int64
+		amount string
+	}{
+		"alpha":   {count: 3, amount: "3.0"},
+		"beta":    {count: 3, amount: "3.0"},
+		"gamma":   {count: 2, amount: "2.0"},
+		"":        {count: 1, amount: "1.0"},
+		"delta":   {count: 1, amount: "1.0"},
+		"epsilon": {count: 1, amount: "1.0"},
+		"eta":     {count: 1, amount: "1.0"},
+		"iota":    {count: 1, amount: "1.0"},
+		"kappa":   {count: 1, amount: "1.0"},
+		"lambda":  {count: 1, amount: "1.0"},
+	}
+	if len(buckets.PerAgentTotal) != len(wantBuckets) {
+		t.Fatalf("bucket count = %d, want %d", len(buckets.PerAgentTotal), len(wantBuckets))
+	}
+	for agent, want := range wantBuckets {
+		assertAgentValue(t, buckets, agent, want.count, want.amount)
+	}
+	assertAgentValue(t, boundaries, "small", 1, "0.00010")
+	assertAgentValue(t, boundaries, "large", 1, "12345678.9")
+}
+
 func TestElasticsearchReadiness_RejectsIncompatibleState(t *testing.T) {
 	endpoint := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_URL")
 	username := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_USERNAME")
@@ -537,4 +688,61 @@ var integrationFixture = strings.TrimSpace(`
 {"from":"2019-02-01","totalPremium":999.0}
 {"index":{"_id":"upper-z"}}
 {"agentLogin":"upper-agent","productCode":"Z","from":"2019-12-31","totalPremium":1000.0}
+`) + "\n"
+
+var acceptedAgentOracleFixture = strings.TrimSpace(`
+{"index":{"_id":"111-001"}}
+{"agentLogin":"m.smith","productCode":"SAFE_HOUSE","from":"2019-01-01","totalPremium":1000}
+{"index":{"_id":"111-002"}}
+{"agentLogin":"a.smith","productCode":"SAFE_HOUSE","from":"2019-02-01","totalPremium":1000}
+{"index":{"_id":"111-003"}}
+{"agentLogin":"m.smith","productCode":"SAFE_CAR","from":"2019-02-01","totalPremium":1000}
+{"index":{"_id":"111-004"}}
+{"agentLogin":"a.smith","productCode":"SAFE_CAR","from":"2019-03-01","totalPremium":1000}
+{"index":{"_id":"111-005"}}
+{"agentLogin":"m.smith","productCode":"SAFE_FARM","from":"2019-04-01","totalPremium":1000}
+{"index":{"_id":"bucket-alpha-1"}}
+{"agentLogin":"alpha","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-alpha-2"}}
+{"agentLogin":"alpha","productCode":"BUCKETS","from":"2020-01-02","totalPremium":1}
+{"index":{"_id":"bucket-alpha-3"}}
+{"agentLogin":"alpha","productCode":"BUCKETS","from":"2020-01-03","totalPremium":1}
+{"index":{"_id":"bucket-beta-1"}}
+{"agentLogin":"beta","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-beta-2"}}
+{"agentLogin":"beta","productCode":"BUCKETS","from":"2020-01-02","totalPremium":1}
+{"index":{"_id":"bucket-beta-3"}}
+{"agentLogin":"beta","productCode":"BUCKETS","from":"2020-01-03","totalPremium":1}
+{"index":{"_id":"bucket-gamma-1"}}
+{"agentLogin":"gamma","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-gamma-2"}}
+{"agentLogin":"gamma","productCode":"BUCKETS","from":"2020-01-02","totalPremium":1}
+{"index":{"_id":"bucket-empty"}}
+{"agentLogin":"","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-delta"}}
+{"agentLogin":"delta","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-epsilon"}}
+{"agentLogin":"epsilon","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-eta"}}
+{"agentLogin":"eta","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-iota"}}
+{"agentLogin":"iota","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-kappa"}}
+{"agentLogin":"kappa","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-lambda"}}
+{"agentLogin":"lambda","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-mu"}}
+{"agentLogin":"mu","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-theta"}}
+{"agentLogin":"theta","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-zeta"}}
+{"agentLogin":"zeta","productCode":"BUCKETS","from":"2020-01-01","totalPremium":1}
+{"index":{"_id":"bucket-missing-agent"}}
+{"productCode":"BUCKETS","from":"2020-01-01","totalPremium":999}
+{"index":{"_id":"bucket-null-agent"}}
+{"agentLogin":null,"productCode":"BUCKETS","from":"2020-01-01","totalPremium":999}
+{"index":{"_id":"boundary-small"}}
+{"agentLogin":"small","productCode":"BOUNDARIES","from":"2023-01-01","totalPremium":0.0001}
+{"index":{"_id":"boundary-large"}}
+{"agentLogin":"large","productCode":"BOUNDARIES","from":"2023-01-01","totalPremium":12345678.9}
 `) + "\n"

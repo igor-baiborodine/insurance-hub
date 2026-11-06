@@ -462,7 +462,7 @@ func (x *TotalSalesHTTPResponse) GetPerProductTotal() map[string]*TotalSalesHTTP
 type AgentSalesHTTPValue struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PoliciesCount int64                  `protobuf:"varint,1,opt,name=policies_count,json=policiesCount,proto3" json:"policies_count,omitempty"`
-	PremiumAmount float64                `protobuf:"fixed64,2,opt,name=premium_amount,json=premiumAmount,proto3" json:"premium_amount,omitempty"`
+	PremiumAmount string                 `protobuf:"bytes,2,opt,name=premium_amount,json=premiumAmount,proto3" json:"premium_amount,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -504,11 +504,11 @@ func (x *AgentSalesHTTPValue) GetPoliciesCount() int64 {
 	return 0
 }
 
-func (x *AgentSalesHTTPValue) GetPremiumAmount() float64 {
+func (x *AgentSalesHTTPValue) GetPremiumAmount() string {
 	if x != nil {
 		return x.PremiumAmount
 	}
-	return 0
+	return ""
 }
 
 // AgentSalesHTTPResponse is documentation-only; the RPC amount remains an exact decimal string.
@@ -605,7 +605,7 @@ const file_dashboard_v1_dashboard_service_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2!.dashboard.v1.TotalSalesHTTPValueR\x05value:\x028\x01\"}\n" +
 	"\x13AgentSalesHTTPValue\x126\n" +
 	"\x0epolicies_count\x18\x01 \x01(\x03B\x0f\x92A\f\x9a\x02\x01\x03\xa2\x02\x05int64R\rpoliciesCount\x12.\n" +
-	"\x0epremium_amount\x18\x02 \x01(\x01B\a\x92A\x04\x9a\x02\x01\x05R\rpremiumAmount\"\xde\x01\n" +
+	"\x0epremium_amount\x18\x02 \x01(\tB\a\x92A\x04\x9a\x02\x01\x05R\rpremiumAmount\"\xde\x01\n" +
 	"\x16AgentSalesHTTPResponse\x12_\n" +
 	"\x0fper_agent_total\x18\x01 \x03(\v27.dashboard.v1.AgentSalesHTTPResponse.PerAgentTotalEntryR\rperAgentTotal\x1ac\n" +
 	"\x12PerAgentTotalEntry\x12\x10\n" +

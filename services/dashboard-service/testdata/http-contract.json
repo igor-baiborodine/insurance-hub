@@ -86,7 +86,7 @@
     },
     "v1AgentSalesHTTPValue": {
       "policiesCount": "integer",
-      "premiumAmount": "number"
+      "premiumAmount": {"type": "number", "format": null}
     },
     "v1AgentSalesHTTPResponse": {"perAgentTotal": "object"},
     "v1AgentSalesValue": {"policiesCount": "string", "premiumAmount": "string"},

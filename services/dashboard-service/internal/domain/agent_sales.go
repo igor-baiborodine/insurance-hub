@@ -18,7 +18,7 @@ const (
 var (
 	ErrInvalidAgentPremium = errors.New("invalid agent premium amount")
 	agentDecimalPattern    = regexp.MustCompile(
-		`^(?:0\.0|-?(?:[1-9][0-9]*\.[0-9]+|0\.[0-9]*[1-9][0-9]*|[1-9]\.[0-9]+E[+-][0-9]+))$`,
+		`^(?:0\.0|-?(?:[1-9][0-9]*|[1-9][0-9]*\.[0-9]+|0\.[0-9]*[1-9][0-9]*|[1-9]\.[0-9]+E[+-][0-9]+))$`,
 	)
 )
 
@@ -49,6 +49,15 @@ func NewAgentPremiumAmount(value string) (AgentPremiumAmount, error) {
 	return AgentPremiumAmount{value: value}, nil
 }
 
+// NewAgentPremiumAmountFromCoefficientScale formats one finite-double decimal using Java
+// BigDecimal.toString rules after the Elasticsearch adapter extracts its coefficient and scale.
+func NewAgentPremiumAmountFromCoefficientScale(
+	coefficient int64,
+	scale int,
+) (AgentPremiumAmount, error) {
+	return NewAgentPremiumAmount(formatCanonicalAgentDecimal(coefficient, scale))
+}
+
 func (amount AgentPremiumAmount) String() string { return amount.value }
 
 func validCanonicalAgentDecimal(value string) bool {
@@ -64,10 +73,7 @@ func validCanonicalAgentDecimal(value string) bool {
 	negative := strings.HasPrefix(mantissa, "-")
 	mantissa = strings.TrimPrefix(mantissa, "-")
 	whole, fraction, present := strings.Cut(mantissa, ".")
-	if !present {
-		return false
-	}
-	if strings.HasSuffix(fraction, "0") && fraction != "0" {
+	if !present && hasExponent {
 		return false
 	}
 	digits := whole + fraction
@@ -78,12 +84,27 @@ func validCanonicalAgentDecimal(value string) bool {
 	if err != nil {
 		return false
 	}
+	absoluteCoefficient := coefficient
+	if absoluteCoefficient < 0 {
+		absoluteCoefficient = -absoluteCoefficient
+	}
+	if !present && absoluteCoefficient%10 == 0 {
+		return false
+	}
+	if strings.HasSuffix(fraction, "0") && fraction != "0" &&
+		(hasExponent || whole != "0" || absoluteCoefficient < 10 ||
+			absoluteCoefficient > 90 || absoluteCoefficient%10 != 0) {
+		return false
+	}
 	scale := int64(len(fraction)) - exponent
 	if scale < minAgentDecimalScale || scale > maxAgentDecimalScale {
 		return false
 	}
-	precision := len(strings.TrimPrefix(digits, "-"))
+	precision := len(strings.TrimPrefix(strconv.FormatInt(coefficient, 10), "-"))
 	adjustedExponent := -int(scale) + precision - 1
+	if !present && adjustedExponent < 7 {
+		return false
+	}
 	if adjustedExponent < minAgentDecimalAdjustedExponent ||
 		adjustedExponent > maxAgentDecimalAdjustedExponent {
 		return false

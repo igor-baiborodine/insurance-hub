@@ -299,7 +299,7 @@ message AgentSalesHTTPValue {
     type: INTEGER
     format: "int64"
   }];
-  double premium_amount = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {type: NUMBER}];
+  string premium_amount = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {type: NUMBER}];
 }
 
 // AgentSalesHTTPResponse is documentation-only; the RPC amount remains an exact decimal string.
