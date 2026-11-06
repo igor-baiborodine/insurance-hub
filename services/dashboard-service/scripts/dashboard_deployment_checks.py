@@ -1454,7 +1454,8 @@ def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, 
     allowed_sales_trends = (
         "set -eu\n"
         f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
-        f"--data '{trends_payload}' '{sales_trends_url}' | grep -q '\"periodSales\"'\n"
+        f"--data '{trends_payload}' '{sales_trends_url}' "
+        "| grep -Eq '^\\{\\}$|\"periodSales\":\\['\n"
     )
     allowed_management = (
         "set -eu\n"

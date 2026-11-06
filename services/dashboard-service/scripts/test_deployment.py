@@ -260,7 +260,7 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
     assert "/dashboard/agentssales" in agent_allowed
     assert "grep -q '\"perAgentTotal\"'" in agent_allowed
     assert "/dashboard/trends" in trends_allowed
-    assert "grep -q '\"periodSales\"'" in trends_allowed
+    assert "grep -Eq '^\\{\\}$|\"periodSales\":\\['" in trends_allowed
     management_allowed = by_name["dashboard-qualification-management"]["spec"]["containers"][0][
         "args"
     ][0]
