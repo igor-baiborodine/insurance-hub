@@ -12,7 +12,7 @@ resources:
 images:
   - name: insurance-hub-dashboard-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/dashboard-api
-    newTag: 1.2.0
+    newTag: 1.3.0
 configMapGenerator:
   - name: dashboard-config
     behavior: merge
@@ -22,7 +22,7 @@ configMapGenerator:
       - ELASTICSEARCH_URL=https://qa-elasticsearch-es-http.qa-data.svc:9200
       - ELASTICSEARCH_CA_FILE=/etc/dashboard/elasticsearch/ca.crt
       - DEPLOYMENT_ENVIRONMENT=qa
-      - SERVICE_VERSION=git-915cac55c2fa
+      - SERVICE_VERSION=git-5be89272a05d
 patches:
   - path: deployment-patch.yaml
     target:
