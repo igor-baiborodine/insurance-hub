@@ -184,9 +184,11 @@ func (client *Client) checkMapping(ctx context.Context) error {
 		return err
 	}
 	mapping, present := mappings[client.index]
+	agent := mapping.Mappings.Properties["agentLogin"]
 	product := mapping.Mappings.Properties["productCode"]
 	dateField := mapping.Mappings.Properties["from"]
-	if !present || len(mappings) != 1 || product.Fields["keyword"].Type != "keyword" ||
+	if !present || len(mappings) != 1 || agent.Fields["keyword"].Type != "keyword" ||
+		product.Fields["keyword"].Type != "keyword" ||
 		dateField.Type != "date" || !acceptsDateOnly(dateField.Format) ||
 		!contains(
 			[]string{"float", "double"},
@@ -226,7 +228,9 @@ func (client *Client) checkFieldCapabilities(ctx context.Context) error {
 	response, err := client.FieldCaps(
 		client.FieldCaps.WithContext(ctx),
 		client.FieldCaps.WithIndex(client.index),
-		client.FieldCaps.WithFields("productCode.keyword", "from", "totalPremium"),
+		client.FieldCaps.WithFields(
+			"agentLogin.keyword", "productCode.keyword", "from", "totalPremium",
+		),
 		client.FieldCaps.WithAllowNoIndices(false),
 		client.FieldCaps.WithIgnoreUnavailable(false),
 		client.FieldCaps.WithIncludeUnmapped(true),
@@ -239,6 +243,7 @@ func (client *Client) checkFieldCapabilities(ctx context.Context) error {
 		return err
 	}
 	want := map[string][]string{
+		"agentLogin.keyword":  {"keyword"},
 		"productCode.keyword": {"keyword"},
 		"from":                {"date"},
 		"totalPremium":        {"float", "double"},
@@ -261,7 +266,7 @@ func (client *Client) checkFieldCapabilities(ctx context.Context) error {
 
 func (client *Client) checkCompatibilityQuery(ctx context.Context) error {
 	body := []byte(
-		`{"size":0,"query":{"range":{"from":{"gte":"2000-01-01","lt":"2000-01-02"}}},"aggs":{"products":{"terms":{"field":"productCode.keyword","size":1},"aggs":{"premium":{"sum":{"field":"totalPremium"}}}}}}`,
+		`{"size":0,"query":{"range":{"from":{"gte":"2000-01-01","lt":"2000-01-02"}}},"aggs":{"agents":{"terms":{"field":"agentLogin.keyword","size":1},"aggs":{"premium":{"sum":{"field":"totalPremium"}}}},"products":{"terms":{"field":"productCode.keyword","size":1},"aggs":{"premium":{"sum":{"field":"totalPremium"}}}}}}`,
 	)
 	response, err := client.Search(
 		client.Search.WithContext(ctx),
@@ -275,7 +280,7 @@ func (client *Client) checkCompatibilityQuery(ctx context.Context) error {
 	if err := decodeCheckResponse(ctx, response, err, &result); err != nil {
 		return err
 	}
-	if len(result.Aggregations["products"]) == 0 {
+	if len(result.Aggregations["agents"]) == 0 || len(result.Aggregations["products"]) == 0 {
 		return errors.New("check elasticsearch: compatibility aggregation is missing")
 	}
 	return nil

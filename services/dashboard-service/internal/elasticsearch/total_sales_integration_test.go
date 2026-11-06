@@ -28,6 +28,7 @@ func TestElasticsearchReader_AcceptedAggregationMatrix(t *testing.T) {
 	adminRequest(t, http.MethodPut, endpoint+"/"+PolicyIndex, `{
 		"settings":{"number_of_shards":1,"number_of_replicas":0},
 		"mappings":{"properties":{
+			"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},
 			"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},
 			"from":{"type":"date"},
 			"totalPremium":{"type":"double"}
@@ -54,9 +55,32 @@ func TestElasticsearchReader_AcceptedAggregationMatrix(t *testing.T) {
 		password,
 		http.StatusOK,
 	)
+	readerUsername := "dashboard_reader"
+	readerPassword := "issue-288-reader-password"
+	adminRequest(
+		t,
+		http.MethodPut,
+		endpoint+"/_security/role/dashboard_reader",
+		`{"indices":[{"names":["policy_stats"],"privileges":["read","view_index_metadata"]}]}`,
+		username,
+		password,
+		http.StatusOK,
+	)
+	adminRequest(
+		t,
+		http.MethodPut,
+		endpoint+"/_security/user/"+readerUsername,
+		`{"password":"`+readerPassword+`","roles":["dashboard_reader"]}`,
+		username,
+		password,
+		http.StatusOK,
+	)
 	client, err := New(Config{
-		Endpoint: endpoint, Index: PolicyIndex, Username: username, Password: password,
-		Timeout: 5 * time.Second,
+		Endpoint: endpoint,
+		Index:    PolicyIndex,
+		Username: readerUsername,
+		Password: readerPassword,
+		Timeout:  5 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -67,6 +91,10 @@ func TestElasticsearchReader_AcceptedAggregationMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	useCase, err := application.NewGetTotalSales(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentUseCase, err := application.NewGetAgentSales(reader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,10 +120,46 @@ func TestElasticsearchReader_AcceptedAggregationMatrix(t *testing.T) {
 		"2019-12-31",
 	)
 	empty := executeTotalSales(t, useCase, domain.AllProducts(), "2020-01-01", "2021-01-01")
+	agents := executeAgentSales(
+		t,
+		agentUseCase,
+		domain.AllAgents(),
+		domain.AllProducts(),
+		"2019-01-01",
+		"2019-12-31",
+	)
+	agent := executeAgentSales(
+		t, agentUseCase, domain.ExactAgent("m.smith"), domain.AllProducts(),
+		"2019-01-01", "2019-12-31",
+	)
+	intersection := executeAgentSales(
+		t, agentUseCase, domain.AllAgents(), domain.ExactProduct("B"),
+		"2019-01-01", "2019-12-31",
+	)
+	emptyAgent := executeAgentSales(
+		t, agentUseCase, domain.ExactAgent(""), domain.AllProducts(),
+		"2019-01-01", "2019-12-31",
+	)
+	equalDates := executeAgentSales(
+		t,
+		agentUseCase,
+		domain.AllAgents(),
+		domain.AllProducts(),
+		"2019-06-01",
+		"2019-06-01",
+	)
+	reversedDates := executeAgentSales(
+		t,
+		agentUseCase,
+		domain.AllAgents(),
+		domain.AllProducts(),
+		"2019-07-01",
+		"2019-06-01",
+	)
 	wrongPassword, err := New(Config{
 		Endpoint: endpoint,
 		Index:    PolicyIndex,
-		Username: username,
+		Username: readerUsername,
 		Password: "wrong-password",
 		Timeout:  5 * time.Second,
 	})
@@ -141,6 +205,26 @@ func TestElasticsearchReader_AcceptedAggregationMatrix(t *testing.T) {
 	if _, present := all.PerProductTotal["J"]; present {
 		t.Fatal("over-limit product J was returned")
 	}
+	assertAgentValue(t, agents, "m.smith", 5, "8.01")
+	assertAgentValue(t, agents, "a.smith", 3, "6.015")
+	assertAgentValue(t, agent, "m.smith", 5, "8.01")
+	assertAgentValue(t, intersection, "a.smith", 3, "6.015")
+	assertAgentValue(t, emptyAgent, "", 1, "4.0")
+	if len(agents.PerAgentTotal) != returnedBucketLimit ||
+		len(equalDates.PerAgentTotal) != 0 || len(reversedDates.PerAgentTotal) != 0 {
+		t.Fatalf(
+			"agent selection = (all=%d, equal=%d, reversed=%d)",
+			len(agents.PerAgentTotal),
+			len(equalDates.PerAgentTotal),
+			len(reversedDates.PerAgentTotal),
+		)
+	}
+	if _, present := agents.PerAgentTotal["z-agent"]; present {
+		t.Fatal("over-limit agent z-agent was returned")
+	}
+	if _, present := agents.PerAgentTotal["missing-agent"]; present {
+		t.Fatal("missing agent attribution created a bucket")
+	}
 	if !errors.Is(authErr, ErrSearchRejected) || !errors.Is(absentErr, ErrSearchRejected) ||
 		absentCheckErr == nil {
 		t.Fatalf(
@@ -178,13 +262,23 @@ func TestElasticsearchReadiness_RejectsIncompatibleState(t *testing.T) {
 			name:  "alias",
 			index: "policy_stats_actual",
 			definition: `{"settings":{"number_of_replicas":0},"aliases":{"policy_stats":{}},` +
-				`"mappings":{"properties":{"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
+				`"mappings":{"properties":{"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
+				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
+				`"from":{"type":"date"},"totalPremium":{"type":"double"}}}}`,
+		},
+		{
+			name:  "non-aggregatable agent keyword",
+			index: PolicyIndex,
+			definition: `{"settings":{"number_of_replicas":0},"mappings":{"properties":{` +
+				`"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword","doc_values":false}}},` +
+				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
 				`"from":{"type":"date"},"totalPremium":{"type":"double"}}}}`,
 		},
 		{
 			name:  "non-aggregatable product keyword",
 			index: PolicyIndex,
 			definition: `{"settings":{"number_of_replicas":0},"mappings":{"properties":{` +
+				`"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
 				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword","doc_values":false}}},` +
 				`"from":{"type":"date"},"totalPremium":{"type":"double"}}}}`,
 		},
@@ -192,6 +286,7 @@ func TestElasticsearchReadiness_RejectsIncompatibleState(t *testing.T) {
 			name:  "missing premium field",
 			index: PolicyIndex,
 			definition: `{"settings":{"number_of_replicas":0},"mappings":{"properties":{` +
+				`"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
 				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
 				`"from":{"type":"date"}}}}`,
 		},
@@ -199,6 +294,7 @@ func TestElasticsearchReadiness_RejectsIncompatibleState(t *testing.T) {
 			name:  "wrong premium type",
 			index: PolicyIndex,
 			definition: `{"settings":{"number_of_replicas":0},"mappings":{"properties":{` +
+				`"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
 				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
 				`"from":{"type":"date"},"totalPremium":{"type":"keyword"}}}}`,
 		},
@@ -206,6 +302,7 @@ func TestElasticsearchReadiness_RejectsIncompatibleState(t *testing.T) {
 			name:  "date rejects date-only input",
 			index: PolicyIndex,
 			definition: `{"settings":{"number_of_replicas":0},"mappings":{"properties":{` +
+				`"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
 				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
 				`"from":{"type":"date","format":"strict_date_time"},"totalPremium":{"type":"double"}}}}`,
 		},
@@ -214,6 +311,7 @@ func TestElasticsearchReadiness_RejectsIncompatibleState(t *testing.T) {
 			index:      PolicyIndex,
 			closeIndex: true,
 			definition: `{"settings":{"number_of_replicas":0},"mappings":{"properties":{` +
+				`"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
 				`"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},` +
 				`"from":{"type":"date"},"totalPremium":{"type":"double"}}}}`,
 		},
@@ -315,6 +413,53 @@ func totalSalesQuery(
 	return application.TotalSalesQuery{Product: product, DateFrom: dateFrom, DateTo: dateTo}
 }
 
+func executeAgentSales(
+	t *testing.T,
+	useCase application.GetAgentSales,
+	agent domain.AgentSelection,
+	product domain.ProductSelection,
+	from, to string,
+) application.AgentSalesResult {
+	t.Helper()
+	dateFrom, err := domain.ParseDate(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dateTo, err := domain.ParseDate(to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := useCase.Execute(context.Background(), application.AgentSalesQuery{
+		Agent: agent, Product: product, DateFrom: dateFrom, DateTo: dateTo,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func assertAgentValue(
+	t *testing.T,
+	result application.AgentSalesResult,
+	agent string,
+	wantCount int64,
+	wantAmount string,
+) {
+	t.Helper()
+	value, present := result.PerAgentTotal[agent]
+	if !present || value.PoliciesCount() != wantCount ||
+		value.PremiumAmount().String() != wantAmount {
+		t.Fatalf(
+			"agent %q = (%#v, %t), want (%d, %s)",
+			agent,
+			value,
+			present,
+			wantCount,
+			wantAmount,
+		)
+	}
+}
+
 func assertTotal(
 	t *testing.T,
 	result application.TotalSalesResult,
@@ -339,57 +484,57 @@ func assertTotal(
 
 var integrationFixture = strings.TrimSpace(`
 {"index":{"_id":"safe-1"}}
-{"productCode":"SAFE_FARM","from":"2018-01-01","totalPremium":1000.0}
+{"agentLogin":"safe-agent","productCode":"SAFE_FARM","from":"2018-01-01","totalPremium":1000.0}
 {"index":{"_id":"safe-2"}}
-{"productCode":"SAFE_FARM","from":"2018-02-01","totalPremium":1000.0}
+{"agentLogin":"safe-agent","productCode":"SAFE_FARM","from":"2018-02-01","totalPremium":1000.0}
 {"index":{"_id":"safe-3"}}
-{"productCode":"SAFE_FARM","from":"2018-03-01","totalPremium":1000.0}
+{"agentLogin":"safe-agent","productCode":"SAFE_FARM","from":"2018-03-01","totalPremium":1000.0}
 {"index":{"_id":"safe-4"}}
-{"productCode":"SAFE_FARM","from":"2018-04-01","totalPremium":1000.0}
+{"agentLogin":"safe-agent","productCode":"SAFE_FARM","from":"2018-04-01","totalPremium":1000.0}
 {"index":{"_id":"safe-5"}}
-{"productCode":"SAFE_FARM","from":"2018-05-01","totalPremium":1000.0}
+{"agentLogin":"safe-agent","productCode":"SAFE_FARM","from":"2018-05-01","totalPremium":1000.0}
 {"index":{"_id":"safe-upper"}}
-{"productCode":"SAFE_FARM","from":"2018-12-31","totalPremium":1000.0}
+{"agentLogin":"safe-agent","productCode":"SAFE_FARM","from":"2018-12-31","totalPremium":1000.0}
 {"index":{"_id":"a-1"}}
-{"productCode":"A","from":"2019-01-01","totalPremium":1.005}
+{"agentLogin":"m.smith","productCode":"A","from":"2019-01-01","totalPremium":1.005}
 {"index":{"_id":"a-2"}}
-{"productCode":"A","from":"2019-02-01","totalPremium":1.005}
+{"agentLogin":"m.smith","productCode":"A","from":"2019-02-01","totalPremium":1.005}
 {"index":{"_id":"a-missing-premium"}}
-{"productCode":"A","from":"2019-03-01"}
+{"agentLogin":"m.smith","productCode":"A","from":"2019-03-01"}
 {"index":{"_id":"b-1"}}
-{"productCode":"B","from":"2019-02-01","totalPremium":2.005}
+{"agentLogin":"a.smith","productCode":"B","from":"2019-02-01","totalPremium":2.005}
 {"index":{"_id":"b-2"}}
-{"productCode":"B","from":"2019-03-01","totalPremium":2.005}
+{"agentLogin":"a.smith","productCode":"B","from":"2019-03-01","totalPremium":2.005}
 {"index":{"_id":"b-3"}}
-{"productCode":"B","from":"2019-04-01","totalPremium":2.005}
+{"agentLogin":"a.smith","productCode":"B","from":"2019-04-01","totalPremium":2.005}
 {"index":{"_id":"c-1"}}
-{"productCode":"C","from":"2019-02-01","totalPremium":3.0}
+{"agentLogin":"m.smith","productCode":"C","from":"2019-02-01","totalPremium":3.0}
 {"index":{"_id":"c-2"}}
-{"productCode":"C","from":"2019-03-01","totalPremium":3.0}
+{"agentLogin":"m.smith","productCode":"C","from":"2019-03-01","totalPremium":3.0}
 {"index":{"_id":"empty-product"}}
-{"productCode":"","from":"2019-02-01","totalPremium":4.0}
+{"agentLogin":"","productCode":"","from":"2019-02-01","totalPremium":4.0}
 {"index":{"_id":"d"}}
-{"productCode":"D","from":"2019-02-01","totalPremium":4.0}
+{"agentLogin":"d-agent","productCode":"D","from":"2019-02-01","totalPremium":4.0}
 {"index":{"_id":"e"}}
-{"productCode":"E","from":"2019-02-01","totalPremium":5.0}
+{"agentLogin":"e-agent","productCode":"E","from":"2019-02-01","totalPremium":5.0}
 {"index":{"_id":"f"}}
-{"productCode":"F","from":"2019-02-01","totalPremium":6.0}
+{"agentLogin":"f-agent","productCode":"F","from":"2019-02-01","totalPremium":6.0}
 {"index":{"_id":"g"}}
-{"productCode":"G","from":"2019-02-01","totalPremium":7.0}
+{"agentLogin":"g-agent","productCode":"G","from":"2019-02-01","totalPremium":7.0}
 {"index":{"_id":"h"}}
-{"productCode":"H","from":"2019-02-01","totalPremium":8.0}
+{"agentLogin":"h-agent","productCode":"H","from":"2019-02-01","totalPremium":8.0}
 {"index":{"_id":"i"}}
-{"productCode":"I","from":"2019-02-01","totalPremium":9.0}
+{"agentLogin":"i-agent","productCode":"I","from":"2019-02-01","totalPremium":9.0}
 {"index":{"_id":"j"}}
-{"productCode":"J","from":"2019-02-01","totalPremium":10.0}
+{"agentLogin":"j-agent","productCode":"J","from":"2019-02-01","totalPremium":10.0}
 {"index":{"_id":"k"}}
-{"productCode":"K","from":"2019-02-01","totalPremium":11.0}
+{"agentLogin":"k-agent","productCode":"K","from":"2019-02-01","totalPremium":11.0}
 {"index":{"_id":"l"}}
-{"productCode":"L","from":"2019-02-01","totalPremium":12.0}
+{"agentLogin":"l-agent","productCode":"L","from":"2019-02-01","totalPremium":12.0}
 {"index":{"_id":"m"}}
-{"productCode":"M","from":"2019-02-01","totalPremium":13.0}
+{"agentLogin":"z-agent","productCode":"M","from":"2019-02-01","totalPremium":13.0}
 {"index":{"_id":"missing-product"}}
 {"from":"2019-02-01","totalPremium":999.0}
 {"index":{"_id":"upper-z"}}
-{"productCode":"Z","from":"2019-12-31","totalPremium":1000.0}
+{"agentLogin":"upper-agent","productCode":"Z","from":"2019-12-31","totalPremium":1000.0}
 `) + "\n"
