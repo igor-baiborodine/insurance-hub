@@ -73,8 +73,17 @@ def request_json(url: str, timeout: float = 10) -> dict[str, Any]:
     return value
 
 
-def request_text(url: str, headers: Mapping[str, str] | None = None) -> str:
-    request = urllib.request.Request(url, headers=dict(headers or {}))
+def request_text(
+    url: str,
+    headers: Mapping[str, str] | None = None,
+    body: Mapping[str, Any] | None = None,
+) -> str:
+    request_headers = dict(headers or {})
+    data = None
+    if body is not None:
+        request_headers["Content-Type"] = "application/json"
+        data = json.dumps(body).encode("utf-8")
+    request = urllib.request.Request(url, data=data, headers=request_headers)
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             require(response.status == 200, f"service endpoint returned HTTP {response.status}")
@@ -412,6 +421,66 @@ def policy_search_services(target: KubernetesTarget) -> list[tuple[str, str, str
     ]
 
 
+def dashboard_reads(
+    ports: Mapping[str, int], trace_id: str, _deployment_settings: Mapping[str, str]
+) -> int:
+    require(
+        request_text(f"http://127.0.0.1:{ports['health']}/livez").strip() == "live",
+        "Dashboard liveness failed",
+    )
+    require(
+        request_text(f"http://127.0.0.1:{ports['health']}/readyz").strip() == "ready",
+        "Dashboard readiness failed",
+    )
+    headers = {"traceparent": f"00-{trace_id}-0123456789abcdef-01"}
+    request_body = {"saleDateFrom": "2099-01-01", "saleDateTo": "2099-01-02"}
+    responses = {
+        "total_sales": request_text(
+            f"http://127.0.0.1:{ports['dashboard']}/dashboard/totalsales",
+            headers,
+            request_body,
+        ),
+        "agent_sales": request_text(
+            f"http://127.0.0.1:{ports['dashboard']}/dashboard/agentssales",
+            headers,
+            request_body,
+        ),
+    }
+    for operation, body in responses.items():
+        try:
+            response = json.loads(body)
+        except json.JSONDecodeError as error:
+            raise VerificationError(f"Dashboard {operation} response is malformed") from error
+        valid_shape = False
+        if isinstance(response, dict) and operation == "total_sales":
+            total = response.get("total")
+            products = response.get("perProductTotal", {})
+            valid_shape = (
+                isinstance(total, dict)
+                and isinstance(total.get("policiesCount"), int)
+                and isinstance(total.get("premiumAmount"), (int, float))
+                and isinstance(products, dict)
+            )
+        elif isinstance(response, dict) and operation == "agent_sales":
+            valid_shape = isinstance(response.get("perAgentTotal"), dict)
+        require(
+            valid_shape,
+            f"Dashboard {operation} response has an unexpected shape",
+        )
+    return len(responses)
+
+
+def dashboard_services(target: KubernetesTarget) -> list[tuple[str, str, str, int]]:
+    require(
+        target.config.management_service is not None,
+        "Dashboard management service is required",
+    )
+    return [
+        ("dashboard", target.service_namespace, target.config.business_service, 80),
+        ("health", target.service_namespace, target.config.management_service, 8081),
+    ]
+
+
 def query_results(value: Mapping[str, Any]) -> list[dict[str, Any]]:
     results = value.get("data", {}).get("result", [])
     require(isinstance(results, list), "backend query result is malformed")
@@ -626,6 +695,94 @@ def verify_policy_search_enabled_signals(
     }
 
 
+def verify_dashboard_enabled_signals(
+    assets: MonitoringAssets,
+    ports: Mapping[str, int],
+    trace_id: str,
+    pod_uid: str,
+    _deployment_settings: Mapping[str, str],
+) -> dict[str, Any]:
+    expected = assets.contract.verification.expected_signals
+    require(
+        len(expected.metrics) == 2
+        and len(expected.logs) == 1
+        and expected.traces == (assets.contract.service_name,),
+        "Dashboard expected signal inventory differs from its registered probe",
+    )
+    common = (
+        f'service_name="{assets.contract.service_name}",'
+        'deployment_environment_name="qa",service_implementation="go",'
+        f'service_instance_id="{pod_uid}"'
+    )
+    queries: dict[str, str] = {}
+    for operation in ("total_sales", "agent_sales"):
+        queries[f"request_{operation}"] = (
+            f"{expected.metrics[0]}{{{common},"
+            'insurance_hub_dashboard_transport="http",'
+            f'insurance_hub_dashboard_operation="{operation}"}}'
+        )
+        queries[f"dependency_{operation}"] = (
+            f"{expected.metrics[1]}{{{common},"
+            'insurance_hub_dashboard_dependency="elasticsearch",'
+            f'insurance_hub_dashboard_operation="{operation}"}}'
+        )
+    metric_counts: dict[str, int] = {}
+    for label, expression in queries.items():
+        url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
+            {"query": expression}
+        )
+        results = wait_for(
+            f"Dashboard {label} metric",
+            lambda url=url: query_results(request_json(url)),
+        )
+        metric_counts[label] = len(results)
+
+    now = time.time_ns()
+    loki_query = (
+        f'{{service_name="{assets.contract.service_name}",deployment_environment_name="qa",'
+        f'service_implementation="go"}} | json | {expected.logs[0]}=' + json.dumps(trace_id)
+    )
+    loki_url = (
+        f"http://127.0.0.1:{ports['loki']}/loki/api/v1/query_range?"
+        + urllib.parse.urlencode(
+            {
+                "query": loki_query,
+                "start": now - 300_000_000_000,
+                "end": now + 30_000_000_000,
+                "limit": 20,
+            }
+        )
+    )
+    logs = wait_for(
+        "correlated Dashboard completion logs",
+        lambda: query_results(request_json(loki_url)),
+    )
+    trace = wait_for(
+        "correlated Dashboard trace",
+        lambda: request_json(f"http://127.0.0.1:{ports['tempo']}/api/traces/{trace_id}").get(
+            "batches"
+        ),
+    )
+    alert_query = (
+        f'count(ALERTS{{service="{assets.contract.service_name}",alertstate="firing"}}) '
+        "or vector(0)"
+    )
+    alert_url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
+        {"query": alert_query}
+    )
+    alerts = query_results(request_json(alert_url))
+    require(
+        len(alerts) == 1 and float(alerts[0]["value"][1]) == 0,
+        "a selected-service Dashboard alert is firing",
+    )
+    return {
+        "metric_series": metric_counts,
+        "log_streams": len(logs),
+        "trace_batches": len(trace),
+        "firing_alerts": 0,
+    }
+
+
 @dataclass(frozen=True)
 class ServiceProbe:
     """Service-owned workload and signal checks behind generic target selection."""
@@ -640,6 +797,13 @@ class ServiceProbe:
 
 
 SERVICE_PROBES = {
+    "dashboard": ServiceProbe(
+        service="dashboard",
+        services=dashboard_services,
+        workload=dashboard_reads,
+        enabled_signals=verify_dashboard_enabled_signals,
+        result_key="dashboard_operations",
+    ),
     "policy-search": ServiceProbe(
         service="policy-search",
         services=policy_search_services,
