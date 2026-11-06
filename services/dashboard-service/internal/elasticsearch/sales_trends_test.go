@@ -93,6 +93,7 @@ func TestTrendReader_UsesExactCalendarQueryAndPreservesGapOrder(t *testing.T) {
 }
 
 func TestDecodeSalesTrendsResponse_UsesConfiguredZoneAndRejectsUnsafeValues(t *testing.T) {
+	// given
 	toronto, err := time.LoadLocation("America/Toronto")
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +101,11 @@ func TestDecodeSalesTrendsResponse_UsesConfiguredZoneAndRejectsUnsafeValues(t *t
 	valid := `{"aggregations":{"agg_filter":{"sales":{"buckets":[` +
 		`{"key":1710028800000,"key_as_string":"independent-label","doc_count":9223372036854775807,` +
 		`"total_premium":{"value":1000.0}}]}}}}`
+
+	// when
 	buckets, err := decodeSalesTrendsResponse([]byte(valid), toronto)
+
+	// then
 	if err != nil || len(buckets) != 1 || buckets[0].PeriodDate.String() != "2024-03-09" ||
 		buckets[0].Period != "independent-label" ||
 		buckets[0].Value.PoliciesCount() != int64(1<<63-1) ||
@@ -118,10 +123,11 @@ func TestDecodeSalesTrendsResponse_UsesConfiguredZoneAndRejectsUnsafeValues(t *t
 			`"total_premium":{"value":"Infinity"}}]}}}}`,
 	}
 	for _, data := range invalid {
-		if _, err := decodeSalesTrendsResponse(
-			[]byte(data),
-			time.UTC,
-		); !errors.Is(
+		// when
+		_, err := decodeSalesTrendsResponse([]byte(data), time.UTC)
+
+		// then
+		if !errors.Is(
 			err,
 			ErrInvalidResponse,
 		) {
@@ -132,10 +138,12 @@ func TestDecodeSalesTrendsResponse_UsesConfiguredZoneAndRejectsUnsafeValues(t *t
 		`"total_premium":{"value":0.0}}`
 	many := `{"aggregations":{"agg_filter":{"sales":{"buckets":[` +
 		strings.Repeat(bucket+",", maximumTrendBuckets) + bucket + `]}}}}`
-	if _, err := decodeSalesTrendsResponse(
-		[]byte(many),
-		time.UTC,
-	); !errors.Is(
+
+	// when
+	_, err = decodeSalesTrendsResponse([]byte(many), time.UTC)
+
+	// then
+	if !errors.Is(
 		err,
 		ErrInvalidResponse,
 	) {
@@ -144,6 +152,7 @@ func TestDecodeSalesTrendsResponse_UsesConfiguredZoneAndRejectsUnsafeValues(t *t
 }
 
 func TestTrendReader_MapsCancellationAvailabilityAndRejectedResponses(t *testing.T) {
+	// given
 	from, _ := domain.ParseDate("2020-01-01")
 	to, _ := domain.ParseDate("2021-01-01")
 	query := application.SalesTrendsQuery{
@@ -181,6 +190,7 @@ func TestTrendReader_MapsCancellationAvailabilityAndRejectedResponses(t *testing
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			calls := 0
 			reader := &TrendReader{
 				location: time.UTC,
@@ -193,7 +203,11 @@ func TestTrendReader_MapsCancellationAvailabilityAndRejectedResponses(t *testing
 					return test.response, test.searchErr
 				},
 			}
+
+			// when
 			_, err := reader.ReadSalesTrends(test.ctx(), query)
+
+			// then
 			if !errors.Is(err, test.wantErr) || calls != test.wantCalls {
 				t.Fatalf("ReadSalesTrends() = (%v, calls=%d)", err, calls)
 			}
@@ -202,9 +216,16 @@ func TestTrendReader_MapsCancellationAvailabilityAndRejectedResponses(t *testing
 }
 
 func TestBuildSalesTrendsRequest_RejectsUnknownUnit(t *testing.T) {
-	if _, err := buildSalesTrendsRequest(application.SalesTrendsQuery{
+	// given
+	query := application.SalesTrendsQuery{
 		AggregationUnit: domain.AggregationUnit("month"),
-	}); !errors.Is(err, domain.ErrInvalidAggregationUnit) {
+	}
+
+	// when
+	_, err := buildSalesTrendsRequest(query)
+
+	// then
+	if !errors.Is(err, domain.ErrInvalidAggregationUnit) {
 		t.Fatalf("unknown unit = %v", err)
 	}
 }
