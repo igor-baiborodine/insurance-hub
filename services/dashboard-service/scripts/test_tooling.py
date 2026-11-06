@@ -232,7 +232,7 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
             ),
             encoding="utf-8",
         )
-        return "check-gateway-contract", "paths must contain only /dashboard/changed", ()
+        return "check-gateway-contract", "Swagger paths differ from the contract", ()
     if case == "gateway-startup":
         path = fixture / "internal" / "service" / "service.go"
         path.write_text(
