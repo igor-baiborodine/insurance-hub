@@ -67,6 +67,15 @@ def require_schema(
                 value.get("format") == expected_format,
                 f"Swagger property {name}.{field} format must be absent",
             )
+        if isinstance(expected, dict):
+            for attribute in ("default", "pattern"):
+                if attribute not in expected:
+                    continue
+                require(
+                    value.get(attribute) == expected[attribute],
+                    f"Swagger property {name}.{field} {attribute} must be "
+                    + ("absent" if expected[attribute] is None else str(expected[attribute])),
+                )
 
 
 def check_contract(contract_path: Path, swagger_path: Path) -> None:

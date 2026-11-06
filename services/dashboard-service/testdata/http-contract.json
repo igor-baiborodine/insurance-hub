@@ -44,6 +44,38 @@
           }
         }
       }
+    },
+    "sales_trends": {
+      "path": "/dashboard/trends",
+      "method": "post",
+      "operation_id": "DashboardService_GetSalesTrends",
+      "consumes": ["application/json"],
+      "produces": ["application/json"],
+      "request_schema": "#/definitions/v1GetSalesTrendsRequest",
+      "success_schema": "#/definitions/v1SalesTrendsHTTPResponse",
+      "error_schema": "#/definitions/rpcStatus",
+      "request_contract": {
+        "json_members": [
+          "productCode",
+          "saleDateFrom",
+          "saleDateTo",
+          "aggregationUnitCode"
+        ],
+        "product_presence": {"absent_or_null": "all", "empty": "exact"},
+        "aggregation_units": ["DAY", "WEEK", "MONTH", "YEAR"]
+      },
+      "responses": {
+        "200": {
+          "periodSales": [
+            {
+              "periodDate": [2020, 2, 1],
+              "period": "2020-02-01T00:00:00.000Z",
+              "policiesCount": 2,
+              "premiumAmount": 2000.0
+            }
+          ]
+        }
+      }
     }
   },
   "shared_request_contract": {
@@ -91,6 +123,30 @@
     "v1AgentSalesHTTPResponse": {"perAgentTotal": "object"},
     "v1AgentSalesValue": {"policiesCount": "string", "premiumAmount": "string"},
     "v1GetAgentSalesResponse": {"perAgentTotal": "object"},
+    "v1GetSalesTrendsRequest": {
+      "productCode": "string",
+      "saleDateFrom": "string",
+      "saleDateTo": "string",
+      "aggregationUnitCode": {
+        "type": "string",
+        "default": null,
+        "pattern": "^(DAY|WEEK|MONTH|YEAR)$"
+      }
+    },
+    "v1SalesTrendHTTPValue": {
+      "periodDate": "array",
+      "period": "string",
+      "policiesCount": "integer",
+      "premiumAmount": {"type": "number", "format": null}
+    },
+    "v1SalesTrendsHTTPResponse": {"periodSales": "array"},
+    "v1SalesTrendValue": {
+      "periodDate": "string",
+      "period": "string",
+      "policiesCount": "string",
+      "premiumAmount": "string"
+    },
+    "v1GetSalesTrendsResponse": {"periodSales": "array"},
     "rpcStatus": {"code": "integer", "message": "string", "details": "array"}
   }
 }

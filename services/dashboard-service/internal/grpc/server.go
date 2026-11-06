@@ -36,6 +36,14 @@ type AgentSalesExecutor interface {
 	Execute(context.Context, application.AgentSalesQuery) (application.AgentSalesResult, error)
 }
 
+// SalesTrendsExecutor is the application boundary used by the sales-trends RPC transport.
+type SalesTrendsExecutor interface {
+	Execute(
+		context.Context,
+		application.SalesTrendsQuery,
+	) (application.SalesTrendsResult, error)
+}
+
 type Settings struct {
 	RequestTimeout  time.Duration
 	MaxReceiveBytes int
@@ -52,6 +60,7 @@ func NewServer(
 	settings Settings,
 	totalSales TotalSalesExecutor,
 	agentSales AgentSalesExecutor,
+	salesTrends SalesTrendsExecutor,
 ) (*grpcgo.Server, error) {
 	if logger == nil {
 		return nil, errors.New("create gRPC server: logger is required")
@@ -68,6 +77,9 @@ func NewServer(
 	if agentSales == nil {
 		return nil, errors.New("create gRPC server: agent-sales executor is required")
 	}
+	if salesTrends == nil {
+		return nil, errors.New("create gRPC server: sales-trends executor is required")
+	}
 	if settings.RequestTimeout <= 0 || settings.MaxReceiveBytes <= 0 ||
 		settings.MaxSendBytes <= 0 {
 		return nil, errors.New(
@@ -79,6 +91,7 @@ func NewServer(
 		protovalidate.WithMessages(
 			&dashboardv1.GetTotalSalesRequest{},
 			&dashboardv1.GetAgentSalesRequest{},
+			&dashboardv1.GetSalesTrendsRequest{},
 		),
 		protovalidate.WithDisableLazy(),
 	)
@@ -109,6 +122,7 @@ func NewServer(
 	dashboardv1.RegisterDashboardServiceServer(server, &dashboardServer{
 		logger: logger, requestTimeout: settings.RequestTimeout,
 		totalSales: totalSales, agentSales: agentSales,
+		salesTrends: salesTrends,
 	})
 	return server, nil
 }
@@ -119,6 +133,7 @@ type dashboardServer struct {
 	requestTimeout time.Duration
 	totalSales     TotalSalesExecutor
 	agentSales     AgentSalesExecutor
+	salesTrends    SalesTrendsExecutor
 }
 
 func (server *dashboardServer) GetTotalSales(
@@ -223,6 +238,56 @@ func (server *dashboardServer) GetAgentSales(
 	return response, nil
 }
 
+func (server *dashboardServer) GetSalesTrends(
+	ctx context.Context,
+	request *dashboardv1.GetSalesTrendsRequest,
+) (*dashboardv1.GetSalesTrendsResponse, error) {
+	dateFrom, err := domain.ParseDate(request.GetSaleDateFrom())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+	dateTo, err := domain.ParseDate(request.GetSaleDateTo())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+	unit, err := domain.ParseAggregationUnit(request.GetAggregationUnitCode())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+	product := domain.AllProducts()
+	if request.ProductCode != nil {
+		product = domain.ExactProduct(request.GetProductCode())
+	}
+
+	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
+	defer cancel()
+	result, err := server.salesTrends.Execute(requestCtx, application.SalesTrendsQuery{
+		Product: product, DateFrom: dateFrom, DateTo: dateTo, AggregationUnit: unit,
+	})
+	if err == nil {
+		err = requestCtx.Err()
+	}
+	if err != nil {
+		return nil, server.mapError(
+			ctx,
+			dashboardv1.DashboardService_GetSalesTrends_FullMethodName,
+			err,
+		)
+	}
+	response := &dashboardv1.GetSalesTrendsResponse{
+		PeriodSales: make([]*dashboardv1.SalesTrendValue, len(result.PeriodSales)),
+	}
+	for index, period := range result.PeriodSales {
+		response.PeriodSales[index] = &dashboardv1.SalesTrendValue{
+			PeriodDate:    period.PeriodDate.String(),
+			Period:        period.Period,
+			PoliciesCount: period.Value.PoliciesCount(),
+			PremiumAmount: period.Value.PremiumAmount().String(),
+		}
+	}
+	return response, nil
+}
+
 func (server *dashboardServer) mapError(ctx context.Context, method string, err error) error {
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -230,7 +295,8 @@ func (server *dashboardServer) mapError(ctx context.Context, method string, err 
 	case errors.Is(err, context.DeadlineExceeded):
 		return status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
 	case errors.Is(err, application.ErrTotalSalesUnavailable),
-		errors.Is(err, application.ErrAgentSalesUnavailable):
+		errors.Is(err, application.ErrAgentSalesUnavailable),
+		errors.Is(err, application.ErrSalesTrendsUnavailable):
 		return status.Error(codes.Unavailable, "service unavailable")
 	default:
 		server.logger.ErrorContext(
@@ -252,6 +318,8 @@ func rpcOperation(method string) string {
 		return telemetry.OperationTotalSales
 	case dashboardv1.DashboardService_GetAgentSales_FullMethodName:
 		return telemetry.OperationAgentSales
+	case dashboardv1.DashboardService_GetSalesTrends_FullMethodName:
+		return telemetry.OperationSalesTrends
 	default:
 		return ""
 	}

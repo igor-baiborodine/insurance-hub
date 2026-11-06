@@ -27,6 +27,30 @@ type TrendReader struct {
 
 var _ application.SalesTrendsReader = (*TrendReader)(nil)
 
+// SalesReader composes the three read-only analytics ports over one client lifetime.
+type SalesReader struct {
+	*Reader
+	*TrendReader
+}
+
+var (
+	_ application.TotalSalesReader  = (*SalesReader)(nil)
+	_ application.AgentSalesReader  = (*SalesReader)(nil)
+	_ application.SalesTrendsReader = (*SalesReader)(nil)
+)
+
+func NewSalesReader(client *Client, location *time.Location) (*SalesReader, error) {
+	reader, err := NewReader(client)
+	if err != nil {
+		return nil, err
+	}
+	trends, err := NewTrendReader(client, location)
+	if err != nil {
+		return nil, err
+	}
+	return &SalesReader{Reader: reader, TrendReader: trends}, nil
+}
+
 func NewTrendReader(client *Client, location *time.Location) (*TrendReader, error) {
 	if client == nil || client.Client == nil {
 		return nil, ErrClientRequired

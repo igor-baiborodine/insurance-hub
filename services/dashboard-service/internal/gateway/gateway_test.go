@@ -199,6 +199,142 @@ func TestHandler_AgentEmptyAndInvalidRPCAmountsFailSafely(t *testing.T) {
 	}
 }
 
+func TestHandler_MapsSalesTrendsRequestAndExactLegacyResponse(t *testing.T) {
+	// given
+	client := &fakeClient{trendResponse: &dashboardv1.GetSalesTrendsResponse{
+		PeriodSales: []*dashboardv1.SalesTrendValue{
+			{
+				PeriodDate: "2020-02-01", Period: "independent-label",
+				PoliciesCount: 9223372036854775807, PremiumAmount: "2000.00",
+			},
+		},
+	}}
+	handler := newTestHandler(t, client, 4096)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		salesTrendsPath+"?ignored=value",
+		strings.NewReader(
+			`{"aggregationUnitCode":"DAY","agentLogin":"ignored",`+
+				`"productCode":"first","productCode":" SAFE ",`+
+				`"saleDateFrom":"2020-01-01","saleDateTo":"2020-05-01",`+
+				`"aggregationUnitCode":"MONTH"}`,
+		),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	// when
+	handler.ServeHTTP(recorder, request)
+
+	// then
+	if recorder.Code != http.StatusOK || recorder.Body.String() !=
+		`{"periodSales":[{"periodDate":[2020,2,1],"period":"independent-label",`+
+			`"policiesCount":9223372036854775807,"premiumAmount":2000.00}]}` {
+		t.Fatalf("response = (%d, %s)", recorder.Code, recorder.Body.String())
+	}
+	if client.trendCalls != 1 || client.trendRequest.GetProductCode() != " SAFE " ||
+		client.trendRequest.ProductCode == nil ||
+		client.trendRequest.GetSaleDateFrom() != "2020-01-01" ||
+		client.trendRequest.GetSaleDateTo() != "2020-05-01" ||
+		client.trendRequest.GetAggregationUnitCode() != "MONTH" {
+		t.Fatalf(
+			"forwarded request/calls = (%+v, %d)",
+			client.trendRequest,
+			client.trendCalls,
+		)
+	}
+}
+
+func TestHandler_SalesTrendsEmptyAndInvalidRPCValuesFailSafely(t *testing.T) {
+	validBody := `{"saleDateFrom":"2020-01-01","saleDateTo":"2020-05-01",` +
+		`"aggregationUnitCode":"MONTH"}`
+	handler := newTestHandler(t, &fakeClient{
+		trendResponse: &dashboardv1.GetSalesTrendsResponse{},
+	}, 4096)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		salesTrendsPath,
+		strings.NewReader(validBody),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	emptyRecorder := httptest.NewRecorder()
+
+	// when
+	handler.ServeHTTP(emptyRecorder, request)
+
+	// then
+	if emptyRecorder.Code != http.StatusOK || emptyRecorder.Body.String() != `{}` {
+		t.Fatalf(
+			"empty response = (%d, %s)",
+			emptyRecorder.Code,
+			emptyRecorder.Body.String(),
+		)
+	}
+
+	for _, value := range []*dashboardv1.SalesTrendValue{
+		nil,
+		{PeriodDate: "2020-02-30", PoliciesCount: 1, PremiumAmount: "1.00"},
+		{PeriodDate: "2020-02-01", PoliciesCount: -1, PremiumAmount: "1.00"},
+		{PeriodDate: "2020-02-01", PoliciesCount: 1, PremiumAmount: "1.0"},
+	} {
+		client := &fakeClient{trendResponse: &dashboardv1.GetSalesTrendsResponse{
+			PeriodSales: []*dashboardv1.SalesTrendValue{value},
+		}}
+		handler = newTestHandler(t, client, 4096)
+		request = httptest.NewRequest(
+			http.MethodPost,
+			salesTrendsPath,
+			strings.NewReader(validBody),
+		)
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, request)
+
+		assertError(
+			t,
+			recorder,
+			http.StatusInternalServerError,
+			`{"code":13,"message":"internal error","details":[]}`,
+		)
+	}
+}
+
+func TestHandler_RejectsInvalidSalesTrendsScalarsBeforeRPC(t *testing.T) {
+	for _, body := range []string{
+		`{}`,
+		`{"saleDateFrom":null,"saleDateTo":"2020-05-01","aggregationUnitCode":"MONTH"}`,
+		`{"saleDateFrom":"2020-01-01","saleDateTo":123,"aggregationUnitCode":"MONTH"}`,
+		`{"saleDateFrom":"2020-01-01","saleDateTo":"2020-05-01"}`,
+		`{"productCode":{},"saleDateFrom":"2020-01-01","saleDateTo":"2020-05-01",` +
+			`"aggregationUnitCode":"MONTH"}`,
+		`{"saleDateFrom":"2020-01-01","saleDateTo":"2020-05-01",` +
+			`"aggregationUnitCode":null}`,
+	} {
+		client := &fakeClient{trendResponse: &dashboardv1.GetSalesTrendsResponse{}}
+		handler := newTestHandler(t, client, 4096)
+		request := httptest.NewRequest(
+			http.MethodPost,
+			salesTrendsPath,
+			strings.NewReader(body),
+		)
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, request)
+
+		assertError(
+			t,
+			recorder,
+			http.StatusBadRequest,
+			`{"code":3,"message":"invalid request","details":[]}`,
+		)
+		if client.trendCalls != 0 {
+			t.Fatalf("invalid body reached sales-trends RPC: %s", body)
+		}
+	}
+}
+
 func TestHandler_RejectsInvalidAgentScalarsBeforeRPC(t *testing.T) {
 	for _, body := range []string{
 		`{"agentLogin":123,"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
@@ -294,12 +430,22 @@ func TestHandler_EnforcesMediaMethodRouteAndBodyLimit(t *testing.T) {
 			wantBody: `{"code":3,"message":"unsupported media type","details":[]}`,
 		},
 		{
+			name: "trends media", method: http.MethodPost, path: salesTrendsPath, contentType: "text/plain",
+			body: valid, limit: 4096, wantStatus: http.StatusUnsupportedMediaType,
+			wantBody: `{"code":3,"message":"unsupported media type","details":[]}`,
+		},
+		{
 			name: "method", method: http.MethodGet, path: totalSalesPath, contentType: "application/json",
 			limit: 4096, wantStatus: http.StatusMethodNotAllowed, wantAllow: http.MethodPost,
 			wantBody: `{"code":12,"message":"method not allowed","details":[]}`,
 		},
 		{
 			name: "agent method", method: http.MethodGet, path: agentSalesPath, contentType: "application/json",
+			limit: 4096, wantStatus: http.StatusMethodNotAllowed, wantAllow: http.MethodPost,
+			wantBody: `{"code":12,"message":"method not allowed","details":[]}`,
+		},
+		{
+			name: "trends method", method: http.MethodGet, path: salesTrendsPath, contentType: "application/json",
 			limit: 4096, wantStatus: http.StatusMethodNotAllowed, wantAllow: http.MethodPost,
 			wantBody: `{"code":12,"message":"method not allowed","details":[]}`,
 		},
@@ -315,6 +461,11 @@ func TestHandler_EnforcesMediaMethodRouteAndBodyLimit(t *testing.T) {
 		},
 		{
 			name: "agent too large", method: http.MethodPost, path: agentSalesPath, contentType: "application/json",
+			body: valid + " ", limit: len(valid), wantStatus: http.StatusRequestEntityTooLarge,
+			wantBody: `{"code":8,"message":"request body too large","details":[]}`,
+		},
+		{
+			name: "trends too large", method: http.MethodPost, path: salesTrendsPath, contentType: "application/json",
 			body: valid + " ", limit: len(valid), wantStatus: http.StatusRequestEntityTooLarge,
 			wantBody: `{"code":8,"message":"request body too large","details":[]}`,
 		},
@@ -582,6 +733,9 @@ type fakeClient struct {
 	agentRequest     *dashboardv1.GetAgentSalesRequest
 	agentResponse    *dashboardv1.GetAgentSalesResponse
 	agentCalls       int
+	trendRequest     *dashboardv1.GetSalesTrendsRequest
+	trendResponse    *dashboardv1.GetSalesTrendsResponse
+	trendCalls       int
 }
 
 func (client *fakeClient) GetTotalSales(
@@ -634,6 +788,32 @@ func (client *fakeClient) GetAgentSales(
 		return nil, status.FromContextError(ctx.Err()).Err()
 	}
 	return client.agentResponse, client.err
+}
+
+func (client *fakeClient) GetSalesTrends(
+	ctx context.Context,
+	request *dashboardv1.GetSalesTrendsRequest,
+	options ...grpc.CallOption,
+) (*dashboardv1.GetSalesTrendsResponse, error) {
+	client.trendCalls++
+	client.trendRequest = request
+	client.requestMetadata, _ = metadata.FromOutgoingContext(ctx)
+	for _, option := range options {
+		switch value := option.(type) {
+		case grpc.HeaderCallOption:
+			*value.HeaderAddr = client.responseMetadata.Copy()
+		case grpc.TrailerCallOption:
+			*value.TrailerAddr = client.responseMetadata.Copy()
+		}
+	}
+	if client.started != nil {
+		close(client.started)
+	}
+	if client.waitForContext {
+		<-ctx.Done()
+		return nil, status.FromContextError(ctx.Err()).Err()
+	}
+	return client.trendResponse, client.err
 }
 
 func newTestHandler(

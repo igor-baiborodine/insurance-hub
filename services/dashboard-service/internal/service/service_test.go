@@ -36,7 +36,7 @@ func TestRun_TraversesRealGatewayRPCAndReadiness(t *testing.T) {
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return fakeTelemetry{}, nil
 	}
-	deps.newSearch = func(config.Elasticsearch) (salesReader, searchDependency, error) {
+	deps.newSearch = func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
 
@@ -139,7 +139,65 @@ func TestRun_TraversesRealGatewayRPCAndReadiness(t *testing.T) {
 		"5000.0" {
 		t.Fatalf("agent RPC response = (%v, %v)", agentRPCResponse, err)
 	}
-	if search.reads.Load() != 4 || search.checks.Load() < 2 {
+	trendHTTPResponse, err := http.Post(
+		"http://"+httpAddress+"/dashboard/trends",
+		"application/json",
+		strings.NewReader(
+			`{"productCode":"SAFE","saleDateFrom":"2019-01-01",`+
+				`"saleDateTo":"2020-01-01","aggregationUnitCode":"MONTH"}`,
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trendHTTPBody, _ := io.ReadAll(trendHTTPResponse.Body)
+	_ = trendHTTPResponse.Body.Close()
+	if trendHTTPResponse.StatusCode != http.StatusOK || string(trendHTTPBody) !=
+		`{"periodSales":[{"periodDate":[2020,1,1],`+
+			`"period":"2020-01-01T00:00:00.000Z",`+
+			`"policiesCount":5,"premiumAmount":5000.00}]}` {
+		t.Fatalf(
+			"trend HTTP response = (%d, %s)",
+			trendHTTPResponse.StatusCode,
+			trendHTTPBody,
+		)
+	}
+	trendRPCResponse, err := dashboardv1.NewDashboardServiceClient(connection).GetSalesTrends(
+		context.Background(),
+		&dashboardv1.GetSalesTrendsRequest{
+			SaleDateFrom: "2019-01-01", SaleDateTo: "2020-01-01",
+			AggregationUnitCode: "MONTH",
+		},
+	)
+	if err != nil || len(trendRPCResponse.GetPeriodSales()) != 1 ||
+		trendRPCResponse.GetPeriodSales()[0].GetPremiumAmount() != "5000.00" {
+		t.Fatalf("trend RPC response = (%v, %v)", trendRPCResponse, err)
+	}
+	for _, unit := range []string{"", "month", "QUARTER", " MONTH "} {
+		invalidResponse, requestErr := http.Post(
+			"http://"+httpAddress+"/dashboard/trends",
+			"application/json",
+			strings.NewReader(
+				`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01",`+
+					`"aggregationUnitCode":"`+unit+`"}`,
+			),
+		)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		invalidBody, _ := io.ReadAll(invalidResponse.Body)
+		_ = invalidResponse.Body.Close()
+		if invalidResponse.StatusCode != http.StatusBadRequest || string(invalidBody) !=
+			`{"code":3,"message":"invalid request","details":[]}` {
+			t.Fatalf(
+				"invalid trend unit %q response = (%d, %s)",
+				unit,
+				invalidResponse.StatusCode,
+				invalidBody,
+			)
+		}
+	}
+	if search.reads.Load() != 6 || search.checks.Load() < 2 {
 		t.Errorf(
 			"search activity = reads %d, checks %d",
 			search.reads.Load(),
@@ -165,7 +223,7 @@ func TestRun_FailsClosedWhenElasticsearchReadinessFails(t *testing.T) {
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return fakeTelemetry{}, nil
 	}
-	deps.newSearch = func(config.Elasticsearch) (salesReader, searchDependency, error) {
+	deps.newSearch = func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
 	deps.listen = func(network, _ string) (net.Listener, error) {
@@ -229,6 +287,22 @@ func (search *fakeSearch) ReadAgentSales(
 	amount, _ := domain.NewAgentPremiumAmount("5000.0")
 	value, _ := domain.NewAgentSalesValue(5, amount)
 	return []domain.AgentSales{{AgentLogin: "safe-agent", Value: value}}, nil
+}
+
+func (search *fakeSearch) ReadSalesTrends(
+	ctx context.Context,
+	_ application.SalesTrendsQuery,
+) ([]domain.PeriodSales, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	search.reads.Add(1)
+	date, _ := domain.ParseDate("2020-01-01")
+	amount, _ := domain.NewTrendPremiumAmount("5000.00")
+	value, _ := domain.NewTrendSalesValue(5, amount)
+	return []domain.PeriodSales{{
+		PeriodDate: date, Period: "2020-01-01T00:00:00.000Z", Value: value,
+	}}, nil
 }
 
 func (search *fakeSearch) Check(ctx context.Context) error {

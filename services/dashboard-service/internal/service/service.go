@@ -75,13 +75,14 @@ type searchDependency interface {
 type salesReader interface {
 	application.TotalSalesReader
 	application.AgentSalesReader
+	application.SalesTrendsReader
 }
 
 type dependencies struct {
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newSearch      func(config.Elasticsearch) (salesReader, searchDependency, error)
-	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.TotalSalesExecutor, transport.AgentSalesExecutor) (grpcServer, error)
+	newSearch      func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error)
+	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.TotalSalesExecutor, transport.AgentSalesExecutor, transport.SalesTrendsExecutor) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
 	newGateway     func(dashboardv1.DashboardServiceClient, gateway.Settings) (http.Handler, error)
 	newUnavailable func(gateway.Settings) (http.Handler, error)
@@ -96,7 +97,7 @@ func productionDependencies() dependencies {
 			return telemetry.New(ctx, name, settings)
 		},
 		newSearch: newSearchDependency,
-		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, totalSales transport.TotalSalesExecutor, agentSales transport.AgentSalesExecutor) (grpcServer, error) {
+		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, totalSales transport.TotalSalesExecutor, agentSales transport.AgentSalesExecutor, salesTrends transport.SalesTrendsExecutor) (grpcServer, error) {
 			return transport.NewServer(
 				logger,
 				tracer,
@@ -104,6 +105,7 @@ func productionDependencies() dependencies {
 				settings,
 				totalSales,
 				agentSales,
+				salesTrends,
 			)
 		},
 		newConnection:  newGatewayConnection,
@@ -125,6 +127,7 @@ func productionDependencies() dependencies {
 
 func newSearchDependency(
 	settings config.Elasticsearch,
+	salesTrendsTimeZone *time.Location,
 ) (salesReader, searchDependency, error) {
 	var caCertificate []byte
 	if settings.CAFile != "" {
@@ -145,7 +148,7 @@ func newSearchDependency(
 	if err != nil {
 		return nil, nil, err
 	}
-	reader, err := elasticsearch.NewReader(client)
+	reader, err := elasticsearch.NewSalesReader(client, salesTrendsTimeZone)
 	if err != nil {
 		client.CloseIdleConnections()
 		return nil, nil, err
@@ -244,7 +247,7 @@ func run(
 	if err != nil {
 		return fail(err)
 	}
-	reader, search, err := deps.newSearch(settings.Elasticsearch)
+	reader, search, err := deps.newSearch(settings.Elasticsearch, settings.SalesTrendsTimeZone)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize Elasticsearch: %w", err))
 	}
@@ -261,6 +264,12 @@ func run(
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize agent-sales use case: %w", err))
 	}
+	salesTrends, err := application.NewGetSalesTrends(
+		newObservedSalesTrendsReader(reader, dependencyObserver),
+	)
+	if err != nil {
+		return fail(fmt.Errorf("run service: initialize sales-trends use case: %w", err))
+	}
 	runtime.grpcServer, err = deps.newGRPCServer(
 		logger, provider.TracerProvider(), provider.GRPCPropagator(),
 		transport.Settings{
@@ -269,7 +278,7 @@ func run(
 			MaxSendBytes:    settings.MaxSendBytes,
 			Observer:        observer,
 			MeterProvider:   provider.MeterProvider(),
-		}, totalSales, agentSales,
+		}, totalSales, agentSales, salesTrends,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize gRPC transport: %w", err))
