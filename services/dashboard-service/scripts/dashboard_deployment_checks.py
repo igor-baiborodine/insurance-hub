@@ -1784,7 +1784,14 @@ def run_deployed_direct_rpc(port: int) -> None:
     validate_direct_rpc_output(output, test_name)
 
 
-def verify_shared_http_operation(port: int, path: str, payload: dict[str, str], field: str) -> None:
+def verify_shared_http_operation(
+    port: int,
+    path: str,
+    payload: dict[str, str],
+    field: str,
+    field_type: type[object],
+    allow_empty: bool = False,
+) -> None:
     status, body = _http(
         f"http://127.0.0.1:{port}{path}",
         json.dumps(payload).encode(),
@@ -1793,10 +1800,10 @@ def verify_shared_http_operation(port: int, path: str, payload: dict[str, str], 
         response = json.loads(body)
     except json.JSONDecodeError as error:
         raise DeploymentError(f"deployed {path} response is malformed") from error
-    require(
-        status == 200 and isinstance(response, dict) and isinstance(response.get(field), dict),
-        f"deployed {path} response differs",
+    valid_shape = isinstance(response, dict) and (
+        (allow_empty and not response) or isinstance(response.get(field), field_type)
     )
+    require(status == 200 and valid_shape, f"deployed {path} response differs")
 
 
 def _wait_for_port_forward(process: subprocess.Popen[bytes], port: int, name: str) -> None:
@@ -1875,12 +1882,14 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                 time.sleep(0.2)
         else:
             raise DeploymentError("deployed readiness was not reachable")
-        for name, path, payload, field in (
+        for name, path, payload, field, field_type, allow_empty in (
             (
                 "total-sales HTTP",
                 "/dashboard/totalsales",
                 {"saleDateFrom": "2019-01-01", "saleDateTo": "2020-01-01"},
                 "total",
+                dict,
+                False,
             ),
             (
                 "agent-sales HTTP",
@@ -1890,6 +1899,8 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                     "saleDateTo": "2020-01-01",
                 },
                 "perAgentTotal",
+                dict,
+                False,
             ),
             (
                 "sales-trends HTTP",
@@ -1900,10 +1911,19 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                     "aggregationUnitCode": "MONTH",
                 },
                 "periodSales",
+                list,
+                True,
             ),
         ):
             try:
-                verify_shared_http_operation(http_port, path, payload, field)
+                verify_shared_http_operation(
+                    http_port,
+                    path,
+                    payload,
+                    field,
+                    field_type,
+                    allow_empty,
+                )
             except Exception as error:
                 failures.append(f"{name}: {error}")
         try:

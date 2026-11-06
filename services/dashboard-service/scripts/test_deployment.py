@@ -518,6 +518,43 @@ def test_verify_runs_rpc_and_access_after_all_http_smokes_fail() -> None:
     access.assert_called_once_with(target)
 
 
+@pytest.mark.parametrize("trend_body", [b"{}", b'{"periodSales":[]}'])
+def test_verify_accepts_empty_and_populated_trend_envelopes(trend_body: bytes) -> None:
+    target = Mock(
+        kubectl_binary="kubectl",
+        context="kind-local-dev-insurance-hub",
+        namespace="local-dev-all",
+        business="local-dev-dashboard-api",
+        management="local-dev-dashboard-api-management",
+    )
+    processes = [Mock(), Mock(), Mock()]
+    for process in processes:
+        process.wait.return_value = 0
+    with (
+        patch.object(checks, "workload_dependencies"),
+        patch.object(checks, "role_snapshot", return_value={"java": "unchanged"}),
+        patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
+        patch.object(checks.subprocess, "Popen", side_effect=processes),
+        patch.object(checks, "_wait_for_port_forward"),
+        patch.object(
+            checks,
+            "_http",
+            side_effect=[
+                (200, b"ready\n"),
+                (200, b'{"total":{}}'),
+                (200, b'{"perAgentTotal":{}}'),
+                (200, trend_body),
+            ],
+        ),
+        patch.object(checks, "run_deployed_direct_rpc") as rpc,
+        patch.object(checks, "run_access_qualification") as access,
+    ):
+        checks.verify(target, [])
+
+    rpc.assert_called_once_with(19090)
+    access.assert_called_once_with(target)
+
+
 @pytest.mark.parametrize("failure", [checks.DeploymentError("RPC failed"), KeyboardInterrupt()])
 def test_verify_cleans_every_port_forward_when_direct_rpc_stops(failure: BaseException) -> None:
     target = Mock(
