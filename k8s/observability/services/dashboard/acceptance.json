@@ -5,7 +5,7 @@
     "limitation": "Thresholds are initial QA pilot operating limits derived from the bounded Dashboard resource contract and require Step 11 target qualification; they are not production SLOs."
   },
   "workload": {
-    "query_shapes": 1,
+    "query_shapes": 2,
     "query_transports": [
       "http",
       "grpc"

@@ -92,7 +92,10 @@ func TestProvider_ExportsIdentifiedTracesAndCumulativeRuntimeMetrics(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	dependencyCtx, dependency := dependencyObserver.StartElasticsearch(ctx)
+	dependencyCtx, dependency := dependencyObserver.StartElasticsearch(
+		ctx,
+		OperationTotalSales,
+	)
 	dependency.Finish(dependencyCtx, nil)
 	err = provider.ForceFlush(ctx)
 	// then
@@ -111,7 +114,7 @@ func TestProvider_ExportsIdentifiedTracesAndCumulativeRuntimeMetrics(t *testing.
 				names[item.Name] = true
 			}
 		}
-		for _, name := range []string{"example", "Elasticsearch search"} {
+		for _, name := range []string{"example", "Elasticsearch total_sales"} {
 			if !names[name] {
 				t.Errorf("missing %s span", name)
 			}

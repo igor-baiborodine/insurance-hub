@@ -24,7 +24,10 @@ func (reader *observedTotalSalesReader) ReadTotalSales(
 	ctx context.Context,
 	query application.TotalSalesQuery,
 ) ([]domain.ProductSales, error) {
-	dependencyCtx, observation := reader.observer.StartElasticsearch(ctx)
+	dependencyCtx, observation := reader.observer.StartElasticsearch(
+		ctx,
+		telemetry.OperationTotalSales,
+	)
 	result, err := reader.reader.ReadTotalSales(dependencyCtx, query)
 	observation.Finish(dependencyCtx, err)
 	return result, err
@@ -46,7 +49,10 @@ func (reader *observedAgentSalesReader) ReadAgentSales(
 	ctx context.Context,
 	query application.AgentSalesQuery,
 ) ([]domain.AgentSales, error) {
-	dependencyCtx, observation := reader.observer.StartElasticsearch(ctx)
+	dependencyCtx, observation := reader.observer.StartElasticsearch(
+		ctx,
+		telemetry.OperationAgentSales,
+	)
 	result, err := reader.reader.ReadAgentSales(dependencyCtx, query)
 	observation.Finish(dependencyCtx, err)
 	return result, err

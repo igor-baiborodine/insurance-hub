@@ -42,6 +42,34 @@
     },
     {
       "labels": {
+        "insurance_hub_dashboard_operation": "agent_sales",
+        "insurance_hub_dashboard_outcome": "success",
+        "insurance_hub_dashboard_transport": "http"
+      },
+      "name": "insurance_hub_dashboard_requests_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_operation": "agent_sales",
+        "insurance_hub_dashboard_outcome": "success",
+        "insurance_hub_dashboard_transport": "grpc"
+      },
+      "name": "insurance_hub_dashboard_requests_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
         "insurance_hub_dashboard_operation": "total_sales",
         "insurance_hub_dashboard_outcome": "internal_error",
         "insurance_hub_dashboard_transport": "http"
@@ -121,7 +149,7 @@
     {
       "labels": {
         "insurance_hub_dashboard_dependency": "elasticsearch",
-        "insurance_hub_dashboard_operation": "search",
+        "insurance_hub_dashboard_operation": "total_sales",
         "insurance_hub_dashboard_outcome": "success"
       },
       "name": "insurance_hub_dashboard_dependencies_total",
@@ -135,7 +163,21 @@
     {
       "labels": {
         "insurance_hub_dashboard_dependency": "elasticsearch",
-        "insurance_hub_dashboard_operation": "search",
+        "insurance_hub_dashboard_operation": "agent_sales",
+        "insurance_hub_dashboard_outcome": "success"
+      },
+      "name": "insurance_hub_dashboard_dependencies_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_dependency": "elasticsearch",
+        "insurance_hub_dashboard_operation": "total_sales",
         "insurance_hub_dashboard_outcome": "error"
       },
       "name": "insurance_hub_dashboard_dependencies_total",
@@ -145,7 +187,7 @@
     {
       "labels": {
         "insurance_hub_dashboard_dependency": "elasticsearch",
-        "insurance_hub_dashboard_operation": "search",
+        "insurance_hub_dashboard_operation": "total_sales",
         "le": "0.1"
       },
       "name": "insurance_hub_dashboard_dependency_duration_seconds_bucket",
@@ -159,7 +201,7 @@
     {
       "labels": {
         "insurance_hub_dashboard_dependency": "elasticsearch",
-        "insurance_hub_dashboard_operation": "search",
+        "insurance_hub_dashboard_operation": "total_sales",
         "le": "0.25"
       },
       "name": "insurance_hub_dashboard_dependency_duration_seconds_bucket",
@@ -173,7 +215,7 @@
     {
       "labels": {
         "insurance_hub_dashboard_dependency": "elasticsearch",
-        "insurance_hub_dashboard_operation": "search",
+        "insurance_hub_dashboard_operation": "total_sales",
         "le": "+Inf"
       },
       "name": "insurance_hub_dashboard_dependency_duration_seconds_bucket",
@@ -187,7 +229,7 @@
     {
       "labels": {
         "insurance_hub_dashboard_dependency": "elasticsearch",
-        "insurance_hub_dashboard_operation": "search"
+        "insurance_hub_dashboard_operation": "total_sales"
       },
       "name": "insurance_hub_dashboard_dependency_duration_seconds_sum",
       "use_common_labels": true,
@@ -200,7 +242,7 @@
     {
       "labels": {
         "insurance_hub_dashboard_dependency": "elasticsearch",
-        "insurance_hub_dashboard_operation": "search"
+        "insurance_hub_dashboard_operation": "total_sales"
       },
       "name": "insurance_hub_dashboard_dependency_duration_seconds_count",
       "use_common_labels": true,

@@ -14,9 +14,10 @@
 # Dashboard service
 
 `dashboard-service` is the first private Go Dashboard process. It runs beside the authoritative
-Java Dashboard and exposes the read-only total-sales query backed by the existing `policy_stats`
-Elasticsearch index. Java retains writer, setup, edge retry and traffic authority. This module does
-not create, seed, remap or write Elasticsearch state and has no Kafka responsibility.
+Java Dashboard and exposes the read-only total-sales and agent-sales queries backed by the existing
+`policy_stats` Elasticsearch index. Java retains writer, setup, edge retry and traffic authority.
+This module does not create, seed, remap or write Elasticsearch state and has no Kafka
+responsibility.
 
 The standalone module is
 `github.com/igor-baiborodine/insurance-hub/services/dashboard-service`. It resolves the published
@@ -28,21 +29,26 @@ service.
 The editable protobuf source is `api/dashboard/v1/dashboard_service.proto`; generated gRPC, gateway
 and Swagger 2.0 outputs live under `gen/dashboard/v1` and `gen/openapiv2/dashboard/v1`.
 
-- Direct gRPC: `dashboard.v1.DashboardService/GetTotalSales`.
+- Direct gRPC: `dashboard.v1.DashboardService/GetTotalSales` and
+  `dashboard.v1.DashboardService/GetAgentSales`.
 - Private HTTP gateway: `POST /dashboard/totalsales` with date-only `saleDateFrom` and
   `saleDateTo` strings plus optional exact `productCode`.
+- Private HTTP gateway: `POST /dashboard/agentssales` with the same required dates plus independent
+  optional exact `agentLogin` and `productCode` filters.
 - Management: `GET /livez` and `GET /readyz` on the separate management listener.
 
 The HTTP adapter validates the accepted 4,096-byte request and media contract, then calls the
-actual local gRPC listener. It maps exact RPC minor units to the legacy numeric JSON envelope.
-Diagnostics never include request values, credentials, query bodies or upstream response content.
+actual local gRPC listener. Total sales maps exact RPC minor units to its legacy two-place numeric
+envelope. Agent sales preserves canonical decimal tokens through RPC and emits them as legacy JSON
+numbers without rounding. Diagnostics never include request values, agent logins, amounts,
+credentials, query bodies or upstream response content.
 
 ```mermaid
 flowchart LR
     caller["Private HTTP caller"] -->|":8080"| gateway["internal/gateway"]
     gateway -->|"generated client over loopback"| listener["gRPC listener :9090"]
     direct["Private RPC caller"] -->|":9090"| listener
-    listener --> query["internal/grpc total sales"]
+    listener --> query["internal/grpc total and agent sales"]
     query --> usecase["internal/application"]
     usecase --> reader["internal/elasticsearch"]
     reader --> es["policy_stats"]
@@ -65,9 +71,9 @@ then shuts them down in the documented HTTP-first order.
 | `cmd/server` | Load settings, construct identity-aware logging and telemetry, own signals and exit |
 | `internal/config` | Compose typed common settings, Dashboard identity and Elasticsearch policy |
 | `internal/gateway` | Strict HTTP decoding, generated client registration, metadata stripping and safe errors |
-| `internal/grpc` | Register total sales, enforce request validation and map safe gRPC statuses |
-| `internal/application` | Own the total-sales use case and narrow reader port |
-| `internal/domain` | Own date, product presence, count and exact minor-unit values |
+| `internal/grpc` | Register both sales operations, enforce request validation and map safe gRPC statuses |
+| `internal/application` | Own distinct total-sales and agent-sales use cases and narrow reader ports |
+| `internal/domain` | Own date/filter presence, count, total minor units and exact agent decimal tokens |
 | `internal/elasticsearch` | Execute the bounded read-only `policy_stats` aggregation |
 | `internal/service` | Compose listeners/providers/query dependencies, readiness, rollback and drain |
 | `internal/logger` | Emit safe completion records with Dashboard runtime identity |
@@ -132,7 +138,7 @@ make go-svc-deploy-test SVC_NAME=dashboard
 consistency, generated-output drift, protobuf compatibility, gateway/Swagger agreement, Python
 tooling, Servicekit selection and reachable vulnerabilities. `test-tooling` uses disposable copies
 to show that controlled defects fail the owning gates. `image-check` builds the exact HEAD image,
-checks its OCI source identity and non-root runtime, and exercises total sales against an owned
+checks its OCI source identity and non-root runtime, and exercises both sales operations against an owned
 Elasticsearch fixture. It proves the reader cannot write, administer the cluster or read another
 index; dependency loss withdraws readiness while liveness remains available and the business
 response stays safe; shutdown remains bounded.

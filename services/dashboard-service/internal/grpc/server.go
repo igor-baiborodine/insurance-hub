@@ -243,8 +243,18 @@ func (server *dashboardServer) mapError(ctx context.Context, method string, err 
 }
 
 func recognizedRPC(method string) bool {
-	return method == dashboardv1.DashboardService_GetTotalSales_FullMethodName ||
-		method == dashboardv1.DashboardService_GetAgentSales_FullMethodName
+	return rpcOperation(method) != ""
+}
+
+func rpcOperation(method string) string {
+	switch method {
+	case dashboardv1.DashboardService_GetTotalSales_FullMethodName:
+		return telemetry.OperationTotalSales
+	case dashboardv1.DashboardService_GetAgentSales_FullMethodName:
+		return telemetry.OperationAgentSales
+	default:
+		return ""
+	}
 }
 
 func validationInterceptor(
@@ -294,7 +304,11 @@ func (handler *requestStatsHandler) TagRPC(
 ) context.Context {
 	ctx = handler.Handler.TagRPC(ctx, info)
 	if handler.observer != nil && recognizedRPC(info.FullMethodName) {
-		return context.WithValue(ctx, requestStateKey{}, handler.observer.StartGRPC(ctx))
+		return context.WithValue(
+			ctx,
+			requestStateKey{},
+			handler.observer.StartGRPC(ctx, rpcOperation(info.FullMethodName)),
+		)
 	}
 	return ctx
 }

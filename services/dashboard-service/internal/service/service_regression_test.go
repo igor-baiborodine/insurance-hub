@@ -30,6 +30,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/domain"
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
 )
 
 func TestRun_PropagatesDeadlineCancellationAndStripsMetadata(t *testing.T) {
@@ -387,13 +388,19 @@ func TestRun_EnforcesHeaderAndGatewayReceiveLimits(t *testing.T) {
 
 func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
 	// given
-	const marker = "private-total-sales-marker"
+	const marker = "private-sales-marker"
 	settings := testSettings(t)
 	search := &controlledSearch{
 		read: func(
 			context.Context,
 			application.TotalSalesQuery,
 		) ([]domain.ProductSales, error) {
+			return nil, errors.New(marker)
+		},
+		agentRead: func(
+			context.Context,
+			application.AgentSalesQuery,
+		) ([]domain.AgentSales, error) {
 			return nil, errors.New(marker)
 		},
 	}
@@ -445,6 +452,22 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
 		http.StatusInternalServerError,
 		`{"code":13,"message":"internal error","details":[]}`,
 	)
+	agentResponse, err := client.Post(
+		"http://"+httpAddress+"/dashboard/agentssales",
+		"application/json",
+		strings.NewReader(
+			`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHTTPResponse(
+		t,
+		agentResponse,
+		http.StatusInternalServerError,
+		`{"code":13,"message":"internal error","details":[]}`,
+	)
 	cancel()
 	if err := receiveValue(t, runResult, "service did not stop"); err != nil {
 		t.Fatalf("run = %v", err)
@@ -455,31 +478,70 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	combined := logs.String() + fmt.Sprint(metrics)
+	operationTraces := map[string]map[string]int{
+		telemetry.OperationTotalSales: {},
+		telemetry.OperationAgentSales: {},
+	}
 	for _, span := range spanRecorder.Ended() {
 		combined += span.Name() + fmt.Sprint(span.Attributes(), span.Events())
+		for _, attribute := range span.Attributes() {
+			if attribute.Key != "insurance_hub.dashboard.operation" {
+				continue
+			}
+			operation := attribute.Value.AsString()
+			if traces, ok := operationTraces[operation]; ok {
+				traces[span.SpanContext().TraceID().String()]++
+			}
+		}
 	}
 	if strings.Contains(combined, marker) {
 		t.Fatalf("private marker escaped into telemetry: %s", combined)
 	}
 	if !strings.Contains(combined, "POST /dashboard/totalsales") ||
+		!strings.Contains(combined, "POST /dashboard/agentssales") ||
+		!strings.Contains(combined, "agent_sales") ||
 		!strings.Contains(combined, "insurance_hub.dashboard.requests") ||
 		!strings.Contains(combined, "insurance_hub.dashboard.dependencies") ||
-		!strings.Contains(combined, "Elasticsearch search") {
+		!strings.Contains(combined, "Elasticsearch total_sales") ||
+		!strings.Contains(combined, "Elasticsearch agent_sales") {
 		t.Errorf("missing HTTP-to-RPC completion signals: %s", combined)
+	}
+	for operation, traces := range operationTraces {
+		if len(traces) != 1 {
+			t.Errorf(
+				"%s trace identities = %v, want one correlated trace",
+				operation,
+				traces,
+			)
+			continue
+		}
+		for _, count := range traces {
+			if count < 3 {
+				t.Errorf(
+					"%s correlated spans = %d, want HTTP, RPC and Elasticsearch",
+					operation,
+					count,
+				)
+			}
+		}
 	}
 }
 
 type controlledSearch struct {
-	mu       sync.RWMutex
-	checkErr error
-	read     func(context.Context, application.TotalSalesQuery) ([]domain.ProductSales, error)
-	closed   atomic.Bool
+	mu        sync.RWMutex
+	checkErr  error
+	read      func(context.Context, application.TotalSalesQuery) ([]domain.ProductSales, error)
+	agentRead func(context.Context, application.AgentSalesQuery) ([]domain.AgentSales, error)
+	closed    atomic.Bool
 }
 
 func (search *controlledSearch) ReadAgentSales(
 	ctx context.Context,
-	_ application.AgentSalesQuery,
+	query application.AgentSalesQuery,
 ) ([]domain.AgentSales, error) {
+	if search.agentRead != nil {
+		return search.agentRead(ctx, query)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

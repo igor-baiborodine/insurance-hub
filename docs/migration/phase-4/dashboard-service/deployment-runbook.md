@@ -1,7 +1,7 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Dashboard Total-Sales Deployment Runbook](#dashboard-total-sales-deployment-runbook)
+- [Dashboard Sales Deployment Runbook](#dashboard-sales-deployment-runbook)
   - [Deployment coordinates](#deployment-coordinates)
   - [Qualify the candidate](#qualify-the-candidate)
   - [Provision reader prerequisites](#provision-reader-prerequisites)
@@ -12,10 +12,10 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# Dashboard Total-Sales Deployment Runbook
+# Dashboard Sales Deployment Runbook
 
-This runbook owns qualification and guarded operation of the private Go Dashboard total-sales
-reader. The Go workload runs beside the Java Dashboard and reads the existing `policy_stats`
+This runbook owns qualification and guarded operation of the private Go Dashboard total-sales and
+agent-sales reader. The Go workload runs beside the Java Dashboard and reads the existing `policy_stats`
 Elasticsearch index. Java retains writer, setup, edge retry, public route and event authority.
 Issue 291 completes the service operating handoff. Issue 292 owns the later full removal and
 restoration rehearsal.
@@ -186,8 +186,8 @@ absent first, and removes every created resource. The probes use the pinned curl
 allowed business, gRPC-listener and management identities, marker-only and
 business-to-management denial, and copied complete HTTP/gRPC identities in the untrusted
 namespace. The verifier also calls the deployed `GetTotalSales` RPC through the business Service
-and requires the exact owner-selected Go scenario and result. The reader probe mounts the workload
-Secret inside Kubernetes, verifies exact-index count/mapping and the authenticated
+and requires the exact owner-selected Go scenario and result. The reader
+probe mounts the workload Secret inside Kubernetes, verifies exact-index count/mapping and the authenticated
 effective-privilege response, and checks unrelated-index, cluster-health and security-role denial
 with read-only requests. It does not attempt a write that could mutate canonical state if
 permissions drift.

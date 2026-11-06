@@ -116,6 +116,7 @@
       "\"type\": \"loki\"",
       "\"type\": \"tempo\"",
       "trace_id",
+      "agent_sales",
       "Legitimate idle time",
       "missing telemetry",
       "pod!~\\\"qa-dashboard-api-legacy-.*\\\""

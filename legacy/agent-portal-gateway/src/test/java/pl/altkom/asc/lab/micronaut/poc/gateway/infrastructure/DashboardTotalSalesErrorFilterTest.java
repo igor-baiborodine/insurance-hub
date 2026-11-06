@@ -57,6 +57,24 @@ class DashboardTotalSalesErrorFilterTest {
         }
 
         @Test
+        void givenAgentSalesFailure_thenReturnFixedInternalError() {
+            // given
+            String privateMarker = "private-agent-downstream-detail";
+            ServerFilterChain chain = request -> Flowable.error(new IllegalStateException(privateMarker));
+
+            // when
+            MutableHttpResponse<?> result = Flowable.fromPublisher(classUnderTest.doFilter(
+                    HttpRequest.POST("/api/dashboard/agentssales", "{}"), chain)).blockingFirst();
+
+            // then
+            assertThat(result.code()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.getCode());
+            assertThat(result.getBody(Map.class)).hasValueSatisfying(body -> {
+                assertThat(body).containsEntry("code", 13).containsEntry("message", "internal error");
+                assertThat(body.toString()).doesNotContain(privateMarker);
+            });
+        }
+
+        @Test
         void givenUnauthenticatedRequest_thenPreserveSecurityResponse() {
             // given
             ServerFilterChain chain = request -> Flowable.error(new AuthorizationException(null));
