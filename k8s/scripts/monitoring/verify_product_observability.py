@@ -445,6 +445,11 @@ def dashboard_reads(
             headers,
             request_body,
         ),
+        "sales_trends": request_text(
+            f"http://127.0.0.1:{ports['dashboard']}/dashboard/trends",
+            headers,
+            {**request_body, "aggregationUnitCode": "MONTH"},
+        ),
     }
     for operation, body in responses.items():
         try:
@@ -463,6 +468,8 @@ def dashboard_reads(
             )
         elif isinstance(response, dict) and operation == "agent_sales":
             valid_shape = isinstance(response.get("perAgentTotal"), dict)
+        elif isinstance(response, dict) and operation == "sales_trends":
+            valid_shape = isinstance(response.get("periodSales", []), list)
         require(
             valid_shape,
             f"Dashboard {operation} response has an unexpected shape",
@@ -715,7 +722,7 @@ def verify_dashboard_enabled_signals(
         f'service_instance_id="{pod_uid}"'
     )
     queries: dict[str, str] = {}
-    for operation in ("total_sales", "agent_sales"):
+    for operation in ("total_sales", "agent_sales", "sales_trends"):
         queries[f"request_{operation}"] = (
             f"{expected.metrics[0]}{{{common},"
             'insurance_hub_dashboard_transport="http",'

@@ -56,6 +56,34 @@
     },
     {
       "labels": {
+        "insurance_hub_dashboard_operation": "sales_trends",
+        "insurance_hub_dashboard_outcome": "success",
+        "insurance_hub_dashboard_transport": "http"
+      },
+      "name": "insurance_hub_dashboard_requests_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_operation": "sales_trends",
+        "insurance_hub_dashboard_outcome": "success",
+        "insurance_hub_dashboard_transport": "grpc"
+      },
+      "name": "insurance_hub_dashboard_requests_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
         "insurance_hub_dashboard_operation": "agent_sales",
         "insurance_hub_dashboard_outcome": "success",
         "insurance_hub_dashboard_transport": "grpc"
@@ -164,6 +192,20 @@
       "labels": {
         "insurance_hub_dashboard_dependency": "elasticsearch",
         "insurance_hub_dashboard_operation": "agent_sales",
+        "insurance_hub_dashboard_outcome": "success"
+      },
+      "name": "insurance_hub_dashboard_dependencies_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_dashboard_dependency": "elasticsearch",
+        "insurance_hub_dashboard_operation": "sales_trends",
         "insurance_hub_dashboard_outcome": "success"
       },
       "name": "insurance_hub_dashboard_dependencies_total",

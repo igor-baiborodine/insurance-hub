@@ -409,6 +409,7 @@ class TestProductObservabilityVerification:
             "ready\n",
             '{"total":{"policiesCount":0,"premiumAmount":0}}',
             '{"perAgentTotal":{}}',
+            "{}",
         ]
 
         # when
@@ -427,20 +428,23 @@ class TestProductObservabilityVerification:
             ("dashboard", "qa-svc", "qa-dashboard-api", 80),
             ("health", "qa-svc", "qa-dashboard-api-management", 8081),
         ]
-        assert operations == 2
+        assert operations == 3
         for call, path in zip(
-            request.call_args_list[-2:],
-            ("/dashboard/totalsales", "/dashboard/agentssales"),
+            request.call_args_list[-3:],
+            ("/dashboard/totalsales", "/dashboard/agentssales", "/dashboard/trends"),
             strict=True,
         ):
             assert call.args[0].endswith(path)
             assert call.args[1] == {"traceparent": "00-" + "c" * 32 + "-0123456789abcdef-01"}
-            assert call.args[2] == {
+            expected = {
                 "saleDateFrom": "2099-01-01",
                 "saleDateTo": "2099-01-02",
             }
+            if path == "/dashboard/trends":
+                expected["aggregationUnitCode"] = "MONTH"
+            assert call.args[2] == expected
 
-    def test_dashboard_enabled_signals_cover_both_operations(self) -> None:
+    def test_dashboard_enabled_signals_cover_all_operations(self) -> None:
         # given
         assets = verifier.load_assets(ASSETS_ROOT, "qa", "dashboard")
         observations: list[str] = []
@@ -474,12 +478,16 @@ class TestProductObservabilityVerification:
             "dependency_total_sales": 1,
             "request_agent_sales": 1,
             "dependency_agent_sales": 1,
+            "request_sales_trends": 1,
+            "dependency_sales_trends": 1,
         }
-        assert observations[:4] == [
+        assert observations[:6] == [
             "Dashboard request_total_sales metric",
             "Dashboard dependency_total_sales metric",
             "Dashboard request_agent_sales metric",
             "Dashboard dependency_agent_sales metric",
+            "Dashboard request_sales_trends metric",
+            "Dashboard dependency_sales_trends metric",
         ]
 
     def test_policy_search_probe_accepts_empty_canonical_query_phase_only(self) -> None:
