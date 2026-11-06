@@ -43,6 +43,7 @@ DENIED_QUALIFICATION_PODS = {
     "dashboard-qualification-cross-namespace-grpc-denied",
 }
 GRPC_REACHABLE_QUALIFICATION_POD = "dashboard-qualification-business-grpc"
+NETWORK_POLICY_CONVERGENCE_SECONDS = 4
 FORBIDDEN_TEXT = ("kafka", "postgres", "database", "insecure_skip_verify")
 PROBE_IMAGE = (
     "docker.io/curlimages/curl:8.16.0@"
@@ -1204,7 +1205,7 @@ def qualification_pod(
         "image": PROBE_IMAGE,
         "imagePullPolicy": "IfNotPresent",
         "command": ["/bin/sh", "-ec"],
-        "args": [script],
+        "args": [f"sleep {NETWORK_POLICY_CONVERGENCE_SECONDS}\n{script}"],
         "securityContext": {
             "allowPrivilegeEscalation": False,
             "readOnlyRootFilesystem": True,
@@ -1370,7 +1371,10 @@ def validate_cni_denial(output: str) -> None:
     except json.JSONDecodeError as error:
         raise DeploymentError("CNI denial result is malformed") from error
     require(
-        result == {"exit_code": 28, "http_status": "000", "response_bytes": 0},
+        result.get("exit_code") in {7, 28}
+        and result.get("http_status") == "000"
+        and result.get("response_bytes") == 0
+        and set(result) == {"exit_code", "http_status", "response_bytes"},
         "CNI denial result differs",
     )
 

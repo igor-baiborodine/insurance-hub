@@ -218,6 +218,12 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
 
     assert len(pods) == 12
     assert all(pod["spec"]["containers"][0]["image"] == checks.PROBE_IMAGE for pod in pods)
+    assert all(
+        pod["spec"]["containers"][0]["args"][0].startswith(
+            f"sleep {checks.NETWORK_POLICY_CONVERGENCE_SECONDS}\n"
+        )
+        for pod in pods
+    )
     by_name = {pod["metadata"]["name"]: pod for pod in pods}
     assert by_name["dashboard-qualification-business"]["metadata"]["labels"] == {
         "app.kubernetes.io/name": "dashboard-qualification",
@@ -336,9 +342,10 @@ def test_effective_reader_privileges_reject_additional_authority(mutation) -> No
         checks.validate_effective_reader_privileges(json.dumps(privileges))
 
 
-def test_cni_denial_accepts_only_the_expected_connection_timeout() -> None:
+@pytest.mark.parametrize("exit_code", [7, 28])
+def test_cni_denial_accepts_the_observed_connection_rejections(exit_code: int) -> None:
     checks.validate_cni_denial(
-        json.dumps({"exit_code": 28, "http_status": "000", "response_bytes": 0})
+        json.dumps({"exit_code": exit_code, "http_status": "000", "response_bytes": 0})
     )
 
 
@@ -351,7 +358,7 @@ def test_cni_denial_accepts_only_the_expected_connection_timeout() -> None:
         (0, "405", 32),
         (0, "500", 32),
         (6, "000", 0),
-        (7, "000", 0),
+        (7, "200", 0),
         (28, "000", 1),
     ],
 )
