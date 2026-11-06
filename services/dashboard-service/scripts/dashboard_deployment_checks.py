@@ -132,10 +132,14 @@ def normalized_policy_spec(value: Any) -> Any:
 
 
 def matching_reader_predecessor_config(actual: Any, expected: Any) -> bool:
-    """Accept the reviewed pre-reader local ConfigMap before its first replacement only."""
+    """Accept reviewed local ConfigMap predecessors before their replacement only."""
     if not isinstance(actual, dict) or not isinstance(expected, dict):
         return False
-    predecessor = {
+    reader_predecessor = dict(expected)
+    reader_predecessor.pop("SALES_TRENDS_TIME_ZONE", None)
+    if actual == reader_predecessor:
+        return True
+    pre_reader_predecessor = {
         key: value
         for key, value in expected.items()
         if key
@@ -146,8 +150,8 @@ def matching_reader_predecessor_config(actual: Any, expected: Any) -> bool:
             "SALES_TRENDS_TIME_ZONE",
         }
     }
-    predecessor["OTEL_EXPORTER_OTLP_TIMEOUT"] = "2s"
-    return actual == predecessor
+    pre_reader_predecessor["OTEL_EXPORTER_OTLP_TIMEOUT"] = "2s"
+    return actual == pre_reader_predecessor
 
 
 def matching_reader_predecessor_environment(actual: Any, expected: Any) -> bool:

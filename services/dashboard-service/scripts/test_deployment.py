@@ -898,6 +898,23 @@ def test_live_state_accepts_api_server_defaulted_probe_fields() -> None:
     target.live(items, require_deployment=True)
 
 
+def test_reader_predecessor_config_accepts_only_the_missing_trend_zone() -> None:
+    # given
+    expected = checks.resource(rendered_resources(), "ConfigMap", "local-dev-dashboard-config")[
+        "data"
+    ]
+    actual = deepcopy(expected)
+    actual.pop("SALES_TRENDS_TIME_ZONE")
+
+    # when
+    accepted = checks.matching_reader_predecessor_config(actual, expected)
+
+    # then
+    assert accepted
+    actual["FOREIGN_SETTING"] = "true"
+    assert not checks.matching_reader_predecessor_config(actual, expected)
+
+
 def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:
     # given a reviewed replacement and the exact previously accepted local release.
     items = rendered_resources()
