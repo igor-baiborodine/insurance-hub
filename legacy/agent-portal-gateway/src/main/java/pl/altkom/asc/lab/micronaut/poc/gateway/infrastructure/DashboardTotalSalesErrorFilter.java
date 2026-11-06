@@ -20,7 +20,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-@Filter("/api/dashboard/totalsales")
+@Filter("/api/dashboard/*sales")
 public class DashboardTotalSalesErrorFilter implements HttpServerFilter {
 
     @Override

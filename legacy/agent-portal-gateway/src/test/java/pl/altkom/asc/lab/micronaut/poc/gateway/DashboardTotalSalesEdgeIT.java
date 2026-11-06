@@ -48,9 +48,14 @@ class DashboardTotalSalesEdgeIT {
 
     @BeforeAll
     void setup() throws IOException {
-        backend = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
-        backend.createContext("/", this::respond);
-        backend.start();
+        String externalBackend = System.getProperty("dashboard.edge.backend.url", "");
+        String backendUrl = externalBackend;
+        if (externalBackend.isEmpty()) {
+            backend = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+            backend.createContext("/", this::respond);
+            backend.start();
+            backendUrl = "http://127.0.0.1:" + backend.getAddress().getPort();
+        }
 
         byte[] secretBytes = new byte[64];
         new SecureRandom().nextBytes(secretBytes);
@@ -59,8 +64,8 @@ class DashboardTotalSalesEdgeIT {
         properties.put("micronaut.server.port", -1);
         properties.put("micronaut.server.host", "127.0.0.1");
         properties.put("tracing.zipkin.enabled", false);
-        properties.put("micronaut.http.services.dashboard-service.urls", Collections.singletonList(
-                "http://127.0.0.1:" + backend.getAddress().getPort()));
+        properties.put("micronaut.http.services.dashboard-service.urls",
+                Collections.singletonList(backendUrl));
         properties.put("micronaut.http.services.dashboard-service.read-timeout", "1s");
         properties.put("micronaut.security.token.jwt.signatures.secret.generator.secret",
                 Base64.getEncoder().encodeToString(secretBytes));
@@ -104,7 +109,9 @@ class DashboardTotalSalesEdgeIT {
         assertThat(success.statusCode()).isEqualTo(200);
         assertThat(success.body()).isEqualTo("{\"total\":{\"policiesCount\":5,"
                 + "\"premiumAmount\":5000.00}}");
-        assertThat(backendRequests.get()).isEqualTo(1);
+        if (backend != null) {
+            assertThat(backendRequests.get()).isEqualTo(1);
+        }
 
         // when
         backendRequests.set(0);
@@ -113,7 +120,9 @@ class DashboardTotalSalesEdgeIT {
         // then
         assertThat(unauthenticated.statusCode()).isEqualTo(401);
         assertThat(unauthenticated.body()).isEmpty();
-        assertThat(backendRequests.get()).isZero();
+        if (backend != null) {
+            assertThat(backendRequests.get()).isZero();
+        }
 
         // when
         backendRequests.set(0);
@@ -126,24 +135,28 @@ class DashboardTotalSalesEdgeIT {
         assertThat(invalid.statusCode()).isEqualTo(400);
         assertThat(invalid.body()).contains("\"message\":\"invalid request\"")
                 .doesNotContain("ArrayList");
-        assertThat(backendRequests.get()).isZero();
+        if (backend != null) {
+            assertThat(backendRequests.get()).isZero();
+        }
 
-        // when
-        backendMode.set("failure");
-        backendRequests.set(0);
-        HttpResponse<String> failure = post(requestBody, bearerToken);
+        if (backend != null) {
+            // when
+            backendMode.set("failure");
+            backendRequests.set(0);
+            HttpResponse<String> failure = post(requestBody, bearerToken);
 
-        // then
-        assertThat(failure.statusCode()).isEqualTo(500);
-        assertThat(failure.body()).contains("\"message\":\"internal error\"")
-                .doesNotContain("private-upstream-marker");
-        assertThat(backendRequests.get()).isEqualTo(3);
-        assertThat(logEvents.list).allSatisfy(event -> {
-            assertThat(event.getFormattedMessage()).doesNotContain("private-upstream-marker");
-            if (event.getThrowableProxy() != null) {
-                assertThat(event.getThrowableProxy().getMessage()).doesNotContain("private-upstream-marker");
-            }
-        });
+            // then
+            assertThat(failure.statusCode()).isEqualTo(500);
+            assertThat(failure.body()).contains("\"message\":\"internal error\"")
+                    .doesNotContain("private-upstream-marker");
+            assertThat(backendRequests.get()).isEqualTo(3);
+            assertThat(logEvents.list).allSatisfy(event -> {
+                assertThat(event.getFormattedMessage()).doesNotContain("private-upstream-marker");
+                if (event.getThrowableProxy() != null) {
+                    assertThat(event.getThrowableProxy().getMessage()).doesNotContain("private-upstream-marker");
+                }
+            });
+        }
     }
 
     private HttpResponse<String> post(String body, String token) throws Exception {
