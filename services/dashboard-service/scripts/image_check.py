@@ -368,6 +368,8 @@ def main() -> int:
                 "ELASTICSEARCH_PASSWORD",
                 "--env",
                 "ELASTICSEARCH_TIMEOUT=5s",
+                "--env",
+                "SALES_TRENDS_TIME_ZONE=GMT",
                 image,
             ],
             "start Dashboard runtime image",

@@ -136,7 +136,13 @@ def matching_reader_predecessor_config(actual: Any, expected: Any) -> bool:
     predecessor = {
         key: value
         for key, value in expected.items()
-        if key not in {"ELASTICSEARCH_INDEX", "ELASTICSEARCH_TIMEOUT", "ELASTICSEARCH_URL"}
+        if key
+        not in {
+            "ELASTICSEARCH_INDEX",
+            "ELASTICSEARCH_TIMEOUT",
+            "ELASTICSEARCH_URL",
+            "SALES_TRENDS_TIME_ZONE",
+        }
     }
     predecessor["OTEL_EXPORTER_OTLP_TIMEOUT"] = "2s"
     return actual == predecessor
@@ -388,6 +394,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         ),
         "ELASTICSEARCH_INDEX": "policy_stats",
         "ELASTICSEARCH_TIMEOUT": "5s",
+        "SALES_TRENDS_TIME_ZONE": "GMT",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
     }
     if environment == "qa":

@@ -24,6 +24,7 @@ const (
 	EnvElasticsearchPassword    = "ELASTICSEARCH_PASSWORD"
 	EnvElasticsearchCAFile      = "ELASTICSEARCH_CA_FILE"
 	EnvElasticsearchTimeout     = "ELASTICSEARCH_TIMEOUT"
+	EnvSalesTrendsTimeZone      = "SALES_TRENDS_TIME_ZONE"
 	defaultMaxHeaderBytes       = 16384
 	defaultMaxBodyBytes         = 4096
 	defaultElasticsearchURL     = "http://127.0.0.1:9200"
@@ -37,13 +38,14 @@ type Config struct {
 	kitconfig.GRPC
 	kitconfig.HTTPServer
 	kitconfig.Telemetry
-	ServiceName        string
-	HTTPAddress        Address
-	GRPCAddress        Address
-	HealthAddress      Address
-	HTTPMaxHeaderBytes int
-	HTTPMaxBodyBytes   int
-	Elasticsearch      Elasticsearch
+	ServiceName         string
+	HTTPAddress         Address
+	GRPCAddress         Address
+	HealthAddress       Address
+	HTTPMaxHeaderBytes  int
+	HTTPMaxBodyBytes    int
+	Elasticsearch       Elasticsearch
+	SalesTrendsTimeZone *time.Location
 }
 
 // Elasticsearch contains the bounded read-only dependency settings.
@@ -208,6 +210,10 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	salesTrendsTimeZone, err := loadSalesTrendsTimeZone(lookup)
+	if err != nil {
+		return Config{}, err
+	}
 	runtime := kitconfig.Runtime{
 		RequestTimeout:  requestTimeout,
 		ProbeTimeout:    probeTimeout,
@@ -271,18 +277,43 @@ func load(lookup lookupEnv) (Config, error) {
 	}
 
 	return Config{
-		Runtime:            runtime,
-		GRPC:               grpc,
-		HTTPServer:         httpServer,
-		ServiceName:        serviceName,
-		HTTPAddress:        httpAddress,
-		GRPCAddress:        grpcAddress,
-		HealthAddress:      healthAddress,
-		HTTPMaxHeaderBytes: maxHeaderBytes,
-		HTTPMaxBodyBytes:   maxBodyBytes,
-		Elasticsearch:      elasticsearchSettings,
-		Telemetry:          telemetry,
+		Runtime:             runtime,
+		GRPC:                grpc,
+		HTTPServer:          httpServer,
+		ServiceName:         serviceName,
+		HTTPAddress:         httpAddress,
+		GRPCAddress:         grpcAddress,
+		HealthAddress:       healthAddress,
+		HTTPMaxHeaderBytes:  maxHeaderBytes,
+		HTTPMaxBodyBytes:    maxBodyBytes,
+		Elasticsearch:       elasticsearchSettings,
+		SalesTrendsTimeZone: salesTrendsTimeZone,
+		Telemetry:           telemetry,
 	}, nil
+}
+
+func loadSalesTrendsTimeZone(lookup lookupEnv) (*time.Location, error) {
+	value, present := lookup(EnvSalesTrendsTimeZone)
+	if !present {
+		return nil, kitconfig.Invalid(EnvSalesTrendsTimeZone, "is required")
+	}
+	if value == "" {
+		return nil, kitconfig.Invalid(EnvSalesTrendsTimeZone, "must not be empty")
+	}
+	if strings.TrimSpace(value) != value || value == "Local" {
+		return nil, kitconfig.Invalid(
+			EnvSalesTrendsTimeZone,
+			"must be an exact explicit IANA time zone name",
+		)
+	}
+	location, err := time.LoadLocation(value)
+	if err != nil {
+		return nil, kitconfig.Invalid(
+			EnvSalesTrendsTimeZone,
+			"must identify an available IANA time zone",
+		)
+	}
+	return location, nil
 }
 
 func loadElasticsearch(lookup lookupEnv) (Elasticsearch, error) {

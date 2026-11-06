@@ -731,6 +731,19 @@ def test_render_requires_the_application_exporter_timeout_default() -> None:
         checks.validate_render("local-dev", yaml.safe_dump_all(items))
 
 
+@pytest.mark.parametrize("value", [None, "", "Local", "UTC", " GMT"])
+def test_render_requires_the_accepted_sales_trends_time_zone(value: str | None) -> None:
+    items = checks.documents(checks.render("local-dev"))
+    config = checks.resource(items, "ConfigMap", "local-dev-dashboard-config")
+    if value is None:
+        config["data"].pop("SALES_TRENDS_TIME_ZONE")
+    else:
+        config["data"]["SALES_TRENDS_TIME_ZONE"] = value
+
+    with pytest.raises(checks.DeploymentError, match="runtime configuration differs"):
+        checks.validate_render("local-dev", yaml.safe_dump_all(items))
+
+
 @pytest.mark.parametrize(
     ("environment", "mutation", "message"),
     [
@@ -858,7 +871,12 @@ def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:
         "git-abcdef123456"
     )
     live_config = actual[("configmap", "local-dev-dashboard-config")]["data"]
-    for name in ("ELASTICSEARCH_INDEX", "ELASTICSEARCH_TIMEOUT", "ELASTICSEARCH_URL"):
+    for name in (
+        "ELASTICSEARCH_INDEX",
+        "ELASTICSEARCH_TIMEOUT",
+        "ELASTICSEARCH_URL",
+        "SALES_TRENDS_TIME_ZONE",
+    ):
         live_config.pop(name)
     live_config["OTEL_EXPORTER_OTLP_TIMEOUT"] = "2s"
     live_container = live_deployment["spec"]["template"]["spec"]["containers"][0]
