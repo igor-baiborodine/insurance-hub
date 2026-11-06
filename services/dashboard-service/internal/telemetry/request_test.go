@@ -38,11 +38,11 @@ func TestRequestObserver_RecordsBoundedGRPCOutcomes(t *testing.T) {
 		t.Run(test.status, func(t *testing.T) {
 			observer, output := requestObserver(t)
 
-			observer.StartGRPC(context.Background()).
+			observer.StartGRPC(context.Background(), OperationAgentSales).
 				Finish(context.Background(), test.status)
 
 			record := decodeCompletion(t, output)
-			assertLogValue(t, record, "operation", "total_sales")
+			assertLogValue(t, record, "operation", OperationAgentSales)
 			assertLogValue(t, record, "transport", "grpc")
 			assertLogValue(t, record, "outcome", test.outcome)
 			assertLogValue(t, record, "rpc_status_code", test.logged)
@@ -64,6 +64,7 @@ func TestRequestObserver_RecordsBoundedHTTPOutcomes(t *testing.T) {
 		level     string
 	}{
 		{name: "success", route: "POST /dashboard/totalsales", status: 200, operation: "total_sales", outcome: "success", level: "INFO"},
+		{name: "agent success", route: "POST /dashboard/agentssales", status: 200, operation: "agent_sales", outcome: "success", level: "INFO"},
 		{name: "invalid request", route: "POST /unknown", status: 400, operation: "unknown", outcome: "invalid_request", level: "INFO"},
 		{name: "cancelled", route: "POST /dashboard/totalsales", status: 499, operation: "total_sales", outcome: "cancelled", level: "WARN"},
 		{name: "deadline", route: "POST /dashboard/totalsales", status: 504, operation: "total_sales", outcome: "deadline_exceeded", level: "WARN"},
@@ -90,6 +91,23 @@ func TestRequestObserver_RecordsBoundedHTTPOutcomes(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestRequestObserver_BoundsUnknownOperationWithoutSensitiveValues(t *testing.T) {
+	// given
+	const privateMarker = "private-agent-login"
+	observer, output := requestObserver(t)
+
+	// when
+	observer.StartGRPC(context.Background(), privateMarker).
+		Finish(context.Background(), "OK")
+
+	// then
+	record := decodeCompletion(t, output)
+	assertLogValue(t, record, "operation", "unknown")
+	if bytes.Contains(output.Bytes(), []byte(privateMarker)) {
+		t.Fatal("unbounded operation was logged")
 	}
 }
 

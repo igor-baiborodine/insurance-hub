@@ -462,7 +462,7 @@
       },
       "id": 15,
       "options": {
-        "content": "Use `trace_id` from a Dashboard completion log to open the matching Tempo trace. Compare request latency with Elasticsearch duration and split results by the fixed `total_sales` operation and HTTP or gRPC transport. Legitimate idle time has zero request rates with present Go runtime samples. An available deployment without a runtime sample is missing telemetry; rising shared drop, failure, lag, or queue signals indicate collection failure. Labels remain bounded and never expose dates, product codes, policy/customer data, credentials, arbitrary errors, or trace IDs.",
+        "content": "Use `trace_id` from a Dashboard completion log to open the matching Tempo trace. Compare request latency with Elasticsearch duration and split results by the fixed `total_sales` or `agent_sales` operation and HTTP or gRPC transport. Legitimate idle time has zero request rates with present Go runtime samples. An available deployment without a runtime sample is missing telemetry; rising shared drop, failure, lag, or queue signals indicate collection failure. Labels remain bounded and never expose dates, agent logins, product codes, amounts, policy/customer data, credentials, arbitrary errors, or trace IDs.",
         "mode": "markdown"
       },
       "title": "Investigation workflow",

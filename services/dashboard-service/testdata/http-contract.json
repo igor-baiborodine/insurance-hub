@@ -1,99 +1,71 @@
 {
   "swagger": "2.0",
-  "operation": {
-    "path": "/dashboard/totalsales",
-    "method": "post",
-    "operation_id": "DashboardService_GetTotalSales",
-    "consumes": [
-      "application/json"
-    ],
-    "produces": [
-      "application/json"
-    ],
-    "request_schema": "#/definitions/v1GetTotalSalesRequest",
-    "success_schema": "#/definitions/v1TotalSalesHTTPResponse",
-    "error_schema": "#/definitions/rpcStatus"
-  },
-  "request_contract": {
-    "json_members": [
-      "productCode",
-      "saleDateFrom",
-      "saleDateTo"
-    ],
-    "unknown_fields": "ignore",
-    "duplicate_fields": "last_wins",
-    "non_empty_query": "ignore",
-    "accepted_content_types": [
-      "application/json",
-      "application/json; charset=utf-8"
-    ],
-    "accepted_response_types": "any",
-    "maximum_body_bytes": 4096,
-    "product_presence": {
-      "absent_or_null": "all",
-      "empty": "exact"
-    }
-  },
-  "responses": {
-    "200": {
-      "total": {
-        "policiesCount": 5,
-        "premiumAmount": 5000.0
+  "operations": {
+    "total_sales": {
+      "path": "/dashboard/totalsales",
+      "method": "post",
+      "operation_id": "DashboardService_GetTotalSales",
+      "consumes": ["application/json"],
+      "produces": ["application/json"],
+      "request_schema": "#/definitions/v1GetTotalSalesRequest",
+      "success_schema": "#/definitions/v1TotalSalesHTTPResponse",
+      "error_schema": "#/definitions/rpcStatus",
+      "request_contract": {
+        "json_members": ["productCode", "saleDateFrom", "saleDateTo"],
+        "product_presence": {"absent_or_null": "all", "empty": "exact"}
       },
-      "perProductTotal": {
-        "SAFE_FARM": {
-          "policiesCount": 1,
-          "premiumAmount": 1000.0
+      "responses": {
+        "200": {
+          "total": {"policiesCount": 5, "premiumAmount": 5000.0},
+          "perProductTotal": {
+            "SAFE_FARM": {"policiesCount": 1, "premiumAmount": 1000.0}
+          }
         }
       }
     },
-    "400": {
-      "code": 3,
-      "message": "invalid request",
-      "details": []
-    },
-    "413": {
-      "code": 8,
-      "message": "request body too large",
-      "details": []
-    },
-    "415": {
-      "code": 3,
-      "message": "unsupported media type",
-      "details": []
-    },
-    "499": {
-      "code": 1,
-      "message": "request canceled",
-      "details": []
-    },
-    "500": {
-      "code": 13,
-      "message": "internal error",
-      "details": []
-    },
-    "503": {
-      "code": 14,
-      "message": "service unavailable",
-      "details": []
-    },
-    "504": {
-      "code": 4,
-      "message": "deadline exceeded",
-      "details": []
+    "agent_sales": {
+      "path": "/dashboard/agentssales",
+      "method": "post",
+      "operation_id": "DashboardService_GetAgentSales",
+      "consumes": ["application/json"],
+      "produces": ["application/json"],
+      "request_schema": "#/definitions/v1GetAgentSalesRequest",
+      "success_schema": "#/definitions/v1AgentSalesHTTPResponse",
+      "error_schema": "#/definitions/rpcStatus",
+      "request_contract": {
+        "json_members": ["agentLogin", "productCode", "saleDateFrom", "saleDateTo"],
+        "agent_presence": {"absent_or_null": "all", "empty": "exact"},
+        "product_presence": {"absent_or_null": "all", "empty": "exact"}
+      },
+      "responses": {
+        "200": {
+          "perAgentTotal": {
+            "m.smith": {"policiesCount": 3, "premiumAmount": 3000.0}
+          }
+        }
+      }
     }
   },
+  "shared_request_contract": {
+    "unknown_fields": "ignore",
+    "duplicate_fields": "last_wins",
+    "non_empty_query": "ignore",
+    "accepted_content_types": ["application/json", "application/json; charset=utf-8"],
+    "accepted_response_types": "any",
+    "maximum_body_bytes": 4096
+  },
+  "common_responses": {
+    "400": {"code": 3, "message": "invalid request", "details": []},
+    "413": {"code": 8, "message": "request body too large", "details": []},
+    "415": {"code": 3, "message": "unsupported media type", "details": []},
+    "499": {"code": 1, "message": "request canceled", "details": []},
+    "500": {"code": 13, "message": "internal error", "details": []},
+    "503": {"code": 14, "message": "service unavailable", "details": []},
+    "504": {"code": 4, "message": "deadline exceeded", "details": []}
+  },
   "routing_responses": {
-    "404": {
-      "code": 5,
-      "message": "not found",
-      "details": []
-    },
-    "405": {
-      "code": 12,
-      "message": "method not allowed",
-      "details": []
-    }
+    "404": {"code": 5, "message": "not found", "details": []},
+    "405": {"code": 12, "message": "method not allowed", "details": []}
   },
   "schemas": {
     "v1GetTotalSalesRequest": {
@@ -105,14 +77,20 @@
       "policiesCount": "integer",
       "premiumAmount": "number"
     },
-    "v1TotalSalesHTTPResponse": {
-      "total": "object",
-      "perProductTotal": "object"
+    "v1TotalSalesHTTPResponse": {"total": "object", "perProductTotal": "object"},
+    "v1GetAgentSalesRequest": {
+      "agentLogin": "string",
+      "productCode": "string",
+      "saleDateFrom": "string",
+      "saleDateTo": "string"
     },
-    "rpcStatus": {
-      "code": "integer",
-      "message": "string",
-      "details": "array"
-    }
+    "v1AgentSalesHTTPValue": {
+      "policiesCount": "integer",
+      "premiumAmount": {"type": "number", "format": null}
+    },
+    "v1AgentSalesHTTPResponse": {"perAgentTotal": "object"},
+    "v1AgentSalesValue": {"policiesCount": "string", "premiumAmount": "string"},
+    "v1GetAgentSalesResponse": {"perAgentTotal": "object"},
+    "rpcStatus": {"code": "integer", "message": "string", "details": "array"}
   }
 }

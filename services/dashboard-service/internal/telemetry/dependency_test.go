@@ -30,7 +30,7 @@ func TestDependencyObserver_RecordsBoundedSignalsWithoutQueryOrError(t *testing.
 	}
 
 	// when
-	ctx, request := observer.StartElasticsearch(context.Background())
+	ctx, request := observer.StartElasticsearch(context.Background(), OperationAgentSales)
 	request.Finish(ctx, errors.New(privateMarker))
 
 	// then
@@ -44,7 +44,7 @@ func TestDependencyObserver_RecordsBoundedSignalsWithoutQueryOrError(t *testing.
 	if strings.Contains(combined, privateMarker) {
 		t.Fatalf("private marker escaped: %s", combined)
 	}
-	for _, expected := range []string{"elasticsearch", "search", "error"} {
+	for _, expected := range []string{"elasticsearch", "agent_sales", "error"} {
 		if !strings.Contains(combined, expected) {
 			t.Errorf("missing bounded signal %q: %s", expected, combined)
 		}
@@ -62,5 +62,35 @@ func TestNewDependencyObserver_RequiresDependencies(t *testing.T) {
 	// then
 	if err == nil {
 		t.Fatal("missing logger accepted")
+	}
+}
+
+func TestDependencyObserver_BoundsUnknownOperation(t *testing.T) {
+	// given
+	const privateMarker = "private-product-code"
+	var logs bytes.Buffer
+	recorder := tracetest.NewSpanRecorder()
+	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	t.Cleanup(func() { _ = tracerProvider.Shutdown(context.Background()) })
+	observer, err := NewDependencyObserver(
+		slog.New(slog.NewJSONHandler(&logs, nil)),
+		metricnoop.NewMeterProvider(),
+		tracerProvider,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// when
+	ctx, request := observer.StartElasticsearch(context.Background(), privateMarker)
+	request.Finish(ctx, nil)
+
+	// then
+	combined := logs.String()
+	for _, span := range recorder.Ended() {
+		combined += span.Name()
+	}
+	if strings.Contains(combined, privateMarker) || !strings.Contains(combined, "unknown") {
+		t.Fatalf("unbounded dependency operation escaped: %s", combined)
 	}
 }

@@ -26,12 +26,15 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	dashboardv1 "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/gen/dashboard/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
 )
 
 const (
 	totalSalesPath  = "/dashboard/totalsales"
 	totalSalesRoute = "POST " + totalSalesPath
+	agentSalesPath  = "/dashboard/agentssales"
+	agentSalesRoute = "POST " + agentSalesPath
 )
 
 type Settings struct {
@@ -73,6 +76,10 @@ func NewHandler(
 		totalSalesRoute,
 		http.HandlerFunc(handler.serveTotalSales),
 	)
+	handler.agentSales = handler.instrument(
+		agentSalesRoute,
+		http.HandlerFunc(handler.serveAgentSales),
+	)
 	handler.unmatched = handler.instrument(
 		"unmatched",
 		http.HandlerFunc(handler.serveUnmatched),
@@ -111,6 +118,7 @@ type Handler struct {
 	mux        http.Handler
 	settings   Settings
 	totalSales http.Handler
+	agentSales http.Handler
 	unmatched  http.Handler
 }
 
@@ -132,6 +140,10 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	request = request.WithContext(requestCtx)
 	if facts.originalPath == totalSalesPath && request.Method == http.MethodPost {
 		handler.totalSales.ServeHTTP(writer, request)
+		return
+	}
+	if facts.originalPath == agentSalesPath && request.Method == http.MethodPost {
+		handler.agentSales.ServeHTTP(writer, request)
 		return
 	}
 	request.URL.Path = "/unmatched"
@@ -156,6 +168,18 @@ func (handler *Handler) instrument(route string, next http.Handler) http.Handler
 }
 
 func (handler *Handler) serveTotalSales(writer http.ResponseWriter, request *http.Request) {
+	handler.serveSales(writer, request, normalizeTotalSalesRequestJSON)
+}
+
+func (handler *Handler) serveAgentSales(writer http.ResponseWriter, request *http.Request) {
+	handler.serveSales(writer, request, normalizeAgentSalesRequestJSON)
+}
+
+func (handler *Handler) serveSales(
+	writer http.ResponseWriter,
+	request *http.Request,
+	normalize func([]byte) ([]byte, bool),
+) {
 	if !isJSON(request.Header.Get("Content-Type")) {
 		writeError(
 			writer,
@@ -179,7 +203,7 @@ func (handler *Handler) serveTotalSales(writer http.ResponseWriter, request *htt
 		)
 		return
 	}
-	normalized, ok := normalizeRequestJSON(body)
+	normalized, ok := normalize(body)
 	if !ok {
 		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
 		return
@@ -190,7 +214,7 @@ func (handler *Handler) serveTotalSales(writer http.ResponseWriter, request *htt
 
 func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http.Request) {
 	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
-	if facts.originalPath == totalSalesPath {
+	if facts.originalPath == totalSalesPath || facts.originalPath == agentSalesPath {
 		writer.Header().Set("Allow", http.MethodPost)
 		writeError(
 			writer,
@@ -283,7 +307,7 @@ type normalizedRequest struct {
 	SaleDateTo   string  `json:"saleDateTo"`
 }
 
-func normalizeRequestJSON(data []byte) ([]byte, bool) {
+func normalizeTotalSalesRequestJSON(data []byte) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
@@ -339,6 +363,75 @@ func normalizeRequestJSON(data []byte) ([]byte, bool) {
 	return normalized, err == nil
 }
 
+type normalizedAgentRequest struct {
+	AgentLogin   *string `json:"agentLogin,omitempty"`
+	ProductCode  *string `json:"productCode,omitempty"`
+	SaleDateFrom string  `json:"saleDateFrom"`
+	SaleDateTo   string  `json:"saleDateTo"`
+}
+
+func normalizeAgentSalesRequestJSON(data []byte) ([]byte, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	request := normalizedAgentRequest{}
+	var fromSet, toSet bool
+	for decoder.More() {
+		name, err := decoder.Token()
+		if err != nil {
+			return nil, false
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, false
+		}
+		switch name {
+		case "agentLogin":
+			if bytes.Equal(value, []byte("null")) {
+				request.AgentLogin = nil
+				continue
+			}
+			var agent string
+			if err := json.Unmarshal(value, &agent); err != nil {
+				return nil, false
+			}
+			request.AgentLogin = &agent
+		case "productCode":
+			if bytes.Equal(value, []byte("null")) {
+				request.ProductCode = nil
+				continue
+			}
+			var product string
+			if err := json.Unmarshal(value, &product); err != nil {
+				return nil, false
+			}
+			request.ProductCode = &product
+		case "saleDateFrom":
+			if bytes.Equal(value, []byte("null")) ||
+				json.Unmarshal(value, &request.SaleDateFrom) != nil {
+				return nil, false
+			}
+			fromSet = true
+		case "saleDateTo":
+			if bytes.Equal(value, []byte("null")) ||
+				json.Unmarshal(value, &request.SaleDateTo) != nil {
+				return nil, false
+			}
+			toSet = true
+		}
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
+		return nil, false
+	}
+	if _, err = decoder.Token(); !errors.Is(err, io.EOF) || !fromSet || !toSet {
+		return nil, false
+	}
+	normalized, err := json.Marshal(request)
+	return normalized, err == nil
+}
+
 func isJSON(value string) bool {
 	mediaType, parameters, err := mime.ParseMediaType(value)
 	if err != nil || mediaType != "application/json" {
@@ -362,6 +455,9 @@ func newLegacyMarshaler() *legacyMarshaler {
 func (marshaler *legacyMarshaler) Marshal(value any) ([]byte, error) {
 	if response, ok := value.(*dashboardv1.GetTotalSalesResponse); ok {
 		return marshalLegacyResponse(response)
+	}
+	if response, ok := value.(*dashboardv1.GetAgentSalesResponse); ok {
+		return marshalLegacyAgentResponse(response)
 	}
 	return marshaler.JSONPb.Marshal(value)
 }
@@ -389,6 +485,37 @@ type legacyHTTPValue struct {
 type legacyHTTPResponse struct {
 	Total           legacyHTTPValue            `json:"total"`
 	PerProductTotal map[string]legacyHTTPValue `json:"perProductTotal,omitempty"`
+}
+
+type legacyAgentHTTPResponse struct {
+	PerAgentTotal map[string]legacyHTTPValue `json:"perAgentTotal"`
+}
+
+func marshalLegacyAgentResponse(response *dashboardv1.GetAgentSalesResponse) ([]byte, error) {
+	if response == nil {
+		return nil, errors.New("marshal agent sales: missing response")
+	}
+	result := legacyAgentHTTPResponse{
+		PerAgentTotal: make(map[string]legacyHTTPValue, len(response.PerAgentTotal)),
+	}
+	for agent, value := range response.PerAgentTotal {
+		if value == nil {
+			return nil, errors.New("marshal agent sales: missing agent value")
+		}
+		amount, err := domain.NewAgentPremiumAmount(value.GetPremiumAmount())
+		if err != nil {
+			return nil, errors.New("marshal agent sales: invalid premium amount")
+		}
+		number := json.RawMessage(amount.String())
+		if !json.Valid(number) {
+			return nil, errors.New("marshal agent sales: invalid JSON premium amount")
+		}
+		result.PerAgentTotal[agent] = legacyHTTPValue{
+			PoliciesCount: value.GetPoliciesCount(),
+			PremiumAmount: number,
+		}
+	}
+	return json.Marshal(result)
 }
 
 func marshalLegacyResponse(response *dashboardv1.GetTotalSalesResponse) ([]byte, error) {

@@ -1,7 +1,7 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Dashboard Total-Sales Deployment Runbook](#dashboard-total-sales-deployment-runbook)
+- [Dashboard Sales Deployment Runbook](#dashboard-sales-deployment-runbook)
   - [Deployment coordinates](#deployment-coordinates)
   - [Qualify the candidate](#qualify-the-candidate)
   - [Provision reader prerequisites](#provision-reader-prerequisites)
@@ -12,10 +12,10 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# Dashboard Total-Sales Deployment Runbook
+# Dashboard Sales Deployment Runbook
 
-This runbook owns qualification and guarded operation of the private Go Dashboard total-sales
-reader. The Go workload runs beside the Java Dashboard and reads the existing `policy_stats`
+This runbook owns qualification and guarded operation of the private Go Dashboard total-sales and
+agent-sales reader. The Go workload runs beside the Java Dashboard and reads the existing `policy_stats`
 Elasticsearch index. Java retains writer, setup, edge retry, public route and event authority.
 Issue 291 completes the service operating handoff. Issue 292 owns the later full removal and
 restoration rehearsal.
@@ -47,10 +47,10 @@ The disposable test loads the candidate image into the existing configured
 `local-dev-insurance-hub` Kind cluster, then creates and removes one uniquely owned namespace. It
 also loads the pinned Elasticsearch image, creates a fixture index through an administrator test
 identity, and gives Dashboard an exact-index reader with no cluster privileges. It proves total
-sales, reader write/admin/unrelated-index denial, readiness and safe response behavior during
-dependency loss, independent liveness, recovery, network denial and pod replacement. It does not
-create or delete the cluster. A render, fake adapter or disposable pass does not establish a
-local-dev or QA deployment result.
+and agent sales over HTTP and direct RPC, reader write/admin/unrelated-index denial, readiness and
+safe responses for both operations during dependency loss, independent liveness, recovery, network
+denial and pod replacement. It does not create or delete the cluster. A render, fake adapter or
+disposable pass does not establish a local-dev or QA deployment result.
 
 The monitoring checks validate the Dashboard-owned request and Elasticsearch dashboards, alerts,
 Prometheus rule tests and collected disposable fixture. They do not prove QA Alloy delivery.
@@ -173,7 +173,8 @@ the exact reader username and password, requires the reader identity
 workload mutation. It never prints or passes credential values on a host command line.
 
 Before and after deployment, record the Java Deployment and Service UIDs and availability. Verify
-the permitted HTTP total-sales request, direct `GetTotalSales` RPC and management endpoints, then
+the permitted HTTP total-sales and agent-sales requests, both direct sales RPCs and management
+endpoints, then
 use labeled and unlabeled probe Pods to establish NetworkPolicy behavior. Confirm that OCI,
 runtime, Pod and ConfigMap versions agree; retain the full OCI revision, image tag and immutable
 digest separately. Verify exact-index reads, write/admin/unrelated-index denials, readiness during
@@ -181,16 +182,17 @@ Elasticsearch loss and independent liveness. No Kafka setting, credential, topic
 to the Go reader.
 
 `go-svc-deploy-verify` is a bounded target operation, not a read-only status command. It creates
-nine fixed-name qualification Pods and one fixed-name untrusted namespace, requires each name to be
-absent first, and removes every created resource. The probes use the pinned curl image, exercise
-allowed business, gRPC-listener and management identities, marker-only and
+twelve fixed-name qualification Pods and one fixed-name untrusted namespace, requires each name to
+be absent first, and removes every created resource. The probes use the pinned curl image, exercise
+both allowed business operations, gRPC-listener and management identities, marker-only and
 business-to-management denial, and copied complete HTTP/gRPC identities in the untrusted
-namespace. The verifier also calls the deployed `GetTotalSales` RPC through the business Service
-and requires the exact owner-selected Go scenario and result. The reader probe mounts the workload
-Secret inside Kubernetes, verifies exact-index count/mapping and the authenticated
-effective-privilege response, and checks unrelated-index, cluster-health and security-role denial
-with read-only requests. It does not attempt a write that could mutate canonical state if
-permissions drift.
+namespace. The verifier also calls the deployed `GetTotalSales` and `GetAgentSales` RPCs through
+the business Service. Shared-state checks require successful operation envelopes without assuming
+fixture totals; the disposable owner retains the exact seeded result assertions. The reader probe
+mounts the workload Secret inside Kubernetes, verifies exact-index count/mapping and the
+authenticated effective-privilege response, and checks unrelated-index, cluster-health and
+security-role denial with read-only requests. It does not attempt a write that could mutate
+canonical state if permissions drift.
 
 ## Stop and return in local development
 

@@ -12,8 +12,21 @@ import (
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
+	dashboardv1 "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/gen/dashboard/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
 )
+
+func TestRPCOperation_UsesFixedMethodAllowlist(t *testing.T) {
+	for method, want := range map[string]string{
+		dashboardv1.DashboardService_GetTotalSales_FullMethodName: telemetry.OperationTotalSales,
+		dashboardv1.DashboardService_GetAgentSales_FullMethodName: telemetry.OperationAgentSales,
+		"/private.Service/AgentLogin":                             "",
+	} {
+		if got := rpcOperation(method); got != want {
+			t.Errorf("rpcOperation(%q) = %q, want %q", method, got, want)
+		}
+	}
+}
 
 func TestRPCStatus_PreservesCanonicalNamesInLogsAndMetrics(t *testing.T) {
 	// given
@@ -55,7 +68,7 @@ func TestRPCStatus_PreservesCanonicalNamesInLogsAndMetrics(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx := context.Background()
-			request := observer.StartGRPC(ctx)
+			request := observer.StartGRPC(ctx, telemetry.OperationTotalSales)
 			// when
 			request.Finish(ctx, rpcCodeName(test.code))
 			// then

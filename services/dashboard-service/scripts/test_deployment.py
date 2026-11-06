@@ -216,7 +216,7 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
 
     pods = checks.qualification_pods(target, f"issue-287-dashboard-denied-{environment}")
 
-    assert len(pods) == 9
+    assert len(pods) == 12
     assert all(pod["spec"]["containers"][0]["image"] == checks.PROBE_IMAGE for pod in pods)
     by_name = {pod["metadata"]["name"]: pod for pod in pods}
     assert by_name["dashboard-qualification-business"]["metadata"]["labels"] == {
@@ -238,6 +238,18 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
         by_name["dashboard-qualification-cross-namespace-grpc-denied"]["metadata"]["namespace"]
         == f"issue-287-dashboard-denied-{environment}"
     )
+    assert (
+        by_name["dashboard-qualification-cross-namespace-agent-denied"]["metadata"]["namespace"]
+        == f"issue-287-dashboard-denied-{environment}"
+    )
+    total_allowed = by_name["dashboard-qualification-business"]["spec"]["containers"][0]["args"][0]
+    agent_allowed = by_name["dashboard-qualification-business-agent-sales"]["spec"]["containers"][
+        0
+    ]["args"][0]
+    assert "/dashboard/totalsales" in total_allowed
+    assert "grep -q '\"total\"'" in total_allowed
+    assert "/dashboard/agentssales" in agent_allowed
+    assert "grep -q '\"perAgentTotal\"'" in agent_allowed
     grpc_reachable = by_name[checks.GRPC_REACHABLE_QUALIFICATION_POD]["spec"]["containers"][0][
         "args"
     ][0]
@@ -254,7 +266,8 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
     assert f"{environment}-dashboard-elasticsearch" in encoded
     assert "go_dashboard_total_sales_reader" in script
     assert "_security/user/_privileges" in script
-    assert "cat /tmp/response" in script
+    assert "cat /tmp/privileges" in script
+    assert "failed=0" in script
     assert "-u " not in script
     assert "ES_PASSWORD" in script
     if environment == "qa":
@@ -422,7 +435,11 @@ def test_direct_rpc_output_rejects_missing_renamed_failed_or_duplicate_results(o
 
 
 def test_direct_rpc_invokes_the_service_owner_with_the_selected_address() -> None:
-    with patch.object(checks, "run", return_value=direct_rpc_output()) as command:
+    with patch.object(
+        checks,
+        "run",
+        return_value=direct_rpc_output(test_name="TestDeployedDirectRPCSharedSmoke"),
+    ) as command:
         checks.run_deployed_direct_rpc(19090)
 
     command.assert_called_once_with(
@@ -434,9 +451,49 @@ def test_direct_rpc_invokes_the_service_owner_with_the_selected_address() -> Non
             "_deploy-test-rpc",
         ],
         timeout=60,
-        environment={"GO": "go", "DASHBOARD_DEPLOYMENT_GRPC_ADDR": "127.0.0.1:19090"},
+        environment={
+            "GO": "go",
+            "DASHBOARD_DEPLOYMENT_GRPC_ADDR": "127.0.0.1:19090",
+            "DASHBOARD_DEPLOYMENT_RPC_SCENARIO": "shared-smoke",
+        },
         activity="verify deployed direct Dashboard RPC",
     )
+
+
+def test_verify_runs_rpc_and_access_after_both_http_smokes_fail() -> None:
+    target = Mock(
+        kubectl_binary="kubectl",
+        context="kind-local-dev-insurance-hub",
+        namespace="local-dev-all",
+        business="local-dev-dashboard-api",
+        management="local-dev-dashboard-api-management",
+    )
+    processes = [Mock(), Mock(), Mock()]
+    for process in processes:
+        process.wait.return_value = 0
+    with (
+        patch.object(checks, "workload_dependencies"),
+        patch.object(checks, "role_snapshot", return_value={"java": "unchanged"}),
+        patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
+        patch.object(checks.subprocess, "Popen", side_effect=processes),
+        patch.object(checks, "_wait_for_port_forward"),
+        patch.object(
+            checks,
+            "_http",
+            side_effect=[
+                (200, b"ready\n"),
+                (500, b'{"error":"total"}'),
+                (403, b'{"error":"agent"}'),
+            ],
+        ),
+        patch.object(checks, "run_deployed_direct_rpc") as rpc,
+        patch.object(checks, "run_access_qualification") as access,
+        pytest.raises(checks.DeploymentError, match="total-sales HTTP.*agent-sales HTTP"),
+    ):
+        checks.verify(target, [])
+
+    rpc.assert_called_once_with(19090)
+    access.assert_called_once_with(target)
 
 
 @pytest.mark.parametrize("failure", [checks.DeploymentError("RPC failed"), KeyboardInterrupt()])
@@ -530,6 +587,90 @@ def test_access_qualification_cleans_owned_resources_after_probe_failure() -> No
         "--wait=true",
         "--timeout=60s",
     ]
+
+
+def test_access_qualification_runs_remaining_probes_after_one_fails() -> None:
+    target = Mock(
+        environment="local-dev",
+        context="kind-local-dev-insurance-hub",
+        kubectl_binary="kubectl",
+    )
+    target.namespace_kubectl.side_effect = lambda _namespace, operation, *_args, **_kwargs: (
+        "failed probe output" if operation == "logs" else ""
+    )
+    target.namespace_json.return_value = {
+        "metadata": {"labels": {"insurance-hub.io/qualification": "issue-287"}}
+    }
+    pods = [
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": name,
+                "namespace": "local-dev-all",
+                "labels": {"insurance-hub.io/qualification": "issue-287"},
+            },
+            "spec": {},
+        }
+        for name in ("probe-one", "probe-two")
+    ]
+    namespace = json.dumps(
+        {"metadata": {"labels": {"insurance-hub.io/qualification": "issue-287"}}}
+    )
+    with (
+        patch.object(checks, "qualification_pods", return_value=pods),
+        patch.object(
+            checks,
+            "wait_for_probe",
+            side_effect=[checks.DeploymentError("first failed"), None],
+        ) as wait,
+        patch.object(checks, "run", side_effect=["", namespace, ""]),
+        pytest.raises(checks.DeploymentError, match="probe-one.*first failed"),
+    ):
+        checks.run_access_qualification(target)
+
+    assert [call.args[2] for call in wait.call_args_list] == ["probe-one", "probe-two"]
+
+
+def test_access_qualification_does_not_read_or_delete_preexisting_probe() -> None:
+    target = Mock(
+        environment="local-dev",
+        context="kind-local-dev-insurance-hub",
+        kubectl_binary="kubectl",
+    )
+    target.namespace_kubectl.return_value = "pod/dashboard-qualification-business"
+    pod = {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": "dashboard-qualification-business",
+            "namespace": "local-dev-all",
+            "labels": {"insurance-hub.io/qualification": "issue-287"},
+        },
+        "spec": {},
+    }
+    namespace = json.dumps(
+        {"metadata": {"labels": {"insurance-hub.io/qualification": "issue-287"}}}
+    )
+
+    with (
+        patch.object(checks, "qualification_pods", return_value=[pod]),
+        patch.object(checks, "run", side_effect=["", namespace, ""]),
+        pytest.raises(checks.DeploymentError, match="already exists"),
+    ):
+        checks.run_access_qualification(target)
+
+    assert target.namespace_kubectl.call_count == 1
+    target.namespace_kubectl.assert_called_once_with(
+        "local-dev-all",
+        "get",
+        "pod",
+        "dashboard-qualification-business",
+        "--ignore-not-found",
+        "-o",
+        "name",
+    )
+    target.namespace_json.assert_not_called()
 
 
 def test_render_rejects_foreign_dependencies_and_incomplete_inventory() -> None:

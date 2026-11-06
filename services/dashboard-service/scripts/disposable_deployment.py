@@ -491,7 +491,7 @@ def setup_elasticsearch(cluster: Cluster, suffix: str = "") -> None:
             "fixture-index",
             "PUT",
             "/policy_stats",
-            '{"settings":{"number_of_shards":1,"number_of_replicas":0},"mappings":{"properties":{"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},"from":{"type":"date"},"totalPremium":{"type":"double"}}}}',
+            '{"settings":{"number_of_shards":1,"number_of_replicas":0},"mappings":{"properties":{"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},"from":{"type":"date"},"totalPremium":{"type":"double"}}}}',
         ),
         (
             "fixture-unrelated",
@@ -503,7 +503,7 @@ def setup_elasticsearch(cluster: Cluster, suffix: str = "") -> None:
             "fixture-document",
             "POST",
             "/policy_stats/_doc/disposable?refresh=true",
-            '{"productCode":"SAFE","from":"2019-06-01","totalPremium":1000.0}',
+            '{"agentLogin":"safe-agent","productCode":"SAFE","from":"2019-06-01","totalPremium":1000.0}',
         ),
     )
     for name, method, path, body in requests:
@@ -527,14 +527,19 @@ def verify_reader_permissions(cluster: Cluster) -> None:
         ("reader-admin-denied", ["/_cluster/settings"]),
         ("reader-index-denied", ["/unrelated_stats/_search"]),
     )
+    failures: list[str] = []
     for name, arguments in requests:
-        path = arguments[-1]
-        response = http_probe(
-            cluster,
-            name,
-            [*base, *arguments[:-1], f"http://{ELASTICSEARCH_NAME}:9200{path}"],
-        )
-        require_elasticsearch_permission_denied(name, response)
+        try:
+            path = arguments[-1]
+            response = http_probe(
+                cluster,
+                name,
+                [*base, *arguments[:-1], f"http://{ELASTICSEARCH_NAME}:9200{path}"],
+            )
+            require_elasticsearch_permission_denied(name, response)
+        except (CheckFailed, checks.DeploymentError, OSError, ValueError) as error:
+            failures.append(f"{name}: {error}")
+    require(not failures, "reader permission checks failed: " + " | ".join(failures))
 
 
 def verify_runtime_identity(
@@ -645,6 +650,7 @@ def direct_rpc(cluster: Cluster) -> None:
             environment={
                 "GO": os.environ.get("GO", "go"),
                 "DASHBOARD_DEPLOYMENT_GRPC_ADDR": f"127.0.0.1:{port}",
+                "DASHBOARD_DEPLOYMENT_RPC_SCENARIO": "owned-fixture",
             },
             activity="verify deployed direct Dashboard RPC",
         )
@@ -753,26 +759,39 @@ def run() -> None:
         )
         wait_for("Dashboard endpoint ready", lambda: endpoint_count(cluster) == 1)
         verify_reader_permissions(cluster)
-        response = http_probe(
-            cluster,
-            "business-total-sales",
-            [
-                "--header",
-                "Content-Type: application/json",
-                "--data",
+        sales_cases = (
+            (
+                "business-total-sales",
                 '{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}',
                 "http://local-dev-dashboard-api/dashboard/totalsales",
-            ],
-            labels={checks.BUSINESS_CLIENT_LABEL: "true"},
+                '{"total":{"policiesCount":1,"premiumAmount":1000.00},'
+                '"perProductTotal":{"SAFE":{"policiesCount":1,"premiumAmount":1000.00}}}',
+            ),
+            (
+                "business-agent-sales",
+                '{"agentLogin":"safe-agent","productCode":"SAFE",'
+                '"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}',
+                "http://local-dev-dashboard-api/dashboard/agentssales",
+                '{"perAgentTotal":{"safe-agent":{"policiesCount":1,"premiumAmount":1000.0}}}',
+            ),
         )
-        require_http_response(
-            "business-total-sales",
-            response,
-            200,
-            '{"total":{"policiesCount":1,"premiumAmount":1000.00},'
-            '"perProductTotal":{"SAFE":{"policiesCount":1,"premiumAmount":1000.00}}}',
-        )
-        direct_rpc(cluster)
+        sales_failures: list[str] = []
+        for name, payload, url, expected in sales_cases:
+            try:
+                response = http_probe(
+                    cluster,
+                    name,
+                    ["--header", "Content-Type: application/json", "--data", payload, url],
+                    labels={checks.BUSINESS_CLIENT_LABEL: "true"},
+                )
+                require_http_response(name, response, 200, expected)
+            except (CheckFailed, checks.DeploymentError, OSError, ValueError) as error:
+                sales_failures.append(f"{name}: {error}")
+        try:
+            direct_rpc(cluster)
+        except (CheckFailed, checks.DeploymentError, OSError, ValueError) as error:
+            sales_failures.append(f"direct RPC: {error}")
+        require(not sales_failures, "sales verification failed: " + " | ".join(sales_failures))
         verify_runtime_identity(cluster, f"git-{source_short}", image, local_image_id)
         response = http_probe(
             cluster,
@@ -781,17 +800,21 @@ def run() -> None:
             labels={checks.MANAGEMENT_CLIENT_LABEL: "true"},
         )
         require_http_response("management-health", response, 200, "ready\n")
-        probe(
-            cluster,
-            "unlabeled-denied",
-            [
-                "--max-time",
-                "3",
-                "--silent",
-                "http://local-dev-dashboard-api/dashboard/totalsales",
-            ],
-            expect_success=False,
-        )
+        denial_failures: list[str] = []
+        for name, path in (
+            ("unlabeled-denied", "/dashboard/totalsales"),
+            ("unlabeled-agent-denied", "/dashboard/agentssales"),
+        ):
+            try:
+                probe(
+                    cluster,
+                    name,
+                    ["--max-time", "3", "--silent", f"http://local-dev-dashboard-api{path}"],
+                    expect_success=False,
+                )
+            except (CheckFailed, checks.DeploymentError, OSError, ValueError) as error:
+                denial_failures.append(f"{name}: {error}")
+        require(not denial_failures, "CNI denial checks failed: " + " | ".join(denial_failures))
         dashboard_pod = cluster.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api")[
             "items"
         ][0]
@@ -812,23 +835,35 @@ def run() -> None:
             labels={checks.MANAGEMENT_CLIENT_LABEL: "true"},
         )
         require_http_response("dependency-live", response, 200, "live\n")
-        response = http_probe(
-            cluster,
-            "dependency-total-sales-safe",
-            [
-                "--header",
-                "Content-Type: application/json",
-                "--data",
-                '{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}',
-                f"http://{dashboard_ip}:8080/dashboard/totalsales",
-            ],
-            labels={checks.BUSINESS_CLIENT_LABEL: "true"},
-        )
-        require_http_response(
-            "dependency-total-sales-safe",
-            response,
-            503,
-            '{"code":14,"message":"service unavailable","details":[]}',
+        dependency_failures: list[str] = []
+        for name, payload, url, _expected in sales_cases:
+            dependency_name = name.replace("business-", "dependency-") + "-safe"
+            try:
+                response = http_probe(
+                    cluster,
+                    dependency_name,
+                    [
+                        "--header",
+                        "Content-Type: application/json",
+                        "--data",
+                        payload,
+                        url.replace(
+                            "http://local-dev-dashboard-api", f"http://{dashboard_ip}:8080"
+                        ),
+                    ],
+                    labels={checks.BUSINESS_CLIENT_LABEL: "true"},
+                )
+                require_http_response(
+                    dependency_name,
+                    response,
+                    503,
+                    '{"code":14,"message":"service unavailable","details":[]}',
+                )
+            except (CheckFailed, checks.DeploymentError, OSError, ValueError) as error:
+                dependency_failures.append(f"{dependency_name}: {error}")
+        require(
+            not dependency_failures,
+            "dependency sales checks failed: " + " | ".join(dependency_failures),
         )
         cluster.kubectl("scale", f"deployment/{ELASTICSEARCH_NAME}", "--replicas=1")
         cluster.kubectl(
@@ -857,7 +892,7 @@ def run() -> None:
         )
         wait_for("Dashboard endpoint recovered", lambda: endpoint_count(cluster) == 1)
         print(
-            "dashboard-disposable: total sales, identity, least privilege, dependency loss, "
+            "dashboard-disposable: sales, identity, least privilege, dependency loss, "
             "health, CNI denial and restart passed"
         )
     finally:

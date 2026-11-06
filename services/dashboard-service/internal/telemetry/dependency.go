@@ -60,8 +60,9 @@ type DependencyRequest struct {
 
 func (observer *DependencyObserver) StartElasticsearch(
 	ctx context.Context,
+	operation string,
 ) (context.Context, *DependencyRequest) {
-	const operation = "search"
+	operation = boundedOperation(operation)
 	ctx, span := observer.tracer.Start(
 		ctx,
 		"Elasticsearch "+operation,

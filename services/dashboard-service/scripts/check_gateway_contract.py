@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify generated total-sales Swagger against the independent HTTP contract fixture."""
+"""Verify generated Dashboard Swagger against the independent HTTP contract fixture."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 
 
 class ContractError(ValueError):
-    """The fixture or generated Swagger violates the owned total-sales contract."""
+    """The fixture or generated Swagger violates the owned Dashboard contract."""
 
 
 def require(condition: bool, message: str) -> None:
@@ -29,7 +29,7 @@ def load_object(path: Path, label: str) -> dict[str, Any]:
 
 
 def require_schema(
-    definitions: dict[str, Any], name: str, expected_properties: dict[str, str]
+    definitions: dict[str, Any], name: str, expected_properties: dict[str, Any]
 ) -> None:
     schema = definitions.get(name)
     require(isinstance(schema, dict), f"Swagger definition is missing: {name}")
@@ -42,9 +42,19 @@ def require_schema(
         set(properties) == set(expected_properties),
         f"Swagger definition {name} properties differ from the contract",
     )
-    for field, expected_type in expected_properties.items():
+    for field, expected in expected_properties.items():
         value = properties[field]
         require(isinstance(value, dict), f"Swagger property {name}.{field} must be an object")
+        if isinstance(expected, str):
+            expected_type = expected
+            expected_format: object = ...
+        else:
+            require(
+                isinstance(expected, dict) and isinstance(expected.get("type"), str),
+                f"HTTP contract schema {name}.{field} must declare a type",
+            )
+            expected_type = expected["type"]
+            expected_format = expected.get("format", ...)
         actual_type = value.get("type")
         if actual_type is None and isinstance(value.get("$ref"), str):
             actual_type = "object"
@@ -52,80 +62,139 @@ def require_schema(
             actual_type == expected_type,
             f"Swagger property {name}.{field} must have type {expected_type}",
         )
+        if expected_format is not ...:
+            require(
+                value.get("format") == expected_format,
+                f"Swagger property {name}.{field} format must be absent",
+            )
 
 
 def check_contract(contract_path: Path, swagger_path: Path) -> None:
     contract = load_object(contract_path, "HTTP contract")
     swagger = load_object(swagger_path, "generated Swagger")
-    operation_contract = contract.get("operation")
-    responses_contract = contract.get("responses")
+    operations_contract = contract.get("operations")
+    common_responses = contract.get("common_responses")
     schemas_contract = contract.get("schemas")
-    require(isinstance(operation_contract, dict), "HTTP contract operation must be an object")
-    require(isinstance(responses_contract, dict), "HTTP contract responses must be an object")
+    require(isinstance(operations_contract, dict), "HTTP contract operations must be an object")
+    require(bool(operations_contract), "HTTP contract operations must not be empty")
+    require(isinstance(common_responses, dict), "HTTP contract common responses must be an object")
     require(isinstance(schemas_contract, dict), "HTTP contract schemas must be an object")
-    assert isinstance(operation_contract, dict)
-    assert isinstance(responses_contract, dict)
+    assert isinstance(operations_contract, dict)
+    assert isinstance(common_responses, dict)
     assert isinstance(schemas_contract, dict)
 
     require(swagger.get("swagger") == contract.get("swagger"), "Swagger version differs")
-    path = operation_contract.get("path")
-    method = operation_contract.get("method")
-    require(isinstance(path, str) and path.startswith("/"), "HTTP contract path is invalid")
-    require(isinstance(method, str) and method.islower(), "HTTP contract method is invalid")
     paths = swagger.get("paths")
     require(isinstance(paths, dict), "generated Swagger paths must be an object")
     assert isinstance(paths, dict)
-    require(set(paths) == {path}, f"Swagger paths must contain only {path}")
-    path_item = paths[path]
-    require(isinstance(path_item, dict), f"Swagger path {path} must be an object")
-    require(set(path_item) == {method}, f"Swagger path {path} must expose only {method}")
-    operation = path_item[method]
-    require(isinstance(operation, dict), "Swagger total-sales operation must be an object")
-    assert isinstance(operation, dict)
+    expected_paths = {
+        operation.get("path")
+        for operation in operations_contract.values()
+        if isinstance(operation, dict)
+    }
+    require(len(expected_paths) == len(operations_contract), "HTTP contract paths must be unique")
+    require(set(paths) == expected_paths, "Swagger paths differ from the contract")
 
-    require(
-        operation.get("operationId") == operation_contract.get("operation_id"),
-        "Swagger operationId differs",
-    )
-    for media_field in ("consumes", "produces"):
-        expected = operation_contract.get(media_field)
-        require(expected == ["application/json"], f"HTTP contract {media_field} must be JSON only")
-        require(operation.get(media_field) == expected, f"Swagger {media_field} differs")
-
-    parameters = operation.get("parameters")
-    require(isinstance(parameters, list) and len(parameters) == 1, "Swagger must have one body")
-    body = parameters[0]
-    require(isinstance(body, dict), "Swagger body parameter must be an object")
-    require(
-        body.get("name") == "body" and body.get("in") == "body" and body.get("required") is True,
-        "Swagger body parameter differs",
-    )
-    require(
-        body.get("schema") == {"$ref": operation_contract.get("request_schema")},
-        "Swagger request schema differs",
-    )
-
-    responses = operation.get("responses")
-    require(isinstance(responses, dict), "Swagger responses must be an object")
-    assert isinstance(responses, dict)
-    require(set(responses) == set(responses_contract), "Swagger response status set differs")
-    for status, expected in responses_contract.items():
-        require(isinstance(expected, dict), f"HTTP contract response {status} must be an object")
-        actual = responses[status]
-        require(isinstance(actual, dict), f"Swagger response {status} must be an object")
-        expected_schema = (
-            operation_contract.get("success_schema")
-            if status == "200"
-            else operation_contract.get("error_schema")
+    for label, operation_contract in operations_contract.items():
+        require(
+            isinstance(operation_contract, dict),
+            f"HTTP contract operation {label} must be an object",
+        )
+        assert isinstance(operation_contract, dict)
+        operation_responses = operation_contract.get("responses")
+        require(
+            isinstance(operation_responses, dict),
+            f"HTTP contract operation {label} responses must be an object",
+        )
+        assert isinstance(operation_responses, dict)
+        require(
+            not (set(common_responses) & set(operation_responses)),
+            f"HTTP contract operation {label} duplicates common response statuses",
+        )
+        responses_contract = common_responses | operation_responses
+        path = operation_contract.get("path")
+        method = operation_contract.get("method")
+        require(
+            isinstance(path, str) and path.startswith("/"),
+            f"HTTP contract {label} path is invalid",
         )
         require(
-            actual.get("schema") == {"$ref": expected_schema},
-            f"Swagger response {status} schema differs",
+            isinstance(method, str) and method.islower(),
+            f"HTTP contract {label} method is invalid",
+        )
+        path_item = paths[path]
+        require(isinstance(path_item, dict), f"Swagger path {path} must be an object")
+        require(set(path_item) == {method}, f"Swagger path {path} must expose only {method}")
+        operation = path_item[method]
+        require(isinstance(operation, dict), f"Swagger operation {label} must be an object")
+        assert isinstance(operation, dict)
+
+        require(
+            operation.get("operationId") == operation_contract.get("operation_id"),
+            f"Swagger operation {label} operationId differs",
+        )
+        for media_field in ("consumes", "produces"):
+            expected = operation_contract.get(media_field)
+            require(
+                expected == ["application/json"],
+                f"HTTP contract {label} {media_field} must be JSON only",
+            )
+            require(
+                operation.get(media_field) == expected,
+                f"Swagger operation {label} {media_field} differs",
+            )
+
+        parameters = operation.get("parameters")
+        require(
+            isinstance(parameters, list) and len(parameters) == 1,
+            f"Swagger operation {label} must have one body",
+        )
+        body = parameters[0]
+        require(isinstance(body, dict), f"Swagger operation {label} body must be an object")
+        require(
+            body.get("name") == "body"
+            and body.get("in") == "body"
+            and body.get("required") is True,
+            f"Swagger operation {label} body parameter differs",
         )
         require(
-            actual.get("examples", {}).get("application/json") == expected,
-            f"Swagger response {status} example differs",
+            body.get("schema") == {"$ref": operation_contract.get("request_schema")},
+            f"Swagger operation {label} request schema differs",
         )
+
+        responses = operation.get("responses")
+        require(
+            isinstance(responses, dict),
+            f"Swagger operation {label} responses must be an object",
+        )
+        assert isinstance(responses, dict)
+        require(
+            set(responses) == set(responses_contract),
+            f"Swagger operation {label} response status set differs",
+        )
+        for status, expected in responses_contract.items():
+            require(
+                isinstance(expected, dict),
+                f"HTTP contract {label} response {status} must be an object",
+            )
+            actual = responses[status]
+            require(
+                isinstance(actual, dict),
+                f"Swagger operation {label} response {status} must be an object",
+            )
+            expected_schema = (
+                operation_contract.get("success_schema")
+                if status == "200"
+                else operation_contract.get("error_schema")
+            )
+            require(
+                actual.get("schema") == {"$ref": expected_schema},
+                f"Swagger operation {label} response {status} schema differs",
+            )
+            require(
+                actual.get("examples", {}).get("application/json") == expected,
+                f"Swagger operation {label} response {status} example differs",
+            )
 
     definitions = swagger.get("definitions")
     require(isinstance(definitions, dict), "generated Swagger definitions must be an object")
@@ -152,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     except ContractError as error:
         print(f"check-gateway-contract: {error}", file=sys.stderr)
         return 1
-    print("check-gateway-contract: generated Swagger matches the independent total-sales contract")
+    print("check-gateway-contract: generated Swagger matches the independent Dashboard contract")
     return 0
 
 

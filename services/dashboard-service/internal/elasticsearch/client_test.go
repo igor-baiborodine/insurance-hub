@@ -124,19 +124,19 @@ func TestClient_CheckUsesExactIndexAndVerifiedTLS(t *testing.T) {
 			case "/policy_stats/_mapping":
 				_, _ = writer.Write(
 					[]byte(
-						`{"policy_stats":{"mappings":{"properties":{"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},"from":{"type":"date"},"totalPremium":{"type":"double"}}}}}`,
+						`{"policy_stats":{"mappings":{"properties":{"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},"from":{"type":"date"},"totalPremium":{"type":"double"}}}}}`,
 					),
 				)
 			case "/policy_stats/_field_caps":
 				_, _ = writer.Write(
 					[]byte(
-						`{"fields":{"productCode.keyword":{"keyword":{"searchable":true,"aggregatable":true}},"from":{"date":{"searchable":true,"aggregatable":true}},"totalPremium":{"double":{"searchable":true,"aggregatable":true}}}}`,
+						`{"fields":{"agentLogin.keyword":{"keyword":{"searchable":true,"aggregatable":true}},"productCode.keyword":{"keyword":{"searchable":true,"aggregatable":true}},"from":{"date":{"searchable":true,"aggregatable":true}},"totalPremium":{"double":{"searchable":true,"aggregatable":true}}}}`,
 					),
 				)
 			case "/policy_stats/_search":
 				_, _ = writer.Write(
 					[]byte(
-						`{"aggregations":{"products":{"doc_count_error_upper_bound":0,"buckets":[]}}}`,
+						`{"aggregations":{"agents":{"doc_count_error_upper_bound":0,"buckets":[]},"products":{"doc_count_error_upper_bound":0,"buckets":[]}}}`,
 					),
 				)
 			default:

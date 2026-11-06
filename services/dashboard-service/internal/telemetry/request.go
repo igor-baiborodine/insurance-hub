@@ -14,7 +14,12 @@ import (
 	servicelogger "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/logger"
 )
 
-// RequestObserver records only the fixed total-sales operation and bounded transport outcomes.
+const (
+	OperationTotalSales = "total_sales"
+	OperationAgentSales = "agent_sales"
+)
+
+// RequestObserver records only fixed Dashboard operations and bounded transport outcomes.
 type RequestObserver struct {
 	logger   *slog.Logger
 	requests metric.Int64Counter
@@ -57,22 +62,34 @@ type Request struct {
 	route     string
 }
 
-func (observer *RequestObserver) StartGRPC(ctx context.Context) *Request {
+func (observer *RequestObserver) StartGRPC(ctx context.Context, operation string) *Request {
 	return &Request{
 		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),
-		transport: "grpc", operation: "total_sales",
+		transport: "grpc", operation: boundedOperation(operation),
 	}
 }
 
 // StartHTTP begins a bounded HTTP transport observation after trace extraction.
 func (observer *RequestObserver) StartHTTP(ctx context.Context, route string) *Request {
 	operation := "unknown"
-	if route == "POST /dashboard/totalsales" {
-		operation = "total_sales"
+	switch route {
+	case "POST /dashboard/totalsales":
+		operation = OperationTotalSales
+	case "POST /dashboard/agentssales":
+		operation = OperationAgentSales
 	}
 	return &Request{
 		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),
 		transport: "http", operation: operation, route: route,
+	}
+}
+
+func boundedOperation(operation string) string {
+	switch operation {
+	case OperationTotalSales, OperationAgentSales:
+		return operation
+	default:
+		return "unknown"
 	}
 }
 

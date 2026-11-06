@@ -25,10 +25,22 @@ import (
 
 type executorFunc func(context.Context, application.TotalSalesQuery) (application.TotalSalesResult, error)
 
+type agentExecutorFunc func(
+	context.Context,
+	application.AgentSalesQuery,
+) (application.AgentSalesResult, error)
+
 func (function executorFunc) Execute(
 	ctx context.Context,
 	query application.TotalSalesQuery,
 ) (application.TotalSalesResult, error) {
+	return function(ctx, query)
+}
+
+func (function agentExecutorFunc) Execute(
+	ctx context.Context,
+	query application.AgentSalesQuery,
+) (application.AgentSalesResult, error) {
 	return function(ctx, query)
 }
 
@@ -93,6 +105,78 @@ func TestDashboardService_UsesGeneratedRPCAndPreservesProductPresence(t *testing
 				t.Fatalf("response = %+v", response)
 			}
 		})
+	}
+}
+
+func TestDashboardService_GetAgentSales_PreservesPresenceAndExactDecimal(t *testing.T) {
+	if dashboardv1.DashboardService_GetAgentSales_FullMethodName !=
+		"/dashboard.v1.DashboardService/GetAgentSales" {
+		t.Fatalf(
+			"full method = %q",
+			dashboardv1.DashboardService_GetAgentSales_FullMethodName,
+		)
+	}
+	// given
+	agentExecutor := agentExecutorFunc(func(
+		_ context.Context,
+		query application.AgentSalesQuery,
+	) (application.AgentSalesResult, error) {
+		if !query.Agent.Present() || query.Agent.Value() != "" ||
+			!query.Product.Present() || query.Product.Value() != " SAFE " ||
+			query.DateFrom.String() != "2019-01-01" || query.DateTo.String() != "2020-01-01" {
+			t.Fatalf("query = %+v", query)
+		}
+		amount, _ := domain.NewAgentPremiumAmount("1.005")
+		value, _ := domain.NewAgentSalesValue(3, amount)
+		return application.AgentSalesResult{
+			PerAgentTotal: map[string]domain.AgentSalesValue{"": value},
+		}, nil
+	})
+	client := newClient(t, nil, agentExecutor)
+
+	// when
+	response, err := client.GetAgentSales(
+		context.Background(),
+		&dashboardv1.GetAgentSalesRequest{
+			AgentLogin: stringPointer(""), ProductCode: stringPointer(" SAFE "),
+			SaleDateFrom: "2019-01-01", SaleDateTo: "2020-01-01",
+		},
+	)
+
+	// then
+	if err != nil || response.GetPerAgentTotal()[""].GetPoliciesCount() != 3 ||
+		response.GetPerAgentTotal()[""].GetPremiumAmount() != "1.005" {
+		t.Fatalf("GetAgentSales() = (%v, %v)", response, err)
+	}
+}
+
+func TestDashboardService_GetAgentSales_RejectsInvalidAndMapsUnavailable(t *testing.T) {
+	// given
+	calls := 0
+	client := newClient(t, nil, agentExecutorFunc(func(
+		context.Context,
+		application.AgentSalesQuery,
+	) (application.AgentSalesResult, error) {
+		calls++
+		return application.AgentSalesResult{}, application.ErrAgentSalesUnavailable
+	}))
+
+	// when
+	_, invalidErr := client.GetAgentSales(
+		context.Background(),
+		&dashboardv1.GetAgentSalesRequest{},
+	)
+	_, unavailableErr := client.GetAgentSales(
+		context.Background(),
+		&dashboardv1.GetAgentSalesRequest{
+			SaleDateFrom: "2019-01-01", SaleDateTo: "2020-01-01",
+		},
+	)
+
+	// then
+	if status.Code(invalidErr) != codes.InvalidArgument ||
+		status.Code(unavailableErr) != codes.Unavailable || calls != 1 {
+		t.Fatalf("errors/calls = (%v, %v, %d)", invalidErr, unavailableErr, calls)
 	}
 }
 
@@ -198,17 +282,38 @@ func TestNewServer_RequiresDependenciesAndPositiveLimits(t *testing.T) {
 			return application.TotalSalesResult{}, nil
 		},
 	)
+	agentExecutor := agentExecutorFunc(
+		func(context.Context, application.AgentSalesQuery) (application.AgentSalesResult, error) {
+			return application.AgentSalesResult{}, nil
+		},
+	)
 	logger := slog.Default()
 	tracer := noop.NewTracerProvider()
 	propagator := propagation.TraceContext{}
 	for _, call := range []func() error{
-		func() error { _, err := transport.NewServer(nil, tracer, propagator, settings, executor); return err },
-		func() error { _, err := transport.NewServer(logger, nil, propagator, settings, executor); return err },
-		func() error { _, err := transport.NewServer(logger, tracer, nil, settings, executor); return err },
-		func() error { _, err := transport.NewServer(logger, tracer, propagator, settings, nil); return err },
+		func() error {
+			_, err := transport.NewServer(nil, tracer, propagator, settings, executor, agentExecutor)
+			return err
+		},
+		func() error {
+			_, err := transport.NewServer(logger, nil, propagator, settings, executor, agentExecutor)
+			return err
+		},
+		func() error {
+			_, err := transport.NewServer(logger, tracer, nil, settings, executor, agentExecutor)
+			return err
+		},
+		func() error {
+			_, err := transport.NewServer(logger, tracer, propagator, settings, nil, agentExecutor)
+			return err
+		},
+		func() error {
+			_, err := transport.NewServer(logger, tracer, propagator, settings, executor, nil)
+			return err
+		},
 		func() error {
 			settings.RequestTimeout = 0
-			_, err := transport.NewServer(logger, tracer, propagator, settings, executor)
+			_, err := transport.NewServer(logger, tracer, propagator, settings, executor, agentExecutor)
 			return err
 		},
 	} {
@@ -225,8 +330,24 @@ func TestNewServer_RequiresDependenciesAndPositiveLimits(t *testing.T) {
 func newClient(
 	t *testing.T,
 	executor transport.TotalSalesExecutor,
+	agentExecutors ...transport.AgentSalesExecutor,
 ) dashboardv1.DashboardServiceClient {
 	t.Helper()
+	if executor == nil {
+		executor = executorFunc(
+			func(context.Context, application.TotalSalesQuery) (application.TotalSalesResult, error) {
+				return application.TotalSalesResult{}, nil
+			},
+		)
+	}
+	var agentExecutor transport.AgentSalesExecutor = agentExecutorFunc(
+		func(context.Context, application.AgentSalesQuery) (application.AgentSalesResult, error) {
+			return application.AgentSalesResult{}, nil
+		},
+	)
+	if len(agentExecutors) > 0 {
+		agentExecutor = agentExecutors[0]
+	}
 	listener := bufconn.Listen(1 << 20)
 	server, err := transport.NewServer(
 		slog.Default(), noop.NewTracerProvider(), propagation.TraceContext{},
@@ -237,6 +358,7 @@ func newClient(
 			MeterProvider:   metricnoop.NewMeterProvider(),
 		},
 		executor,
+		agentExecutor,
 	)
 	if err != nil {
 		t.Fatal(err)
