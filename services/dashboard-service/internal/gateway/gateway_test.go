@@ -107,6 +107,131 @@ func TestHandler_MapsAcceptedRequestsAndLegacyNumericResponses(t *testing.T) {
 	}
 }
 
+func TestHandler_MapsAgentRequestThroughGeneratedClientAndWritesExactNumber(t *testing.T) {
+	// given
+	client := &fakeClient{agentResponse: &dashboardv1.GetAgentSalesResponse{
+		PerAgentTotal: map[string]*dashboardv1.AgentSalesValue{
+			"m.smith": {PoliciesCount: 3, PremiumAmount: "1.005"},
+		},
+	}}
+	handler := newTestHandler(t, client, 4096)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		agentSalesPath+"?ignored=value",
+		strings.NewReader(
+			`{"agentLogin":"first","aggregationUnitCode":"MONTH",`+
+				`"agentLogin":"","productCode":" SAFE ",`+
+				`"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+		),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	// when
+	handler.ServeHTTP(recorder, request)
+
+	// then
+	if recorder.Code != http.StatusOK || recorder.Body.String() !=
+		`{"perAgentTotal":{"m.smith":{"policiesCount":3,"premiumAmount":1.005}}}` {
+		t.Fatalf("response = (%d, %s)", recorder.Code, recorder.Body.String())
+	}
+	if client.agentCalls != 1 || client.agentRequest.GetAgentLogin() != "" ||
+		client.agentRequest.AgentLogin == nil || client.agentRequest.GetProductCode() != " SAFE " ||
+		client.agentRequest.GetSaleDateFrom() != "2019-01-01" ||
+		client.agentRequest.GetSaleDateTo() != "2020-01-01" {
+		t.Fatalf(
+			"forwarded request/calls = (%+v, %d)",
+			client.agentRequest,
+			client.agentCalls,
+		)
+	}
+}
+
+func TestHandler_AgentEmptyAndInvalidRPCAmountsFailSafely(t *testing.T) {
+	// given
+	handler := newTestHandler(t, &fakeClient{
+		agentResponse: &dashboardv1.GetAgentSalesResponse{
+			PerAgentTotal: map[string]*dashboardv1.AgentSalesValue{},
+		},
+	}, 4096)
+	request := httptest.NewRequest(http.MethodPost, agentSalesPath, strings.NewReader(
+		`{"agentLogin":null,"productCode":null,"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+	emptyRecorder := httptest.NewRecorder()
+
+	// when
+	handler.ServeHTTP(emptyRecorder, request)
+
+	// then
+	if emptyRecorder.Code != http.StatusOK ||
+		emptyRecorder.Body.String() != `{"perAgentTotal":{}}` {
+		t.Fatalf(
+			"empty response = (%d, %s)",
+			emptyRecorder.Code,
+			emptyRecorder.Body.String(),
+		)
+	}
+
+	for _, amount := range []string{"", "1.00E-7", "NaN"} {
+		client := &fakeClient{agentResponse: &dashboardv1.GetAgentSalesResponse{
+			PerAgentTotal: map[string]*dashboardv1.AgentSalesValue{
+				"agent": {PoliciesCount: 1, PremiumAmount: amount},
+			},
+		}}
+		handler = newTestHandler(t, client, 4096)
+		request = httptest.NewRequest(http.MethodPost, agentSalesPath, strings.NewReader(
+			`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+		))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		// when
+		handler.ServeHTTP(recorder, request)
+
+		// then
+		assertError(
+			t,
+			recorder,
+			http.StatusInternalServerError,
+			`{"code":13,"message":"internal error","details":[]}`,
+		)
+	}
+}
+
+func TestHandler_RejectsInvalidAgentScalarsBeforeRPC(t *testing.T) {
+	for _, body := range []string{
+		`{"agentLogin":123,"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+		`{"productCode":{},"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+		`{"saleDateFrom":null,"saleDateTo":"2020-01-01"}`,
+	} {
+		// given
+		client := &fakeClient{agentResponse: &dashboardv1.GetAgentSalesResponse{}}
+		handler := newTestHandler(t, client, 4096)
+		request := httptest.NewRequest(
+			http.MethodPost,
+			agentSalesPath,
+			strings.NewReader(body),
+		)
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		// when
+		handler.ServeHTTP(recorder, request)
+
+		// then
+		assertError(
+			t,
+			recorder,
+			http.StatusBadRequest,
+			`{"code":3,"message":"invalid request","details":[]}`,
+		)
+		if client.agentCalls != 0 {
+			t.Fatalf("invalid body reached agent RPC: %s", body)
+		}
+	}
+}
+
 func TestHandler_RejectsInvalidBodiesBeforeRPC(t *testing.T) {
 	// given
 	for _, body := range []string{
@@ -164,7 +289,17 @@ func TestHandler_EnforcesMediaMethodRouteAndBodyLimit(t *testing.T) {
 			wantBody: `{"code":3,"message":"unsupported media type","details":[]}`,
 		},
 		{
+			name: "agent media", method: http.MethodPost, path: agentSalesPath, contentType: "text/plain",
+			body: valid, limit: 4096, wantStatus: http.StatusUnsupportedMediaType,
+			wantBody: `{"code":3,"message":"unsupported media type","details":[]}`,
+		},
+		{
 			name: "method", method: http.MethodGet, path: totalSalesPath, contentType: "application/json",
+			limit: 4096, wantStatus: http.StatusMethodNotAllowed, wantAllow: http.MethodPost,
+			wantBody: `{"code":12,"message":"method not allowed","details":[]}`,
+		},
+		{
+			name: "agent method", method: http.MethodGet, path: agentSalesPath, contentType: "application/json",
 			limit: 4096, wantStatus: http.StatusMethodNotAllowed, wantAllow: http.MethodPost,
 			wantBody: `{"code":12,"message":"method not allowed","details":[]}`,
 		},
@@ -175,6 +310,11 @@ func TestHandler_EnforcesMediaMethodRouteAndBodyLimit(t *testing.T) {
 		},
 		{
 			name: "too large", method: http.MethodPost, path: totalSalesPath, contentType: "application/json",
+			body: valid + " ", limit: len(valid), wantStatus: http.StatusRequestEntityTooLarge,
+			wantBody: `{"code":8,"message":"request body too large","details":[]}`,
+		},
+		{
+			name: "agent too large", method: http.MethodPost, path: agentSalesPath, contentType: "application/json",
 			body: valid + " ", limit: len(valid), wantStatus: http.StatusRequestEntityTooLarge,
 			wantBody: `{"code":8,"message":"request body too large","details":[]}`,
 		},
@@ -439,6 +579,9 @@ type fakeClient struct {
 	started          chan struct{}
 	requestMetadata  metadata.MD
 	responseMetadata metadata.MD
+	agentRequest     *dashboardv1.GetAgentSalesRequest
+	agentResponse    *dashboardv1.GetAgentSalesResponse
+	agentCalls       int
 }
 
 func (client *fakeClient) GetTotalSales(
@@ -465,6 +608,32 @@ func (client *fakeClient) GetTotalSales(
 		return nil, status.FromContextError(ctx.Err()).Err()
 	}
 	return client.response, client.err
+}
+
+func (client *fakeClient) GetAgentSales(
+	ctx context.Context,
+	request *dashboardv1.GetAgentSalesRequest,
+	options ...grpc.CallOption,
+) (*dashboardv1.GetAgentSalesResponse, error) {
+	client.agentCalls++
+	client.agentRequest = request
+	client.requestMetadata, _ = metadata.FromOutgoingContext(ctx)
+	for _, option := range options {
+		switch value := option.(type) {
+		case grpc.HeaderCallOption:
+			*value.HeaderAddr = client.responseMetadata.Copy()
+		case grpc.TrailerCallOption:
+			*value.TrailerAddr = client.responseMetadata.Copy()
+		}
+	}
+	if client.started != nil {
+		close(client.started)
+	}
+	if client.waitForContext {
+		<-ctx.Done()
+		return nil, status.FromContextError(ctx.Err()).Err()
+	}
+	return client.agentResponse, client.err
 }
 
 func newTestHandler(

@@ -313,7 +313,7 @@ func TestRun_PartialStartupClosesResourcesExactlyOnce(t *testing.T) {
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return provider, nil
 	}
-	deps.newSearch = func(config.Elasticsearch) (application.TotalSalesReader, searchDependency, error) {
+	deps.newSearch = func(config.Elasticsearch) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
 	bindFailure := errors.New("management bind failed")
@@ -408,7 +408,7 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return provider, nil
 	}
-	deps.newSearch = func(config.Elasticsearch) (application.TotalSalesReader, searchDependency, error) {
+	deps.newSearch = func(config.Elasticsearch) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
 	addresses := make(chan string, 3)
@@ -474,6 +474,18 @@ type controlledSearch struct {
 	checkErr error
 	read     func(context.Context, application.TotalSalesQuery) ([]domain.ProductSales, error)
 	closed   atomic.Bool
+}
+
+func (search *controlledSearch) ReadAgentSales(
+	ctx context.Context,
+	_ application.AgentSalesQuery,
+) ([]domain.AgentSales, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	amount, _ := domain.NewAgentPremiumAmount("5000.0")
+	value, _ := domain.NewAgentSalesValue(5, amount)
+	return []domain.AgentSales{{AgentLogin: "safe-agent", Value: value}}, nil
 }
 
 func (search *controlledSearch) ReadTotalSales(
@@ -565,7 +577,7 @@ func startRegressionService(
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return fakeTelemetry{}, nil
 	}
-	deps.newSearch = func(config.Elasticsearch) (application.TotalSalesReader, searchDependency, error) {
+	deps.newSearch = func(config.Elasticsearch) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
 	addresses := make(chan string, 3)

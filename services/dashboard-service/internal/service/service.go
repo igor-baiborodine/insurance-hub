@@ -72,11 +72,16 @@ type searchDependency interface {
 	CloseIdleConnections()
 }
 
+type salesReader interface {
+	application.TotalSalesReader
+	application.AgentSalesReader
+}
+
 type dependencies struct {
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newSearch      func(config.Elasticsearch) (application.TotalSalesReader, searchDependency, error)
-	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.TotalSalesExecutor) (grpcServer, error)
+	newSearch      func(config.Elasticsearch) (salesReader, searchDependency, error)
+	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.TotalSalesExecutor, transport.AgentSalesExecutor) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
 	newGateway     func(dashboardv1.DashboardServiceClient, gateway.Settings) (http.Handler, error)
 	newUnavailable func(gateway.Settings) (http.Handler, error)
@@ -91,8 +96,15 @@ func productionDependencies() dependencies {
 			return telemetry.New(ctx, name, settings)
 		},
 		newSearch: newSearchDependency,
-		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, totalSales transport.TotalSalesExecutor) (grpcServer, error) {
-			return transport.NewServer(logger, tracer, propagator, settings, totalSales)
+		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, totalSales transport.TotalSalesExecutor, agentSales transport.AgentSalesExecutor) (grpcServer, error) {
+			return transport.NewServer(
+				logger,
+				tracer,
+				propagator,
+				settings,
+				totalSales,
+				agentSales,
+			)
 		},
 		newConnection:  newGatewayConnection,
 		newGateway:     gateway.NewHandler,
@@ -113,7 +125,7 @@ func productionDependencies() dependencies {
 
 func newSearchDependency(
 	settings config.Elasticsearch,
-) (application.TotalSalesReader, searchDependency, error) {
+) (salesReader, searchDependency, error) {
 	var caCertificate []byte
 	if settings.CAFile != "" {
 		var err error
@@ -243,6 +255,12 @@ func run(
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize total-sales use case: %w", err))
 	}
+	agentSales, err := application.NewGetAgentSales(
+		newObservedAgentSalesReader(reader, dependencyObserver),
+	)
+	if err != nil {
+		return fail(fmt.Errorf("run service: initialize agent-sales use case: %w", err))
+	}
 	runtime.grpcServer, err = deps.newGRPCServer(
 		logger, provider.TracerProvider(), provider.GRPCPropagator(),
 		transport.Settings{
@@ -251,7 +269,7 @@ func run(
 			MaxSendBytes:    settings.MaxSendBytes,
 			Observer:        observer,
 			MeterProvider:   provider.MeterProvider(),
-		}, totalSales,
+		}, totalSales, agentSales,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize gRPC transport: %w", err))

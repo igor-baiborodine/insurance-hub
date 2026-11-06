@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	DashboardService_GetTotalSales_FullMethodName = "/dashboard.v1.DashboardService/GetTotalSales"
+	DashboardService_GetAgentSales_FullMethodName = "/dashboard.v1.DashboardService/GetAgentSales"
 )
 
 // DashboardServiceClient is the client API for DashboardService service.
@@ -30,6 +31,8 @@ const (
 type DashboardServiceClient interface {
 	// GetTotalSales returns the accepted legacy total-sales aggregation.
 	GetTotalSales(ctx context.Context, in *GetTotalSalesRequest, opts ...grpc.CallOption) (*GetTotalSalesResponse, error)
+	// GetAgentSales returns the accepted legacy per-agent aggregation.
+	GetAgentSales(ctx context.Context, in *GetAgentSalesRequest, opts ...grpc.CallOption) (*GetAgentSalesResponse, error)
 }
 
 type dashboardServiceClient struct {
@@ -50,6 +53,16 @@ func (c *dashboardServiceClient) GetTotalSales(ctx context.Context, in *GetTotal
 	return out, nil
 }
 
+func (c *dashboardServiceClient) GetAgentSales(ctx context.Context, in *GetAgentSalesRequest, opts ...grpc.CallOption) (*GetAgentSalesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAgentSalesResponse)
+	err := c.cc.Invoke(ctx, DashboardService_GetAgentSales_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DashboardServiceServer is the server API for DashboardService service.
 // All implementations must embed UnimplementedDashboardServiceServer
 // for forward compatibility.
@@ -58,6 +71,8 @@ func (c *dashboardServiceClient) GetTotalSales(ctx context.Context, in *GetTotal
 type DashboardServiceServer interface {
 	// GetTotalSales returns the accepted legacy total-sales aggregation.
 	GetTotalSales(context.Context, *GetTotalSalesRequest) (*GetTotalSalesResponse, error)
+	// GetAgentSales returns the accepted legacy per-agent aggregation.
+	GetAgentSales(context.Context, *GetAgentSalesRequest) (*GetAgentSalesResponse, error)
 	mustEmbedUnimplementedDashboardServiceServer()
 }
 
@@ -70,6 +85,9 @@ type UnimplementedDashboardServiceServer struct{}
 
 func (UnimplementedDashboardServiceServer) GetTotalSales(context.Context, *GetTotalSalesRequest) (*GetTotalSalesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTotalSales not implemented")
+}
+func (UnimplementedDashboardServiceServer) GetAgentSales(context.Context, *GetAgentSalesRequest) (*GetAgentSalesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAgentSales not implemented")
 }
 func (UnimplementedDashboardServiceServer) mustEmbedUnimplementedDashboardServiceServer() {}
 func (UnimplementedDashboardServiceServer) testEmbeddedByValue()                          {}
@@ -110,6 +128,24 @@ func _DashboardService_GetTotalSales_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DashboardService_GetAgentSales_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAgentSalesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DashboardServiceServer).GetAgentSales(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DashboardService_GetAgentSales_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DashboardServiceServer).GetAgentSales(ctx, req.(*GetAgentSalesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DashboardService_ServiceDesc is the grpc.ServiceDesc for DashboardService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -120,6 +156,10 @@ var DashboardService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTotalSales",
 			Handler:    _DashboardService_GetTotalSales_Handler,
+		},
+		{
+			MethodName: "GetAgentSales",
+			Handler:    _DashboardService_GetAgentSales_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

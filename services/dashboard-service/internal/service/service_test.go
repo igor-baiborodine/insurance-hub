@@ -36,7 +36,7 @@ func TestRun_TraversesRealGatewayRPCAndReadiness(t *testing.T) {
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return fakeTelemetry{}, nil
 	}
-	deps.newSearch = func(config.Elasticsearch) (application.TotalSalesReader, searchDependency, error) {
+	deps.newSearch = func(config.Elasticsearch) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
 
@@ -108,7 +108,38 @@ func TestRun_TraversesRealGatewayRPCAndReadiness(t *testing.T) {
 	if err != nil || rpcResponse.GetTotal().GetPoliciesCount() != 5 {
 		t.Fatalf("RPC response = (%v, %v)", rpcResponse, err)
 	}
-	if search.reads.Load() != 2 || search.checks.Load() < 2 {
+	agentHTTPResponse, err := http.Post(
+		"http://"+httpAddress+"/dashboard/agentssales",
+		"application/json",
+		strings.NewReader(
+			`{"agentLogin":"safe-agent","productCode":"SAFE",`+
+				`"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentHTTPBody, _ := io.ReadAll(agentHTTPResponse.Body)
+	_ = agentHTTPResponse.Body.Close()
+	if agentHTTPResponse.StatusCode != http.StatusOK || string(agentHTTPBody) !=
+		`{"perAgentTotal":{"safe-agent":{"policiesCount":5,"premiumAmount":5000.0}}}` {
+		t.Fatalf(
+			"agent HTTP response = (%d, %s)",
+			agentHTTPResponse.StatusCode,
+			agentHTTPBody,
+		)
+	}
+	agentRPCResponse, err := dashboardv1.NewDashboardServiceClient(connection).GetAgentSales(
+		context.Background(),
+		&dashboardv1.GetAgentSalesRequest{
+			SaleDateFrom: "2019-01-01", SaleDateTo: "2020-01-01",
+		},
+	)
+	if err != nil || agentRPCResponse.GetPerAgentTotal()["safe-agent"].GetPremiumAmount() !=
+		"5000.0" {
+		t.Fatalf("agent RPC response = (%v, %v)", agentRPCResponse, err)
+	}
+	if search.reads.Load() != 4 || search.checks.Load() < 2 {
 		t.Errorf(
 			"search activity = reads %d, checks %d",
 			search.reads.Load(),
@@ -134,7 +165,7 @@ func TestRun_FailsClosedWhenElasticsearchReadinessFails(t *testing.T) {
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return fakeTelemetry{}, nil
 	}
-	deps.newSearch = func(config.Elasticsearch) (application.TotalSalesReader, searchDependency, error) {
+	deps.newSearch = func(config.Elasticsearch) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
 	deps.listen = func(network, _ string) (net.Listener, error) {
@@ -185,6 +216,19 @@ func (search *fakeSearch) ReadTotalSales(
 	}
 	value, _ := domain.NewSalesValue(5, domain.NewPremiumAmount(500000))
 	return []domain.ProductSales{{ProductCode: product, Value: value}}, nil
+}
+
+func (search *fakeSearch) ReadAgentSales(
+	ctx context.Context,
+	_ application.AgentSalesQuery,
+) ([]domain.AgentSales, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	search.reads.Add(1)
+	amount, _ := domain.NewAgentPremiumAmount("5000.0")
+	value, _ := domain.NewAgentSalesValue(5, amount)
+	return []domain.AgentSales{{AgentLogin: "safe-agent", Value: value}}, nil
 }
 
 func (search *fakeSearch) Check(ctx context.Context) error {

@@ -125,6 +125,122 @@ service DashboardService {
       }
     };
   }
+
+  // GetAgentSales returns the accepted legacy per-agent aggregation.
+  rpc GetAgentSales(GetAgentSalesRequest) returns (GetAgentSalesResponse) {
+    option (google.api.http) = {
+      post: "/dashboard/agentssales"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      consumes: "application/json"
+      produces: "application/json"
+      responses: {
+        key: "200"
+        value: {
+          description: "The legacy numeric per-agent sales envelope."
+          schema: {
+            json_schema: {ref: ".dashboard.v1.AgentSalesHTTPResponse"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"perAgentTotal\":{\"m.smith\":{\"policiesCount\":3,\"premiumAmount\":3000.0}}}"
+          }
+        }
+      }
+      responses: {
+        key: "400"
+        value: {
+          description: "The request is invalid."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":3,\"message\":\"invalid request\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "413"
+        value: {
+          description: "The request body is too large."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":8,\"message\":\"request body too large\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "415"
+        value: {
+          description: "The request media type is not supported."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":3,\"message\":\"unsupported media type\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "499"
+        value: {
+          description: "The request was canceled."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":1,\"message\":\"request canceled\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "500"
+        value: {
+          description: "The request failed unexpectedly."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":13,\"message\":\"internal error\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "503"
+        value: {
+          description: "The RPC service is unavailable."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":14,\"message\":\"service unavailable\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "504"
+        value: {
+          description: "The RPC deadline was exceeded."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}"
+          }
+        }
+      }
+    };
+  }
 }
 
 message GetTotalSalesRequest {
@@ -143,6 +259,22 @@ message GetTotalSalesResponse {
   map<string, SalesValue> per_product_total = 2;
 }
 
+message GetAgentSalesRequest {
+  optional string agent_login = 1;
+  optional string product_code = 2;
+  string sale_date_from = 3 [(buf.validate.field).string = {pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}];
+  string sale_date_to = 4 [(buf.validate.field).string = {pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}];
+}
+
+message AgentSalesValue {
+  int64 policies_count = 1;
+  string premium_amount = 2;
+}
+
+message GetAgentSalesResponse {
+  map<string, AgentSalesValue> per_agent_total = 1;
+}
+
 // TotalSalesHTTPValue documents the legacy JSON representation written by the gateway adapter.
 message TotalSalesHTTPValue {
   int64 policies_count = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
@@ -159,4 +291,18 @@ message TotalSalesHTTPValue {
 message TotalSalesHTTPResponse {
   TotalSalesHTTPValue total = 1;
   map<string, TotalSalesHTTPValue> per_product_total = 2;
+}
+
+// AgentSalesHTTPValue documents the legacy numeric JSON representation.
+message AgentSalesHTTPValue {
+  int64 policies_count = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    type: INTEGER
+    format: "int64"
+  }];
+  double premium_amount = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {type: NUMBER}];
+}
+
+// AgentSalesHTTPResponse is documentation-only; the RPC amount remains an exact decimal string.
+message AgentSalesHTTPResponse {
+  map<string, AgentSalesHTTPValue> per_agent_total = 1;
 }

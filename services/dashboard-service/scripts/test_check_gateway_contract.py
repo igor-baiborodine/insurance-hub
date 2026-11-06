@@ -1,4 +1,4 @@
-"""Independent fixtures for the generated total-sales Swagger contract check."""
+"""Independent fixtures for the generated Dashboard Swagger contract check."""
 
 from __future__ import annotations
 
@@ -20,12 +20,12 @@ def test_current_generated_swagger_matches_contract() -> None:
     check_gateway_contract.check_contract(CONTRACT, SWAGGER)
 
 
-def change_path(swagger: dict[str, Any]) -> None:
-    swagger["paths"]["/dashboard/changed"] = swagger["paths"].pop("/dashboard/totalsales")
+def remove_agent_path(swagger: dict[str, Any]) -> None:
+    del swagger["paths"]["/dashboard/agentssales"]
 
 
 def change_status_example(swagger: dict[str, Any]) -> None:
-    swagger["paths"]["/dashboard/totalsales"]["post"]["responses"]["503"]["examples"][
+    swagger["paths"]["/dashboard/agentssales"]["post"]["responses"]["503"]["examples"][
         "application/json"
     ]["message"] = "raw upstream failure"
 
@@ -42,13 +42,20 @@ def quote_policy_count(swagger: dict[str, Any]) -> None:
     )
 
 
+def quote_agent_money(swagger: dict[str, Any]) -> None:
+    swagger["definitions"]["v1AgentSalesHTTPValue"]["properties"]["premiumAmount"]["type"] = (
+        "string"
+    )
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
-        (change_path, "paths must contain only"),
-        (change_status_example, "response 503 example differs"),
-        (add_response, "response status set differs"),
+        (remove_agent_path, "paths differ from the contract"),
+        (change_status_example, "agent_sales response 503 example differs"),
+        (add_response, "total_sales response status set differs"),
         (quote_policy_count, "v1TotalSalesHTTPValue.policiesCount must have type integer"),
+        (quote_agent_money, "v1AgentSalesHTTPValue.premiumAmount must have type number"),
     ],
 )
 def test_contract_check_rejects_controlled_swagger_drift(

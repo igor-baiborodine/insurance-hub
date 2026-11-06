@@ -17,6 +17,140 @@
     "application/json"
   ],
   "paths": {
+    "/dashboard/agentssales": {
+      "post": {
+        "summary": "GetAgentSales returns the accepted legacy per-agent aggregation.",
+        "operationId": "DashboardService_GetAgentSales",
+        "responses": {
+          "200": {
+            "description": "The legacy numeric per-agent sales envelope.",
+            "schema": {
+              "$ref": "#/definitions/v1AgentSalesHTTPResponse"
+            },
+            "examples": {
+              "application/json": {
+                "perAgentTotal": {
+                  "m.smith": {
+                    "policiesCount": 3,
+                    "premiumAmount": 3000.0
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "invalid request",
+                "details": []
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is too large.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 8,
+                "message": "request body too large",
+                "details": []
+              }
+            }
+          },
+          "415": {
+            "description": "The request media type is not supported.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "unsupported media type",
+                "details": []
+              }
+            }
+          },
+          "499": {
+            "description": "The request was canceled.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 1,
+                "message": "request canceled",
+                "details": []
+              }
+            }
+          },
+          "500": {
+            "description": "The request failed unexpectedly.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 13,
+                "message": "internal error",
+                "details": []
+              }
+            }
+          },
+          "503": {
+            "description": "The RPC service is unavailable.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 14,
+                "message": "service unavailable",
+                "details": []
+              }
+            }
+          },
+          "504": {
+            "description": "The RPC deadline was exceeded.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 4,
+                "message": "deadline exceeded",
+                "details": []
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1GetAgentSalesRequest"
+            }
+          }
+        ],
+        "tags": [
+          "DashboardService"
+        ],
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ]
+      }
+    },
     "/dashboard/totalsales": {
       "post": {
         "summary": "GetTotalSales returns the accepted legacy total-sales aggregation.",
@@ -181,6 +315,72 @@
           "items": {
             "type": "object",
             "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1AgentSalesHTTPResponse": {
+      "type": "object",
+      "properties": {
+        "perAgentTotal": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/v1AgentSalesHTTPValue"
+          }
+        }
+      },
+      "description": "AgentSalesHTTPResponse is documentation-only; the RPC amount remains an exact decimal string."
+    },
+    "v1AgentSalesHTTPValue": {
+      "type": "object",
+      "properties": {
+        "policiesCount": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "premiumAmount": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "description": "AgentSalesHTTPValue documents the legacy numeric JSON representation."
+    },
+    "v1AgentSalesValue": {
+      "type": "object",
+      "properties": {
+        "policiesCount": {
+          "type": "string",
+          "format": "int64"
+        },
+        "premiumAmount": {
+          "type": "string"
+        }
+      }
+    },
+    "v1GetAgentSalesRequest": {
+      "type": "object",
+      "properties": {
+        "agentLogin": {
+          "type": "string"
+        },
+        "productCode": {
+          "type": "string"
+        },
+        "saleDateFrom": {
+          "type": "string"
+        },
+        "saleDateTo": {
+          "type": "string"
+        }
+      }
+    },
+    "v1GetAgentSalesResponse": {
+      "type": "object",
+      "properties": {
+        "perAgentTotal": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/v1AgentSalesValue"
           }
         }
       }

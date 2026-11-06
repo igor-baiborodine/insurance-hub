@@ -29,3 +29,25 @@ func (reader *observedTotalSalesReader) ReadTotalSales(
 	observation.Finish(dependencyCtx, err)
 	return result, err
 }
+
+type observedAgentSalesReader struct {
+	reader   application.AgentSalesReader
+	observer *telemetry.DependencyObserver
+}
+
+func newObservedAgentSalesReader(
+	reader application.AgentSalesReader,
+	observer *telemetry.DependencyObserver,
+) application.AgentSalesReader {
+	return &observedAgentSalesReader{reader: reader, observer: observer}
+}
+
+func (reader *observedAgentSalesReader) ReadAgentSales(
+	ctx context.Context,
+	query application.AgentSalesQuery,
+) ([]domain.AgentSales, error) {
+	dependencyCtx, observation := reader.observer.StartElasticsearch(ctx)
+	result, err := reader.reader.ReadAgentSales(dependencyCtx, query)
+	observation.Finish(dependencyCtx, err)
+	return result, err
+}

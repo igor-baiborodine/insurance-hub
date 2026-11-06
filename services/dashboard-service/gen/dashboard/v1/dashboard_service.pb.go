@@ -188,6 +188,170 @@ func (x *GetTotalSalesResponse) GetPerProductTotal() map[string]*SalesValue {
 	return nil
 }
 
+type GetAgentSalesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentLogin    *string                `protobuf:"bytes,1,opt,name=agent_login,json=agentLogin,proto3,oneof" json:"agent_login,omitempty"`
+	ProductCode   *string                `protobuf:"bytes,2,opt,name=product_code,json=productCode,proto3,oneof" json:"product_code,omitempty"`
+	SaleDateFrom  string                 `protobuf:"bytes,3,opt,name=sale_date_from,json=saleDateFrom,proto3" json:"sale_date_from,omitempty"`
+	SaleDateTo    string                 `protobuf:"bytes,4,opt,name=sale_date_to,json=saleDateTo,proto3" json:"sale_date_to,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAgentSalesRequest) Reset() {
+	*x = GetAgentSalesRequest{}
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAgentSalesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAgentSalesRequest) ProtoMessage() {}
+
+func (x *GetAgentSalesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAgentSalesRequest.ProtoReflect.Descriptor instead.
+func (*GetAgentSalesRequest) Descriptor() ([]byte, []int) {
+	return file_dashboard_v1_dashboard_service_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetAgentSalesRequest) GetAgentLogin() string {
+	if x != nil && x.AgentLogin != nil {
+		return *x.AgentLogin
+	}
+	return ""
+}
+
+func (x *GetAgentSalesRequest) GetProductCode() string {
+	if x != nil && x.ProductCode != nil {
+		return *x.ProductCode
+	}
+	return ""
+}
+
+func (x *GetAgentSalesRequest) GetSaleDateFrom() string {
+	if x != nil {
+		return x.SaleDateFrom
+	}
+	return ""
+}
+
+func (x *GetAgentSalesRequest) GetSaleDateTo() string {
+	if x != nil {
+		return x.SaleDateTo
+	}
+	return ""
+}
+
+type AgentSalesValue struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PoliciesCount int64                  `protobuf:"varint,1,opt,name=policies_count,json=policiesCount,proto3" json:"policies_count,omitempty"`
+	PremiumAmount string                 `protobuf:"bytes,2,opt,name=premium_amount,json=premiumAmount,proto3" json:"premium_amount,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentSalesValue) Reset() {
+	*x = AgentSalesValue{}
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentSalesValue) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentSalesValue) ProtoMessage() {}
+
+func (x *AgentSalesValue) ProtoReflect() protoreflect.Message {
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentSalesValue.ProtoReflect.Descriptor instead.
+func (*AgentSalesValue) Descriptor() ([]byte, []int) {
+	return file_dashboard_v1_dashboard_service_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *AgentSalesValue) GetPoliciesCount() int64 {
+	if x != nil {
+		return x.PoliciesCount
+	}
+	return 0
+}
+
+func (x *AgentSalesValue) GetPremiumAmount() string {
+	if x != nil {
+		return x.PremiumAmount
+	}
+	return ""
+}
+
+type GetAgentSalesResponse struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	PerAgentTotal map[string]*AgentSalesValue `protobuf:"bytes,1,rep,name=per_agent_total,json=perAgentTotal,proto3" json:"per_agent_total,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAgentSalesResponse) Reset() {
+	*x = GetAgentSalesResponse{}
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAgentSalesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAgentSalesResponse) ProtoMessage() {}
+
+func (x *GetAgentSalesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAgentSalesResponse.ProtoReflect.Descriptor instead.
+func (*GetAgentSalesResponse) Descriptor() ([]byte, []int) {
+	return file_dashboard_v1_dashboard_service_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GetAgentSalesResponse) GetPerAgentTotal() map[string]*AgentSalesValue {
+	if x != nil {
+		return x.PerAgentTotal
+	}
+	return nil
+}
+
 // TotalSalesHTTPValue documents the legacy JSON representation written by the gateway adapter.
 type TotalSalesHTTPValue struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -199,7 +363,7 @@ type TotalSalesHTTPValue struct {
 
 func (x *TotalSalesHTTPValue) Reset() {
 	*x = TotalSalesHTTPValue{}
-	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[3]
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -211,7 +375,7 @@ func (x *TotalSalesHTTPValue) String() string {
 func (*TotalSalesHTTPValue) ProtoMessage() {}
 
 func (x *TotalSalesHTTPValue) ProtoReflect() protoreflect.Message {
-	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[3]
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -224,7 +388,7 @@ func (x *TotalSalesHTTPValue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TotalSalesHTTPValue.ProtoReflect.Descriptor instead.
 func (*TotalSalesHTTPValue) Descriptor() ([]byte, []int) {
-	return file_dashboard_v1_dashboard_service_proto_rawDescGZIP(), []int{3}
+	return file_dashboard_v1_dashboard_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *TotalSalesHTTPValue) GetPoliciesCount() int64 {
@@ -252,7 +416,7 @@ type TotalSalesHTTPResponse struct {
 
 func (x *TotalSalesHTTPResponse) Reset() {
 	*x = TotalSalesHTTPResponse{}
-	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[4]
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -264,7 +428,7 @@ func (x *TotalSalesHTTPResponse) String() string {
 func (*TotalSalesHTTPResponse) ProtoMessage() {}
 
 func (x *TotalSalesHTTPResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[4]
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -277,7 +441,7 @@ func (x *TotalSalesHTTPResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TotalSalesHTTPResponse.ProtoReflect.Descriptor instead.
 func (*TotalSalesHTTPResponse) Descriptor() ([]byte, []int) {
-	return file_dashboard_v1_dashboard_service_proto_rawDescGZIP(), []int{4}
+	return file_dashboard_v1_dashboard_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *TotalSalesHTTPResponse) GetTotal() *TotalSalesHTTPValue {
@@ -290,6 +454,104 @@ func (x *TotalSalesHTTPResponse) GetTotal() *TotalSalesHTTPValue {
 func (x *TotalSalesHTTPResponse) GetPerProductTotal() map[string]*TotalSalesHTTPValue {
 	if x != nil {
 		return x.PerProductTotal
+	}
+	return nil
+}
+
+// AgentSalesHTTPValue documents the legacy numeric JSON representation.
+type AgentSalesHTTPValue struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PoliciesCount int64                  `protobuf:"varint,1,opt,name=policies_count,json=policiesCount,proto3" json:"policies_count,omitempty"`
+	PremiumAmount float64                `protobuf:"fixed64,2,opt,name=premium_amount,json=premiumAmount,proto3" json:"premium_amount,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentSalesHTTPValue) Reset() {
+	*x = AgentSalesHTTPValue{}
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentSalesHTTPValue) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentSalesHTTPValue) ProtoMessage() {}
+
+func (x *AgentSalesHTTPValue) ProtoReflect() protoreflect.Message {
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentSalesHTTPValue.ProtoReflect.Descriptor instead.
+func (*AgentSalesHTTPValue) Descriptor() ([]byte, []int) {
+	return file_dashboard_v1_dashboard_service_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *AgentSalesHTTPValue) GetPoliciesCount() int64 {
+	if x != nil {
+		return x.PoliciesCount
+	}
+	return 0
+}
+
+func (x *AgentSalesHTTPValue) GetPremiumAmount() float64 {
+	if x != nil {
+		return x.PremiumAmount
+	}
+	return 0
+}
+
+// AgentSalesHTTPResponse is documentation-only; the RPC amount remains an exact decimal string.
+type AgentSalesHTTPResponse struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	PerAgentTotal map[string]*AgentSalesHTTPValue `protobuf:"bytes,1,rep,name=per_agent_total,json=perAgentTotal,proto3" json:"per_agent_total,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentSalesHTTPResponse) Reset() {
+	*x = AgentSalesHTTPResponse{}
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentSalesHTTPResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentSalesHTTPResponse) ProtoMessage() {}
+
+func (x *AgentSalesHTTPResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_dashboard_v1_dashboard_service_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentSalesHTTPResponse.ProtoReflect.Descriptor instead.
+func (*AgentSalesHTTPResponse) Descriptor() ([]byte, []int) {
+	return file_dashboard_v1_dashboard_service_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AgentSalesHTTPResponse) GetPerAgentTotal() map[string]*AgentSalesHTTPValue {
+	if x != nil {
+		return x.PerAgentTotal
 	}
 	return nil
 }
@@ -314,7 +576,24 @@ const file_dashboard_v1_dashboard_service_proto_rawDesc = "" +
 	"\x11per_product_total\x18\x02 \x03(\v28.dashboard.v1.GetTotalSalesResponse.PerProductTotalEntryR\x0fperProductTotal\x1a\\\n" +
 	"\x14PerProductTotalEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12.\n" +
-	"\x05value\x18\x02 \x01(\v2\x18.dashboard.v1.SalesValueR\x05value:\x028\x01\"\x86\x01\n" +
+	"\x05value\x18\x02 \x01(\v2\x18.dashboard.v1.SalesValueR\x05value:\x028\x01\"\x97\x02\n" +
+	"\x14GetAgentSalesRequest\x12$\n" +
+	"\vagent_login\x18\x01 \x01(\tH\x00R\n" +
+	"agentLogin\x88\x01\x01\x12&\n" +
+	"\fproduct_code\x18\x02 \x01(\tH\x01R\vproductCode\x88\x01\x01\x12I\n" +
+	"\x0esale_date_from\x18\x03 \x01(\tB#\xbaH r\x1e2\x1c^[0-9]{4}-[0-9]{2}-[0-9]{2}$R\fsaleDateFrom\x12E\n" +
+	"\fsale_date_to\x18\x04 \x01(\tB#\xbaH r\x1e2\x1c^[0-9]{4}-[0-9]{2}-[0-9]{2}$R\n" +
+	"saleDateToB\x0e\n" +
+	"\f_agent_loginB\x0f\n" +
+	"\r_product_code\"_\n" +
+	"\x0fAgentSalesValue\x12%\n" +
+	"\x0epolicies_count\x18\x01 \x01(\x03R\rpoliciesCount\x12%\n" +
+	"\x0epremium_amount\x18\x02 \x01(\tR\rpremiumAmount\"\xd8\x01\n" +
+	"\x15GetAgentSalesResponse\x12^\n" +
+	"\x0fper_agent_total\x18\x01 \x03(\v26.dashboard.v1.GetAgentSalesResponse.PerAgentTotalEntryR\rperAgentTotal\x1a_\n" +
+	"\x12PerAgentTotalEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
+	"\x05value\x18\x02 \x01(\v2\x1d.dashboard.v1.AgentSalesValueR\x05value:\x028\x01\"\x86\x01\n" +
 	"\x13TotalSalesHTTPValue\x126\n" +
 	"\x0epolicies_count\x18\x01 \x01(\x03B\x0f\x92A\f\x9a\x02\x01\x03\xa2\x02\x05int64R\rpoliciesCount\x127\n" +
 	"\x0epremium_amount\x18\x02 \x01(\x01B\x10\x92A\r\x9a\x02\x01\x05\xa2\x02\x06doubleR\rpremiumAmount\"\x9f\x02\n" +
@@ -323,7 +602,15 @@ const file_dashboard_v1_dashboard_service_proto_rawDesc = "" +
 	"\x11per_product_total\x18\x02 \x03(\v29.dashboard.v1.TotalSalesHTTPResponse.PerProductTotalEntryR\x0fperProductTotal\x1ae\n" +
 	"\x14PerProductTotalEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
-	"\x05value\x18\x02 \x01(\v2!.dashboard.v1.TotalSalesHTTPValueR\x05value:\x028\x012\x99\v\n" +
+	"\x05value\x18\x02 \x01(\v2!.dashboard.v1.TotalSalesHTTPValueR\x05value:\x028\x01\"}\n" +
+	"\x13AgentSalesHTTPValue\x126\n" +
+	"\x0epolicies_count\x18\x01 \x01(\x03B\x0f\x92A\f\x9a\x02\x01\x03\xa2\x02\x05int64R\rpoliciesCount\x12.\n" +
+	"\x0epremium_amount\x18\x02 \x01(\x01B\a\x92A\x04\x9a\x02\x01\x05R\rpremiumAmount\"\xde\x01\n" +
+	"\x16AgentSalesHTTPResponse\x12_\n" +
+	"\x0fper_agent_total\x18\x01 \x03(\v27.dashboard.v1.AgentSalesHTTPResponse.PerAgentTotalEntryR\rperAgentTotal\x1ac\n" +
+	"\x12PerAgentTotalEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
+	"\x05value\x18\x02 \x01(\v2!.dashboard.v1.AgentSalesHTTPValueR\x05value:\x028\x012\xea\x15\n" +
 	"\x10DashboardService\x12\x84\v\n" +
 	"\rGetTotalSales\x12\".dashboard.v1.GetTotalSalesRequest\x1a#.dashboard.v1.GetTotalSalesResponse\"\xa9\n" +
 	"\x92A\x85\n" +
@@ -359,7 +646,41 @@ const file_dashboard_v1_dashboard_service_proto_rawDesc = "" +
 	"\x03504\x12\x83\x01\n" +
 	"\x1eThe RPC deadline was exceeded.\x12\x16\n" +
 	"\x14\x1a\x12.google.rpc.Status\"I\n" +
-	"\x10application/json\x125{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}\x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/dashboard/totalsalesBcZagithub.com/igor-baiborodine/insurance-hub/services/dashboard-service/gen/dashboard/v1;dashboardv1b\x06proto3"
+	"\x10application/json\x125{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}\x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/dashboard/totalsales\x12\xce\n" +
+	"\n" +
+	"\rGetAgentSales\x12\".dashboard.v1.GetAgentSalesRequest\x1a#.dashboard.v1.GetAgentSalesResponse\"\xf3\t\x92A\xce\t2\x10application/json:\x10application/jsonJ\xbe\x01\n" +
+	"\x03200\x12\xb6\x01\n" +
+	",The legacy numeric per-agent sales envelope.\x12(\n" +
+	"&\x1a$.dashboard.v1.AgentSalesHTTPResponse\"\\\n" +
+	"\x10application/json\x12H{\"perAgentTotal\":{\"m.smith\":{\"policiesCount\":3,\"premiumAmount\":3000.0}}}J\x81\x01\n" +
+	"\x03400\x12z\n" +
+	"\x17The request is invalid.\x12\x16\n" +
+	"\x14\x1a\x12.google.rpc.Status\"G\n" +
+	"\x10application/json\x123{\"code\":3,\"message\":\"invalid request\",\"details\":[]}J\x90\x01\n" +
+	"\x03413\x12\x88\x01\n" +
+	"\x1eThe request body is too large.\x12\x16\n" +
+	"\x14\x1a\x12.google.rpc.Status\"N\n" +
+	"\x10application/json\x12:{\"code\":8,\"message\":\"request body too large\",\"details\":[]}J\x9a\x01\n" +
+	"\x03415\x12\x92\x01\n" +
+	"(The request media type is not supported.\x12\x16\n" +
+	"\x14\x1a\x12.google.rpc.Status\"N\n" +
+	"\x10application/json\x12:{\"code\":3,\"message\":\"unsupported media type\",\"details\":[]}J\x84\x01\n" +
+	"\x03499\x12}\n" +
+	"\x19The request was canceled.\x12\x16\n" +
+	"\x14\x1a\x12.google.rpc.Status\"H\n" +
+	"\x10application/json\x124{\"code\":1,\"message\":\"request canceled\",\"details\":[]}J\x8b\x01\n" +
+	"\x03500\x12\x83\x01\n" +
+	" The request failed unexpectedly.\x12\x16\n" +
+	"\x14\x1a\x12.google.rpc.Status\"G\n" +
+	"\x10application/json\x123{\"code\":13,\"message\":\"internal error\",\"details\":[]}J\x8f\x01\n" +
+	"\x03503\x12\x87\x01\n" +
+	"\x1fThe RPC service is unavailable.\x12\x16\n" +
+	"\x14\x1a\x12.google.rpc.Status\"L\n" +
+	"\x10application/json\x128{\"code\":14,\"message\":\"service unavailable\",\"details\":[]}J\x8b\x01\n" +
+	"\x03504\x12\x83\x01\n" +
+	"\x1eThe RPC deadline was exceeded.\x12\x16\n" +
+	"\x14\x1a\x12.google.rpc.Status\"I\n" +
+	"\x10application/json\x125{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/dashboard/agentssalesBcZagithub.com/igor-baiborodine/insurance-hub/services/dashboard-service/gen/dashboard/v1;dashboardv1b\x06proto3"
 
 var (
 	file_dashboard_v1_dashboard_service_proto_rawDescOnce sync.Once
@@ -373,30 +694,43 @@ func file_dashboard_v1_dashboard_service_proto_rawDescGZIP() []byte {
 	return file_dashboard_v1_dashboard_service_proto_rawDescData
 }
 
-var file_dashboard_v1_dashboard_service_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_dashboard_v1_dashboard_service_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_dashboard_v1_dashboard_service_proto_goTypes = []any{
 	(*GetTotalSalesRequest)(nil),   // 0: dashboard.v1.GetTotalSalesRequest
 	(*SalesValue)(nil),             // 1: dashboard.v1.SalesValue
 	(*GetTotalSalesResponse)(nil),  // 2: dashboard.v1.GetTotalSalesResponse
-	(*TotalSalesHTTPValue)(nil),    // 3: dashboard.v1.TotalSalesHTTPValue
-	(*TotalSalesHTTPResponse)(nil), // 4: dashboard.v1.TotalSalesHTTPResponse
-	nil,                            // 5: dashboard.v1.GetTotalSalesResponse.PerProductTotalEntry
-	nil,                            // 6: dashboard.v1.TotalSalesHTTPResponse.PerProductTotalEntry
+	(*GetAgentSalesRequest)(nil),   // 3: dashboard.v1.GetAgentSalesRequest
+	(*AgentSalesValue)(nil),        // 4: dashboard.v1.AgentSalesValue
+	(*GetAgentSalesResponse)(nil),  // 5: dashboard.v1.GetAgentSalesResponse
+	(*TotalSalesHTTPValue)(nil),    // 6: dashboard.v1.TotalSalesHTTPValue
+	(*TotalSalesHTTPResponse)(nil), // 7: dashboard.v1.TotalSalesHTTPResponse
+	(*AgentSalesHTTPValue)(nil),    // 8: dashboard.v1.AgentSalesHTTPValue
+	(*AgentSalesHTTPResponse)(nil), // 9: dashboard.v1.AgentSalesHTTPResponse
+	nil,                            // 10: dashboard.v1.GetTotalSalesResponse.PerProductTotalEntry
+	nil,                            // 11: dashboard.v1.GetAgentSalesResponse.PerAgentTotalEntry
+	nil,                            // 12: dashboard.v1.TotalSalesHTTPResponse.PerProductTotalEntry
+	nil,                            // 13: dashboard.v1.AgentSalesHTTPResponse.PerAgentTotalEntry
 }
 var file_dashboard_v1_dashboard_service_proto_depIdxs = []int32{
-	1, // 0: dashboard.v1.GetTotalSalesResponse.total:type_name -> dashboard.v1.SalesValue
-	5, // 1: dashboard.v1.GetTotalSalesResponse.per_product_total:type_name -> dashboard.v1.GetTotalSalesResponse.PerProductTotalEntry
-	3, // 2: dashboard.v1.TotalSalesHTTPResponse.total:type_name -> dashboard.v1.TotalSalesHTTPValue
-	6, // 3: dashboard.v1.TotalSalesHTTPResponse.per_product_total:type_name -> dashboard.v1.TotalSalesHTTPResponse.PerProductTotalEntry
-	1, // 4: dashboard.v1.GetTotalSalesResponse.PerProductTotalEntry.value:type_name -> dashboard.v1.SalesValue
-	3, // 5: dashboard.v1.TotalSalesHTTPResponse.PerProductTotalEntry.value:type_name -> dashboard.v1.TotalSalesHTTPValue
-	0, // 6: dashboard.v1.DashboardService.GetTotalSales:input_type -> dashboard.v1.GetTotalSalesRequest
-	2, // 7: dashboard.v1.DashboardService.GetTotalSales:output_type -> dashboard.v1.GetTotalSalesResponse
-	7, // [7:8] is the sub-list for method output_type
-	6, // [6:7] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	1,  // 0: dashboard.v1.GetTotalSalesResponse.total:type_name -> dashboard.v1.SalesValue
+	10, // 1: dashboard.v1.GetTotalSalesResponse.per_product_total:type_name -> dashboard.v1.GetTotalSalesResponse.PerProductTotalEntry
+	11, // 2: dashboard.v1.GetAgentSalesResponse.per_agent_total:type_name -> dashboard.v1.GetAgentSalesResponse.PerAgentTotalEntry
+	6,  // 3: dashboard.v1.TotalSalesHTTPResponse.total:type_name -> dashboard.v1.TotalSalesHTTPValue
+	12, // 4: dashboard.v1.TotalSalesHTTPResponse.per_product_total:type_name -> dashboard.v1.TotalSalesHTTPResponse.PerProductTotalEntry
+	13, // 5: dashboard.v1.AgentSalesHTTPResponse.per_agent_total:type_name -> dashboard.v1.AgentSalesHTTPResponse.PerAgentTotalEntry
+	1,  // 6: dashboard.v1.GetTotalSalesResponse.PerProductTotalEntry.value:type_name -> dashboard.v1.SalesValue
+	4,  // 7: dashboard.v1.GetAgentSalesResponse.PerAgentTotalEntry.value:type_name -> dashboard.v1.AgentSalesValue
+	6,  // 8: dashboard.v1.TotalSalesHTTPResponse.PerProductTotalEntry.value:type_name -> dashboard.v1.TotalSalesHTTPValue
+	8,  // 9: dashboard.v1.AgentSalesHTTPResponse.PerAgentTotalEntry.value:type_name -> dashboard.v1.AgentSalesHTTPValue
+	0,  // 10: dashboard.v1.DashboardService.GetTotalSales:input_type -> dashboard.v1.GetTotalSalesRequest
+	3,  // 11: dashboard.v1.DashboardService.GetAgentSales:input_type -> dashboard.v1.GetAgentSalesRequest
+	2,  // 12: dashboard.v1.DashboardService.GetTotalSales:output_type -> dashboard.v1.GetTotalSalesResponse
+	5,  // 13: dashboard.v1.DashboardService.GetAgentSales:output_type -> dashboard.v1.GetAgentSalesResponse
+	12, // [12:14] is the sub-list for method output_type
+	10, // [10:12] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_dashboard_v1_dashboard_service_proto_init() }
@@ -405,13 +739,14 @@ func file_dashboard_v1_dashboard_service_proto_init() {
 		return
 	}
 	file_dashboard_v1_dashboard_service_proto_msgTypes[0].OneofWrappers = []any{}
+	file_dashboard_v1_dashboard_service_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_dashboard_v1_dashboard_service_proto_rawDesc), len(file_dashboard_v1_dashboard_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
