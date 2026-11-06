@@ -8,6 +8,7 @@ INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py scripts/deployment.py \
+	scripts/reader_administration.py scripts/test_reader_administration.py \
 	scripts/disposable_deployment.py scripts/image_check.py scripts/service_process.py \
 	scripts/test_image_check.py \
 	scripts/elasticsearch_integration.py scripts/test_elasticsearch_integration.py \
@@ -20,6 +21,7 @@ PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_elasticsearch_integration.py \
 	scripts/test_image_check.py \
 	scripts/test_deployment.py \
+	scripts/test_reader_administration.py \
 	scripts/test_disposable_command.py \
 	scripts/test_service_process.py \
 	scripts/test_tooling_runner.py)
@@ -103,7 +105,8 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling test-integration test-elasticsearch-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
 	image-build image-check _image-check-existing deploy-render deploy-check \
-	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
+	deploy-preflight deploy-status image-load deploy deploy-verify stop \
+	reader-ensure reader-verify reader-rotate deploy-test-tooling deploy-test \
 	_deploy-test-rpc \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
@@ -139,9 +142,13 @@ deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runt
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" scripts/deployment.py '$@'
 
+reader-ensure reader-verify reader-rotate: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/reader_administration.py '$(@:reader-%=%)'
+
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Dashboard deployment guards
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		"$(PYTHON)" -m pytest -q scripts/test_deployment.py
+		"$(PYTHON)" -m pytest -q scripts/test_deployment.py scripts/test_reader_administration.py
 
 deploy-test: python-toolchain-check image-build ## Exercise Dashboard in an owned disposable Kind namespace
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" \

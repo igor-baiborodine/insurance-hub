@@ -164,6 +164,15 @@ dispatch/release registration are owned at the repository root. The service owns
 render/check and guarded direct local-dev operations. QA remains Flux-owned; direct QA apply,
 image load, stop and Flux suspension are forbidden.
 
+Before either shared target is deployed or verified, its environment administrator provisions the
+dedicated Elasticsearch reader through the Dashboard owner. `reader-ensure` is idempotent for
+fully absent or fully owned state, `reader-verify` is read-only, and `reader-rotate` is the explicit
+recovery path when an owned reader identity exists without a recoverable workload Secret. Each
+mutation requires the environment-specific `DASHBOARD_READER_CONFIRM` value documented in the
+[deployment runbook](../../docs/migration/phase-4/dashboard-service/deployment-runbook.md). The
+owner never creates or changes `policy_stats`, prints credentials, or places credentials on a host
+command line.
+
 The guarded local-dev sequence uses catalog service `dashboard`, context
 `kind-local-dev-insurance-hub` and namespace coordinate `local-dev-all`:
 

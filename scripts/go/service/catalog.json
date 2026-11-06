@@ -247,12 +247,21 @@
         "deploy",
         "deploy-verify",
         "stop",
+        "reader-ensure",
+        "reader-verify",
+        "reader-rotate",
         "deploy-test-tooling",
         "deploy-test"
       ],
       "releaseTargets": [
         "qa"
       ],
+      "readerAdministration": {
+        "owner": "issue-287",
+        "index": "policy_stats",
+        "role": "go_dashboard_total_sales_reader",
+        "user": "go_dashboard_total_sales_reader"
+      },
       "deploymentTargets": {
         "local-dev": {
           "mode": "direct",
@@ -260,6 +269,14 @@
           "namespace": "local-dev-all",
           "dataNamespace": "local-dev-all",
           "overlay": "k8s/overlays/local-dev/svc/dashboard",
+          "readerAdministration": {
+            "service": "local-dev-elasticsearch-es-http",
+            "adminSecret": "local-dev-elasticsearch-es-elastic-user",
+            "workloadSecret": "local-dev-dashboard-elasticsearch",
+            "publicCASecret": "",
+            "workloadCASecret": "",
+            "serverName": ""
+          },
           "kindCluster": "local-dev-insurance-hub"
         },
         "qa": {
@@ -268,6 +285,14 @@
           "namespace": "qa-svc",
           "dataNamespace": "qa-data",
           "overlay": "k8s/overlays/qa/svc/dashboard",
+          "readerAdministration": {
+            "service": "qa-elasticsearch-es-http",
+            "adminSecret": "qa-elasticsearch-es-elastic-user",
+            "workloadSecret": "qa-dashboard-elasticsearch",
+            "publicCASecret": "qa-elasticsearch-es-http-certs-public",
+            "workloadCASecret": "qa-dashboard-elasticsearch-ca",
+            "serverName": "qa-elasticsearch-es-http.qa-data.svc"
+          },
           "flux": {
             "namespace": "flux-system",
             "sourcePrefix": "qa-dashboard-release",
