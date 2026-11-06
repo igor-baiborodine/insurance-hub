@@ -35,9 +35,11 @@ MANAGEMENT_CLIENT_LABEL = "insurance-hub.io/dashboard-management-client"
 JAVA_NAMES = {"dashboard-api-legacy"}
 DENIED_QUALIFICATION_PODS = {
     "dashboard-qualification-marker-only",
+    "dashboard-qualification-marker-only-agent-denied",
     "dashboard-qualification-marker-only-grpc-denied",
     "dashboard-qualification-business-management-denied",
     "dashboard-qualification-cross-namespace-denied",
+    "dashboard-qualification-cross-namespace-agent-denied",
     "dashboard-qualification-cross-namespace-grpc-denied",
 }
 GRPC_REACHABLE_QUALIFICATION_POD = "dashboard-qualification-business-grpc"
@@ -1298,18 +1300,27 @@ fi
 config=/tmp/elasticsearch-curl.conf
 umask 077
 printf 'user = "%s:%s"\\n' "$ES_USER" "$ES_PASSWORD" >"$config"
-trap 'rm -f "$config" /tmp/response' EXIT
+trap 'rm -f "$config" /tmp/response /tmp/privileges' EXIT
 request() {{
   curl --config "$config" --silent --show-error --max-time 5 {trust} \
     --output /tmp/response --write-out '%{{http_code}}' "$@"
 }}
-{missing_ca}test "$(request "{url}/policy_stats/_count")" = 200
-test "$(request "{url}/policy_stats/_mapping")" = 200
-test "$(request "{url}/_security/user/_privileges")" = 200
-cat /tmp/response
-test "$(request "{url}/issue-287-unrelated/_search")" = 403
-test "$(request "{url}/_cluster/health")" = 403
-test "$(request "{url}/_security/role/go_dashboard_total_sales_reader")" = 403
+{missing_ca}failed=0
+check_status() {{
+  expected=$1
+  shift
+  actual=$(request "$@") || {{ failed=1; return; }}
+  test "$actual" = "$expected" || failed=1
+}}
+check_status 200 "{url}/policy_stats/_count"
+check_status 200 "{url}/policy_stats/_mapping"
+check_status 200 "{url}/_security/user/_privileges"
+cp /tmp/response /tmp/privileges
+check_status 403 "{url}/issue-287-unrelated/_search"
+check_status 403 "{url}/_cluster/health"
+check_status 403 "{url}/_security/role/go_dashboard_total_sales_reader"
+cat /tmp/privileges
+exit "$failed"
 """
 
 
@@ -1391,7 +1402,8 @@ def validate_qualification_output(name: str, output: str) -> None:
 
 
 def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, Any]]:
-    business_url = f"http://{target.business}.{target.namespace}.svc/dashboard/totalsales"
+    total_sales_url = f"http://{target.business}.{target.namespace}.svc/dashboard/totalsales"
+    agent_sales_url = f"http://{target.business}.{target.namespace}.svc/dashboard/agentssales"
     grpc_url = f"http://{target.business}.{target.namespace}.svc:9090"
     management_url = f"http://{target.management}.{target.namespace}.svc:8081"
     full_business = {
@@ -1406,11 +1418,20 @@ def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, 
         "insurance-hub.io/owner": "issue-287",
         MANAGEMENT_CLIENT_LABEL: "true",
     }
-    payload = '{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}'
-    allowed_business = (
+    total_payload = '{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}'
+    agent_payload = (
+        '{"agentLogin":"safe-agent","productCode":"SAFE",'
+        '"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}'
+    )
+    allowed_total_sales = (
         "set -eu\n"
         f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
-        f"--data '{payload}' '{business_url}' | grep -q '\"total\"'\n"
+        f"--data '{total_payload}' '{total_sales_url}' | grep -q '\"total\"'\n"
+    )
+    allowed_agent_sales = (
+        "set -eu\n"
+        f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
+        f"--data '{agent_payload}' '{agent_sales_url}' | grep -q '\"perAgentTotal\"'\n"
     )
     allowed_management = (
         "set -eu\n"
@@ -1450,7 +1471,13 @@ printf '%s\n' "$result"
             target,
             "dashboard-qualification-business",
             full_business,
-            allowed_business,
+            allowed_total_sales,
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-business-agent-sales",
+            full_business,
+            allowed_agent_sales,
         ),
         qualification_pod(
             target,
@@ -1468,7 +1495,13 @@ printf '%s\n' "$result"
             target,
             "dashboard-qualification-marker-only",
             {BUSINESS_CLIENT_LABEL: "true"},
-            denied(business_url),
+            denied(total_sales_url),
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-marker-only-agent-denied",
+            {BUSINESS_CLIENT_LABEL: "true"},
+            denied(agent_sales_url),
         ),
         qualification_pod(
             target,
@@ -1486,7 +1519,14 @@ printf '%s\n' "$result"
             target,
             "dashboard-qualification-cross-namespace-denied",
             full_business,
-            denied(business_url),
+            denied(total_sales_url),
+            namespace=denied_namespace,
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-cross-namespace-agent-denied",
+            full_business,
+            denied(agent_sales_url),
             namespace=denied_namespace,
         ),
         qualification_pod(
@@ -1543,25 +1583,27 @@ def run_access_qualification(target: Target) -> None:
         ]
     )
     require(not existing.strip(), f"qualification namespace/{denied_namespace} already exists")
+    failures: list[str] = []
     try:
         target.kubectl("create", "-f", "-", input_text=yaml.safe_dump(namespace, sort_keys=False))
         for pod in qualification_pods(target, denied_namespace):
             metadata = pod["metadata"]
             name = metadata["name"]
             namespace_name = metadata["namespace"]
-            require(
-                not target.namespace_kubectl(
-                    namespace_name,
-                    "get",
-                    "pod",
-                    name,
-                    "--ignore-not-found",
-                    "-o",
-                    "name",
-                ).strip(),
-                f"qualification Pod/{name} already exists",
-            )
+            created = False
             try:
+                require(
+                    not target.namespace_kubectl(
+                        namespace_name,
+                        "get",
+                        "pod",
+                        name,
+                        "--ignore-not-found",
+                        "-o",
+                        "name",
+                    ).strip(),
+                    f"qualification Pod/{name} already exists",
+                )
                 target.namespace_kubectl(
                     namespace_name,
                     "create",
@@ -1569,6 +1611,7 @@ def run_access_qualification(target: Target) -> None:
                     "-",
                     input_text=yaml.safe_dump(pod, sort_keys=False),
                 )
+                created = True
                 wait_for_probe(target, namespace_name, name)
                 if (
                     name == "dashboard-qualification-reader"
@@ -1579,30 +1622,41 @@ def run_access_qualification(target: Target) -> None:
                         namespace_name, "logs", f"pod/{name}", timeout=10
                     )
                     validate_qualification_output(name, output)
-            except DeploymentError as error:
-                logs = target.namespace_kubectl(namespace_name, "logs", f"pod/{name}", timeout=10)
-                raise DeploymentError(f"{error}; sanitized probe output: {logs[-1000:]}") from error
+            except Exception as error:
+                try:
+                    logs = target.namespace_kubectl(
+                        namespace_name, "logs", f"pod/{name}", timeout=10
+                    )
+                    diagnostic = logs[-1000:]
+                except Exception as log_error:
+                    diagnostic = f"logs unavailable ({type(log_error).__name__})"
+                failures.append(f"Pod/{name}: {error}; sanitized probe output: {diagnostic}")
             finally:
-                current = target.namespace_json(
-                    namespace_name, "get", "pod", name, "--ignore-not-found"
-                )
-                if current:
-                    require(
-                        current.get("metadata", {})
-                        .get("labels", {})
-                        .get("insurance-hub.io/qualification")
-                        == "issue-287",
-                        f"qualification Pod/{name} cleanup ownership differs",
-                    )
-                    target.namespace_kubectl(
-                        namespace_name,
-                        "delete",
-                        "pod",
-                        name,
-                        "--wait=true",
-                        "--timeout=30s",
-                        timeout=40,
-                    )
+                try:
+                    if created:
+                        current = target.namespace_json(
+                            namespace_name, "get", "pod", name, "--ignore-not-found"
+                        )
+                        if current:
+                            require(
+                                current.get("metadata", {})
+                                .get("labels", {})
+                                .get("insurance-hub.io/qualification")
+                                == "issue-287",
+                                f"qualification Pod/{name} cleanup ownership differs",
+                            )
+                            target.namespace_kubectl(
+                                namespace_name,
+                                "delete",
+                                "pod",
+                                name,
+                                "--wait=true",
+                                "--timeout=30s",
+                                timeout=40,
+                            )
+                except Exception as cleanup_error:
+                    failures.append(f"Pod/{name} cleanup: {cleanup_error}")
+        require(not failures, "qualification probes failed: " + " | ".join(failures))
     finally:
         current = json.loads(
             run(
@@ -1641,8 +1695,7 @@ def run_access_qualification(target: Target) -> None:
             )
 
 
-def validate_direct_rpc_output(output: str) -> None:
-    test_name = "TestDeployedDirectRPC"
+def validate_direct_rpc_output(output: str, test_name: str = "TestDeployedDirectRPC") -> None:
     selected_runs = 0
     selected_passes = 0
     selected_failed = False
@@ -1666,6 +1719,7 @@ def validate_direct_rpc_output(output: str) -> None:
 
 
 def run_deployed_direct_rpc(port: int) -> None:
+    test_name = "TestDeployedDirectRPCSharedSmoke"
     output = run(
         [
             os.environ.get("MAKE_COMMAND", "make"),
@@ -1678,10 +1732,26 @@ def run_deployed_direct_rpc(port: int) -> None:
         environment={
             "GO": os.environ.get("GO", "go"),
             "DASHBOARD_DEPLOYMENT_GRPC_ADDR": f"127.0.0.1:{port}",
+            "DASHBOARD_DEPLOYMENT_RPC_SCENARIO": "shared-smoke",
         },
         activity="verify deployed direct Dashboard RPC",
     )
-    validate_direct_rpc_output(output)
+    validate_direct_rpc_output(output, test_name)
+
+
+def verify_shared_http_operation(port: int, path: str, payload: dict[str, str], field: str) -> None:
+    status, body = _http(
+        f"http://127.0.0.1:{port}{path}",
+        json.dumps(payload).encode(),
+    )
+    try:
+        response = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise DeploymentError(f"deployed {path} response is malformed") from error
+    require(
+        status == 200 and isinstance(response, dict) and isinstance(response.get(field), dict),
+        f"deployed {path} response differs",
+    )
 
 
 def _wait_for_port_forward(process: subprocess.Popen[bytes], port: int, name: str) -> None:
@@ -1748,6 +1818,7 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             start_new_session=True,
         ),
     ]
+    failures: list[str] = []
     try:
         _wait_for_port_forward(processes[2], grpc_port, "direct-RPC")
         deadline = time.monotonic() + 20
@@ -1759,15 +1830,31 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                 time.sleep(0.2)
         else:
             raise DeploymentError("deployed readiness was not reachable")
-        status, body = _http(
-            f"http://127.0.0.1:{http_port}/dashboard/totalsales",
-            json.dumps({"saleDateFrom": "2019-01-01", "saleDateTo": "2020-01-01"}).encode(),
-        )
-        require(
-            status == 200 and "total" in json.loads(body),
-            "deployed total-sales response differs",
-        )
-        run_deployed_direct_rpc(grpc_port)
+        for name, path, payload, field in (
+            (
+                "total-sales HTTP",
+                "/dashboard/totalsales",
+                {"saleDateFrom": "2019-01-01", "saleDateTo": "2020-01-01"},
+                "total",
+            ),
+            (
+                "agent-sales HTTP",
+                "/dashboard/agentssales",
+                {
+                    "saleDateFrom": "2019-01-01",
+                    "saleDateTo": "2020-01-01",
+                },
+                "perAgentTotal",
+            ),
+        ):
+            try:
+                verify_shared_http_operation(http_port, path, payload, field)
+            except Exception as error:
+                failures.append(f"{name}: {error}")
+        try:
+            run_deployed_direct_rpc(grpc_port)
+        except Exception as error:
+            failures.append(f"direct RPC: {error}")
     finally:
         for child in processes:
             child.terminate()
@@ -1776,8 +1863,17 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             except subprocess.TimeoutExpired:
                 child.kill()
                 child.wait(timeout=5)
-    run_access_qualification(target)
-    require(role_snapshot(target) == before, "Java resource identity changed during verification")
+    try:
+        run_access_qualification(target)
+    except Exception as error:
+        failures.append(f"access qualification: {error}")
+    try:
+        require(
+            role_snapshot(target) == before, "Java resource identity changed during verification"
+        )
+    except Exception as error:
+        failures.append(f"Java identity: {error}")
+    require(not failures, "Dashboard verification failed: " + " | ".join(failures))
 
 
 def stop(target: Target, _items: list[dict[str, Any]]) -> None:

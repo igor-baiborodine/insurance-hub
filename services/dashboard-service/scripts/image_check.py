@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the Dashboard image total-sales path, health, identity and bounded shutdown."""
+"""Validate Dashboard image sales paths, health, identity and bounded shutdown."""
 
 from __future__ import annotations
 
@@ -190,6 +190,10 @@ def create_elasticsearch_fixture(url: str) -> None:
                         "type": "text",
                         "fields": {"keyword": {"type": "keyword"}},
                     },
+                    "agentLogin": {
+                        "type": "text",
+                        "fields": {"keyword": {"type": "keyword"}},
+                    },
                     "from": {"type": "date"},
                     "totalPremium": {"type": "double"},
                 }
@@ -200,7 +204,12 @@ def create_elasticsearch_fixture(url: str) -> None:
         url,
         "POST",
         "/policy_stats/_doc/image-fixture?refresh=true",
-        {"productCode": "SAFE", "from": "2019-06-01", "totalPremium": 1000.0},
+        {
+            "agentLogin": "safe-agent",
+            "productCode": "SAFE",
+            "from": "2019-06-01",
+            "totalPremium": 1000.0,
+        },
     )
     elasticsearch_request(
         url,
@@ -214,21 +223,22 @@ def verify_reader_permissions(url: str) -> None:
     checks = (
         (
             "write",
-            reader_request(
-                url,
-                "PUT",
-                "/policy_stats/_doc/denied-write",
-                {"productCode": "DENIED", "from": "2019-06-01", "totalPremium": 1.0},
-            ),
+            "PUT",
+            "/policy_stats/_doc/denied-write",
+            {"productCode": "DENIED", "from": "2019-06-01", "totalPremium": 1.0},
         ),
-        ("cluster administration", reader_request(url, "GET", "/_cluster/settings")),
-        ("unrelated index", reader_request(url, "GET", "/unrelated_stats/_search")),
+        ("cluster administration", "GET", "/_cluster/settings", None),
+        ("unrelated index", "GET", "/unrelated_stats/_search", None),
     )
-    for capability, (status, response) in checks:
-        require(
-            status == 403,
-            f"Dashboard reader {capability} was not denied: HTTP {status}: {response[:256]!r}",
-        )
+    failures: list[str] = []
+    for capability, method, path, body in checks:
+        try:
+            status, response = reader_request(url, method, path, body)
+            if status != 403:
+                failures.append(f"{capability}: HTTP {status}: {response[:256]!r}")
+        except OSError as error:
+            failures.append(f"{capability}: {type(error).__name__}")
+    require(not failures, "Dashboard reader denials failed: " + " | ".join(failures))
 
 
 def verify_runtime_identity(logs: str, version: str) -> None:
@@ -371,18 +381,43 @@ def main() -> int:
             request(f"http://127.0.0.1:{management_port}/livez") == (200, b"live\n"),
             "liveness differs",
         )
-        status, body = request(
-            f"http://127.0.0.1:{http_port}/dashboard/totalsales",
-            json.dumps({"saleDateFrom": "2019-01-01", "saleDateTo": "2020-01-01"}).encode(),
+        sales_operations = (
+            (
+                "total-sales",
+                "/dashboard/totalsales",
+                {"saleDateFrom": "2019-01-01", "saleDateTo": "2020-01-01"},
+                {
+                    "total": {"policiesCount": 1, "premiumAmount": 1000.0},
+                    "perProductTotal": {"SAFE": {"policiesCount": 1, "premiumAmount": 1000.0}},
+                },
+            ),
+            (
+                "agent-sales",
+                "/dashboard/agentssales",
+                {
+                    "agentLogin": "safe-agent",
+                    "productCode": "SAFE",
+                    "saleDateFrom": "2019-01-01",
+                    "saleDateTo": "2020-01-01",
+                },
+                {"perAgentTotal": {"safe-agent": {"policiesCount": 1, "premiumAmount": 1000.0}}},
+            ),
         )
+        operation_failures: list[str] = []
+        for name, path, payload, expected in sales_operations:
+            try:
+                status, body = request(
+                    f"http://127.0.0.1:{http_port}{path}",
+                    json.dumps(payload).encode(),
+                )
+                require(
+                    status == 200 and json.loads(body) == expected,
+                    f"image {name} response differs",
+                )
+            except (ImageCheckError, OSError, ValueError, json.JSONDecodeError) as error:
+                operation_failures.append(f"{name}: {error}")
         require(
-            status == 200
-            and json.loads(body)
-            == {
-                "total": {"policiesCount": 1, "premiumAmount": 1000.0},
-                "perProductTotal": {"SAFE": {"policiesCount": 1, "premiumAmount": 1000.0}},
-            },
-            "image total-sales response differs",
+            not operation_failures, "image sales checks failed: " + " | ".join(operation_failures)
         )
         command(
             [docker, "stop", "--time", "10", elasticsearch_container],
@@ -394,13 +429,23 @@ def main() -> int:
             request(f"http://127.0.0.1:{management_port}/livez") == (200, b"live\n"),
             "liveness failed after dependency loss",
         )
-        status, body = request(
-            f"http://127.0.0.1:{http_port}/dashboard/totalsales",
-            json.dumps({"saleDateFrom": "2019-01-01", "saleDateTo": "2020-01-01"}).encode(),
-        )
+        dependency_failures: list[str] = []
+        safe_failure = b'{"code":14,"message":"service unavailable","details":[]}'
+        for name, path, payload, _expected in sales_operations:
+            try:
+                status, body = request(
+                    f"http://127.0.0.1:{http_port}{path}",
+                    json.dumps(payload).encode(),
+                )
+                require(
+                    status == 503 and body == safe_failure,
+                    f"{name} dependency failure response differs",
+                )
+            except (ImageCheckError, OSError, ValueError) as error:
+                dependency_failures.append(f"{name}: {error}")
         require(
-            status == 503 and body == b'{"code":14,"message":"service unavailable","details":[]}',
-            "dependency failure response differs",
+            not dependency_failures,
+            "image dependency checks failed: " + " | ".join(dependency_failures),
         )
         started = time.monotonic()
         command(
@@ -441,7 +486,7 @@ def main() -> int:
             failed = True
     if failed:
         return 1
-    print("dashboard-image-check: total sales, dependency, health, identity and shutdown passed")
+    print("dashboard-image-check: sales, dependency, health, identity and shutdown passed")
     return 0
 
 

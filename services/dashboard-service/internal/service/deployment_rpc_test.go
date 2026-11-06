@@ -15,6 +15,31 @@ import (
 )
 
 func TestDeployedDirectRPC(t *testing.T) {
+	client := deployedClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	assertOwnedTotalSales(t, ctx, client)
+	assertOwnedAgentSales(t, ctx, client)
+}
+
+func TestDeployedDirectRPCSharedSmoke(t *testing.T) {
+	client := deployedClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := client.GetTotalSales(ctx, &dashboardv1.GetTotalSalesRequest{
+		SaleDateFrom: "2019-01-01", SaleDateTo: "2020-01-01",
+	}); err != nil {
+		t.Fatalf("GetTotalSales: %v", err)
+	}
+	if _, err := client.GetAgentSales(ctx, &dashboardv1.GetAgentSalesRequest{
+		SaleDateFrom: "2019-01-01", SaleDateTo: "2020-01-01",
+	}); err != nil {
+		t.Fatalf("GetAgentSales: %v", err)
+	}
+}
+
+func deployedClient(t *testing.T) dashboardv1.DashboardServiceClient {
+	t.Helper()
 	address := os.Getenv("DASHBOARD_DEPLOYMENT_GRPC_ADDR")
 	if address == "" {
 		t.Fatal("DASHBOARD_DEPLOYMENT_GRPC_ADDR is required")
@@ -28,10 +53,16 @@ func TestDeployedDirectRPC(t *testing.T) {
 		t.Fatalf("create gRPC client: %v", err)
 	}
 	t.Cleanup(func() { _ = connection.Close() })
+	return dashboardv1.NewDashboardServiceClient(connection)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	response, err := dashboardv1.NewDashboardServiceClient(connection).GetTotalSales(
+func assertOwnedTotalSales(
+	t *testing.T,
+	ctx context.Context,
+	client dashboardv1.DashboardServiceClient,
+) {
+	t.Helper()
+	response, err := client.GetTotalSales(
 		ctx,
 		&dashboardv1.GetTotalSalesRequest{
 			SaleDateFrom: "2019-01-01",
@@ -55,3 +86,27 @@ func TestDeployedDirectRPC(t *testing.T) {
 		t.Fatalf("SAFE total = %v, want one policy and 100000 minor units", safe)
 	}
 }
+
+func assertOwnedAgentSales(
+	t *testing.T,
+	ctx context.Context,
+	client dashboardv1.DashboardServiceClient,
+) {
+	t.Helper()
+	response, err := client.GetAgentSales(ctx, &dashboardv1.GetAgentSalesRequest{
+		AgentLogin: stringPointer("safe-agent"), ProductCode: stringPointer("SAFE"),
+		SaleDateFrom: "2019-01-01", SaleDateTo: "2020-01-01",
+	})
+	if err != nil {
+		t.Fatalf("GetAgentSales: %v", err)
+	}
+	if len(response.GetPerAgentTotal()) != 1 {
+		t.Fatalf("per-agent result length = %d, want 1", len(response.GetPerAgentTotal()))
+	}
+	safe := response.GetPerAgentTotal()["safe-agent"]
+	if safe.GetPoliciesCount() != 1 || safe.GetPremiumAmount() != "1000.0" {
+		t.Fatalf("safe-agent total = %v, want one policy and exact 1000.0", safe)
+	}
+}
+
+func stringPointer(value string) *string { return &value }

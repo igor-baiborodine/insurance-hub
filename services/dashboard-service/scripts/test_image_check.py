@@ -129,6 +129,16 @@ def test_main_owns_dependency_network_reader_configuration_and_cleanup(
                     "perProductTotal": {"SAFE": {"policiesCount": 1, "premiumAmount": 1000.0}},
                 }
             ).encode()
+        if url.endswith("/dashboard/agentssales"):
+            if any(
+                command[1:4] == ["stop", "--time", "10"]
+                and command[-1] == "dashboard-image-elasticsearch-4242"
+                for command in commands
+            ):
+                return 503, b'{"code":14,"message":"service unavailable","details":[]}'
+            return 200, json.dumps(
+                {"perAgentTotal": {"safe-agent": {"policiesCount": 1, "premiumAmount": 1000.0}}}
+            ).encode()
         raise AssertionError(url)
 
     monkeypatch.setattr(image_check, "request", controlled_request)
@@ -216,6 +226,34 @@ def test_reader_permissions_require_write_admin_and_index_denials(
         ("PUT", "/policy_stats/_doc/denied-write"),
         ("GET", "/_cluster/settings"),
         ("GET", "/unrelated_stats/_search"),
+    ]
+
+
+@pytest.mark.parametrize("allowed_index", [0, 1, 2])
+def test_reader_permissions_run_every_denial_before_reporting_drift(
+    monkeypatch: pytest.MonkeyPatch, allowed_index: int
+) -> None:
+    responses = iter(
+        (200, b"unexpected authority") if index == allowed_index else (403, b"denied")
+        for index in range(3)
+    )
+    calls: list[str] = []
+
+    def controlled_reader(
+        _url: str, _method: str, path: str, _body: dict[str, object] | None = None
+    ) -> tuple[int, bytes]:
+        calls.append(path)
+        return next(responses)
+
+    monkeypatch.setattr(image_check, "reader_request", controlled_reader)
+
+    with pytest.raises(image_check.ImageCheckError, match="reader denials failed"):
+        image_check.verify_reader_permissions("http://elasticsearch")
+
+    assert calls == [
+        "/policy_stats/_doc/denied-write",
+        "/_cluster/settings",
+        "/unrelated_stats/_search",
     ]
 
 

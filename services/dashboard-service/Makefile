@@ -119,7 +119,7 @@ image-build: python-runtime-check ## Build the pinned linux/amd64 Dashboard runt
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" build
 
-image-check: image-build ## Build and validate Dashboard image identity, total sales, health and shutdown
+image-check: image-build ## Build and validate Dashboard image identity, sales, health and shutdown
 	@$(MAKE) --no-print-directory _image-check-existing
 
 _image-check-existing: python-runtime-check
@@ -159,8 +159,13 @@ _deploy-test-rpc: verify-tools
 	@test -n "$${DASHBOARD_DEPLOYMENT_GRPC_ADDR:-}" || { \
 		echo '_deploy-test-rpc: DASHBOARD_DEPLOYMENT_GRPC_ADDR is required' >&2; exit 1; \
 	}
-	@GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
-		-run='^TestDeployedDirectRPC$$' -json ./internal/service
+	@case "$${DASHBOARD_DEPLOYMENT_RPC_SCENARIO:-}" in \
+		owned-fixture) test_name=TestDeployedDirectRPC;; \
+		shared-smoke) test_name=TestDeployedDirectRPCSharedSmoke;; \
+		*) echo '_deploy-test-rpc: DASHBOARD_DEPLOYMENT_RPC_SCENARIO must be owned-fixture or shared-smoke' >&2; exit 1;; \
+	esac; \
+	GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
+		-run="^$${test_name}$$" -json ./internal/service
 
 python-tooling-format-check: python-toolchain-check
 	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \
