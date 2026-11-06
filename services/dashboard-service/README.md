@@ -192,6 +192,10 @@ make go-svc-deploy-status SVC_NAME=dashboard
 make go-svc-deploy-verify SVC_NAME=dashboard
 ```
 
+When replacing an existing local release, export its exact running image as
+`DEPLOY_PREVIOUS_IMAGE_REF` before preflight. Keep it set through `go-svc-deploy`, then unset it
+before status and verification. The deployment runbook contains the complete command sequence.
+
 `go-svc-stop` scales only the Go Dashboard Deployment to zero. A guarded redeploy restores the
 same accepted image. Java Dashboard resources, routes, configuration and data/event authority stay
 unchanged. The [Dashboard deployment runbook](../../docs/migration/phase-4/dashboard-service/deployment-runbook.md)

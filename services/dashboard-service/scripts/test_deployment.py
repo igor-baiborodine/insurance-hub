@@ -635,21 +635,12 @@ def test_java_edge_identity_requires_the_dedicated_dashboard_marker() -> None:
 
 
 def test_live_state_rejects_wrong_resource_identity() -> None:
-    target = object.__new__(checks.Target)
-    target.namespace = "local-dev-all"
-    target.json = Mock(
-        return_value={
-            "kind": "ConfigMap",
-            "metadata": {"name": "foreign", "namespace": "local-dev-all"},
-        }
-    )
-    desired = {
-        "apiVersion": "v1",
-        "kind": "ConfigMap",
-        "metadata": {"name": "local-dev-dashboard-config", "namespace": "local-dev-all"},
-    }
+    items = rendered_resources()
+    target, actual = target_with_live_resources(items)
+    actual[("configmap", "local-dev-dashboard-config")]["metadata"]["name"] = "foreign"
+
     with pytest.raises(checks.DeploymentError, match="identity differs"):
-        target.live([desired], require_deployment=True)
+        target.live(items, require_deployment=True)
 
 
 def rendered_resources(environment: str = "local-dev") -> list[dict[str, object]]:
@@ -663,7 +654,9 @@ def target_with_live_resources(
         (str(item["kind"]).lower(), str(item["metadata"]["name"])): deepcopy(item) for item in items
     }
     target = object.__new__(checks.Target)
+    target.environment = "local-dev"
     target.namespace = "local-dev-all"
+    target.deployment = "local-dev-dashboard-api"
     target.configuration = {"mode": "direct"}
     target.json = Mock(side_effect=lambda _get, kind, name, _ignore: actual[(kind, name)])
     return target, actual
@@ -685,6 +678,82 @@ def test_live_state_accepts_api_server_defaulted_probe_fields() -> None:
         container[name]["successThreshold"] = 1
 
     target.live(items, require_deployment=True)
+
+
+def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:
+    # given a reviewed replacement and the exact previously accepted local release.
+    items = rendered_resources()
+    deployment = checks.resource(items, "Deployment", "local-dev-dashboard-api")
+    config = checks.resource(items, "ConfigMap", "local-dev-dashboard-config")
+    desired_image = "insurance-hub-dashboard-api:1.0.0-local.123456789abc"
+    previous_image = "insurance-hub-dashboard-api:1.0.0-local.abcdef123456"
+    deployment["metadata"]["labels"]["app.kubernetes.io/version"] = "git-123456789abc"
+    deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"] = (
+        "git-123456789abc"
+    )
+    deployment["spec"]["template"]["spec"]["containers"][0]["image"] = desired_image
+    config["data"]["SERVICE_VERSION"] = "git-123456789abc"
+    target, actual = target_with_live_resources(items)
+    live_deployment = actual[("deployment", "local-dev-dashboard-api")]
+    live_deployment["metadata"]["labels"]["app.kubernetes.io/version"] = "git-abcdef123456"
+    live_deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"] = (
+        "git-abcdef123456"
+    )
+    live_deployment["spec"]["template"]["spec"]["containers"][0]["image"] = previous_image
+    actual[("configmap", "local-dev-dashboard-config")]["data"]["SERVICE_VERSION"] = (
+        "git-abcdef123456"
+    )
+    live_config = actual[("configmap", "local-dev-dashboard-config")]["data"]
+    for name in ("ELASTICSEARCH_INDEX", "ELASTICSEARCH_TIMEOUT", "ELASTICSEARCH_URL"):
+        live_config.pop(name)
+    live_config["OTEL_EXPORTER_OTLP_TIMEOUT"] = "2s"
+    live_container = live_deployment["spec"]["template"]["spec"]["containers"][0]
+    live_container["name"] = "dashboard-service"
+    live_container["imagePullPolicy"] = "IfNotPresent"
+    live_container["env"] = [
+        item for item in live_container["env"] if item["name"] == "SERVICE_INSTANCE_ID"
+    ]
+    live_policy = actual[("networkpolicy", "local-dev-dashboard-api")]
+    live_policy["spec"].pop("egress")
+    live_policy["spec"]["ingress"] = [
+        {
+            "from": [{"podSelector": {"matchLabels": {checks.BUSINESS_CLIENT_LABEL: "true"}}}],
+            "ports": [
+                {"port": 8080, "protocol": "TCP"},
+                {"port": 9090, "protocol": "TCP"},
+            ],
+        },
+        {
+            "from": [{"podSelector": {"matchLabels": {checks.MANAGEMENT_CLIENT_LABEL: "true"}}}],
+            "ports": [{"port": 8081, "protocol": "TCP"}],
+        },
+    ]
+
+    with patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True):
+        # when / then the declared predecessor is accepted only before apply.
+        target.live(items, require_deployment=False)
+        with pytest.raises(checks.DeploymentError, match="differs from rendered configuration"):
+            target.live(items, require_deployment=True)
+
+
+@pytest.mark.parametrize(
+    "previous_image",
+    [
+        "insurance-hub-dashboard-api:latest",
+        "insurance-hub-policy-search-api:1.0.0-local.abcdef123456",
+    ],
+)
+def test_live_state_rejects_invalid_predecessor(previous_image: str) -> None:
+    # given
+    items = rendered_resources()
+    target, _actual = target_with_live_resources(items)
+
+    with (
+        patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True),
+        # when / then
+        pytest.raises(checks.DeploymentError, match="valid only for a direct local rollout"),
+    ):
+        target.live(items, require_deployment=False)
 
 
 @pytest.mark.parametrize(
@@ -794,6 +863,7 @@ def test_qa_live_state_requires_running_pod_digest(
         return actual[(kind, arguments[0])]
 
     target = object.__new__(checks.Target)
+    target.environment = "qa"
     target.namespace = "qa-svc"
     target.deployment = deployment_item["metadata"]["name"]
     target.configuration = {"mode": "flux"}
