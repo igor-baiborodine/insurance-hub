@@ -194,7 +194,7 @@ func TestLoad_ValidOverrides(t *testing.T) {
 		kitconfig.EnvShutdownTimeout:          "15s",
 		kitconfig.EnvOTELEnabled:              "true",
 		kitconfig.EnvOTELExporterOTLPEndpoint: "https://alloy.monitoring.svc:4317/",
-		kitconfig.EnvOTELExporterOTLPTimeout:  "750",
+		kitconfig.EnvOTELExporterOTLPTimeout:  "750ms",
 	}
 
 	// when
@@ -221,7 +221,7 @@ func TestLoad_ValidOverrides(t *testing.T) {
 	}
 }
 
-func TestLoad_RejectsNonstandardOTLPTimeoutWithoutExposingValue(t *testing.T) {
+func TestLoad_RejectsMalformedOTLPTimeoutWithoutExposingValue(t *testing.T) {
 	// given
 	const privateMarker = "private-timeout-marker"
 	values := map[string]string{
@@ -237,7 +237,7 @@ func TestLoad_RejectsNonstandardOTLPTimeoutWithoutExposingValue(t *testing.T) {
 	}
 	setting, reason := kitconfig.ErrorDetails(err)
 	if setting != kitconfig.EnvOTELExporterOTLPTimeout ||
-		reason != "must be a positive integer number of milliseconds" {
+		reason != "must be a positive duration" {
 		t.Errorf("error details = (%q, %q)", setting, reason)
 	}
 	if strings.Contains(err.Error(), privateMarker) {
@@ -312,6 +312,11 @@ func TestLoad_RejectsInvalidSettingsWithoutExposingValues(t *testing.T) {
 			name:    "invalid telemetry flag",
 			values:  map[string]string{kitconfig.EnvOTELEnabled: privateMarker},
 			setting: kitconfig.EnvOTELEnabled,
+		},
+		{
+			name:    "unitless exporter timeout",
+			values:  map[string]string{kitconfig.EnvOTELExporterOTLPTimeout: "750"},
+			setting: kitconfig.EnvOTELExporterOTLPTimeout,
 		},
 		{
 			name:    "empty exporter timeout",

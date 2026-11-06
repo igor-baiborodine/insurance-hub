@@ -30,7 +30,7 @@ func TestRun_LogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 		"OTEL_EXPORTER_OTLP_ENDPOINT",
 		"http://user:"+privateMarker+"@127.0.0.1:4317",
 	)
-	t.Setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "1000")
+	t.Setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "1s")
 	var output bytes.Buffer
 
 	// when
