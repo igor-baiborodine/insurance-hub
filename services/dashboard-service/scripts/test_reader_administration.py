@@ -115,9 +115,9 @@ def test_apply_secret_passes_values_only_through_stdin() -> None:
     arguments = target.run.call_args.args
     manifest = json.loads(target.run.call_args.kwargs["input_text"])
     assert password not in arguments
-    assert manifest["stringData"] == {
-        "username": administration.IDENTITY,
-        "password": password,
+    assert manifest["data"] == {
+        "username": base64.b64encode(administration.IDENTITY.encode()).decode(),
+        "password": base64.b64encode(password.encode()).decode(),
     }
     assert manifest["metadata"]["labels"]["insurance-hub.io/owner"] == "issue-287"
 

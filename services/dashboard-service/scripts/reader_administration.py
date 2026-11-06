@@ -303,7 +303,10 @@ class Target:
                 },
             },
             "type": "Opaque",
-            "stringData": data,
+            "data": {
+                key: base64.b64encode(value.encode("utf-8")).decode("ascii")
+                for key, value in data.items()
+            },
         }
         self.run(
             "apply",
