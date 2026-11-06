@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	OperationTotalSales = "total_sales"
-	OperationAgentSales = "agent_sales"
+	OperationTotalSales  = "total_sales"
+	OperationAgentSales  = "agent_sales"
+	OperationSalesTrends = "sales_trends"
 )
 
 // RequestObserver records only fixed Dashboard operations and bounded transport outcomes.
@@ -77,6 +78,8 @@ func (observer *RequestObserver) StartHTTP(ctx context.Context, route string) *R
 		operation = OperationTotalSales
 	case "POST /dashboard/agentssales":
 		operation = OperationAgentSales
+	case "POST /dashboard/trends":
+		operation = OperationSalesTrends
 	}
 	return &Request{
 		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),
@@ -86,7 +89,7 @@ func (observer *RequestObserver) StartHTTP(ctx context.Context, route string) *R
 
 func boundedOperation(operation string) string {
 	switch operation {
-	case OperationTotalSales, OperationAgentSales:
+	case OperationTotalSales, OperationAgentSales, OperationSalesTrends:
 		return operation
 	default:
 		return "unknown"

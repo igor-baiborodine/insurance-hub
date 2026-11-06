@@ -36,10 +36,12 @@ JAVA_NAMES = {"dashboard-api-legacy"}
 DENIED_QUALIFICATION_PODS = {
     "dashboard-qualification-marker-only",
     "dashboard-qualification-marker-only-agent-denied",
+    "dashboard-qualification-marker-only-trends-denied",
     "dashboard-qualification-marker-only-grpc-denied",
     "dashboard-qualification-business-management-denied",
     "dashboard-qualification-cross-namespace-denied",
     "dashboard-qualification-cross-namespace-agent-denied",
+    "dashboard-qualification-cross-namespace-trends-denied",
     "dashboard-qualification-cross-namespace-grpc-denied",
 }
 GRPC_REACHABLE_QUALIFICATION_POD = "dashboard-qualification-business-grpc"
@@ -136,7 +138,13 @@ def matching_reader_predecessor_config(actual: Any, expected: Any) -> bool:
     predecessor = {
         key: value
         for key, value in expected.items()
-        if key not in {"ELASTICSEARCH_INDEX", "ELASTICSEARCH_TIMEOUT", "ELASTICSEARCH_URL"}
+        if key
+        not in {
+            "ELASTICSEARCH_INDEX",
+            "ELASTICSEARCH_TIMEOUT",
+            "ELASTICSEARCH_URL",
+            "SALES_TRENDS_TIME_ZONE",
+        }
     }
     predecessor["OTEL_EXPORTER_OTLP_TIMEOUT"] = "2s"
     return actual == predecessor
@@ -388,6 +396,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         ),
         "ELASTICSEARCH_INDEX": "policy_stats",
         "ELASTICSEARCH_TIMEOUT": "5s",
+        "SALES_TRENDS_TIME_ZONE": "GMT",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
     }
     if environment == "qa":
@@ -1408,6 +1417,7 @@ def validate_qualification_output(name: str, output: str) -> None:
 def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, Any]]:
     total_sales_url = f"http://{target.business}.{target.namespace}.svc/dashboard/totalsales"
     agent_sales_url = f"http://{target.business}.{target.namespace}.svc/dashboard/agentssales"
+    sales_trends_url = f"http://{target.business}.{target.namespace}.svc/dashboard/trends"
     grpc_url = f"http://{target.business}.{target.namespace}.svc:9090"
     management_url = f"http://{target.management}.{target.namespace}.svc:8081"
     full_business = {
@@ -1427,6 +1437,10 @@ def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, 
         '{"agentLogin":"safe-agent","productCode":"SAFE",'
         '"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}'
     )
+    trends_payload = (
+        '{"productCode":"SAFE","saleDateFrom":"2019-01-01",'
+        '"saleDateTo":"2020-01-01","aggregationUnitCode":"MONTH"}'
+    )
     allowed_total_sales = (
         "set -eu\n"
         f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
@@ -1436,6 +1450,12 @@ def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, 
         "set -eu\n"
         f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
         f"--data '{agent_payload}' '{agent_sales_url}' | grep -q '\"perAgentTotal\"'\n"
+    )
+    allowed_sales_trends = (
+        "set -eu\n"
+        f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
+        f"--data '{trends_payload}' '{sales_trends_url}' "
+        "| grep -Eq '^\\{\\}$|\"periodSales\":\\['\n"
     )
     allowed_management = (
         "set -eu\n"
@@ -1485,6 +1505,12 @@ printf '%s\n' "$result"
         ),
         qualification_pod(
             target,
+            "dashboard-qualification-business-sales-trends",
+            full_business,
+            allowed_sales_trends,
+        ),
+        qualification_pod(
+            target,
             "dashboard-qualification-management",
             full_management,
             allowed_management,
@@ -1506,6 +1532,12 @@ printf '%s\n' "$result"
             "dashboard-qualification-marker-only-agent-denied",
             {BUSINESS_CLIENT_LABEL: "true"},
             denied(agent_sales_url),
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-marker-only-trends-denied",
+            {BUSINESS_CLIENT_LABEL: "true"},
+            denied(sales_trends_url),
         ),
         qualification_pod(
             target,
@@ -1531,6 +1563,13 @@ printf '%s\n' "$result"
             "dashboard-qualification-cross-namespace-agent-denied",
             full_business,
             denied(agent_sales_url),
+            namespace=denied_namespace,
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-cross-namespace-trends-denied",
+            full_business,
+            denied(sales_trends_url),
             namespace=denied_namespace,
         ),
         qualification_pod(
@@ -1746,7 +1785,14 @@ def run_deployed_direct_rpc(port: int) -> None:
     validate_direct_rpc_output(output, test_name)
 
 
-def verify_shared_http_operation(port: int, path: str, payload: dict[str, str], field: str) -> None:
+def verify_shared_http_operation(
+    port: int,
+    path: str,
+    payload: dict[str, str],
+    field: str,
+    field_type: type[object],
+    allow_empty: bool = False,
+) -> None:
     status, body = _http(
         f"http://127.0.0.1:{port}{path}",
         json.dumps(payload).encode(),
@@ -1755,10 +1801,10 @@ def verify_shared_http_operation(port: int, path: str, payload: dict[str, str], 
         response = json.loads(body)
     except json.JSONDecodeError as error:
         raise DeploymentError(f"deployed {path} response is malformed") from error
-    require(
-        status == 200 and isinstance(response, dict) and isinstance(response.get(field), dict),
-        f"deployed {path} response differs",
+    valid_shape = isinstance(response, dict) and (
+        (allow_empty and not response) or isinstance(response.get(field), field_type)
     )
+    require(status == 200 and valid_shape, f"deployed {path} response differs")
 
 
 def _wait_for_port_forward(process: subprocess.Popen[bytes], port: int, name: str) -> None:
@@ -1837,12 +1883,14 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                 time.sleep(0.2)
         else:
             raise DeploymentError("deployed readiness was not reachable")
-        for name, path, payload, field in (
+        for name, path, payload, field, field_type, allow_empty in (
             (
                 "total-sales HTTP",
                 "/dashboard/totalsales",
                 {"saleDateFrom": "2019-01-01", "saleDateTo": "2020-01-01"},
                 "total",
+                dict,
+                False,
             ),
             (
                 "agent-sales HTTP",
@@ -1852,10 +1900,31 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                     "saleDateTo": "2020-01-01",
                 },
                 "perAgentTotal",
+                dict,
+                False,
+            ),
+            (
+                "sales-trends HTTP",
+                "/dashboard/trends",
+                {
+                    "saleDateFrom": "2019-01-01",
+                    "saleDateTo": "2020-01-01",
+                    "aggregationUnitCode": "MONTH",
+                },
+                "periodSales",
+                list,
+                True,
             ),
         ):
             try:
-                verify_shared_http_operation(http_port, path, payload, field)
+                verify_shared_http_operation(
+                    http_port,
+                    path,
+                    payload,
+                    field,
+                    field_type,
+                    allow_empty,
+                )
             except Exception as error:
                 failures.append(f"{name}: {error}")
         try:

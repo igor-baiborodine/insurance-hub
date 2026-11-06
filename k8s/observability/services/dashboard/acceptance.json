@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "evidence": {
-    "source": "issue-287 accepted signal contract and local transport/dependency tests",
+    "source": "issue-287 accepted signal contract plus issue-289 three-query local transport/dependency tests",
     "limitation": "Thresholds are initial QA pilot operating limits derived from the bounded Dashboard resource contract and require Step 11 target qualification; they are not production SLOs."
   },
   "workload": {
-    "query_shapes": 2,
+    "query_shapes": 3,
     "query_transports": [
       "http",
       "grpc"
@@ -60,9 +60,9 @@
       "severity": "warning",
       "just_below": 0.05,
       "just_above": 0.06,
-      "suppression": "Fewer than 20 total-sales read operations.",
+      "suppression": "Fewer than 20 Dashboard read operations.",
       "recovery": "The five-minute dependency failure ratio returns to 5% or lower.",
-      "response": "Split total-sales read failures by outcome and verify Elasticsearch readiness, TLS and reader privileges."
+      "response": "Split Dashboard read failures by operation and outcome and verify Elasticsearch readiness, TLS and reader privileges."
     },
     "DashboardElasticsearchHighLatency": {
       "threshold_seconds": 0.25,
@@ -74,9 +74,9 @@
       "severity": "warning",
       "just_below_seconds": 0.25,
       "just_above_seconds": 0.3,
-      "suppression": "Fewer than 20 total-sales read operations.",
+      "suppression": "Fewer than 20 Dashboard read operations.",
       "recovery": "The five-minute dependency p95 returns to 250ms or lower.",
-      "response": "Split total-sales read latency, inspect Elasticsearch health and correlate a slow trace."
+      "response": "Split Dashboard read latency by operation, inspect Elasticsearch health and correlate a slow trace."
     },
     "DashboardResourcePressure": {
       "cpu_threshold_cores": 0.24,
@@ -91,7 +91,7 @@
       "memory_just_above_bytes": 220000000,
       "suppression": "Both CPU and memory remain at or below 80% of their deployment limits.",
       "recovery": "Both resource signals remain below their thresholds.",
-      "response": "Inspect total-sales load, runtime memory, throttling, pod events and rollout identity."
+      "response": "Inspect Dashboard request load, runtime memory, throttling, pod events and rollout identity."
     },
     "DashboardUnavailable": {
       "for": "2m",

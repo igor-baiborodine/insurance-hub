@@ -387,6 +387,182 @@ func TestElasticsearchReader_AcceptedAgentOracle(t *testing.T) {
 	assertAgentValue(t, boundaries, "large", 1, "12345678.9")
 }
 
+func TestElasticsearchReader_AcceptedTrendOracle(t *testing.T) {
+	// given — fixtures replay the independently accepted Q03 interval and amount vectors.
+	endpoint := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_URL")
+	username := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_USERNAME")
+	password := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_PASSWORD")
+	if endpoint == "" || username == "" || password == "" {
+		t.Fatal("owned Elasticsearch endpoint and paired credentials are required")
+	}
+	adminRequest(t, http.MethodPut, endpoint+"/"+PolicyIndex, `{
+		"settings":{"number_of_shards":1,"number_of_replicas":0},
+		"mappings":{"properties":{
+			"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},
+			"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},
+			"from":{"type":"date"},
+			"totalPremium":{"type":"double"}
+		}}
+	}`, username, password, http.StatusOK)
+	t.Cleanup(func() {
+		request, err := http.NewRequest(http.MethodDelete, endpoint+"/"+PolicyIndex, nil)
+		if err == nil {
+			request.SetBasicAuth(username, password)
+			response, requestErr := (&http.Client{Timeout: 10 * time.Second}).Do(
+				request,
+			)
+			if requestErr == nil {
+				_ = response.Body.Close()
+			}
+		}
+	})
+	adminRequest(
+		t,
+		http.MethodPost,
+		endpoint+"/"+PolicyIndex+"/_bulk?refresh=true",
+		acceptedTrendOracleFixture,
+		username,
+		password,
+		http.StatusOK,
+	)
+	readerUsername := "dashboard_trend_reader"
+	readerPassword := "issue-289-reader-password"
+	adminRequest(
+		t,
+		http.MethodPut,
+		endpoint+"/_security/role/dashboard_trend_reader",
+		`{"indices":[{"names":["policy_stats"],"privileges":["read","view_index_metadata"]}]}`,
+		username,
+		password,
+		http.StatusOK,
+	)
+	adminRequest(
+		t,
+		http.MethodPut,
+		endpoint+"/_security/user/"+readerUsername,
+		`{"password":"`+readerPassword+`","roles":["dashboard_trend_reader"]}`,
+		username,
+		password,
+		http.StatusOK,
+	)
+	client, err := New(Config{
+		Endpoint: endpoint, Index: PolicyIndex, Username: readerUsername,
+		Password: readerPassword, Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+	reader, err := NewTrendReader(client, time.FixedZone("GMT", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	useCase, err := application.NewGetSalesTrends(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminRequest(
+		t,
+		http.MethodPut,
+		endpoint+"/"+PolicyIndex+"/_doc/denied?refresh=true",
+		`{"productCode":"DENIED","from":"2020-01-01","totalPremium":1}`,
+		readerUsername,
+		readerPassword,
+		http.StatusForbidden,
+	)
+
+	// when
+	day := executeSalesTrends(
+		t, useCase, domain.ExactProduct("CAL_DAY"), "2020-02-01", "2020-04-01",
+		domain.AggregationUnitDay,
+	)
+	week := executeSalesTrends(
+		t, useCase, domain.ExactProduct("CAL_WEEK"), "2024-12-01", "2025-02-01",
+		domain.AggregationUnitWeek,
+	)
+	month := executeSalesTrends(
+		t, useCase, domain.ExactProduct("CAL_MONTH"), "2020-01-01", "2020-05-01",
+		domain.AggregationUnitMonth,
+	)
+	year := executeSalesTrends(
+		t, useCase, domain.ExactProduct("CAL_YEAR"), "2019-01-01", "2022-01-01",
+		domain.AggregationUnitYear,
+	)
+	five := executeSalesTrends(
+		t, useCase, domain.AllProducts(), "2019-01-01", "2019-12-31",
+		domain.AggregationUnitMonth,
+	)
+	house := executeSalesTrends(
+		t, useCase, domain.ExactProduct("SAFE_HOUSE"), "2019-01-01", "2019-12-31",
+		domain.AggregationUnitMonth,
+	)
+	decimals := executeSalesTrends(
+		t, useCase, domain.ExactProduct("DECIMAL"), "2022-01-01", "2022-07-01",
+		domain.AggregationUnitMonth,
+	)
+	empty := executeSalesTrends(
+		t, useCase, domain.ExactProduct("missing"), "2020-01-01", "2021-01-01",
+		domain.AggregationUnitMonth,
+	)
+	equal := executeSalesTrends(
+		t, useCase, domain.AllProducts(), "2020-01-01", "2020-01-01",
+		domain.AggregationUnitMonth,
+	)
+	reversed := executeSalesTrends(
+		t, useCase, domain.AllProducts(), "2020-02-01", "2020-01-01",
+		domain.AggregationUnitMonth,
+	)
+	_, nonfiniteErr := useCase.Execute(context.Background(), salesTrendsQuery(
+		t, domain.ExactProduct("NONFINITE"), "2023-01-01", "2023-02-01",
+		domain.AggregationUnitMonth,
+	))
+
+	// then
+	assertTrendVector(t, day, []trendExpectation{
+		{"2020-02-28T00:00:00.000Z", "2020-02-28", 1, "1.00"},
+		{"2020-02-29T00:00:00.000Z", "2020-02-29", 1, "2.00"},
+		{"2020-03-01T00:00:00.000Z", "2020-03-01", 1, "3.00"},
+	})
+	assertTrendVector(t, week, []trendExpectation{
+		{"2024-12-23T00:00:00.000Z", "2024-12-23", 1, "1.00"},
+		{"2024-12-30T00:00:00.000Z", "2024-12-30", 2, "5.00"},
+		{"2025-01-06T00:00:00.000Z", "2025-01-06", 1, "4.00"},
+	})
+	assertTrendVector(t, month, []trendExpectation{
+		{"2020-01-01T00:00:00.000Z", "2020-01-01", 1, "1.00"},
+		{"2020-02-01T00:00:00.000Z", "2020-02-01", 1, "2.00"},
+		{"2020-03-01T00:00:00.000Z", "2020-03-01", 0, "0.00"},
+		{"2020-04-01T00:00:00.000Z", "2020-04-01", 1, "4.00"},
+	})
+	assertTrendVector(t, year, []trendExpectation{
+		{"2019-01-01T00:00:00.000Z", "2019-01-01", 1, "1.00"},
+		{"2020-01-01T00:00:00.000Z", "2020-01-01", 2, "5.00"},
+		{"2021-01-01T00:00:00.000Z", "2021-01-01", 1, "4.00"},
+	})
+	assertTrendCountsAndAmounts(t, five, []int64{1, 2, 1, 1}, []string{
+		"1000.00", "2000.00", "1000.00", "1000.00",
+	})
+	assertTrendCountsAndAmounts(t, house, []int64{1, 1}, []string{"1000.00", "1000.00"})
+	assertTrendCountsAndAmounts(
+		t,
+		decimals,
+		[]int64{1, 1, 1, 1, 2, 2},
+		[]string{"1.01", "-1.01", "0.00", "1000.00", "0.30", "2.00"},
+	)
+	if len(empty.PeriodSales) != 0 || len(equal.PeriodSales) != 0 ||
+		len(reversed.PeriodSales) != 0 {
+		t.Fatalf(
+			"empty/equal/reversed sizes = %d/%d/%d",
+			len(empty.PeriodSales),
+			len(equal.PeriodSales),
+			len(reversed.PeriodSales),
+		)
+	}
+	if !errors.Is(nonfiniteErr, ErrInvalidResponse) {
+		t.Fatalf("non-finite aggregate = %v", nonfiniteErr)
+	}
+}
+
 func TestElasticsearchReadiness_RejectsIncompatibleState(t *testing.T) {
 	endpoint := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_URL")
 	username := os.Getenv("DASHBOARD_TEST_ELASTICSEARCH_USERNAME")
@@ -589,6 +765,94 @@ func executeAgentSales(
 	return result
 }
 
+func executeSalesTrends(
+	t *testing.T,
+	useCase application.GetSalesTrends,
+	product domain.ProductSelection,
+	from, to string,
+	unit domain.AggregationUnit,
+) application.SalesTrendsResult {
+	t.Helper()
+	result, err := useCase.Execute(
+		context.Background(),
+		salesTrendsQuery(t, product, from, to, unit),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func salesTrendsQuery(
+	t *testing.T,
+	product domain.ProductSelection,
+	from, to string,
+	unit domain.AggregationUnit,
+) application.SalesTrendsQuery {
+	t.Helper()
+	dateFrom, err := domain.ParseDate(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dateTo, err := domain.ParseDate(to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return application.SalesTrendsQuery{
+		Product: product, DateFrom: dateFrom, DateTo: dateTo, AggregationUnit: unit,
+	}
+}
+
+type trendExpectation struct {
+	period string
+	date   string
+	count  int64
+	amount string
+}
+
+func assertTrendVector(
+	t *testing.T,
+	result application.SalesTrendsResult,
+	want []trendExpectation,
+) {
+	t.Helper()
+	if len(result.PeriodSales) != len(want) {
+		t.Fatalf("trend period count = %d, want %d", len(result.PeriodSales), len(want))
+	}
+	for index, expected := range want {
+		actual := result.PeriodSales[index]
+		if actual.Period != expected.period ||
+			actual.PeriodDate.String() != expected.date ||
+			actual.Value.PoliciesCount() != expected.count ||
+			actual.Value.PremiumAmount().String() != expected.amount {
+			t.Fatalf("trend period %d = %#v, want %#v", index, actual, expected)
+		}
+	}
+}
+
+func assertTrendCountsAndAmounts(
+	t *testing.T,
+	result application.SalesTrendsResult,
+	wantCounts []int64,
+	wantAmounts []string,
+) {
+	t.Helper()
+	if len(result.PeriodSales) != len(wantCounts) || len(wantCounts) != len(wantAmounts) {
+		t.Fatalf(
+			"trend lengths = periods:%d counts:%d amounts:%d",
+			len(result.PeriodSales),
+			len(wantCounts),
+			len(wantAmounts),
+		)
+	}
+	for index, period := range result.PeriodSales {
+		if period.Value.PoliciesCount() != wantCounts[index] ||
+			period.Value.PremiumAmount().String() != wantAmounts[index] {
+			t.Fatalf("trend period %d = %#v", index, period)
+		}
+	}
+}
+
 func assertAgentValue(
 	t *testing.T,
 	result application.AgentSalesResult,
@@ -745,4 +1009,65 @@ var acceptedAgentOracleFixture = strings.TrimSpace(`
 {"agentLogin":"small","productCode":"BOUNDARIES","from":"2023-01-01","totalPremium":0.0001}
 {"index":{"_id":"boundary-large"}}
 {"agentLogin":"large","productCode":"BOUNDARIES","from":"2023-01-01","totalPremium":12345678.9}
+`) + "\n"
+
+var acceptedTrendOracleFixture = strings.TrimSpace(`
+{"index":{"_id":"five-1"}}
+{"productCode":"SAFE_HOUSE","from":"2019-01-01","totalPremium":1000}
+{"index":{"_id":"five-2"}}
+{"productCode":"SAFE_HOUSE","from":"2019-02-01","totalPremium":1000}
+{"index":{"_id":"five-3"}}
+{"productCode":"SAFE_CAR","from":"2019-02-02","totalPremium":1000}
+{"index":{"_id":"five-4"}}
+{"productCode":"SAFE_CAR","from":"2019-03-01","totalPremium":1000}
+{"index":{"_id":"five-5"}}
+{"productCode":"SAFE_FARM","from":"2019-04-01","totalPremium":1000}
+{"index":{"_id":"day-1"}}
+{"productCode":"CAL_DAY","from":"2020-02-28","totalPremium":1}
+{"index":{"_id":"day-2"}}
+{"productCode":"CAL_DAY","from":"2020-02-29","totalPremium":2}
+{"index":{"_id":"day-3"}}
+{"productCode":"CAL_DAY","from":"2020-03-01","totalPremium":3}
+{"index":{"_id":"week-1"}}
+{"productCode":"CAL_WEEK","from":"2024-12-29","totalPremium":1}
+{"index":{"_id":"week-2"}}
+{"productCode":"CAL_WEEK","from":"2024-12-30","totalPremium":2}
+{"index":{"_id":"week-3"}}
+{"productCode":"CAL_WEEK","from":"2025-01-05","totalPremium":3}
+{"index":{"_id":"week-4"}}
+{"productCode":"CAL_WEEK","from":"2025-01-06","totalPremium":4}
+{"index":{"_id":"month-1"}}
+{"productCode":"CAL_MONTH","from":"2020-01-31","totalPremium":1}
+{"index":{"_id":"month-2"}}
+{"productCode":"CAL_MONTH","from":"2020-02-29","totalPremium":2}
+{"index":{"_id":"month-3"}}
+{"productCode":"CAL_MONTH","from":"2020-04-01","totalPremium":4}
+{"index":{"_id":"year-1"}}
+{"productCode":"CAL_YEAR","from":"2019-12-31","totalPremium":1}
+{"index":{"_id":"year-2"}}
+{"productCode":"CAL_YEAR","from":"2020-01-01","totalPremium":2}
+{"index":{"_id":"year-3"}}
+{"productCode":"CAL_YEAR","from":"2020-12-31","totalPremium":3}
+{"index":{"_id":"year-4"}}
+{"productCode":"CAL_YEAR","from":"2021-01-01","totalPremium":4}
+{"index":{"_id":"decimal-positive"}}
+{"productCode":"DECIMAL","from":"2022-01-01","totalPremium":1.005}
+{"index":{"_id":"decimal-negative"}}
+{"productCode":"DECIMAL","from":"2022-02-01","totalPremium":-1.005}
+{"index":{"_id":"decimal-zero"}}
+{"productCode":"DECIMAL","from":"2022-03-01","totalPremium":0}
+{"index":{"_id":"decimal-whole"}}
+{"productCode":"DECIMAL","from":"2022-04-01","totalPremium":1000}
+{"index":{"_id":"decimal-fraction-a"}}
+{"productCode":"DECIMAL","from":"2022-05-01","totalPremium":0.1}
+{"index":{"_id":"decimal-fraction-b"}}
+{"productCode":"DECIMAL","from":"2022-05-02","totalPremium":0.2}
+{"index":{"_id":"decimal-missing"}}
+{"productCode":"DECIMAL","from":"2022-06-01"}
+{"index":{"_id":"decimal-present"}}
+{"productCode":"DECIMAL","from":"2022-06-02","totalPremium":2}
+{"index":{"_id":"nonfinite-a"}}
+{"productCode":"NONFINITE","from":"2023-01-01","totalPremium":1.7e308}
+{"index":{"_id":"nonfinite-b"}}
+{"productCode":"NONFINITE","from":"2023-01-02","totalPremium":1.7e308}
 `) + "\n"

@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from unittest import mock
 
+import probe_dashboard
 import probe_product
 import pytest
 
@@ -215,6 +216,52 @@ def test_product_probe_docker_removal_has_a_finite_timeout(tmp_path: Path) -> No
         pytest.raises(probe_product.ProbeError, match="setup failed"),
     ):
         probe_product.execute_in_root(args, tmp_path)
+    assert len(observed) == 1
+    assert 0 < observed[0] <= 15
+
+
+def test_dashboard_probe_uses_default_exporter_timeout() -> None:
+    # given
+    args = type(
+        "Args",
+        (),
+        {
+            "version": "git-135beef00000",
+            "instance_id": "instance",
+            "otlp_endpoint": "http://127.0.0.1:4317",
+        },
+    )()
+
+    # when
+    with mock.patch.dict(os.environ, {"OTEL_EXPORTER_OTLP_TIMEOUT": "sentinel"}):
+        values = probe_dashboard.dashboard_environment(
+            args, "http://127.0.0.1:9200", 18080, 19090, 18081
+        )
+
+    # then
+    assert "OTEL_EXPORTER_OTLP_TIMEOUT" not in values
+    assert values["SALES_TRENDS_TIME_ZONE"] == "GMT"
+    assert values["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://127.0.0.1:4317"
+
+
+def test_dashboard_probe_docker_removal_has_a_finite_timeout(tmp_path: Path) -> None:
+    # given
+    args = type("Args", (), {"ownership_file": None})()
+    observed: list[float] = []
+
+    def remove(_arguments, **kwargs):
+        observed.append(kwargs["timeout"])
+        return subprocess.CompletedProcess([], 0)
+
+    # when / then
+    with (
+        mock.patch.object(
+            probe_dashboard, "run", side_effect=probe_dashboard.ProbeError("setup failed")
+        ),
+        mock.patch.object(probe_dashboard.subprocess, "run", side_effect=remove),
+        pytest.raises(probe_dashboard.ProbeError, match="setup failed"),
+    ):
+        probe_dashboard.execute_in_root(args, tmp_path)
     assert len(observed) == 1
     assert 0 < observed[0] <= 15
 

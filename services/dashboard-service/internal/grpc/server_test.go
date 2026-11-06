@@ -30,6 +30,11 @@ type agentExecutorFunc func(
 	application.AgentSalesQuery,
 ) (application.AgentSalesResult, error)
 
+type trendExecutorFunc func(
+	context.Context,
+	application.SalesTrendsQuery,
+) (application.SalesTrendsResult, error)
+
 func (function executorFunc) Execute(
 	ctx context.Context,
 	query application.TotalSalesQuery,
@@ -41,6 +46,13 @@ func (function agentExecutorFunc) Execute(
 	ctx context.Context,
 	query application.AgentSalesQuery,
 ) (application.AgentSalesResult, error) {
+	return function(ctx, query)
+}
+
+func (function trendExecutorFunc) Execute(
+	ctx context.Context,
+	query application.SalesTrendsQuery,
+) (application.SalesTrendsResult, error) {
 	return function(ctx, query)
 }
 
@@ -180,6 +192,102 @@ func TestDashboardService_GetAgentSales_RejectsInvalidAndMapsUnavailable(t *test
 	}
 }
 
+func TestDashboardService_GetSalesTrends_PreservesExactOrderedValues(t *testing.T) {
+	if dashboardv1.DashboardService_GetSalesTrends_FullMethodName !=
+		"/dashboard.v1.DashboardService/GetSalesTrends" {
+		t.Fatalf(
+			"full method = %q",
+			dashboardv1.DashboardService_GetSalesTrends_FullMethodName,
+		)
+	}
+	// given
+	trendExecutor := trendExecutorFunc(func(
+		_ context.Context,
+		query application.SalesTrendsQuery,
+	) (application.SalesTrendsResult, error) {
+		if !query.Product.Present() || query.Product.Value() != "" ||
+			query.DateFrom.String() != "2020-01-01" || query.DateTo.String() != "2020-05-01" ||
+			query.AggregationUnit != domain.AggregationUnitMonth {
+			t.Fatalf("query = %+v", query)
+		}
+		date, _ := domain.ParseDate("2020-03-01")
+		amount, _ := domain.NewTrendPremiumAmount("0.00")
+		value, _ := domain.NewTrendSalesValue(0, amount)
+		return application.SalesTrendsResult{PeriodSales: []domain.PeriodSales{{
+			PeriodDate: date, Period: "2020-03-01T00:00:00.000Z", Value: value,
+		}}}, nil
+	})
+	client := newClientWithExecutors(t, nil, nil, trendExecutor)
+
+	// when
+	response, err := client.GetSalesTrends(
+		context.Background(),
+		&dashboardv1.GetSalesTrendsRequest{
+			ProductCode: stringPointer(""), SaleDateFrom: "2020-01-01",
+			SaleDateTo: "2020-05-01", AggregationUnitCode: "MONTH",
+		},
+	)
+
+	// then
+	periods := response.GetPeriodSales()
+	if err != nil || len(periods) != 1 || periods[0].GetPeriodDate() != "2020-03-01" ||
+		periods[0].GetPeriod() != "2020-03-01T00:00:00.000Z" ||
+		periods[0].GetPoliciesCount() != 0 || periods[0].GetPremiumAmount() != "0.00" {
+		t.Fatalf("GetSalesTrends() = (%v, %v)", response, err)
+	}
+}
+
+func TestDashboardService_GetSalesTrends_RejectsInvalidAndMapsUnavailable(t *testing.T) {
+	// given
+	calls := 0
+	client := newClientWithExecutors(t, nil, nil, trendExecutorFunc(func(
+		context.Context,
+		application.SalesTrendsQuery,
+	) (application.SalesTrendsResult, error) {
+		calls++
+		return application.SalesTrendsResult{}, application.ErrSalesTrendsUnavailable
+	}))
+
+	// when
+	for _, request := range []*dashboardv1.GetSalesTrendsRequest{
+		{},
+		{SaleDateFrom: "2020-01-01", SaleDateTo: "2021-01-01"},
+		{
+			SaleDateFrom: "2020-02-30", SaleDateTo: "2021-01-01",
+			AggregationUnitCode: "MONTH",
+		},
+		{
+			SaleDateFrom: "2020-01-01", SaleDateTo: "2021-01-01",
+			AggregationUnitCode: "month",
+		},
+		{
+			SaleDateFrom: "2020-01-01", SaleDateTo: "2021-01-01",
+			AggregationUnitCode: "QUARTER",
+		},
+		{
+			SaleDateFrom: "2020-01-01", SaleDateTo: "2021-01-01",
+			AggregationUnitCode: " MONTH ",
+		},
+	} {
+		_, err := client.GetSalesTrends(context.Background(), request)
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("invalid request error = %v", err)
+		}
+	}
+	_, unavailableErr := client.GetSalesTrends(
+		context.Background(),
+		&dashboardv1.GetSalesTrendsRequest{
+			SaleDateFrom: "2020-01-01", SaleDateTo: "2021-01-01",
+			AggregationUnitCode: "MONTH",
+		},
+	)
+
+	// then
+	if status.Code(unavailableErr) != codes.Unavailable || calls != 1 {
+		t.Fatalf("unavailable/calls = (%v, %d)", unavailableErr, calls)
+	}
+}
+
 func TestDashboardService_RejectsMissingMalformedAndInvalidDatesBeforeUseCase(t *testing.T) {
 	// given
 	var calls int
@@ -287,33 +395,56 @@ func TestNewServer_RequiresDependenciesAndPositiveLimits(t *testing.T) {
 			return application.AgentSalesResult{}, nil
 		},
 	)
+	trendExecutor := trendExecutorFunc(
+		func(context.Context, application.SalesTrendsQuery) (application.SalesTrendsResult, error) {
+			return application.SalesTrendsResult{}, nil
+		},
+	)
 	logger := slog.Default()
 	tracer := noop.NewTracerProvider()
 	propagator := propagation.TraceContext{}
 	for _, call := range []func() error{
 		func() error {
-			_, err := transport.NewServer(nil, tracer, propagator, settings, executor, agentExecutor)
+			_, err := transport.NewServer(
+				nil, tracer, propagator, settings, executor, agentExecutor, trendExecutor,
+			)
 			return err
 		},
 		func() error {
-			_, err := transport.NewServer(logger, nil, propagator, settings, executor, agentExecutor)
+			_, err := transport.NewServer(
+				logger, nil, propagator, settings, executor, agentExecutor, trendExecutor,
+			)
 			return err
 		},
 		func() error {
-			_, err := transport.NewServer(logger, tracer, nil, settings, executor, agentExecutor)
+			_, err := transport.NewServer(
+				logger, tracer, nil, settings, executor, agentExecutor, trendExecutor,
+			)
 			return err
 		},
 		func() error {
-			_, err := transport.NewServer(logger, tracer, propagator, settings, nil, agentExecutor)
+			_, err := transport.NewServer(
+				logger, tracer, propagator, settings, nil, agentExecutor, trendExecutor,
+			)
 			return err
 		},
 		func() error {
-			_, err := transport.NewServer(logger, tracer, propagator, settings, executor, nil)
+			_, err := transport.NewServer(
+				logger, tracer, propagator, settings, executor, nil, trendExecutor,
+			)
+			return err
+		},
+		func() error {
+			_, err := transport.NewServer(
+				logger, tracer, propagator, settings, executor, agentExecutor, nil,
+			)
 			return err
 		},
 		func() error {
 			settings.RequestTimeout = 0
-			_, err := transport.NewServer(logger, tracer, propagator, settings, executor, agentExecutor)
+			_, err := transport.NewServer(
+				logger, tracer, propagator, settings, executor, agentExecutor, trendExecutor,
+			)
 			return err
 		},
 	} {
@@ -333,6 +464,20 @@ func newClient(
 	agentExecutors ...transport.AgentSalesExecutor,
 ) dashboardv1.DashboardServiceClient {
 	t.Helper()
+	var agentExecutor transport.AgentSalesExecutor
+	if len(agentExecutors) > 0 {
+		agentExecutor = agentExecutors[0]
+	}
+	return newClientWithExecutors(t, executor, agentExecutor, nil)
+}
+
+func newClientWithExecutors(
+	t *testing.T,
+	executor transport.TotalSalesExecutor,
+	agentExecutor transport.AgentSalesExecutor,
+	trendExecutor transport.SalesTrendsExecutor,
+) dashboardv1.DashboardServiceClient {
+	t.Helper()
 	if executor == nil {
 		executor = executorFunc(
 			func(context.Context, application.TotalSalesQuery) (application.TotalSalesResult, error) {
@@ -340,13 +485,21 @@ func newClient(
 			},
 		)
 	}
-	var agentExecutor transport.AgentSalesExecutor = agentExecutorFunc(
-		func(context.Context, application.AgentSalesQuery) (application.AgentSalesResult, error) {
+	if agentExecutor == nil {
+		agentExecutor = agentExecutorFunc(func(
+			context.Context,
+			application.AgentSalesQuery,
+		) (application.AgentSalesResult, error) {
 			return application.AgentSalesResult{}, nil
-		},
-	)
-	if len(agentExecutors) > 0 {
-		agentExecutor = agentExecutors[0]
+		})
+	}
+	if trendExecutor == nil {
+		trendExecutor = trendExecutorFunc(func(
+			context.Context,
+			application.SalesTrendsQuery,
+		) (application.SalesTrendsResult, error) {
+			return application.SalesTrendsResult{}, nil
+		})
 	}
 	listener := bufconn.Listen(1 << 20)
 	server, err := transport.NewServer(
@@ -359,6 +512,7 @@ func newClient(
 		},
 		executor,
 		agentExecutor,
+		trendExecutor,
 	)
 	if err != nil {
 		t.Fatal(err)

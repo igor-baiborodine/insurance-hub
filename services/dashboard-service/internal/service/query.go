@@ -57,3 +57,28 @@ func (reader *observedAgentSalesReader) ReadAgentSales(
 	observation.Finish(dependencyCtx, err)
 	return result, err
 }
+
+type observedSalesTrendsReader struct {
+	reader   application.SalesTrendsReader
+	observer *telemetry.DependencyObserver
+}
+
+func newObservedSalesTrendsReader(
+	reader application.SalesTrendsReader,
+	observer *telemetry.DependencyObserver,
+) application.SalesTrendsReader {
+	return &observedSalesTrendsReader{reader: reader, observer: observer}
+}
+
+func (reader *observedSalesTrendsReader) ReadSalesTrends(
+	ctx context.Context,
+	query application.SalesTrendsQuery,
+) ([]domain.PeriodSales, error) {
+	dependencyCtx, observation := reader.observer.StartElasticsearch(
+		ctx,
+		telemetry.OperationSalesTrends,
+	)
+	result, err := reader.reader.ReadSalesTrends(dependencyCtx, query)
+	observation.Finish(dependencyCtx, err)
+	return result, err
+}

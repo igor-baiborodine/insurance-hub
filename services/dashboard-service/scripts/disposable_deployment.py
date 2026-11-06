@@ -774,6 +774,15 @@ def run() -> None:
                 "http://local-dev-dashboard-api/dashboard/agentssales",
                 '{"perAgentTotal":{"safe-agent":{"policiesCount":1,"premiumAmount":1000.0}}}',
             ),
+            (
+                "business-sales-trends",
+                '{"productCode":"SAFE","saleDateFrom":"2019-01-01",'
+                '"saleDateTo":"2020-01-01","aggregationUnitCode":"MONTH"}',
+                "http://local-dev-dashboard-api/dashboard/trends",
+                '{"periodSales":[{"periodDate":[2019,6,1],'
+                '"period":"2019-06-01T00:00:00.000Z","policiesCount":1,'
+                '"premiumAmount":1000.00}]}',
+            ),
         )
         sales_failures: list[str] = []
         for name, payload, url, expected in sales_cases:
@@ -804,6 +813,7 @@ def run() -> None:
         for name, path in (
             ("unlabeled-denied", "/dashboard/totalsales"),
             ("unlabeled-agent-denied", "/dashboard/agentssales"),
+            ("unlabeled-trends-denied", "/dashboard/trends"),
         ):
             try:
                 probe(

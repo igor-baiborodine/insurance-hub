@@ -24,6 +24,10 @@ def remove_agent_path(swagger: dict[str, Any]) -> None:
     del swagger["paths"]["/dashboard/agentssales"]
 
 
+def remove_trends_path(swagger: dict[str, Any]) -> None:
+    del swagger["paths"]["/dashboard/trends"]
+
+
 def change_status_example(swagger: dict[str, Any]) -> None:
     swagger["paths"]["/dashboard/agentssales"]["post"]["responses"]["503"]["examples"][
         "application/json"
@@ -54,15 +58,35 @@ def format_agent_money_as_double(swagger: dict[str, Any]) -> None:
     )
 
 
+def quote_trend_money(swagger: dict[str, Any]) -> None:
+    swagger["definitions"]["v1SalesTrendHTTPValue"]["properties"]["premiumAmount"]["type"] = (
+        "string"
+    )
+
+
+def scalar_trend_date(swagger: dict[str, Any]) -> None:
+    swagger["definitions"]["v1SalesTrendHTTPValue"]["properties"]["periodDate"]["type"] = "string"
+
+
+def default_trend_unit(swagger: dict[str, Any]) -> None:
+    swagger["definitions"]["v1GetSalesTrendsRequest"]["properties"]["aggregationUnitCode"][
+        "default"
+    ] = "MONTH"
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
         (remove_agent_path, "paths differ from the contract"),
+        (remove_trends_path, "paths differ from the contract"),
         (change_status_example, "agent_sales response 503 example differs"),
         (add_response, "total_sales response status set differs"),
         (quote_policy_count, "v1TotalSalesHTTPValue.policiesCount must have type integer"),
         (quote_agent_money, "v1AgentSalesHTTPValue.premiumAmount must have type number"),
         (format_agent_money_as_double, "v1AgentSalesHTTPValue.premiumAmount format must be absent"),
+        (quote_trend_money, "v1SalesTrendHTTPValue.premiumAmount must have type number"),
+        (scalar_trend_date, "v1SalesTrendHTTPValue.periodDate must have type array"),
+        (default_trend_unit, "v1GetSalesTrendsRequest.aggregationUnitCode default must be absent"),
     ],
 )
 def test_contract_check_rejects_controlled_swagger_drift(

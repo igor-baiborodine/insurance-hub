@@ -12,7 +12,7 @@ import (
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 )
 
-func TestLoad_Defaults(t *testing.T) {
+func TestLoad_DefaultsWithRequiredSalesTrendsTimeZone(t *testing.T) {
 	// given
 	lookup := mapLookup(nil)
 
@@ -67,6 +67,87 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if got.ExporterTimeout != 2*time.Second {
 		t.Errorf("Telemetry.ExporterTimeout = %v, want 2s", got.ExporterTimeout)
+	}
+	if got.SalesTrendsTimeZone == nil || got.SalesTrendsTimeZone.String() != "GMT" {
+		t.Errorf("SalesTrendsTimeZone = %v, want GMT", got.SalesTrendsTimeZone)
+	}
+}
+
+func TestLoad_RequiresExactSalesTrendsTimeZone(t *testing.T) {
+	// given
+	tests := []struct {
+		name   string
+		lookup lookupEnv
+	}{
+		{name: "missing", lookup: exactMapLookup(nil)},
+		{
+			name:   "empty",
+			lookup: exactMapLookup(map[string]string{EnvSalesTrendsTimeZone: ""}),
+		},
+		{
+			name:   "process local",
+			lookup: exactMapLookup(map[string]string{EnvSalesTrendsTimeZone: "Local"}),
+		},
+		{
+			name:   "leading whitespace",
+			lookup: exactMapLookup(map[string]string{EnvSalesTrendsTimeZone: " GMT"}),
+		},
+		{
+			name:   "trailing whitespace",
+			lookup: exactMapLookup(map[string]string{EnvSalesTrendsTimeZone: "GMT "}),
+		},
+		{
+			name: "unknown",
+			lookup: exactMapLookup(
+				map[string]string{EnvSalesTrendsTimeZone: "private-marker/Unknown"},
+			),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			_, err := load(test.lookup)
+
+			// then
+			if err == nil {
+				t.Fatal("invalid sales-trends time zone accepted")
+			}
+			setting, _ := kitconfig.ErrorDetails(err)
+			if setting != EnvSalesTrendsTimeZone {
+				t.Errorf(
+					"setting = %q, want %q: %v",
+					setting,
+					EnvSalesTrendsTimeZone,
+					err,
+				)
+			}
+			if strings.Contains(err.Error(), "private-marker") {
+				t.Fatalf("configuration value disclosed: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoad_AcceptsAvailableExplicitSalesTrendsTimeZones(t *testing.T) {
+	for _, name := range []string{"GMT", "UTC", "America/Toronto"} {
+		t.Run(name, func(t *testing.T) {
+			// when
+			got, err := load(
+				exactMapLookup(map[string]string{EnvSalesTrendsTimeZone: name}),
+			)
+			// then
+			if err != nil {
+				t.Fatalf("load %s: %v", name, err)
+			}
+			if got.SalesTrendsTimeZone == nil ||
+				got.SalesTrendsTimeZone.String() != name {
+				t.Errorf(
+					"SalesTrendsTimeZone = %v, want %s",
+					got.SalesTrendsTimeZone,
+					name,
+				)
+			}
+		})
 	}
 }
 
@@ -195,6 +276,7 @@ func TestLoad_ValidOverrides(t *testing.T) {
 		kitconfig.EnvOTELEnabled:              "true",
 		kitconfig.EnvOTELExporterOTLPEndpoint: "https://alloy.monitoring.svc:4317/",
 		kitconfig.EnvOTELExporterOTLPTimeout:  "750ms",
+		EnvSalesTrendsTimeZone:                "America/Toronto",
 	}
 
 	// when
@@ -218,6 +300,9 @@ func TestLoad_ValidOverrides(t *testing.T) {
 	if !got.Enabled || got.ExporterEndpoint.String() !=
 		"https://alloy.monitoring.svc:4317" {
 		t.Errorf("unexpected telemetry: %+v", got.Telemetry)
+	}
+	if got.SalesTrendsTimeZone == nil || got.SalesTrendsTimeZone.String() != "America/Toronto" {
+		t.Errorf("unexpected sales-trends time zone: %v", got.SalesTrendsTimeZone)
 	}
 }
 
@@ -416,6 +501,19 @@ func TestLoad_AllowsEmptyEndpointWhenTelemetryIsDisabled(t *testing.T) {
 }
 
 func mapLookup(values map[string]string) lookupEnv {
+	return func(name string) (string, bool) {
+		if name == EnvSalesTrendsTimeZone {
+			if value, exists := values[name]; exists {
+				return value, true
+			}
+			return "GMT", true
+		}
+		value, exists := values[name]
+		return value, exists
+	}
+}
+
+func exactMapLookup(values map[string]string) lookupEnv {
 	return func(name string) (string, bool) {
 		value, exists := values[name]
 		return value, exists

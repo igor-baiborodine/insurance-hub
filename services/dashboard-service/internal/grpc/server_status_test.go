@@ -18,9 +18,10 @@ import (
 
 func TestRPCOperation_UsesFixedMethodAllowlist(t *testing.T) {
 	for method, want := range map[string]string{
-		dashboardv1.DashboardService_GetTotalSales_FullMethodName: telemetry.OperationTotalSales,
-		dashboardv1.DashboardService_GetAgentSales_FullMethodName: telemetry.OperationAgentSales,
-		"/private.Service/AgentLogin":                             "",
+		dashboardv1.DashboardService_GetTotalSales_FullMethodName:  telemetry.OperationTotalSales,
+		dashboardv1.DashboardService_GetAgentSales_FullMethodName:  telemetry.OperationAgentSales,
+		dashboardv1.DashboardService_GetSalesTrends_FullMethodName: telemetry.OperationSalesTrends,
+		"/private.Service/AgentLogin":                              "",
 	} {
 		if got := rpcOperation(method); got != want {
 			t.Errorf("rpcOperation(%q) = %q, want %q", method, got, want)

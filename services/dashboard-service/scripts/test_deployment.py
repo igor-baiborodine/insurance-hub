@@ -216,7 +216,7 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
 
     pods = checks.qualification_pods(target, f"issue-287-dashboard-denied-{environment}")
 
-    assert len(pods) == 12
+    assert len(pods) == 15
     assert all(pod["spec"]["containers"][0]["image"] == checks.PROBE_IMAGE for pod in pods)
     assert all(
         pod["spec"]["containers"][0]["args"][0].startswith(
@@ -252,10 +252,15 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
     agent_allowed = by_name["dashboard-qualification-business-agent-sales"]["spec"]["containers"][
         0
     ]["args"][0]
+    trends_allowed = by_name["dashboard-qualification-business-sales-trends"]["spec"]["containers"][
+        0
+    ]["args"][0]
     assert "/dashboard/totalsales" in total_allowed
     assert "grep -q '\"total\"'" in total_allowed
     assert "/dashboard/agentssales" in agent_allowed
     assert "grep -q '\"perAgentTotal\"'" in agent_allowed
+    assert "/dashboard/trends" in trends_allowed
+    assert "grep -Eq '^\\{\\}$|\"periodSales\":\\['" in trends_allowed
     management_allowed = by_name["dashboard-qualification-management"]["spec"]["containers"][0][
         "args"
     ][0]
@@ -473,7 +478,7 @@ def test_direct_rpc_invokes_the_service_owner_with_the_selected_address() -> Non
     )
 
 
-def test_verify_runs_rpc_and_access_after_both_http_smokes_fail() -> None:
+def test_verify_runs_rpc_and_access_after_all_http_smokes_fail() -> None:
     target = Mock(
         kubectl_binary="kubectl",
         context="kind-local-dev-insurance-hub",
@@ -497,11 +502,52 @@ def test_verify_runs_rpc_and_access_after_both_http_smokes_fail() -> None:
                 (200, b"ready\n"),
                 (500, b'{"error":"total"}'),
                 (403, b'{"error":"agent"}'),
+                (504, b'{"error":"trends"}'),
             ],
         ),
         patch.object(checks, "run_deployed_direct_rpc") as rpc,
         patch.object(checks, "run_access_qualification") as access,
-        pytest.raises(checks.DeploymentError, match="total-sales HTTP.*agent-sales HTTP"),
+        pytest.raises(
+            checks.DeploymentError,
+            match="total-sales HTTP.*agent-sales HTTP.*sales-trends HTTP",
+        ),
+    ):
+        checks.verify(target, [])
+
+    rpc.assert_called_once_with(19090)
+    access.assert_called_once_with(target)
+
+
+@pytest.mark.parametrize("trend_body", [b"{}", b'{"periodSales":[]}'])
+def test_verify_accepts_empty_and_populated_trend_envelopes(trend_body: bytes) -> None:
+    target = Mock(
+        kubectl_binary="kubectl",
+        context="kind-local-dev-insurance-hub",
+        namespace="local-dev-all",
+        business="local-dev-dashboard-api",
+        management="local-dev-dashboard-api-management",
+    )
+    processes = [Mock(), Mock(), Mock()]
+    for process in processes:
+        process.wait.return_value = 0
+    with (
+        patch.object(checks, "workload_dependencies"),
+        patch.object(checks, "role_snapshot", return_value={"java": "unchanged"}),
+        patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
+        patch.object(checks.subprocess, "Popen", side_effect=processes),
+        patch.object(checks, "_wait_for_port_forward"),
+        patch.object(
+            checks,
+            "_http",
+            side_effect=[
+                (200, b"ready\n"),
+                (200, b'{"total":{}}'),
+                (200, b'{"perAgentTotal":{}}'),
+                (200, trend_body),
+            ],
+        ),
+        patch.object(checks, "run_deployed_direct_rpc") as rpc,
+        patch.object(checks, "run_access_qualification") as access,
     ):
         checks.verify(target, [])
 
@@ -530,7 +576,12 @@ def test_verify_cleans_every_port_forward_when_direct_rpc_stops(failure: BaseExc
         patch.object(
             checks,
             "_http",
-            side_effect=[(200, b"ready\n"), (200, b'{"total":{"policiesCount":1}}')],
+            side_effect=[
+                (200, b"ready\n"),
+                (200, b'{"total":{"policiesCount":1}}'),
+                (200, b'{"perAgentTotal":{}}'),
+                (200, b'{"periodSales":[]}'),
+            ],
         ),
         patch.object(checks, "run_deployed_direct_rpc", side_effect=failure),
         patch.object(checks, "run_access_qualification"),
@@ -731,6 +782,19 @@ def test_render_requires_the_application_exporter_timeout_default() -> None:
         checks.validate_render("local-dev", yaml.safe_dump_all(items))
 
 
+@pytest.mark.parametrize("value", [None, "", "Local", "UTC", " GMT"])
+def test_render_requires_the_accepted_sales_trends_time_zone(value: str | None) -> None:
+    items = checks.documents(checks.render("local-dev"))
+    config = checks.resource(items, "ConfigMap", "local-dev-dashboard-config")
+    if value is None:
+        config["data"].pop("SALES_TRENDS_TIME_ZONE")
+    else:
+        config["data"]["SALES_TRENDS_TIME_ZONE"] = value
+
+    with pytest.raises(checks.DeploymentError, match="runtime configuration differs"):
+        checks.validate_render("local-dev", yaml.safe_dump_all(items))
+
+
 @pytest.mark.parametrize(
     ("environment", "mutation", "message"),
     [
@@ -858,7 +922,12 @@ def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:
         "git-abcdef123456"
     )
     live_config = actual[("configmap", "local-dev-dashboard-config")]["data"]
-    for name in ("ELASTICSEARCH_INDEX", "ELASTICSEARCH_TIMEOUT", "ELASTICSEARCH_URL"):
+    for name in (
+        "ELASTICSEARCH_INDEX",
+        "ELASTICSEARCH_TIMEOUT",
+        "ELASTICSEARCH_URL",
+        "SALES_TRENDS_TIME_ZONE",
+    ):
         live_config.pop(name)
     live_config["OTEL_EXPORTER_OTLP_TIMEOUT"] = "2s"
     live_container = live_deployment["spec"]["template"]["spec"]["containers"][0]

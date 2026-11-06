@@ -32,7 +32,7 @@ import check_backend_config as backend_check
 
 TIMEOUT = 90
 CLEANUP_TIMEOUT = 15
-SERVICE_VERSION = "sha-135beef"
+SERVICE_VERSION = "git-135beef00000"
 SERVICE_INSTANCE_ID = "13500000-0000-4000-8000-000000000015"
 SERVICE_TRACE_ID = "13513513513513513513513513513515"
 SYNTHETIC_TRACE_ID = "51515151515151515151515151515151"
@@ -1174,6 +1174,33 @@ def validate_policy_search_metrics(prometheus_port: int) -> None:
     validate_runtime_metrics("policy-search", prometheus_port)
 
 
+def validate_dashboard_metrics(prometheus_port: int) -> None:
+    service_name = "dashboard-service"
+    prefix = "insurance_hub_dashboard_"
+    dependency_dimensions = [
+        {
+            f"{prefix}dependency": "elasticsearch",
+            f"{prefix}operation": "sales_trends",
+            f"{prefix}outcome": "success",
+        }
+    ]
+    dependencies = metric_series(
+        prometheus_port,
+        f"{prefix}dependencies_total",
+        service_name,
+        dependency_dimensions,
+    )
+    if float(dependencies[0]["value"][1]) != 1:
+        raise HarnessError("Dashboard Elasticsearch sales-trends counter is not exactly one")
+    validate_histogram_inventory(
+        prometheus_port,
+        f"{prefix}dependency_duration_seconds",
+        service_name,
+        dependency_dimensions,
+    )
+    validate_runtime_metrics("dashboard", prometheus_port)
+
+
 def start_prometheus(harness: DockerHarness, enabled: bool) -> tuple[str, int]:
     arguments = [
         "--config.file=/fixture/prometheus.yml",
@@ -1223,36 +1250,67 @@ def validate_service_backends(
 ) -> None:
     service_name = f"{service_domain}-service"
     metric_domain = service_domain.replace("-", "_")
-    operation = "search" if service_domain == "policy-search" else "list"
-    request_dimensions = {
-        f"insurance_hub_{metric_domain}_operation": operation,
-        f"insurance_hub_{metric_domain}_transport": "http",
-        f"insurance_hub_{metric_domain}_outcome": "success",
-        "http_response_status_code": "200",
-    }
+    operation = {
+        "dashboard": "sales_trends",
+        "policy-search": "search",
+    }.get(service_domain, "list")
+    if service_domain == "dashboard":
+        request_dimensions = [
+            {
+                "insurance_hub_dashboard_operation": operation,
+                "insurance_hub_dashboard_transport": "http",
+                "insurance_hub_dashboard_outcome": "success",
+                "http_response_status_code": "200",
+            },
+            {
+                "insurance_hub_dashboard_operation": operation,
+                "insurance_hub_dashboard_transport": "grpc",
+                "insurance_hub_dashboard_outcome": "success",
+                "rpc_response_status_code": "OK",
+            },
+        ]
+    else:
+        request_dimensions = [
+            {
+                f"insurance_hub_{metric_domain}_operation": operation,
+                f"insurance_hub_{metric_domain}_transport": "http",
+                f"insurance_hub_{metric_domain}_outcome": "success",
+                "http_response_status_code": "200",
+            }
+        ]
     request_counter = metric_series(
         prometheus_port,
         f"insurance_hub_{metric_domain}_requests_total",
         service_name,
-        [request_dimensions],
+        request_dimensions,
     )
-    if float(request_counter[0]["value"][1]) != 1:
-        raise HarnessError(f"{service_domain} request counter is not exactly one")
+    if any(float(result["value"][1]) != 1 for result in request_counter):
+        raise HarnessError(f"{service_domain} request counters are not exactly one each")
     if request_histogram_buckets != len(REQUEST_HISTOGRAM_BOUNDS):
         raise HarnessError(
             f"{service_domain} request histogram contract has "
             f"{len(REQUEST_HISTOGRAM_BOUNDS)} buckets, configured proof expects "
             f"{request_histogram_buckets}"
         )
-    validate_histogram(
-        prometheus_port,
-        f"insurance_hub_{metric_domain}_request_duration_seconds",
-        service_name,
-        request_dimensions,
-        REQUEST_HISTOGRAM_BOUNDS,
-    )
+    if service_domain == "dashboard":
+        validate_histogram_inventory(
+            prometheus_port,
+            f"insurance_hub_{metric_domain}_request_duration_seconds",
+            service_name,
+            request_dimensions,
+        )
+    else:
+        validate_histogram(
+            prometheus_port,
+            f"insurance_hub_{metric_domain}_request_duration_seconds",
+            service_name,
+            request_dimensions[0],
+            REQUEST_HISTOGRAM_BOUNDS,
+        )
     if service_domain == "product":
         validate_database_pool_and_runtime_metrics(service_domain, prometheus_port)
+    elif service_domain == "dashboard":
+        validate_dashboard_metrics(prometheus_port)
     elif service_domain == "policy-search":
         validate_policy_search_metrics(prometheus_port)
     else:
@@ -1278,10 +1336,14 @@ def validate_service_backends(
     url = f"http://127.0.0.1:{loki_port}/loki/api/v1/query_range?" + urllib.parse.urlencode(
         {"query": query, "start": start, "end": end, "limit": 20}
     )
+    expected_completion_logs = 2 if service_domain == "dashboard" else 1
     logs = wait_json(
         url,
-        lambda value: sum(len(stream.get("values", [])) for stream in query_results(value)) == 1,
-        f"one correlated {service_domain} completion log",
+        lambda value: (
+            sum(len(stream.get("values", [])) for stream in query_results(value))
+            == expected_completion_logs
+        ),
+        f"{expected_completion_logs} correlated {service_domain} completion logs",
     )
     streams = query_results(logs)
     returned_fields = streams[0].get("stream", {})

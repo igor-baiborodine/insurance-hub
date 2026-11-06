@@ -31,10 +31,12 @@ import (
 )
 
 const (
-	totalSalesPath  = "/dashboard/totalsales"
-	totalSalesRoute = "POST " + totalSalesPath
-	agentSalesPath  = "/dashboard/agentssales"
-	agentSalesRoute = "POST " + agentSalesPath
+	totalSalesPath   = "/dashboard/totalsales"
+	totalSalesRoute  = "POST " + totalSalesPath
+	agentSalesPath   = "/dashboard/agentssales"
+	agentSalesRoute  = "POST " + agentSalesPath
+	salesTrendsPath  = "/dashboard/trends"
+	salesTrendsRoute = "POST " + salesTrendsPath
 )
 
 type Settings struct {
@@ -80,6 +82,10 @@ func NewHandler(
 		agentSalesRoute,
 		http.HandlerFunc(handler.serveAgentSales),
 	)
+	handler.salesTrends = handler.instrument(
+		salesTrendsRoute,
+		http.HandlerFunc(handler.serveSalesTrends),
+	)
 	handler.unmatched = handler.instrument(
 		"unmatched",
 		http.HandlerFunc(handler.serveUnmatched),
@@ -115,11 +121,12 @@ func validSettings(settings Settings) bool {
 }
 
 type Handler struct {
-	mux        http.Handler
-	settings   Settings
-	totalSales http.Handler
-	agentSales http.Handler
-	unmatched  http.Handler
+	mux         http.Handler
+	settings    Settings
+	totalSales  http.Handler
+	agentSales  http.Handler
+	salesTrends http.Handler
+	unmatched   http.Handler
 }
 
 type (
@@ -144,6 +151,10 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	if facts.originalPath == agentSalesPath && request.Method == http.MethodPost {
 		handler.agentSales.ServeHTTP(writer, request)
+		return
+	}
+	if facts.originalPath == salesTrendsPath && request.Method == http.MethodPost {
+		handler.salesTrends.ServeHTTP(writer, request)
 		return
 	}
 	request.URL.Path = "/unmatched"
@@ -173,6 +184,10 @@ func (handler *Handler) serveTotalSales(writer http.ResponseWriter, request *htt
 
 func (handler *Handler) serveAgentSales(writer http.ResponseWriter, request *http.Request) {
 	handler.serveSales(writer, request, normalizeAgentSalesRequestJSON)
+}
+
+func (handler *Handler) serveSalesTrends(writer http.ResponseWriter, request *http.Request) {
+	handler.serveSales(writer, request, normalizeSalesTrendsRequestJSON)
 }
 
 func (handler *Handler) serveSales(
@@ -214,7 +229,8 @@ func (handler *Handler) serveSales(
 
 func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http.Request) {
 	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
-	if facts.originalPath == totalSalesPath || facts.originalPath == agentSalesPath {
+	if facts.originalPath == totalSalesPath || facts.originalPath == agentSalesPath ||
+		facts.originalPath == salesTrendsPath {
 		writer.Header().Set("Allow", http.MethodPost)
 		writeError(
 			writer,
@@ -432,6 +448,71 @@ func normalizeAgentSalesRequestJSON(data []byte) ([]byte, bool) {
 	return normalized, err == nil
 }
 
+type normalizedSalesTrendsRequest struct {
+	ProductCode         *string `json:"productCode,omitempty"`
+	SaleDateFrom        string  `json:"saleDateFrom"`
+	SaleDateTo          string  `json:"saleDateTo"`
+	AggregationUnitCode string  `json:"aggregationUnitCode"`
+}
+
+func normalizeSalesTrendsRequestJSON(data []byte) ([]byte, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	request := normalizedSalesTrendsRequest{}
+	var fromSet, toSet, unitSet bool
+	for decoder.More() {
+		name, err := decoder.Token()
+		if err != nil {
+			return nil, false
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, false
+		}
+		switch name {
+		case "productCode":
+			if bytes.Equal(value, []byte("null")) {
+				request.ProductCode = nil
+				continue
+			}
+			var product string
+			if err := json.Unmarshal(value, &product); err != nil {
+				return nil, false
+			}
+			request.ProductCode = &product
+		case "saleDateFrom":
+			if bytes.Equal(value, []byte("null")) ||
+				json.Unmarshal(value, &request.SaleDateFrom) != nil {
+				return nil, false
+			}
+			fromSet = true
+		case "saleDateTo":
+			if bytes.Equal(value, []byte("null")) ||
+				json.Unmarshal(value, &request.SaleDateTo) != nil {
+				return nil, false
+			}
+			toSet = true
+		case "aggregationUnitCode":
+			if bytes.Equal(value, []byte("null")) ||
+				json.Unmarshal(value, &request.AggregationUnitCode) != nil {
+				return nil, false
+			}
+			unitSet = true
+		}
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
+		return nil, false
+	}
+	if _, err = decoder.Token(); !errors.Is(err, io.EOF) || !fromSet || !toSet || !unitSet {
+		return nil, false
+	}
+	normalized, err := json.Marshal(request)
+	return normalized, err == nil
+}
+
 func isJSON(value string) bool {
 	mediaType, parameters, err := mime.ParseMediaType(value)
 	if err != nil || mediaType != "application/json" {
@@ -458,6 +539,9 @@ func (marshaler *legacyMarshaler) Marshal(value any) ([]byte, error) {
 	}
 	if response, ok := value.(*dashboardv1.GetAgentSalesResponse); ok {
 		return marshalLegacyAgentResponse(response)
+	}
+	if response, ok := value.(*dashboardv1.GetSalesTrendsResponse); ok {
+		return marshalLegacySalesTrendsResponse(response)
 	}
 	return marshaler.JSONPb.Marshal(value)
 }
@@ -489,6 +573,51 @@ type legacyHTTPResponse struct {
 
 type legacyAgentHTTPResponse struct {
 	PerAgentTotal map[string]legacyHTTPValue `json:"perAgentTotal"`
+}
+
+type legacySalesTrendValue struct {
+	PeriodDate    [3]int          `json:"periodDate"`
+	Period        string          `json:"period"`
+	PoliciesCount int64           `json:"policiesCount"`
+	PremiumAmount json.RawMessage `json:"premiumAmount"`
+}
+
+type legacySalesTrendsResponse struct {
+	PeriodSales []legacySalesTrendValue `json:"periodSales,omitempty"`
+}
+
+func marshalLegacySalesTrendsResponse(
+	response *dashboardv1.GetSalesTrendsResponse,
+) ([]byte, error) {
+	if response == nil {
+		return nil, errors.New("marshal sales trends: missing response")
+	}
+	result := legacySalesTrendsResponse{
+		PeriodSales: make([]legacySalesTrendValue, len(response.PeriodSales)),
+	}
+	for index, value := range response.PeriodSales {
+		if value == nil || value.GetPoliciesCount() < 0 {
+			return nil, errors.New("marshal sales trends: invalid period value")
+		}
+		date, err := time.Parse(time.DateOnly, value.GetPeriodDate())
+		if err != nil || date.Format(time.DateOnly) != value.GetPeriodDate() {
+			return nil, errors.New("marshal sales trends: invalid period date")
+		}
+		amount, err := domain.NewTrendPremiumAmount(value.GetPremiumAmount())
+		if err != nil {
+			return nil, errors.New("marshal sales trends: invalid premium amount")
+		}
+		number := json.RawMessage(amount.String())
+		if !json.Valid(number) {
+			return nil, errors.New("marshal sales trends: invalid JSON premium amount")
+		}
+		result.PeriodSales[index] = legacySalesTrendValue{
+			PeriodDate: [3]int{date.Year(), int(date.Month()), date.Day()},
+			Period:     value.GetPeriod(), PoliciesCount: value.GetPoliciesCount(),
+			PremiumAmount: number,
+		}
+	}
+	return json.Marshal(result)
 }
 
 func marshalLegacyAgentResponse(response *dashboardv1.GetAgentSalesResponse) ([]byte, error) {

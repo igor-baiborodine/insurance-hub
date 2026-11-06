@@ -368,6 +368,8 @@ def main() -> int:
                 "ELASTICSEARCH_PASSWORD",
                 "--env",
                 "ELASTICSEARCH_TIMEOUT=5s",
+                "--env",
+                "SALES_TRENDS_TIME_ZONE=America/Toronto",
                 image,
             ],
             "start Dashboard runtime image",
@@ -401,6 +403,26 @@ def main() -> int:
                     "saleDateTo": "2020-01-01",
                 },
                 {"perAgentTotal": {"safe-agent": {"policiesCount": 1, "premiumAmount": 1000.0}}},
+            ),
+            (
+                "sales-trends",
+                "/dashboard/trends",
+                {
+                    "productCode": "SAFE",
+                    "saleDateFrom": "2019-01-01",
+                    "saleDateTo": "2020-01-01",
+                    "aggregationUnitCode": "MONTH",
+                },
+                {
+                    "periodSales": [
+                        {
+                            "periodDate": [2019, 5, 31],
+                            "period": "2019-06-01T00:00:00.000Z",
+                            "policiesCount": 1,
+                            "premiumAmount": 1000.0,
+                        }
+                    ]
+                },
             ),
         )
         operation_failures: list[str] = []

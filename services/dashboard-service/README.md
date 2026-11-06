@@ -14,8 +14,9 @@
 # Dashboard service
 
 `dashboard-service` is the first private Go Dashboard process. It runs beside the authoritative
-Java Dashboard and exposes the read-only total-sales and agent-sales queries backed by the existing
-`policy_stats` Elasticsearch index. Java retains writer, setup, edge retry and traffic authority.
+Java Dashboard and exposes the read-only total-sales, agent-sales and sales-trends queries backed
+by the existing `policy_stats` Elasticsearch index. Java retains writer, setup, edge retry and
+traffic authority.
 This module does not create, seed, remap or write Elasticsearch state and has no Kafka
 responsibility.
 
@@ -29,26 +30,32 @@ service.
 The editable protobuf source is `api/dashboard/v1/dashboard_service.proto`; generated gRPC, gateway
 and Swagger 2.0 outputs live under `gen/dashboard/v1` and `gen/openapiv2/dashboard/v1`.
 
-- Direct gRPC: `dashboard.v1.DashboardService/GetTotalSales` and
-  `dashboard.v1.DashboardService/GetAgentSales`.
+- Direct gRPC: `dashboard.v1.DashboardService/GetTotalSales`,
+  `dashboard.v1.DashboardService/GetAgentSales` and
+  `dashboard.v1.DashboardService/GetSalesTrends`.
 - Private HTTP gateway: `POST /dashboard/totalsales` with date-only `saleDateFrom` and
   `saleDateTo` strings plus optional exact `productCode`.
 - Private HTTP gateway: `POST /dashboard/agentssales` with the same required dates plus independent
   optional exact `agentLogin` and `productCode` filters.
+- Private HTTP gateway: `POST /dashboard/trends` with the same required dates, optional exact
+  `productCode`, and required `DAY`, `WEEK`, `MONTH` or `YEAR` `aggregationUnitCode`.
 - Management: `GET /livez` and `GET /readyz` on the separate management listener.
 
 The HTTP adapter validates the accepted 4,096-byte request and media contract, then calls the
 actual local gRPC listener. Total sales maps exact RPC minor units to its legacy two-place numeric
 envelope. Agent sales preserves canonical decimal tokens through RPC and emits them as legacy JSON
-numbers without rounding. Diagnostics never include request values, agent logins, amounts,
-credentials, query bodies or upstream response content.
+numbers without rounding. Sales trends converts the Elasticsearch aggregate once with
+Java-compatible HALF_UP rounding and emits a two-place legacy JSON number. A trend `periodDate`
+array uses the configured IANA time zone, while `period` retains the independent UTC backend label.
+Diagnostics never include request values, periods, agent logins, amounts, credentials, query bodies
+or upstream response content.
 
 ```mermaid
 flowchart LR
     caller["Private HTTP caller"] -->|":8080"| gateway["internal/gateway"]
     gateway -->|"generated client over loopback"| listener["gRPC listener :9090"]
     direct["Private RPC caller"] -->|":9090"| listener
-    listener --> query["internal/grpc total and agent sales"]
+    listener --> query["internal/grpc three sales reads"]
     query --> usecase["internal/application"]
     usecase --> reader["internal/elasticsearch"]
     reader --> es["policy_stats"]
@@ -71,9 +78,9 @@ then shuts them down in the documented HTTP-first order.
 | `cmd/server` | Load settings, construct identity-aware logging and telemetry, own signals and exit |
 | `internal/config` | Compose typed common settings, Dashboard identity and Elasticsearch policy |
 | `internal/gateway` | Strict HTTP decoding, generated client registration, metadata stripping and safe errors |
-| `internal/grpc` | Register both sales operations, enforce request validation and map safe gRPC statuses |
-| `internal/application` | Own distinct total-sales and agent-sales use cases and narrow reader ports |
-| `internal/domain` | Own date/filter presence, count, total minor units and exact agent decimal tokens |
+| `internal/grpc` | Register all three sales operations, enforce request validation and map safe gRPC statuses |
+| `internal/application` | Own distinct total-sales, agent-sales and sales-trends use cases and narrow reader ports |
+| `internal/domain` | Own date/filter presence, aggregation units, periods, counts and exact decimal tokens |
 | `internal/elasticsearch` | Execute the bounded read-only `policy_stats` aggregation |
 | `internal/service` | Compose listeners/providers/query dependencies, readiness, rollback and drain |
 | `internal/logger` | Emit safe completion records with Dashboard runtime identity |
@@ -96,7 +103,8 @@ value.
 | HTTP limits | Header/body `16384`/`4096` bytes; read-header/read/write/idle `5s`/`10s`/`10s`/`30s` |
 | gRPC limits | Receive/send `1048576`/`8388608` bytes |
 | Elasticsearch | `ELASTICSEARCH_URL=http://127.0.0.1:9200`, fixed `ELASTICSEARCH_INDEX=policy_stats`, optional paired `ELASTICSEARCH_USERNAME`/`ELASTICSEARCH_PASSWORD`, HTTPS-only `ELASTICSEARCH_CA_FILE`, `ELASTICSEARCH_TIMEOUT=5s` maximum |
-| Telemetry | `OTEL_ENABLED=false`, optional `OTEL_EXPORTER_OTLP_ENDPOINT`; exporter timeout defaults to `2s`, and an explicit `OTEL_EXPORTER_OTLP_TIMEOUT` override is a positive integer number of milliseconds |
+| Sales trends | Required `SALES_TRENDS_TIME_ZONE`; exact available IANA name loaded once at startup. Empty, `Local`, whitespace-altered and unknown values fail. Local-dev and QA use `GMT`. |
+| Telemetry | `OTEL_ENABLED=false`, optional `OTEL_EXPORTER_OTLP_ENDPOINT`; exporter timeout defaults to `2s` and accepts positive Go duration syntax. Deployed configuration omits `OTEL_EXPORTER_OTLP_TIMEOUT`, and deployment guards reject an override. |
 | Logging | `LOG_LEVEL=info`; safe structured fields only |
 
 `git-000000000000`, `unconfigured` and `development` are unresolved templates. Image, deployment
@@ -138,10 +146,10 @@ make go-svc-deploy-test SVC_NAME=dashboard
 consistency, generated-output drift, protobuf compatibility, gateway/Swagger agreement, Python
 tooling, Servicekit selection and reachable vulnerabilities. `test-tooling` uses disposable copies
 to show that controlled defects fail the owning gates. `image-check` builds the exact HEAD image,
-checks its OCI source identity and non-root runtime, and exercises both sales operations against an owned
-Elasticsearch fixture. It proves the reader cannot write, administer the cluster or read another
-index; dependency loss withdraws readiness while liveness remains available and the business
-response stays safe; shutdown remains bounded.
+checks its OCI source identity and non-root runtime, and exercises all three sales operations
+against an owned Elasticsearch fixture. It proves the reader cannot write, administer the cluster
+or read another index; dependency loss withdraws readiness while liveness remains available and
+the business response stays safe; shutdown remains bounded.
 
 `go-svc-deploy-test` loads that exact image and a digest-pinned Elasticsearch image into the
 configured Kind cluster, then creates one uniquely owned namespace. Its fixture setup is explicit
@@ -160,6 +168,7 @@ Run locally with accepted identity values:
 SERVICE_VERSION=git-123456789abc \
 SERVICE_INSTANCE_ID=dashboard-local \
 DEPLOYMENT_ENVIRONMENT=local-dev \
+SALES_TRENDS_TIME_ZONE=GMT \
 make -C services/dashboard-service run
 ```
 

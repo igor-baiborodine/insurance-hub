@@ -35,7 +35,7 @@ groups:
     annotations:
       description: More than 5% of at least 20 Elasticsearch operations failed in
         five minutes.
-      runbook_action: Split total-sales read failures by outcome and verify Elasticsearch
+      runbook_action: Split Dashboard read failures by operation and outcome and verify Elasticsearch
         readiness, TLS, and reader privileges.
       summary: Dashboard Elasticsearch failure rate exceeds the pilot threshold
     expr: sum(rate(insurance_hub_dashboard_dependencies_total{service_name="dashboard-service",insurance_hub_dashboard_dependency="elasticsearch",insurance_hub_dashboard_outcome=~"error|deadline_exceeded"}[5m]))
@@ -50,7 +50,7 @@ groups:
     annotations:
       description: Aggregate Elasticsearch operation p95 exceeded 250ms with at least
         20 operations in five minutes.
-      runbook_action: Inspect total-sales read latency, Elasticsearch health, and a
+      runbook_action: Inspect read latency by operation, Elasticsearch health, and a
         correlated slow trace.
       summary: Dashboard Elasticsearch latency exceeds the pilot threshold
     expr: "histogram_quantile(0.95,\n  sum by (le) (rate(insurance_hub_dashboard_dependency_duration_seconds_bucket{service_name=\"\

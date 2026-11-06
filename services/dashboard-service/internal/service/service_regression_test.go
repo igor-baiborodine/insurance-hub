@@ -175,20 +175,127 @@ func TestRun_ReportsElasticsearchReadinessLossAndRecovery(t *testing.T) {
 	}
 }
 
+func TestRun_MapsThreeDependencyLossesToServiceUnavailable(t *testing.T) {
+	// given
+	settings := testSettings(t)
+	search := &controlledSearch{
+		read: func(
+			context.Context,
+			application.TotalSalesQuery,
+		) ([]domain.ProductSales, error) {
+			return nil, application.ErrTotalSalesUnavailable
+		},
+		agentRead: func(
+			context.Context,
+			application.AgentSalesQuery,
+		) ([]domain.AgentSales, error) {
+			return nil, application.ErrAgentSalesUnavailable
+		},
+		trendRead: func(
+			context.Context,
+			application.SalesTrendsQuery,
+		) ([]domain.PeriodSales, error) {
+			return nil, application.ErrSalesTrendsUnavailable
+		},
+	}
+	_, httpAddress, healthAddress, cancel, runResult := startRegressionService(
+		t,
+		settings,
+		search,
+		slog.New(slog.NewJSONHandler(io.Discard, nil)),
+	)
+	client := &http.Client{Timeout: time.Second}
+	waitForStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
+	requests := []*http.Request{
+		totalSalesRequest(t, context.Background(), httpAddress, "LOSS"),
+	}
+	for _, pathAndBody := range [][2]string{
+		{
+			"/dashboard/agentssales",
+			`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+		},
+		{
+			"/dashboard/trends",
+			`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01",` +
+				`"aggregationUnitCode":"MONTH"}`,
+		},
+	} {
+		request, err := http.NewRequest(
+			http.MethodPost,
+			"http://"+httpAddress+pathAndBody[0],
+			strings.NewReader(pathAndBody[1]),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		requests = append(requests, request)
+	}
+
+	// when / then
+	for _, request := range requests {
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertHTTPResponse(
+			t,
+			response,
+			http.StatusServiceUnavailable,
+			`{"code":14,"message":"service unavailable","details":[]}`,
+		)
+	}
+	cancel()
+	if err := receiveValue(t, runResult, "service did not stop"); err != nil {
+		t.Fatalf("run = %v", err)
+	}
+}
+
 func TestRun_DrainsAcceptedHTTPBeforeRPCShutdown(t *testing.T) {
 	// given
 	settings := testSettings(t)
-	started := make(chan struct{})
+	started := make(chan string, 3)
 	release := make(chan struct{})
 	search := &controlledSearch{}
 	search.read = func(
 		ctx context.Context,
 		_ application.TotalSalesQuery,
 	) ([]domain.ProductSales, error) {
-		close(started)
+		started <- telemetry.OperationTotalSales
 		select {
 		case <-release:
 			return successfulSales(), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	search.agentRead = func(
+		ctx context.Context,
+		_ application.AgentSalesQuery,
+	) ([]domain.AgentSales, error) {
+		started <- telemetry.OperationAgentSales
+		select {
+		case <-release:
+			amount, _ := domain.NewAgentPremiumAmount("5000.0")
+			value, _ := domain.NewAgentSalesValue(5, amount)
+			return []domain.AgentSales{{AgentLogin: "safe-agent", Value: value}}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	search.trendRead = func(
+		ctx context.Context,
+		_ application.SalesTrendsQuery,
+	) ([]domain.PeriodSales, error) {
+		started <- telemetry.OperationSalesTrends
+		select {
+		case <-release:
+			date, _ := domain.ParseDate("2020-01-01")
+			amount, _ := domain.NewTrendPremiumAmount("5000.00")
+			value, _ := domain.NewTrendSalesValue(5, amount)
+			return []domain.PeriodSales{{
+				PeriodDate: date, Period: "2020-01-01T00:00:00.000Z", Value: value,
+			}}, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -201,20 +308,54 @@ func TestRun_DrainsAcceptedHTTPBeforeRPCShutdown(t *testing.T) {
 	)
 	client := &http.Client{Timeout: time.Second}
 	waitForStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
-	responseResult := make(chan *http.Response, 1)
-	errorResult := make(chan error, 1)
-	request := totalSalesRequest(t, context.Background(), httpAddress, "DRAIN")
+	type requestResult struct {
+		name     string
+		response *http.Response
+		err      error
+	}
+	results := make(chan requestResult, 3)
+	requests := map[string]*http.Request{
+		telemetry.OperationTotalSales: totalSalesRequest(
+			t,
+			context.Background(),
+			httpAddress,
+			"DRAIN",
+		),
+	}
+	for operation, pathAndBody := range map[string][2]string{
+		telemetry.OperationAgentSales: {
+			"/dashboard/agentssales",
+			`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}`,
+		},
+		telemetry.OperationSalesTrends: {
+			"/dashboard/trends",
+			`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01",` +
+				`"aggregationUnitCode":"MONTH"}`,
+		},
+	} {
+		request, err := http.NewRequest(
+			http.MethodPost,
+			"http://"+httpAddress+pathAndBody[0],
+			strings.NewReader(pathAndBody[1]),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		requests[operation] = request
+	}
 
 	// when
-	go func() {
-		response, err := client.Do(request)
-		if err != nil {
-			errorResult <- err
-			return
-		}
-		responseResult <- response
-	}()
-	receiveSignalWithin(t, started, "accepted request did not reach reader")
+	for operation, request := range requests {
+		go func(name string, accepted *http.Request) {
+			response, err := client.Do(accepted)
+			results <- requestResult{name: name, response: response, err: err}
+		}(operation, request)
+	}
+	seen := map[string]bool{}
+	for len(seen) < len(requests) {
+		seen[receiveValue(t, started, "accepted request did not reach reader")] = true
+	}
 
 	// then
 	cancel()
@@ -225,27 +366,33 @@ func TestRun_DrainsAcceptedHTTPBeforeRPCShutdown(t *testing.T) {
 		http.StatusServiceUnavailable,
 	)
 	select {
-	case response := <-responseResult:
-		_ = response.Body.Close()
-		t.Fatal("accepted request completed before release")
-	case err := <-errorResult:
-		t.Fatalf("accepted request failed during drain: %v", err)
+	case result := <-results:
+		if result.response != nil {
+			_ = result.response.Body.Close()
+		}
+		t.Fatalf(
+			"accepted %s request completed before release: %v",
+			result.name,
+			result.err,
+		)
 	default:
 	}
 	close(release)
-	select {
-	case response := <-responseResult:
-		assertHTTPResponse(
-			t,
-			response,
-			http.StatusOK,
-			`{"total":{"policiesCount":5,"premiumAmount":5000.00},`+
-				`"perProductTotal":{"SAFE":{"policiesCount":5,"premiumAmount":5000.00}}}`,
-		)
-	case err := <-errorResult:
-		t.Fatalf("drained request failed: %v", err)
-	case <-time.After(time.Second):
-		t.Fatal("accepted request did not drain")
+	wantBodies := map[string]string{
+		telemetry.OperationTotalSales: `{"total":{"policiesCount":5,"premiumAmount":5000.00},` +
+			`"perProductTotal":{"SAFE":{"policiesCount":5,"premiumAmount":5000.00}}}`,
+		telemetry.OperationAgentSales: `{"perAgentTotal":{"safe-agent":` +
+			`{"policiesCount":5,"premiumAmount":5000.0}}}`,
+		telemetry.OperationSalesTrends: `{"periodSales":[{"periodDate":[2020,1,1],` +
+			`"period":"2020-01-01T00:00:00.000Z",` +
+			`"policiesCount":5,"premiumAmount":5000.00}]}`,
+	}
+	for range requests {
+		result := receiveValue(t, results, "accepted request did not drain")
+		if result.err != nil {
+			t.Fatalf("drained %s request failed: %v", result.name, result.err)
+		}
+		assertHTTPResponse(t, result.response, http.StatusOK, wantBodies[result.name])
 	}
 	if err := receiveValue(t, runResult, "service did not stop"); err != nil {
 		t.Fatalf("run = %v", err)
@@ -314,7 +461,7 @@ func TestRun_PartialStartupClosesResourcesExactlyOnce(t *testing.T) {
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return provider, nil
 	}
-	deps.newSearch = func(config.Elasticsearch) (salesReader, searchDependency, error) {
+	deps.newSearch = func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
 	bindFailure := errors.New("management bind failed")
@@ -403,6 +550,12 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
 		) ([]domain.AgentSales, error) {
 			return nil, errors.New(marker)
 		},
+		trendRead: func(
+			context.Context,
+			application.SalesTrendsQuery,
+		) ([]domain.PeriodSales, error) {
+			return nil, errors.New(marker)
+		},
 	}
 	metricReader := sdkmetric.NewManualReader()
 	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(metricReader))
@@ -415,7 +568,7 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return provider, nil
 	}
-	deps.newSearch = func(config.Elasticsearch) (salesReader, searchDependency, error) {
+	deps.newSearch = func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
 	addresses := make(chan string, 3)
@@ -468,6 +621,23 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
 		http.StatusInternalServerError,
 		`{"code":13,"message":"internal error","details":[]}`,
 	)
+	trendResponse, err := client.Post(
+		"http://"+httpAddress+"/dashboard/trends",
+		"application/json",
+		strings.NewReader(
+			`{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01",`+
+				`"aggregationUnitCode":"MONTH"}`,
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHTTPResponse(
+		t,
+		trendResponse,
+		http.StatusInternalServerError,
+		`{"code":13,"message":"internal error","details":[]}`,
+	)
 	cancel()
 	if err := receiveValue(t, runResult, "service did not stop"); err != nil {
 		t.Fatalf("run = %v", err)
@@ -479,8 +649,9 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
 	}
 	combined := logs.String() + fmt.Sprint(metrics)
 	operationTraces := map[string]map[string]int{
-		telemetry.OperationTotalSales: {},
-		telemetry.OperationAgentSales: {},
+		telemetry.OperationTotalSales:  {},
+		telemetry.OperationAgentSales:  {},
+		telemetry.OperationSalesTrends: {},
 	}
 	for _, span := range spanRecorder.Ended() {
 		combined += span.Name() + fmt.Sprint(span.Attributes(), span.Events())
@@ -499,11 +670,14 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateValues(t *testing.T) {
 	}
 	if !strings.Contains(combined, "POST /dashboard/totalsales") ||
 		!strings.Contains(combined, "POST /dashboard/agentssales") ||
+		!strings.Contains(combined, "POST /dashboard/trends") ||
 		!strings.Contains(combined, "agent_sales") ||
+		!strings.Contains(combined, "sales_trends") ||
 		!strings.Contains(combined, "insurance_hub.dashboard.requests") ||
 		!strings.Contains(combined, "insurance_hub.dashboard.dependencies") ||
 		!strings.Contains(combined, "Elasticsearch total_sales") ||
-		!strings.Contains(combined, "Elasticsearch agent_sales") {
+		!strings.Contains(combined, "Elasticsearch agent_sales") ||
+		!strings.Contains(combined, "Elasticsearch sales_trends") {
 		t.Errorf("missing HTTP-to-RPC completion signals: %s", combined)
 	}
 	for operation, traces := range operationTraces {
@@ -532,6 +706,7 @@ type controlledSearch struct {
 	checkErr  error
 	read      func(context.Context, application.TotalSalesQuery) ([]domain.ProductSales, error)
 	agentRead func(context.Context, application.AgentSalesQuery) ([]domain.AgentSales, error)
+	trendRead func(context.Context, application.SalesTrendsQuery) ([]domain.PeriodSales, error)
 	closed    atomic.Bool
 }
 
@@ -558,6 +733,24 @@ func (search *controlledSearch) ReadTotalSales(
 		return search.read(ctx, query)
 	}
 	return successfulSales(), nil
+}
+
+func (search *controlledSearch) ReadSalesTrends(
+	ctx context.Context,
+	query application.SalesTrendsQuery,
+) ([]domain.PeriodSales, error) {
+	if search.trendRead != nil {
+		return search.trendRead(ctx, query)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	date, _ := domain.ParseDate("2020-01-01")
+	amount, _ := domain.NewTrendPremiumAmount("5000.00")
+	value, _ := domain.NewTrendSalesValue(5, amount)
+	return []domain.PeriodSales{{
+		PeriodDate: date, Period: "2020-01-01T00:00:00.000Z", Value: value,
+	}}, nil
 }
 
 func (search *controlledSearch) Check(ctx context.Context) error {
@@ -639,7 +832,7 @@ func startRegressionService(
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return fakeTelemetry{}, nil
 	}
-	deps.newSearch = func(config.Elasticsearch) (salesReader, searchDependency, error) {
+	deps.newSearch = func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
 	addresses := make(chan string, 3)

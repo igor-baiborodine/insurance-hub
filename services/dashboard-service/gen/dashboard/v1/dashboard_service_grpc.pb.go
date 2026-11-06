@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DashboardService_GetTotalSales_FullMethodName = "/dashboard.v1.DashboardService/GetTotalSales"
-	DashboardService_GetAgentSales_FullMethodName = "/dashboard.v1.DashboardService/GetAgentSales"
+	DashboardService_GetTotalSales_FullMethodName  = "/dashboard.v1.DashboardService/GetTotalSales"
+	DashboardService_GetAgentSales_FullMethodName  = "/dashboard.v1.DashboardService/GetAgentSales"
+	DashboardService_GetSalesTrends_FullMethodName = "/dashboard.v1.DashboardService/GetSalesTrends"
 )
 
 // DashboardServiceClient is the client API for DashboardService service.
@@ -33,6 +34,8 @@ type DashboardServiceClient interface {
 	GetTotalSales(ctx context.Context, in *GetTotalSalesRequest, opts ...grpc.CallOption) (*GetTotalSalesResponse, error)
 	// GetAgentSales returns the accepted legacy per-agent aggregation.
 	GetAgentSales(ctx context.Context, in *GetAgentSalesRequest, opts ...grpc.CallOption) (*GetAgentSalesResponse, error)
+	// GetSalesTrends returns the accepted legacy calendar aggregation.
+	GetSalesTrends(ctx context.Context, in *GetSalesTrendsRequest, opts ...grpc.CallOption) (*GetSalesTrendsResponse, error)
 }
 
 type dashboardServiceClient struct {
@@ -63,6 +66,16 @@ func (c *dashboardServiceClient) GetAgentSales(ctx context.Context, in *GetAgent
 	return out, nil
 }
 
+func (c *dashboardServiceClient) GetSalesTrends(ctx context.Context, in *GetSalesTrendsRequest, opts ...grpc.CallOption) (*GetSalesTrendsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSalesTrendsResponse)
+	err := c.cc.Invoke(ctx, DashboardService_GetSalesTrends_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DashboardServiceServer is the server API for DashboardService service.
 // All implementations must embed UnimplementedDashboardServiceServer
 // for forward compatibility.
@@ -73,6 +86,8 @@ type DashboardServiceServer interface {
 	GetTotalSales(context.Context, *GetTotalSalesRequest) (*GetTotalSalesResponse, error)
 	// GetAgentSales returns the accepted legacy per-agent aggregation.
 	GetAgentSales(context.Context, *GetAgentSalesRequest) (*GetAgentSalesResponse, error)
+	// GetSalesTrends returns the accepted legacy calendar aggregation.
+	GetSalesTrends(context.Context, *GetSalesTrendsRequest) (*GetSalesTrendsResponse, error)
 	mustEmbedUnimplementedDashboardServiceServer()
 }
 
@@ -88,6 +103,9 @@ func (UnimplementedDashboardServiceServer) GetTotalSales(context.Context, *GetTo
 }
 func (UnimplementedDashboardServiceServer) GetAgentSales(context.Context, *GetAgentSalesRequest) (*GetAgentSalesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAgentSales not implemented")
+}
+func (UnimplementedDashboardServiceServer) GetSalesTrends(context.Context, *GetSalesTrendsRequest) (*GetSalesTrendsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSalesTrends not implemented")
 }
 func (UnimplementedDashboardServiceServer) mustEmbedUnimplementedDashboardServiceServer() {}
 func (UnimplementedDashboardServiceServer) testEmbeddedByValue()                          {}
@@ -146,6 +164,24 @@ func _DashboardService_GetAgentSales_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DashboardService_GetSalesTrends_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSalesTrendsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DashboardServiceServer).GetSalesTrends(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DashboardService_GetSalesTrends_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DashboardServiceServer).GetSalesTrends(ctx, req.(*GetSalesTrendsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DashboardService_ServiceDesc is the grpc.ServiceDesc for DashboardService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -160,6 +196,10 @@ var DashboardService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAgentSales",
 			Handler:    _DashboardService_GetAgentSales_Handler,
+		},
+		{
+			MethodName: "GetSalesTrends",
+			Handler:    _DashboardService_GetSalesTrends_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

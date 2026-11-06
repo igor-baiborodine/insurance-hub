@@ -145,7 +145,7 @@ def main() -> int:
                 f"-coverprofile={coverage}",
                 "-json",
                 "-run",
-                "^TestElasticsearch(Reader_(AcceptedAggregationMatrix|AcceptedAgentOracle)|Readiness_RejectsIncompatibleState)$",
+                "^TestElasticsearch(Reader_(AcceptedAggregationMatrix|AcceptedAgentOracle|AcceptedTrendOracle)|Readiness_RejectsIncompatibleState)$",
                 "./internal/elasticsearch",
             ],
             cwd=MODULE_ROOT,
@@ -173,6 +173,10 @@ def main() -> int:
             f"agent oracle suite missed expected test; passed={sorted(discovered)}",
         )
         require(
+            "TestElasticsearchReader_AcceptedTrendOracle" in discovered,
+            f"trend oracle suite missed expected test; passed={sorted(discovered)}",
+        )
+        require(
             "TestElasticsearchReadiness_RejectsIncompatibleState" in discovered,
             f"readiness suite missed expected test; passed={sorted(discovered)}",
         )
@@ -196,7 +200,7 @@ def main() -> int:
                 status = 1
     if status:
         return status
-    print("test-elasticsearch-integration: selected=3 auth=passed cleanup=passed")
+    print("test-elasticsearch-integration: selected=4 auth=passed cleanup=passed")
     return 0
 
 

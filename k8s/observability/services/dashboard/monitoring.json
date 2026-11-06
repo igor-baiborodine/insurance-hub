@@ -117,6 +117,7 @@
       "\"type\": \"tempo\"",
       "trace_id",
       "agent_sales",
+      "sales_trends",
       "Legitimate idle time",
       "missing telemetry",
       "pod!~\\\"qa-dashboard-api-legacy-.*\\\""
