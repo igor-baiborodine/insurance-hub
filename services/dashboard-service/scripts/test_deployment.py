@@ -632,6 +632,47 @@ def test_access_qualification_runs_remaining_probes_after_one_fails() -> None:
     assert [call.args[2] for call in wait.call_args_list] == ["probe-one", "probe-two"]
 
 
+def test_access_qualification_does_not_read_or_delete_preexisting_probe() -> None:
+    target = Mock(
+        environment="local-dev",
+        context="kind-local-dev-insurance-hub",
+        kubectl_binary="kubectl",
+    )
+    target.namespace_kubectl.return_value = "pod/dashboard-qualification-business"
+    pod = {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": "dashboard-qualification-business",
+            "namespace": "local-dev-all",
+            "labels": {"insurance-hub.io/qualification": "issue-287"},
+        },
+        "spec": {},
+    }
+    namespace = json.dumps(
+        {"metadata": {"labels": {"insurance-hub.io/qualification": "issue-287"}}}
+    )
+
+    with (
+        patch.object(checks, "qualification_pods", return_value=[pod]),
+        patch.object(checks, "run", side_effect=["", namespace, ""]),
+        pytest.raises(checks.DeploymentError, match="already exists"),
+    ):
+        checks.run_access_qualification(target)
+
+    assert target.namespace_kubectl.call_count == 1
+    target.namespace_kubectl.assert_called_once_with(
+        "local-dev-all",
+        "get",
+        "pod",
+        "dashboard-qualification-business",
+        "--ignore-not-found",
+        "-o",
+        "name",
+    )
+    target.namespace_json.assert_not_called()
+
+
 def test_render_rejects_foreign_dependencies_and_incomplete_inventory() -> None:
     with pytest.raises(checks.DeploymentError, match="data dependency"):
         checks.validate_render("local-dev", "kind: Secret\nmetadata:\n  name: kafka\n")

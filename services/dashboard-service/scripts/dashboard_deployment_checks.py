@@ -1623,13 +1623,16 @@ def run_access_qualification(target: Target) -> None:
                     )
                     validate_qualification_output(name, output)
             except Exception as error:
-                try:
-                    logs = target.namespace_kubectl(
-                        namespace_name, "logs", f"pod/{name}", timeout=10
-                    )
-                    diagnostic = logs[-1000:]
-                except Exception as log_error:
-                    diagnostic = f"logs unavailable ({type(log_error).__name__})"
+                if created:
+                    try:
+                        logs = target.namespace_kubectl(
+                            namespace_name, "logs", f"pod/{name}", timeout=10
+                        )
+                        diagnostic = logs[-1000:]
+                    except Exception as log_error:
+                        diagnostic = f"logs unavailable ({type(log_error).__name__})"
+                else:
+                    diagnostic = "probe output unavailable because the Pod was not created"
                 failures.append(f"Pod/{name}: {error}; sanitized probe output: {diagnostic}")
             finally:
                 try:
