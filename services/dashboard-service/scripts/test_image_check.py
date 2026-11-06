@@ -110,8 +110,10 @@ def test_main_owns_dependency_network_reader_configuration_and_cleanup(
         lambda url: permission_urls.append(url),
     )
     monkeypatch.setattr(image_check, "wait_status", lambda *_args, **_kwargs: None)
+    requested_urls: list[str] = []
 
     def controlled_request(url: str, *_args: object, **_kwargs: object) -> tuple[int, bytes]:
+        requested_urls.append(url)
         if url.endswith("/livez"):
             return 200, b"live\n"
         if url.endswith("/readyz"):
@@ -139,6 +141,25 @@ def test_main_owns_dependency_network_reader_configuration_and_cleanup(
             return 200, json.dumps(
                 {"perAgentTotal": {"safe-agent": {"policiesCount": 1, "premiumAmount": 1000.0}}}
             ).encode()
+        if url.endswith("/dashboard/trends"):
+            if any(
+                command[1:4] == ["stop", "--time", "10"]
+                and command[-1] == "dashboard-image-elasticsearch-4242"
+                for command in commands
+            ):
+                return 503, b'{"code":14,"message":"service unavailable","details":[]}'
+            return 200, json.dumps(
+                {
+                    "periodSales": [
+                        {
+                            "periodDate": [2019, 5, 31],
+                            "period": "2019-06-01T00:00:00.000Z",
+                            "policiesCount": 1,
+                            "premiumAmount": 1000.0,
+                        }
+                    ]
+                }
+            ).encode()
         raise AssertionError(url)
 
     monkeypatch.setattr(image_check, "request", controlled_request)
@@ -162,6 +183,8 @@ def test_main_owns_dependency_network_reader_configuration_and_cleanup(
     assert "--network-alias elasticsearch" in flattened
     assert "ELASTICSEARCH_URL=http://elasticsearch:9200" in flattened
     assert "ELASTICSEARCH_USERNAME=dashboard_image_reader" in flattened
+    assert "SALES_TRENDS_TIME_ZONE=America/Toronto" in flattened
+    assert sum(url.endswith("/dashboard/trends") for url in requested_urls) == 2
     assert image_check.ADMIN_PASSWORD not in flattened
     assert image_check.READER_PASSWORD not in flattened
     assert {"ELASTIC_PASSWORD": image_check.ADMIN_PASSWORD} in environments

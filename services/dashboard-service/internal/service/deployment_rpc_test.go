@@ -20,6 +20,7 @@ func TestDeployedDirectRPC(t *testing.T) {
 	defer cancel()
 	assertOwnedTotalSales(t, ctx, client)
 	assertOwnedAgentSales(t, ctx, client)
+	assertOwnedSalesTrends(t, ctx, client)
 }
 
 func TestDeployedDirectRPCSharedSmoke(t *testing.T) {
@@ -35,6 +36,11 @@ func TestDeployedDirectRPCSharedSmoke(t *testing.T) {
 		SaleDateFrom: "2019-01-01", SaleDateTo: "2020-01-01",
 	}); err != nil {
 		t.Fatalf("GetAgentSales: %v", err)
+	}
+	if _, err := client.GetSalesTrends(ctx, &dashboardv1.GetSalesTrendsRequest{
+		SaleDateFrom: "2019-01-01", SaleDateTo: "2020-01-01", AggregationUnitCode: "MONTH",
+	}); err != nil {
+		t.Fatalf("GetSalesTrends: %v", err)
 	}
 }
 
@@ -106,6 +112,31 @@ func assertOwnedAgentSales(
 	safe := response.GetPerAgentTotal()["safe-agent"]
 	if safe.GetPoliciesCount() != 1 || safe.GetPremiumAmount() != "1000.0" {
 		t.Fatalf("safe-agent total = %v, want one policy and exact 1000.0", safe)
+	}
+}
+
+func assertOwnedSalesTrends(
+	t *testing.T,
+	ctx context.Context,
+	client dashboardv1.DashboardServiceClient,
+) {
+	t.Helper()
+	response, err := client.GetSalesTrends(ctx, &dashboardv1.GetSalesTrendsRequest{
+		ProductCode: stringPointer("SAFE"), SaleDateFrom: "2019-01-01",
+		SaleDateTo: "2020-01-01", AggregationUnitCode: "MONTH",
+	})
+	if err != nil {
+		t.Fatalf("GetSalesTrends: %v", err)
+	}
+	periods := response.GetPeriodSales()
+	if len(periods) != 1 {
+		t.Fatalf("period-sales result length = %d, want 1", len(periods))
+	}
+	period := periods[0]
+	if period.GetPeriodDate() != "2019-06-01" ||
+		period.GetPeriod() != "2019-06-01T00:00:00.000Z" ||
+		period.GetPoliciesCount() != 1 || period.GetPremiumAmount() != "1000.00" {
+		t.Fatalf("sales-trends period = %v, want exact June fixture", period)
 	}
 }
 

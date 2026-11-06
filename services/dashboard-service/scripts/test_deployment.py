@@ -216,7 +216,7 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
 
     pods = checks.qualification_pods(target, f"issue-287-dashboard-denied-{environment}")
 
-    assert len(pods) == 12
+    assert len(pods) == 15
     assert all(pod["spec"]["containers"][0]["image"] == checks.PROBE_IMAGE for pod in pods)
     assert all(
         pod["spec"]["containers"][0]["args"][0].startswith(
@@ -252,10 +252,15 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
     agent_allowed = by_name["dashboard-qualification-business-agent-sales"]["spec"]["containers"][
         0
     ]["args"][0]
+    trends_allowed = by_name["dashboard-qualification-business-sales-trends"]["spec"]["containers"][
+        0
+    ]["args"][0]
     assert "/dashboard/totalsales" in total_allowed
     assert "grep -q '\"total\"'" in total_allowed
     assert "/dashboard/agentssales" in agent_allowed
     assert "grep -q '\"perAgentTotal\"'" in agent_allowed
+    assert "/dashboard/trends" in trends_allowed
+    assert "grep -q '\"periodSales\"'" in trends_allowed
     management_allowed = by_name["dashboard-qualification-management"]["spec"]["containers"][0][
         "args"
     ][0]
@@ -473,7 +478,7 @@ def test_direct_rpc_invokes_the_service_owner_with_the_selected_address() -> Non
     )
 
 
-def test_verify_runs_rpc_and_access_after_both_http_smokes_fail() -> None:
+def test_verify_runs_rpc_and_access_after_all_http_smokes_fail() -> None:
     target = Mock(
         kubectl_binary="kubectl",
         context="kind-local-dev-insurance-hub",
@@ -497,11 +502,15 @@ def test_verify_runs_rpc_and_access_after_both_http_smokes_fail() -> None:
                 (200, b"ready\n"),
                 (500, b'{"error":"total"}'),
                 (403, b'{"error":"agent"}'),
+                (504, b'{"error":"trends"}'),
             ],
         ),
         patch.object(checks, "run_deployed_direct_rpc") as rpc,
         patch.object(checks, "run_access_qualification") as access,
-        pytest.raises(checks.DeploymentError, match="total-sales HTTP.*agent-sales HTTP"),
+        pytest.raises(
+            checks.DeploymentError,
+            match="total-sales HTTP.*agent-sales HTTP.*sales-trends HTTP",
+        ),
     ):
         checks.verify(target, [])
 
@@ -530,7 +539,12 @@ def test_verify_cleans_every_port_forward_when_direct_rpc_stops(failure: BaseExc
         patch.object(
             checks,
             "_http",
-            side_effect=[(200, b"ready\n"), (200, b'{"total":{"policiesCount":1}}')],
+            side_effect=[
+                (200, b"ready\n"),
+                (200, b'{"total":{"policiesCount":1}}'),
+                (200, b'{"perAgentTotal":{}}'),
+                (200, b'{"periodSales":[]}'),
+            ],
         ),
         patch.object(checks, "run_deployed_direct_rpc", side_effect=failure),
         patch.object(checks, "run_access_qualification"),

@@ -183,7 +183,7 @@ Elasticsearch loss and independent liveness. No Kafka setting, credential, topic
 to the Go reader.
 
 `go-svc-deploy-verify` is a bounded target operation, not a read-only status command. It creates
-twelve fixed-name qualification Pods and one fixed-name untrusted namespace, requires each name to
+fifteen fixed-name qualification Pods and one fixed-name untrusted namespace, requires each name to
 be absent first, and removes every created resource. The probes use the pinned curl image, exercise
 all three allowed business operations, gRPC-listener and management identities, marker-only and
 business-to-management denial, and copied complete HTTP/gRPC identities in the untrusted

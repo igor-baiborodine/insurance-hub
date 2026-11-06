@@ -36,10 +36,12 @@ JAVA_NAMES = {"dashboard-api-legacy"}
 DENIED_QUALIFICATION_PODS = {
     "dashboard-qualification-marker-only",
     "dashboard-qualification-marker-only-agent-denied",
+    "dashboard-qualification-marker-only-trends-denied",
     "dashboard-qualification-marker-only-grpc-denied",
     "dashboard-qualification-business-management-denied",
     "dashboard-qualification-cross-namespace-denied",
     "dashboard-qualification-cross-namespace-agent-denied",
+    "dashboard-qualification-cross-namespace-trends-denied",
     "dashboard-qualification-cross-namespace-grpc-denied",
 }
 GRPC_REACHABLE_QUALIFICATION_POD = "dashboard-qualification-business-grpc"
@@ -1415,6 +1417,7 @@ def validate_qualification_output(name: str, output: str) -> None:
 def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, Any]]:
     total_sales_url = f"http://{target.business}.{target.namespace}.svc/dashboard/totalsales"
     agent_sales_url = f"http://{target.business}.{target.namespace}.svc/dashboard/agentssales"
+    sales_trends_url = f"http://{target.business}.{target.namespace}.svc/dashboard/trends"
     grpc_url = f"http://{target.business}.{target.namespace}.svc:9090"
     management_url = f"http://{target.management}.{target.namespace}.svc:8081"
     full_business = {
@@ -1434,6 +1437,10 @@ def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, 
         '{"agentLogin":"safe-agent","productCode":"SAFE",'
         '"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}'
     )
+    trends_payload = (
+        '{"productCode":"SAFE","saleDateFrom":"2019-01-01",'
+        '"saleDateTo":"2020-01-01","aggregationUnitCode":"MONTH"}'
+    )
     allowed_total_sales = (
         "set -eu\n"
         f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
@@ -1443,6 +1450,11 @@ def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, 
         "set -eu\n"
         f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
         f"--data '{agent_payload}' '{agent_sales_url}' | grep -q '\"perAgentTotal\"'\n"
+    )
+    allowed_sales_trends = (
+        "set -eu\n"
+        f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
+        f"--data '{trends_payload}' '{sales_trends_url}' | grep -q '\"periodSales\"'\n"
     )
     allowed_management = (
         "set -eu\n"
@@ -1492,6 +1504,12 @@ printf '%s\n' "$result"
         ),
         qualification_pod(
             target,
+            "dashboard-qualification-business-sales-trends",
+            full_business,
+            allowed_sales_trends,
+        ),
+        qualification_pod(
+            target,
             "dashboard-qualification-management",
             full_management,
             allowed_management,
@@ -1513,6 +1531,12 @@ printf '%s\n' "$result"
             "dashboard-qualification-marker-only-agent-denied",
             {BUSINESS_CLIENT_LABEL: "true"},
             denied(agent_sales_url),
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-marker-only-trends-denied",
+            {BUSINESS_CLIENT_LABEL: "true"},
+            denied(sales_trends_url),
         ),
         qualification_pod(
             target,
@@ -1538,6 +1562,13 @@ printf '%s\n' "$result"
             "dashboard-qualification-cross-namespace-agent-denied",
             full_business,
             denied(agent_sales_url),
+            namespace=denied_namespace,
+        ),
+        qualification_pod(
+            target,
+            "dashboard-qualification-cross-namespace-trends-denied",
+            full_business,
+            denied(sales_trends_url),
             namespace=denied_namespace,
         ),
         qualification_pod(
@@ -1859,6 +1890,16 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                     "saleDateTo": "2020-01-01",
                 },
                 "perAgentTotal",
+            ),
+            (
+                "sales-trends HTTP",
+                "/dashboard/trends",
+                {
+                    "saleDateFrom": "2019-01-01",
+                    "saleDateTo": "2020-01-01",
+                    "aggregationUnitCode": "MONTH",
+                },
+                "periodSales",
             ),
         ):
             try:
