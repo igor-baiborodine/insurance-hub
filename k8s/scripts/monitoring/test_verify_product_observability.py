@@ -400,6 +400,88 @@ class TestProductObservabilityVerification:
             "traceparent": "00-" + "b" * 32 + "-0123456789abcdef-01"
         }
 
+    def test_dashboard_probe_resolves_its_own_target_and_safe_reads(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "dashboard")
+        target = verifier.KubernetesTarget(assets, "a" * 40)
+        responses = [
+            "live\n",
+            "ready\n",
+            '{"total":{"policiesCount":0,"premiumAmount":0}}',
+            '{"perAgentTotal":{}}',
+        ]
+
+        # when
+        probe = verifier.select_probe(assets)
+        services = probe.services(target)
+        with mock.patch.object(verifier, "request_text", side_effect=responses) as request:
+            operations = probe.workload(
+                {"health": 1001, "dashboard": 1002},
+                "c" * 32,
+                {},
+            )
+
+        # then
+        assert probe.service == "dashboard"
+        assert services == [
+            ("dashboard", "qa-svc", "qa-dashboard-api", 80),
+            ("health", "qa-svc", "qa-dashboard-api-management", 8081),
+        ]
+        assert operations == 2
+        for call, path in zip(
+            request.call_args_list[-2:],
+            ("/dashboard/totalsales", "/dashboard/agentssales"),
+            strict=True,
+        ):
+            assert call.args[0].endswith(path)
+            assert call.args[1] == {"traceparent": "00-" + "c" * 32 + "-0123456789abcdef-01"}
+            assert call.args[2] == {
+                "saleDateFrom": "2099-01-01",
+                "saleDateTo": "2099-01-02",
+            }
+
+    def test_dashboard_enabled_signals_cover_both_operations(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "dashboard")
+        observations: list[str] = []
+
+        def observed_signal(description: str, _probe: object) -> object:
+            observations.append(description)
+            if "trace" in description:
+                return [{"trace": "observed"}]
+            return [{"value": [0, "1"]}]
+
+        # when
+        with (
+            mock.patch.object(verifier, "wait_for", side_effect=observed_signal),
+            mock.patch.object(
+                verifier,
+                "request_json",
+                return_value={"data": {"result": [{"value": [0, "0"]}]}},
+            ),
+        ):
+            result = verifier.verify_dashboard_enabled_signals(
+                assets,
+                {"prometheus": 1001, "loki": 1002, "tempo": 1003},
+                "a" * 32,
+                "pod-uid",
+                {},
+            )
+
+        # then
+        assert result["metric_series"] == {
+            "request_total_sales": 1,
+            "dependency_total_sales": 1,
+            "request_agent_sales": 1,
+            "dependency_agent_sales": 1,
+        }
+        assert observations[:4] == [
+            "Dashboard request_total_sales metric",
+            "Dashboard dependency_total_sales metric",
+            "Dashboard request_agent_sales metric",
+            "Dashboard dependency_agent_sales metric",
+        ]
+
     def test_policy_search_probe_accepts_empty_canonical_query_phase_only(self) -> None:
         responses = ["live\n", "ready\n", "{}"]
         with mock.patch.object(verifier, "request_text", side_effect=responses):
