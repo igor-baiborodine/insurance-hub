@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/pem"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -290,5 +291,121 @@ func TestClient_CheckBoundsResponseBody(t *testing.T) {
 	err = client.Check(context.Background())
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
 		t.Fatalf("Check() = %v after %s", err, time.Since(started))
+	}
+}
+
+func TestClient_CheckWriteRequiresExactPrivilege(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{
+			name:   "all privileges denied",
+			status: http.StatusOK,
+			body:   `{"has_all_requested":false,"index":{"policy_stats_issue_290":{"index":false}}}`,
+		},
+		{
+			name:   "index privilege denied",
+			status: http.StatusOK,
+			body:   `{"has_all_requested":true,"index":{"policy_stats_issue_290":{"index":false}}}`,
+		},
+		{
+			name:   "request rejected",
+			status: http.StatusForbidden,
+			body:   `{"private":"marker"}`,
+		},
+		{name: "malformed response", status: http.StatusOK, body: `{`},
+		{
+			name:   "oversized response",
+			status: http.StatusOK,
+			body:   strings.Repeat("x", maximumCheckResponseBytes+1),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			server := httptest.NewServer(
+				http.HandlerFunc(
+					func(writer http.ResponseWriter, request *http.Request) {
+						writer.Header().
+							Set("X-Elastic-Product", "Elasticsearch")
+						body, err := io.ReadAll(request.Body)
+						if err != nil {
+							t.Error(err)
+						}
+						if request.Method != http.MethodPost ||
+							request.URL.Path != "/_security/user/_has_privileges" ||
+							string(
+								body,
+							) != `{"index":[{"names":["policy_stats_issue_290"],"privileges":["index"]}]}` {
+							t.Errorf(
+								"privilege request = %s %s %s",
+								request.Method,
+								request.URL.Path,
+								body,
+							)
+						}
+						writer.WriteHeader(test.status)
+						_, _ = writer.Write([]byte(test.body))
+					},
+				),
+			)
+			defer server.Close()
+			client, err := New(Config{
+				Endpoint: server.URL, Index: ProjectionIndex, Timeout: time.Second,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// when
+			err = client.CheckWrite(context.Background())
+
+			// then
+			if err == nil || strings.Contains(err.Error(), "marker") {
+				t.Fatalf("CheckWrite() = %v", err)
+			}
+		})
+	}
+}
+
+func TestClient_CheckWriteRequiresIsolatedClientAndPropagatesCancellation(t *testing.T) {
+	// given
+	server := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
+			_, _ = writer.Write(
+				[]byte(
+					`{"has_all_requested":true,"index":{"policy_stats_issue_290":{"index":true}}}`,
+				),
+			)
+		}),
+	)
+	defer server.Close()
+	canonical, err := New(Config{
+		Endpoint: server.URL, Index: PolicyIndex, Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := New(Config{
+		Endpoint: server.URL, Index: ProjectionIndex, Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var missing *Client
+
+	// when
+	missingErr := missing.CheckWrite(context.Background())
+	canonicalErr := canonical.CheckWrite(context.Background())
+	cancelErr := projection.CheckWrite(ctx)
+
+	// then
+	if missingErr == nil || canonicalErr == nil || !errors.Is(cancelErr, context.Canceled) {
+		t.Fatalf("CheckWrite() errors = %v / %v / %v", missingErr, canonicalErr, cancelErr)
 	}
 }
