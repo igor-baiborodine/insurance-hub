@@ -1,8 +1,22 @@
 {
   "schema_version": 1,
   "evidence": {
-    "source": "issue-287 accepted signal contract, issue-289 three-query tests and issue-290 Policy Search-aligned registration signal contract",
-    "limitation": "Event thresholds are adapted from the Policy Search pilot for the single Dashboard registration worker and require Step 11 target qualification; all thresholds remain pilot limits, not production SLOs."
+    "source": "issue-291 controlled local qualification and accepted Policy Search pilot operating limits",
+    "source_revision": "a1a80a26b27ae9649c7fba5b15790e91cf7301b1",
+    "decision_sha256": "c268c84fdd01d02fa57e443cc984dcc7e899e0c369a21b605f8f833948da927e",
+    "query_report_sha256": "96737b8e774792d4ae2544d4805eaa8db8526318536d8c7117d34a836eab39d3",
+    "event_report_sha256": "a3d30419e5adefd1e420463d2f118a16d4a9225d7022d5c53be688d0518035e6",
+    "request_p95_observed_max_seconds": 0.002532035,
+    "request_p95_accepted_limit_seconds": 0.25,
+    "event_visibility_p95_observed_seconds": 0.106866995,
+    "event_visibility_accepted_limit_seconds": 30,
+    "average_cpu_observed_cores": 0.10252835485172075,
+    "peak_rss_observed_bytes": 87769088,
+    "dependency_fault_http_status": 500,
+    "dependency_fault_rpc_rejected": true,
+    "readiness_fault_http_status": 503,
+    "readiness_recovered": true,
+    "limitation": "These values qualify the accepted pilot limits for bounded Dashboard workloads; they are not production SLOs or full-service capacity evidence. Idle, zero in-flight age, refreshed visibility and broker offsets do not prove caught-up status or completeness. Shared Alloy failure and backlog remain shared infrastructure health."
   },
   "workload": {
     "query_shapes": 3,
@@ -16,9 +30,13 @@
     ],
     "query_measured_blocks": 5,
     "query_cycles_per_block": 10,
+    "query_request_count": 300,
     "event_paths": [
       "registered"
     ],
+    "event_blocks": 3,
+    "event_identities_per_block": 4,
+    "event_count": 12,
     "required_modes": [
       "enabled-active",
       "enabled-idle",

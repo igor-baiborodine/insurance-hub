@@ -193,6 +193,21 @@ tests:
     exp_samples:
     - labels: '{}'
       value: 0
+- name: event failures stay inactive with sufficient traffic while disabled
+  interval: 30s
+  input_series:
+  - series: insurance_hub_dashboard_events_total{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered",insurance_hub_dashboard_outcome="success"}
+    values: 0+8x20
+  - series: insurance_hub_dashboard_events_total{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered",insurance_hub_dashboard_outcome="error"}
+    values: 0+2x20
+  - series: insurance_hub_dashboard_event_worker_enabled{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered"}
+    values: 0x20
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardEventFailure",alertstate="firing"}) or vector(0)
+    eval_time: 9m
+    exp_samples:
+    - labels: '{}'
+      value: 0
 - name: enabled registration stall fires after two minutes and recovers
   interval: 30s
   input_series:
