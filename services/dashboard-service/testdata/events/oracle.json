@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "ownership": "issue-290-disposable",
+  "resources": {
+    "registeredTopic": "policy-registered-issue-290",
+    "consumerGroup": "dashboard-service-issue-290",
+    "index": "policy_stats_issue_290",
+    "syntheticIdPrefix": "SYN-290-"
+  },
+  "events": {
+    "registration": {
+      "key": "SYN-290-KEY-IGNORED",
+      "value": {
+        "policy": {
+          "number": "SYN-290-001",
+          "from": [2026, 1, 1],
+          "to": [2026, 12, 31],
+          "policyHolder": "Synthetic Holder A",
+          "productCode": "HSI",
+          "totalPremium": 123.45,
+          "agentLogin": null
+        }
+      },
+      "expectedDocument": {
+        "number": "SYN-290-001",
+        "from": "2026-01-01",
+        "to": "2026-12-31",
+        "policyHolder": "Synthetic Holder A",
+        "productCode": "HSI",
+        "totalPremium": 123.45,
+        "agentLogin": null
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "C05-E01",
+      "sequence": ["registration", "refresh", "three-queries"],
+      "expected": "one seven-field document and January total, agent, and trend results"
+    },
+    {
+      "id": "C05-E02",
+      "sequence": ["registration", "same-id-changed-values", "same-id-null-agent"],
+      "expected": "one current full replacement without stale fields or attribution"
+    },
+    {
+      "id": "C05-E03",
+      "sequence": ["presence-matrix", "decimal-token-matrix"],
+      "expected": "null and empty remain distinct and accepted premium source tokens survive"
+    },
+    {
+      "id": "C05-E04",
+      "sequence": ["lower-bound-registration", "upper-bound-registration", "range-query"],
+      "expected": "the accepted half-open date range includes only the lower bound"
+    },
+    {
+      "id": "C05-E05",
+      "sequence": ["key-mismatch", "malformed-input-matrix", "valid-registration"],
+      "expected": "key mismatch is accepted while malformed and missing identity outcomes follow Q05/Q08"
+    },
+    {
+      "id": "C05-E06",
+      "sequence": ["two-record-batch", "writer-failure", "inspect-offsets-and-documents"],
+      "expected": "no false success, invented rewind, or stronger delivery guarantee"
+    },
+    {
+      "id": "C05-E07",
+      "sequence": ["new-group", "commit", "restart", "hard-crash", "graceful-stop"],
+      "expected": "positions and possible replay match the accepted Q05 commit limits"
+    },
+    {
+      "id": "C05-E08",
+      "sequence": ["workers-disabled", "queries", "invalid-enabled-settings"],
+      "expected": "disabled mode has no event effects and invalid enabled mode fails before effects"
+    },
+    {
+      "id": "C05-E09",
+      "sequence": ["access-denials", "wrong-target", "invalid-tls"],
+      "expected": "accepted exact-target controls deny the listed operations with documented exceptions"
+    },
+    {
+      "id": "C05-E10",
+      "sequence": ["absent-index", "empty-index", "populated-index"],
+      "expected": "explicit setup creates only absent state and adoption preserves existing state"
+    },
+    {
+      "id": "C05-E11",
+      "sequence": ["partial-startup", "dependency-loss", "cancel", "bounded-stop"],
+      "expected": "readiness, query drain, and cleanup follow the accepted lifecycle bounds"
+    },
+    {
+      "id": "C05-E12",
+      "sequence": ["success", "malformed-record", "dependency-failure", "inspect-signals"],
+      "expected": "fixed safe signals distinguish progress, idle, disabled, stalled, and missing telemetry"
+    }
+  ]
+}
