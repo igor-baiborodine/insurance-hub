@@ -66,7 +66,59 @@ from the monitoring source revision.
 
 ## QA preflight and stop conditions
 
-Before a live operation, record all of the following:
+Keep the commands in this section in one shell so the evidence directory and source revision remain
+available to later steps. Start from a clean checkout of the exact reviewed revision, then capture
+the current Flux, workload and monitoring-object state before any write:
+
+```sh
+export DASHBOARD_SOURCE_REVISION="$(git rev-parse HEAD)"
+export MONITORING_EVIDENCE_DIR="$(mktemp -d)"
+test -z "$(git status --porcelain)"
+test "$(kubectl config current-context)" = qa-insurance-hub
+
+kubectl --context qa-insurance-hub -n flux-system get \
+  gitrepository/insurance-hub -o json \
+  > "$MONITORING_EVIDENCE_DIR/flux-source.json"
+kubectl --context qa-insurance-hub -n flux-system get \
+  kustomization/qa-svc -o json \
+  > "$MONITORING_EVIDENCE_DIR/flux-qa-svc.json"
+kubectl --context qa-insurance-hub -n qa-svc get \
+  deployment/qa-dashboard-api -o json \
+  > "$MONITORING_EVIDENCE_DIR/dashboard-deployment.json"
+kubectl --context qa-insurance-hub -n qa-monitoring get \
+  prometheusrule/qa-dashboard-service -o json --ignore-not-found \
+  > "$MONITORING_EVIDENCE_DIR/prior-rule.json"
+kubectl --context qa-insurance-hub -n qa-monitoring get \
+  configmap/qa-dashboard-dashboard -o json --ignore-not-found \
+  > "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
+
+if test -s "$MONITORING_EVIDENCE_DIR/prior-rule.json"; then
+  jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace, uid: .metadata.uid}, spec}' \
+    "$MONITORING_EVIDENCE_DIR/prior-rule.json" \
+    > "$MONITORING_EVIDENCE_DIR/prior-rule-source.json"
+  sha256sum "$MONITORING_EVIDENCE_DIR/prior-rule-source.json"
+else
+  : > "$MONITORING_EVIDENCE_DIR/prior-rule.absent"
+fi
+
+if test -s "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"; then
+  jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace, uid: .metadata.uid}, data}' \
+    "$MONITORING_EVIDENCE_DIR/prior-dashboard.json" \
+    > "$MONITORING_EVIDENCE_DIR/prior-dashboard-source.json"
+  sha256sum "$MONITORING_EVIDENCE_DIR/prior-dashboard-source.json"
+else
+  : > "$MONITORING_EVIDENCE_DIR/prior-dashboard.absent"
+fi
+
+if test -s "$MONITORING_EVIDENCE_DIR/prior-rule.json"; then
+  test -s "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
+else
+  test ! -s "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
+fi
+```
+
+The final guard stops when only one monitoring object exists. Before a live operation, record all
+of the following:
 
 - the full reviewed repository commit containing the monitoring assets;
 - the current Flux `insurance-hub` source and `qa-svc` applied revisions;
@@ -84,11 +136,35 @@ stop for missing Dashboard signals, unexplained firing alerts, a mutable Grafana
 unbounded/sensitive query or any operation that would alter shared monitoring releases, PVCs,
 Alloy, Prometheus, Loki, Tempo, Elasticsearch, Kafka, Java resources or another service's assets.
 
-Render and inspect the exact objects before applying:
+For a first installation, when both `.absent` markers exist, run the selected-service read-only
+pre-provision verifier before creating either object:
 
 ```sh
-make -C k8s prometheus-rules-render ENV_NAME=qa SVC_NAME=dashboard
-make -C k8s grafana-dashboard-render ENV_NAME=qa SVC_NAME=dashboard
+make verify-service-observability \
+  ENV_NAME=qa \
+  SVC_NAME=dashboard \
+  VERIFY_MODE=pre-provision \
+  VERIFY_SOURCE_REVISION="$DASHBOARD_SOURCE_REVISION"
+```
+
+Render the exact objects into the evidence directory, retain their hashes, and ask the API server
+to admit them without persisting either object:
+
+```sh
+make --no-print-directory -C k8s \
+  prometheus-rules-render ENV_NAME=qa SVC_NAME=dashboard \
+  > "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml"
+make --no-print-directory -C k8s \
+  grafana-dashboard-render ENV_NAME=qa SVC_NAME=dashboard \
+  > "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml"
+sha256sum \
+  "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml" \
+  "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml" \
+  > "$MONITORING_EVIDENCE_DIR/candidate-render.sha256"
+kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=server \
+  -f "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml"
+kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=server \
+  -f "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml"
 ```
 
 Confirm the render names `qa-dashboard-service` and `qa-dashboard-dashboard`, namespace
@@ -105,6 +181,32 @@ monitoring resources:
 ```sh
 make -C k8s prometheus-rules-apply ENV_NAME=qa SVC_NAME=dashboard
 make -C k8s grafana-dashboard-apply ENV_NAME=qa SVC_NAME=dashboard
+```
+
+Read back each applied object before verifying live signals. Re-render the same source and require
+it to match the retained candidate byte for byte:
+
+```sh
+kubectl --context qa-insurance-hub -n qa-monitoring get \
+  prometheusrule/qa-dashboard-service -o yaml \
+  > "$MONITORING_EVIDENCE_DIR/applied-rule.yaml"
+kubectl --context qa-insurance-hub -n qa-monitoring get \
+  configmap/qa-dashboard-dashboard -o yaml \
+  > "$MONITORING_EVIDENCE_DIR/applied-dashboard.yaml"
+make --no-print-directory -C k8s \
+  prometheus-rules-render ENV_NAME=qa SVC_NAME=dashboard \
+  > "$MONITORING_EVIDENCE_DIR/rerendered-rule.yaml"
+make --no-print-directory -C k8s \
+  grafana-dashboard-render ENV_NAME=qa SVC_NAME=dashboard \
+  > "$MONITORING_EVIDENCE_DIR/rerendered-dashboard.yaml"
+cmp "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml" \
+  "$MONITORING_EVIDENCE_DIR/rerendered-rule.yaml"
+cmp "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml" \
+  "$MONITORING_EVIDENCE_DIR/rerendered-dashboard.yaml"
+sha256sum \
+  "$MONITORING_EVIDENCE_DIR/rerendered-rule.yaml" \
+  "$MONITORING_EVIDENCE_DIR/rerendered-dashboard.yaml" \
+  > "$MONITORING_EVIDENCE_DIR/rerendered.sha256"
 ```
 
 After apply, use the full reconciled source revision rather than a branch name or short SHA:
@@ -128,7 +230,11 @@ Read back the effective Grafana dashboard by UID and confirm it is provisioned, 
 the provider disables UI updates/deletion and all variables/queries remain scoped to Dashboard,
 QA and Go. Read back the active Prometheus group `insurance-hub-dashboard-service`, its 13 alert
 names, expressions and pending windows. Keep render, admission, apply, API read-back and live
-signal evidence distinct.
+signal evidence distinct. Use the owned foreground Grafana path for the effective UI/API check:
+
+```sh
+make -C k8s grafana-ui
+```
 
 ## Investigation workflow
 
@@ -209,12 +315,47 @@ Dashboard [deployment recovery procedure](deployment-runbook.md#diagnostics-stop
 before classifying an application defect. Do not change thresholds to hide missing or firing data.
 
 To restore prior monitoring assets, first verify that the captured UIDs still identify
-`qa-dashboard-service` and `qa-dashboard-dashboard`. Check out the captured accepted repository
-revision in an isolated checkout, rerun its asset validation, then apply only those two exact
-objects through the same guarded Make targets. Read back the restored hashes, rule group,
-dashboard UID and provider policy, and confirm Product/Policy Search resources and shared releases
-are unchanged. Follow the live restore with the reviewed repository revert required for durable
-source ownership.
+`qa-dashboard-service` and `qa-dashboard-dashboard`:
+
+```sh
+test "$(kubectl --context qa-insurance-hub -n qa-monitoring get \
+  prometheusrule/qa-dashboard-service -o jsonpath='{.metadata.uid}')" \
+  = "$(jq -r '.metadata.uid' "$MONITORING_EVIDENCE_DIR/prior-rule.json")"
+test "$(kubectl --context qa-insurance-hub -n qa-monitoring get \
+  configmap/qa-dashboard-dashboard -o jsonpath='{.metadata.uid}')" \
+  = "$(jq -r '.metadata.uid' "$MONITORING_EVIDENCE_DIR/prior-dashboard.json")"
+```
+
+Check out the captured accepted repository revision in an isolated checkout, rerun its asset
+validation, then apply only those two exact objects through the same guarded Make targets. Read the
+restored objects back and compare their stable source payloads with the preflight captures:
+
+```sh
+kubectl --context qa-insurance-hub -n qa-monitoring get \
+  prometheusrule/qa-dashboard-service -o json \
+  > "$MONITORING_EVIDENCE_DIR/restored-rule.json"
+jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace, uid: .metadata.uid}, spec}' \
+  "$MONITORING_EVIDENCE_DIR/restored-rule.json" \
+  > "$MONITORING_EVIDENCE_DIR/restored-rule-source.json"
+kubectl --context qa-insurance-hub -n qa-monitoring get \
+  configmap/qa-dashboard-dashboard -o json \
+  > "$MONITORING_EVIDENCE_DIR/restored-dashboard.json"
+jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace, uid: .metadata.uid}, data}' \
+  "$MONITORING_EVIDENCE_DIR/restored-dashboard.json" \
+  > "$MONITORING_EVIDENCE_DIR/restored-dashboard-source.json"
+cmp "$MONITORING_EVIDENCE_DIR/prior-rule-source.json" \
+  "$MONITORING_EVIDENCE_DIR/restored-rule-source.json"
+cmp "$MONITORING_EVIDENCE_DIR/prior-dashboard-source.json" \
+  "$MONITORING_EVIDENCE_DIR/restored-dashboard-source.json"
+sha256sum \
+  "$MONITORING_EVIDENCE_DIR/restored-rule-source.json" \
+  "$MONITORING_EVIDENCE_DIR/restored-dashboard-source.json"
+```
+
+Confirm the restored rule group, dashboard UID and provider policy, and confirm Product/Policy
+Search resources and shared releases are unchanged. Follow the live restore with the reviewed
+repository revert required for durable source ownership. For a first installation, use the
+separately authorized exact-object deletion below instead of this prior-state procedure.
 
 For a proven first installation that must be retired, separately authorize deletion of only:
 
