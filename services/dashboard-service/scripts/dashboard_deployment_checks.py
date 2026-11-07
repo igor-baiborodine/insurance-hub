@@ -46,11 +46,28 @@ DENIED_QUALIFICATION_PODS = {
 }
 GRPC_REACHABLE_QUALIFICATION_POD = "dashboard-qualification-business-grpc"
 NETWORK_POLICY_CONVERGENCE_SECONDS = 4
-FORBIDDEN_TEXT = ("kafka", "postgres", "database", "insecure_skip_verify")
+FORBIDDEN_TEXT = ("postgres", "database", "insecure_skip_verify")
 PROBE_IMAGE = (
     "docker.io/curlimages/curl:8.16.0@"
     "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
 )
+EVENT_ACTIVATION_PATCHES = (
+    "event-enabled-config-patch.yaml",
+    "event-enabled-deployment-patch.yaml",
+    "event-enabled-network-policy-patch.yaml",
+)
+REGISTRATION_TOPIC = "policy-registered-issue-290"
+REGISTRATION_FIXTURE = {
+    "policy": {
+        "number": "SYN-290-001",
+        "from": [2026, 1, 1],
+        "to": [2026, 12, 31],
+        "policyHolder": "Synthetic Holder A",
+        "productCode": "HSI",
+        "totalPremium": 123.45,
+        "agentLogin": None,
+    }
+}
 
 
 class DeploymentError(RuntimeError):
@@ -135,6 +152,26 @@ def matching_reader_predecessor_config(actual: Any, expected: Any) -> bool:
     """Accept reviewed local ConfigMap predecessors before their replacement only."""
     if not isinstance(actual, dict) or not isinstance(expected, dict):
         return False
+    if expected.get("EVENT_WORKERS_ENABLED") == "true":
+        interrupted_activation = dict(expected)
+        interrupted_activation["PROBE_TIMEOUT"] = "2s"
+        if actual == interrupted_activation:
+            return True
+        event_predecessor = dict(expected)
+        event_predecessor.update(
+            {
+                "ELASTICSEARCH_INDEX": "policy_stats",
+                "EVENT_WORKERS_ENABLED": "false",
+            }
+        )
+        for name in ("KAFKA_BROKERS", "KAFKA_GROUP", "KAFKA_REGISTERED_TOPIC", "KAFKA_CA_FILE"):
+            event_predecessor.pop(name, None)
+        if actual == event_predecessor:
+            return True
+        pre_event_predecessor = dict(event_predecessor)
+        pre_event_predecessor.pop("EVENT_WORKERS_ENABLED", None)
+        if actual == pre_event_predecessor:
+            return True
     event_predecessor = dict(expected)
     event_predecessor.pop("EVENT_WORKERS_ENABLED", None)
     if actual == event_predecessor:
@@ -168,11 +205,33 @@ def matching_reader_predecessor_environment(actual: Any, expected: Any) -> bool:
         return True
     if not isinstance(actual, list) or not isinstance(expected, list):
         return False
-    predecessor = [
-        item
-        for item in expected
-        if item.get("name") not in {"ELASTICSEARCH_USERNAME", "ELASTICSEARCH_PASSWORD"}
-    ]
+    names = {item.get("name") for item in expected}
+    if {"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"}.issubset(names):
+        predecessor = []
+        for item in expected:
+            name = item.get("name")
+            if name in {"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"}:
+                continue
+            if name in {"ELASTICSEARCH_USERNAME", "ELASTICSEARCH_PASSWORD"}:
+                predecessor.append(
+                    {
+                        "name": name,
+                        "valueFrom": {
+                            "secretKeyRef": {
+                                "name": "local-dev-dashboard-elasticsearch",
+                                "key": "username" if name.endswith("USERNAME") else "password",
+                            }
+                        },
+                    }
+                )
+            else:
+                predecessor.append(item)
+        if actual == predecessor:
+            return True
+    predecessor_names = {"ELASTICSEARCH_USERNAME", "ELASTICSEARCH_PASSWORD"}
+    if {"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"}.issubset(names):
+        predecessor_names.update({"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"})
+    predecessor = [item for item in expected if item.get("name") not in predecessor_names]
     return actual == predecessor
 
 
@@ -182,6 +241,12 @@ def matching_reader_predecessor_network_policy(actual: Any, expected: Any) -> bo
         return True
     if not isinstance(expected, dict):
         return False
+    event_predecessor = dict(expected)
+    egress = event_predecessor.get("egress")
+    if isinstance(egress, list) and egress:
+        event_predecessor["egress"] = egress[:-1]
+        if normalized_policy_spec(actual) == normalized_policy_spec(event_predecessor):
+            return True
     predecessor = {
         "podSelector": expected.get("podSelector"),
         "policyTypes": expected.get("policyTypes"),
@@ -200,6 +265,15 @@ def matching_reader_predecessor_network_policy(actual: Any, expected: Any) -> bo
         ],
     }
     return normalized_policy_spec(actual) == normalized_policy_spec(predecessor)
+
+
+def event_activation_predecessor_list(actual: Any, expected: Any) -> bool:
+    """Accept the exact disabled trust boundary only during a declared local replacement."""
+    if actual == expected:
+        return True
+    if not isinstance(actual, list) or not isinstance(expected, list):
+        return False
+    return actual == [item for item in expected if item.get("name") != "kafka-ca"]
 
 
 def render(environment: str) -> str:
@@ -353,13 +427,8 @@ def kafka_egress(environment: str) -> dict[str, Any]:
 
 def event_activation_assets(environment: str) -> tuple[dict[str, Any], ...]:
     root = ROOT / f"k8s/overlays/{environment}/svc/dashboard"
-    names = (
-        "event-enabled-config-patch.yaml",
-        "event-enabled-deployment-patch.yaml",
-        "event-enabled-network-policy-patch.yaml",
-    )
     values: list[dict[str, Any]] = []
-    for name in names:
+    for name in EVENT_ACTIVATION_PATCHES:
         try:
             value = yaml.safe_load((root / name).read_text(encoding="utf-8"))
         except (OSError, yaml.YAMLError) as error:
@@ -369,12 +438,31 @@ def event_activation_assets(environment: str) -> tuple[dict[str, Any], ...]:
     return tuple(values)
 
 
+def event_activation_enabled(environment: str) -> bool:
+    root = ROOT / f"k8s/overlays/{environment}/svc/dashboard"
+    try:
+        kustomization = yaml.safe_load((root / "kustomization.yaml").read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise DeploymentError("Dashboard Kustomization is invalid") from error
+    require(isinstance(kustomization, dict), "Dashboard Kustomization is invalid")
+    paths = [
+        item.get("path") for item in kustomization.get("patches", []) if isinstance(item, dict)
+    ]
+    event_paths = {
+        path for path in paths if isinstance(path, str) and path.startswith("event-enabled-")
+    }
+    expected = set(EVENT_ACTIVATION_PATCHES)
+    require(event_paths in (set(), expected), "event activation patch selection differs")
+    return event_paths == expected
+
+
 def validate_event_activation_assets(environment: str) -> None:
     require(environment in {"local-dev", "qa"}, "deployment environment is invalid")
     config, deployment, network = event_activation_assets(environment)
     prefix = environment
     expected_config = {
         "EVENT_WORKERS_ENABLED": "true",
+        "PROBE_TIMEOUT": "30s",
         "ELASTICSEARCH_INDEX": "policy_stats_issue_290",
         "KAFKA_BROKERS": (
             "local-dev-kafka-kafka-bootstrap:9093"
@@ -437,10 +525,7 @@ def validate_event_activation_assets(environment: str) -> None:
         == [*expected_egress(environment), kafka_egress(environment)],
         "event activation egress differs",
     )
-    kustomization = (
-        ROOT / f"k8s/overlays/{environment}/svc/dashboard/kustomization.yaml"
-    ).read_text(encoding="utf-8")
-    require("event-enabled-" not in kustomization, "PR1 desired state activates event assets")
+    event_activation_enabled(environment)
 
 
 def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
@@ -456,6 +541,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     )
     require(len(items) == 5, "Dashboard resource inventory differs")
     prefix = f"{environment}-"
+    event_enabled = event_activation_enabled(environment)
     expected_names = {
         "ConfigMap": {prefix + "dashboard-config"},
         "Deployment": {prefix + "dashboard-api"},
@@ -501,7 +587,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "HEALTH_ADDR": "0.0.0.0:8081",
         "LOG_LEVEL": "info",
         "REQUEST_TIMEOUT": "8s",
-        "PROBE_TIMEOUT": "2s",
+        "PROBE_TIMEOUT": "30s" if event_enabled else "2s",
         "SHUTDOWN_TIMEOUT": "10s",
         "HTTP_MAX_HEADER_BYTES": "16384",
         "HTTP_MAX_BODY_BYTES": "4096",
@@ -516,9 +602,9 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             if environment == "local-dev"
             else "https://qa-elasticsearch-es-http.qa-data.svc:9200"
         ),
-        "ELASTICSEARCH_INDEX": "policy_stats",
+        "ELASTICSEARCH_INDEX": "policy_stats_issue_290" if event_enabled else "policy_stats",
         "ELASTICSEARCH_TIMEOUT": "5s",
-        "EVENT_WORKERS_ENABLED": "false",
+        "EVENT_WORKERS_ENABLED": "true" if event_enabled else "false",
         "SALES_TRENDS_TIME_ZONE": "GMT",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
     }
@@ -527,6 +613,42 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
         )
         expected_config["ELASTICSEARCH_CA_FILE"] = "/etc/dashboard/elasticsearch/ca.crt"
+    if event_enabled:
+        expected_config.update(
+            {
+                "KAFKA_BROKERS": (
+                    "local-dev-kafka-kafka-bootstrap:9093"
+                    if environment == "local-dev"
+                    else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
+                ),
+                "KAFKA_GROUP": "dashboard-service-issue-290",
+                "KAFKA_REGISTERED_TOPIC": "policy-registered-issue-290",
+                "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
+            }
+        )
+    expected_volumes: list[dict[str, Any]] = []
+    if event_enabled:
+        expected_volumes.append(
+            {
+                "name": "kafka-ca",
+                "secret": {
+                    "secretName": f"{environment}-dashboard-kafka-ca",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 292,
+                },
+            }
+        )
+    if environment == "qa":
+        expected_volumes.append(
+            {
+                "name": "elasticsearch-ca",
+                "secret": {
+                    "secretName": "qa-dashboard-elasticsearch-ca",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 292,
+                },
+            }
+        )
     require(
         "OTEL_EXPORTER_OTLP_TIMEOUT" not in data,
         "exporter timeout must use the application default",
@@ -556,27 +678,26 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "fsGroup": 65532,
             "seccompProfile": {"type": "RuntimeDefault"},
         }
-        and pod.get("volumes", [])
-        == (
-            []
-            if environment == "local-dev"
-            else [
-                {
-                    "name": "elasticsearch-ca",
-                    "secret": {
-                        "secretName": "qa-dashboard-elasticsearch-ca",
-                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                        "defaultMode": 292,
-                    },
-                }
-            ]
-        )
+        and pod.get("volumes", []) == expected_volumes
         and not pod.get("initContainers"),
         "Pod security or data boundary differs",
     )
     containers = pod.get("containers", [])
     require(len(containers) == 1, "container inventory differs")
     container = containers[0]
+    expected_mounts: list[dict[str, Any]] = []
+    if event_enabled:
+        expected_mounts.append(
+            {"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}
+        )
+    if environment == "qa":
+        expected_mounts.append(
+            {
+                "name": "elasticsearch-ca",
+                "mountPath": "/etc/dashboard/elasticsearch",
+                "readOnly": True,
+            }
+        )
     require(
         container.get("name") == "dashboard-api"
         and container.get("imagePullPolicy")
@@ -592,18 +713,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "requests": {"cpu": "100m", "memory": "64Mi"},
             "limits": {"cpu": "300m", "memory": "256Mi"},
         }
-        and container.get("volumeMounts", [])
-        == (
-            []
-            if environment == "local-dev"
-            else [
-                {
-                    "name": "elasticsearch-ca",
-                    "mountPath": "/etc/dashboard/elasticsearch",
-                    "readOnly": True,
-                }
-            ]
-        )
+        and container.get("volumeMounts", []) == expected_mounts
         and container.get("envFrom") == [{"configMapRef": {"name": prefix + "dashboard-config"}}],
         "container security or resources differ",
     )
@@ -612,21 +722,39 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         ports == {("http", 8080), ("grpc", 9090), ("management", 8081)}, "container ports differ"
     )
     env = {item.get("name"): item for item in container.get("env", [])}
+    reader_secret = (
+        f"{environment}-dashboard-elasticsearch-issue-290"
+        if event_enabled
+        else f"{environment}-dashboard-elasticsearch"
+    )
+    expected_env_names = {
+        "SERVICE_INSTANCE_ID",
+        "ELASTICSEARCH_USERNAME",
+        "ELASTICSEARCH_PASSWORD",
+    }
+    if event_enabled:
+        expected_env_names.update(
+            {"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"}
+        )
     require(
         env.get("SERVICE_INSTANCE_ID", {}).get("valueFrom", {}).get("fieldRef", {}).get("fieldPath")
         == "metadata.uid"
         and env.get("ELASTICSEARCH_USERNAME", {}).get("valueFrom", {}).get("secretKeyRef")
-        == {"name": f"{environment}-dashboard-elasticsearch", "key": "username"}
+        == {"name": reader_secret, "key": "username"}
         and env.get("ELASTICSEARCH_PASSWORD", {}).get("valueFrom", {}).get("secretKeyRef")
-        == {"name": f"{environment}-dashboard-elasticsearch", "key": "password"}
-        and set(env)
-        == {
-            "SERVICE_INSTANCE_ID",
-            "ELASTICSEARCH_USERNAME",
-            "ELASTICSEARCH_PASSWORD",
-        },
+        == {"name": reader_secret, "key": "password"}
+        and set(env) == expected_env_names,
         "runtime identity environment differs",
     )
+    if event_enabled:
+        writer_secret = f"{environment}-dashboard-elasticsearch-writer-issue-290"
+        require(
+            env["ELASTICSEARCH_WRITER_USERNAME"].get("valueFrom", {}).get("secretKeyRef")
+            == {"name": writer_secret, "key": "username"}
+            and env["ELASTICSEARCH_WRITER_PASSWORD"].get("valueFrom", {}).get("secretKeyRef")
+            == {"name": writer_secret, "key": "password"},
+            "writer environment differs",
+        )
     probes = {
         "startupProbe": ({"path": "/livez", "port": "management", "scheme": "HTTP"}, 2, 2, 30),
         "livenessProbe": ({"path": "/livez", "port": "management", "scheme": "HTTP"}, 10, 2, 3),
@@ -673,7 +801,11 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "NetworkPolicy admission differs",
     )
     require(
-        policy_spec.get("egress", []) == expected_egress(environment),
+        policy_spec.get("egress", [])
+        == [
+            *expected_egress(environment),
+            *([kafka_egress(environment)] if event_enabled else []),
+        ],
         "NetworkPolicy egress differs",
     )
     return items
@@ -964,7 +1096,16 @@ class Target:
                 and pod.get("hostIPC") is not True
                 and pod.get("serviceAccountName") in (None, "default")
                 and not pod.get("initContainers")
-                and pod.get("volumes", []) == desired_pod.get("volumes", []),
+                and (
+                    pod.get("volumes", []) == desired_pod.get("volumes", [])
+                    or (
+                        previous_image
+                        and not require_deployment
+                        and event_activation_predecessor_list(
+                            pod.get("volumes", []), desired_pod.get("volumes", [])
+                        )
+                    )
+                ),
                 f"live Deployment/{name} Pod security settings differ",
             )
             desired_containers = desired_pod.get("containers", [])
@@ -1011,6 +1152,13 @@ class Target:
                     require(
                         container.get(field) in {desired_container.get(field), "IfNotPresent"},
                         f"live Deployment/{name} container imagePullPolicy differs",
+                    )
+                elif field == "volumeMounts" and previous_image and not require_deployment:
+                    require(
+                        event_activation_predecessor_list(
+                            container.get(field, []), desired_container.get(field, [])
+                        ),
+                        f"live Deployment/{name} container {field} differs",
                     )
                 else:
                     require(
@@ -1887,8 +2035,13 @@ def validate_direct_rpc_output(output: str, test_name: str = "TestDeployedDirect
     )
 
 
-def run_deployed_direct_rpc(port: int) -> None:
-    test_name = "TestDeployedDirectRPCSharedSmoke"
+def run_deployed_direct_rpc(port: int, scenario: str = "shared-smoke") -> None:
+    test_names = {
+        "shared-smoke": "TestDeployedDirectRPCSharedSmoke",
+        "registration": "TestDeployedDirectRPCRegistration",
+    }
+    require(scenario in test_names, "deployed direct-RPC scenario differs")
+    test_name = test_names[scenario]
     output = run(
         [
             os.environ.get("MAKE_COMMAND", "make"),
@@ -1901,11 +2054,108 @@ def run_deployed_direct_rpc(port: int) -> None:
         environment={
             "GO": os.environ.get("GO", "go"),
             "DASHBOARD_DEPLOYMENT_GRPC_ADDR": f"127.0.0.1:{port}",
-            "DASHBOARD_DEPLOYMENT_RPC_SCENARIO": "shared-smoke",
+            "DASHBOARD_DEPLOYMENT_RPC_SCENARIO": scenario,
         },
         activity="verify deployed direct Dashboard RPC",
     )
     validate_direct_rpc_output(output, test_name)
+
+
+def produce_registration_fixture(target: Target) -> None:
+    listing = target.data_json(
+        "get", "pods", "-l", f"strimzi.io/cluster={target.environment}-kafka"
+    )
+    brokers = sorted(
+        item.get("metadata", {}).get("name", "")
+        for item in listing.get("items", [])
+        if item.get("metadata", {}).get("labels", {}).get("strimzi.io/broker-role") == "true"
+        and any(
+            condition.get("type") == "Ready" and condition.get("status") == "True"
+            for condition in item.get("status", {}).get("conditions", [])
+        )
+    )
+    require(brokers and all(brokers), "ready Kafka broker inventory differs")
+    payload = json.dumps(REGISTRATION_FIXTURE, separators=(",", ":"))
+    record = f"SYN-290-KEY-IGNORED|{payload}"
+    target.namespace_kubectl(
+        target.data_namespace,
+        "exec",
+        f"pod/{brokers[0]}",
+        "-c",
+        "kafka",
+        "--",
+        "bash",
+        "-c",
+        (
+            'printf "%s\\n" "$1" | '
+            "/opt/kafka/bin/kafka-console-producer.sh "
+            "--bootstrap-server 127.0.0.1:9092 "
+            f"--topic {REGISTRATION_TOPIC} "
+            "--property parse.key=true "
+            "--property 'key.separator=|' "
+            "--producer-property acks=all"
+        ),
+        "_",
+        record,
+        timeout=30,
+    )
+
+
+def registration_http_results(port: int) -> None:
+    deadline = time.monotonic() + 30
+    last: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        cases = (
+            (
+                "/dashboard/totalsales",
+                {"saleDateFrom": "2026-01-01", "saleDateTo": "2026-02-01"},
+                lambda value: value.get("total") == {"policiesCount": 1, "premiumAmount": 123.45},
+            ),
+            (
+                "/dashboard/agentssales",
+                {"saleDateFrom": "2026-01-01", "saleDateTo": "2026-02-01"},
+                lambda value: not value or value.get("perAgentTotal") == {},
+            ),
+            (
+                "/dashboard/trends",
+                {
+                    "saleDateFrom": "2026-01-01",
+                    "saleDateTo": "2026-02-01",
+                    "aggregationUnitCode": "DAY",
+                },
+                lambda value: (
+                    value.get("periodSales")
+                    == [
+                        {
+                            "periodDate": [2026, 1, 1],
+                            "period": "2026-01-01",
+                            "policiesCount": 1,
+                            "premiumAmount": 123.45,
+                        }
+                    ]
+                ),
+            ),
+        )
+        passed = True
+        for path, payload, expected in cases:
+            status, body = _http(
+                f"http://127.0.0.1:{port}{path}",
+                json.dumps(payload).encode(),
+            )
+            try:
+                value = json.loads(body)
+            except json.JSONDecodeError:
+                value = {}
+            last[path] = {"status": status, "value": value}
+            if status != 200 or not isinstance(value, dict) or not expected(value):
+                passed = False
+        if passed:
+            return
+        time.sleep(0.25)
+    raise DeploymentError(
+        "deployed registration query results differ: "
+        + json.dumps(last, sort_keys=True, separators=(",", ":"))
+    )
 
 
 def verify_shared_http_operation(
@@ -2006,6 +2256,10 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                 time.sleep(0.2)
         else:
             raise DeploymentError("deployed readiness was not reachable")
+        event_enabled = event_activation_enabled(target.environment)
+        if event_enabled:
+            produce_registration_fixture(target)
+            registration_http_results(http_port)
         for name, path, payload, field, field_type, allow_empty in (
             (
                 "total-sales HTTP",
@@ -2051,7 +2305,7 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             except Exception as error:
                 failures.append(f"{name}: {error}")
         try:
-            run_deployed_direct_rpc(grpc_port)
+            run_deployed_direct_rpc(grpc_port, "registration" if event_enabled else "shared-smoke")
         except Exception as error:
             failures.append(f"direct RPC: {error}")
     finally:
@@ -2140,8 +2394,8 @@ def main(argv: list[str] | None = None) -> int:
             validate_event_activation_assets(environment)
             validate_java_edge_identity(environment)
         print(
-            "dashboard-deployment-check: disabled local-dev/QA renders and guarded "
-            "event activation assets passed"
+            "dashboard-deployment-check: local-dev/QA renders and guarded event activation "
+            "assets passed"
         )
     return 0
 

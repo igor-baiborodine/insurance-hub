@@ -4,6 +4,7 @@ metadata:
   name: dashboard-config
 data:
   EVENT_WORKERS_ENABLED: "true"
+  PROBE_TIMEOUT: 30s
   ELASTICSEARCH_INDEX: policy_stats_issue_290
   KAFKA_BROKERS: qa-kafka-kafka-bootstrap.qa-data.svc:9093
   KAFKA_GROUP: dashboard-service-issue-290
