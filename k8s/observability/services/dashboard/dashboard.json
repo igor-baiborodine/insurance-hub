@@ -548,12 +548,12 @@
       },
       "targets": [
         {
-          "expr": "{service_name=\"dashboard-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"} | json | outcome=~\"internal_error|deadline_exceeded|unavailable|error|cancelled\"",
+          "expr": "{service_name=\"dashboard-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"} | json | outcome=~\"internal_error|deadline_exceeded|unavailable|malformed|error|cancelled\"",
           "queryType": "range",
           "refId": "A"
         }
       ],
-      "title": "Failed request investigation logs",
+      "title": "Failed request and worker investigation logs",
       "type": "logs"
     },
     {

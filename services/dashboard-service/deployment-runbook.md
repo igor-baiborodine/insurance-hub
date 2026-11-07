@@ -1,7 +1,7 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Dashboard Sales Deployment Runbook](#dashboard-sales-deployment-runbook)
+- [Dashboard deployment runbook](#dashboard-deployment-runbook)
   - [Deployment coordinates](#deployment-coordinates)
   - [Qualify the candidate](#qualify-the-candidate)
   - [Provision reader prerequisites](#provision-reader-prerequisites)
@@ -10,10 +10,12 @@
   - [Stop and return in local development](#stop-and-return-in-local-development)
   - [Stage and observe QA](#stage-and-observe-qa)
   - [Return from QA activation](#return-from-qa-activation)
+  - [Diagnostics, stop conditions and recovery](#diagnostics-stop-conditions-and-recovery)
+  - [Evidence checklist and later ownership](#evidence-checklist-and-later-ownership)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# Dashboard Sales Deployment Runbook
+# Dashboard deployment runbook
 
 This runbook owns qualification and guarded operation of the private Go Dashboard queries and its
 disabled-by-default isolated registration candidate. The default workload reads `policy_stats`.
@@ -22,6 +24,11 @@ The candidate uses `policy_stats_issue_290`, `policy-registered-issue-290` and
 event authority.
 Issue 291 completes the service operating handoff. Issue 292 owns the later full removal and
 restoration rehearsal.
+
+Use the companion [observability runbook](observability-runbook.md) for Dashboard monitoring
+source validation, QA provisioning/read-back, investigation and monitoring restoration. The two
+procedures share service and image identity, but workload reconciliation remains Flux-owned while
+the Dashboard PrometheusRule and Grafana ConfigMap use their guarded monitoring owners.
 
 ## Deployment coordinates
 
@@ -187,9 +194,9 @@ export DEPLOY_ENV=local-dev
 export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
 export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
-export DEPLOY_IMAGE_REF=insurance-hub-dashboard-api:1.0.0-local.<12-source-hex>
-export DEPLOY_JAVA_DEPLOYMENT_UID=<recorded-local-dev-Java-Deployment-UID>
-export DEPLOY_JAVA_SERVICE_UID=<recorded-local-dev-Java-Service-UID>
+: "${DEPLOY_IMAGE_REF:?set the exact source-derived local Dashboard image reference}"
+: "${DEPLOY_JAVA_DEPLOYMENT_UID:?set the recorded local-dev Java Deployment UID}"
+: "${DEPLOY_JAVA_SERVICE_UID:?set the recorded local-dev Java Service UID}"
 
 make go-svc-deploy-preflight SVC_NAME=dashboard
 make go-svc-image-load SVC_NAME=dashboard
@@ -273,10 +280,10 @@ export DEPLOY_ENV=qa
 export DEPLOY_CONTEXT=qa-insurance-hub
 export DEPLOY_SVC_NS=qa-svc
 export DEPLOY_DATA_NS=qa-data
-export DEPLOY_SOURCE_REVISION=<40-flux-source-applied-hex>
-export DEPLOY_IMAGE_DIGEST=sha256:<64-hex-registry-digest>
-export DEPLOY_JAVA_DEPLOYMENT_UID=<recorded-QA-Java-Deployment-UID>
-export DEPLOY_JAVA_SERVICE_UID=<recorded-QA-Java-Service-UID>
+: "${DEPLOY_SOURCE_REVISION:?set the full Flux source applied revision}"
+: "${DEPLOY_IMAGE_DIGEST:?set the sha256 registry digest}"
+: "${DEPLOY_JAVA_DEPLOYMENT_UID:?set the recorded QA Java Deployment UID}"
+: "${DEPLOY_JAVA_SERVICE_UID:?set the recorded QA Java Service UID}"
 
 make go-svc-deploy-status SVC_NAME=dashboard
 make go-svc-deploy-verify SVC_NAME=dashboard
@@ -305,3 +312,62 @@ If QA acceptance must stop, revert only the reviewed `./dashboard` inclusion thr
 Flux remove the Go resources. Keep `./dashboard/legacy`, the shared Flux source and all Java,
 monitoring and data resources unchanged. Record the source/applied revisions and Java UIDs before
 and after the return. A final remove-and-restore rehearsal remains issue 292 work.
+
+## Diagnostics, stop conditions and recovery
+
+Stop before a target mutation when any declared environment, context, namespace, Java UID,
+Dashboard resource name, source revision, image reference/digest, Secret shape, Elasticsearch
+index/identity, Kafka topic/group or current Flux owner differs from the recorded candidate. Stop
+after mutation for a placeholder/mismatched runtime identity, an unexpected ready Pod, failed
+business/management probe, lost Java availability, reader privilege expansion, writer access to
+`policy_stats`, worker access to the canonical topic/group, an unexplained readiness failure or
+incomplete owned cleanup. Preserve the first failure and current source/image/resource identities
+before retrying.
+
+Use `go-svc-deploy-status SVC_NAME=dashboard` for the selected target before classifying stale
+source or image state. Check the exact Deployment, ConfigMap, Services, NetworkPolicy, Pod image ID
+and runtime identity; use the [observability runbook](observability-runbook.md#investigation-workflow)
+for bounded metrics/logs/traces. Do not print Secrets, raw events or Elasticsearch responses. A
+collector failure must not make liveness depend on Alloy.
+
+For local development, recovery uses the captured accepted image and the same guarded preflight,
+image-load, deploy, status and verify sequence. `go-svc-stop` may scale only
+`local-dev-dashboard-api`; it does not remove dependency resources. Verify Java UIDs and
+availability before and after recovery.
+
+For QA, do not patch the workload or suspend Flux. Revert the reviewed Dashboard source change,
+let `qa-svc` reconcile, and record both source and applied revisions. Verify the exact prior image
+digest, Pod identity, Java UIDs, reader permissions and monitoring behavior after reconciliation.
+If monitoring source differs from application source, restore it through the separate guarded
+procedure rather than treating an application rollback as monitoring restoration.
+
+Clean up only resources owned by the failed operation. The verifier owns its fixed probe Pods and
+untrusted namespace; the disposable deployment owns its unique namespace. Before retrying after an
+interruption, check those exact recorded names and preserve an unexpected resource for diagnosis.
+Do not use broad namespace, Pod, process or consumer-group cleanup.
+
+Reader rotation and issue-290 event-resource retirement remain explicit administrative actions
+with their own confirmations. Never use retirement as routine deployment recovery. Removing group
+offsets, canonical data, shared Kafka/Elasticsearch/Alloy resources, Java authority or persistent
+QA Flux ownership is outside this runbook.
+
+## Evidence checklist and later ownership
+
+Retain the following without credentials or business data:
+
+- intended base/head and full candidate source revision;
+- semantic/local image reference, full OCI source revision, source-derived build version,
+  immutable registry digest and actual Pod image ID;
+- selected environment/context/namespaces, Flux source/applied revisions and exact resource UIDs;
+- configuration identity, worker mode, Elasticsearch index/reader/writer identities and Kafka
+  topic/group without secret values;
+- render/preflight/status/verify results, all three HTTP/RPC outcomes, readiness/liveness,
+  dependency fault/recovery and allowed/denied network/reader observations;
+- Java Deployment/Service UIDs and availability before and after the operation;
+- monitoring dashboard/rule identities, bounded investigation results and any stop/recovery path;
+- owned disposable/probe cleanup and final accepted state.
+
+Issue 291 owns the monitoring and service-root operating procedures. Issue 292 owns cumulative
+practical load, full application downgrade/removal/reinstallation/restoration and isolated
+authority handover. Later epic tickets own route/traffic transfer, canonical writer changes and
+Java retirement. Nothing in this runbook authorizes those actions.

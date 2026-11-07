@@ -144,6 +144,7 @@
       "trace_id",
       "agent_sales",
       "sales_trends",
+      "malformed",
       "Event worker state",
       "Legitimate idle time",
       "missing telemetry",
@@ -156,7 +157,7 @@
           "Readiness and restarts"
         ],
         "investigation": [
-          "Failed request investigation logs",
+          "Failed request and worker investigation logs",
           "Dashboard traces",
           "Investigation workflow"
         ],
