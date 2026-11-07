@@ -755,6 +755,52 @@ def test_render_requires_the_runtime_config_map_linkage() -> None:
         checks.validate_render("local-dev", yaml.safe_dump_all(items))
 
 
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+def test_event_activation_assets_are_exact_and_inactive(environment: str) -> None:
+    checks.validate_event_activation_assets(environment)
+    items = checks.documents(checks.render(environment))
+    config = checks.resource(items, "ConfigMap", f"{environment}-dashboard-config")
+    deployment = checks.resource(items, "Deployment", f"{environment}-dashboard-api")
+    policy = checks.resource(items, "NetworkPolicy", f"{environment}-dashboard-api")
+    container = deployment["spec"]["template"]["spec"]["containers"][0]
+
+    assert config["data"]["EVENT_WORKERS_ENABLED"] == "false"
+    assert "KAFKA_BROKERS" not in config["data"]
+    assert not any(
+        item.get("name", "").startswith("ELASTICSEARCH_WRITER_") for item in container["env"]
+    )
+    assert all(item.get("name") != "kafka-ca" for item in container.get("volumeMounts", []))
+    assert checks.kafka_egress(environment) not in policy["spec"]["egress"]
+
+
+def test_event_activation_assets_reject_canonical_topic_or_secret() -> None:
+    config, deployment, network = checks.event_activation_assets("local-dev")
+    config["data"]["KAFKA_REGISTERED_TOPIC"] = "policy-registered"
+    with (
+        patch.object(
+            checks,
+            "event_activation_assets",
+            return_value=(config, deployment, network),
+        ),
+        pytest.raises(checks.DeploymentError, match="activation configuration"),
+    ):
+        checks.validate_event_activation_assets("local-dev")
+
+    config, deployment, network = checks.event_activation_assets("local-dev")
+    deployment["spec"]["template"]["spec"]["containers"][0]["env"][0]["valueFrom"]["secretKeyRef"][
+        "name"
+    ] = "local-dev-dashboard-elasticsearch"
+    with (
+        patch.object(
+            checks,
+            "event_activation_assets",
+            return_value=(config, deployment, network),
+        ),
+        pytest.raises(checks.DeploymentError, match="ELASTICSEARCH_USERNAME"),
+    ):
+        checks.validate_event_activation_assets("local-dev")
+
+
 @pytest.mark.parametrize(
     ("environment", "key"),
     [
@@ -943,6 +989,7 @@ def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:
         "ELASTICSEARCH_INDEX",
         "ELASTICSEARCH_TIMEOUT",
         "ELASTICSEARCH_URL",
+        "EVENT_WORKERS_ENABLED",
         "SALES_TRENDS_TIME_ZONE",
     ):
         live_config.pop(name)

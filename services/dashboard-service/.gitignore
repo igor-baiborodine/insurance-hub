@@ -1,2 +1,4 @@
 /.tools/bin/
 /.tools/ruff-cache/
+/elasticsearch-integration-coverage.txt
+/event-integration-coverage.txt

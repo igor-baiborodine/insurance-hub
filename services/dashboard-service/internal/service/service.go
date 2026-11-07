@@ -2,6 +2,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/elasticsearch"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/grpc"
+	dashboardkafka "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/kafka"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
 )
 
@@ -78,10 +80,18 @@ type salesReader interface {
 	application.SalesTrendsReader
 }
 
+type eventWorker interface {
+	Check(context.Context) error
+	Run(context.Context) error
+	Shutdown(context.Context) error
+}
+
 type dependencies struct {
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newSearch      func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error)
+	newProjection  func(config.Elasticsearch, *telemetry.DependencyObserver) (projectionRuntime, error)
+	newWorker      func(dashboardkafka.Settings, projectionRuntime, *slog.Logger) (eventWorker, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.TotalSalesExecutor, transport.AgentSalesExecutor, transport.SalesTrendsExecutor) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
 	newGateway     func(dashboardv1.DashboardServiceClient, gateway.Settings) (http.Handler, error)
@@ -96,7 +106,15 @@ func productionDependencies() dependencies {
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
-		newSearch: newSearchDependency,
+		newSearch:     newSearchDependency,
+		newProjection: newProductionProjection,
+		newWorker: func(
+			settings dashboardkafka.Settings,
+			projection projectionRuntime,
+			logger *slog.Logger,
+		) (eventWorker, error) {
+			return dashboardkafka.NewWorker(settings, projection, logger)
+		},
 		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, totalSales transport.TotalSalesExecutor, agentSales transport.AgentSalesExecutor, salesTrends transport.SalesTrendsExecutor) (grpcServer, error) {
 			return transport.NewServer(
 				logger,
@@ -207,6 +225,11 @@ type runningService struct {
 	managementServer   httpServer
 	managementListener net.Listener
 	tracker            *handlerTracker
+	projection         projectionRuntime
+	worker             eventWorker
+	workerCancel       context.CancelFunc
+	workerResult       chan error
+	workerWG           sync.WaitGroup
 }
 
 func run(
@@ -246,6 +269,27 @@ func run(
 	)
 	if err != nil {
 		return fail(err)
+	}
+	eventObserver, err := telemetry.NewEventObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+		settings.Events.Enabled,
+	)
+	if err != nil {
+		return fail(err)
+	}
+	if settings.Events.Enabled {
+		if err := runtime.configureWorker(
+			settings.Events,
+			logger,
+			deps,
+			dependencyObserver,
+			eventObserver,
+			provider.HTTPPropagator(),
+		); err != nil {
+			return fail(fmt.Errorf("run service: %w", err))
+		}
 	}
 	reader, search, err := deps.newSearch(settings.Elasticsearch, settings.SalesTrendsTimeZone)
 	if err != nil {
@@ -317,6 +361,13 @@ func run(
 	if err == nil {
 		err = runtime.search.Check(readyContext)
 	}
+	if err == nil && runtime.projection != nil {
+		err = runtime.projection.Check(readyContext)
+	}
+	if err == nil {
+		runtime.startWorker(ctx)
+		err = runtime.checkWorker(readyContext)
+	}
 	cancelReady()
 	if err != nil {
 		return fail(fmt.Errorf("run service: dependency not ready: %w", err))
@@ -325,7 +376,10 @@ func run(
 		if runtime.connection.GetState() != connectivity.Ready {
 			return errors.New("gateway connection is not ready")
 		}
-		return runtime.search.Check(ctx)
+		if err := runtime.search.Check(ctx); err != nil {
+			return err
+		}
+		return runtime.checkWorker(ctx)
 	})
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
@@ -364,6 +418,8 @@ func run(
 		return fail(unexpectedServeError("business HTTP", err))
 	case err := <-managementResult:
 		return fail(unexpectedServeError("management HTTP", err))
+	case err := <-runtime.workerResult:
+		return fail(unexpectedWorkerError(err))
 	default:
 	}
 	runtime.state.SetReady(true)
@@ -382,11 +438,84 @@ func run(
 		serveErr = unexpectedServeError("business HTTP", err)
 	case err := <-managementResult:
 		serveErr = unexpectedServeError("management HTTP", err)
+	case err := <-runtime.workerResult:
+		if ctx.Err() == nil {
+			serveErr = unexpectedWorkerError(err)
+		}
 	}
 	return errors.Join(
 		serveErr,
 		runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 	)
+}
+
+func (runtime *runningService) configureWorker(
+	settings config.Events,
+	logger *slog.Logger,
+	deps dependencies,
+	dependencyObserver *telemetry.DependencyObserver,
+	eventObserver *telemetry.EventObserver,
+	propagator propagation.TextMapPropagator,
+) error {
+	caCertificate, err := readBoundedFile(settings.CAFile, 1<<20)
+	if err != nil {
+		return errors.New("read Kafka CA file")
+	}
+	if len(bytes.TrimSpace(caCertificate)) == 0 {
+		return errors.New("read Kafka CA file: empty certificate")
+	}
+	runtime.projection, err = deps.newProjection(settings.Writer, dependencyObserver)
+	if err != nil {
+		return err
+	}
+	runtime.worker, err = deps.newWorker(dashboardkafka.Settings{
+		Brokers: settings.Brokers, Group: settings.Group,
+		Topic: settings.RegisteredTopic, ClientID: "policy-registered-dashboard-listener",
+		CACert: caCertificate, EventType: "registered", Propagator: propagator,
+		Observe: func(ctx context.Context, eventType string) (
+			context.Context,
+			func(context.Context, string, error),
+		) {
+			observedCtx, observation := eventObserver.Start(ctx, eventType)
+			return observedCtx, observation.Finish
+		},
+		CommitFailure: eventObserver.RecordCommitFailure,
+	}, runtime.projection, logger)
+	return err
+}
+
+func (runtime *runningService) checkWorker(ctx context.Context) error {
+	if runtime.worker == nil {
+		return nil
+	}
+	if runtime.projection == nil {
+		return errors.New("projection is unavailable")
+	}
+	if err := runtime.projection.Check(ctx); err != nil {
+		return err
+	}
+	return runtime.worker.Check(ctx)
+}
+
+func (runtime *runningService) startWorker(parent context.Context) {
+	if runtime.worker == nil {
+		return
+	}
+	workerCtx, cancel := context.WithCancel(parent)
+	runtime.workerCancel = cancel
+	runtime.workerResult = make(chan error, 1)
+	runtime.workerWG.Add(1)
+	go func() {
+		defer runtime.workerWG.Done()
+		runtime.workerResult <- runtime.worker.Run(workerCtx)
+	}()
+}
+
+func unexpectedWorkerError(err error) error {
+	if err == nil {
+		err = errors.New("stopped unexpectedly")
+	}
+	return fmt.Errorf("event worker stopped: %w", err)
 }
 
 func waitForConnection(ctx context.Context, connection gatewayConnection) error {
@@ -433,6 +562,27 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 	)
 	defer cancelGraceful()
 	var shutdownErrors []error
+	if runtime.workerCancel != nil {
+		runtime.workerCancel()
+		workerStopped := make(chan struct{})
+		go func() { runtime.workerWG.Wait(); close(workerStopped) }()
+		select {
+		case <-workerStopped:
+		case <-graceful.Done():
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("stop event worker: %w", graceful.Err()),
+			)
+		}
+	}
+	if runtime.worker != nil {
+		if err := runtime.worker.Shutdown(graceful); err != nil {
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("shutdown event worker: %w", err),
+			)
+		}
+	}
 
 	if runtime.tracker != nil {
 		runtime.tracker.beginDrain()
@@ -529,6 +679,9 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 	}
 	if runtime.search != nil {
 		runtime.search.CloseIdleConnections()
+	}
+	if runtime.projection != nil {
+		runtime.projection.CloseIdleConnections()
 	}
 	if runtime.provider != nil {
 		if err := runtime.provider.Shutdown(overall); err != nil {

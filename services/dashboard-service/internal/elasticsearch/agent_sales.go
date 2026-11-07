@@ -29,7 +29,7 @@ func (reader *Reader) ReadAgentSales(
 	if err != nil {
 		return nil, ErrInvalidResponse
 	}
-	response, err := reader.search(operationCtx, PolicyIndex, bytes.NewReader(body))
+	response, err := reader.search(operationCtx, reader.index, bytes.NewReader(body))
 	if err != nil {
 		if contextErr := operationCtx.Err(); contextErr != nil {
 			return nil, contextErr

@@ -104,7 +104,7 @@ func TestReader_UsesExactFilterAggregationAndClosesResponse(t *testing.T) {
 		]}}}}`)}
 	var gotIndex string
 	var gotRequest map[string]any
-	reader := &Reader{search: func(
+	reader := &Reader{index: PolicyIndex, search: func(
 		_ context.Context,
 		index string,
 		body io.Reader,
@@ -255,7 +255,7 @@ func TestReader_MapsCancellationAvailabilityAndUnsafeResponses(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			calls := 0
-			reader := &Reader{search: func(
+			reader := &Reader{index: PolicyIndex, search: func(
 				context.Context,
 				string,
 				io.Reader,

@@ -707,11 +707,11 @@ def verify_dashboard_enabled_signals(
     ports: Mapping[str, int],
     trace_id: str,
     pod_uid: str,
-    _deployment_settings: Mapping[str, str],
+    deployment_settings: Mapping[str, str],
 ) -> dict[str, Any]:
     expected = assets.contract.verification.expected_signals
     require(
-        len(expected.metrics) == 2
+        len(expected.metrics) == 3
         and len(expected.logs) == 1
         and expected.traces == (assets.contract.service_name,),
         "Dashboard expected signal inventory differs from its registered probe",
@@ -733,7 +733,9 @@ def verify_dashboard_enabled_signals(
             'insurance_hub_dashboard_dependency="elasticsearch",'
             f'insurance_hub_dashboard_operation="{operation}"}}'
         )
+    queries["event_workers"] = f"{expected.metrics[2]}{{{common}}}"
     metric_counts: dict[str, int] = {}
+    metric_results: dict[str, list[dict[str, Any]]] = {}
     for label, expression in queries.items():
         url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
             {"query": expression}
@@ -743,6 +745,33 @@ def verify_dashboard_enabled_signals(
             lambda url=url: query_results(request_json(url)),
         )
         metric_counts[label] = len(results)
+        metric_results[label] = results
+
+    worker_mode = deployment_settings.get("EVENT_WORKERS_ENABLED")
+    require(
+        worker_mode in {"true", "false"},
+        "Dashboard Deployment EVENT_WORKERS_ENABLED is not a supported boolean",
+    )
+    worker_results = metric_results["event_workers"]
+    require(len(worker_results) == 1, "Dashboard registration worker metric is missing")
+    worker_metric = worker_results[0].get("metric", {})
+    worker_sample = worker_results[0].get("value", [])
+    require(
+        isinstance(worker_metric, dict)
+        and worker_metric.get("insurance_hub_dashboard_event_type") == "registered"
+        and isinstance(worker_sample, list)
+        and len(worker_sample) == 2,
+        "Dashboard registration worker metric is malformed",
+    )
+    expected_worker_value = 1.0 if worker_mode == "true" else 0.0
+    try:
+        worker_value = float(worker_sample[1])
+    except (TypeError, ValueError) as error:
+        raise VerificationError("Dashboard registration worker value is malformed") from error
+    require(
+        worker_value == expected_worker_value,
+        "Dashboard registration worker metric differs from Deployment EVENT_WORKERS_ENABLED",
+    )
 
     now = time.time_ns()
     loki_query = (

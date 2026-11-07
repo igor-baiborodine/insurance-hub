@@ -84,6 +84,18 @@ func TestProvider_ExportsIdentifiedTracesAndCumulativeRuntimeMetrics(t *testing.
 	// when
 	_, span := provider.TracerProvider().Tracer("test").Start(ctx, "example")
 	span.End()
+	eventObserver, err := NewEventObserver(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventCtx, event := eventObserver.Start(ctx, registrationEventType)
+	event.Finish(eventCtx, "success", nil)
+	eventObserver.RecordCommitFailure(ctx, registrationEventType)
 	dependencyObserver, err := NewDependencyObserver(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		provider.MeterProvider(),
@@ -114,7 +126,9 @@ func TestProvider_ExportsIdentifiedTracesAndCumulativeRuntimeMetrics(t *testing.
 				names[item.Name] = true
 			}
 		}
-		for _, name := range []string{"example", "Elasticsearch total_sales"} {
+		for _, name := range []string{
+			"example", "Kafka policy registration", "Elasticsearch total_sales",
+		} {
 			if !names[name] {
 				t.Errorf("missing %s span", name)
 			}
@@ -143,6 +157,9 @@ func TestProvider_ExportsIdentifiedTracesAndCumulativeRuntimeMetrics(t *testing.
 		}
 		for _, name := range []string{
 			"go.memory.allocations",
+			"insurance_hub.dashboard.events",
+			"insurance_hub.dashboard.event.duration",
+			"insurance_hub.dashboard.event.commit.failures",
 			"insurance_hub.dashboard.dependencies",
 			"insurance_hub.dashboard.dependency.duration",
 		} {

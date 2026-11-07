@@ -36,6 +36,7 @@ func TestTrendReader_UsesExactCalendarQueryAndPreservesGapOrder(t *testing.T) {
 	var gotIndex string
 	var gotRequest map[string]any
 	reader := &TrendReader{
+		index:    PolicyIndex,
 		location: time.UTC,
 		search: func(
 			_ context.Context,
@@ -193,6 +194,7 @@ func TestTrendReader_MapsCancellationAvailabilityAndRejectedResponses(t *testing
 			// given
 			calls := 0
 			reader := &TrendReader{
+				index:    PolicyIndex,
 				location: time.UTC,
 				search: func(
 					context.Context,

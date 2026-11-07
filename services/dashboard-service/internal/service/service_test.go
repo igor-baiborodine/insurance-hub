@@ -27,6 +27,8 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/domain"
+	dashboardkafka "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/kafka"
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
 )
 
 func TestRun_TraversesRealGatewayRPCAndReadiness(t *testing.T) {
@@ -239,6 +241,149 @@ func TestRun_FailsClosedWhenElasticsearchReadinessFails(t *testing.T) {
 	}
 }
 
+func TestRun_DisabledWorkerAcquiresNoEventResources(t *testing.T) {
+	settings := testSettings(t)
+	search := &fakeSearch{checkErr: errors.New("stop after disabled composition")}
+	deps := productionDependencies()
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return fakeTelemetry{}, nil
+	}
+	deps.newSearch = func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error) {
+		return search, search, nil
+	}
+	deps.newProjection = func(
+		config.Elasticsearch,
+		*telemetry.DependencyObserver,
+	) (projectionRuntime, error) {
+		t.Fatal("disabled mode constructed the writer client")
+		return nil, nil
+	}
+	deps.newWorker = func(dashboardkafka.Settings, projectionRuntime, *slog.Logger) (eventWorker, error) {
+		t.Fatal("disabled mode constructed the Kafka client")
+		return nil, nil
+	}
+	deps.listen = func(network, _ string) (net.Listener, error) {
+		return net.Listen(network, "127.0.0.1:0")
+	}
+
+	_ = run(context.Background(), settings, slog.Default(), deps)
+}
+
+func TestRun_EnabledWorkerUsesExactSettingsAndBoundedLifecycle(t *testing.T) {
+	settings := testSettings(t)
+	caFile := t.TempDir() + "/ca.crt"
+	if err := os.WriteFile(caFile, []byte("test CA"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings.Events = config.Events{
+		Enabled:         true,
+		Brokers:         []string{"kafka.example:9093"},
+		Group:           "dashboard-service-issue-290",
+		RegisteredTopic: "policy-registered-issue-290",
+		CAFile:          caFile,
+		Writer: config.Elasticsearch{
+			URL: "http://127.0.0.1:9200", Index: "policy_stats_issue_290",
+			Username: "writer", Password: "private", Timeout: time.Second,
+		},
+	}
+	search := &fakeSearch{}
+	projection := &fakeProjectionRuntime{}
+	worker := &fakeEventWorker{}
+	deps := productionDependencies()
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return fakeTelemetry{}, nil
+	}
+	deps.newSearch = func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error) {
+		return search, search, nil
+	}
+	deps.newProjection = func(
+		got config.Elasticsearch,
+		observer *telemetry.DependencyObserver,
+	) (projectionRuntime, error) {
+		if got.Index != "policy_stats_issue_290" || got.Username != "writer" {
+			t.Fatalf("projection settings = %+v", got)
+		}
+		if observer == nil {
+			t.Fatal("projection dependency observer is nil")
+		}
+		return projection, nil
+	}
+	deps.newWorker = func(got dashboardkafka.Settings, _ projectionRuntime, _ *slog.Logger) (eventWorker, error) {
+		if got.ClientID != "policy-registered-dashboard-listener" ||
+			got.Group != "dashboard-service-issue-290" ||
+			got.Topic != "policy-registered-issue-290" || got.EventType != "registered" ||
+			got.Propagator == nil || got.Observe == nil || got.CommitFailure == nil ||
+			string(got.CACert) != "test CA" {
+			t.Fatalf("worker settings = %+v", got)
+		}
+		return worker, nil
+	}
+	var listenerMu sync.Mutex
+	addresses := make([]string, 0, 3)
+	deps.listen = func(network, _ string) (net.Listener, error) {
+		listener, err := net.Listen(network, "127.0.0.1:0")
+		if err == nil {
+			listenerMu.Lock()
+			addresses = append(addresses, listener.Addr().String())
+			listenerMu.Unlock()
+		}
+		return listener, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, settings, slog.Default(), deps) }()
+	_, _, healthAddress := waitForAddresses(t, &listenerMu, &addresses)
+	waitForReady(t, healthAddress)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !worker.started.Load() || !worker.shutdown.Load() || !projection.closed.Load() ||
+		projection.checks.Load() == 0 {
+		t.Fatalf(
+			"lifecycle = worker started:%t shutdown:%t projection checks:%d closed:%t",
+			worker.started.Load(), worker.shutdown.Load(), projection.checks.Load(),
+			projection.closed.Load(),
+		)
+	}
+}
+
+func TestRun_EnabledWorkerConstructionFailureCleansProjection(t *testing.T) {
+	settings := testSettings(t)
+	caFile := t.TempDir() + "/ca.crt"
+	if err := os.WriteFile(caFile, []byte("test CA"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings.Events = config.Events{
+		Enabled:         true,
+		Brokers:         []string{"kafka.example:9093"},
+		Group:           "dashboard-service-issue-290",
+		RegisteredTopic: "policy-registered-issue-290",
+		CAFile:          caFile,
+		Writer:          config.Elasticsearch{Index: "policy_stats_issue_290"},
+	}
+	projection := &fakeProjectionRuntime{}
+	failure := errors.New("construct registration worker")
+	deps := productionDependencies()
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return fakeTelemetry{}, nil
+	}
+	deps.newProjection = func(
+		config.Elasticsearch,
+		*telemetry.DependencyObserver,
+	) (projectionRuntime, error) {
+		return projection, nil
+	}
+	deps.newWorker = func(dashboardkafka.Settings, projectionRuntime, *slog.Logger) (eventWorker, error) {
+		return nil, failure
+	}
+
+	err := run(context.Background(), settings, slog.Default(), deps)
+	if !errors.Is(err, failure) || !projection.closed.Load() {
+		t.Fatalf("run error = %v, projection closed = %t", err, projection.closed.Load())
+	}
+}
+
 func TestReadBoundedFile_RejectsOversizedCertificate(t *testing.T) {
 	path := t.TempDir() + "/ca.pem"
 	if err := os.WriteFile(path, []byte("12345"), 0o600); err != nil {
@@ -314,6 +459,45 @@ func (search *fakeSearch) Check(ctx context.Context) error {
 }
 
 func (search *fakeSearch) CloseIdleConnections() { search.closed.Store(true) }
+
+type fakeProjectionRuntime struct {
+	checks atomic.Int64
+	closed atomic.Bool
+}
+
+func (*fakeProjectionRuntime) ProjectPolicy(context.Context, application.PolicyEvent) error {
+	return nil
+}
+
+func (projection *fakeProjectionRuntime) Check(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	projection.checks.Add(1)
+	return nil
+}
+
+func (projection *fakeProjectionRuntime) CloseIdleConnections() {
+	projection.closed.Store(true)
+}
+
+type fakeEventWorker struct {
+	started  atomic.Bool
+	shutdown atomic.Bool
+}
+
+func (*fakeEventWorker) Check(ctx context.Context) error { return ctx.Err() }
+
+func (worker *fakeEventWorker) Run(ctx context.Context) error {
+	worker.started.Store(true)
+	<-ctx.Done()
+	return nil
+}
+
+func (worker *fakeEventWorker) Shutdown(ctx context.Context) error {
+	worker.shutdown.Store(true)
+	return ctx.Err()
+}
 
 type fakeTelemetry struct{}
 

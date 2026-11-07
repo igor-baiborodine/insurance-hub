@@ -5,6 +5,7 @@
   - [Deployment coordinates](#deployment-coordinates)
   - [Qualify the candidate](#qualify-the-candidate)
   - [Provision reader prerequisites](#provision-reader-prerequisites)
+  - [Prepare isolated registration resources](#prepare-isolated-registration-resources)
   - [Deploy to local development](#deploy-to-local-development)
   - [Stop and return in local development](#stop-and-return-in-local-development)
   - [Stage and observe QA](#stage-and-observe-qa)
@@ -14,10 +15,11 @@
 
 # Dashboard Sales Deployment Runbook
 
-This runbook owns qualification and guarded operation of the private Go Dashboard total-sales,
-agent-sales and sales-trends reader. The Go workload runs beside the Java Dashboard and reads the
-existing `policy_stats` Elasticsearch index. Java retains writer, setup, edge retry, public route
-and event authority.
+This runbook owns qualification and guarded operation of the private Go Dashboard queries and its
+disabled-by-default isolated registration candidate. The default workload reads `policy_stats`.
+The candidate uses `policy_stats_issue_290`, `policy-registered-issue-290` and
+`dashboard-service-issue-290`; Java retains canonical writer, setup, edge retry, public route and
+event authority.
 Issue 291 completes the service operating handoff. Issue 292 owns the later full removal and
 restoration rehearsal.
 
@@ -42,19 +44,23 @@ make go-svc-deploy-test-tooling SVC_NAME=dashboard
 make go-svc-deploy-test SVC_NAME=dashboard
 make monitoring-assets-check ENV_NAME=qa SVC_NAME=dashboard
 make test-monitoring ENV_NAME=qa SVC_NAME=dashboard
+make -C services/dashboard-service test-event-integration
 ```
 
-The disposable test loads the candidate image into the existing configured
-`local-dev-insurance-hub` Kind cluster, then creates and removes one uniquely owned namespace. It
-also loads the pinned Elasticsearch image, creates a fixture index through an administrator test
-identity, and gives Dashboard an exact-index reader with no cluster privileges. It proves total,
-agent and trend sales over HTTP and direct RPC, reader write/admin/unrelated-index denial, readiness
-and safe responses for all three operations during dependency loss, independent liveness,
-recovery, network denial and pod replacement. It does not create or delete the cluster. A render,
-fake adapter or disposable pass does not establish a local-dev or QA deployment result.
+The disposable test loads the candidate image plus pinned Elasticsearch and Kafka images into the
+existing configured `local-dev-insurance-hub` Kind cluster, then creates and removes one uniquely
+owned namespace. It proves the disabled query deployment first. It then enables only the
+disposable issue-290 reader/writer/Kafka inputs, verifies exact-index permissions and the accepted
+writer mapping-authority limit, checks Kafka CA/hostname TLS behavior, consumes the isolated topic
+and proves the canonical topic/group remain untouched. It retains the existing HTTP/RPC,
+dependency-loss, liveness, recovery, network-denial and replacement checks. It does not create or
+delete the cluster. A render, fake adapter or disposable pass does not establish a local-dev or QA
+deployment result.
 
-The monitoring checks validate the Dashboard-owned request and Elasticsearch dashboards, alerts,
-Prometheus rule tests and collected disposable fixture. They do not prove QA Alloy delivery.
+The monitoring checks validate Dashboard request, Elasticsearch and registration panels, alerts,
+Prometheus rule tests and the collected disposable fixture. The registration owner distinguishes
+disabled, enabled-idle and stalled state and reports fixed outcome/duration and commit failures.
+It does not infer broker lag from these signals. These checks do not prove QA Alloy delivery.
 
 ## Provision reader prerequisites
 
@@ -113,6 +119,49 @@ and verifies the effective privilege boundary. When an earlier owned Secret exis
 apply or verification restores its credential. Do not hand-create, copy or print credential data.
 After QA ensure succeeds, leave the shared Flux owner active and wait for it to reconcile; do not
 apply the Dashboard workload directly.
+
+## Prepare isolated registration resources
+
+PR1 keeps both shared overlays at `EVENT_WORKERS_ENABLED=false`. The checked-in activation patches
+are guarded inputs for the later authorized activation step; the active kustomizations do not
+reference them. Disabled renders keep the canonical reader, omit writer credentials and Kafka
+trust, and have no Kafka egress.
+
+The event setup owner targets only `policy_stats_issue_290`,
+`policy-registered-issue-290` and the future `dashboard-service-issue-290` consumer group. It
+creates the index only when absent, adopts compatible empty or populated state without seeding or
+rewriting it, and provisions the separate `go_dashboard_issue_290_reader` and
+`go_dashboard_issue_290_writer` identities. The writer's native Elasticsearch `index` privilege
+can submit compatible mapping updates; this is the accepted issue-290 limit. The shared broker has
+no topic/group ACL, so exact configuration and NetworkPolicy are guards rather than broker
+authorization proof.
+
+After separately authorizing setup on the selected environment, export the same exact coordinates
+used by deployment. For local development:
+
+```sh
+export DEPLOY_ENV=local-dev
+export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
+export DEPLOY_SVC_NS=local-dev-all
+export DEPLOY_DATA_NS=local-dev-all
+export DASHBOARD_EVENT_CONFIRM=setup-local-dev-dashboard-event-issue-290
+make go-svc-event-fixture-setup SVC_NAME=dashboard
+unset DASHBOARD_EVENT_CONFIRM
+make go-svc-event-fixture-verify SVC_NAME=dashboard
+```
+
+For QA, use `qa-insurance-hub`, `qa-svc`, `qa-data` and confirmation
+`setup-qa-dashboard-event-issue-290`. Setup and verify fail before effects when coordinates,
+existing mappings, roles, Secrets, Kafka cluster/listener, topic ownership or CA material differ.
+Normal deployment/status/verification never invokes setup.
+
+Retirement is deliberately separate because issue 290 retains isolated documents and consumer
+progress for later handoff and return evidence. When a later ticket explicitly authorizes removal, use
+`retire-<environment>-dashboard-event-issue-290` as `DASHBOARD_EVENT_CONFIRM` and run
+`make go-svc-event-fixture-retire SVC_NAME=dashboard`. The owner first verifies every present
+resource belongs to issue 290, then removes only the exact index, identities, Secrets and topic.
+Setup and verification never reset the consumer group; any later group-offset removal needs its own
+broker-state check and authorization.
 
 ## Deploy to local development
 

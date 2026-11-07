@@ -449,8 +449,17 @@ class TestProductObservabilityVerification:
         assets = verifier.load_assets(ASSETS_ROOT, "qa", "dashboard")
         observations: list[str] = []
 
+        worker_results = [
+            {
+                "metric": {"insurance_hub_dashboard_event_type": "registered"},
+                "value": [0, "0"],
+            }
+        ]
+
         def observed_signal(description: str, _probe: object) -> object:
             observations.append(description)
+            if description == "Dashboard event_workers metric":
+                return worker_results
             if "trace" in description:
                 return [{"trace": "observed"}]
             return [{"value": [0, "1"]}]
@@ -469,7 +478,7 @@ class TestProductObservabilityVerification:
                 {"prometheus": 1001, "loki": 1002, "tempo": 1003},
                 "a" * 32,
                 "pod-uid",
-                {},
+                {"EVENT_WORKERS_ENABLED": "false"},
             )
 
         # then
@@ -480,6 +489,7 @@ class TestProductObservabilityVerification:
             "dependency_agent_sales": 1,
             "request_sales_trends": 1,
             "dependency_sales_trends": 1,
+            "event_workers": 1,
         }
         assert observations[:6] == [
             "Dashboard request_total_sales metric",

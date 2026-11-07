@@ -20,7 +20,10 @@ import (
 	"github.com/elastic/go-elasticsearch/v8/esapi"
 )
 
-const PolicyIndex = "policy_stats"
+const (
+	PolicyIndex     = "policy_stats"
+	ProjectionIndex = "policy_stats_issue_290"
+)
 
 const maximumCheckResponseBytes = 1 << 20
 
@@ -47,7 +50,7 @@ func New(settings Config) (*Client, error) {
 	if settings.Index == "" {
 		settings.Index = PolicyIndex
 	}
-	if !validIndexName(settings.Index) || settings.Index != PolicyIndex {
+	if !validIndexName(settings.Index) || !dashboardIndex(settings.Index) {
 		return nil, errors.New("configure elasticsearch: invalid index name")
 	}
 	endpoint, err := url.Parse(settings.Endpoint)
@@ -105,6 +108,10 @@ func New(settings Config) (*Client, error) {
 	}, nil
 }
 
+func dashboardIndex(index string) bool {
+	return index == PolicyIndex || index == ProjectionIndex
+}
+
 // Check verifies exact-index compatibility without creating or changing cluster state.
 func (client *Client) Check(ctx context.Context) error {
 	if client == nil || client.Client == nil {
@@ -122,6 +129,36 @@ func (client *Client) Check(ctx context.Context) error {
 		return err
 	}
 	return client.checkCompatibilityQuery(operationCtx)
+}
+
+// CheckWrite verifies the isolated writer identity without reading or mutating the index.
+func (client *Client) CheckWrite(ctx context.Context) error {
+	if client == nil || client.Client == nil || client.index != ProjectionIndex {
+		return errors.New("check elasticsearch writer: isolated client is required")
+	}
+	operationCtx, cancel := withOperationTimeout(ctx, client.timeout)
+	defer cancel()
+	payload := []byte(
+		`{"index":[{"names":["policy_stats_issue_290"],"privileges":["index"]}]}`,
+	)
+	response, err := client.Security.HasPrivileges(
+		bytes.NewReader(payload),
+		client.Security.HasPrivileges.WithContext(operationCtx),
+	)
+	var privileges struct {
+		HasAllRequested bool                       `json:"has_all_requested"`
+		Index           map[string]map[string]bool `json:"index"`
+	}
+	if err := decodeCheckResponse(operationCtx, response, err, &privileges); err != nil {
+		if contextErr := operationCtx.Err(); contextErr != nil {
+			return contextErr
+		}
+		return errors.New("check elasticsearch writer: request failed")
+	}
+	if !privileges.HasAllRequested || !privileges.Index[ProjectionIndex]["index"] {
+		return errors.New("check elasticsearch writer: required privilege unavailable")
+	}
+	return nil
 }
 
 func withOperationTimeout(

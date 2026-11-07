@@ -21,6 +21,7 @@ var ErrTrendTimeZoneRequired = errors.New("sales-trends time zone is required")
 // TrendReader implements the application trend port with the shared read-only client.
 type TrendReader struct {
 	search   searchFunc
+	index    string
 	timeout  time.Duration
 	location *time.Location
 }
@@ -66,6 +67,7 @@ func NewTrendReader(client *Client, location *time.Location) (*TrendReader, erro
 				client.Search.WithBody(body),
 			)
 		},
+		index:    client.index,
 		timeout:  client.timeout,
 		location: location,
 	}, nil
@@ -84,7 +86,7 @@ func (reader *TrendReader) ReadSalesTrends(
 	if err != nil {
 		return nil, ErrInvalidResponse
 	}
-	response, err := reader.search(operationCtx, PolicyIndex, bytes.NewReader(body))
+	response, err := reader.search(operationCtx, reader.index, bytes.NewReader(body))
 	if err != nil {
 		if contextErr := operationCtx.Err(); contextErr != nil {
 			return nil, contextErr

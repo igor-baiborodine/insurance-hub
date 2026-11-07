@@ -33,9 +33,10 @@ var (
 
 type searchFunc func(context.Context, string, io.Reader) (*esapi.Response, error)
 
-// Reader implements the application total-sales port against policy_stats.
+// Reader implements the application analytics ports against one exact Dashboard index profile.
 type Reader struct {
 	search  searchFunc
+	index   string
 	timeout time.Duration
 }
 
@@ -53,6 +54,7 @@ func NewReader(client *Client) (*Reader, error) {
 				client.Search.WithBody(body),
 			)
 		},
+		index:   client.index,
 		timeout: client.timeout,
 	}, nil
 }
@@ -70,7 +72,7 @@ func (reader *Reader) ReadTotalSales(
 	if err != nil {
 		return nil, ErrInvalidResponse
 	}
-	response, err := reader.search(operationCtx, PolicyIndex, bytes.NewReader(body))
+	response, err := reader.search(operationCtx, reader.index, bytes.NewReader(body))
 	if err != nil {
 		if contextErr := operationCtx.Err(); contextErr != nil {
 			return nil, contextErr

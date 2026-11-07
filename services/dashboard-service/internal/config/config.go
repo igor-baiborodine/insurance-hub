@@ -24,12 +24,22 @@ const (
 	EnvElasticsearchPassword    = "ELASTICSEARCH_PASSWORD"
 	EnvElasticsearchCAFile      = "ELASTICSEARCH_CA_FILE"
 	EnvElasticsearchTimeout     = "ELASTICSEARCH_TIMEOUT"
+	EnvEventWorkersEnabled      = "EVENT_WORKERS_ENABLED"
+	EnvKafkaBrokers             = "KAFKA_BROKERS"
+	EnvKafkaGroup               = "KAFKA_GROUP"
+	EnvKafkaRegisteredTopic     = "KAFKA_REGISTERED_TOPIC"
+	EnvKafkaCAFile              = "KAFKA_CA_FILE"
+	EnvWriterUsername           = "ELASTICSEARCH_WRITER_USERNAME"
+	EnvWriterPassword           = "ELASTICSEARCH_WRITER_PASSWORD"
 	EnvSalesTrendsTimeZone      = "SALES_TRENDS_TIME_ZONE"
 	defaultMaxHeaderBytes       = 16384
 	defaultMaxBodyBytes         = 4096
 	defaultElasticsearchURL     = "http://127.0.0.1:9200"
 	defaultElasticsearchIndex   = "policy_stats"
 	defaultElasticsearchTimeout = 5 * time.Second
+	defaultProjectionIndex      = "policy_stats_issue_290"
+	defaultKafkaGroup           = "dashboard-service-issue-290"
+	defaultRegisteredTopic      = "policy-registered-issue-290"
 )
 
 // Config contains settings parsed and validated once during process startup.
@@ -45,6 +55,7 @@ type Config struct {
 	HTTPMaxHeaderBytes  int
 	HTTPMaxBodyBytes    int
 	Elasticsearch       Elasticsearch
+	Events              Events
 	SalesTrendsTimeZone *time.Location
 }
 
@@ -56,6 +67,17 @@ type Elasticsearch struct {
 	Password string
 	CAFile   string
 	Timeout  time.Duration
+}
+
+// Events contains the opt-in registration worker settings.
+// Disabled workers require and retain no event dependency settings.
+type Events struct {
+	Enabled         bool
+	Brokers         []string
+	Group           string
+	RegisteredTopic string
+	CAFile          string
+	Writer          Elasticsearch
 }
 
 // Address uses the shared TCP address parser and preserves ephemeral ports.
@@ -210,6 +232,10 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	eventSettings, err := loadEvents(lookup, elasticsearchSettings)
+	if err != nil {
+		return Config{}, err
+	}
 	salesTrendsTimeZone, err := loadSalesTrendsTimeZone(lookup)
 	if err != nil {
 		return Config{}, err
@@ -287,9 +313,100 @@ func load(lookup lookupEnv) (Config, error) {
 		HTTPMaxHeaderBytes:  maxHeaderBytes,
 		HTTPMaxBodyBytes:    maxBodyBytes,
 		Elasticsearch:       elasticsearchSettings,
+		Events:              eventSettings,
 		SalesTrendsTimeZone: salesTrendsTimeZone,
 		Telemetry:           telemetry,
 	}, nil
+}
+
+func loadEvents(lookup lookupEnv, reader Elasticsearch) (Events, error) {
+	enabledValue, err := kitconfig.ValueOrDefault(lookup, EnvEventWorkersEnabled, "false")
+	if err != nil {
+		return Events{}, err
+	}
+	enabled, err := kitconfig.ParseBool(EnvEventWorkersEnabled, enabledValue)
+	if err != nil {
+		return Events{}, err
+	}
+	if !enabled {
+		return Events{}, nil
+	}
+	if reader.Index != defaultProjectionIndex {
+		return Events{}, kitconfig.Invalid(
+			EnvElasticsearchIndex,
+			"must select the issue-290 projection when event workers are enabled",
+		)
+	}
+	brokersValue, err := requiredSetting(lookup, EnvKafkaBrokers)
+	if err != nil {
+		return Events{}, err
+	}
+	brokers := strings.Split(brokersValue, ",")
+	for index := range brokers {
+		brokers[index] = strings.TrimSpace(brokers[index])
+		if brokers[index] == "" || !validBroker(brokers[index]) {
+			return Events{}, kitconfig.Invalid(
+				EnvKafkaBrokers,
+				"must contain comma-separated host:port brokers",
+			)
+		}
+	}
+	group, err := kitconfig.ValueOrDefault(lookup, EnvKafkaGroup, defaultKafkaGroup)
+	if err != nil {
+		return Events{}, err
+	}
+	if group != defaultKafkaGroup {
+		return Events{}, kitconfig.Invalid(EnvKafkaGroup, "must select the issue-290 group")
+	}
+	topic, err := kitconfig.ValueOrDefault(
+		lookup,
+		EnvKafkaRegisteredTopic,
+		defaultRegisteredTopic,
+	)
+	if err != nil {
+		return Events{}, err
+	}
+	if topic != defaultRegisteredTopic {
+		return Events{}, kitconfig.Invalid(
+			EnvKafkaRegisteredTopic,
+			"must select the issue-290 registration topic",
+		)
+	}
+	caFile, err := requiredSetting(lookup, EnvKafkaCAFile)
+	if err != nil {
+		return Events{}, err
+	}
+	username, err := requiredSetting(lookup, EnvWriterUsername)
+	if err != nil {
+		return Events{}, err
+	}
+	password, err := requiredSetting(lookup, EnvWriterPassword)
+	if err != nil {
+		return Events{}, err
+	}
+	writer := reader
+	writer.Username = username
+	writer.Password = password
+	return Events{
+		Enabled: true, Brokers: brokers, Group: group, RegisteredTopic: topic,
+		CAFile: caFile, Writer: writer,
+	}, nil
+}
+
+func requiredSetting(lookup lookupEnv, name string) (string, error) {
+	value, err := optionalSetting(lookup, name)
+	if err != nil {
+		return "", err
+	}
+	if value == "" {
+		return "", kitconfig.Invalid(name, "is required when event workers are enabled")
+	}
+	return value, nil
+}
+
+func validBroker(value string) bool {
+	parsed, err := url.Parse("tcp://" + value)
+	return err == nil && parsed.Host == value && parsed.Hostname() != "" && parsed.Port() != ""
 }
 
 func loadSalesTrendsTimeZone(lookup lookupEnv) (*time.Location, error) {
@@ -343,10 +460,11 @@ func loadElasticsearch(lookup lookupEnv) (Elasticsearch, error) {
 	if err != nil {
 		return Elasticsearch{}, err
 	}
-	if !validElasticsearchIndex(index) || index != defaultElasticsearchIndex {
+	if !validElasticsearchIndex(index) ||
+		(index != defaultElasticsearchIndex && index != defaultProjectionIndex) {
 		return Elasticsearch{}, kitconfig.Invalid(
 			EnvElasticsearchIndex,
-			"must be policy_stats",
+			"must select an exact Dashboard index",
 		)
 	}
 	username, err := optionalSetting(lookup, EnvElasticsearchUsername)
