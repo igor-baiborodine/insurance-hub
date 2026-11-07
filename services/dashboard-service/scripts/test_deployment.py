@@ -7,6 +7,7 @@ import json
 import os
 import signal
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -495,6 +496,7 @@ def test_verify_runs_rpc_and_access_after_all_http_smokes_fail() -> None:
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
         patch.object(checks.subprocess, "Popen", side_effect=processes),
         patch.object(checks, "_wait_for_port_forward"),
+        patch.object(checks, "event_activation_enabled", return_value=False),
         patch.object(
             checks,
             "_http",
@@ -514,7 +516,7 @@ def test_verify_runs_rpc_and_access_after_all_http_smokes_fail() -> None:
     ):
         checks.verify(target, [])
 
-    rpc.assert_called_once_with(19090)
+    rpc.assert_called_once_with(19090, "shared-smoke")
     access.assert_called_once_with(target)
 
 
@@ -536,6 +538,7 @@ def test_verify_accepts_empty_and_populated_trend_envelopes(trend_body: bytes) -
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
         patch.object(checks.subprocess, "Popen", side_effect=processes),
         patch.object(checks, "_wait_for_port_forward"),
+        patch.object(checks, "event_activation_enabled", return_value=False),
         patch.object(
             checks,
             "_http",
@@ -551,7 +554,7 @@ def test_verify_accepts_empty_and_populated_trend_envelopes(trend_body: bytes) -
     ):
         checks.verify(target, [])
 
-    rpc.assert_called_once_with(19090)
+    rpc.assert_called_once_with(19090, "shared-smoke")
     access.assert_called_once_with(target)
 
 
@@ -573,6 +576,7 @@ def test_verify_cleans_every_port_forward_when_direct_rpc_stops(failure: BaseExc
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
         patch.object(checks.subprocess, "Popen", side_effect=processes) as popen,
         patch.object(checks, "_wait_for_port_forward"),
+        patch.object(checks, "event_activation_enabled", return_value=False),
         patch.object(
             checks,
             "_http",
@@ -739,7 +743,7 @@ def test_access_qualification_does_not_read_or_delete_preexisting_probe() -> Non
 
 def test_render_rejects_foreign_dependencies_and_incomplete_inventory() -> None:
     with pytest.raises(checks.DeploymentError, match="data dependency"):
-        checks.validate_render("local-dev", "kind: Secret\nmetadata:\n  name: kafka\n")
+        checks.validate_render("local-dev", "kind: Secret\nmetadata:\n  name: database\n")
     with pytest.raises(checks.DeploymentError, match="required resource kind"):
         checks.validate_render(
             "local-dev",
@@ -755,22 +759,94 @@ def test_render_requires_the_runtime_config_map_linkage() -> None:
         checks.validate_render("local-dev", yaml.safe_dump_all(items))
 
 
-@pytest.mark.parametrize("environment", ["local-dev", "qa"])
-def test_event_activation_assets_are_exact_and_inactive(environment: str) -> None:
+@pytest.mark.parametrize(
+    ("environment", "enabled"),
+    [("local-dev", True), ("qa", False)],
+)
+def test_event_activation_assets_and_selected_state_are_exact(
+    environment: str, enabled: bool
+) -> None:
     checks.validate_event_activation_assets(environment)
+    assert checks.event_activation_enabled(environment) is enabled
     items = checks.documents(checks.render(environment))
     config = checks.resource(items, "ConfigMap", f"{environment}-dashboard-config")
     deployment = checks.resource(items, "Deployment", f"{environment}-dashboard-api")
     policy = checks.resource(items, "NetworkPolicy", f"{environment}-dashboard-api")
     container = deployment["spec"]["template"]["spec"]["containers"][0]
 
-    assert config["data"]["EVENT_WORKERS_ENABLED"] == "false"
-    assert "KAFKA_BROKERS" not in config["data"]
-    assert not any(
-        item.get("name", "").startswith("ELASTICSEARCH_WRITER_") for item in container["env"]
+    assert config["data"]["EVENT_WORKERS_ENABLED"] == str(enabled).lower()
+    assert ("KAFKA_BROKERS" in config["data"]) is enabled
+    assert (
+        any(item.get("name", "").startswith("ELASTICSEARCH_WRITER_") for item in container["env"])
+        is enabled
     )
-    assert all(item.get("name") != "kafka-ca" for item in container.get("volumeMounts", []))
-    assert checks.kafka_egress(environment) not in policy["spec"]["egress"]
+    assert (
+        any(item.get("name") == "kafka-ca" for item in container.get("volumeMounts", [])) is enabled
+    )
+    assert (checks.kafka_egress(environment) in policy["spec"]["egress"]) is enabled
+
+
+def test_event_activation_rejects_partial_or_foreign_patch_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    overlay = tmp_path / "k8s/overlays/local-dev/svc/dashboard"
+    overlay.mkdir(parents=True)
+    monkeypatch.setattr(checks, "ROOT", tmp_path)
+
+    (overlay / "kustomization.yaml").write_text(
+        "patches:\n  - path: event-enabled-config-patch.yaml\n", encoding="utf-8"
+    )
+    with pytest.raises(checks.DeploymentError, match="patch selection"):
+        checks.event_activation_enabled("local-dev")
+
+    (overlay / "kustomization.yaml").write_text(
+        "patches:\n  - path: event-enabled-foreign-patch.yaml\n", encoding="utf-8"
+    )
+    with pytest.raises(checks.DeploymentError, match="patch selection"):
+        checks.event_activation_enabled("local-dev")
+
+
+def test_registration_fixture_is_flushed_through_broker_local_pipe() -> None:
+    target = SimpleNamespace(
+        environment="local-dev",
+        data_namespace="local-dev-all",
+        data_json=Mock(
+            return_value={
+                "items": [
+                    {
+                        "metadata": {
+                            "name": "local-dev-kafka-broker-controller-0",
+                            "labels": {"strimzi.io/broker-role": "true"},
+                        },
+                        "status": {"conditions": [{"type": "Ready", "status": "True"}]},
+                    }
+                ]
+            }
+        ),
+        namespace_kubectl=Mock(return_value=""),
+    )
+
+    checks.produce_registration_fixture(target)
+
+    target.data_json.assert_called_once_with(
+        "get", "pods", "-l", "strimzi.io/cluster=local-dev-kafka"
+    )
+    call = target.namespace_kubectl.call_args
+    assert call.args[:6] == (
+        "local-dev-all",
+        "exec",
+        "pod/local-dev-kafka-broker-controller-0",
+        "-c",
+        "kafka",
+        "--",
+    )
+    assert call.args[6:9] == ("bash", "-c", call.args[8])
+    assert "kafka-console-producer.sh" in call.args[8]
+    assert "--producer-property acks=all" in call.args[8]
+    key, payload = call.args[-1].split("|", maxsplit=1)
+    assert key == "SYN-290-KEY-IGNORED"
+    assert json.loads(payload) == checks.REGISTRATION_FIXTURE
+    assert call.kwargs == {"timeout": 30}
 
 
 def test_event_activation_assets_reject_canonical_topic_or_secret() -> None:

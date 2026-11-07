@@ -177,7 +177,8 @@ _deploy-test-rpc: verify-tools
 	@case "$${DASHBOARD_DEPLOYMENT_RPC_SCENARIO:-}" in \
 		owned-fixture) test_name=TestDeployedDirectRPC;; \
 		shared-smoke) test_name=TestDeployedDirectRPCSharedSmoke;; \
-		*) echo '_deploy-test-rpc: DASHBOARD_DEPLOYMENT_RPC_SCENARIO must be owned-fixture or shared-smoke' >&2; exit 1;; \
+		registration) test_name=TestDeployedDirectRPCRegistration;; \
+		*) echo '_deploy-test-rpc: DASHBOARD_DEPLOYMENT_RPC_SCENARIO must be owned-fixture, shared-smoke or registration' >&2; exit 1;; \
 	esac; \
 	GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
 		-run="^$${test_name}$$" -json ./internal/service

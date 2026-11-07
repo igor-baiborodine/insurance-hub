@@ -44,6 +44,42 @@ func TestDeployedDirectRPCSharedSmoke(t *testing.T) {
 	}
 }
 
+func TestDeployedDirectRPCRegistration(t *testing.T) {
+	client := deployedClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	total, err := client.GetTotalSales(ctx, &dashboardv1.GetTotalSalesRequest{
+		SaleDateFrom: "2026-01-01", SaleDateTo: "2026-02-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total.GetTotal().GetPoliciesCount() != 1 ||
+		total.GetTotal().GetPremiumAmountMinorUnits() != 12345 {
+		t.Fatalf("registration total = %v", total)
+	}
+	agents, err := client.GetAgentSales(ctx, &dashboardv1.GetAgentSalesRequest{
+		SaleDateFrom: "2026-01-01", SaleDateTo: "2026-02-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents.GetPerAgentTotal()) != 0 {
+		t.Fatalf("registration null agent was attributed: %v", agents)
+	}
+	trends, err := client.GetSalesTrends(ctx, &dashboardv1.GetSalesTrendsRequest{
+		SaleDateFrom: "2026-01-01", SaleDateTo: "2026-02-01", AggregationUnitCode: "DAY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	periods := trends.GetPeriodSales()
+	if len(periods) != 1 || periods[0].GetPeriodDate() != "2026-01-01" ||
+		periods[0].GetPoliciesCount() != 1 || periods[0].GetPremiumAmount() != "123.45" {
+		t.Fatalf("registration trends = %v", trends)
+	}
+}
+
 func deployedClient(t *testing.T) dashboardv1.DashboardServiceClient {
 	t.Helper()
 	address := os.Getenv("DASHBOARD_DEPLOYMENT_GRPC_ADDR")
