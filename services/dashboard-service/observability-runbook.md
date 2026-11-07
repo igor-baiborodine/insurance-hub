@@ -220,11 +220,13 @@ make verify-service-observability \
   VERIFY_SOURCE_REVISION="$MONITORING_SOURCE_REVISION"
 ```
 
-Use `VERIFY_MODE=disabled` when the Go workload is intentionally disabled and
-`VERIFY_MODE=pre-provision` before the monitoring objects are expected to exist. The verifier is
-read-only but creates bounded local port-forwards; it requires the Flux source identity, exact
-Dashboard resources, application probes and Prometheus/Loki/Tempo results appropriate to the
-selected mode, then cleans up its owned processes.
+Use `VERIFY_MODE=disabled` only when the deployed workload has `OTEL_ENABLED=false`. Current QA has
+`OTEL_ENABLED=true`, so use `VERIFY_MODE=enabled` there regardless of whether the registration
+worker's independent `EVENT_WORKERS_ENABLED` setting is `true` or `false`; the verifier checks that
+worker setting separately. Use `VERIFY_MODE=pre-provision` before the monitoring objects are
+expected to exist. The verifier is read-only but creates bounded local port-forwards; it requires
+the Flux source identity, exact Dashboard resources, application probes and Prometheus/Loki/Tempo
+results appropriate to the selected mode, then cleans up its owned processes.
 
 Read back the effective Grafana dashboard by UID and confirm it is provisioned, `editable: false`,
 the provider disables UI updates/deletion and all variables/queries remain scoped to Dashboard,
