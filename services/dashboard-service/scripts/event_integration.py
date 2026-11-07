@@ -239,7 +239,10 @@ def main() -> int:
     coverage = os.environ.get("EVENT_INTEGRATION_COVERAGE_FILE", "")
     elasticsearch_name = f"dashboard-event-elasticsearch-{os.getpid()}"
     kafka_name = f"dashboard-event-kafka-{os.getpid()}"
+    kafka_secrets_init_name = f"dashboard-event-kafka-secrets-init-{os.getpid()}"
+    kafka_secrets_volume = f"dashboard-event-kafka-secrets-{os.getpid()}"
     owned_containers: list[str] = []
+    owned_volumes: list[str] = []
     status = 0
     environment: dict[str, str] = {}
     certificate_directory: tempfile.TemporaryDirectory[str] | None = None
@@ -264,6 +267,66 @@ def main() -> int:
         certificate_directory = tempfile.TemporaryDirectory(prefix="dashboard-event-tls-")
         certificate_root = Path(certificate_directory.name)
         ca_certificate = create_kafka_certificates(certificate_root, environment)
+
+        owned_volumes.append(kafka_secrets_volume)
+        run(
+            [
+                docker,
+                "volume",
+                "create",
+                "--label",
+                "insurance-hub.owner=issue-290-disposable",
+                kafka_secrets_volume,
+            ],
+            cwd=MODULE_ROOT,
+            env=environment,
+            timeout_seconds=30,
+            activity="create disposable Dashboard Kafka secrets volume",
+            capture=True,
+        )
+        owned_containers.append(kafka_secrets_init_name)
+        run(
+            [
+                docker,
+                "create",
+                "--name",
+                kafka_secrets_init_name,
+                "--user",
+                "root",
+                "--network",
+                "none",
+                "--read-only",
+                "--volume",
+                f"{certificate_root}:/source:ro",
+                "--volume",
+                f"{kafka_secrets_volume}:/target",
+                "--entrypoint",
+                "/bin/sh",
+                kafka_image,
+                "-ec",
+                (
+                    "cp /source/server.p12 /source/key-password "
+                    "/source/keystore-password /target/; "
+                    "chown -R appuser:appuser /target; "
+                    "chmod 0700 /target; "
+                    "chmod 0600 /target/server.p12 /target/key-password "
+                    "/target/keystore-password"
+                ),
+            ],
+            cwd=MODULE_ROOT,
+            env=environment,
+            timeout_seconds=30,
+            activity="create disposable Dashboard Kafka secrets initializer",
+            capture=True,
+        )
+        run(
+            [docker, "start", "--attach", kafka_secrets_init_name],
+            cwd=MODULE_ROOT,
+            env=environment,
+            timeout_seconds=30,
+            activity="stage disposable Dashboard Kafka secrets",
+            capture=True,
+        )
 
         owned_containers.append(elasticsearch_name)
         run(
@@ -316,7 +379,7 @@ def main() -> int:
                 "--publish",
                 f"127.0.0.1:{kafka_port}:9092",
                 "--volume",
-                f"{certificate_root}:/etc/kafka/secrets:ro",
+                f"{kafka_secrets_volume}:/etc/kafka/secrets:ro",
                 "--env",
                 "CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk",
                 "--env",
@@ -429,6 +492,19 @@ def main() -> int:
                 )
             except (CommandError, OSError) as error:
                 print(f"test-event-integration: cleanup failed: {error}", file=sys.stderr)
+                status = 1
+        for name in reversed(owned_volumes):
+            try:
+                run(
+                    [docker, "volume", "rm", "--force", name],
+                    cwd=MODULE_ROOT,
+                    env=environment,
+                    timeout_seconds=30,
+                    activity=f"remove owned Dashboard event volume {name}",
+                    capture=True,
+                )
+            except (CommandError, OSError) as error:
+                print(f"test-event-integration: volume cleanup failed: {error}", file=sys.stderr)
                 status = 1
         if certificate_directory is not None:
             try:

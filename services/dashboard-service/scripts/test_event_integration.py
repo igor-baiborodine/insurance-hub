@@ -27,6 +27,7 @@ def prepare_owned_run(
     monkeypatch: pytest.MonkeyPatch,
     *,
     go_failure: str | None = None,
+    initializer_failure: bool = False,
     cleanup_failure: bool = False,
 ) -> list[tuple[list[str], dict[str, object]]]:
     calls: list[tuple[list[str], dict[str, object]]] = []
@@ -53,6 +54,8 @@ def prepare_owned_run(
                     "",
                 )
             )
+        if initializer_failure and command[1:3] == ["start", "--attach"]:
+            raise CommandError("controlled secrets initializer failure")
         if (
             cleanup_failure
             and command[1:3] == ["rm", "--force"]
@@ -143,9 +146,39 @@ def test_main_propagates_test_failure_and_removes_owned_containers_in_reverse_or
     # then
     assert status == 1
     removals = [command for command, _options in calls if command[1:3] == ["rm", "--force"]]
-    assert len(removals) == 2
+    assert len(removals) == 3
     assert "dashboard-event-kafka" in removals[0][-1]
     assert "dashboard-event-elasticsearch" in removals[1][-1]
+    assert "dashboard-event-kafka-secrets-init" in removals[2][-1]
+    volume_removals = [
+        command for command, _options in calls if command[1:4] == ["volume", "rm", "--force"]
+    ]
+    assert len(volume_removals) == 1
+    assert "dashboard-event-kafka-secrets" in volume_removals[0][-1]
+
+
+def test_main_cleans_partial_secret_staging_before_starting_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # given
+    configure(monkeypatch, tmp_path)
+    calls = prepare_owned_run(monkeypatch, initializer_failure=True)
+
+    # when
+    status = integration.main()
+
+    # then
+    assert status == 1
+    assert not any(command[:2] == ["docker-controlled", "run"] for command, _options in calls)
+    removals = [command for command, _options in calls if command[1:3] == ["rm", "--force"]]
+    assert len(removals) == 1
+    assert "dashboard-event-kafka-secrets-init" in removals[0][-1]
+    volume_removals = [
+        command for command, _options in calls if command[1:4] == ["volume", "rm", "--force"]
+    ]
+    assert len(volume_removals) == 1
+    assert "dashboard-event-kafka-secrets" in volume_removals[0][-1]
 
 
 def test_main_reports_cleanup_failure_and_continues_reverse_cleanup(
@@ -163,7 +196,7 @@ def test_main_reports_cleanup_failure_and_continues_reverse_cleanup(
     # then
     assert status == 1
     removals = [command for command, _options in calls if command[1:3] == ["rm", "--force"]]
-    assert len(removals) == 2
+    assert len(removals) == 3
     assert "cleanup failed" in capsys.readouterr().err
 
 
@@ -192,8 +225,33 @@ def test_main_starts_pinned_dependencies_on_loopback_with_kafka_tls(
     joined = "\n".join(kafka)
     assert "KAFKA_ADVERTISED_LISTENERS=SSL://127.0.0.1:49092" in joined
     assert "KAFKA_SSL_KEYSTORE_FILENAME=server.p12" in joined
-    assert "/etc/kafka/secrets:ro" in joined
+    secrets_mount = kafka[kafka.index("--volume") + 1]
+    assert secrets_mount.startswith("dashboard-event-kafka-secrets-")
+    assert secrets_mount.endswith(":/etc/kafka/secrets:ro")
+    assert str(tmp_path) not in secrets_mount
     assert "PLAINTEXT://127.0.0.1:49092" not in joined
+
+    volume_create = next(
+        command for command, _options in calls if command[1:3] == ["volume", "create"]
+    )
+    assert volume_create[-1].startswith("dashboard-event-kafka-secrets-")
+    initializer = next(
+        command
+        for command, _options in calls
+        if command[1] == "create"
+        and any("dashboard-event-kafka-secrets-init" in argument for argument in command)
+    )
+    initializer_joined = "\n".join(initializer)
+    assert "root" in initializer
+    assert initializer[initializer.index("--network") + 1] == "none"
+    assert "--read-only" in initializer
+    assert ":/source:ro" in initializer_joined
+    assert "dashboard-event-tls-" in initializer_joined
+    assert f"{volume_create[-1]}:/target" in initializer_joined
+    assert "/source/server.p12" in initializer_joined
+    assert "/source/key-password" in initializer_joined
+    assert "/source/keystore-password" in initializer_joined
+    assert "changeit" not in initializer_joined
 
 
 def test_create_kafka_certificates_keeps_password_out_of_arguments_and_files_private(
