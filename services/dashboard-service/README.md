@@ -181,7 +181,7 @@ QA deployment result. The guarded deployment stage requires the exact target ECK
 Secret and QA public-CA copy before mutation. `go-svc-deploy-verify` creates and removes bounded
 qualification Pods and one untrusted namespace to prove allowed and denied caller identities plus
 the reader's effective read-only privileges. The
-[deployment runbook](../../docs/migration/phase-4/dashboard-service/deployment-runbook.md) records
+[deployment runbook](deployment-runbook.md) records
 those side effects, coordinates and cleanup.
 
 Run locally with accepted identity values:
@@ -206,7 +206,7 @@ dedicated Elasticsearch reader through the Dashboard owner. `reader-ensure` is i
 fully absent or fully owned state, `reader-verify` is read-only, and `reader-rotate` is the explicit
 recovery path when an owned reader identity exists without a recoverable workload Secret. Each
 mutation requires the environment-specific `DASHBOARD_READER_CONFIRM` value documented in the
-[deployment runbook](../../docs/migration/phase-4/dashboard-service/deployment-runbook.md). The
+[deployment runbook](deployment-runbook.md). The
 owner never creates or changes `policy_stats`, prints credentials, or places credentials on a host
 command line.
 
@@ -228,9 +228,9 @@ export DEPLOY_ENV=local-dev
 export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
 export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
-export DEPLOY_IMAGE_REF=insurance-hub-dashboard-api:1.0.0-local.<12-source-hex>
-export DEPLOY_JAVA_DEPLOYMENT_UID=<recorded-local-dev-Java-Deployment-UID>
-export DEPLOY_JAVA_SERVICE_UID=<recorded-local-dev-Java-Service-UID>
+: "${DEPLOY_IMAGE_REF:?set the exact source-derived local Dashboard image reference}"
+: "${DEPLOY_JAVA_DEPLOYMENT_UID:?set the recorded local-dev Java Deployment UID}"
+: "${DEPLOY_JAVA_SERVICE_UID:?set the recorded local-dev Java Service UID}"
 
 make go-svc-deploy-preflight SVC_NAME=dashboard
 make go-svc-image-load SVC_NAME=dashboard
@@ -245,8 +245,13 @@ before status and verification. The deployment runbook contains the complete com
 
 `go-svc-stop` scales only the Go Dashboard Deployment to zero. A guarded redeploy restores the
 same accepted image. Java Dashboard resources, routes, configuration and data/event authority stay
-unchanged. The [Dashboard deployment runbook](../../docs/migration/phase-4/dashboard-service/deployment-runbook.md)
+unchanged. The [Dashboard deployment runbook](deployment-runbook.md)
 owns the complete deployment and return procedure after those owners are onboarded.
+
+The [Dashboard observability runbook](observability-runbook.md) owns monitoring validation,
+guarded QA provisioning/read-back, bounded investigation and restoration. It preserves the
+accepted pilot thresholds and the limitation that worker state, refreshed reads and broker
+offsets do not prove continuous backlog or projection completeness.
 
 ## Generated inventory and provenance
 
