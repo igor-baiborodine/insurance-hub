@@ -151,6 +151,87 @@ tests:
     exp_samples:
     - labels: '{}'
       value: 0
+- name: enabled registration failures fire with minimum traffic and recover
+  interval: 30s
+  input_series:
+  - series: insurance_hub_dashboard_events_total{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered",insurance_hub_dashboard_outcome="success"}
+    values: 0+8x30
+  - series: insurance_hub_dashboard_events_total{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered",insurance_hub_dashboard_outcome="error"}
+    values: 0+2x16 32+0x14
+  - series: insurance_hub_dashboard_event_worker_enabled{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered"}
+    values: 1x30
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardEventFailure",alertstate="firing"}) or vector(0)
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="DashboardEventFailure",alertstate="firing"}) or vector(0)
+    eval_time: 4m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardEventFailure",alertstate="firing"}) or vector(0)
+    eval_time: 14m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: event alerts stay inactive below traffic or while disabled
+  interval: 30s
+  input_series:
+  - series: insurance_hub_dashboard_events_total{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered",insurance_hub_dashboard_outcome="success"}
+    values: 0+0.15x20
+  - series: insurance_hub_dashboard_events_total{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered",insurance_hub_dashboard_outcome="error"}
+    values: 0+0.1x20
+  - series: insurance_hub_dashboard_event_worker_enabled{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered"}
+    values: 0x20
+  - series: insurance_hub_dashboard_event_worker_in_flight_age_seconds{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered"}
+    values: 60x20
+  promql_expr_test:
+  - expr: count(ALERTS{alertname=~"DashboardEventFailure|DashboardEventStalled",alertstate="firing"}) or vector(0)
+    eval_time: 9m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: enabled registration stall fires after two minutes and recovers
+  interval: 30s
+  input_series:
+  - series: insurance_hub_dashboard_event_worker_enabled{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered"}
+    values: 1x20
+  - series: insurance_hub_dashboard_event_worker_in_flight_age_seconds{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered"}
+    values: 0 31x9 0x10
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardEventStalled",alertstate="firing"}) or vector(0)
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="DashboardEventStalled",alertstate="firing"}) or vector(0)
+    eval_time: 2m30s
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardEventStalled",alertstate="firing"}) or vector(0)
+    eval_time: 6m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: registration commit failure fires immediately and recovers
+  interval: 30s
+  input_series:
+  - series: insurance_hub_dashboard_event_commit_failures_total{service_name="dashboard-service",insurance_hub_dashboard_event_type="registered"}
+    values: 0+1x2 2+0x20
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="DashboardEventCommitFailure",alertstate="firing"}) or vector(0)
+    eval_time: 1m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="DashboardEventCommitFailure",alertstate="firing"}) or vector(0)
+    eval_time: 8m
+    exp_samples:
+    - labels: '{}'
+      value: 0
 - name: resource pressure fires and recovers
   interval: 30s
   input_series:

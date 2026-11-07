@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"slices"
@@ -23,10 +24,20 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace/noop"
+	grpcgo "google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 
+	dashboardv1 "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/gen/dashboard/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/application"
 	dashboardelasticsearch "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/elasticsearch"
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/gateway"
+	transport "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/grpc"
 	dashboardkafka "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/kafka"
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
 )
 
 const (
@@ -176,6 +187,12 @@ func TestEventFixture_ProductionWorkerProjectsRegistration(t *testing.T) {
 		environment,
 		documentID,
 		oracle.Events.Registration.ExpectedDocument,
+	)
+	assertRegistrationQueries(
+		t,
+		ctx,
+		environment,
+		writerClient,
 	)
 	replacement := registrationReplacement(t, oracle.Events.Registration, 456.789, "agent-290")
 	produceFixtureEvent(t, ctx, producer, environment.Topic, replacement)
@@ -637,10 +654,10 @@ func createEventIndex(
     "number":{"type":"keyword"},
     "from":{"type":"date","format":"strict_date"},
     "to":{"type":"date","format":"strict_date"},
-    "policyHolder":{"type":"keyword"},
-    "productCode":{"type":"keyword"},
-    "totalPremium":{"type":"double"},
-    "agentLogin":{"type":"keyword"}
+	    "policyHolder":{"type":"text","fields":{"keyword":{"type":"keyword"}}},
+	    "productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},
+	    "totalPremium":{"type":"double"},
+	    "agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}}
   }}
 }`)
 	request, err := http.NewRequestWithContext(
@@ -655,6 +672,223 @@ func createEventIndex(
 	request.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(request)
 	assertHTTPResponse(t, response, err, http.StatusOK, "create owned event index")
+}
+
+func assertRegistrationQueries(
+	t *testing.T,
+	ctx context.Context,
+	environment eventEnvironment,
+	client *dashboardelasticsearch.Client,
+) {
+	t.Helper()
+	reader, err := dashboardelasticsearch.NewSalesReader(client, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	totalSales, err := application.NewGetTotalSales(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentSales, err := application.NewGetAgentSales(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	salesTrends, err := application.NewGetSalesTrends(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	requestObserver, err := telemetry.NewRequestObserver(logger, metricnoop.NewMeterProvider())
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := bufconn.Listen(1 << 20)
+	server, err := transport.NewServer(
+		logger,
+		noop.NewTracerProvider(),
+		propagation.TraceContext{},
+		transport.Settings{
+			RequestTimeout:  5 * time.Second,
+			MaxReceiveBytes: 1 << 20,
+			MaxSendBytes:    8 << 20,
+			Observer:        requestObserver,
+			MeterProvider:   metricnoop.NewMeterProvider(),
+		},
+		totalSales,
+		agentSales,
+		salesTrends,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		server.Stop()
+		_ = listener.Close()
+		select {
+		case <-serveResult:
+		case <-time.After(time.Second):
+			t.Error("registration query gRPC server did not stop")
+		}
+	})
+	connection, err := grpcgo.NewClient(
+		"passthrough:///dashboard-registration",
+		grpcgo.WithTransportCredentials(insecure.NewCredentials()),
+		grpcgo.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	clientRPC := dashboardv1.NewDashboardServiceClient(connection)
+	assertRegistrationRPCQueries(t, ctx, clientRPC)
+
+	handler, err := gateway.NewHandler(clientRPC, gateway.Settings{
+		RequestTimeout: 5 * time.Second,
+		MaxBodyBytes:   4096,
+		TracerProvider: noop.NewTracerProvider(),
+		MeterProvider:  metricnoop.NewMeterProvider(),
+		Propagator:     propagation.TraceContext{},
+		Observer:       requestObserver,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(handler)
+	t.Cleanup(httpServer.Close)
+	assertRegistrationHTTPQueries(t, ctx, httpServer.Client(), httpServer.URL)
+	if environment.Index != eventFixtureIndex {
+		t.Fatal("registration queries used an unexpected index")
+	}
+}
+
+func assertRegistrationRPCQueries(
+	t *testing.T,
+	ctx context.Context,
+	client dashboardv1.DashboardServiceClient,
+) {
+	t.Helper()
+	total, err := client.GetTotalSales(ctx, &dashboardv1.GetTotalSalesRequest{
+		SaleDateFrom: "2026-01-01", SaleDateTo: "2026-02-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total.GetTotal().GetPoliciesCount() != 1 ||
+		total.GetTotal().GetPremiumAmountMinorUnits() != 12345 ||
+		total.GetPerProductTotal()["HSI"].GetPoliciesCount() != 1 {
+		t.Fatalf("unexpected direct total-sales result: %v", total)
+	}
+	agents, err := client.GetAgentSales(ctx, &dashboardv1.GetAgentSalesRequest{
+		SaleDateFrom: "2026-01-01", SaleDateTo: "2026-02-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents.GetPerAgentTotal()) != 0 {
+		t.Fatalf("null agent was attributed by direct RPC: %v", agents)
+	}
+	trends, err := client.GetSalesTrends(ctx, &dashboardv1.GetSalesTrendsRequest{
+		SaleDateFrom: "2026-01-01", SaleDateTo: "2026-02-01",
+		AggregationUnitCode: "DAY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	periods := trends.GetPeriodSales()
+	if len(periods) != 1 || periods[0].GetPeriodDate() != "2026-01-01" ||
+		periods[0].GetPoliciesCount() != 1 || periods[0].GetPremiumAmount() != "123.45" {
+		t.Fatalf("unexpected direct sales-trends result: %v", trends)
+	}
+}
+
+func assertRegistrationHTTPQueries(
+	t *testing.T,
+	ctx context.Context,
+	client *http.Client,
+	baseURL string,
+) {
+	t.Helper()
+	cases := []struct {
+		path   string
+		body   string
+		assert func(map[string]any) bool
+	}{
+		{
+			path: "/dashboard/totalsales",
+			body: `{"saleDateFrom":"2026-01-01","saleDateTo":"2026-02-01"}`,
+			assert: func(value map[string]any) bool {
+				total, _ := value["total"].(map[string]any)
+				return total["policiesCount"] == float64(1) &&
+					total["premiumAmount"] == 123.45
+			},
+		},
+		{
+			path: "/dashboard/agentssales",
+			body: `{"saleDateFrom":"2026-01-01","saleDateTo":"2026-02-01"}`,
+			assert: func(value map[string]any) bool {
+				agents, found := value["perAgentTotal"]
+				if !found {
+					return len(value) == 0
+				}
+				result, ok := agents.(map[string]any)
+				return ok && len(result) == 0
+			},
+		},
+		{
+			path: "/dashboard/trends",
+			body: `{"saleDateFrom":"2026-01-01","saleDateTo":"2026-02-01",` +
+				`"aggregationUnitCode":"DAY"}`,
+			assert: func(value map[string]any) bool {
+				periods, ok := value["periodSales"].([]any)
+				if !ok || len(periods) != 1 {
+					return false
+				}
+				period, ok := periods[0].(map[string]any)
+				periodDate, dateOK := period["periodDate"].([]any)
+				return ok && dateOK && len(periodDate) == 3 &&
+					periodDate[0] == float64(
+						2026,
+					) && periodDate[1] == float64(1) &&
+					periodDate[2] == float64(
+						1,
+					) && period["period"] == "2026-01-01" &&
+					period["policiesCount"] == float64(1) &&
+					period["premiumAmount"] == 123.45
+			},
+		},
+	}
+	for _, test := range cases {
+		request, err := http.NewRequestWithContext(
+			ctx,
+			http.MethodPost,
+			baseURL+test.path,
+			bytes.NewBufferString(test.body),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value map[string]any
+		decodeErr := json.NewDecoder(response.Body).Decode(&value)
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK || decodeErr != nil || !test.assert(value) {
+			t.Fatalf(
+				"gateway query %s returned status=%d body=%v decode=%v",
+				test.path,
+				response.StatusCode,
+				value,
+				decodeErr,
+			)
+		}
+	}
 }
 
 func expectedDocumentNumber(t *testing.T, document json.RawMessage) string {

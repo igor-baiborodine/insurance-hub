@@ -28,6 +28,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/domain"
 	dashboardkafka "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/kafka"
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
 )
 
 func TestRun_TraversesRealGatewayRPCAndReadiness(t *testing.T) {
@@ -250,7 +251,10 @@ func TestRun_DisabledWorkerAcquiresNoEventResources(t *testing.T) {
 	deps.newSearch = func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
-	deps.newProjection = func(config.Elasticsearch) (projectionRuntime, error) {
+	deps.newProjection = func(
+		config.Elasticsearch,
+		*telemetry.DependencyObserver,
+	) (projectionRuntime, error) {
 		t.Fatal("disabled mode constructed the writer client")
 		return nil, nil
 	}
@@ -292,9 +296,15 @@ func TestRun_EnabledWorkerUsesExactSettingsAndBoundedLifecycle(t *testing.T) {
 	deps.newSearch = func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error) {
 		return search, search, nil
 	}
-	deps.newProjection = func(got config.Elasticsearch) (projectionRuntime, error) {
+	deps.newProjection = func(
+		got config.Elasticsearch,
+		observer *telemetry.DependencyObserver,
+	) (projectionRuntime, error) {
 		if got.Index != "policy_stats_issue_290" || got.Username != "writer" {
 			t.Fatalf("projection settings = %+v", got)
+		}
+		if observer == nil {
+			t.Fatal("projection dependency observer is nil")
 		}
 		return projection, nil
 	}
@@ -302,7 +312,8 @@ func TestRun_EnabledWorkerUsesExactSettingsAndBoundedLifecycle(t *testing.T) {
 		if got.ClientID != "policy-registered-dashboard-listener" ||
 			got.Group != "dashboard-service-issue-290" ||
 			got.Topic != "policy-registered-issue-290" || got.EventType != "registered" ||
-			got.Propagator == nil || string(got.CACert) != "test CA" {
+			got.Propagator == nil || got.Observe == nil || got.CommitFailure == nil ||
+			string(got.CACert) != "test CA" {
 			t.Fatalf("worker settings = %+v", got)
 		}
 		return worker, nil
@@ -357,7 +368,10 @@ func TestRun_EnabledWorkerConstructionFailureCleansProjection(t *testing.T) {
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return fakeTelemetry{}, nil
 	}
-	deps.newProjection = func(config.Elasticsearch) (projectionRuntime, error) {
+	deps.newProjection = func(
+		config.Elasticsearch,
+		*telemetry.DependencyObserver,
+	) (projectionRuntime, error) {
 		return projection, nil
 	}
 	deps.newWorker = func(dashboardkafka.Settings, projectionRuntime, *slog.Logger) (eventWorker, error) {

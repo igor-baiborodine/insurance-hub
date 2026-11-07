@@ -57,6 +57,10 @@ func New(ctx context.Context, serviceName string, settings config.Telemetry) (*P
 				"insurance_hub.dashboard.dependency.duration",
 				requestBuckets,
 			),
+			kittelemetry.HistogramView(
+				"insurance_hub.dashboard.event.duration",
+				requestBuckets,
+			),
 		},
 	})
 	if err != nil {

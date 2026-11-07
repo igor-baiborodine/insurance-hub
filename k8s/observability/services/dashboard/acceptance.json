@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "evidence": {
-    "source": "issue-287 accepted signal contract plus issue-289 three-query local transport/dependency tests",
-    "limitation": "Thresholds are initial QA pilot operating limits derived from the bounded Dashboard resource contract and require Step 11 target qualification; they are not production SLOs."
+    "source": "issue-287 accepted signal contract, issue-289 three-query tests and issue-290 Policy Search-aligned registration signal contract",
+    "limitation": "Event thresholds are adapted from the Policy Search pilot for the single Dashboard registration worker and require Step 11 target qualification; all thresholds remain pilot limits, not production SLOs."
   },
   "workload": {
     "query_shapes": 3,
@@ -15,7 +15,15 @@
       4
     ],
     "query_measured_blocks": 5,
-    "query_cycles_per_block": 10
+    "query_cycles_per_block": 10,
+    "event_paths": [
+      "registered"
+    ],
+    "required_modes": [
+      "enabled-active",
+      "enabled-idle",
+      "disabled"
+    ]
   },
   "resource_budget": {
     "cpu_limit_cores": 0.3,
@@ -77,6 +85,43 @@
       "suppression": "Fewer than 20 Dashboard read operations.",
       "recovery": "The five-minute dependency p95 returns to 250ms or lower.",
       "response": "Split Dashboard read latency by operation, inspect Elasticsearch health and correlate a slow trace."
+    },
+    "DashboardEventFailure": {
+      "threshold": 0.1,
+      "comparison": ">",
+      "window": "5m",
+      "for": "2m",
+      "minimum_events": 10,
+      "severity": "warning",
+      "just_below": 0.1,
+      "just_above": 0.11,
+      "suppression": "Fewer than 10 completed registrations, healthy idle or a disabled worker.",
+      "recovery": "The five-minute malformed/error/cancelled ratio returns to 10% or lower.",
+      "response": "Inspect bounded registration outcomes and writer/Kafka readiness without exposing event values."
+    },
+    "DashboardEventStalled": {
+      "threshold_seconds": 30,
+      "comparison": ">",
+      "for": "2m",
+      "minimum_events": 1,
+      "severity": "warning",
+      "just_below_seconds": 30,
+      "just_above_seconds": 31,
+      "suppression": "Worker enabled is zero or in-flight age is zero.",
+      "recovery": "Completion or cancellation resets in-flight age to zero.",
+      "response": "Inspect writer/Kafka readiness and a correlated trace, preserving offsets before restart or rollback."
+    },
+    "DashboardEventCommitFailure": {
+      "threshold": 0,
+      "comparison": ">",
+      "window": "5m",
+      "for": null,
+      "severity": "warning",
+      "just_below": 0,
+      "just_above": 1,
+      "suppression": "No registration offset commit failure occurred in five minutes.",
+      "recovery": "The last commit failure ages out of the five-minute window.",
+      "response": "Inspect bounded commit diagnostics and broker readiness while preserving offset and document evidence."
     },
     "DashboardResourcePressure": {
       "cpu_threshold_cores": 0.24,

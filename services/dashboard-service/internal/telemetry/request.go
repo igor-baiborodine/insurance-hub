@@ -18,6 +18,7 @@ const (
 	OperationTotalSales  = "total_sales"
 	OperationAgentSales  = "agent_sales"
 	OperationSalesTrends = "sales_trends"
+	OperationReplace     = "replace"
 )
 
 // RequestObserver records only fixed Dashboard operations and bounded transport outcomes.
@@ -89,7 +90,7 @@ func (observer *RequestObserver) StartHTTP(ctx context.Context, route string) *R
 
 func boundedOperation(operation string) string {
 	switch operation {
-	case OperationTotalSales, OperationAgentSales, OperationSalesTrends:
+	case OperationTotalSales, OperationAgentSales, OperationSalesTrends, OperationReplace:
 		return operation
 	default:
 		return "unknown"

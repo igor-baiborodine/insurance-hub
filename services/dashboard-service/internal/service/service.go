@@ -90,7 +90,7 @@ type dependencies struct {
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newSearch      func(config.Elasticsearch, *time.Location) (salesReader, searchDependency, error)
-	newProjection  func(config.Elasticsearch) (projectionRuntime, error)
+	newProjection  func(config.Elasticsearch, *telemetry.DependencyObserver) (projectionRuntime, error)
 	newWorker      func(dashboardkafka.Settings, projectionRuntime, *slog.Logger) (eventWorker, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.TotalSalesExecutor, transport.AgentSalesExecutor, transport.SalesTrendsExecutor) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
@@ -270,11 +270,22 @@ func run(
 	if err != nil {
 		return fail(err)
 	}
+	eventObserver, err := telemetry.NewEventObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+		settings.Events.Enabled,
+	)
+	if err != nil {
+		return fail(err)
+	}
 	if settings.Events.Enabled {
 		if err := runtime.configureWorker(
 			settings.Events,
 			logger,
 			deps,
+			dependencyObserver,
+			eventObserver,
 			provider.HTTPPropagator(),
 		); err != nil {
 			return fail(fmt.Errorf("run service: %w", err))
@@ -442,6 +453,8 @@ func (runtime *runningService) configureWorker(
 	settings config.Events,
 	logger *slog.Logger,
 	deps dependencies,
+	dependencyObserver *telemetry.DependencyObserver,
+	eventObserver *telemetry.EventObserver,
 	propagator propagation.TextMapPropagator,
 ) error {
 	caCertificate, err := readBoundedFile(settings.CAFile, 1<<20)
@@ -451,7 +464,7 @@ func (runtime *runningService) configureWorker(
 	if len(bytes.TrimSpace(caCertificate)) == 0 {
 		return errors.New("read Kafka CA file: empty certificate")
 	}
-	runtime.projection, err = deps.newProjection(settings.Writer)
+	runtime.projection, err = deps.newProjection(settings.Writer, dependencyObserver)
 	if err != nil {
 		return err
 	}
@@ -459,6 +472,14 @@ func (runtime *runningService) configureWorker(
 		Brokers: settings.Brokers, Group: settings.Group,
 		Topic: settings.RegisteredTopic, ClientID: "policy-registered-dashboard-listener",
 		CACert: caCertificate, EventType: "registered", Propagator: propagator,
+		Observe: func(ctx context.Context, eventType string) (
+			context.Context,
+			func(context.Context, string, error),
+		) {
+			observedCtx, observation := eventObserver.Start(ctx, eventType)
+			return observedCtx, observation.Finish
+		},
+		CommitFailure: eventObserver.RecordCommitFailure,
 	}, runtime.projection, logger)
 	return err
 }

@@ -213,6 +213,131 @@
       "fieldConfig": {
         "defaults": {
           "min": 0,
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (insurance_hub_dashboard_event_type, insurance_hub_dashboard_outcome) (rate(insurance_hub_dashboard_events_total{service_name=\"dashboard-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))",
+          "legendFormat": "{{insurance_hub_dashboard_event_type}} {{insurance_hub_dashboard_outcome}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(insurance_hub_dashboard_events_total{service_name=\"dashboard-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_dashboard_outcome=~\"malformed|error|cancelled\"}[$__rate_interval])) / clamp_min(sum(rate(insurance_hub_dashboard_events_total{service_name=\"dashboard-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])), 0.000001)",
+          "legendFormat": "failure ratio",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(insurance_hub_dashboard_event_commit_failures_total{service_name=\"dashboard-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))",
+          "legendFormat": "commit failures",
+          "refId": "C"
+        }
+      ],
+      "title": "Event rate and outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, insurance_hub_dashboard_event_type) (rate(insurance_hub_dashboard_event_duration_seconds_bucket{service_name=\"dashboard-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "legendFormat": "{{insurance_hub_dashboard_event_type}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, insurance_hub_dashboard_event_type) (rate(insurance_hub_dashboard_event_duration_seconds_bucket{service_name=\"dashboard-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "legendFormat": "{{insurance_hub_dashboard_event_type}} p95",
+          "refId": "B"
+        }
+      ],
+      "title": "Event duration percentiles",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max by (insurance_hub_dashboard_event_type) (insurance_hub_dashboard_event_worker_enabled{service_name=\"dashboard-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"})",
+          "legendFormat": "{{insurance_hub_dashboard_event_type}} enabled",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (insurance_hub_dashboard_event_type) (insurance_hub_dashboard_event_worker_in_flight_age_seconds{service_name=\"dashboard-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"})",
+          "legendFormat": "{{insurance_hub_dashboard_event_type}} in-flight age",
+          "refId": "B"
+        }
+      ],
+      "title": "Event worker state",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
           "unit": "short"
         },
         "overrides": []
@@ -462,7 +587,7 @@
       },
       "id": 15,
       "options": {
-        "content": "Use `trace_id` from a Dashboard completion log to open the matching Tempo trace. Compare request latency with Elasticsearch duration and split results by the fixed `total_sales`, `agent_sales` or `sales_trends` operation and HTTP or gRPC transport. Legitimate idle time has zero request rates with present Go runtime samples. An available deployment without a runtime sample is missing telemetry; rising shared drop, failure, lag, or queue signals indicate collection failure. Labels remain bounded and never expose dates, periods, agent logins, product codes, amounts, policy/customer data, credentials, arbitrary errors, or trace IDs.",
+        "content": "Use `trace_id` from a Dashboard completion log to open the matching Tempo trace. Compare request latency with Elasticsearch duration and split results by the fixed `total_sales`, `agent_sales`, `sales_trends` or `replace` operation. Inspect the fixed `registered` worker outcome, duration, commit-failure and in-flight signals. Legitimate idle time has zero request/event rates, present Go runtime samples, enabled state matching configuration and zero in-flight age. Disabled mode reports enabled zero. An available deployment without a runtime sample is missing telemetry; rising shared drop, failure, lag or queue signals indicate collection failure. Labels remain bounded and never expose dates, periods, agent logins, product codes, amounts, policy/customer data, topics, groups, credentials, arbitrary errors or trace IDs.",
         "mode": "markdown"
       },
       "title": "Investigation workflow",

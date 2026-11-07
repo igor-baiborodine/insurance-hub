@@ -62,6 +62,49 @@ groups:
     labels:
       service: dashboard-service
       severity: warning
+  - alert: DashboardEventFailure
+    annotations:
+      description: More than 10% of at least 10 completed registrations failed while
+        the event worker was enabled.
+      runbook_action: Inspect bounded registration outcomes, writer and Kafka readiness,
+        and a correlated trace without exposing event values.
+      summary: Dashboard registration failure rate exceeds the pilot threshold
+    expr: sum(rate(insurance_hub_dashboard_events_total{service_name="dashboard-service",insurance_hub_dashboard_outcome=~"malformed|error|cancelled"}[5m]))
+      / clamp_min(sum(rate(insurance_hub_dashboard_events_total{service_name="dashboard-service"}[5m])),
+      0.000001) > 0.1 and sum(increase(insurance_hub_dashboard_events_total{service_name="dashboard-service"}[5m]))
+      >= 10 and max(insurance_hub_dashboard_event_worker_enabled{service_name="dashboard-service"})
+      > 0
+    for: 2m
+    labels:
+      service: dashboard-service
+      severity: warning
+  - alert: DashboardEventStalled
+    annotations:
+      description: The enabled registration worker has held one synchronous record
+        for more than 30 seconds.
+      runbook_action: Inspect writer and Kafka readiness and a correlated trace; preserve
+        offsets before restart or rollback.
+      summary: The Dashboard registration worker appears stalled
+    expr: max by (insurance_hub_dashboard_event_type) (insurance_hub_dashboard_event_worker_in_flight_age_seconds{service_name="dashboard-service"})
+      > 30 and on (insurance_hub_dashboard_event_type) max by (insurance_hub_dashboard_event_type)
+      (insurance_hub_dashboard_event_worker_enabled{service_name="dashboard-service"})
+      == 1
+    for: 2m
+    labels:
+      service: dashboard-service
+      severity: warning
+  - alert: DashboardEventCommitFailure
+    annotations:
+      description: The Dashboard registration worker reported an offset commit failure
+        during the last five minutes.
+      runbook_action: Inspect bounded commit diagnostics and broker readiness, then preserve
+        offset and document evidence before restart or rollback.
+      summary: Dashboard registration offset commit failed
+    expr: sum(increase(insurance_hub_dashboard_event_commit_failures_total{service_name="dashboard-service"}[5m]))
+      > 0
+    labels:
+      service: dashboard-service
+      severity: warning
   - alert: DashboardResourcePressure
     annotations:
       description: Dashboard memory exceeded 80% of 256MiB or CPU exceeded 80% of

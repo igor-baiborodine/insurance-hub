@@ -8,6 +8,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/config"
 	dashboardelasticsearch "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/elasticsearch"
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/telemetry"
 )
 
 type projectionRuntime interface {
@@ -17,11 +18,20 @@ type projectionRuntime interface {
 }
 
 type productionProjection struct {
-	client  *dashboardelasticsearch.Client
-	useCase application.ProjectPolicy
+	client   *dashboardelasticsearch.Client
+	useCase  application.ProjectPolicy
+	observer *telemetry.DependencyObserver
 }
 
-func newProductionProjection(settings config.Elasticsearch) (projectionRuntime, error) {
+func newProductionProjection(
+	settings config.Elasticsearch,
+	observer *telemetry.DependencyObserver,
+) (projectionRuntime, error) {
+	if observer == nil {
+		return nil, errors.New(
+			"initialize policy projection: dependency observer is required",
+		)
+	}
 	var caCertificate []byte
 	if settings.CAFile != "" {
 		var err error
@@ -54,14 +64,20 @@ func newProductionProjection(settings config.Elasticsearch) (projectionRuntime, 
 			"initialize policy projection: configure application use case",
 		)
 	}
-	return &productionProjection{client: client, useCase: useCase}, nil
+	return &productionProjection{client: client, useCase: useCase, observer: observer}, nil
 }
 
 func (projection *productionProjection) ProjectPolicy(
 	ctx context.Context,
 	event application.PolicyEvent,
 ) error {
-	return projection.useCase.Execute(ctx, event)
+	dependencyCtx, observation := projection.observer.StartElasticsearch(
+		ctx,
+		telemetry.OperationReplace,
+	)
+	err := projection.useCase.Execute(dependencyCtx, event)
+	observation.Finish(dependencyCtx, err)
+	return err
 }
 
 func (projection *productionProjection) Check(ctx context.Context) error {

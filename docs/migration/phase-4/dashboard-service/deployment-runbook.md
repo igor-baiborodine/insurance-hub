@@ -14,10 +14,11 @@
 
 # Dashboard Sales Deployment Runbook
 
-This runbook owns qualification and guarded operation of the private Go Dashboard total-sales,
-agent-sales and sales-trends reader. The Go workload runs beside the Java Dashboard and reads the
-existing `policy_stats` Elasticsearch index. Java retains writer, setup, edge retry, public route
-and event authority.
+This runbook owns qualification and guarded operation of the private Go Dashboard queries and its
+disabled-by-default isolated registration candidate. The default workload reads `policy_stats`.
+The candidate uses `policy_stats_issue_290`, `policy-registered-issue-290` and
+`dashboard-service-issue-290`; Java retains canonical writer, setup, edge retry, public route and
+event authority.
 Issue 291 completes the service operating handoff. Issue 292 owns the later full removal and
 restoration rehearsal.
 
@@ -42,6 +43,7 @@ make go-svc-deploy-test-tooling SVC_NAME=dashboard
 make go-svc-deploy-test SVC_NAME=dashboard
 make monitoring-assets-check ENV_NAME=qa SVC_NAME=dashboard
 make test-monitoring ENV_NAME=qa SVC_NAME=dashboard
+make -C services/dashboard-service test-event-integration
 ```
 
 The disposable test loads the candidate image into the existing configured
@@ -53,8 +55,10 @@ and safe responses for all three operations during dependency loss, independent 
 recovery, network denial and pod replacement. It does not create or delete the cluster. A render,
 fake adapter or disposable pass does not establish a local-dev or QA deployment result.
 
-The monitoring checks validate the Dashboard-owned request and Elasticsearch dashboards, alerts,
-Prometheus rule tests and collected disposable fixture. They do not prove QA Alloy delivery.
+The monitoring checks validate Dashboard request, Elasticsearch and registration panels, alerts,
+Prometheus rule tests and the collected disposable fixture. The registration owner distinguishes
+disabled, enabled-idle and stalled state and reports fixed outcome/duration and commit failures.
+It does not infer broker lag from these signals. These checks do not prove QA Alloy delivery.
 
 ## Provision reader prerequisites
 

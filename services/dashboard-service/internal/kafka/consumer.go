@@ -35,14 +35,15 @@ var (
 
 // Settings captures the explicit Java-compatible client behavior selected for issue 290.
 type Settings struct {
-	Brokers    []string
-	Group      string
-	Topic      string
-	ClientID   string
-	CACert     []byte
-	EventType  string
-	Propagator propagation.TextMapPropagator
-	Observe    func(context.Context, string) (context.Context, func(context.Context, string, error))
+	Brokers       []string
+	Group         string
+	Topic         string
+	ClientID      string
+	CACert        []byte
+	EventType     string
+	Propagator    propagation.TextMapPropagator
+	Observe       func(context.Context, string) (context.Context, func(context.Context, string, error))
+	CommitFailure func(context.Context, string)
 }
 
 type projection interface {
@@ -82,13 +83,14 @@ func (client franzClient) CloseAllowingRebalance() { client.client.CloseAllowing
 
 // Worker synchronously projects one topic while preserving the selected weak auto-commit model.
 type Worker struct {
-	client     consumerClient
-	projection projection
-	logger     *slog.Logger
-	assigned   *atomic.Bool
-	eventType  string
-	propagator propagation.TextMapPropagator
-	observe    func(context.Context, string) (context.Context, func(context.Context, string, error))
+	client        consumerClient
+	projection    projection
+	logger        *slog.Logger
+	assigned      *atomic.Bool
+	eventType     string
+	propagator    propagation.TextMapPropagator
+	observe       func(context.Context, string) (context.Context, func(context.Context, string, error))
+	commitFailure func(context.Context, string)
 }
 
 // NewWorker creates one independently owned topic consumer.
@@ -125,7 +127,14 @@ func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*
 			err error,
 		) {
 			if err != nil {
-				logger.Error("policy event offset commit failed")
+				if settings.CommitFailure != nil {
+					settings.CommitFailure(
+						context.Background(),
+						settings.EventType,
+					)
+				} else {
+					logger.Error("policy event offset commit failed")
+				}
 			}
 		}),
 	}
@@ -164,7 +173,7 @@ func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*
 		client: franzClient{client: consumer}, projection: projection,
 		logger: logger, assigned: assigned,
 		eventType: settings.EventType, propagator: settings.Propagator,
-		observe: settings.Observe,
+		observe: settings.Observe, commitFailure: settings.CommitFailure,
 	}, nil
 }
 
@@ -313,6 +322,9 @@ func (carrier kafkaHeaderCarrier) Keys() []string {
 // Shutdown commits the current consumed position, releases rebalances and closes the client.
 func (worker *Worker) Shutdown(ctx context.Context) error {
 	commitErr := worker.client.CommitUncommittedOffsets(ctx)
+	if commitErr != nil && worker.commitFailure != nil {
+		worker.commitFailure(context.Background(), worker.eventType)
+	}
 	worker.client.AllowRebalance()
 	closed := make(chan struct{})
 	go func() {

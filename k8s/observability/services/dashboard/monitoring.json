@@ -21,6 +21,21 @@
         "> 0.25",
         ">= 20"
       ],
+      "DashboardEventFailure": [
+        "insurance_hub_dashboard_event_worker_enabled",
+        "> 0.1",
+        ">= 10"
+      ],
+      "DashboardEventStalled": [
+        "insurance_hub_dashboard_event_worker_in_flight_age_seconds",
+        "> 30",
+        "insurance_hub_dashboard_event_worker_enabled"
+      ],
+      "DashboardEventCommitFailure": [
+        "insurance_hub_dashboard_event_commit_failures_total",
+        "> 0",
+        "[5m]"
+      ],
       "DashboardResourcePressure": [
         "> 214748364.8",
         "> 0.24"
@@ -56,6 +71,9 @@
       "DashboardHighLatency": "5m",
       "DashboardElasticsearchFailure": "2m",
       "DashboardElasticsearchHighLatency": "5m",
+      "DashboardEventFailure": "2m",
+      "DashboardEventStalled": "2m",
+      "DashboardEventCommitFailure": null,
       "DashboardResourcePressure": "5m",
       "DashboardUnavailable": "2m",
       "DashboardTelemetryMissing": "1m",
@@ -86,7 +104,13 @@
           "DashboardElasticsearchHighLatency"
         ]
       },
-      "workers": {}
+      "workers": {
+        "events": [
+          "DashboardEventFailure",
+          "DashboardEventStalled",
+          "DashboardEventCommitFailure"
+        ]
+      }
     },
     "path": "alerts.yaml",
     "prometheus_rule_name": "dashboard-service",
@@ -104,12 +128,14 @@
     "dependencies": [
       "elasticsearch"
     ],
-    "workers": []
+    "workers": [
+      "events"
+    ]
   },
   "dashboard": {
     "application_selector": "service_name=\"dashboard-service\"",
     "editable": false,
-    "minimum_prometheus_targets": 24,
+    "minimum_prometheus_targets": 31,
     "path": "dashboard.json",
     "refresh": "30s",
     "required_markers": [
@@ -118,8 +144,10 @@
       "trace_id",
       "agent_sales",
       "sales_trends",
+      "Event worker state",
       "Legitimate idle time",
       "missing telemetry",
+      "collection failure",
       "pod!~\\\"qa-dashboard-api-legacy-.*\\\""
     ],
     "outcomes": {
@@ -153,7 +181,13 @@
           "Elasticsearch latency percentiles"
         ]
       },
-      "workers": {}
+      "workers": {
+        "events": [
+          "Event rate and outcomes",
+          "Event duration percentiles",
+          "Event worker state"
+        ]
+      }
     },
     "required_query_filters": [
       "deployment_environment_name=~\"$environment\"",
@@ -182,7 +216,8 @@
       ],
       "metrics": [
         "insurance_hub_dashboard_requests_total",
-        "insurance_hub_dashboard_dependencies_total"
+        "insurance_hub_dashboard_dependencies_total",
+        "insurance_hub_dashboard_event_worker_enabled"
       ],
       "traces": [
         "dashboard-service"

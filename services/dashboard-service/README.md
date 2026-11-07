@@ -14,11 +14,11 @@
 # Dashboard service
 
 `dashboard-service` is the first private Go Dashboard process. It runs beside the authoritative
-Java Dashboard and exposes the read-only total-sales, agent-sales and sales-trends queries backed
-by the existing `policy_stats` Elasticsearch index. Java retains writer, setup, edge retry and
-traffic authority.
-This module does not create, seed, remap or write Elasticsearch state and has no Kafka
-responsibility.
+Java Dashboard and exposes total-sales, agent-sales and sales-trends queries. Its default
+deployment reads the existing `policy_stats` index with event processing disabled. The opt-in
+issue-290 candidate consumes only isolated policy registrations and performs refreshed whole-
+document replacement in `policy_stats_issue_290`; Java retains canonical writer, setup, edge
+retry, traffic and event authority.
 
 The standalone module is
 `github.com/igor-baiborodine/insurance-hub/services/dashboard-service`. It resolves the published
@@ -59,6 +59,10 @@ flowchart LR
     query --> usecase["internal/application"]
     usecase --> reader["internal/elasticsearch"]
     reader --> es["policy_stats"]
+    broker[("Kafka TLS")] --> worker["internal/kafka registration worker"]
+    worker --> projection["internal/application projection"]
+    projection --> writer["separate Elasticsearch writer"]
+    writer --> isolated["policy_stats_issue_290"]
     probes["Kubelet or management caller"] -->|":8081"| health["livez and readyz"]
     entry["cmd/server"] --> composition["internal/service"]
     composition --> gateway
@@ -69,7 +73,8 @@ flowchart LR
 
 Solid arrows show runtime calls. `cmd/server` loads settings and delegates resource construction to
 `internal/service`. The composition owner acquires listeners, the gateway channel and telemetry,
-then shuts them down in the documented HTTP-first order.
+then conditionally acquires the separate writer and one Kafka worker. Shutdown stops and commits
+the worker before the documented HTTP-first RPC drain.
 
 ## Package map
 
@@ -79,12 +84,13 @@ then shuts them down in the documented HTTP-first order.
 | `internal/config` | Compose typed common settings, Dashboard identity and Elasticsearch policy |
 | `internal/gateway` | Strict HTTP decoding, generated client registration, metadata stripping and safe errors |
 | `internal/grpc` | Register all three sales operations, enforce request validation and map safe gRPC statuses |
-| `internal/application` | Own distinct total-sales, agent-sales and sales-trends use cases and narrow reader ports |
-| `internal/domain` | Own date/filter presence, aggregation units, periods, counts and exact decimal tokens |
-| `internal/elasticsearch` | Execute the bounded read-only `policy_stats` aggregation |
-| `internal/service` | Compose listeners/providers/query dependencies, readiness, rollback and drain |
+| `internal/application` | Own three query use cases plus the received registration projection and narrow ports |
+| `internal/domain` | Own date/filter presence, aggregation units, periods, counts, projection values and exact decimal tokens |
+| `internal/elasticsearch` | Execute bounded analytics reads and isolated refreshed whole-document replacement through separate clients |
+| `internal/kafka` | Consume one registration topic with the accepted legacy polling, commit and batch-stop behavior |
+| `internal/service` | Compose listeners/providers/query dependencies and the conditional worker, readiness, rollback and drain |
 | `internal/logger` | Emit safe completion records with Dashboard runtime identity |
-| `internal/telemetry` | Own bounded HTTP/RPC and Elasticsearch metrics and traces over Servicekit providers |
+| `internal/telemetry` | Own bounded HTTP/RPC, Elasticsearch, registration, commit-failure and worker-state signals over Servicekit providers |
 | `api/dashboard/v1` | Editable protobuf and HTTP annotation source |
 | `gen/dashboard/v1` | Generated Go, gRPC and gateway code; never edit manually |
 | `gen/openapiv2/dashboard/v1` | Generated Swagger 2.0 contract; never edit manually |
@@ -103,6 +109,7 @@ value.
 | HTTP limits | Header/body `16384`/`4096` bytes; read-header/read/write/idle `5s`/`10s`/`10s`/`30s` |
 | gRPC limits | Receive/send `1048576`/`8388608` bytes |
 | Elasticsearch | `ELASTICSEARCH_URL=http://127.0.0.1:9200`, fixed `ELASTICSEARCH_INDEX=policy_stats`, optional paired `ELASTICSEARCH_USERNAME`/`ELASTICSEARCH_PASSWORD`, HTTPS-only `ELASTICSEARCH_CA_FILE`, `ELASTICSEARCH_TIMEOUT=5s` maximum |
+| Registration worker | `EVENT_WORKERS_ENABLED=false`; enabled mode requires exact `ELASTICSEARCH_INDEX=policy_stats_issue_290`, separate writer credentials, `KAFKA_BROKERS`, `KAFKA_CA_FILE`, and the fixed isolated defaults `KAFKA_GROUP=dashboard-service-issue-290` and `KAFKA_REGISTERED_TOPIC=policy-registered-issue-290` |
 | Sales trends | Required `SALES_TRENDS_TIME_ZONE`; exact available IANA name loaded once at startup. Empty, `Local`, whitespace-altered and unknown values fail. Local-dev and QA use `GMT`. |
 | Telemetry | `OTEL_ENABLED=false`, optional `OTEL_EXPORTER_OTLP_ENDPOINT`; exporter timeout defaults to `2s` and accepts positive Go duration syntax. Deployed configuration omits `OTEL_EXPORTER_OTLP_TIMEOUT`, and deployment guards reject an override. |
 | Logging | `LOG_LEVEL=info`; safe structured fields only |
@@ -150,6 +157,19 @@ checks its OCI source identity and non-root runtime, and exercises all three sal
 against an owned Elasticsearch fixture. It proves the reader cannot write, administer the cluster
 or read another index; dependency loss withdraws readiness while liveness remains available and
 the business response stays safe; shutdown remains bounded.
+
+`make -C services/dashboard-service test-event-integration` owns disposable TLS Kafka and
+Elasticsearch, creates only the issue-290 topic/group/index, runs the production registration
+worker, and exercises the resulting document through direct RPC and the generated HTTP-to-RPC
+gateway for all three cumulative queries. Its index setup and cleanup are fixture administration;
+normal serving never creates, seeds or remaps state.
+
+Registration telemetry follows the Policy Search provider pattern with Dashboard-specific names
+and one fixed `registered` series. It exports bounded outcome/duration, worker enabled/in-flight
+age and commit-failure metrics. Idle means enabled state with zero in-flight age and no event-rate
+increase; disabled reports enabled zero; a stalled worker has increasing in-flight age. Missing
+runtime samples indicate telemetry loss. Logs, traces and labels omit event bodies, policy/customer
+values, amounts, topics, groups, credentials and raw dependency errors.
 
 `go-svc-deploy-test` loads that exact image and a digest-pinned Elasticsearch image into the
 configured Kind cluster, then creates one uniquely owned namespace. Its fixture setup is explicit

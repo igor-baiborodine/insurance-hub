@@ -125,6 +125,10 @@ func TestWorker_ShutdownBoundsCommitAndCloseFailures(t *testing.T) {
 	commitFailure := errors.New("synthetic commit failure")
 	consumer := &fakeClient{commitErr: commitFailure, closeRelease: release}
 	worker := newWorker(consumer, &fakeProjection{}, slog.Default())
+	commitFailures := make(chan string, 1)
+	worker.commitFailure = func(_ context.Context, eventType string) {
+		commitFailures <- eventType
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
@@ -140,6 +144,9 @@ func TestWorker_ShutdownBoundsCommitAndCloseFailures(t *testing.T) {
 			err,
 			consumer.allowCount(),
 		)
+	}
+	if eventType := <-commitFailures; eventType != "registered" {
+		t.Fatalf("commit failure event type = %q", eventType)
 	}
 }
 
