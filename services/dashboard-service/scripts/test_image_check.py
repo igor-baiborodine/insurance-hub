@@ -183,6 +183,7 @@ def test_main_owns_dependency_network_reader_configuration_and_cleanup(
     assert "--network-alias elasticsearch" in flattened
     assert "ELASTICSEARCH_URL=http://elasticsearch:9200" in flattened
     assert "ELASTICSEARCH_USERNAME=dashboard_image_reader" in flattened
+    assert "EVENT_WORKERS_ENABLED=false" in flattened
     assert "SALES_TRENDS_TIME_ZONE=America/Toronto" in flattened
     assert sum(url.endswith("/dashboard/trends") for url in requested_urls) == 2
     assert image_check.ADMIN_PASSWORD not in flattened

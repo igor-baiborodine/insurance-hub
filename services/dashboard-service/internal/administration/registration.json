@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "owner": "issue-290",
+  "index": "policy_stats_issue_290",
+  "mapping": {
+    "dynamic": "strict",
+    "properties": {
+      "number": {
+        "type": "keyword"
+      },
+      "from": {
+        "type": "date",
+        "format": "strict_date"
+      },
+      "to": {
+        "type": "date",
+        "format": "strict_date"
+      },
+      "policyHolder": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "productCode": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "totalPremium": {
+        "type": "double"
+      },
+      "agentLogin": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      }
+    }
+  }
+}

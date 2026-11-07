@@ -331,6 +331,12 @@ func loadEvents(lookup lookupEnv, reader Elasticsearch) (Events, error) {
 	if !enabled {
 		return Events{}, nil
 	}
+	if reader.Index != defaultProjectionIndex {
+		return Events{}, kitconfig.Invalid(
+			EnvElasticsearchIndex,
+			"must select the issue-290 projection when event workers are enabled",
+		)
+	}
 	brokersValue, err := requiredSetting(lookup, EnvKafkaBrokers)
 	if err != nil {
 		return Events{}, err
@@ -379,7 +385,6 @@ func loadEvents(lookup lookupEnv, reader Elasticsearch) (Events, error) {
 		return Events{}, err
 	}
 	writer := reader
-	writer.Index = defaultProjectionIndex
 	writer.Username = username
 	writer.Password = password
 	return Events{
@@ -455,10 +460,11 @@ func loadElasticsearch(lookup lookupEnv) (Elasticsearch, error) {
 	if err != nil {
 		return Elasticsearch{}, err
 	}
-	if !validElasticsearchIndex(index) || index != defaultElasticsearchIndex {
+	if !validElasticsearchIndex(index) ||
+		(index != defaultElasticsearchIndex && index != defaultProjectionIndex) {
 		return Elasticsearch{}, kitconfig.Invalid(
 			EnvElasticsearchIndex,
-			"must be policy_stats",
+			"must select an exact Dashboard index",
 		)
 	}
 	username, err := optionalSetting(lookup, EnvElasticsearchUsername)

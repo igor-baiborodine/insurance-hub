@@ -135,8 +135,15 @@ def matching_reader_predecessor_config(actual: Any, expected: Any) -> bool:
     """Accept reviewed local ConfigMap predecessors before their replacement only."""
     if not isinstance(actual, dict) or not isinstance(expected, dict):
         return False
+    event_predecessor = dict(expected)
+    event_predecessor.pop("EVENT_WORKERS_ENABLED", None)
+    if actual == event_predecessor:
+        return True
     reader_predecessor = dict(expected)
     reader_predecessor.pop("SALES_TRENDS_TIME_ZONE", None)
+    if actual == reader_predecessor:
+        return True
+    reader_predecessor.pop("EVENT_WORKERS_ENABLED", None)
     if actual == reader_predecessor:
         return True
     pre_reader_predecessor = {
@@ -147,6 +154,7 @@ def matching_reader_predecessor_config(actual: Any, expected: Any) -> bool:
             "ELASTICSEARCH_INDEX",
             "ELASTICSEARCH_TIMEOUT",
             "ELASTICSEARCH_URL",
+            "EVENT_WORKERS_ENABLED",
             "SALES_TRENDS_TIME_ZONE",
         }
     }
@@ -325,6 +333,116 @@ def expected_egress(environment: str) -> list[dict[str, Any]]:
     ]
 
 
+def kafka_egress(environment: str) -> dict[str, Any]:
+    namespace = "local-dev-all" if environment == "local-dev" else "qa-data"
+    return {
+        "to": [
+            {
+                "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": namespace}},
+                "podSelector": {
+                    "matchLabels": {
+                        "strimzi.io/cluster": f"{environment}-kafka",
+                        "strimzi.io/component-type": "kafka",
+                    }
+                },
+            }
+        ],
+        "ports": [{"port": 9093, "protocol": "TCP"}],
+    }
+
+
+def event_activation_assets(environment: str) -> tuple[dict[str, Any], ...]:
+    root = ROOT / f"k8s/overlays/{environment}/svc/dashboard"
+    names = (
+        "event-enabled-config-patch.yaml",
+        "event-enabled-deployment-patch.yaml",
+        "event-enabled-network-policy-patch.yaml",
+    )
+    values: list[dict[str, Any]] = []
+    for name in names:
+        try:
+            value = yaml.safe_load((root / name).read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as error:
+            raise DeploymentError(f"Dashboard event activation asset {name} is invalid") from error
+        require(isinstance(value, dict), f"Dashboard event activation asset {name} is invalid")
+        values.append(value)
+    return tuple(values)
+
+
+def validate_event_activation_assets(environment: str) -> None:
+    require(environment in {"local-dev", "qa"}, "deployment environment is invalid")
+    config, deployment, network = event_activation_assets(environment)
+    prefix = environment
+    expected_config = {
+        "EVENT_WORKERS_ENABLED": "true",
+        "ELASTICSEARCH_INDEX": "policy_stats_issue_290",
+        "KAFKA_BROKERS": (
+            "local-dev-kafka-kafka-bootstrap:9093"
+            if environment == "local-dev"
+            else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
+        ),
+        "KAFKA_GROUP": "dashboard-service-issue-290",
+        "KAFKA_REGISTERED_TOPIC": "policy-registered-issue-290",
+        "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
+    }
+    require(
+        config.get("kind") == "ConfigMap"
+        and config.get("metadata", {}).get("name") == "dashboard-config"
+        and config.get("data") == expected_config,
+        "event activation configuration differs",
+    )
+    pod = deployment.get("spec", {}).get("template", {}).get("spec", {})
+    containers = pod.get("containers", [])
+    require(
+        deployment.get("kind") == "Deployment"
+        and deployment.get("metadata", {}).get("name") == "dashboard-api"
+        and len(containers) == 1
+        and containers[0].get("name") == "dashboard-api",
+        "event activation Deployment identity differs",
+    )
+    env = {item.get("name"): item for item in containers[0].get("env", [])}
+    expected_secrets = {
+        "ELASTICSEARCH_USERNAME": f"{prefix}-dashboard-elasticsearch-issue-290",
+        "ELASTICSEARCH_PASSWORD": f"{prefix}-dashboard-elasticsearch-issue-290",
+        "ELASTICSEARCH_WRITER_USERNAME": (f"{prefix}-dashboard-elasticsearch-writer-issue-290"),
+        "ELASTICSEARCH_WRITER_PASSWORD": (f"{prefix}-dashboard-elasticsearch-writer-issue-290"),
+    }
+    require(set(env) == set(expected_secrets), "event activation Secret inputs differ")
+    for name, secret in expected_secrets.items():
+        key = "username" if name.endswith("USERNAME") else "password"
+        require(
+            env[name].get("valueFrom", {}).get("secretKeyRef") == {"name": secret, "key": key},
+            f"event activation {name} differs",
+        )
+    require(
+        containers[0].get("volumeMounts")
+        == [{"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}]
+        and pod.get("volumes")
+        == [
+            {
+                "name": "kafka-ca",
+                "secret": {
+                    "secretName": f"{prefix}-dashboard-kafka-ca",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 292,
+                },
+            }
+        ],
+        "event activation Kafka trust mount differs",
+    )
+    require(
+        network.get("kind") == "NetworkPolicy"
+        and network.get("metadata", {}).get("name") == "dashboard-api"
+        and network.get("spec", {}).get("egress")
+        == [*expected_egress(environment), kafka_egress(environment)],
+        "event activation egress differs",
+    )
+    kustomization = (
+        ROOT / f"k8s/overlays/{environment}/svc/dashboard/kustomization.yaml"
+    ).read_text(encoding="utf-8")
+    require("event-enabled-" not in kustomization, "PR1 desired state activates event assets")
+
+
 def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(environment in {"local-dev", "qa"}, "deployment environment is invalid")
     lower = text.lower()
@@ -400,6 +518,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         ),
         "ELASTICSEARCH_INDEX": "policy_stats",
         "ELASTICSEARCH_TIMEOUT": "5s",
+        "EVENT_WORKERS_ENABLED": "false",
         "SALES_TRENDS_TIME_ZONE": "GMT",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
     }
@@ -2018,8 +2137,12 @@ def main(argv: list[str] | None = None) -> int:
         qa_root = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
         validate_qa_aggregate(qa_root.get("resources"))
         for environment in ("local-dev", "qa"):
+            validate_event_activation_assets(environment)
             validate_java_edge_identity(environment)
-        print("dashboard-deployment-check: local-dev and active QA renders passed")
+        print(
+            "dashboard-deployment-check: disabled local-dev/QA renders and guarded "
+            "event activation assets passed"
+        )
     return 0
 
 

@@ -139,6 +139,51 @@ def test_render_adds_owned_dependency_reader_secret_and_exact_identity(
     assert policy["spec"]["egress"][1]["ports"] == [{"port": 9200, "protocol": "TCP"}]
 
 
+def test_event_enabled_render_uses_only_issue_290_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    items = rendered_items()
+    monkeypatch.setattr(disposable_deployment.checks, "render", lambda _environment: "rendered")
+    monkeypatch.setattr(
+        disposable_deployment.checks,
+        "validate_render",
+        lambda _environment, _text: deepcopy(items),
+    )
+    cluster = disposable_deployment.Cluster("dashboard-disposable-test")
+
+    _rendered, actual = disposable_deployment.render(
+        cluster,
+        "insurance-hub-dashboard-api:1.0.0-local.0123456789ab",
+        "0123456789ab",
+        "elasticsearch@example@sha256:" + "a" * 64,
+        event_enabled=True,
+    )
+
+    config = disposable_deployment.checks.resource(
+        actual, "ConfigMap", "local-dev-dashboard-config"
+    )["data"]
+    assert config["EVENT_WORKERS_ENABLED"] == "true"
+    assert config["ELASTICSEARCH_INDEX"] == "policy_stats_issue_290"
+    assert config["KAFKA_REGISTERED_TOPIC"] == "policy-registered-issue-290"
+    deployment = disposable_deployment.checks.resource(
+        actual, "Deployment", "local-dev-dashboard-api"
+    )
+    container = deployment["spec"]["template"]["spec"]["containers"][0]
+    environment = {item["name"]: item for item in container["env"]}
+    assert environment["ELASTICSEARCH_USERNAME"]["valueFrom"]["secretKeyRef"]["name"] == (
+        "local-dev-dashboard-elasticsearch-issue-290"
+    )
+    assert (
+        environment["ELASTICSEARCH_WRITER_USERNAME"]["valueFrom"]["secretKeyRef"]["name"]
+        == "local-dev-dashboard-elasticsearch-writer-issue-290"
+    )
+    assert container["volumeMounts"] == [
+        {"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}
+    ]
+    policy = disposable_deployment.checks.resource(
+        actual, "NetworkPolicy", "local-dev-dashboard-api"
+    )
+    assert policy["spec"]["egress"][-1]["ports"] == [{"port": 9093, "protocol": "TCP"}]
+
+
 def test_run_rejects_missing_digest_qualified_dependency_before_commands(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

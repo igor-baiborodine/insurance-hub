@@ -369,6 +369,8 @@ def main() -> int:
                 "--env",
                 "ELASTICSEARCH_TIMEOUT=5s",
                 "--env",
+                "EVENT_WORKERS_ENABLED=false",
+                "--env",
                 "SALES_TRENDS_TIME_ZONE=America/Toronto",
                 image,
             ],

@@ -147,6 +147,9 @@ def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() 
         "reader-ensure",
         "reader-verify",
         "reader-rotate",
+        "event-fixture-setup",
+        "event-fixture-verify",
+        "event-fixture-retire",
         "deploy-test-tooling",
         "deploy-test",
     ]

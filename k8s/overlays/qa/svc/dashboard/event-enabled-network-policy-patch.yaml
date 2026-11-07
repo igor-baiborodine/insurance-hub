@@ -1,0 +1,50 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dashboard-api
+spec:
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: qa-data
+          podSelector:
+            matchLabels:
+              elasticsearch.k8s.elastic.co/cluster-name: qa-elasticsearch
+      ports:
+        - port: 9200
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: qa-monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alloy
+              app.kubernetes.io/instance: qa-alloy
+      ports:
+        - port: 4317
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: qa-data
+          podSelector:
+            matchLabels:
+              strimzi.io/cluster: qa-kafka
+              strimzi.io/component-type: kafka
+      ports:
+        - port: 9093
+          protocol: TCP

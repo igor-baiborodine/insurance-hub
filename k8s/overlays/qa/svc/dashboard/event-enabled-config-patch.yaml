@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-config
+data:
+  EVENT_WORKERS_ENABLED: "true"
+  ELASTICSEARCH_INDEX: policy_stats_issue_290
+  KAFKA_BROKERS: qa-kafka-kafka-bootstrap.qa-data.svc:9093
+  KAFKA_GROUP: dashboard-service-issue-290
+  KAFKA_REGISTERED_TOPIC: policy-registered-issue-290
+  KAFKA_CA_FILE: /etc/dashboard/kafka/ca.crt

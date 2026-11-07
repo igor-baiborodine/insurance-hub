@@ -79,6 +79,7 @@ func TestLoad_DefaultsWithRequiredSalesTrendsTimeZone(t *testing.T) {
 func TestLoad_EnabledEventWorkerRequiresAndPreservesIsolatedSettings(t *testing.T) {
 	// given
 	values := map[string]string{
+		EnvElasticsearchIndex:   defaultProjectionIndex,
 		EnvEventWorkersEnabled:  "true",
 		EnvKafkaBrokers:         "kafka-a.example:9093, kafka-b.example:9093",
 		EnvKafkaGroup:           defaultKafkaGroup,
@@ -107,6 +108,7 @@ func TestLoad_EnabledEventWorkerRequiresAndPreservesIsolatedSettings(t *testing.
 
 func TestLoad_EnabledEventWorkerFailsOnIncompleteOrWrongTargetSettings(t *testing.T) {
 	valid := map[string]string{
+		EnvElasticsearchIndex:  defaultProjectionIndex,
 		EnvEventWorkersEnabled: "true",
 		EnvKafkaBrokers:        "kafka.example:9093",
 		EnvKafkaCAFile:         "/var/run/kafka/ca.crt",
@@ -118,6 +120,13 @@ func TestLoad_EnabledEventWorkerFailsOnIncompleteOrWrongTargetSettings(t *testin
 		setting string
 		change  func(map[string]string)
 	}{
+		{
+			"canonical reader index",
+			EnvElasticsearchIndex,
+			func(values map[string]string) {
+				values[EnvElasticsearchIndex] = defaultElasticsearchIndex
+			},
+		},
 		{
 			"brokers",
 			EnvKafkaBrokers,
@@ -180,6 +189,7 @@ func TestLoad_EnabledEventWorkerFailsOnIncompleteOrWrongTargetSettings(t *testin
 
 func TestLoad_DisabledEventWorkerIgnoresDependencySettings(t *testing.T) {
 	got, err := load(mapLookup(map[string]string{
+		EnvElasticsearchIndex:   defaultProjectionIndex,
 		EnvEventWorkersEnabled:  "false",
 		EnvKafkaBrokers:         "private-invalid-broker",
 		EnvKafkaGroup:           "canonical-group",
