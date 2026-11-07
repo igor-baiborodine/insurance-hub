@@ -18,6 +18,8 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	grpcgo "google.golang.org/grpc"
@@ -269,6 +271,64 @@ func TestRun_DisabledWorkerAcquiresNoEventResources(t *testing.T) {
 	_ = run(context.Background(), settings, slog.Default(), deps)
 }
 
+func TestRun_EventWorkerGaugeUsesConfiguredMode(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		enabled bool
+		want    int64
+	}{
+		{name: "disabled", enabled: false, want: 0},
+		{name: "enabled", enabled: true, want: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reader := sdkmetric.NewManualReader()
+			meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			t.Cleanup(func() { _ = meterProvider.Shutdown(context.Background()) })
+			provider := &workerMetricTelemetryProvider{meterProvider: meterProvider}
+			settings := testSettings(t)
+			settings.Events.Enabled = test.enabled
+			search := &fakeSearch{}
+			deps := productionDependencies()
+			deps.newTelemetry = func(
+				context.Context,
+				string,
+				config.Telemetry,
+			) (telemetryProvider, error) {
+				return provider, nil
+			}
+			deps.newSearch = func(
+				config.Elasticsearch,
+				*time.Location,
+			) (salesReader, searchDependency, error) {
+				return search, search, errors.New("stop after event observer")
+			}
+			if test.enabled {
+				settings.Events.CAFile = writeTestCA(t)
+				deps.newProjection = func(
+					config.Elasticsearch,
+					*telemetry.DependencyObserver,
+				) (projectionRuntime, error) {
+					return &fakeProjectionRuntime{}, nil
+				}
+				deps.newWorker = func(
+					dashboardkafka.Settings,
+					projectionRuntime,
+					*slog.Logger,
+				) (eventWorker, error) {
+					return &fakeEventWorker{}, nil
+				}
+			}
+
+			err := run(context.Background(), settings, slog.Default(), deps)
+			if err == nil ||
+				!strings.Contains(err.Error(), "stop after event observer") {
+				t.Fatalf("run error = %v", err)
+			}
+			assertWorkerEnabledMetric(t, reader, test.want)
+		})
+	}
+}
+
 func TestRun_EnabledWorkerUsesExactSettingsAndBoundedLifecycle(t *testing.T) {
 	settings := testSettings(t)
 	caFile := t.TempDir() + "/ca.crt"
@@ -511,6 +571,69 @@ func (fakeTelemetry) GRPCPropagator() propagation.TextMapPropagator {
 	return propagation.TraceContext{}
 }
 func (fakeTelemetry) Shutdown(context.Context) error { return nil }
+
+type workerMetricTelemetryProvider struct {
+	meterProvider *sdkmetric.MeterProvider
+}
+
+func (provider *workerMetricTelemetryProvider) MeterProvider() metric.MeterProvider {
+	return provider.meterProvider
+}
+
+func (*workerMetricTelemetryProvider) TracerProvider() trace.TracerProvider {
+	return noop.NewTracerProvider()
+}
+
+func (*workerMetricTelemetryProvider) HTTPPropagator() propagation.TextMapPropagator {
+	return propagation.TraceContext{}
+}
+
+func (*workerMetricTelemetryProvider) GRPCPropagator() propagation.TextMapPropagator {
+	return propagation.TraceContext{}
+}
+
+func (*workerMetricTelemetryProvider) Shutdown(context.Context) error { return nil }
+
+func assertWorkerEnabledMetric(t *testing.T, reader *sdkmetric.ManualReader, want int64) {
+	t.Helper()
+	var metrics metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &metrics); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range metrics.ScopeMetrics {
+		for _, measurement := range scope.Metrics {
+			gauge, ok := measurement.Data.(metricdata.Gauge[int64])
+			if !ok ||
+				measurement.Name != "insurance_hub.dashboard.event.worker.enabled" {
+				continue
+			}
+			if len(gauge.DataPoints) != 1 || gauge.DataPoints[0].Value != want {
+				t.Fatalf(
+					"event-worker enabled metrics = %v, want %d",
+					gauge.DataPoints,
+					want,
+				)
+			}
+			attributes := gauge.DataPoints[0].Attributes.ToSlice()
+			if len(attributes) != 1 ||
+				attributes[0].Key != "insurance_hub.dashboard.event.type" ||
+				attributes[0].Value.AsString() != "registered" {
+				t.Fatalf("event-worker metric attributes = %v", attributes)
+			}
+			return
+		}
+	}
+	t.Fatal("event-worker enabled metric was not collected")
+}
+
+func writeTestCA(t *testing.T) string {
+	t.Helper()
+	path := t.TempDir() + "/ca.crt"
+	if err := os.WriteFile(path, []byte("test CA"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 func testSettings(t *testing.T) config.Config {
 	t.Helper()
