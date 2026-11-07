@@ -31,6 +31,7 @@ func TestReader_ReadAgentSales_UsesExactFiltersAndClosesResponse(t *testing.T) {
 		]}}}}`)}
 	var gotRequest map[string]any
 	reader := &Reader{
+		index: PolicyIndex,
 		search: func(_ context.Context, index string, body io.Reader) (*esapi.Response, error) {
 			if index != PolicyIndex {
 				t.Fatalf("index = %q", index)
@@ -131,6 +132,7 @@ func TestAgentPremiumAmount_PreservesJavaEquivalentTokens(t *testing.T) {
 func TestReader_ReadAgentSales_AcceptsJavaNotationBoundaryBucket(t *testing.T) {
 	// given — expected tokens were observed from JDK 14 BigDecimal.valueOf(double).toString().
 	reader := &Reader{
+		index: PolicyIndex,
 		search: func(context.Context, string, io.Reader) (*esapi.Response, error) {
 			return responseWithBody(`{
 				"aggregations":{"agg_filter":{"count_by_agent":{"buckets":[
@@ -202,6 +204,7 @@ func TestReader_ReadAgentSales_RejectsMalformedAndUnavailableResults(t *testing.
 		t.Run(test.name, func(t *testing.T) {
 			calls := 0
 			reader := &Reader{
+				index: PolicyIndex,
 				search: func(context.Context, string, io.Reader) (*esapi.Response, error) {
 					calls++
 					return test.response, test.searchErr

@@ -74,6 +74,22 @@ func TestNew_RequiresExactBoundedReadOnlyConfiguration(t *testing.T) {
 	}
 }
 
+func TestNew_AcceptsOnlyDashboardIndexProfiles(t *testing.T) {
+	for _, index := range []string{PolicyIndex, ProjectionIndex} {
+		t.Run(index, func(t *testing.T) {
+			// when
+			client, err := New(Config{
+				Endpoint: "http://example:9200", Index: index, Timeout: time.Second,
+			})
+
+			// then
+			if err != nil || client.index != index {
+				t.Fatalf("New() = (%v, %v), want index %q", client, err, index)
+			}
+		})
+	}
+}
+
 func TestClient_DoesNotRetryRejectedSearch(t *testing.T) {
 	// given
 	requests := 0

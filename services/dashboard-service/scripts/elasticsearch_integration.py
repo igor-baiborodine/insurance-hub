@@ -145,7 +145,7 @@ def main() -> int:
                 f"-coverprofile={coverage}",
                 "-json",
                 "-run",
-                "^TestElasticsearch(Reader_(AcceptedAggregationMatrix|AcceptedAgentOracle|AcceptedTrendOracle)|Readiness_RejectsIncompatibleState)$",
+                "^TestElasticsearch(Reader_(AcceptedAggregationMatrix|AcceptedAgentOracle|AcceptedTrendOracle)|Readiness_RejectsIncompatibleState|Projection_AcceptedWriterMatrix)$",
                 "./internal/elasticsearch",
             ],
             cwd=MODULE_ROOT,
@@ -180,6 +180,11 @@ def main() -> int:
             "TestElasticsearchReadiness_RejectsIncompatibleState" in discovered,
             f"readiness suite missed expected test; passed={sorted(discovered)}",
         )
+        # This is the production projection/writer path, not the Step 5 direct fixture write.
+        require(
+            "TestElasticsearchProjection_AcceptedWriterMatrix" in discovered,
+            f"projection suite missed expected test; passed={sorted(discovered)}",
+        )
         require(coverage_path.is_file(), "integration coverage profile was not produced")
     except (IntegrationError, CommandError, OSError) as error:
         print(f"test-elasticsearch-integration: {error}", file=sys.stderr)
@@ -200,7 +205,7 @@ def main() -> int:
                 status = 1
     if status:
         return status
-    print("test-elasticsearch-integration: selected=4 auth=passed cleanup=passed")
+    print("test-elasticsearch-integration: selected=5 auth=passed cleanup=passed")
     return 0
 
 
