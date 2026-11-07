@@ -49,7 +49,7 @@ def prepare_owned_run(
             return "\n".join(
                 (
                     '{"Action":"pass","Test":"TestEventFixture_OracleDefinesIndependentCases"}',
-                    '{"Action":"pass","Test":"TestEventFixture_RealKafkaAndElasticsearchResources"}',
+                    '{"Action":"pass","Test":"TestEventFixture_ProductionWorkerProjectsRegistration"}',
                     "",
                 )
             )

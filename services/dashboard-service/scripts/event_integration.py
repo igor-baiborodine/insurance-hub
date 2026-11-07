@@ -405,7 +405,7 @@ def main() -> int:
         sys.stdout.write(output)
         expected = {
             "TestEventFixture_OracleDefinesIndependentCases",
-            "TestEventFixture_RealKafkaAndElasticsearchResources",
+            "TestEventFixture_ProductionWorkerProjectsRegistration",
         }
         discovered = passed_tests(output)
         require(
@@ -438,7 +438,7 @@ def main() -> int:
                 status = 1
     if status:
         return status
-    print("test-event-integration: selected=2 production-workers=not-exercised cleanup=passed")
+    print("test-event-integration: selected=2 production-worker=exercised cleanup=passed")
     return 0
 
 

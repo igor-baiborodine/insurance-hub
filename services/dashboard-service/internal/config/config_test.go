@@ -71,6 +71,131 @@ func TestLoad_DefaultsWithRequiredSalesTrendsTimeZone(t *testing.T) {
 	if got.SalesTrendsTimeZone == nil || got.SalesTrendsTimeZone.String() != "GMT" {
 		t.Errorf("SalesTrendsTimeZone = %v, want GMT", got.SalesTrendsTimeZone)
 	}
+	if got.Events.Enabled || len(got.Events.Brokers) != 0 || got.Events.Writer.URL != "" {
+		t.Errorf("event worker defaults = %+v, want disabled and empty", got.Events)
+	}
+}
+
+func TestLoad_EnabledEventWorkerRequiresAndPreservesIsolatedSettings(t *testing.T) {
+	// given
+	values := map[string]string{
+		EnvEventWorkersEnabled:  "true",
+		EnvKafkaBrokers:         "kafka-a.example:9093, kafka-b.example:9093",
+		EnvKafkaGroup:           defaultKafkaGroup,
+		EnvKafkaRegisteredTopic: defaultRegisteredTopic,
+		EnvKafkaCAFile:          "/var/run/kafka/ca.crt",
+		EnvWriterUsername:       "writer",
+		EnvWriterPassword:       "private-password",
+	}
+
+	// when
+	got, err := load(mapLookup(values))
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Events.Enabled || len(got.Events.Brokers) != 2 ||
+		got.Events.Group != defaultKafkaGroup ||
+		got.Events.RegisteredTopic != defaultRegisteredTopic ||
+		got.Events.Writer.Index != defaultProjectionIndex ||
+		got.Events.Writer.URL != got.Elasticsearch.URL ||
+		got.Events.Writer.Username != "writer" ||
+		got.Events.Writer.Password != "private-password" {
+		t.Fatalf("event settings = %+v", got.Events)
+	}
+}
+
+func TestLoad_EnabledEventWorkerFailsOnIncompleteOrWrongTargetSettings(t *testing.T) {
+	valid := map[string]string{
+		EnvEventWorkersEnabled: "true",
+		EnvKafkaBrokers:        "kafka.example:9093",
+		EnvKafkaCAFile:         "/var/run/kafka/ca.crt",
+		EnvWriterUsername:      "writer",
+		EnvWriterPassword:      "private-password",
+	}
+	tests := []struct {
+		name    string
+		setting string
+		change  func(map[string]string)
+	}{
+		{
+			"brokers",
+			EnvKafkaBrokers,
+			func(values map[string]string) { delete(values, EnvKafkaBrokers) },
+		},
+		{
+			"broker address",
+			EnvKafkaBrokers,
+			func(values map[string]string) { values[EnvKafkaBrokers] = "missing-port" },
+		},
+		{
+			"CA",
+			EnvKafkaCAFile,
+			func(values map[string]string) { delete(values, EnvKafkaCAFile) },
+		},
+		{
+			"writer username",
+			EnvWriterUsername,
+			func(values map[string]string) { delete(values, EnvWriterUsername) },
+		},
+		{
+			"writer password",
+			EnvWriterPassword,
+			func(values map[string]string) { delete(values, EnvWriterPassword) },
+		},
+		{
+			"wrong group",
+			EnvKafkaGroup,
+			func(values map[string]string) { values[EnvKafkaGroup] = "dashboard-service" },
+		},
+		{
+			"wrong topic",
+			EnvKafkaRegisteredTopic,
+			func(values map[string]string) { values[EnvKafkaRegisteredTopic] = "policy-registered" },
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			values := make(map[string]string, len(valid))
+			for key, value := range valid {
+				values[key] = value
+			}
+			test.change(values)
+
+			// when
+			_, err := load(mapLookup(values))
+
+			// then
+			if err == nil {
+				t.Fatal("invalid event settings accepted")
+			}
+			setting, _ := kitconfig.ErrorDetails(err)
+			if setting != test.setting ||
+				strings.Contains(err.Error(), "private-password") {
+				t.Fatalf("configuration error = %v, setting = %q", err, setting)
+			}
+		})
+	}
+}
+
+func TestLoad_DisabledEventWorkerIgnoresDependencySettings(t *testing.T) {
+	got, err := load(mapLookup(map[string]string{
+		EnvEventWorkersEnabled:  "false",
+		EnvKafkaBrokers:         "private-invalid-broker",
+		EnvKafkaGroup:           "canonical-group",
+		EnvKafkaRegisteredTopic: "canonical-topic",
+		EnvKafkaCAFile:          "",
+		EnvWriterUsername:       "",
+		EnvWriterPassword:       "private-password",
+	}))
+	if err != nil {
+		t.Fatalf("disabled event settings: %v", err)
+	}
+	if got.Events.Enabled || len(got.Events.Brokers) != 0 || got.Events.Group != "" ||
+		got.Events.RegisteredTopic != "" || got.Events.CAFile != "" ||
+		got.Events.Writer.URL != "" {
+		t.Fatalf("disabled event settings retained dependency values: %+v", got.Events)
+	}
 }
 
 func TestLoad_RequiresExactSalesTrendsTimeZone(t *testing.T) {

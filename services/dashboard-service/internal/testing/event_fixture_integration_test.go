@@ -8,18 +8,25 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
+
+	"github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/application"
+	dashboardelasticsearch "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/elasticsearch"
+	dashboardkafka "github.com/igor-baiborodine/insurance-hub/services/dashboard-service/internal/kafka"
 )
 
 const (
@@ -98,7 +105,7 @@ func TestEventFixture_OracleDefinesIndependentCases(t *testing.T) {
 	assertRegistrationOracle(t, oracle.Events.Registration)
 }
 
-func TestEventFixture_RealKafkaAndElasticsearchResources(t *testing.T) {
+func TestEventFixture_ProductionWorkerProjectsRegistration(t *testing.T) {
 	// given
 	oracle := loadEventOracle(t)
 	environment := requireEventEnvironment(t, oracle)
@@ -111,25 +118,46 @@ func TestEventFixture_RealKafkaAndElasticsearchResources(t *testing.T) {
 	t.Cleanup(producer.Close)
 	waitForKafka(t, ctx, producer)
 	createEventTopic(t, ctx, producer, environment.Topic)
-	consumerOptions := append(
-		kafkaTLSOptions(t, environment),
-		kgo.ClientID("dashboard-event-fixture"),
-		kgo.ConsumerGroup(environment.ConsumerGroup),
-		kgo.ConsumeTopics(environment.Topic),
-		kgo.ConsumeStartOffset(kgo.NewOffset().AtStart()),
-		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
-		kgo.Balancers(kgo.RangeBalancer()),
-	)
-	consumer, err := kgo.NewClient(consumerOptions...)
-	if err != nil {
-		t.Fatalf("construct fixture Kafka consumer: %v", err)
-	}
-	t.Cleanup(consumer.Close)
 	httpClient := &http.Client{
 		Transport: &http.Transport{Proxy: nil},
 		Timeout:   5 * time.Second,
 	}
 	createEventIndex(t, ctx, httpClient, environment)
+	writerClient, err := dashboardelasticsearch.New(dashboardelasticsearch.Config{
+		Endpoint: environment.Elasticsearch,
+		Index:    environment.Index,
+		Timeout:  5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("construct production writer client: %v", err)
+	}
+	t.Cleanup(writerClient.CloseIdleConnections)
+	writer, err := dashboardelasticsearch.NewWriter(writerClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	useCase, err := application.NewProjectPolicy(writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, err := dashboardkafka.NewWorker(dashboardkafka.Settings{
+		Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup,
+		Topic: environment.Topic, ClientID: "policy-registered-dashboard-listener",
+		CACert: environment.KafkaCA, EventType: "registered",
+	}, productionProjection{useCase: useCase}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("construct production registration worker: %v", err)
+	}
+	workerContext, cancelWorker := context.WithCancel(ctx)
+	workerResult := make(chan error, 1)
+	go func() { workerResult <- worker.Run(workerContext) }()
+	readyContext, cancelReady := context.WithTimeout(ctx, 10*time.Second)
+	if err := worker.Check(readyContext); err != nil {
+		cancelReady()
+		cancelWorker()
+		t.Fatalf("production registration worker readiness: %v", err)
+	}
+	cancelReady()
 
 	// when
 	produced := producer.ProduceSync(ctx, &kgo.Record{
@@ -140,18 +168,8 @@ func TestEventFixture_RealKafkaAndElasticsearchResources(t *testing.T) {
 	if err := produced.FirstErr(); err != nil {
 		t.Fatalf("produce registration fixture: %v", err)
 	}
-	fetches := consumer.PollRecords(ctx, 1)
-	if fetchErrors := fetches.Errors(); len(fetchErrors) != 0 {
-		t.Fatalf("consume registration fixture: %v", fetchErrors[0].Err)
-	}
-	records := fetches.Records()
-	if len(records) == 1 {
-		if err := consumer.CommitRecords(ctx, records...); err != nil {
-			t.Fatalf("commit registration fixture: %v", err)
-		}
-	}
 	documentID := expectedDocumentNumber(t, oracle.Events.Registration.ExpectedDocument)
-	indexFixtureDocument(
+	stored := waitForFixtureDocument(
 		t,
 		ctx,
 		httpClient,
@@ -159,18 +177,160 @@ func TestEventFixture_RealKafkaAndElasticsearchResources(t *testing.T) {
 		documentID,
 		oracle.Events.Registration.ExpectedDocument,
 	)
-	stored := readFixtureDocument(t, ctx, httpClient, environment, documentID)
+	replacement := registrationReplacement(t, oracle.Events.Registration, 456.789, "agent-290")
+	produceFixtureEvent(t, ctx, producer, environment.Topic, replacement)
+	stored = waitForFixtureDocument(
+		t, ctx, httpClient, environment, documentID, replacement.ExpectedDocument,
+	)
+	nullAgent := registrationReplacement(t, oracle.Events.Registration, 789.125, nil)
+	produceRawFixtureEvent(t, ctx, producer, environment.Topic, []byte(`{"policy":`))
+	produceFixtureEvent(t, ctx, producer, environment.Topic, nullAgent)
+	stored = waitForFixtureDocument(
+		t, ctx, httpClient, environment, documentID, nullAgent.ExpectedDocument,
+	)
+	cancelWorker()
+	if err := <-workerResult; err != nil {
+		t.Fatalf("run production registration worker: %v", err)
+	}
+	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
+	if err := worker.Shutdown(shutdownContext); err != nil {
+		t.Fatalf("shutdown production registration worker: %v", err)
+	}
 
 	// then
-	if len(records) != 1 {
-		t.Fatalf("consumed records = %d, want 1", len(records))
+	if !equalJSON(t, stored, nullAgent.ExpectedDocument) {
+		t.Fatal("production worker changed the independently expected document")
 	}
-	if string(records[0].Key) != oracle.Events.Registration.Key ||
-		!bytes.Equal(records[0].Value, oracle.Events.Registration.Value) {
-		t.Fatal("Kafka fixture changed the independent key or envelope bytes")
+	verifyHandlerFailureCommitParity(
+		t, ctx, producer, writerClient, httpClient, environment, oracle.Events.Registration,
+	)
+}
+
+type productionProjection struct{ useCase application.ProjectPolicy }
+
+func (projection productionProjection) ProjectPolicy(
+	ctx context.Context,
+	event application.PolicyEvent,
+) error {
+	return projection.useCase.Execute(ctx, event)
+}
+
+type failingProjection struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (projection *failingProjection) ProjectPolicy(
+	context.Context,
+	application.PolicyEvent,
+) error {
+	projection.mu.Lock()
+	projection.calls++
+	projection.mu.Unlock()
+	return errors.New("synthetic writer failure")
+}
+
+func (projection *failingProjection) waitForCalls(t *testing.T, count int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		projection.mu.Lock()
+		calls := projection.calls
+		projection.mu.Unlock()
+		if calls >= count {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	if !equalJSON(t, stored, oracle.Events.Registration.ExpectedDocument) {
-		t.Fatal("Elasticsearch fixture changed the independently expected document")
+	t.Fatalf("projection calls did not reach %d", count)
+}
+
+func verifyHandlerFailureCommitParity(
+	t *testing.T,
+	ctx context.Context,
+	producer *kgo.Client,
+	writerClient *dashboardelasticsearch.Client,
+	httpClient *http.Client,
+	environment eventEnvironment,
+	source oracleEvent,
+) {
+	t.Helper()
+	first := registrationWithNumber(t, source, "SYN-290-FAIL-1")
+	second := registrationWithNumber(t, source, "SYN-290-FAIL-2")
+	produceFixtureEvents(t, ctx, producer, environment.Topic, first, second)
+	projection := &failingProjection{}
+	worker, err := dashboardkafka.NewWorker(dashboardkafka.Settings{
+		Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup,
+		Topic: environment.Topic, ClientID: "policy-registered-dashboard-listener",
+		CACert: environment.KafkaCA, EventType: "registered",
+	}, projection, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerContext, cancelWorker := context.WithCancel(ctx)
+	result := make(chan error, 1)
+	go func() { result <- worker.Run(workerContext) }()
+	if err := worker.Check(ctx); err != nil {
+		cancelWorker()
+		t.Fatal(err)
+	}
+	projection.waitForCalls(t, 1)
+	time.Sleep(300 * time.Millisecond)
+	projection.mu.Lock()
+	calls := projection.calls
+	projection.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("failed fetched batch projected %d records, want 1", calls)
+	}
+	cancelWorker()
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := worker.Shutdown(shutdownContext); err != nil {
+		cancelShutdown()
+		t.Fatal(err)
+	}
+	cancelShutdown()
+
+	writer, err := dashboardelasticsearch.NewWriter(writerClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	useCase, err := application.NewProjectPolicy(writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := dashboardkafka.NewWorker(dashboardkafka.Settings{
+		Brokers: []string{environment.Broker}, Group: environment.ConsumerGroup,
+		Topic: environment.Topic, ClientID: "policy-registered-dashboard-listener",
+		CACert: environment.KafkaCA, EventType: "registered",
+	}, productionProjection{useCase: useCase}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartContext, cancelRestart := context.WithCancel(ctx)
+	restartResult := make(chan error, 1)
+	go func() { restartResult <- restarted.Run(restartContext) }()
+	if err := restarted.Check(ctx); err != nil {
+		cancelRestart()
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	cancelRestart()
+	if err := <-restartResult; err != nil {
+		t.Fatal(err)
+	}
+	shutdownContext, cancelShutdown = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
+	if err := restarted.Shutdown(shutdownContext); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := tryReadFixtureDocument(
+		t, ctx, httpClient, environment, expectedDocumentNumber(t, second.ExpectedDocument),
+	); found {
+		t.Fatal("graceful current-position commit replayed the failed batch remainder")
 	}
 }
 
@@ -205,6 +365,111 @@ func loadEventOracle(t *testing.T) eventOracle {
 		)
 	}
 	return oracle
+}
+
+func registrationReplacement(
+	t *testing.T,
+	source oracleEvent,
+	premium float64,
+	agent any,
+) oracleEvent {
+	t.Helper()
+	var envelope map[string]any
+	if err := json.Unmarshal(source.Value, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	policy, ok := envelope["policy"].(map[string]any)
+	if !ok {
+		t.Fatal("registration policy is not an object")
+	}
+	policy["totalPremium"] = premium
+	policy["agentLogin"] = agent
+	value, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expected map[string]any
+	if err := json.Unmarshal(source.ExpectedDocument, &expected); err != nil {
+		t.Fatal(err)
+	}
+	expected["totalPremium"] = premium
+	expected["agentLogin"] = agent
+	document, err := json.Marshal(expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return oracleEvent{Key: source.Key, Value: value, ExpectedDocument: document}
+}
+
+func registrationWithNumber(t *testing.T, source oracleEvent, number string) oracleEvent {
+	t.Helper()
+	var envelope map[string]any
+	if err := json.Unmarshal(source.Value, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	policy, ok := envelope["policy"].(map[string]any)
+	if !ok {
+		t.Fatal("registration policy is not an object")
+	}
+	policy["number"] = number
+	value, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expected map[string]any
+	if err := json.Unmarshal(source.ExpectedDocument, &expected); err != nil {
+		t.Fatal(err)
+	}
+	expected["number"] = number
+	document, err := json.Marshal(expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return oracleEvent{Key: number, Value: value, ExpectedDocument: document}
+}
+
+func produceFixtureEvent(
+	t *testing.T,
+	ctx context.Context,
+	producer *kgo.Client,
+	topic string,
+	event oracleEvent,
+) {
+	t.Helper()
+	produceRawFixtureEvent(t, ctx, producer, topic, event.Value)
+}
+
+func produceFixtureEvents(
+	t *testing.T,
+	ctx context.Context,
+	producer *kgo.Client,
+	topic string,
+	events ...oracleEvent,
+) {
+	t.Helper()
+	records := make([]*kgo.Record, 0, len(events))
+	for _, event := range events {
+		records = append(records, &kgo.Record{
+			Topic: topic, Key: []byte(event.Key), Value: event.Value,
+		})
+	}
+	if err := producer.ProduceSync(ctx, records...).FirstErr(); err != nil {
+		t.Fatalf("produce registration fixtures: %v", err)
+	}
+}
+
+func produceRawFixtureEvent(
+	t *testing.T,
+	ctx context.Context,
+	producer *kgo.Client,
+	topic string,
+	value []byte,
+) {
+	t.Helper()
+	if err := producer.ProduceSync(ctx, &kgo.Record{Topic: topic, Value: value}).
+		FirstErr(); err != nil {
+		t.Fatalf("produce registration fixture: %v", err)
+	}
 }
 
 func requireJSONEnd(decoder *json.Decoder) error {
@@ -403,33 +668,25 @@ func expectedDocumentNumber(t *testing.T, document json.RawMessage) string {
 	return expected.Number
 }
 
-func indexFixtureDocument(
+func waitForFixtureDocument(
 	t *testing.T,
 	ctx context.Context,
 	client *http.Client,
 	environment eventEnvironment,
 	id string,
-	document json.RawMessage,
-) {
+	expected json.RawMessage,
+) json.RawMessage {
 	t.Helper()
-	endpoint := fmt.Sprintf(
-		"%s/%s/_doc/%s?refresh=true",
-		environment.Elasticsearch,
-		environment.Index,
-		url.PathEscape(id),
-	)
-	request, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPut,
-		endpoint,
-		bytes.NewReader(document),
-	)
-	if err != nil {
-		t.Fatalf("build index fixture request: %v", err)
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) && ctx.Err() == nil {
+		stored, found := tryReadFixtureDocument(t, ctx, client, environment, id)
+		if found && equalJSON(t, stored, expected) {
+			return stored
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	request.Header.Set("Content-Type", "application/json")
-	response, err := client.Do(request)
-	assertHTTPResponse(t, response, err, http.StatusCreated, "index owned fixture document")
+	t.Fatal("production worker did not project the registration")
+	return nil
 }
 
 func readFixtureDocument(
@@ -470,6 +727,49 @@ func readFixtureDocument(
 		t.Fatalf("decode fixture document: %v", err)
 	}
 	return result.Source
+}
+
+func tryReadFixtureDocument(
+	t *testing.T,
+	ctx context.Context,
+	client *http.Client,
+	environment eventEnvironment,
+	id string,
+) (json.RawMessage, bool) {
+	t.Helper()
+	endpoint := fmt.Sprintf(
+		"%s/%s/_doc/%s",
+		environment.Elasticsearch,
+		environment.Index,
+		url.PathEscape(id),
+	)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		t.Fatalf("build read fixture request: %v", err)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("read fixture document: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return nil, false
+	}
+	if response.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		t.Fatalf(
+			"read fixture document returned status %d: %s",
+			response.StatusCode,
+			payload,
+		)
+	}
+	var result struct {
+		Source json.RawMessage `json:"_source"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatalf("decode fixture document: %v", err)
+	}
+	return result.Source, true
 }
 
 func assertHTTPResponse(
