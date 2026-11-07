@@ -12,7 +12,6 @@ PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py script
 	scripts/disposable_deployment.py scripts/image_check.py scripts/service_process.py \
 	scripts/test_image_check.py \
 	scripts/elasticsearch_integration.py scripts/test_elasticsearch_integration.py \
-	scripts/event_integration.py scripts/test_event_integration.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_disposable_deployment.py \
 	scripts/test_disposable_command.py \
@@ -20,7 +19,6 @@ PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py script
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_elasticsearch_integration.py \
-	scripts/test_event_integration.py \
 	scripts/test_image_check.py \
 	scripts/test_deployment.py \
 	scripts/test_reader_administration.py \
@@ -67,16 +65,12 @@ OTEL_HTTP_VERSION := v0.70.0
 X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.0.1
 ELASTICSEARCH_CLIENT_VERSION := v8.19.7
-FRANZ_GO_VERSION := v1.22.2
-KMSG_VERSION := v1.15.0
 ELASTICSEARCH_IMAGE := docker.elastic.co/elasticsearch/elasticsearch:8.19.6@sha256:bfb2108076735fbfc5dcd5d49f12f5aa93fab9759034c55f7da3b4345606c903
-KAFKA_IMAGE := apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 TEST_PACKAGES ?= ./...
 COVERAGE_EXCLUDE_PATHS := gen internal/testing
 INTEGRATION_COVERAGE_FILE ?=
 ELASTICSEARCH_INTEGRATION_COVERAGE_FILE ?= elasticsearch-integration-coverage.txt
-EVENT_INTEGRATION_COVERAGE_FILE ?= event-integration-coverage.txt
 HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
@@ -109,7 +103,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
-	test-coverage-tooling test-integration test-elasticsearch-integration test-event-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
+	test-coverage-tooling test-integration test-elasticsearch-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
 	image-build image-check _image-check-existing deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop \
 	reader-ensure reader-verify reader-rotate deploy-test-tooling deploy-test \
@@ -203,8 +197,6 @@ update-deps:
 		buf.build/go/protovalidate@$(PROTOVALIDATE_GO_VERSION) \
 		buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go@$(PROTOVALIDATE_SCHEMA_GO_VERSION) \
 		github.com/elastic/go-elasticsearch/v8@$(ELASTICSEARCH_CLIENT_VERSION) \
-		github.com/twmb/franz-go@$(FRANZ_GO_VERSION) \
-		github.com/twmb/franz-go/pkg/kmsg@$(KMSG_VERSION) \
 		github.com/grpc-ecosystem/grpc-gateway/v2@$(GRPC_GATEWAY_VERSION) \
 		go.opentelemetry.io/otel@$(OTEL_VERSION) \
 		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
@@ -222,7 +214,7 @@ update-deps:
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration \
-	test-elasticsearch-integration test-event-integration build \
+	test-elasticsearch-integration build \
 	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
 
 check-gateway-contract: python-runtime-check
@@ -256,12 +248,6 @@ test-elasticsearch-integration: python-runtime-check ## Exercise total-sales aga
 		ELASTICSEARCH_INTEGRATION_COVERAGE_FILE="$(ELASTICSEARCH_INTEGRATION_COVERAGE_FILE)" \
 		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" scripts/elasticsearch_integration.py
-
-test-event-integration: python-runtime-check ## Validate Dashboard event fixtures with owned disposable Kafka and Elasticsearch
-	@DOCKER="$(DOCKER)" GO="$(GO)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
-		KAFKA_IMAGE="$(KAFKA_IMAGE)" EVENT_INTEGRATION_COVERAGE_FILE="$(EVENT_INTEGRATION_COVERAGE_FILE)" \
-		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		"$(PYTHON)" scripts/event_integration.py
 
 shared-fast-build:
 	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
