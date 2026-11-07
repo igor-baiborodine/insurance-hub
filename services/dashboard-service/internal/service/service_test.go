@@ -281,6 +281,7 @@ func TestRun_EventWorkerGaugeUsesConfiguredMode(t *testing.T) {
 		{name: "enabled", enabled: true, want: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			reader := sdkmetric.NewManualReader()
 			meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 			t.Cleanup(func() { _ = meterProvider.Shutdown(context.Background()) })
@@ -319,7 +320,10 @@ func TestRun_EventWorkerGaugeUsesConfiguredMode(t *testing.T) {
 				}
 			}
 
+			// when
 			err := run(context.Background(), settings, slog.Default(), deps)
+
+			// then
 			if err == nil ||
 				!strings.Contains(err.Error(), "stop after event observer") {
 				t.Fatalf("run error = %v", err)
