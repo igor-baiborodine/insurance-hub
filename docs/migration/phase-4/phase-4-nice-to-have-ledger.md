@@ -47,6 +47,7 @@
       - [issue-215-N12 Additional guarded search administration automation](#issue-215-n12-additional-guarded-search-administration-automation)
       - [issue-215-N13 Java policy-search retirement](#issue-215-n13-java-policy-search-retirement)
       - [issue-215-N14 Authoritative Go-era recovery](#issue-215-n14-authoritative-go-era-recovery)
+      - [issue-215-N15 Policy event commit-failure telemetry](#issue-215-n15-policy-event-commit-failure-telemetry)
   - [Sub-epic 4.4 Dashboard migration to Go](#sub-epic-44-dashboard-migration-to-go)
     - [Issue 266 Migrate Dashboard using Policy Search principles](#issue-266-migrate-dashboard-using-policy-search-principles)
       - [issue-266-N01 Dashboard analytics corrections](#issue-266-n01-dashboard-analytics-corrections)
@@ -600,7 +601,8 @@ Origin: issue-215 requirements N01/N03–N13 and the user's 2026-10-30 requests 
 per-agent visibility and turn useful migration exclusions into deferred future work. N04 retains
 the previously accepted access-model decision. The user subsequently promoted N13 into issue
 215's mandatory retirement scope on 2026-10-30; the other deferred entries do not expand its
-mandatory delivery scope.
+mandatory delivery scope. N14 preserves the later recovery finding. N15 was added on 2026-11-07
+after the Dashboard migration exposed a useful Policy Search commit-failure observability gap.
 
 Source ticket: [issue 215](https://github.com/igor-baiborodine/insurance-hub/issues/215).
 Local assessment: `ai/artifacts/epic-4.3/issue-215-requirements.md`, optional requirements and
@@ -626,6 +628,7 @@ relative to issue 215; existing roadmap commitments keep their own priority and 
 | [issue-215-N12](#issue-215-n12-additional-guarded-search-administration-automation) | Additional guarded search administration automation | Deferred | Unassigned; select through a separately accepted receiving scope |
 | [issue-215-N13](#issue-215-n13-java-policy-search-retirement) | Java policy-search retirement | Scheduled | Promoted on 2026-10-30 into [issue 215](https://github.com/igor-baiborodine/insurance-hub/issues/215): mandatory M17, child [#236](https://github.com/igor-baiborodine/insurance-hub/issues/236) (C09); not delivered |
 | [issue-215-N14](#issue-215-n14-authoritative-go-era-recovery) | Authoritative Go-era recovery source and rebuild | Deferred | Unassigned; select only through a separately accepted future scope; does not gate #215 or #228–#236 |
+| [issue-215-N15](#issue-215-n15-policy-event-commit-failure-telemetry) | Policy event commit-failure telemetry | Deferred | Unassigned; align with the bounded Dashboard signal through a separately accepted receiving scope |
 
 #### issue-215-N01 Search pagination and streaming
 
@@ -895,6 +898,36 @@ retention contract, proves a consistent snapshot/replay boundary and isolated re
 covers interrupted restart and missing-publication repair, and rejects history gaps or inconsistent
 watermarks. Preserve index isolation, permissions and data privacy. Kafka's current seven-day
 delete retention and PostgreSQL logical WAL setting alone do not establish this capability.
+
+#### issue-215-N15 Policy event commit-failure telemetry
+
+**Requirement:** Report Policy Search Kafka offset commit failures through a bounded telemetry
+observer for both periodic auto-commit callbacks and the explicit shutdown commit. Preserve the
+current returned errors, safe fallback logging, commit timing and weak delivery guarantees. Add a
+fixed event-type counter and actionable alert without recording topics, groups, offsets, broker
+details, event payloads or arbitrary error text. Prefer the Dashboard consumer's independently
+validated behavior while choosing one consistent observer contract for both services.
+
+**Why deferred:** Policy Search currently logs periodic commit failures and returns shutdown commit
+errors, which preserves failure behavior but does not provide a dedicated metric or alert. Its
+accepted migration scope did not require that signal. Dashboard issue 290 added the bounded signal
+for its own explicit observability requirements and exposed this parity improvement; applying it
+retroactively is useful but does not block Policy Search migration, cutover or retirement.
+
+**Reconsider when:** Policy Search event observability is next revised, operators need an alert for
+possible replay after a failed commit, or consumer telemetry is deliberately aligned across the two
+services.
+
+**Acceptance evidence:** Unit tests cover periodic and shutdown commit failures, returned-error and
+fallback-log behavior, bounded labels and successful commits that emit no failure. Provider,
+transport and monitoring tests prove the counter reaches the supported backend and triggers only
+the intended alert. A real or controlled Kafka failure scenario demonstrates the signal without
+changing offsets, retry behavior or delivery guarantees, double-counting one failure, or leaking
+sensitive values. Existing Policy Search event processing and lifecycle checks remain green.
+
+**Related source:** Dashboard issue 290 introduced the corresponding bounded observer after direct
+comparison with Policy Search. This entry records the reusable improvement without adding it to
+issue 290 or silently expanding issue 215.
 
 ## Sub-epic 4.4 Dashboard migration to Go
 
