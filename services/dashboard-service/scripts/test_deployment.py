@@ -761,7 +761,7 @@ def test_render_requires_the_runtime_config_map_linkage() -> None:
 
 @pytest.mark.parametrize(
     ("environment", "enabled"),
-    [("local-dev", True), ("qa", False)],
+    [("local-dev", True), ("qa", True)],
 )
 def test_event_activation_assets_and_selected_state_are_exact(
     environment: str, enabled: bool

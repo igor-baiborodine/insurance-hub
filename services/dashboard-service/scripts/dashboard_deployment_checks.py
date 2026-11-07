@@ -627,23 +627,23 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             }
         )
     expected_volumes: list[dict[str, Any]] = []
-    if environment == "qa":
-        expected_volumes.append(
-            {
-                "name": "elasticsearch-ca",
-                "secret": {
-                    "secretName": "qa-dashboard-elasticsearch-ca",
-                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                    "defaultMode": 292,
-                },
-            }
-        )
     if event_enabled:
         expected_volumes.append(
             {
                 "name": "kafka-ca",
                 "secret": {
                     "secretName": f"{environment}-dashboard-kafka-ca",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 292,
+                },
+            }
+        )
+    if environment == "qa":
+        expected_volumes.append(
+            {
+                "name": "elasticsearch-ca",
+                "secret": {
+                    "secretName": "qa-dashboard-elasticsearch-ca",
                     "items": [{"key": "ca.crt", "path": "ca.crt"}],
                     "defaultMode": 292,
                 },
@@ -686,6 +686,10 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(len(containers) == 1, "container inventory differs")
     container = containers[0]
     expected_mounts: list[dict[str, Any]] = []
+    if event_enabled:
+        expected_mounts.append(
+            {"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}
+        )
     if environment == "qa":
         expected_mounts.append(
             {
@@ -693,10 +697,6 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
                 "mountPath": "/etc/dashboard/elasticsearch",
                 "readOnly": True,
             }
-        )
-    if event_enabled:
-        expected_mounts.append(
-            {"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}
         )
     require(
         container.get("name") == "dashboard-api"

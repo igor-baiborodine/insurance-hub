@@ -32,6 +32,18 @@ patches:
     target:
       kind: NetworkPolicy
       name: dashboard-api
+  - path: event-enabled-config-patch.yaml
+    target:
+      kind: ConfigMap
+      name: dashboard-config
+  - path: event-enabled-deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: dashboard-api
+  - path: event-enabled-network-policy-patch.yaml
+    target:
+      kind: NetworkPolicy
+      name: dashboard-api
 replacements:
   - source:
       kind: ConfigMap
