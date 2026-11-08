@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import http.client
 import json
 import os
 import re
@@ -48,8 +50,10 @@ EVENT_WRITER_PASSWORD = "issue-290-disposable-writer-password"
 ELASTICSEARCH_NAME = "dashboard-disposable-elasticsearch"
 KAFKA_NAME = "local-dev-kafka"
 KAFKA_BOOTSTRAP = "local-dev-kafka-kafka-bootstrap"
+DASHBOARD_HTTP_SERVICE_PORT = 80
 HTTP_STATUS_MARKER = "__INSURANCE_HUB_HTTP_STATUS__="
 MAX_HTTP_BODY_BYTES = 4096
+QUALIFICATION_ASSET = ROOT / "services/dashboard-service/testdata/qualification.json"
 
 
 class CheckFailed(RuntimeError):
@@ -71,9 +75,176 @@ class ImageContentIdentity(NamedTuple):
     pod: str
 
 
+class CandidateIdentity(NamedTuple):
+    """Immutable source and image identity selected for qualification."""
+
+    revision: str
+    version: str
+    local_image_id: str
+    registry_digest: str | None
+
+
+class OffsetSnapshot(NamedTuple):
+    """Committed and broker positions for one owned topic partition."""
+
+    partition: int
+    committed: int
+    log_end: int
+
+
+class StateSnapshot(NamedTuple):
+    """Persistent state retained while only the Dashboard process is stopped."""
+
+    mapping: dict[str, Any]
+    documents: list[dict[str, Any]]
+    offsets: list[OffsetSnapshot]
+
+
 def require(condition: object, message: str) -> None:
     if not condition:
         raise CheckFailed(message)
+
+
+def load_qualification() -> dict[str, Any]:
+    """Load the fixed, independently calculated issue-292 qualification oracle."""
+
+    value = json.loads(QUALIFICATION_ASSET.read_text(encoding="utf-8"))
+    measurement = value.get("measurement", {})
+    events = value.get("events", [])
+    queries = value.get("queries", [])
+    require(value.get("schemaVersion") == 1, "qualification schema differs")
+    require(
+        measurement
+        == {
+            "requestsPerQuery": 10,
+            "maximumSeconds": 300,
+            "eventVisibilitySeconds": 30,
+            "requestDeadlineSeconds": 5,
+        },
+        "qualification measurement bounds differ",
+    )
+    require(
+        [event.get("name") for event in events]
+        == ["initial", "same-id-replacement", "second-policy", "post-restore"],
+        "qualification event sequence differs",
+    )
+    require(
+        [event.get("expectedDocument", {}).get("number") for event in events]
+        == ["SYN-292-001", "SYN-292-001", "SYN-292-002", "SYN-292-003"],
+        "qualification synthetic identities differ",
+    )
+    require(
+        [query.get("name") for query in queries] == ["total-sales", "agent-sales", "sales-trends"],
+        "qualification query set differs",
+    )
+    for event in events:
+        require(
+            isinstance(event.get("value"), dict)
+            and isinstance(event.get("expectedDocument"), dict),
+            "qualification event payload differs",
+        )
+    for query in queries:
+        require(
+            isinstance(query.get("request"), dict)
+            and isinstance(query.get("expectedResponse"), dict),
+            "qualification query oracle differs",
+        )
+    require(
+        isinstance(value.get("postRestoreQuery"), dict),
+        "qualification post-restore oracle differs",
+    )
+    return value
+
+
+def prepare_candidate_image(image: str, expected_revision: str) -> CandidateIdentity:
+    """Resolve a local development image or an immutable registry candidate."""
+
+    local_pattern = (
+        r"insurance-hub-dashboard-api:1\.[0-9]+\.[0-9]+-local\."
+        r"(?!0{12})[0-9a-f]{12}"
+    )
+    registry_match = re.fullmatch(r".+@(sha256:[0-9a-f]{64})", image)
+    is_local = bool(re.fullmatch(local_pattern, image))
+    require(is_local or bool(registry_match), "IMAGE_REF is not an accepted immutable candidate")
+    if registry_match:
+        require(
+            bool(re.fullmatch(r"(?!0{40})[0-9a-f]{40}", expected_revision)),
+            "QUALIFICATION_SOURCE_REVISION is required for a registry candidate",
+        )
+        command(
+            ["docker", "pull", image],
+            timeout=300,
+            activity="pull immutable Dashboard qualification image",
+        )
+    else:
+        require(
+            not expected_revision,
+            "QUALIFICATION_SOURCE_REVISION is only valid for a registry candidate",
+        )
+    inspected = json.loads(command(["docker", "image", "inspect", image]))
+    require(len(inspected) == 1, "Dashboard candidate image is absent")
+    item = inspected[0]
+    labels = item.get("Config", {}).get("Labels", {})
+    revision = str(labels.get("org.opencontainers.image.revision", ""))
+    version = str(labels.get("org.opencontainers.image.version", ""))
+    local_image_id = str(item.get("Id", ""))
+    image_content_digest(local_image_id, "local Docker")
+    require(
+        bool(re.fullmatch(r"(?!0{40})[0-9a-f]{40}", revision)),
+        "Dashboard candidate source revision is invalid",
+    )
+    require(version == f"git-{revision[:12]}", "Dashboard candidate version differs")
+    if registry_match:
+        require(revision == expected_revision, "Dashboard candidate source differs")
+        repo_digests = item.get("RepoDigests", [])
+        require(
+            isinstance(repo_digests, list)
+            and any(str(value).endswith(f"@{registry_match.group(1)}") for value in repo_digests),
+            "local registry candidate digest differs",
+        )
+    else:
+        require(image.endswith(revision[:12]), "Dashboard candidate source differs")
+    return CandidateIdentity(
+        revision,
+        version,
+        local_image_id,
+        registry_match.group(1) if registry_match else None,
+    )
+
+
+def prepare_kind_candidate(image: str, candidate: CandidateIdentity) -> str:
+    """Make the selected content resolvable by the existing single-node Kind cluster."""
+
+    if candidate.registry_digest is None:
+        command(
+            ["kind", "load", "docker-image", image, "--name", KIND_CLUSTER],
+            timeout=120,
+            activity="load Dashboard image into existing Kind cluster",
+        )
+        return image
+    runtime_image, separator, _digest = image.partition("@")
+    require(bool(separator) and ":" in runtime_image.rsplit("/", 1)[-1], "candidate tag is absent")
+    nodes = command(["kind", "get", "nodes", "--name", KIND_CLUSTER]).splitlines()
+    require(len(nodes) == 1, "qualification requires the selected single-node Kind cluster")
+    command(
+        ["docker", "exec", nodes[0], "crictl", "pull", runtime_image],
+        timeout=300,
+        activity="pull Dashboard candidate tag into Kind containerd",
+    )
+    inspected = json.loads(
+        command(
+            ["docker", "exec", nodes[0], "crictl", "inspecti", runtime_image],
+            timeout=30,
+            activity="inspect Dashboard candidate tag in Kind containerd",
+        )
+    )
+    repo_digests = inspected.get("status", {}).get("repoDigests", [])
+    require(
+        isinstance(repo_digests, list)
+        and any(str(value).endswith(f"@{candidate.registry_digest}") for value in repo_digests),
+        "Kind candidate tag does not resolve to the selected registry digest",
+    )
+    return runtime_image
 
 
 def safe_environment(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -458,6 +629,7 @@ def render(
     image: str,
     source_short: str,
     elasticsearch_image: str,
+    registry_digest: str | None = None,
     *,
     event_enabled: bool = False,
 ) -> tuple[str, list[dict[str, Any]]]:
@@ -470,7 +642,10 @@ def render(
     deployment["spec"]["template"]["metadata"].setdefault("labels", {})[OWNER_LABEL] = (
         cluster.namespace
     )
-    deployment["spec"]["template"]["spec"]["containers"][0]["image"] = image
+    dashboard_container = deployment["spec"]["template"]["spec"]["containers"][0]
+    dashboard_container["image"] = image
+    if registry_digest or re.fullmatch(r".+@sha256:[0-9a-f]{64}", image):
+        dashboard_container["imagePullPolicy"] = "IfNotPresent"
     version = f"git-{source_short}"
     deployment["metadata"].setdefault("labels", {})["app.kubernetes.io/version"] = version
     deployment["spec"]["template"]["metadata"].setdefault("labels", {})[
@@ -480,6 +655,14 @@ def render(
         version
     )
     config = checks.resource(items, "ConfigMap", "local-dev-dashboard-config")["data"]
+    for name in (
+        "EVENT_WORKERS_ENABLED",
+        "KAFKA_BROKERS",
+        "KAFKA_GROUP",
+        "KAFKA_REGISTERED_TOPIC",
+        "KAFKA_CA_FILE",
+    ):
+        config.pop(name, None)
     config.update(
         {
             "ELASTICSEARCH_URL": f"http://{ELASTICSEARCH_NAME}:9200",
@@ -488,11 +671,17 @@ def render(
             "ELASTICSEARCH_TIMEOUT": "5s",
         }
     )
-    environment = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+    environment = dashboard_container["env"]
     environment[:] = [
         item
         for item in environment
-        if item.get("name") not in {"ELASTICSEARCH_USERNAME", "ELASTICSEARCH_PASSWORD"}
+        if item.get("name")
+        not in {
+            "ELASTICSEARCH_USERNAME",
+            "ELASTICSEARCH_PASSWORD",
+            "ELASTICSEARCH_WRITER_USERNAME",
+            "ELASTICSEARCH_WRITER_PASSWORD",
+        }
     ]
     environment.extend(
         [
@@ -508,6 +697,15 @@ def render(
             },
         ]
     )
+    dashboard_container["volumeMounts"] = [
+        item
+        for item in dashboard_container.get("volumeMounts", [])
+        if item.get("name") != "kafka-ca"
+    ]
+    pod_spec = deployment["spec"]["template"]["spec"]
+    pod_spec["volumes"] = [
+        item for item in pod_spec.get("volumes", []) if item.get("name") != "kafka-ca"
+    ]
     policy = checks.resource(items, "NetworkPolicy", "local-dev-dashboard-api")
     for rule in policy["spec"]["ingress"]:
         for source in rule["from"]:
@@ -955,10 +1153,36 @@ def require_matching_image_content(
     image: str,
     containerd_image: dict[str, Any],
     pod_image_id: str,
+    registry_digest: str | None = None,
 ) -> ImageContentIdentity:
     require(isinstance(containerd_image, dict), "containerd image inspection is invalid")
     containerd_status = containerd_image.get("status", {})
     require(isinstance(containerd_status, dict), "containerd image status is absent")
+    registry_match = re.fullmatch(r".+@(sha256:[0-9a-f]{64})", image)
+    selected_digest = registry_digest or (registry_match.group(1) if registry_match else None)
+    if selected_digest:
+        repo_digests = containerd_status.get("repoDigests", [])
+        available_digests = {
+            image_content_digest(str(value), "containerd repository")
+            for value in repo_digests
+            if isinstance(value, str)
+        }
+        require(
+            isinstance(repo_digests, list) and selected_digest in available_digests,
+            "containerd image digest differs from the selected Dashboard image",
+        )
+        local_digest = image_content_digest(local_image_id, "local Docker")
+        containerd_id = image_content_digest(str(containerd_status.get("id", "")), "containerd")
+        pod_digest = image_content_digest(pod_image_id, "Pod runtime")
+        require(
+            local_digest == containerd_id,
+            "Kind containerd content differs from the selected Dashboard image",
+        )
+        require(
+            pod_digest in available_digests,
+            "running Pod identity is absent from the selected containerd image",
+        )
+        return ImageContentIdentity(local_digest, selected_digest, pod_digest)
     expected_tag = f"docker.io/library/{image}"
     repo_tags = containerd_status.get("repoTags", [])
     require(
@@ -1213,7 +1437,11 @@ def verify_event_permissions(cluster: Cluster) -> None:
 
 
 def verify_runtime_identity(
-    cluster: Cluster, version: str, image: str, local_image_id: str
+    cluster: Cluster,
+    version: str,
+    image: str,
+    local_image_id: str,
+    registry_digest: str | None = None,
 ) -> None:
     pod = cluster.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api")["items"][0]
     configured_image = pod["spec"]["containers"][0]["image"]
@@ -1233,6 +1461,7 @@ def verify_runtime_identity(
         image,
         containerd_image,
         str(pod_status.get("imageID", "")),
+        registry_digest,
     )
     logs = cluster.kubectl("logs", pod["metadata"]["name"])
     entries = []
@@ -1315,6 +1544,8 @@ def direct_rpc(cluster: Cluster) -> None:
                 "-C",
                 "services/dashboard-service",
                 "_deploy-test-rpc",
+                f"TOOLS_DIR={os.environ.get('TOOLS_DIR', '')}",
+                f"COMMON_GO_TOOLING_PYTHON={sys.executable}",
             ],
             timeout=60,
             environment={
@@ -1333,23 +1564,7 @@ def direct_rpc(cluster: Cluster) -> None:
         )
 
 
-def exercise_registration_projection(cluster: Cluster) -> None:
-    oracle = json.loads(
-        (ROOT / "services/dashboard-service/testdata/events/oracle.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    registration = oracle.get("events", {}).get("registration", {})
-    event = registration.get("value")
-    expected = registration.get("expectedDocument")
-    document_id = expected.get("number") if isinstance(expected, dict) else None
-    require(
-        registration.get("key") == "SYN-290-KEY-IGNORED"
-        and isinstance(event, dict)
-        and isinstance(expected, dict)
-        and document_id == "SYN-290-001",
-        "Dashboard event oracle differs",
-    )
+def produce_qualification_event(cluster: Cluster, event: dict[str, Any]) -> None:
     kafka_cli(
         cluster,
         "kafka-console-producer.sh",
@@ -1359,42 +1574,366 @@ def exercise_registration_projection(cluster: Cluster) -> None:
         "/etc/kafka/secrets/client.properties",
         "--topic",
         event_admin.TOPIC,
-        input_text=json.dumps(event, separators=(",", ":")) + "\n",
+        input_text=json.dumps(event["value"], separators=(",", ":")) + "\n",
+        timeout=20,
+    )
+
+
+def wait_for_qualification_document(
+    client: event_admin.ElasticsearchClient,
+    event: dict[str, Any],
+    visibility_seconds: int,
+) -> float:
+    expected = event["expectedDocument"]
+    document_id = expected["number"]
+    started = time.monotonic()
+    deadline = started + visibility_seconds
+    while time.monotonic() < deadline:
+        try:
+            status, result = client.request(
+                "GET", f"/{event_admin.INDEX}/_doc/{document_id}?refresh=true"
+            )
+        except event_admin.AdministrationError:
+            status, result = 0, None
+        if status == 200 and isinstance(result, dict) and result.get("_source") == expected:
+            return time.monotonic() - started
+        time.sleep(0.25)
+    raise CheckFailed(f"qualification event {event['name']} was not visible within its bound")
+
+
+def run_qualification_events(
+    cluster: Cluster,
+    client: event_admin.ElasticsearchClient,
+    events: list[dict[str, Any]],
+    visibility_seconds: int,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for event in events:
+        produce_qualification_event(cluster, event)
+        elapsed = wait_for_qualification_document(client, event, visibility_seconds)
+        results.append({"name": event["name"], "visibilitySeconds": round(elapsed, 3)})
+        print(f"PASS qualification event {event['name']} visible in {elapsed:.3f}s", flush=True)
+    return results
+
+
+def post_dashboard_query(
+    connection: http.client.HTTPConnection,
+    query: dict[str, Any],
+) -> None:
+    payload = json.dumps(query["request"], separators=(",", ":"))
+    try:
+        connection.request(
+            "POST",
+            query["path"],
+            body=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        data = response.read(MAX_HTTP_BODY_BYTES + 1)
+    except (OSError, http.client.HTTPException) as error:
+        raise CheckFailed(f"qualification query {query['name']} failed") from error
+    require(len(data) <= MAX_HTTP_BODY_BYTES, "qualification query response exceeded its bound")
+    try:
+        body = json.loads(data)
+    except json.JSONDecodeError as error:
+        raise CheckFailed(f"qualification query {query['name']} response is not JSON") from error
+    require(
+        response.status == 200 and body == query["expectedResponse"],
+        f"qualification query {query['name']} response differs",
+    )
+
+
+def run_query_workload(
+    cluster: Cluster,
+    queries: list[dict[str, Any]],
+    repetitions: int,
+    request_deadline: int,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    with forwarded_service(cluster, "local-dev-dashboard-api", DASHBOARD_HTTP_SERVICE_PORT) as port:
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=request_deadline)
+        try:
+            for query in queries:
+                started = time.monotonic()
+                for _request_number in range(repetitions):
+                    post_dashboard_query(connection, query)
+                elapsed = time.monotonic() - started
+                results.append(
+                    {
+                        "name": query["name"],
+                        "requests": repetitions,
+                        "elapsedSeconds": round(elapsed, 3),
+                    }
+                )
+                print(
+                    f"PASS qualification query {query['name']} x{repetitions} in {elapsed:.3f}s",
+                    flush=True,
+                )
+        finally:
+            connection.close()
+    return results
+
+
+def parse_consumer_group_offsets(output: str) -> list[OffsetSnapshot]:
+    offsets: list[OffsetSnapshot] = []
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) < 5 or fields[0] == "GROUP":
+            continue
+        if fields[0] != event_admin.GROUP or fields[1] != event_admin.TOPIC:
+            continue
+        try:
+            offsets.append(OffsetSnapshot(int(fields[2]), int(fields[3]), int(fields[4])))
+        except ValueError as error:
+            raise CheckFailed("owned Kafka offset output differs") from error
+    require(bool(offsets), "owned Kafka offsets are absent")
+    require(
+        len({offset.partition for offset in offsets}) == len(offsets),
+        "owned Kafka offsets contain duplicate partitions",
+    )
+    return sorted(offsets)
+
+
+def consumer_group_offsets(cluster: Cluster) -> list[OffsetSnapshot]:
+    output = kafka_cli(
+        cluster,
+        "kafka-consumer-groups.sh",
+        "--bootstrap-server",
+        "localhost:9093",
+        "--command-config",
+        "/etc/kafka/secrets/client.properties",
+        "--describe",
+        "--group",
+        event_admin.GROUP,
+    )
+    return parse_consumer_group_offsets(output)
+
+
+def wait_for_committed_offsets(
+    cluster: Cluster,
+    minimum: dict[int, int],
+    seconds: int = 30,
+) -> list[OffsetSnapshot]:
+    deadline = time.monotonic() + seconds
+    observed: list[OffsetSnapshot] = []
+    while time.monotonic() < deadline:
+        try:
+            observed = consumer_group_offsets(cluster)
+        except CheckFailed:
+            observed = []
+        by_partition = {offset.partition: offset for offset in observed}
+        if minimum and all(
+            partition in by_partition and by_partition[partition].committed >= value
+            for partition, value in minimum.items()
+        ):
+            return observed
+        time.sleep(0.5)
+    raise CheckFailed("owned Kafka committed offsets did not reach the expected positions")
+
+
+def capture_state(
+    client: event_admin.ElasticsearchClient,
+    offsets: list[OffsetSnapshot],
+) -> StateSnapshot:
+    status, mapping_result = client.request("GET", f"/{event_admin.INDEX}/_mapping")
+    require(status == 200 and isinstance(mapping_result, dict), "qualification mapping is absent")
+    mapping = mapping_result.get(event_admin.INDEX, {}).get("mappings")
+    require(isinstance(mapping, dict), "qualification mapping differs")
+    status, search_result = client.request(
+        "POST",
+        f"/{event_admin.INDEX}/_search",
+        {"size": 100, "query": {"prefix": {"number": "SYN-292-"}}},
+    )
+    require(status == 200 and isinstance(search_result, dict), "qualification documents are absent")
+    hits = search_result.get("hits", {}).get("hits", [])
+    require(isinstance(hits, list), "qualification document response differs")
+    documents = sorted(
+        [
+            {"id": str(hit.get("_id", "")), "source": hit.get("_source")}
+            for hit in hits
+            if isinstance(hit, dict)
+        ],
+        key=lambda item: item["id"],
+    )
+    return StateSnapshot(mapping, documents, offsets)
+
+
+def require_same_state(name: str, expected: StateSnapshot, actual: StateSnapshot) -> None:
+    require(actual.mapping == expected.mapping, f"{name} mapping changed")
+    require(actual.documents == expected.documents, f"{name} documents changed")
+    require(actual.offsets == expected.offsets, f"{name} committed offsets changed")
+
+
+def safe_state_record(state: StateSnapshot) -> dict[str, Any]:
+    mapping_text = json.dumps(state.mapping, separators=(",", ":"), sort_keys=True)
+    return {
+        "mappingSha256": hashlib.sha256(mapping_text.encode()).hexdigest(),
+        "documents": state.documents,
+        "offsets": [offset._asdict() for offset in state.offsets],
+    }
+
+
+def deployment_configuration_sha256(cluster: Cluster) -> str:
+    deployment = cluster.json("get", "deployment", "local-dev-dashboard-api")
+    config = cluster.json("get", "configmap", "local-dev-dashboard-config")
+    selected = {
+        "template": deployment.get("spec", {}).get("template"),
+        "config": config.get("data"),
+    }
+    encoded = json.dumps(selected, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def dashboard_pod_state(cluster: Cluster) -> dict[str, Any]:
+    items = cluster.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api").get(
+        "items", []
+    )
+    items = [item for item in items if not item.get("metadata", {}).get("deletionTimestamp")]
+    require(len(items) == 1, "qualification expected one Dashboard Pod")
+    pod = items[0]
+    status = pod.get("status", {}).get("containerStatuses", [{}])[0]
+    return {
+        "uid": pod.get("metadata", {}).get("uid"),
+        "image": pod.get("spec", {}).get("containers", [{}])[0].get("image"),
+        "imageID": status.get("imageID"),
+        "restartCount": status.get("restartCount"),
+    }
+
+
+def run_bounded_smoke(
+    cluster: Cluster,
+    qualification: dict[str, Any],
+) -> dict[str, Any]:
+    measurement = qualification["measurement"]
+    started = time.monotonic()
+    pod_before = dashboard_pod_state(cluster)
+    with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
+        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        events = run_qualification_events(
+            cluster,
+            client,
+            qualification["events"][:3],
+            measurement["eventVisibilitySeconds"],
+        )
+    verify_isolated_kafka_names(cluster)
+    queries = run_query_workload(
+        cluster,
+        qualification["queries"],
+        measurement["requestsPerQuery"],
+        measurement["requestDeadlineSeconds"],
+    )
+    offsets = wait_for_committed_offsets(cluster, {0: 3})
+    elapsed = time.monotonic() - started
+    pod_after = dashboard_pod_state(cluster)
+    require(elapsed <= measurement["maximumSeconds"], "qualification smoke exceeded five minutes")
+    require(pod_after == pod_before, "Dashboard restarted during qualification smoke")
+    return {
+        "elapsedSeconds": round(elapsed, 3),
+        "events": events,
+        "queries": queries,
+        "offsets": [offset._asdict() for offset in offsets],
+        "pod": pod_after,
+    }
+
+
+def run_stop_restore(
+    cluster: Cluster,
+    qualification: dict[str, Any],
+    candidate: CandidateIdentity,
+    image: str,
+) -> dict[str, Any]:
+    configuration = deployment_configuration_sha256(cluster)
+    before_offsets = wait_for_committed_offsets(cluster, {0: 3})
+    with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
+        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        before = capture_state(client, before_offsets)
+    cluster.kubectl("scale", "deployment/local-dev-dashboard-api", "--replicas=0")
+    wait_for("Dashboard stopped for retained-state check", lambda: endpoint_count(cluster) == 0)
+    with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
+        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        stopped = capture_state(client, consumer_group_offsets(cluster))
+    require_same_state("stopped Dashboard", before, stopped)
+    cluster.kubectl("scale", "deployment/local-dev-dashboard-api", "--replicas=1")
+    cluster.kubectl(
+        "rollout",
+        "status",
+        "deployment/local-dev-dashboard-api",
+        "--timeout=180s",
+        timeout=210,
+        activity="restore qualified Dashboard candidate",
+    )
+    wait_for("restored Dashboard endpoint ready", lambda: endpoint_count(cluster) == 1)
+    require(
+        deployment_configuration_sha256(cluster) == configuration,
+        "restored Dashboard configuration differs",
+    )
+    verify_runtime_identity(
+        cluster,
+        candidate.version,
+        image,
+        candidate.local_image_id,
+        candidate.registry_digest,
     )
     with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
-        admin = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
-        projected: dict[str, Any] | None = None
-
-        def stored() -> bool:
-            nonlocal projected
-            try:
-                status, result = admin.request("GET", f"/{event_admin.INDEX}/_doc/{document_id}")
-            except event_admin.AdministrationError:
-                return False
-            if status == 200 and isinstance(result, dict):
-                projected = result.get("_source")
-            return projected == expected
-
-        wait_for("registration projected through deployed worker", stored, 90)
-    response = http_probe(
-        cluster,
-        "event-total-sales",
-        [
-            "--header",
-            "Content-Type: application/json",
-            "--data",
-            '{"saleDateFrom":"2026-01-01","saleDateTo":"2026-02-01"}',
-            "http://local-dev-dashboard-api/dashboard/totalsales",
+        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        restored = capture_state(client, consumer_group_offsets(cluster))
+        require_same_state("restored Dashboard", before, restored)
+        event_result = run_qualification_events(
+            cluster,
+            client,
+            [qualification["events"][3]],
+            qualification["measurement"]["eventVisibilitySeconds"],
+        )[0]
+        expected_offsets = {offset.partition: offset.committed + 1 for offset in before.offsets}
+        after_offsets = wait_for_committed_offsets(cluster, expected_offsets)
+        after = capture_state(client, after_offsets)
+    require(after.mapping == before.mapping, "post-restore mapping changed")
+    require(
+        after.documents
+        == before.documents
+        + [
+            {
+                "id": qualification["events"][3]["expectedDocument"]["number"],
+                "source": qualification["events"][3]["expectedDocument"],
+            }
         ],
-        labels={checks.BUSINESS_CLIENT_LABEL: "true"},
+        "post-restore document advancement differs",
     )
-    require_http_response(
-        "event-total-sales",
-        response,
-        200,
-        '{"total":{"policiesCount":1,"premiumAmount":123.45},'
-        '"perProductTotal":{"HSI":{"policiesCount":1,"premiumAmount":123.45}}}',
+    for old, new in zip(before.offsets, after.offsets, strict=True):
+        require(
+            new.partition == old.partition
+            and new.committed == old.committed + 1
+            and new.log_end == old.log_end + 1,
+            "post-restore offset advancement differs",
+        )
+    run_query_workload(
+        cluster,
+        [qualification["postRestoreQuery"]],
+        1,
+        qualification["measurement"]["requestDeadlineSeconds"],
     )
+    return {
+        "configurationSha256": configuration,
+        "before": safe_state_record(before),
+        "stopped": safe_state_record(stopped),
+        "restored": safe_state_record(restored),
+        "after": safe_state_record(after),
+        "postRestoreEvent": event_result,
+        "pod": dashboard_pod_state(cluster),
+    }
+
+
+def write_qualification_report(report: dict[str, Any]) -> None:
+    raw_path = os.environ.get("QUALIFICATION_REPORT_FILE", "")
+    if not raw_path:
+        return
+    path = Path(raw_path)
+    require(path.is_absolute() and path.suffix == ".json", "qualification report path differs")
+    require(path.parent.is_dir(), "qualification report directory is absent")
+    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def verify_isolated_kafka_names(cluster: Cluster) -> None:
     topics = set(
         kafka_cli(
             cluster,
@@ -1425,17 +1964,9 @@ def exercise_registration_projection(cluster: Cluster) -> None:
 
 def run() -> None:
     image = os.environ.get("IMAGE_REF", "")
+    expected_revision = os.environ.get("QUALIFICATION_SOURCE_REVISION", "")
     elasticsearch_image = os.environ.get("ELASTICSEARCH_IMAGE", "")
     kafka_image = os.environ.get("KAFKA_IMAGE", "")
-    require(
-        bool(
-            re.fullmatch(
-                r"insurance-hub-dashboard-api:1\.[0-9]+\.[0-9]+-local\.(?!0{12})[0-9a-f]{12}",
-                image,
-            )
-        ),
-        "IMAGE_REF differs",
-    )
     require(
         bool(re.fullmatch(r".+@sha256:[0-9a-f]{64}", elasticsearch_image)),
         "ELASTICSEARCH_IMAGE must be digest-qualified",
@@ -1445,36 +1976,15 @@ def run() -> None:
         "KAFKA_IMAGE must be digest-qualified",
     )
     require(command(["kubectl", "config", "current-context"]).strip() == CONTEXT, "wrong context")
-    inspected = json.loads(command(["docker", "image", "inspect", image]))
-    require(len(inspected) == 1, "Dashboard image is absent")
-    local_image_id = str(inspected[0].get("Id", ""))
-    image_content_digest(local_image_id, "local Docker")
-    revision = (
-        inspected[0]
-        .get("Config", {})
-        .get("Labels", {})
-        .get("org.opencontainers.image.revision", "")
-    )
-    source_short = image.rsplit(".", 1)[1]
-    require(
-        bool(re.fullmatch(r"(?!0{40})[0-9a-f]{40}", revision)),
-        "Dashboard image source revision is invalid",
-    )
-    labels = inspected[0].get("Config", {}).get("Labels", {})
-    require(revision[:12] == source_short, "Dashboard image source differs")
-    require(
-        labels.get("org.opencontainers.image.version") == f"git-{source_short}",
-        "Dashboard image version differs",
-    )
+    qualification = load_qualification()
+    candidate = prepare_candidate_image(image, expected_revision)
+    runtime_image = prepare_kind_candidate(image, candidate)
+    source_short = candidate.revision[:12]
     namespace = f"dashboard-disposable-{os.getpid()}-{secrets.token_hex(3)}"
     cluster = Cluster(namespace)
     created = False
+    report: dict[str, Any] | None = None
     try:
-        command(
-            ["kind", "load", "docker-image", image, "--name", KIND_CLUSTER],
-            timeout=120,
-            activity="load Dashboard image into existing Kind cluster",
-        )
         command(
             ["docker", "pull", elasticsearch_image],
             timeout=300,
@@ -1506,7 +2016,13 @@ def run() -> None:
             activity="create disposable Dashboard namespace",
         )
         created = True
-        rendered, _items = render(cluster, image, source_short, elasticsearch_image)
+        rendered, _items = render(
+            cluster,
+            runtime_image,
+            source_short,
+            elasticsearch_image,
+            candidate.registry_digest,
+        )
         cluster.kubectl(
             "apply",
             "--server-side",
@@ -1576,7 +2092,13 @@ def run() -> None:
         except (CheckFailed, checks.DeploymentError, OSError, ValueError) as error:
             sales_failures.append(f"direct RPC: {error}")
         require(not sales_failures, "sales verification failed: " + " | ".join(sales_failures))
-        verify_runtime_identity(cluster, f"git-{source_short}", image, local_image_id)
+        verify_runtime_identity(
+            cluster,
+            candidate.version,
+            runtime_image,
+            candidate.local_image_id,
+            candidate.registry_digest,
+        )
         response = http_probe(
             cluster,
             "management-health",
@@ -1605,9 +2127,10 @@ def run() -> None:
         verify_event_permissions(cluster)
         enabled_render, _enabled_items = render(
             cluster,
-            image,
+            runtime_image,
             source_short,
             elasticsearch_image,
+            candidate.registry_digest,
             event_enabled=True,
         )
         cluster.kubectl(
@@ -1627,7 +2150,21 @@ def run() -> None:
             activity="wait for event-enabled Dashboard rollout",
         )
         wait_for("event-enabled Dashboard endpoint ready", lambda: endpoint_count(cluster) == 1)
-        exercise_registration_projection(cluster)
+        smoke = run_bounded_smoke(cluster, qualification)
+        restoration = run_stop_restore(cluster, qualification, candidate, runtime_image)
+        report = {
+            "schemaVersion": 1,
+            "candidate": {
+                "sourceRevision": candidate.revision,
+                "version": candidate.version,
+                "image": image,
+                "runtimeImage": runtime_image,
+                "registryDigest": candidate.registry_digest,
+            },
+            "target": {"context": CONTEXT, "namespace": namespace},
+            "smoke": smoke,
+            "restoration": restoration,
+        }
         dashboard_pod = cluster.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api")[
             "items"
         ][0]
@@ -1738,6 +2275,8 @@ def run() -> None:
                 ).strip(),
                 "disposable namespace cleanup failed",
             )
+    require(report is not None, "qualification report was not produced")
+    write_qualification_report(report)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "ownership": "issue-292-disposable",
+  "measurement": {
+    "requestsPerQuery": 10,
+    "maximumSeconds": 300,
+    "eventVisibilitySeconds": 30,
+    "requestDeadlineSeconds": 5
+  },
+  "events": [
+    {
+      "name": "initial",
+      "value": {
+        "policy": {
+          "number": "SYN-292-001",
+          "from": [2026, 1, 1],
+          "to": [2026, 12, 31],
+          "policyHolder": "Synthetic Holder One",
+          "productCode": "HSI",
+          "totalPremium": 123.45,
+          "agentLogin": null
+        }
+      },
+      "expectedDocument": {
+        "number": "SYN-292-001",
+        "from": "2026-01-01",
+        "to": "2026-12-31",
+        "policyHolder": "Synthetic Holder One",
+        "productCode": "HSI",
+        "totalPremium": 123.45,
+        "agentLogin": null
+      }
+    },
+    {
+      "name": "same-id-replacement",
+      "value": {
+        "policy": {
+          "number": "SYN-292-001",
+          "from": [2026, 1, 1],
+          "to": [2026, 12, 31],
+          "policyHolder": "Synthetic Holder One Replaced",
+          "productCode": "HSI",
+          "totalPremium": 456.78,
+          "agentLogin": "agent-292"
+        }
+      },
+      "expectedDocument": {
+        "number": "SYN-292-001",
+        "from": "2026-01-01",
+        "to": "2026-12-31",
+        "policyHolder": "Synthetic Holder One Replaced",
+        "productCode": "HSI",
+        "totalPremium": 456.78,
+        "agentLogin": "agent-292"
+      }
+    },
+    {
+      "name": "second-policy",
+      "value": {
+        "policy": {
+          "number": "SYN-292-002",
+          "from": [2026, 1, 2],
+          "to": [2026, 12, 31],
+          "policyHolder": "Synthetic Holder Two",
+          "productCode": "HSI",
+          "totalPremium": 100.0,
+          "agentLogin": null
+        }
+      },
+      "expectedDocument": {
+        "number": "SYN-292-002",
+        "from": "2026-01-02",
+        "to": "2026-12-31",
+        "policyHolder": "Synthetic Holder Two",
+        "productCode": "HSI",
+        "totalPremium": 100.0,
+        "agentLogin": null
+      }
+    },
+    {
+      "name": "post-restore",
+      "value": {
+        "policy": {
+          "number": "SYN-292-003",
+          "from": [2026, 1, 3],
+          "to": [2026, 12, 31],
+          "policyHolder": "Synthetic Holder Three",
+          "productCode": "HSI",
+          "totalPremium": 200.0,
+          "agentLogin": null
+        }
+      },
+      "expectedDocument": {
+        "number": "SYN-292-003",
+        "from": "2026-01-03",
+        "to": "2026-12-31",
+        "policyHolder": "Synthetic Holder Three",
+        "productCode": "HSI",
+        "totalPremium": 200.0,
+        "agentLogin": null
+      }
+    }
+  ],
+  "queries": [
+    {
+      "name": "total-sales",
+      "path": "/dashboard/totalsales",
+      "request": {
+        "saleDateFrom": "2026-01-01",
+        "saleDateTo": "2026-02-01"
+      },
+      "expectedResponse": {
+        "total": {"policiesCount": 2, "premiumAmount": 556.78},
+        "perProductTotal": {
+          "HSI": {"policiesCount": 2, "premiumAmount": 556.78}
+        }
+      }
+    },
+    {
+      "name": "agent-sales",
+      "path": "/dashboard/agentssales",
+      "request": {
+        "saleDateFrom": "2026-01-01",
+        "saleDateTo": "2026-02-01"
+      },
+      "expectedResponse": {
+        "perAgentTotal": {
+          "agent-292": {"policiesCount": 1, "premiumAmount": 456.78}
+        }
+      }
+    },
+    {
+      "name": "sales-trends",
+      "path": "/dashboard/trends",
+      "request": {
+        "productCode": "HSI",
+        "saleDateFrom": "2026-01-01",
+        "saleDateTo": "2026-02-01",
+        "aggregationUnitCode": "DAY"
+      },
+      "expectedResponse": {
+        "periodSales": [
+          {
+            "periodDate": [2026, 1, 1],
+            "period": "2026-01-01",
+            "policiesCount": 1,
+            "premiumAmount": 456.78
+          },
+          {
+            "periodDate": [2026, 1, 2],
+            "period": "2026-01-02",
+            "policiesCount": 1,
+            "premiumAmount": 100.0
+          }
+        ]
+      }
+    }
+  ],
+  "postRestoreQuery": {
+    "name": "post-restore-total-sales",
+    "path": "/dashboard/totalsales",
+    "request": {
+      "saleDateFrom": "2026-01-01",
+      "saleDateTo": "2026-02-01"
+    },
+    "expectedResponse": {
+      "total": {"policiesCount": 3, "premiumAmount": 756.78},
+      "perProductTotal": {
+        "HSI": {"policiesCount": 3, "premiumAmount": 756.78}
+      }
+    }
+  }
+}

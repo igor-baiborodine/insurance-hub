@@ -54,15 +54,31 @@ make test-monitoring ENV_NAME=qa SVC_NAME=dashboard
 make -C services/dashboard-service test-event-integration
 ```
 
+The default disposable command builds and qualifies the current committed source. To qualify an
+existing immutable registry candidate without rebuilding it, pass its digest-qualified reference,
+the full matching OCI source revision and an absolute JSON report path:
+
+```sh
+make go-svc-deploy-test SVC_NAME=dashboard \
+  QUALIFICATION_IMAGE_REF='ghcr.io/igor-baiborodine/insurance-hub/dashboard-api:VERSION@sha256:DIGEST' \
+  QUALIFICATION_SOURCE_REVISION='FULL_40_CHARACTER_REVISION' \
+  QUALIFICATION_REPORT_FILE="$PWD/dashboard-qualification.json"
+```
+
 The disposable test loads the candidate image plus pinned Elasticsearch and Kafka images into the
 existing configured `local-dev-insurance-hub` Kind cluster, then creates and removes one uniquely
 owned namespace. It proves the disabled query deployment first. It then enables only the
 disposable issue-290 reader/writer/Kafka inputs, verifies exact-index permissions and the accepted
 writer mapping-authority limit, checks Kafka CA/hostname TLS behavior, consumes the isolated topic
-and proves the canonical topic/group remain untouched. It retains the existing HTTP/RPC,
-dependency-loss, liveness, recovery, network-denial and replacement checks. It does not create or
-delete the cluster. A render, fake adapter or disposable pass does not establish a local-dev or QA
-deployment result.
+and proves the canonical topic/group remain untouched. Its bounded qualification sends three
+registrations, including same-ID replacement, and makes ten requests for each query through one
+client. Before dependency reinitialization, it snapshots documents, mapping and committed offsets,
+stops only the Go Deployment, restores the same candidate and configuration, compares retained
+state, and proves one new event advances both state and offsets. The JSON report contains only the
+synthetic state and identity evidence. The test retains the existing HTTP/RPC, dependency-loss,
+liveness, recovery, network-denial and replacement checks. It does not create or delete the
+cluster. A render, fake adapter or disposable pass does not establish a local-dev or QA deployment
+result.
 
 The monitoring checks validate Dashboard request, Elasticsearch and registration panels, alerts,
 Prometheus rule tests and the collected disposable fixture. The registration owner distinguishes

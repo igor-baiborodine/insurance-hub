@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -12,6 +13,33 @@ import disposable_deployment
 import pytest
 
 
+class FakeHTTPResponse:
+    def __init__(self, status: int, body: object) -> None:
+        self.status = status
+        self._body = json.dumps(body).encode()
+
+    def read(self, _limit: int) -> bytes:
+        return self._body
+
+
+class FakeHTTPConnection:
+    def __init__(self, response: FakeHTTPResponse) -> None:
+        self.response = response
+        self.requests: list[tuple[str, str, str, dict[str, str]]] = []
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        body: str,
+        headers: dict[str, str],
+    ) -> None:
+        self.requests.append((method, path, body, headers))
+
+    def getresponse(self) -> FakeHTTPResponse:
+        return self.response
+
+
 def rendered_items() -> list[dict[str, object]]:
     metadata = {"namespace": "local-dev-all", "labels": {}}
     return [
@@ -19,7 +47,14 @@ def rendered_items() -> list[dict[str, object]]:
             "apiVersion": "v1",
             "kind": "ConfigMap",
             "metadata": {**deepcopy(metadata), "name": "local-dev-dashboard-config"},
-            "data": {"SERVICE_VERSION": "git-aaaaaaaaaaaa"},
+            "data": {
+                "SERVICE_VERSION": "git-aaaaaaaaaaaa",
+                "EVENT_WORKERS_ENABLED": "true",
+                "KAFKA_BROKERS": "canonical-kafka:9093",
+                "KAFKA_GROUP": "dashboard-service",
+                "KAFKA_REGISTERED_TOPIC": "policy-registered",
+                "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
+            },
         },
         {
             "apiVersion": "apps/v1",
@@ -32,6 +67,13 @@ def rendered_items() -> list[dict[str, object]]:
                         "containers": [
                             {
                                 "image": "old",
+                                "volumeMounts": [
+                                    {
+                                        "name": "kafka-ca",
+                                        "mountPath": "/etc/dashboard/kafka",
+                                        "readOnly": True,
+                                    }
+                                ],
                                 "env": [
                                     {
                                         "name": "ELASTICSEARCH_PASSWORD",
@@ -41,10 +83,34 @@ def rendered_items() -> list[dict[str, object]]:
                                                 "key": "password",
                                             }
                                         },
-                                    }
+                                    },
+                                    {
+                                        "name": "ELASTICSEARCH_WRITER_USERNAME",
+                                        "valueFrom": {
+                                            "secretKeyRef": {
+                                                "name": "local-dev-dashboard-elasticsearch-writer",
+                                                "key": "username",
+                                            }
+                                        },
+                                    },
+                                    {
+                                        "name": "ELASTICSEARCH_WRITER_PASSWORD",
+                                        "valueFrom": {
+                                            "secretKeyRef": {
+                                                "name": "local-dev-dashboard-elasticsearch-writer",
+                                                "key": "password",
+                                            }
+                                        },
+                                    },
                                 ],
                             }
-                        ]
+                        ],
+                        "volumes": [
+                            {
+                                "name": "kafka-ca",
+                                "secret": {"secretName": "local-dev-dashboard-kafka-ca"},
+                            }
+                        ],
                     },
                 }
             },
@@ -99,6 +165,7 @@ def test_render_adds_owned_dependency_reader_secret_and_exact_identity(
     )["data"]
     assert config["SERVICE_VERSION"] == "git-0123456789ab"
     assert config["ELASTICSEARCH_USERNAME"] == disposable_deployment.READER_USERNAME
+    assert not any(name.startswith(("EVENT_", "KAFKA_")) for name in config)
     environment = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
     credential_entries = [
         item
@@ -125,6 +192,8 @@ def test_render_adds_owned_dependency_reader_secret_and_exact_identity(
             },
         },
     ]
+    assert deployment["spec"]["template"]["spec"]["containers"][0]["volumeMounts"] == []
+    assert deployment["spec"]["template"]["spec"]["volumes"] == []
     secret = disposable_deployment.checks.resource(
         actual, "Secret", disposable_deployment.ELASTICSEARCH_NAME
     )
@@ -184,6 +253,33 @@ def test_event_enabled_render_uses_only_issue_290_inputs(monkeypatch: pytest.Mon
     assert policy["spec"]["egress"][-1]["ports"] == [{"port": 9093, "protocol": "TCP"}]
 
 
+def test_registry_candidate_render_allows_exact_digest_pull(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    items = rendered_items()
+    monkeypatch.setattr(disposable_deployment.checks, "render", lambda _environment: "rendered")
+    monkeypatch.setattr(
+        disposable_deployment.checks,
+        "validate_render",
+        lambda _environment, _text: deepcopy(items),
+    )
+    image = "ghcr.io/example/dashboard:1.5.0@sha256:" + "a" * 64
+
+    _rendered, actual = disposable_deployment.render(
+        disposable_deployment.Cluster("dashboard-disposable-test"),
+        image,
+        "0123456789ab",
+        "elasticsearch@example@sha256:" + "b" * 64,
+    )
+
+    deployment = disposable_deployment.checks.resource(
+        actual, "Deployment", "local-dev-dashboard-api"
+    )
+    container = deployment["spec"]["template"]["spec"]["containers"][0]
+    assert container["image"] == image
+    assert container["imagePullPolicy"] == "IfNotPresent"
+
+
 def test_run_rejects_missing_digest_qualified_dependency_before_commands(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -197,6 +293,85 @@ def test_run_rejects_missing_digest_qualified_dependency_before_commands(
 
     with pytest.raises(disposable_deployment.CheckFailed, match="digest-qualified"):
         disposable_deployment.run()
+
+
+def test_qualification_oracle_has_fixed_replacement_and_query_values() -> None:
+    qualification = disposable_deployment.load_qualification()
+
+    # Given the same synthetic identity is sent twice, the second event is a replacement.
+    events = qualification["events"]
+    assert events[0]["expectedDocument"]["number"] == events[1]["expectedDocument"]["number"]
+    assert events[1]["expectedDocument"]["totalPremium"] == 456.78
+    # Then independently fixed totals reflect two documents, not three append-only records.
+    assert qualification["queries"][0]["expectedResponse"]["total"] == {
+        "policiesCount": 2,
+        "premiumAmount": 556.78,
+    }
+
+
+def test_registry_candidate_requires_exact_oci_source_and_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    revision = "7" * 40
+    digest = "sha256:" + "8" * 64
+    image = f"ghcr.io/example/dashboard:1.5.0@{digest}"
+    calls: list[list[str]] = []
+
+    def fake_command(arguments: list[str], **_kwargs: object) -> str:
+        calls.append(arguments)
+        if arguments[:3] == ["docker", "image", "inspect"]:
+            return json.dumps(
+                [
+                    {
+                        "Id": "sha256:" + "9" * 64,
+                        "RepoDigests": [f"ghcr.io/example/dashboard@{digest}"],
+                        "Config": {
+                            "Labels": {
+                                "org.opencontainers.image.revision": revision,
+                                "org.opencontainers.image.version": "git-" + revision[:12],
+                            }
+                        },
+                    }
+                ]
+            )
+        return ""
+
+    monkeypatch.setattr(disposable_deployment, "command", fake_command)
+
+    candidate = disposable_deployment.prepare_candidate_image(image, revision)
+
+    assert candidate.registry_digest == digest
+    assert calls[0] == ["docker", "pull", image]
+    assert calls[1] == ["docker", "image", "inspect", image]
+
+    with pytest.raises(disposable_deployment.CheckFailed, match="source differs"):
+        disposable_deployment.prepare_candidate_image(image, "6" * 40)
+
+
+def test_kind_candidate_tag_must_resolve_to_selected_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    digest = "sha256:" + "8" * 64
+    image = f"ghcr.io/example/dashboard:1.5.0@{digest}"
+    candidate = disposable_deployment.CandidateIdentity(
+        "7" * 40,
+        "git-" + "7" * 12,
+        "sha256:" + "9" * 64,
+        digest,
+    )
+
+    def fake_command(arguments: list[str], **_kwargs: object) -> str:
+        if arguments == ["kind", "get", "nodes", "--name", disposable_deployment.KIND_CLUSTER]:
+            return "kind-node\n"
+        if "inspecti" in arguments:
+            return json.dumps({"status": {"repoDigests": [f"ghcr.io/example/dashboard@{digest}"]}})
+        return ""
+
+    monkeypatch.setattr(disposable_deployment, "command", fake_command)
+
+    assert disposable_deployment.prepare_kind_candidate(image, candidate) == (
+        "ghcr.io/example/dashboard:1.5.0"
+    )
 
 
 def test_selected_deployed_rpc_must_execute_and_pass() -> None:
@@ -281,6 +456,101 @@ def test_runtime_image_content_requires_exact_loaded_tag() -> None:
             {"status": {"id": digest, "repoTags": ["docker.io/library/other:latest"]}},
             digest,
         )
+
+
+def test_runtime_registry_digest_must_match_containerd_and_pod() -> None:
+    digest = "sha256:" + "a" * 64
+    image = "ghcr.io/example/dashboard:1.5.0"
+    containerd = {
+        "status": {
+            "id": "sha256:" + "b" * 64,
+            "repoDigests": [f"ghcr.io/example/dashboard@{digest}"],
+        }
+    }
+
+    identity = disposable_deployment.require_matching_image_content(
+        "sha256:" + "b" * 64,
+        image,
+        containerd,
+        f"ghcr.io/example/dashboard@{digest}",
+        digest,
+    )
+
+    assert identity.containerd == identity.pod == digest
+    with pytest.raises(disposable_deployment.CheckFailed, match="Pod identity is absent"):
+        disposable_deployment.require_matching_image_content(
+            "sha256:" + "b" * 64,
+            image,
+            containerd,
+            "ghcr.io/example/dashboard@sha256:" + "c" * 64,
+            digest,
+        )
+
+
+def test_offset_parser_and_state_comparison_reject_reset() -> None:
+    output = """
+GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID
+dashboard-service-issue-290 policy-registered-issue-290 0 3 3 0 - - -
+"""
+    offsets = disposable_deployment.parse_consumer_group_offsets(output)
+    mapping = {"dynamic": "strict"}
+    documents = [{"id": "SYN-292-001", "source": {"number": "SYN-292-001"}}]
+    expected = disposable_deployment.StateSnapshot(mapping, documents, offsets)
+
+    # When the controlled candidate resets its committed position, retention must fail.
+    reset = disposable_deployment.StateSnapshot(
+        mapping,
+        documents,
+        [disposable_deployment.OffsetSnapshot(0, 0, 3)],
+    )
+    with pytest.raises(disposable_deployment.CheckFailed, match="committed offsets changed"):
+        disposable_deployment.require_same_state("controlled offset reset", expected, reset)
+
+
+def test_query_assertion_rejects_controlled_wrong_total() -> None:
+    query = {
+        "name": "total-sales",
+        "path": "/dashboard/totalsales",
+        "request": {"saleDateFrom": "2026-01-01", "saleDateTo": "2026-02-01"},
+        "expectedResponse": {"total": {"policiesCount": 2, "premiumAmount": 556.78}},
+    }
+    connection = FakeHTTPConnection(FakeHTTPResponse(200, query["expectedResponse"]))
+    disposable_deployment.post_dashboard_query(connection, query)
+    assert len(connection.requests) == 1
+
+    # When a controlled response reports an append-only count, the fixed oracle must fail.
+    wrong = FakeHTTPConnection(
+        FakeHTTPResponse(200, {"total": {"policiesCount": 3, "premiumAmount": 680.23}})
+    )
+    with pytest.raises(disposable_deployment.CheckFailed, match="response differs"):
+        disposable_deployment.post_dashboard_query(wrong, query)
+
+
+def test_dashboard_state_ignores_terminating_rollout_pod() -> None:
+    active = {
+        "metadata": {"uid": "active"},
+        "spec": {"containers": [{"image": "selected"}]},
+        "status": {"containerStatuses": [{"imageID": "selected@digest", "restartCount": 0}]},
+    }
+    terminating = deepcopy(active)
+    terminating["metadata"] = {
+        "uid": "old",
+        "deletionTimestamp": "2026-11-08T00:00:00Z",
+    }
+
+    class RolloutCluster:
+        @staticmethod
+        def json(*_arguments: str) -> dict[str, object]:
+            return {"items": [terminating, active]}
+
+    state = disposable_deployment.dashboard_pod_state(RolloutCluster())
+
+    assert state == {
+        "uid": "active",
+        "image": "selected",
+        "imageID": "selected@digest",
+        "restartCount": 0,
+    }
 
 
 def assert_reaped(pid_file: Path) -> None:
