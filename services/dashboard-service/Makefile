@@ -90,6 +90,11 @@ SOURCE_REPOSITORY ?= https://github.com/igor-baiborodine/insurance-hub
 SOURCE_VERSION ?= $(HEAD_VERSION)
 IMAGE_TAG ?= 1.0.0-local.$(HEAD_SHORT)
 IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
+QUALIFICATION_IMAGE_REF ?=
+QUALIFICATION_SOURCE_REVISION ?=
+QUALIFICATION_REPORT_FILE ?=
+QUALIFICATION_EFFECTIVE_IMAGE_REF := $(if $(strip $(QUALIFICATION_IMAGE_REF)),$(QUALIFICATION_IMAGE_REF),$(IMAGE_REF))
+QUALIFICATION_IMAGE_PREREQUISITE := $(if $(strip $(QUALIFICATION_IMAGE_REF)),,image-build)
 TARGET_PLATFORM ?= linux/amd64
 GO_SERVICE_TOOLING_CONFIG := $(CURDIR)/go-service-tooling.json
 
@@ -164,10 +169,13 @@ deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Dashboard de
 		"$(PYTHON)" -m pytest -q scripts/test_deployment.py scripts/test_event_administration.py \
 		scripts/test_reader_administration.py
 
-deploy-test: python-toolchain-check image-build ## Exercise Dashboard in an owned disposable Kind namespace
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" \
+deploy-test: python-toolchain-check $(QUALIFICATION_IMAGE_PREREQUISITE) ## Exercise Dashboard in an owned disposable Kind namespace
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		IMAGE_REF="$(QUALIFICATION_EFFECTIVE_IMAGE_REF)" \
+		QUALIFICATION_SOURCE_REVISION="$(QUALIFICATION_SOURCE_REVISION)" \
+		QUALIFICATION_REPORT_FILE="$(QUALIFICATION_REPORT_FILE)" \
 		ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" KAFKA_IMAGE="$(KAFKA_IMAGE)" \
-		GO="$(GO)" MAKE_COMMAND="$(MAKE)" \
+		GO="$(GO)" MAKE_COMMAND="$(MAKE)" TOOLS_DIR="$(TOOLS_DIR)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_disposable_deployment.py
 
 _deploy-test-rpc: verify-tools
