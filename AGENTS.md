@@ -3,6 +3,7 @@
 
 - [Insurance Hub Agent Guide](#insurance-hub-agent-guide)
   - [Repository Context](#repository-context)
+  - [Learning Project Constraints](#learning-project-constraints)
   - [Repository Shape](#repository-shape)
   - [Instruction Precedence](#instruction-precedence)
   - [Default Workflow](#default-workflow)
@@ -27,6 +28,20 @@ Insurance Hub is a multi-module insurance platform with legacy Java/Micronaut se
 The repository is also a migration workspace that incrementally moves the original Java/Micronaut proof of concept toward Go-based services and updated operational workflows.
 
 Treat API contracts, DTOs, validation, persistence behavior, and security behavior as first-class requirements. When modernizing or migrating behavior, capture the current behavior before proposing a replacement.
+
+## Learning Project Constraints
+
+Insurance Hub is a learning project. Keep every ticket proportionate and simple across its scope
+and requirements, specification, delivery steps, implementation, testing, and auxiliary tooling.
+
+- Limit testing to focused smoke tests that cover the affected behavior and essential safety
+  concerns. Minimize checks that do not provide necessary confidence.
+- Treat Java service retirement as a one-time destructive operation. Do not automate it.
+- Use a direct Java-to-Go transition. Do not plan or perform Java-to-Go-to-Java rehearsals.
+- Develop Go services as greenfield implementations. Do not add migration-specific compatibility,
+  canonical or non-canonical cleanup, normalization, or transitional code for Java services.
+
+These constraints are intended to accelerate development and conserve effort and resources.
 
 ## Repository Shape
 
