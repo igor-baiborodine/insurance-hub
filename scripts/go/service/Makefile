@@ -25,6 +25,8 @@ export SVC_NAME
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
 	go-svc-fixture-setup go-svc-fixture-verify go-svc-fixture-retire \
 	go-svc-event-fixture-setup go-svc-event-fixture-verify go-svc-event-fixture-retire \
+	go-svc-canonical-event-inspect go-svc-canonical-event-ensure-access \
+	go-svc-canonical-event-verify go-svc-canonical-return-check \
 	go-svc-cutover-index-inspect go-svc-cutover-index-ensure go-svc-cutover-index-verify \
 	go-svc-canonical-secrets-migrate \
 	go-svc-deploy-test-flux \
@@ -67,6 +69,10 @@ go-svc-fixture-retire: ## Remove only the selected service's accepted fixture an
 go-svc-event-fixture-setup: ## Create the selected service's isolated event resources and writer identity
 go-svc-event-fixture-verify: ## Verify isolated event resources, trust and writer permissions
 go-svc-event-fixture-retire: ## Remove only the selected service's isolated event resources and identity
+go-svc-canonical-event-inspect: ## Inspect canonical Dashboard index and Kafka progress without mutation
+go-svc-canonical-event-ensure-access: ## Guardedly provision canonical Dashboard writer and trust
+go-svc-canonical-event-verify: ## Verify canonical Dashboard access and resource state
+go-svc-canonical-return-check: ## Verify stopped Dashboard authority and progress before Java return
 go-svc-cutover-index-inspect: ## Inspect the canonical Policy Search index without mutation
 go-svc-cutover-index-ensure: ## Guardedly create the canonical index and cutover identities
 go-svc-cutover-index-verify: ## Verify canonical index and least-privilege cutover identities
@@ -79,7 +85,10 @@ go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
 	go-svc-deploy-test-flux go-svc-fixture-setup go-svc-fixture-verify \
 	go-svc-fixture-retire go-svc-event-fixture-setup go-svc-event-fixture-verify \
-	go-svc-event-fixture-retire go-svc-cutover-index-inspect go-svc-cutover-index-ensure \
+	go-svc-event-fixture-retire go-svc-canonical-event-inspect \
+	go-svc-canonical-event-ensure-access go-svc-canonical-event-verify \
+	go-svc-canonical-return-check \
+	go-svc-cutover-index-inspect go-svc-cutover-index-ensure \
 	go-svc-cutover-index-verify go-svc-canonical-secrets-migrate: python-runtime-check
 	+@set -eu; \
 		capability='$(@:go-svc-%=%)'; \

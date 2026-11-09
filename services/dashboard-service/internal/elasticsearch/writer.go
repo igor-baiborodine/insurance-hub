@@ -15,7 +15,7 @@ const maximumWriterResponseBytes = 4096
 
 var ErrWriteFailed = errors.New("elasticsearch policy replacement failed")
 
-// Writer performs refreshed whole-document replacement on the isolated projection index.
+// Writer performs refreshed whole-document replacement on one exact Dashboard index.
 type Writer struct {
 	client *Client
 }
@@ -26,8 +26,10 @@ func NewWriter(client *Client) (*Writer, error) {
 	if client == nil || client.Client == nil {
 		return nil, ErrClientRequired
 	}
-	if client.index != ProjectionIndex {
-		return nil, errors.New("configure elasticsearch writer: isolated index is required")
+	if !dashboardIndex(client.index) {
+		return nil, errors.New(
+			"configure elasticsearch writer: exact Dashboard index is required",
+		)
 	}
 	return &Writer{client: client}, nil
 }
@@ -46,7 +48,7 @@ func (writer *Writer) ReplacePolicy(
 	operationCtx, cancel := withOperationTimeout(ctx, writer.client.timeout)
 	defer cancel()
 	response, err := writer.client.Index(
-		ProjectionIndex,
+		writer.client.index,
 		bytes.NewReader(payload),
 		writer.client.Index.WithContext(operationCtx),
 		writer.client.Index.WithDocumentID(policy.Number),

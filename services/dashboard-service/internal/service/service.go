@@ -81,6 +81,7 @@ type salesReader interface {
 }
 
 type eventWorker interface {
+	Preflight(context.Context) error
 	Check(context.Context) error
 	Run(context.Context) error
 	Shutdown(context.Context) error
@@ -364,6 +365,9 @@ func run(
 	if err == nil && runtime.projection != nil {
 		err = runtime.projection.Check(readyContext)
 	}
+	if err == nil && runtime.worker != nil {
+		err = runtime.worker.Preflight(readyContext)
+	}
 	if err == nil {
 		runtime.startWorker(ctx)
 		err = runtime.checkWorker(readyContext)
@@ -479,7 +483,8 @@ func (runtime *runningService) configureWorker(
 			observedCtx, observation := eventObserver.Start(ctx, eventType)
 			return observedCtx, observation.Finish
 		},
-		CommitFailure: eventObserver.RecordCommitFailure,
+		CommitFailure:            eventObserver.RecordCommitFailure,
+		RequireCommittedProgress: settings.Mode == config.EventProcessingCanonical,
 	}, runtime.projection, logger)
 	return err
 }

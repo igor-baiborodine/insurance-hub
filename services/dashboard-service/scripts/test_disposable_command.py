@@ -165,7 +165,9 @@ def test_render_adds_owned_dependency_reader_secret_and_exact_identity(
     )["data"]
     assert config["SERVICE_VERSION"] == "git-0123456789ab"
     assert config["ELASTICSEARCH_USERNAME"] == disposable_deployment.READER_USERNAME
-    assert not any(name.startswith(("EVENT_", "KAFKA_")) for name in config)
+    assert config["EVENT_PROCESSING_MODE"] == "disabled"
+    assert config["EVENT_WORKERS_ENABLED"] == "false"
+    assert not any(name.startswith("KAFKA_") for name in config)
     environment = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
     credential_entries = [
         item
@@ -223,7 +225,7 @@ def test_event_enabled_render_uses_only_issue_290_inputs(monkeypatch: pytest.Mon
         "insurance-hub-dashboard-api:1.0.0-local.0123456789ab",
         "0123456789ab",
         "elasticsearch@example@sha256:" + "a" * 64,
-        event_enabled=True,
+        event_mode="isolated",
     )
 
     config = disposable_deployment.checks.resource(

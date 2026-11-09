@@ -24,6 +24,7 @@ const (
 	EnvElasticsearchPassword    = "ELASTICSEARCH_PASSWORD"
 	EnvElasticsearchCAFile      = "ELASTICSEARCH_CA_FILE"
 	EnvElasticsearchTimeout     = "ELASTICSEARCH_TIMEOUT"
+	EnvEventProcessingMode      = "EVENT_PROCESSING_MODE"
 	EnvEventWorkersEnabled      = "EVENT_WORKERS_ENABLED"
 	EnvKafkaBrokers             = "KAFKA_BROKERS"
 	EnvKafkaGroup               = "KAFKA_GROUP"
@@ -38,8 +39,19 @@ const (
 	defaultElasticsearchIndex   = "policy_stats"
 	defaultElasticsearchTimeout = 5 * time.Second
 	defaultProjectionIndex      = "policy_stats_issue_290"
-	defaultKafkaGroup           = "dashboard-service-issue-290"
-	defaultRegisteredTopic      = "policy-registered-issue-290"
+	isolatedKafkaGroup          = "dashboard-service-issue-290"
+	isolatedRegisteredTopic     = "policy-registered-issue-290"
+	canonicalKafkaGroup         = "dashboard-service"
+	canonicalRegisteredTopic    = "policy-registered"
+)
+
+// EventProcessingMode selects one closed registration-processing profile.
+type EventProcessingMode string
+
+const (
+	EventProcessingDisabled  EventProcessingMode = "disabled"
+	EventProcessingIsolated  EventProcessingMode = "isolated"
+	EventProcessingCanonical EventProcessingMode = "canonical"
 )
 
 // Config contains settings parsed and validated once during process startup.
@@ -72,6 +84,7 @@ type Elasticsearch struct {
 // Events contains the opt-in registration worker settings.
 // Disabled workers require and retain no event dependency settings.
 type Events struct {
+	Mode            EventProcessingMode
 	Enabled         bool
 	Brokers         []string
 	Group           string
@@ -320,6 +333,22 @@ func load(lookup lookupEnv) (Config, error) {
 }
 
 func loadEvents(lookup lookupEnv, reader Elasticsearch) (Events, error) {
+	modeValue, err := kitconfig.ValueOrDefault(
+		lookup,
+		EnvEventProcessingMode,
+		string(EventProcessingDisabled),
+	)
+	if err != nil {
+		return Events{}, err
+	}
+	mode := EventProcessingMode(modeValue)
+	if mode != EventProcessingDisabled && mode != EventProcessingIsolated &&
+		mode != EventProcessingCanonical {
+		return Events{}, kitconfig.Invalid(
+			EnvEventProcessingMode,
+			"must be disabled, isolated, or canonical",
+		)
+	}
 	enabledValue, err := kitconfig.ValueOrDefault(lookup, EnvEventWorkersEnabled, "false")
 	if err != nil {
 		return Events{}, err
@@ -328,13 +357,43 @@ func loadEvents(lookup lookupEnv, reader Elasticsearch) (Events, error) {
 	if err != nil {
 		return Events{}, err
 	}
-	if !enabled {
-		return Events{}, nil
+	wantEnabled := mode != EventProcessingDisabled
+	if enabled != wantEnabled {
+		return Events{}, kitconfig.Invalid(
+			EnvEventWorkersEnabled,
+			"must agree with EVENT_PROCESSING_MODE",
+		)
 	}
-	if reader.Index != defaultProjectionIndex {
+	if !wantEnabled {
+		for _, name := range []string{
+			EnvKafkaBrokers,
+			EnvKafkaGroup,
+			EnvKafkaRegisteredTopic,
+			EnvKafkaCAFile,
+			EnvWriterUsername,
+			EnvWriterPassword,
+		} {
+			if _, present := lookup(name); present {
+				return Events{}, kitconfig.Invalid(
+					name,
+					"must be unset when event processing is disabled",
+				)
+			}
+		}
+		return Events{Mode: mode}, nil
+	}
+	wantIndex := defaultProjectionIndex
+	wantGroup := isolatedKafkaGroup
+	wantTopic := isolatedRegisteredTopic
+	if mode == EventProcessingCanonical {
+		wantIndex = defaultElasticsearchIndex
+		wantGroup = canonicalKafkaGroup
+		wantTopic = canonicalRegisteredTopic
+	}
+	if reader.Index != wantIndex {
 		return Events{}, kitconfig.Invalid(
 			EnvElasticsearchIndex,
-			"must select the issue-290 projection when event workers are enabled",
+			"must agree with EVENT_PROCESSING_MODE",
 		)
 	}
 	brokersValue, err := requiredSetting(lookup, EnvKafkaBrokers)
@@ -351,25 +410,28 @@ func loadEvents(lookup lookupEnv, reader Elasticsearch) (Events, error) {
 			)
 		}
 	}
-	group, err := kitconfig.ValueOrDefault(lookup, EnvKafkaGroup, defaultKafkaGroup)
+	group, err := kitconfig.ValueOrDefault(lookup, EnvKafkaGroup, wantGroup)
 	if err != nil {
 		return Events{}, err
 	}
-	if group != defaultKafkaGroup {
-		return Events{}, kitconfig.Invalid(EnvKafkaGroup, "must select the issue-290 group")
+	if group != wantGroup {
+		return Events{}, kitconfig.Invalid(
+			EnvKafkaGroup,
+			"must agree with EVENT_PROCESSING_MODE",
+		)
 	}
 	topic, err := kitconfig.ValueOrDefault(
 		lookup,
 		EnvKafkaRegisteredTopic,
-		defaultRegisteredTopic,
+		wantTopic,
 	)
 	if err != nil {
 		return Events{}, err
 	}
-	if topic != defaultRegisteredTopic {
+	if topic != wantTopic {
 		return Events{}, kitconfig.Invalid(
 			EnvKafkaRegisteredTopic,
-			"must select the issue-290 registration topic",
+			"must agree with EVENT_PROCESSING_MODE",
 		)
 	}
 	caFile, err := requiredSetting(lookup, EnvKafkaCAFile)
@@ -388,7 +450,7 @@ func loadEvents(lookup lookupEnv, reader Elasticsearch) (Events, error) {
 	writer.Username = username
 	writer.Password = password
 	return Events{
-		Enabled: true, Brokers: brokers, Group: group, RegisteredTopic: topic,
+		Mode: mode, Enabled: true, Brokers: brokers, Group: group, RegisteredTopic: topic,
 		CAFile: caFile, Writer: writer,
 	}, nil
 }

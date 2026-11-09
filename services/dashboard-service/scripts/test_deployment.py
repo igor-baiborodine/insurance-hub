@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import dashboard_deployment_checks as checks
+import ownership_transition as transition
 import pytest
 import yaml
 from scripts.go.service import deployment as lifecycle
@@ -767,6 +768,7 @@ def test_event_activation_assets_and_selected_state_are_exact(
     environment: str, enabled: bool
 ) -> None:
     checks.validate_event_activation_assets(environment)
+    checks.validate_canonical_activation_assets(environment)
     assert checks.event_activation_enabled(environment) is enabled
     items = checks.documents(checks.render(environment))
     config = checks.resource(items, "ConfigMap", f"{environment}-dashboard-config")
@@ -775,6 +777,7 @@ def test_event_activation_assets_and_selected_state_are_exact(
     container = deployment["spec"]["template"]["spec"]["containers"][0]
 
     assert config["data"]["EVENT_WORKERS_ENABLED"] == str(enabled).lower()
+    assert config["data"]["EVENT_PROCESSING_MODE"] == "isolated"
     assert ("KAFKA_BROKERS" in config["data"]) is enabled
     assert (
         any(item.get("name", "").startswith("ELASTICSEARCH_WRITER_") for item in container["env"])
@@ -862,6 +865,30 @@ def test_event_activation_assets_reject_canonical_topic_or_secret() -> None:
     ):
         checks.validate_event_activation_assets("local-dev")
 
+
+def test_canonical_assets_reject_isolated_topic_or_writer() -> None:
+    config, deployment, network = checks.activation_assets(
+        "local-dev", checks.CANONICAL_ACTIVATION_PATCHES
+    )
+    config["data"]["KAFKA_REGISTERED_TOPIC"] = "policy-registered-issue-290"
+    with (
+        patch.object(checks, "activation_assets", return_value=(config, deployment, network)),
+        pytest.raises(checks.DeploymentError, match="canonical activation configuration"),
+    ):
+        checks.validate_canonical_activation_assets("local-dev")
+
+    config, deployment, network = checks.activation_assets(
+        "local-dev", checks.CANONICAL_ACTIVATION_PATCHES
+    )
+    deployment["spec"]["template"]["spec"]["containers"][0]["env"][2]["valueFrom"]["secretKeyRef"][
+        "name"
+    ] += "-issue-290"
+    with (
+        patch.object(checks, "activation_assets", return_value=(config, deployment, network)),
+        pytest.raises(checks.DeploymentError, match="canonical activation"),
+    ):
+        checks.validate_canonical_activation_assets("local-dev")
+
     config, deployment, network = checks.event_activation_assets("local-dev")
     deployment["spec"]["template"]["spec"]["containers"][0]["env"][0]["valueFrom"]["secretKeyRef"][
         "name"
@@ -875,6 +902,42 @@ def test_event_activation_assets_reject_canonical_topic_or_secret() -> None:
         pytest.raises(checks.DeploymentError, match="ELASTICSEARCH_USERNAME"),
     ):
         checks.validate_event_activation_assets("local-dev")
+
+
+def test_canonical_rollout_accepts_only_the_exact_isolated_predecessor() -> None:
+    expected = {
+        "EVENT_PROCESSING_MODE": "canonical",
+        "EVENT_WORKERS_ENABLED": "true",
+        "ELASTICSEARCH_INDEX": "policy_stats",
+        "KAFKA_GROUP": "dashboard-service",
+        "KAFKA_REGISTERED_TOPIC": "policy-registered",
+    }
+    isolated = expected | {
+        "EVENT_PROCESSING_MODE": "isolated",
+        "ELASTICSEARCH_INDEX": "policy_stats_issue_290",
+        "KAFKA_GROUP": "dashboard-service-issue-290",
+        "KAFKA_REGISTERED_TOPIC": "policy-registered-issue-290",
+    }
+    assert checks.matching_reader_predecessor_config(isolated, expected)
+    isolated["KAFKA_GROUP"] = "dashboard-service"
+    assert not checks.matching_reader_predecessor_config(isolated, expected)
+
+    expected_env = [
+        {
+            "name": "ELASTICSEARCH_WRITER_USERNAME",
+            "valueFrom": {
+                "secretKeyRef": {
+                    "name": "local-dev-dashboard-elasticsearch-writer",
+                    "key": "username",
+                }
+            },
+        }
+    ]
+    isolated_env = deepcopy(expected_env)
+    isolated_env[0]["valueFrom"]["secretKeyRef"]["name"] += "-issue-290"
+    assert checks.matching_reader_predecessor_environment(isolated_env, expected_env)
+    isolated_env[0]["valueFrom"]["secretKeyRef"]["name"] = "foreign"
+    assert not checks.matching_reader_predecessor_environment(isolated_env, expected_env)
 
 
 @pytest.mark.parametrize(
@@ -1333,6 +1396,158 @@ def test_java_snapshot_requires_declared_stable_available_resources() -> None:
             "deployment/local-dev-dashboard-api-legacy": "deployment-uid",
             "service/local-dev-dashboard-api-legacy": "service-uid",
         }
+
+
+def test_canonical_snapshot_rejects_successor_before_java_quiescence() -> None:
+    # given
+    target = Mock(environment="local-dev", namespace="local-dev-all")
+    target.processing_mode = "canonical"
+    deployment = {
+        "metadata": {
+            "name": "local-dev-dashboard-api-legacy",
+            "namespace": "local-dev-all",
+            "uid": "java-uid",
+        },
+        "spec": {"replicas": 1},
+        "status": {"replicas": 1},
+    }
+    target.json.side_effect = lambda *args: deployment if args[1] == "deployment" else {"items": []}
+
+    # when / then
+    with (
+        patch.object(checks, "canonical_transfer_observation") as observation,
+        pytest.raises(checks.DeploymentError, match="not quiescent"),
+    ):
+        checks.role_snapshot(target)
+    observation.assert_not_called()
+
+    # given
+    deployment["spec"]["replicas"] = 0
+    deployment["status"]["replicas"] = 0
+    unsafe_states = (
+        transition.OwnershipState(0, 0, 0, 1, 1),
+        transition.OwnershipState(0, 0, 0, 0, 1),
+    )
+    progress = transition.ProgressState(stable=True, complete=True, in_range=True)
+
+    for state in unsafe_states:
+        # when / then
+        with (
+            patch.object(checks, "canonical_transfer_observation", return_value=(state, progress)),
+            pytest.raises(checks.DeploymentError),
+        ):
+            checks.role_snapshot(target)
+
+    # when
+    with patch.object(
+        checks,
+        "canonical_transfer_observation",
+        return_value=(transition.OwnershipState(0, 0, 0, 0, 0), progress),
+    ):
+        snapshot = checks.role_snapshot(target)
+
+    # then
+    assert snapshot == {
+        "deployment/local-dev-dashboard-api-legacy": "java-uid",
+        "phase": "exclusive",
+    }
+
+
+def test_canonical_transfer_observation_counts_terminating_go_and_group_member() -> None:
+    # given
+    target = Mock(environment="local-dev", data_namespace="local-dev-all")
+    target.json.side_effect = [
+        {"items": []},
+        {"items": [{"metadata": {"deletionTimestamp": "now"}}]},
+    ]
+    progress = transition.ProgressState(stable=True, complete=True, in_range=True)
+
+    # when
+    with patch.object(
+        checks,
+        "canonical_progress_observation",
+        return_value=({"activeMembers": 1}, progress),
+    ):
+        state, observed_progress = checks.canonical_transfer_observation(target)
+
+    # then
+    assert state == transition.OwnershipState(0, 0, 0, 1, 1)
+    assert observed_progress == progress
+
+
+def test_canonical_kafka_snapshot_observes_group_members_and_progress() -> None:
+    # given
+    target = Mock(
+        environment="local-dev",
+        data_namespace="local-dev-all",
+        configuration={"canonicalEventAdministration": {"kafkaCluster": "local-dev-kafka"}},
+    )
+    target.data_json.return_value = {
+        "items": [
+            {
+                "metadata": {
+                    "name": "local-dev-kafka-0",
+                    "labels": {"strimzi.io/broker-role": "true"},
+                },
+                "status": {
+                    "phase": "Running",
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                },
+            }
+        ]
+    }
+    target.namespace_kubectl.side_effect = [
+        "Topic: policy-registered Partition: 0 Leader: 0 Replicas: 0 Isr: 0\n",
+        "GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID\n"
+        "dashboard-service policy-registered 0 7 9 2 go-member /host client\n",
+    ]
+
+    # when
+    snapshot = checks.canonical_kafka_snapshot(target)
+
+    # then
+    assert snapshot == {"partitions": [0], "offsets": {0: (7, 9)}, "activeMembers": 1}
+
+
+def test_canonical_return_snapshot_requires_observed_quiescence() -> None:
+    # given
+    target = Mock(environment="local-dev", namespace="local-dev-all")
+    deployments = {
+        "local-dev-dashboard-api-legacy": {
+            "metadata": {"name": "local-dev-dashboard-api-legacy", "namespace": "local-dev-all"},
+            "spec": {"replicas": 0},
+            "status": {"replicas": 0},
+        },
+        "local-dev-dashboard-api": {
+            "metadata": {"name": "local-dev-dashboard-api", "namespace": "local-dev-all"},
+            "spec": {"replicas": 0},
+            "status": {"replicas": 0},
+        },
+    }
+    target.json.side_effect = lambda _get, _kind, name: deployments[name]
+    progress = transition.ProgressState(stable=True, complete=True, in_range=True)
+
+    # when
+    with patch.object(
+        checks,
+        "canonical_transfer_observation",
+        return_value=(transition.OwnershipState(0, 0, 0, 0, 0), progress),
+    ):
+        snapshot = checks.canonical_return_snapshot(target)
+
+    # then
+    assert snapshot == {"environment": "local-dev", "phase": "quiescent", "status": "passed"}
+
+    # when / then
+    with (
+        patch.object(
+            checks,
+            "canonical_transfer_observation",
+            return_value=(transition.OwnershipState(0, 0, 0, 1, 0), progress),
+        ),
+        pytest.raises(checks.DeploymentError, match="requires quiescence"),
+    ):
+        checks.canonical_return_snapshot(target)
 
 
 @pytest.mark.parametrize("defect", ["absent", "replaced", "selector", "unavailable"])

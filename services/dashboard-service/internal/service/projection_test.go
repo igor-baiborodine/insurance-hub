@@ -46,15 +46,6 @@ func TestNewProductionProjection_ValidatesDependenciesAndConfiguration(t *testin
 			},
 			observer: observer,
 		},
-		{
-			name: "canonical reader index",
-			settings: config.Elasticsearch{
-				URL:     "http://example:9200",
-				Index:   dashboardelasticsearch.PolicyIndex,
-				Timeout: time.Second,
-			},
-			observer: observer,
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -68,6 +59,21 @@ func TestNewProductionProjection_ValidatesDependenciesAndConfiguration(t *testin
 			}
 		})
 	}
+}
+
+func TestNewProductionProjection_AcceptsCanonicalWriter(t *testing.T) {
+	projection, err := newProductionProjection(
+		config.Elasticsearch{
+			URL:     "http://example:9200",
+			Index:   dashboardelasticsearch.PolicyIndex,
+			Timeout: time.Second,
+		},
+		testDependencyObserver(t),
+	)
+	if err != nil || projection == nil {
+		t.Fatalf("newProductionProjection() = (%v, %v)", projection, err)
+	}
+	projection.CloseIdleConnections()
 }
 
 func TestProductionProjection_ProjectsChecksAndCloses(t *testing.T) {

@@ -8,15 +8,19 @@ import binascii
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
+import canonical_event_administration as canonical
+import ownership_transition as transition
 import yaml
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
@@ -54,6 +58,11 @@ PROBE_IMAGE = (
 EVENT_ACTIVATION_PATCHES = (
     "event-enabled-config-patch.yaml",
     "event-enabled-deployment-patch.yaml",
+    "event-enabled-network-policy-patch.yaml",
+)
+CANONICAL_ACTIVATION_PATCHES = (
+    "canonical-config-patch.yaml",
+    "canonical-deployment-patch.yaml",
     "event-enabled-network-policy-patch.yaml",
 )
 REGISTRATION_TOPIC = "policy-registered-issue-290"
@@ -152,6 +161,18 @@ def matching_reader_predecessor_config(actual: Any, expected: Any) -> bool:
     """Accept reviewed local ConfigMap predecessors before their replacement only."""
     if not isinstance(actual, dict) or not isinstance(expected, dict):
         return False
+    if expected.get("EVENT_PROCESSING_MODE") == "canonical":
+        isolated = dict(expected)
+        isolated.update(
+            {
+                "EVENT_PROCESSING_MODE": "isolated",
+                "ELASTICSEARCH_INDEX": "policy_stats_issue_290",
+                "KAFKA_GROUP": "dashboard-service-issue-290",
+                "KAFKA_REGISTERED_TOPIC": "policy-registered-issue-290",
+            }
+        )
+        if actual == isolated:
+            return True
     if expected.get("EVENT_WORKERS_ENABLED") == "true":
         interrupted_activation = dict(expected)
         interrupted_activation["PROBE_TIMEOUT"] = "2s"
@@ -206,6 +227,18 @@ def matching_reader_predecessor_environment(actual: Any, expected: Any) -> bool:
     if not isinstance(actual, list) or not isinstance(expected, list):
         return False
     names = {item.get("name") for item in expected}
+    isolated = []
+    for item in expected:
+        candidate = json.loads(json.dumps(item))
+        secret = candidate.get("valueFrom", {}).get("secretKeyRef", {})
+        name = secret.get("name", "")
+        if name.endswith("-dashboard-elasticsearch") or name.endswith(
+            "-dashboard-elasticsearch-writer"
+        ):
+            secret["name"] = name + "-issue-290"
+        isolated.append(candidate)
+    if actual == isolated:
+        return True
     if {"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"}.issubset(names):
         predecessor = []
         for item in expected:
@@ -273,6 +306,14 @@ def event_activation_predecessor_list(actual: Any, expected: Any) -> bool:
         return True
     if not isinstance(actual, list) or not isinstance(expected, list):
         return False
+    isolated = json.loads(json.dumps(expected))
+    for item in isolated:
+        secret = item.get("secret", {})
+        name = secret.get("secretName", "")
+        if name.endswith("-dashboard-kafka-ca"):
+            secret["secretName"] = name + "-issue-290"
+    if actual == isolated:
+        return True
     return actual == [item for item in expected if item.get("name") != "kafka-ca"]
 
 
@@ -280,6 +321,25 @@ def render(environment: str) -> str:
     record = service_record(ROOT, SERVICE)
     target = target_record(ROOT, record, environment)
     return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(ROOT / target["overlay"])])
+
+
+def render_canonical(environment: str) -> str:
+    """Render the prepared canonical patches without selecting them in repository state."""
+    source = ROOT / f"k8s/overlays/{environment}/svc/dashboard"
+    with tempfile.TemporaryDirectory(prefix=".dashboard-canonical-", dir=source.parent) as name:
+        candidate = Path(name)
+        for item in source.iterdir():
+            if item.is_file():
+                shutil.copy2(item, candidate / item.name)
+        path = candidate / "kustomization.yaml"
+        value = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for patch in value.get("patches", []):
+            if patch.get("path") == "event-enabled-config-patch.yaml":
+                patch["path"] = "canonical-config-patch.yaml"
+            elif patch.get("path") == "event-enabled-deployment-patch.yaml":
+                patch["path"] = "canonical-deployment-patch.yaml"
+        path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
+        return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(candidate)])
 
 
 def expected_ingress(environment: str) -> list[dict[str, Any]]:
@@ -425,10 +485,10 @@ def kafka_egress(environment: str) -> dict[str, Any]:
     }
 
 
-def event_activation_assets(environment: str) -> tuple[dict[str, Any], ...]:
+def activation_assets(environment: str, names: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
     root = ROOT / f"k8s/overlays/{environment}/svc/dashboard"
     values: list[dict[str, Any]] = []
-    for name in EVENT_ACTIVATION_PATCHES:
+    for name in names:
         try:
             value = yaml.safe_load((root / name).read_text(encoding="utf-8"))
         except (OSError, yaml.YAMLError) as error:
@@ -436,6 +496,10 @@ def event_activation_assets(environment: str) -> tuple[dict[str, Any], ...]:
         require(isinstance(value, dict), f"Dashboard event activation asset {name} is invalid")
         values.append(value)
     return tuple(values)
+
+
+def event_activation_assets(environment: str) -> tuple[dict[str, Any], ...]:
+    return activation_assets(environment, EVENT_ACTIVATION_PATCHES)
 
 
 def event_activation_enabled(environment: str) -> bool:
@@ -461,6 +525,7 @@ def validate_event_activation_assets(environment: str) -> None:
     config, deployment, network = event_activation_assets(environment)
     prefix = environment
     expected_config = {
+        "EVENT_PROCESSING_MODE": "isolated",
         "EVENT_WORKERS_ENABLED": "true",
         "PROBE_TIMEOUT": "30s",
         "ELASTICSEARCH_INDEX": "policy_stats_issue_290",
@@ -528,7 +593,72 @@ def validate_event_activation_assets(environment: str) -> None:
     event_activation_enabled(environment)
 
 
-def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
+def validate_canonical_activation_assets(environment: str) -> None:
+    """Validate the unselected canonical state without granting it authority."""
+    config, deployment, network = activation_assets(environment, CANONICAL_ACTIVATION_PATCHES)
+    brokers = (
+        "local-dev-kafka-kafka-bootstrap:9093"
+        if environment == "local-dev"
+        else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
+    )
+    require(
+        config.get("data")
+        == {
+            "EVENT_PROCESSING_MODE": "canonical",
+            "EVENT_WORKERS_ENABLED": "true",
+            "PROBE_TIMEOUT": "30s",
+            "ELASTICSEARCH_INDEX": "policy_stats",
+            "KAFKA_BROKERS": brokers,
+            "KAFKA_GROUP": "dashboard-service",
+            "KAFKA_REGISTERED_TOPIC": "policy-registered",
+            "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
+        },
+        "canonical activation configuration differs",
+    )
+    pod = deployment.get("spec", {}).get("template", {}).get("spec", {})
+    container = pod.get("containers", [{}])[0]
+    env = {item.get("name"): item for item in container.get("env", [])}
+    reader = f"{environment}-dashboard-elasticsearch"
+    writer = f"{environment}-dashboard-elasticsearch-writer"
+    expected = {
+        "ELASTICSEARCH_USERNAME": (reader, "username"),
+        "ELASTICSEARCH_PASSWORD": (reader, "password"),
+        "ELASTICSEARCH_WRITER_USERNAME": (writer, "username"),
+        "ELASTICSEARCH_WRITER_PASSWORD": (writer, "password"),
+    }
+    require(set(env) == set(expected), "canonical activation Secret inputs differ")
+    for name, (secret, key) in expected.items():
+        require(
+            env[name].get("valueFrom", {}).get("secretKeyRef") == {"name": secret, "key": key},
+            f"canonical activation {name} differs",
+        )
+    require(
+        pod.get("volumes")
+        == [
+            {
+                "name": "kafka-ca",
+                "secret": {
+                    "secretName": f"{environment}-dashboard-kafka-ca",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 292,
+                },
+            }
+        ]
+        and container.get("volumeMounts")
+        == [{"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}],
+        "canonical activation Kafka trust differs",
+    )
+    require(
+        network.get("spec", {}).get("egress")
+        == [*expected_egress(environment), kafka_egress(environment)],
+        "canonical activation egress differs",
+    )
+    require(event_activation_enabled(environment), "PR1 must retain explicit isolated selection")
+
+
+def validate_render(
+    environment: str, text: str, expected_mode: str | None = None
+) -> list[dict[str, Any]]:
     require(environment in {"local-dev", "qa"}, "deployment environment is invalid")
     lower = text.lower()
     require(
@@ -541,7 +671,9 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     )
     require(len(items) == 5, "Dashboard resource inventory differs")
     prefix = f"{environment}-"
-    event_enabled = event_activation_enabled(environment)
+    mode = expected_mode or ("isolated" if event_activation_enabled(environment) else "disabled")
+    require(mode in {"disabled", "isolated", "canonical"}, "rendered event mode differs")
+    event_enabled = mode != "disabled"
     expected_names = {
         "ConfigMap": {prefix + "dashboard-config"},
         "Deployment": {prefix + "dashboard-api"},
@@ -602,8 +734,9 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             if environment == "local-dev"
             else "https://qa-elasticsearch-es-http.qa-data.svc:9200"
         ),
-        "ELASTICSEARCH_INDEX": "policy_stats_issue_290" if event_enabled else "policy_stats",
+        "ELASTICSEARCH_INDEX": "policy_stats_issue_290" if mode == "isolated" else "policy_stats",
         "ELASTICSEARCH_TIMEOUT": "5s",
+        "EVENT_PROCESSING_MODE": mode,
         "EVENT_WORKERS_ENABLED": "true" if event_enabled else "false",
         "SALES_TRENDS_TIME_ZONE": "GMT",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
@@ -621,8 +754,12 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
                     if environment == "local-dev"
                     else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
                 ),
-                "KAFKA_GROUP": "dashboard-service-issue-290",
-                "KAFKA_REGISTERED_TOPIC": "policy-registered-issue-290",
+                "KAFKA_GROUP": (
+                    "dashboard-service-issue-290" if mode == "isolated" else "dashboard-service"
+                ),
+                "KAFKA_REGISTERED_TOPIC": (
+                    "policy-registered-issue-290" if mode == "isolated" else "policy-registered"
+                ),
                 "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
             }
         )
@@ -632,7 +769,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             {
                 "name": "kafka-ca",
                 "secret": {
-                    "secretName": f"{environment}-dashboard-kafka-ca",
+                    "secretName": (f"{environment}-dashboard-kafka-ca"),
                     "items": [{"key": "ca.crt", "path": "ca.crt"}],
                     "defaultMode": 292,
                 },
@@ -661,8 +798,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         spec.get("replicas") == 1
         and spec.get("minReadySeconds") == 5
         and spec.get("progressDeadlineSeconds") == 180
-        and spec.get("strategy")
-        == {"type": "RollingUpdate", "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0}},
+        and spec.get("strategy") == {"type": "Recreate"},
         "rollout settings differ",
     )
     pod = spec.get("template", {}).get("spec", {})
@@ -724,7 +860,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     env = {item.get("name"): item for item in container.get("env", [])}
     reader_secret = (
         f"{environment}-dashboard-elasticsearch-issue-290"
-        if event_enabled
+        if mode == "isolated"
         else f"{environment}-dashboard-elasticsearch"
     )
     expected_env_names = {
@@ -747,7 +883,11 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "runtime identity environment differs",
     )
     if event_enabled:
-        writer_secret = f"{environment}-dashboard-elasticsearch-writer-issue-290"
+        writer_secret = (
+            f"{environment}-dashboard-elasticsearch-writer-issue-290"
+            if mode == "isolated"
+            else f"{environment}-dashboard-elasticsearch-writer"
+        )
         require(
             env["ELASTICSEARCH_WRITER_USERNAME"].get("valueFrom", {}).get("secretKeyRef")
             == {"name": writer_secret, "key": "username"}
@@ -903,6 +1043,11 @@ class Target:
         text = render(self.environment)
         items = validate_render(self.environment, text)
         deployment = resource(items, "Deployment", self.deployment)
+        self.processing_mode = str(
+            resource(items, "ConfigMap", f"{self.environment}-dashboard-config")["data"][
+                "EVENT_PROCESSING_MODE"
+            ]
+        )
         image = deployment["spec"]["template"]["spec"]["containers"][0]["image"]
         requested = os.environ.get("DEPLOY_IMAGE_REF", "")
         if requested:
@@ -1337,6 +1482,8 @@ def secret_and_image(target: Target, image: str) -> None:
 
 
 def role_snapshot(target: Target) -> dict[str, Any]:
+    if getattr(target, "processing_mode", "isolated") == "canonical":
+        return canonical_quiescence_snapshot(target)
     values: dict[str, Any] = {}
     expected_uids = {
         "deployment": os.environ.get("DEPLOY_JAVA_DEPLOYMENT_UID", ""),
@@ -1394,6 +1541,162 @@ def role_snapshot(target: Target) -> dict[str, Any]:
     return values
 
 
+def canonical_quiescence_snapshot(target: Target) -> dict[str, Any]:
+    """Require an observed exclusive boundary before or after canonical Go startup."""
+    name = f"{target.environment}-dashboard-api-legacy"
+    deployment = target.json("get", "deployment", name)
+    metadata = deployment.get("metadata", {})
+    require(
+        metadata.get("name") == name
+        and metadata.get("namespace") == target.namespace
+        and not metadata.get("deletionTimestamp")
+        and deployment.get("spec", {}).get("replicas") == 0
+        and deployment.get("status", {}).get("replicas", 0) == 0,
+        "canonical Java Deployment is not quiescent",
+    )
+    state, progress = canonical_transfer_observation(target)
+    try:
+        phase = transition.phase(state)
+        if phase == "quiescent":
+            transition.require_successor_start(state, progress)
+        else:
+            require(phase == "go-owned", "canonical ownership is not exclusive")
+            require(
+                progress.stable and progress.complete and progress.in_range,
+                "canonical committed progress is not safe",
+            )
+    except transition.TransitionError as error:
+        raise DeploymentError(str(error)) from error
+    return {f"deployment/{name}": metadata.get("uid", ""), "phase": "exclusive"}
+
+
+def pod_counts(items: list[dict[str, Any]]) -> tuple[int, int]:
+    terminating = sum(bool(item.get("metadata", {}).get("deletionTimestamp")) for item in items)
+    return len(items) - terminating, terminating
+
+
+def canonical_kafka_snapshot(target: Target) -> dict[str, Any]:
+    event = target.configuration.get("canonicalEventAdministration", {})
+    cluster = event.get("kafkaCluster", "")
+    require(cluster == f"{target.environment}-kafka", "canonical Kafka cluster differs")
+    pods = target.data_json("get", "pods", "-l", f"strimzi.io/cluster={cluster}").get("items", [])
+    ready = sorted(
+        pod.get("metadata", {}).get("name", "")
+        for pod in pods
+        if not pod.get("metadata", {}).get("deletionTimestamp")
+        and pod.get("metadata", {}).get("labels", {}).get("strimzi.io/broker-role") == "true"
+        and pod.get("status", {}).get("phase") == "Running"
+        and any(
+            condition.get("type") == "Ready" and condition.get("status") == "True"
+            for condition in pod.get("status", {}).get("conditions", [])
+        )
+    )
+    require(bool(ready) and ready[0], "no ready canonical Kafka broker Pod is available")
+    topic = target.namespace_kubectl(
+        target.data_namespace,
+        "exec",
+        ready[0],
+        "-c",
+        "kafka",
+        "--",
+        "/opt/kafka/bin/kafka-topics.sh",
+        "--bootstrap-server",
+        "localhost:9092",
+        "--describe",
+        "--topic",
+        canonical.TOPIC,
+    )
+    partitions = sorted({int(value) for value in re.findall(r"Partition:\s*(\d+)", topic)})
+    require(partitions == list(range(len(partitions))) and partitions, "canonical topic differs")
+    group = target.namespace_kubectl(
+        target.data_namespace,
+        "exec",
+        ready[0],
+        "-c",
+        "kafka",
+        "--",
+        "/opt/kafka/bin/kafka-consumer-groups.sh",
+        "--bootstrap-server",
+        "localhost:9092",
+        "--describe",
+        "--group",
+        canonical.GROUP,
+    )
+    offsets: dict[int, tuple[int, int]] = {}
+    members: set[str] = set()
+    for line in group.splitlines():
+        fields = line.split()
+        if len(fields) < 6 or fields[0] != canonical.GROUP or fields[1] != canonical.TOPIC:
+            continue
+        try:
+            partition, committed, log_end = map(int, fields[2:5])
+        except ValueError as error:
+            raise DeploymentError("canonical group progress differs") from error
+        require(0 <= committed <= log_end, "canonical group offset is out of range")
+        offsets[partition] = (committed, log_end)
+        if len(fields) > 6 and fields[6] != "-":
+            members.add(fields[6])
+    require(set(offsets) == set(partitions), "canonical group partition progress is incomplete")
+    return {"partitions": partitions, "offsets": offsets, "activeMembers": len(members)}
+
+
+def canonical_progress_observation(
+    target: Target,
+) -> tuple[dict[str, Any], transition.ProgressState]:
+    first = canonical_kafka_snapshot(target)
+    time.sleep(1)
+    second = canonical_kafka_snapshot(target)
+    return second, transition.ProgressState(
+        stable=canonical.stable_kafka_progress(first, second),
+        complete=bool(second["partitions"]),
+        in_range=True,
+    )
+
+
+def canonical_transfer_observation(
+    target: Target,
+) -> tuple[transition.OwnershipState, transition.ProgressState]:
+    java_pods = target.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api-legacy").get(
+        "items", []
+    )
+    java_running, java_terminating = pod_counts(java_pods)
+    go_pods = target.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api").get(
+        "items", []
+    )
+    go_running, go_terminating = pod_counts(go_pods)
+    kafka, progress = canonical_progress_observation(target)
+    return (
+        transition.OwnershipState(
+            java_running=java_running,
+            java_terminating=java_terminating,
+            go_running=go_running,
+            go_terminating=go_terminating,
+            canonical_members=kafka["activeMembers"],
+        ),
+        progress,
+    )
+
+
+def canonical_return_snapshot(target: Target) -> dict[str, Any]:
+    java_name = f"{target.environment}-dashboard-api-legacy"
+    go_name = f"{target.environment}-dashboard-api"
+    for name in (java_name, go_name):
+        deployment = target.json("get", "deployment", name)
+        require(
+            deployment.get("metadata", {}).get("name") == name
+            and deployment.get("metadata", {}).get("namespace") == target.namespace
+            and deployment.get("spec", {}).get("replicas") == 0
+            and deployment.get("status", {}).get("replicas", 0) == 0,
+            f"Deployment/{name} is not stopped for canonical return",
+        )
+    state, progress = canonical_transfer_observation(target)
+    try:
+        transition.require_predecessor_return(state, progress)
+    except transition.TransitionError as error:
+        raise DeploymentError(str(error)) from error
+    return {"environment": target.environment, "phase": "quiescent", "status": "passed"}
+
+
 def record_snapshot(stage: str, value: dict[str, Any]) -> None:
     print(json.dumps({"stage": stage, "resources": value}, sort_keys=True))
 
@@ -1411,8 +1714,13 @@ def initialization_complete(_target: Target) -> None:
 
 
 def rollout(target: Target) -> None:
+    seconds = transition.LIMITS[target.environment]["action_seconds"]
     target.kubectl(
-        "rollout", "status", f"deployment/{target.deployment}", "--timeout=180s", timeout=210
+        "rollout",
+        "status",
+        f"deployment/{target.deployment}",
+        f"--timeout={seconds}s",
+        timeout=seconds + 30,
     )
 
 
@@ -2376,8 +2684,14 @@ def validate_java_edge_identity(environment: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     require(
-        len(arguments) == 1 and arguments[0] in {"render", "check"}, "unsupported check operation"
+        len(arguments) == 1 and arguments[0] in {"render", "check", "return-check"},
+        "unsupported check operation",
     )
+    if arguments[0] == "return-check":
+        target = Target()
+        target.coordinates()
+        print(json.dumps(canonical_return_snapshot(target), sort_keys=True))
+        return 0
     environments = (
         [os.environ.get("DEPLOY_ENV", "")] if arguments[0] == "render" else ["local-dev", "qa"]
     )
@@ -2392,6 +2706,8 @@ def main(argv: list[str] | None = None) -> int:
         validate_qa_aggregate(qa_root.get("resources"))
         for environment in ("local-dev", "qa"):
             validate_event_activation_assets(environment)
+            validate_canonical_activation_assets(environment)
+            validate_render(environment, render_canonical(environment), "canonical")
             validate_java_edge_identity(environment)
         print(
             "dashboard-deployment-check: local-dev/QA renders and guarded event activation "

@@ -71,7 +71,8 @@ func TestLoad_DefaultsWithRequiredSalesTrendsTimeZone(t *testing.T) {
 	if got.SalesTrendsTimeZone == nil || got.SalesTrendsTimeZone.String() != "GMT" {
 		t.Errorf("SalesTrendsTimeZone = %v, want GMT", got.SalesTrendsTimeZone)
 	}
-	if got.Events.Enabled || len(got.Events.Brokers) != 0 || got.Events.Writer.URL != "" {
+	if got.Events.Mode != EventProcessingDisabled || got.Events.Enabled ||
+		len(got.Events.Brokers) != 0 || got.Events.Writer.URL != "" {
 		t.Errorf("event worker defaults = %+v, want disabled and empty", got.Events)
 	}
 }
@@ -79,11 +80,12 @@ func TestLoad_DefaultsWithRequiredSalesTrendsTimeZone(t *testing.T) {
 func TestLoad_EnabledEventWorkerRequiresAndPreservesIsolatedSettings(t *testing.T) {
 	// given
 	values := map[string]string{
+		EnvEventProcessingMode:  string(EventProcessingIsolated),
 		EnvElasticsearchIndex:   defaultProjectionIndex,
 		EnvEventWorkersEnabled:  "true",
 		EnvKafkaBrokers:         "kafka-a.example:9093, kafka-b.example:9093",
-		EnvKafkaGroup:           defaultKafkaGroup,
-		EnvKafkaRegisteredTopic: defaultRegisteredTopic,
+		EnvKafkaGroup:           isolatedKafkaGroup,
+		EnvKafkaRegisteredTopic: isolatedRegisteredTopic,
 		EnvKafkaCAFile:          "/var/run/kafka/ca.crt",
 		EnvWriterUsername:       "writer",
 		EnvWriterPassword:       "private-password",
@@ -95,9 +97,9 @@ func TestLoad_EnabledEventWorkerRequiresAndPreservesIsolatedSettings(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Events.Enabled || len(got.Events.Brokers) != 2 ||
-		got.Events.Group != defaultKafkaGroup ||
-		got.Events.RegisteredTopic != defaultRegisteredTopic ||
+	if got.Events.Mode != EventProcessingIsolated || !got.Events.Enabled ||
+		len(got.Events.Brokers) != 2 || got.Events.Group != isolatedKafkaGroup ||
+		got.Events.RegisteredTopic != isolatedRegisteredTopic ||
 		got.Events.Writer.Index != defaultProjectionIndex ||
 		got.Events.Writer.URL != got.Elasticsearch.URL ||
 		got.Events.Writer.Username != "writer" ||
@@ -108,6 +110,7 @@ func TestLoad_EnabledEventWorkerRequiresAndPreservesIsolatedSettings(t *testing.
 
 func TestLoad_EnabledEventWorkerFailsOnIncompleteOrWrongTargetSettings(t *testing.T) {
 	valid := map[string]string{
+		EnvEventProcessingMode: string(EventProcessingIsolated),
 		EnvElasticsearchIndex:  defaultProjectionIndex,
 		EnvEventWorkersEnabled: "true",
 		EnvKafkaBrokers:        "kafka.example:9093",
@@ -187,24 +190,114 @@ func TestLoad_EnabledEventWorkerFailsOnIncompleteOrWrongTargetSettings(t *testin
 	}
 }
 
-func TestLoad_DisabledEventWorkerIgnoresDependencySettings(t *testing.T) {
-	got, err := load(mapLookup(map[string]string{
-		EnvElasticsearchIndex:   defaultProjectionIndex,
-		EnvEventWorkersEnabled:  "false",
-		EnvKafkaBrokers:         "private-invalid-broker",
-		EnvKafkaGroup:           "canonical-group",
-		EnvKafkaRegisteredTopic: "canonical-topic",
-		EnvKafkaCAFile:          "",
-		EnvWriterUsername:       "",
+func TestLoad_CanonicalEventWorkerSelectsOnlyCanonicalTuple(t *testing.T) {
+	values := map[string]string{
+		EnvEventProcessingMode:  "canonical",
+		EnvElasticsearchIndex:   "policy_stats",
+		EnvEventWorkersEnabled:  "true",
+		EnvKafkaBrokers:         "kafka.example:9093",
+		EnvKafkaGroup:           "dashboard-service",
+		EnvKafkaRegisteredTopic: "policy-registered",
+		EnvKafkaCAFile:          "/var/run/kafka/ca.crt",
+		EnvWriterUsername:       "writer",
 		EnvWriterPassword:       "private-password",
-	}))
-	if err != nil {
-		t.Fatalf("disabled event settings: %v", err)
 	}
-	if got.Events.Enabled || len(got.Events.Brokers) != 0 || got.Events.Group != "" ||
-		got.Events.RegisteredTopic != "" || got.Events.CAFile != "" ||
-		got.Events.Writer.URL != "" {
-		t.Fatalf("disabled event settings retained dependency values: %+v", got.Events)
+
+	got, err := load(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Events.Mode != EventProcessingCanonical || !got.Events.Enabled ||
+		got.Events.Group != "dashboard-service" ||
+		got.Events.RegisteredTopic != "policy-registered" ||
+		got.Events.Writer.Index != "policy_stats" {
+		t.Fatalf("canonical event settings = %+v", got.Events)
+	}
+}
+
+func TestLoad_EventModeAndTransitionGuardFailClosed(t *testing.T) {
+	tests := []struct {
+		name    string
+		values  map[string]string
+		setting string
+	}{
+		{
+			name: "unknown mode",
+			values: map[string]string{
+				EnvEventProcessingMode: "private-unknown-mode",
+			},
+			setting: EnvEventProcessingMode,
+		},
+		{
+			name: "canonical with disabled guard",
+			values: map[string]string{
+				EnvEventProcessingMode: string(EventProcessingCanonical),
+			},
+			setting: EnvEventWorkersEnabled,
+		},
+		{
+			name: "disabled with enabled guard",
+			values: map[string]string{
+				EnvEventWorkersEnabled: "true",
+			},
+			setting: EnvEventWorkersEnabled,
+		},
+		{
+			name: "disabled with event dependency",
+			values: map[string]string{
+				EnvEventWorkersEnabled: "false",
+				EnvKafkaGroup:          "dashboard-service",
+			},
+			setting: EnvKafkaGroup,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := load(mapLookup(test.values))
+			setting, _ := kitconfig.ErrorDetails(err)
+			if err == nil || setting != test.setting ||
+				strings.Contains(err.Error(), "private-unknown-mode") {
+				t.Fatalf("load() error = %v, setting = %q", err, setting)
+			}
+		})
+	}
+}
+
+func TestLoad_EnabledModesRejectMixedCoordinates(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		mode  string
+		index string
+		group string
+		topic string
+	}{
+		{
+			name: "canonical mode with isolated group", mode: "canonical",
+			index: "policy_stats", group: "dashboard-service-issue-290",
+			topic: "policy-registered",
+		},
+		{
+			name: "isolated mode with canonical index", mode: "isolated",
+			index: "policy_stats", group: "dashboard-service-issue-290",
+			topic: "policy-registered-issue-290",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := load(mapLookup(map[string]string{
+				EnvEventProcessingMode:  test.mode,
+				EnvElasticsearchIndex:   test.index,
+				EnvEventWorkersEnabled:  "true",
+				EnvKafkaBrokers:         "kafka.example:9093",
+				EnvKafkaGroup:           test.group,
+				EnvKafkaRegisteredTopic: test.topic,
+				EnvKafkaCAFile:          "/var/run/kafka/ca.crt",
+				EnvWriterUsername:       "writer",
+				EnvWriterPassword:       "private-password",
+			}))
+			if err == nil {
+				t.Fatal("mixed event tuple accepted")
+			}
+		})
 	}
 }
 

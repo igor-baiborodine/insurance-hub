@@ -310,6 +310,22 @@ is shared collection failure and does not by itself prove Dashboard loss. Never 
 Prometheus, Loki, Tempo, Elasticsearch or Kafka to generate an incident; exercise outages only in
 the disposable harness.
 
+For a canonical ownership observation, first retain two passing stabilization samples. Then
+observe 15 minutes with at least 31 inclusive samples at 30-second cadence. Run 30 opening
+authenticated calls, ten per query, and three final authenticated calls, one per query. Submit ten
+sequential same-ID synthetic registrations. Every controlled result must succeed, each event must
+be visible within 30 seconds, and the selected ID must leave one exact retained document. Require
+zero commit failures and restarts, inactive alerts, and the existing minimum-sample guards before
+accepting request or dependency p95 at or below 250 ms. Record start/end owner, group assignments,
+per-partition progress, document count, source/image/config identities and actual downtime. Quiet
+traffic or missing telemetry cannot establish this result.
+
+During that window, classify a safe abort phase within 60 seconds and initiate the selected return
+within 120 seconds. Local actions have a 180-second limit and a 10-minute return limit. QA Flux
+revisions have a 10-minute limit and a 30-minute return limit. Any ownership overlap, unexpected
+member, progress regression, out-of-range commit, firing alert, restart or missing required sample
+starts the guarded return from the deployment runbook.
+
 ## Recovery, rollback and cleanup
 
 If a source, runtime or network mismatch appears, stop the acceptance attempt and use the
@@ -383,6 +399,6 @@ diagnostic links, recovery outcome and owned cleanup. Redact credentials, busine
 event bodies.
 
 Issue 291 owns these monitoring assets and operating procedures. Issue 292 owns full-service
-practical load, application downgrade/removal/reinstallation/restoration and isolated authority
-handover. Later tickets own route/traffic transfer and Java retirement. This runbook does not
-authorize those actions.
+practical load and restoration evidence. Issue 293 owns canonical transfer observations and the
+separate route gates; later work owns final Java retirement. This runbook does not authorize those
+actions.

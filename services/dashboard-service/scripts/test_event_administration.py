@@ -59,7 +59,7 @@ def target_record(name: str = "local-dev") -> dict[str, object]:
                 else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
             ),
             "kafkaPublicCASecret": f"{prefix}-kafka-cluster-ca-cert",
-            "kafkaWorkloadCASecret": f"{prefix}-dashboard-kafka-ca",
+            "kafkaWorkloadCASecret": f"{prefix}-dashboard-kafka-ca-issue-290",
             "kafkaReplicas": 1 if local else 3,
         },
     }
@@ -77,7 +77,7 @@ def test_target_accepts_only_issue_290_catalog_coordinates(environment: str) -> 
     assert target.environment == environment
     assert target.reader_secret == f"{environment}-dashboard-elasticsearch-issue-290"
     assert target.writer_secret == f"{environment}-dashboard-elasticsearch-writer-issue-290"
-    assert target.kafka_ca_secret == f"{environment}-dashboard-kafka-ca"
+    assert target.kafka_ca_secret == f"{environment}-dashboard-kafka-ca-issue-290"
 
 
 def test_target_rejects_wrong_coordinates_before_cluster_access() -> None:
@@ -282,9 +282,9 @@ def test_topic_contract_records_exact_cluster_owner_and_replication() -> None:
 def test_retire_refuses_foreign_topic_before_any_topic_or_secret_deletion() -> None:
     target = SimpleNamespace(
         data_namespace="qa-data",
-        reader_secret="reader",
-        writer_secret="writer",
-        kafka_ca_secret="kafka-ca",
+        reader_secret="qa-dashboard-elasticsearch-issue-290",
+        writer_secret="qa-dashboard-elasticsearch-writer-issue-290",
+        kafka_ca_secret="qa-dashboard-kafka-ca-issue-290",
         json=Mock(return_value={"metadata": {"labels": {"insurance-hub.io/owner": "foreign"}}}),
         verify_topic=Mock(side_effect=administration.AdministrationError("topic differs")),
         run=Mock(),
@@ -300,3 +300,23 @@ def test_retire_refuses_foreign_topic_before_any_topic_or_secret_deletion() -> N
 
     admin.request.assert_not_called()
     target.run.assert_not_called()
+
+
+def test_retire_rejects_every_canonical_resource_name_before_inspection() -> None:
+    definition = administration.load_definition()
+    target = SimpleNamespace(
+        reader_secret="local-dev-dashboard-elasticsearch",
+        writer_secret="local-dev-dashboard-elasticsearch-writer",
+        kafka_ca_secret="local-dev-dashboard-kafka-ca",
+    )
+    admin = Mock()
+    with (
+        patch.object(administration, "INDEX", "policy_stats"),
+        patch.object(administration, "TOPIC", "policy-registered"),
+        patch.object(administration, "GROUP", "dashboard-service"),
+        patch.object(administration, "inspect_index") as inspect_index,
+        pytest.raises(administration.AdministrationError, match="retirement boundary"),
+    ):
+        administration.retire(target, admin, definition)
+    inspect_index.assert_not_called()
+    admin.request.assert_not_called()

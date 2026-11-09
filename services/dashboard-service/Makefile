@@ -8,8 +8,10 @@ INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py scripts/deployment.py \
-	scripts/event_administration.py scripts/reader_administration.py \
-	scripts/test_event_administration.py scripts/test_reader_administration.py \
+	scripts/event_administration.py scripts/canonical_event_administration.py \
+	scripts/ownership_transition.py scripts/reader_administration.py \
+	scripts/test_event_administration.py scripts/test_canonical_event_administration.py \
+	scripts/test_ownership_transition.py scripts/test_reader_administration.py \
 	scripts/disposable_deployment.py scripts/image_check.py scripts/service_process.py \
 	scripts/test_image_check.py \
 	scripts/elasticsearch_integration.py scripts/test_elasticsearch_integration.py \
@@ -24,7 +26,10 @@ PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_event_integration.py \
 	scripts/test_image_check.py \
 	scripts/test_deployment.py \
+	scripts/test_disposable_deployment.py \
 	scripts/test_event_administration.py \
+	scripts/test_canonical_event_administration.py \
+	scripts/test_ownership_transition.py \
 	scripts/test_reader_administration.py \
 	scripts/test_disposable_command.py \
 	scripts/test_service_process.py \
@@ -93,6 +98,7 @@ IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
 QUALIFICATION_IMAGE_REF ?=
 QUALIFICATION_SOURCE_REVISION ?=
 QUALIFICATION_REPORT_FILE ?=
+QUALIFICATION_JAVA_IMAGE_REF ?=
 QUALIFICATION_EFFECTIVE_IMAGE_REF := $(if $(strip $(QUALIFICATION_IMAGE_REF)),$(QUALIFICATION_IMAGE_REF),$(IMAGE_REF))
 QUALIFICATION_IMAGE_PREREQUISITE := $(if $(strip $(QUALIFICATION_IMAGE_REF)),,image-build)
 TARGET_PLATFORM ?= linux/amd64
@@ -120,7 +126,9 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	image-build image-check _image-check-existing deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop \
 	reader-ensure reader-verify reader-rotate event-fixture-setup event-fixture-verify \
-	event-fixture-retire deploy-test-tooling deploy-test \
+	event-fixture-retire canonical-event-inspect canonical-event-ensure-access \
+	canonical-event-verify canonical-return-check deploy-test-tooling deploy-test \
+	_qualification-java-image-check \
 	_deploy-test-rpc \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
@@ -128,6 +136,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	shared-candidate-image
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
+export QUALIFICATION_JAVA_IMAGE_REF
 
 image-build: python-runtime-check ## Build the pinned linux/amd64 Dashboard runtime image
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
@@ -164,16 +173,31 @@ event-fixture-setup event-fixture-verify event-fixture-retire: python-runtime-ch
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/event_administration.py '$(@:event-fixture-%=%)'
 
+canonical-event-inspect canonical-event-ensure-access canonical-event-verify: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/canonical_event_administration.py '$(@:canonical-event-%=%)'
+
+canonical-return-check: python-runtime-check ## Verify the stopped canonical boundary before Java return
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/dashboard_deployment_checks.py return-check
+
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Dashboard deployment guards
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" -m pytest -q scripts/test_deployment.py scripts/test_event_administration.py \
+		scripts/test_canonical_event_administration.py scripts/test_ownership_transition.py \
 		scripts/test_reader_administration.py
 
-deploy-test: python-toolchain-check $(QUALIFICATION_IMAGE_PREREQUISITE) ## Exercise Dashboard in an owned disposable Kind namespace
+_qualification-java-image-check:
+	@test -n "$${QUALIFICATION_JAVA_IMAGE_REF:-}" || { \
+		echo 'deploy-test: QUALIFICATION_JAVA_IMAGE_REF is required' >&2; exit 1; \
+	}
+
+deploy-test: _qualification-java-image-check python-toolchain-check $(QUALIFICATION_IMAGE_PREREQUISITE) ## Exercise Dashboard in an owned disposable Kind namespace
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		IMAGE_REF="$(QUALIFICATION_EFFECTIVE_IMAGE_REF)" \
 		QUALIFICATION_SOURCE_REVISION="$(QUALIFICATION_SOURCE_REVISION)" \
 		QUALIFICATION_REPORT_FILE="$(QUALIFICATION_REPORT_FILE)" \
+		QUALIFICATION_JAVA_IMAGE_REF="$(QUALIFICATION_JAVA_IMAGE_REF)" \
 		ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" KAFKA_IMAGE="$(KAFKA_IMAGE)" \
 		GO="$(GO)" MAKE_COMMAND="$(MAKE)" TOOLS_DIR="$(TOOLS_DIR)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_disposable_deployment.py

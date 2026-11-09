@@ -131,16 +131,21 @@ func (client *Client) Check(ctx context.Context) error {
 	return client.checkCompatibilityQuery(operationCtx)
 }
 
-// CheckWrite verifies the isolated writer identity without reading or mutating the index.
+// CheckWrite verifies the selected exact-index writer identity without mutating the index.
 func (client *Client) CheckWrite(ctx context.Context) error {
-	if client == nil || client.Client == nil || client.index != ProjectionIndex {
-		return errors.New("check elasticsearch writer: isolated client is required")
+	if client == nil || client.Client == nil || !dashboardIndex(client.index) {
+		return errors.New("check elasticsearch writer: exact Dashboard client is required")
 	}
 	operationCtx, cancel := withOperationTimeout(ctx, client.timeout)
 	defer cancel()
-	payload := []byte(
-		`{"index":[{"names":["policy_stats_issue_290"],"privileges":["index"]}]}`,
-	)
+	payload, err := json.Marshal(map[string]any{
+		"index": []map[string]any{
+			{"names": []string{client.index}, "privileges": []string{"index"}},
+		},
+	})
+	if err != nil {
+		return errors.New("check elasticsearch writer: build privilege request")
+	}
 	response, err := client.Security.HasPrivileges(
 		bytes.NewReader(payload),
 		client.Security.HasPrivileges.WithContext(operationCtx),
@@ -155,7 +160,7 @@ func (client *Client) CheckWrite(ctx context.Context) error {
 		}
 		return errors.New("check elasticsearch writer: request failed")
 	}
-	if !privileges.HasAllRequested || !privileges.Index[ProjectionIndex]["index"] {
+	if !privileges.HasAllRequested || !privileges.Index[client.index]["index"] {
 		return errors.New("check elasticsearch writer: required privilege unavailable")
 	}
 	return nil

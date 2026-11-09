@@ -150,6 +150,10 @@ def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() 
         "event-fixture-setup",
         "event-fixture-verify",
         "event-fixture-retire",
+        "canonical-event-inspect",
+        "canonical-event-ensure-access",
+        "canonical-event-verify",
+        "canonical-return-check",
         "deploy-test-tooling",
         "deploy-test",
     ]

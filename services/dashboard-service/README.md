@@ -13,12 +13,11 @@
 
 # Dashboard service
 
-`dashboard-service` is the first private Go Dashboard process. It runs beside the authoritative
-Java Dashboard and exposes total-sales, agent-sales and sales-trends queries. Its default
-deployment reads the existing `policy_stats` index with event processing disabled. The opt-in
-issue-290 candidate consumes only isolated policy registrations and performs refreshed whole-
-document replacement in `policy_stats_issue_290`; Java retains canonical writer, setup, edge
-retry, traffic and event authority.
+`dashboard-service` is the private Go Dashboard process. It exposes total-sales, agent-sales and
+sales-trends queries and supports closed `disabled`, `isolated` and `canonical` event modes. PR1
+keeps both shared overlays explicitly isolated while retaining Java canonical authority and the
+Java edge route. The prepared canonical mode reuses `policy_stats`, `policy-registered` and
+`dashboard-service` only after the guarded ownership-transfer prerequisites pass.
 
 The standalone module is
 `github.com/igor-baiborodine/insurance-hub/services/dashboard-service`. It resolves the published
@@ -62,7 +61,7 @@ flowchart LR
     broker[("Kafka TLS")] --> worker["internal/kafka registration worker"]
     worker --> projection["internal/application projection"]
     projection --> writer["separate Elasticsearch writer"]
-    writer --> isolated["policy_stats_issue_290"]
+    writer --> selected["selected policy_stats index"]
     probes["Kubelet or management caller"] -->|":8081"| health["livez and readyz"]
     entry["cmd/server"] --> composition["internal/service"]
     composition --> gateway
@@ -86,8 +85,8 @@ the worker before the documented HTTP-first RPC drain.
 | `internal/grpc` | Register all three sales operations, enforce request validation and map safe gRPC statuses |
 | `internal/application` | Own three query use cases plus the received registration projection and narrow ports |
 | `internal/domain` | Own date/filter presence, aggregation units, periods, counts, projection values and exact decimal tokens |
-| `internal/elasticsearch` | Execute bounded analytics reads and isolated refreshed whole-document replacement through separate clients |
-| `internal/kafka` | Consume one registration topic with the accepted legacy polling, commit and batch-stop behavior |
+| `internal/elasticsearch` | Execute bounded analytics reads and mode-selected refreshed whole-document replacement through separate clients |
+| `internal/kafka` | Inspect canonical progress before group acquisition and consume one selected registration topic with bounded commit and stop behavior |
 | `internal/service` | Compose listeners/providers/query dependencies and the conditional worker, readiness, rollback and drain |
 | `internal/logger` | Emit safe completion records with Dashboard runtime identity |
 | `internal/telemetry` | Own bounded HTTP/RPC, Elasticsearch, registration, commit-failure and worker-state signals over Servicekit providers |
@@ -109,7 +108,7 @@ value.
 | HTTP limits | Header/body `16384`/`4096` bytes; read-header/read/write/idle `5s`/`10s`/`10s`/`30s` |
 | gRPC limits | Receive/send `1048576`/`8388608` bytes |
 | Elasticsearch | `ELASTICSEARCH_URL=http://127.0.0.1:9200`, fixed `ELASTICSEARCH_INDEX=policy_stats`, optional paired `ELASTICSEARCH_USERNAME`/`ELASTICSEARCH_PASSWORD`, HTTPS-only `ELASTICSEARCH_CA_FILE`, `ELASTICSEARCH_TIMEOUT=5s` maximum |
-| Registration worker | `EVENT_WORKERS_ENABLED=false`; enabled mode requires exact `ELASTICSEARCH_INDEX=policy_stats_issue_290`, separate writer credentials, `KAFKA_BROKERS`, `KAFKA_CA_FILE`, and the fixed isolated defaults `KAFKA_GROUP=dashboard-service-issue-290` and `KAFKA_REGISTERED_TOPIC=policy-registered-issue-290` |
+| Registration worker | `EVENT_PROCESSING_MODE=disabled|isolated|canonical` with coherent `EVENT_WORKERS_ENABLED`; isolated selects the issue-290 index/topic/group and suffixed Elasticsearch Secrets while PR1 preserves the existing ordinary Kafka-trust Secret name, and canonical selects only `policy_stats`, `policy-registered`, `dashboard-service` and ordinary Secrets. Canonical startup requires stable commits, complete in-range progress and no active member before group acquisition; new log-end arrivals may increase the backlog. |
 | Sales trends | Required `SALES_TRENDS_TIME_ZONE`; exact available IANA name loaded once at startup. Empty, `Local`, whitespace-altered and unknown values fail. Local-dev and QA use `GMT`. |
 | Telemetry | `OTEL_ENABLED=false`, optional `OTEL_EXPORTER_OTLP_ENDPOINT`; exporter timeout defaults to `2s` and accepts positive Go duration syntax. Deployed configuration omits `OTEL_EXPORTER_OTLP_TIMEOUT`, and deployment guards reject an override. |
 | Logging | `LOG_LEVEL=info`; safe structured fields only |
@@ -175,12 +174,17 @@ values, amounts, topics, groups, credentials and raw dependency errors.
 the configured Kind cluster, then creates one uniquely owned namespace. It first proves the
 disabled query deployment, then enables only the disposable issue-290 inputs, checks reader/writer
 permissions and the accepted mapping-authority limit, verifies Kafka TLS/hostname handling, and
-projects an isolated registration. Its fixture setup is explicit test administration; serving
-never creates or seeds state. The test removes its namespace and does not establish a local-dev or
-QA deployment result. The guarded deployment stage requires the exact target ECK Service, reader
-Secret and QA public-CA copy before mutation. `go-svc-deploy-verify` creates and removes bounded
-qualification Pods and one untrusted namespace to prove allowed and denied caller identities plus
-the reader's effective read-only privileges. The
+projects an isolated registration. It then uses `QUALIFICATION_JAVA_IMAGE_REF` for one bounded
+disposable canonical rehearsal. The rehearsal establishes two Java-owned documents and nonzero
+commits, stops Java before Go, exercises a failed Go readiness transition and ordered Java return,
+then completes Java to Go to Java with a same-ID replacement and a new post-return event/query.
+Every owner change waits for terminating Pods and canonical group membership to disappear. Its
+fixture setup is explicit test administration; serving never creates or seeds state. The test
+removes its namespace and does not establish a local-dev or QA deployment result. The guarded
+deployment stage requires the exact target ECK Service, reader Secret and QA public-CA copy before
+mutation. `go-svc-deploy-verify` creates and removes bounded qualification Pods and one untrusted
+namespace to prove allowed and denied caller identities plus the reader's effective read-only
+privileges. The
 [deployment runbook](deployment-runbook.md) records
 those side effects, coordinates and cleanup.
 
@@ -220,6 +224,16 @@ broker CA and registration topic. Verify is read-only. Setup and retirement requ
 index, identities, Secrets and topic, so it remains a separately authorized later operation; it
 does not reset the consumer group.
 
+Canonical administration is separately dispatched as `go-svc-canonical-event-inspect`,
+`go-svc-canonical-event-ensure-access` and `go-svc-canonical-event-verify`. It inspects the existing
+index and stable Kafka topic/group progress, reuses the issue-287 reader, and may provision only
+the issue-293 exact-index writer plus ordinary writer and Kafka-trust Secrets. Before any
+Elasticsearch mutation, ensure-access either creates the ordinary trust Secret or adopts only the
+exact issue-290 predecessor with matching CA bytes and its recorded field manager. It never creates,
+deletes, remaps, seeds or retires canonical state. The isolated retirement owner rejects ordinary
+canonical names before its first inspection or deletion. `go-svc-canonical-return-check` observes
+both workloads, terminating Pods, canonical membership and stable progress before Java return.
+
 The guarded local-dev sequence uses catalog service `dashboard`, context
 `kind-local-dev-insurance-hub` and namespace coordinate `local-dev-all`:
 
@@ -243,10 +257,11 @@ When replacing an existing local release, export its exact running image as
 `DEPLOY_PREVIOUS_IMAGE_REF` before preflight. Keep it set through `go-svc-deploy`, then unset it
 before status and verification. The deployment runbook contains the complete command sequence.
 
-`go-svc-stop` scales only the Go Dashboard Deployment to zero. A guarded redeploy restores the
-same accepted image. Java Dashboard resources, routes, configuration and data/event authority stay
-unchanged. The [Dashboard deployment runbook](deployment-runbook.md)
-owns the complete deployment and return procedure after those owners are onboarded.
+`go-svc-stop` scales only the Go Dashboard Deployment to zero. Canonical transfer separately stops
+the whole Java Deployment, proves that no running or terminating Java Pod or canonical member
+remains, and then starts one Go Pod through the non-surging `Recreate` strategy. Return stops Go
+first and proves the same boundary before Java resumes. The edge route changes independently. The
+[Dashboard deployment runbook](deployment-runbook.md) owns the complete procedure and budgets.
 
 The [Dashboard observability runbook](observability-runbook.md) owns monitoring validation,
 guarded QA provisioning/read-back, bounded investigation and restoration. It preserves the

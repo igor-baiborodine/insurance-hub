@@ -114,6 +114,34 @@ func TestWriter_EmitsAllSevenFieldsForNullAndEmptyValues(t *testing.T) {
 	}
 }
 
+func TestWriter_UsesSelectedCanonicalIndex(t *testing.T) {
+	var path string
+	server := httptest.NewServer(
+		http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			response.Header().Set("X-Elastic-Product", "Elasticsearch")
+			path = request.Method + " " + request.URL.RequestURI()
+			_, _ = response.Write([]byte(`{"_id":"SYN-CANONICAL","result":"created"}`))
+		}),
+	)
+	defer server.Close()
+	client, err := New(Config{Endpoint: server.URL, Index: PolicyIndex, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewWriter(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = writer.ReplacePolicy(
+		context.Background(),
+		domain.PolicyProjection{Number: "SYN-CANONICAL"},
+	)
+	if err != nil || path != "PUT /policy_stats/_doc/SYN-CANONICAL?refresh=true" {
+		t.Fatalf("canonical replacement = %q, %v", path, err)
+	}
+}
+
 func TestWriter_ClassifiesRejectedAndOversizedResponses(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -172,7 +200,7 @@ func TestWriter_ClassifiesRejectedAndOversizedResponses(t *testing.T) {
 	}
 }
 
-func TestWriter_PropagatesCancellationAndRequiresIsolatedClient(t *testing.T) {
+func TestWriter_PropagatesCancellationAndRequiresDashboardClient(t *testing.T) {
 	// given
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -218,11 +246,12 @@ func TestWriter_PropagatesCancellationAndRequiresIsolatedClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, canonicalErr := NewWriter(canonicalClient)
+	canonicalWriter, canonicalErr := NewWriter(canonicalClient)
 	_, missingErr := NewWriter(nil)
 
 	// then
-	if !errors.Is(writeErr, context.Canceled) || canonicalErr == nil ||
+	if !errors.Is(writeErr, context.Canceled) || canonicalErr != nil ||
+		canonicalWriter == nil ||
 		!errors.Is(missingErr, ErrClientRequired) {
 		t.Fatalf("errors = %v / %v / %v", writeErr, canonicalErr, missingErr)
 	}

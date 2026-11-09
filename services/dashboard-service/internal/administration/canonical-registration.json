@@ -1,0 +1,17 @@
+{
+  "owner": "issue-293",
+  "index": "policy_stats",
+  "reader": {
+    "role": "go_dashboard_total_sales_reader",
+    "user": "go_dashboard_total_sales_reader",
+    "privileges": ["read", "view_index_metadata"]
+  },
+  "writer": {
+    "role": "go_dashboard_policy_stats_writer",
+    "user": "go_dashboard_policy_stats_writer",
+    "privileges": ["index"]
+  },
+  "topic": "policy-registered",
+  "consumerGroup": "dashboard-service",
+  "cleanup": false
+}
