@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/kmsg"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
@@ -247,6 +248,92 @@ func TestWorker_CheckRequiresStableAssignment(t *testing.T) {
 	}
 }
 
+func TestVerifyCanonicalProgress_RequiresStableCompleteInRangeSnapshot(t *testing.T) {
+	tests := []struct {
+		name      string
+		client    progressRequestClient
+		wantError string
+	}{
+		{
+			name:   "stable committed progress",
+			client: progressRequestClient{start: 0, committed: 4, end: 4},
+		},
+		{
+			name: "active member",
+			client: progressRequestClient{
+				start:     0,
+				committed: 4,
+				end:       4,
+				active:    true,
+			},
+			wantError: "group is not inactive",
+		},
+		{
+			name:      "missing commit",
+			client:    progressRequestClient{start: 0, committed: -1, end: 4},
+			wantError: "missing group commit",
+		},
+		{
+			name:      "out of range commit",
+			client:    progressRequestClient{start: 0, committed: 5, end: 4},
+			wantError: "invalid committed progress",
+		},
+		{
+			name: "changing bounds",
+			client: progressRequestClient{
+				start:     0,
+				committed: 4,
+				end:       4,
+				changeEnd: true,
+			},
+			wantError: "Kafka progress changed",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := test.client
+			err := verifyCanonicalProgress(
+				context.Background(),
+				&client,
+				"policy-registered",
+				"dashboard-service",
+			)
+			if test.wantError == "" && err != nil {
+				t.Fatal(err)
+			}
+			if test.wantError != "" &&
+				(err == nil || !strings.Contains(err.Error(), test.wantError)) {
+				t.Fatalf(
+					"verifyCanonicalProgress() error = %v, want %q",
+					err,
+					test.wantError,
+				)
+			}
+		})
+	}
+}
+
+func TestWorker_PreflightConstructsCanonicalConsumerOnlyAfterGuard(t *testing.T) {
+	consumer := &fakeClient{}
+	calls := 0
+	worker := &Worker{preflight: func(context.Context) (consumerClient, error) {
+		calls++
+		return consumer, nil
+	}}
+	if worker.client != nil {
+		t.Fatal("canonical consumer existed before preflight")
+	}
+	if err := worker.Preflight(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if worker.client != consumer || calls != 1 {
+		t.Fatalf("preflight client = %v, calls = %d", worker.client, calls)
+	}
+	if err := worker.Preflight(context.Background()); err != nil || calls != 1 {
+		t.Fatalf("repeated preflight = %v, calls = %d", err, calls)
+	}
+}
+
 func TestDecode_PreservesSevenReceivedValues(t *testing.T) {
 	// given / when
 	got, err := decode(
@@ -287,6 +374,73 @@ type fakeClient struct {
 	commitErr    error
 	closeRelease <-chan struct{}
 }
+
+type progressRequestClient struct {
+	start     int64
+	committed int64
+	end       int64
+	active    bool
+	changeEnd bool
+	endReads  int
+}
+
+func (client *progressRequestClient) Request(
+	_ context.Context,
+	request kmsg.Request,
+) (kmsg.Response, error) {
+	topic := "policy-registered"
+	switch typed := request.(type) {
+	case *kmsg.MetadataRequest:
+		return &kmsg.MetadataResponse{Topics: []kmsg.MetadataResponseTopic{
+			{
+				Topic: &topic,
+				Partitions: []kmsg.MetadataResponseTopicPartition{
+					{Partition: 0, Leader: 1},
+				},
+			},
+		}}, nil
+	case *kmsg.DescribeGroupsRequest:
+		members := []kmsg.DescribeGroupsResponseGroupMember(nil)
+		if client.active {
+			members = append(
+				members,
+				kmsg.DescribeGroupsResponseGroupMember{MemberID: "active"},
+			)
+		}
+		return &kmsg.DescribeGroupsResponse{Groups: []kmsg.DescribeGroupsResponseGroup{{
+			Group: typed.Groups[0], State: "Empty", Members: members,
+		}}}, nil
+	case *kmsg.OffsetFetchRequest:
+		return &kmsg.OffsetFetchResponse{Groups: []kmsg.OffsetFetchResponseGroup{{
+			Group: "dashboard-service",
+			Topics: []kmsg.OffsetFetchResponseGroupTopic{{
+				Topic: topic,
+				Partitions: []kmsg.OffsetFetchResponseGroupTopicPartition{{
+					Partition: 0, Offset: client.committed,
+				}},
+			}},
+		}}}, nil
+	case *kmsg.ListOffsetsRequest:
+		offset := client.start
+		if typed.Topics[0].Partitions[0].Timestamp == -1 {
+			offset = client.end
+			if client.changeEnd && client.endReads > 0 {
+				offset++
+			}
+			client.endReads++
+		}
+		return &kmsg.ListOffsetsResponse{Topics: []kmsg.ListOffsetsResponseTopic{{
+			Topic: topic,
+			Partitions: []kmsg.ListOffsetsResponseTopicPartition{{
+				Partition: 0, Offset: offset,
+			}},
+		}}}, nil
+	default:
+		return nil, errors.New("unexpected request")
+	}
+}
+
+func (*progressRequestClient) Close() {}
 
 func (client *fakeClient) Poll(ctx context.Context, _ int) pollResult {
 	client.mu.Lock()
