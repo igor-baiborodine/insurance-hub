@@ -3,8 +3,11 @@ package kafka
 import (
 	"bytes"
 	"context"
+	"encoding/pem"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -221,6 +224,40 @@ func TestNewWorker_RejectsEmptyCACertificate(t *testing.T) {
 	}
 }
 
+func TestNewWorker_CanonicalSettingsDeferGroupConsumerUntilPreflight(t *testing.T) {
+	// given
+	server := httptest.NewTLSServer(
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+	)
+	certificate := pem.EncodeToMemory(&pem.Block{
+		Type: "CERTIFICATE", Bytes: server.Certificate().Raw,
+	})
+	server.Close()
+	settings := Settings{
+		Brokers:                  []string{"kafka.example:9093"},
+		Group:                    "dashboard-service",
+		Topic:                    "policy-registered",
+		ClientID:                 "policy-registered-dashboard-listener",
+		CACert:                   certificate,
+		EventType:                "registered",
+		RequireCommittedProgress: true,
+	}
+
+	// when
+	worker, err := NewWorker(settings, &fakeProjection{}, slog.Default())
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worker.client != nil || worker.preflight == nil {
+		t.Fatalf(
+			"canonical worker before preflight = client:%v preflight:%t",
+			worker.client,
+			worker.preflight != nil,
+		)
+	}
+}
+
 func TestWorker_CheckRequiresStableAssignment(t *testing.T) {
 	// given
 	worker := newWorker(&fakeClient{}, &fakeProjection{}, slog.Default())
@@ -334,6 +371,119 @@ func TestWorker_PreflightConstructsCanonicalConsumerOnlyAfterGuard(t *testing.T)
 	}
 }
 
+func TestWorker_PreflightFailsClosedWithoutUsableConsumer(t *testing.T) {
+	guardFailure := errors.New("guard failed")
+	tests := []struct {
+		name      string
+		worker    *Worker
+		wantError string
+	}{
+		{name: "nil worker", wantError: "worker is required"},
+		{
+			name: "guard failure",
+			worker: &Worker{preflight: func(context.Context) (consumerClient, error) {
+				return nil, guardFailure
+			}},
+			wantError: guardFailure.Error(),
+		},
+		{
+			name: "missing consumer",
+			worker: &Worker{preflight: func(context.Context) (consumerClient, error) {
+				return nil, nil
+			}},
+			wantError: "consumer is required",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.worker.Preflight(context.Background())
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("Preflight() error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestCanonicalProgressReadersValidateBrokerResponseShape(t *testing.T) {
+	topic := "policy-registered"
+	t.Run("legacy committed offsets", func(t *testing.T) {
+		client := staticRequestClient{response: &kmsg.OffsetFetchResponse{
+			Topics: []kmsg.OffsetFetchResponseTopic{{
+				Topic: topic,
+				Partitions: []kmsg.OffsetFetchResponseTopicPartition{{
+					Partition: 0, Offset: 4,
+				}},
+			}},
+		}}
+		got, err := readCommittedOffsets(
+			context.Background(), client, topic, "dashboard-service", []int32{0},
+		)
+		if err != nil || got[0] != 4 {
+			t.Fatalf("readCommittedOffsets() = (%v, %v)", got, err)
+		}
+	})
+	t.Run("duplicate topic partition", func(t *testing.T) {
+		client := staticRequestClient{response: &kmsg.MetadataResponse{
+			Topics: []kmsg.MetadataResponseTopic{{
+				Topic: &topic,
+				Partitions: []kmsg.MetadataResponseTopicPartition{
+					{Partition: 0, Leader: 1},
+					{Partition: 0, Leader: 1},
+				},
+			}},
+		}}
+		if _, err := readTopicPartitions(context.Background(), client, topic); err == nil ||
+			!strings.Contains(err.Error(), "duplicate partition") {
+			t.Fatalf("readTopicPartitions() error = %v", err)
+		}
+	})
+	t.Run("unavailable topic partition", func(t *testing.T) {
+		client := staticRequestClient{response: &kmsg.MetadataResponse{
+			Topics: []kmsg.MetadataResponseTopic{{
+				Topic: &topic,
+				Partitions: []kmsg.MetadataResponseTopicPartition{{
+					Partition: 0, Leader: -1,
+				}},
+			}},
+		}}
+		if _, err := readTopicPartitions(context.Background(), client, topic); err == nil ||
+			!strings.Contains(err.Error(), "partition unavailable") {
+			t.Fatalf("readTopicPartitions() error = %v", err)
+		}
+	})
+	t.Run("duplicate partition bound", func(t *testing.T) {
+		client := staticRequestClient{response: &kmsg.ListOffsetsResponse{
+			Topics: []kmsg.ListOffsetsResponseTopic{{
+				Topic: topic,
+				Partitions: []kmsg.ListOffsetsResponseTopicPartition{
+					{Partition: 0, Offset: 0},
+					{Partition: 0, Offset: 4},
+				},
+			}},
+		}}
+		if _, err := readListOffsets(
+			context.Background(), client, topic, []int32{0}, -1,
+		); err == nil || !strings.Contains(err.Error(), "duplicate partition bound") {
+			t.Fatalf("readListOffsets() error = %v", err)
+		}
+	})
+	t.Run("failed partition bound", func(t *testing.T) {
+		client := staticRequestClient{response: &kmsg.ListOffsetsResponse{
+			Topics: []kmsg.ListOffsetsResponseTopic{{
+				Topic: topic,
+				Partitions: []kmsg.ListOffsetsResponseTopicPartition{{
+					Partition: 0, Offset: -1,
+				}},
+			}},
+		}}
+		if _, err := readListOffsets(
+			context.Background(), client, topic, []int32{0}, -1,
+		); err == nil || !strings.Contains(err.Error(), "partition bound failed") {
+			t.Fatalf("readListOffsets() error = %v", err)
+		}
+	})
+}
+
 func TestDecode_PreservesSevenReceivedValues(t *testing.T) {
 	// given / when
 	got, err := decode(
@@ -383,6 +533,17 @@ type progressRequestClient struct {
 	changeEnd bool
 	endReads  int
 }
+
+type staticRequestClient struct {
+	response kmsg.Response
+	err      error
+}
+
+func (client staticRequestClient) Request(context.Context, kmsg.Request) (kmsg.Response, error) {
+	return client.response, client.err
+}
+
+func (staticRequestClient) Close() {}
 
 func (client *progressRequestClient) Request(
 	_ context.Context,
