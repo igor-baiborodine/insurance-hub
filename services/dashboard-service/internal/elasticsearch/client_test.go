@@ -370,7 +370,46 @@ func TestClient_CheckWriteRequiresExactPrivilege(t *testing.T) {
 	}
 }
 
-func TestClient_CheckWriteRequiresIsolatedClientAndPropagatesCancellation(t *testing.T) {
+func TestClient_CheckWriteUsesSelectedExactIndex(t *testing.T) {
+	for _, index := range []string{"policy_stats", "policy_stats_issue_290"} {
+		t.Run(index, func(t *testing.T) {
+			var requestBody string
+			server := httptest.NewServer(
+				http.HandlerFunc(
+					func(writer http.ResponseWriter, request *http.Request) {
+						writer.Header().
+							Set("X-Elastic-Product", "Elasticsearch")
+						body, err := io.ReadAll(request.Body)
+						if err != nil {
+							t.Error(err)
+						}
+						requestBody = string(body)
+						_, _ = writer.Write([]byte(
+							`{"has_all_requested":true,"index":{"` + index + `":{"index":true}}}`,
+						))
+					},
+				),
+			)
+			defer server.Close()
+			client, err := New(
+				Config{Endpoint: server.URL, Index: index, Timeout: time.Second},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := client.CheckWrite(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			want := `{"index":[{"names":["` + index + `"],"privileges":["index"]}]}`
+			if requestBody != want {
+				t.Fatalf("privilege request = %s, want %s", requestBody, want)
+			}
+		})
+	}
+}
+
+func TestClient_CheckWriteRequiresDashboardClientAndPropagatesCancellation(t *testing.T) {
 	// given
 	server := httptest.NewServer(
 		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
@@ -383,12 +422,6 @@ func TestClient_CheckWriteRequiresIsolatedClientAndPropagatesCancellation(t *tes
 		}),
 	)
 	defer server.Close()
-	canonical, err := New(Config{
-		Endpoint: server.URL, Index: PolicyIndex, Timeout: time.Second,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	projection, err := New(Config{
 		Endpoint: server.URL, Index: ProjectionIndex, Timeout: time.Second,
 	})
@@ -398,14 +431,16 @@ func TestClient_CheckWriteRequiresIsolatedClientAndPropagatesCancellation(t *tes
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var missing *Client
+	invalid := *projection
+	invalid.index = "other-index"
 
 	// when
 	missingErr := missing.CheckWrite(context.Background())
-	canonicalErr := canonical.CheckWrite(context.Background())
+	invalidErr := invalid.CheckWrite(context.Background())
 	cancelErr := projection.CheckWrite(ctx)
 
 	// then
-	if missingErr == nil || canonicalErr == nil || !errors.Is(cancelErr, context.Canceled) {
-		t.Fatalf("CheckWrite() errors = %v / %v / %v", missingErr, canonicalErr, cancelErr)
+	if missingErr == nil || invalidErr == nil || !errors.Is(cancelErr, context.Canceled) {
+		t.Fatalf("CheckWrite() errors = %v / %v / %v", missingErr, invalidErr, cancelErr)
 	}
 }

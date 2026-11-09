@@ -33,7 +33,7 @@ var (
 	errMissingIdentity = errors.New("project policy event: missing policy number")
 )
 
-// Settings captures the explicit Java-compatible client behavior selected for issue 290.
+// Settings captures the explicit Java-compatible registration client behavior.
 type Settings struct {
 	Brokers       []string
 	Group         string
@@ -111,8 +111,7 @@ func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*
 		kgo.ClientID(settings.ClientID),
 		kgo.ConsumerGroup(settings.Group),
 		kgo.ConsumeTopics(settings.Topic),
-		kgo.ConsumeStartOffset(kgo.NewOffset().AtStart()),
-		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+		kgo.ConsumeResetOffset(kgo.NoResetOffset()),
 		kgo.AutoCommitInterval(5 * time.Second),
 		kgo.SessionTimeout(10 * time.Second),
 		kgo.HeartbeatInterval(3 * time.Second),
