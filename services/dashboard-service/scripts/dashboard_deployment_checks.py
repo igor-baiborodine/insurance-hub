@@ -670,9 +670,8 @@ def validate_canonical_activation_assets(environment: str) -> None:
         == [*expected_egress(environment), kafka_egress(environment)],
         "canonical activation egress differs",
     )
-    expected_selected_mode = "canonical" if environment == "local-dev" else "isolated"
     require(
-        event_activation_mode(environment) == expected_selected_mode,
+        event_activation_mode(environment) == "canonical",
         f"{environment} selected event mode differs",
     )
 

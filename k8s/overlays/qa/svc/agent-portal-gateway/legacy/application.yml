@@ -7,3 +7,6 @@ micronaut:
       policy-search-service:
         urls:
           - http://qa-policy-search-api.qa-svc.svc.cluster.local:80
+      dashboard-service:
+        urls:
+          - http://qa-dashboard-api.qa-svc.svc.cluster.local:80
