@@ -15,9 +15,9 @@ import dashboard_deployment_checks as checks
 import ownership_transition as transition
 import pytest
 import yaml
-from scripts.go.service import deployment as lifecycle
 
 import deployment
+from scripts.go.service import deployment as lifecycle
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -767,7 +767,7 @@ def test_render_requires_the_runtime_config_map_linkage() -> None:
 
 @pytest.mark.parametrize(
     ("environment", "mode"),
-    [("local-dev", "canonical"), ("qa", "isolated")],
+    [("local-dev", "canonical"), ("qa", "canonical")],
 )
 def test_event_activation_assets_and_selected_state_are_exact(environment: str, mode: str) -> None:
     checks.validate_event_activation_assets(environment)

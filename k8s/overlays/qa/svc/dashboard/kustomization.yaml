@@ -32,11 +32,11 @@ patches:
     target:
       kind: NetworkPolicy
       name: dashboard-api
-  - path: event-enabled-config-patch.yaml
+  - path: canonical-config-patch.yaml
     target:
       kind: ConfigMap
       name: dashboard-config
-  - path: event-enabled-deployment-patch.yaml
+  - path: canonical-deployment-patch.yaml
     target:
       kind: Deployment
       name: dashboard-api
