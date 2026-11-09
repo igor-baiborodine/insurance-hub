@@ -211,19 +211,19 @@ mutation requires the environment-specific `DASHBOARD_READER_CONFIRM` value docu
 owner never creates or changes `policy_stats`, prints credentials, or places credentials on a host
 command line.
 
-Ordinary registration administration is separately dispatched as `go-svc-registration-inspect`,
-`go-svc-registration-ensure` and `go-svc-registration-verify`. It inspects the existing index and
+Ordinary registration administration is owned by the service-local `registration-inspect`,
+`registration-ensure` and `registration-verify` targets. It inspects the existing index and
 stable Kafka topic/group progress, reuses the issue-287 reader, and provisions the issue-293
 exact-index writer plus ordinary workload and Kafka-trust Secrets. Ensure creates the exact empty
 mapping, topic, roles and trust only when absent, preserves compatible populated state, and rejects
 foreign ownership or incompatible state. It never seeds documents.
 
-The temporary issue-290 owner is separately dispatched as `go-svc-retirement-inspect` and
-`go-svc-retirement-retire`. Inspection is read-only and accepts already-absent retirement Secrets.
+The temporary issue-290 owner is exposed through the service-local `retirement-inspect` and
+`retirement-retire` targets. Inspection is read-only and accepts already-absent retirement Secrets.
 Retirement requires exact issue-290 ownership, rejects active consumer-group members, deletes the
 exact group and owned resources, and verifies every postcondition. The isolated retirement owner
 rejects ordinary registration names before its first inspection or deletion.
-`go-svc-canonical-return-check` observes both workloads, terminating Pods, canonical membership and
+`canonical-return-check` observes both workloads, terminating Pods, canonical membership and
 stable progress before Java return.
 
 The guarded local-dev sequence uses catalog service `dashboard`, context

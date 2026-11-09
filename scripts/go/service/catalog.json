@@ -250,12 +250,6 @@
         "reader-ensure",
         "reader-verify",
         "reader-rotate",
-        "registration-inspect",
-        "registration-ensure",
-        "registration-verify",
-        "retirement-inspect",
-        "retirement-retire",
-        "canonical-return-check",
         "deploy-test-tooling",
         "deploy-smoke"
       ],

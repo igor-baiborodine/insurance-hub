@@ -24,8 +24,6 @@ export SVC_NAME
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-smoke \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
 	go-svc-fixture-setup go-svc-fixture-verify go-svc-fixture-retire \
-	go-svc-registration-inspect go-svc-registration-ensure go-svc-registration-verify \
-	go-svc-retirement-inspect go-svc-retirement-retire go-svc-canonical-return-check \
 	go-svc-cutover-index-inspect go-svc-cutover-index-ensure go-svc-cutover-index-verify \
 	go-svc-canonical-secrets-migrate \
 	go-svc-deploy-test-flux \
@@ -65,12 +63,6 @@ go-svc-reader-rotate: ## Explicitly rotate and recover the selected service's re
 go-svc-fixture-setup: ## Create the selected service's accepted fixture and least-privilege identity
 go-svc-fixture-verify: ## Verify the selected service's fixture and reader permission boundary
 go-svc-fixture-retire: ## Remove only the selected service's accepted fixture and identity
-go-svc-registration-inspect: ## Inspect ordinary Dashboard registration state without mutation
-go-svc-registration-ensure: ## Guardedly ensure ordinary Dashboard registration resources
-go-svc-registration-verify: ## Verify ordinary Dashboard registration resources and access
-go-svc-retirement-inspect: ## Inspect temporary Dashboard issue-290 resources without mutation
-go-svc-retirement-retire: ## Retire only the exact Dashboard issue-290 resources
-go-svc-canonical-return-check: ## Verify stopped Dashboard authority and progress before Java return
 go-svc-cutover-index-inspect: ## Inspect the canonical Policy Search index without mutation
 go-svc-cutover-index-ensure: ## Guardedly create the canonical index and cutover identities
 go-svc-cutover-index-verify: ## Verify canonical index and least-privilege cutover identities
@@ -82,9 +74,7 @@ go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-smoke \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
 	go-svc-deploy-test-flux go-svc-fixture-setup go-svc-fixture-verify \
-	go-svc-fixture-retire go-svc-registration-inspect go-svc-registration-ensure \
-	go-svc-registration-verify go-svc-retirement-inspect go-svc-retirement-retire \
-	go-svc-canonical-return-check \
+	go-svc-fixture-retire \
 	go-svc-cutover-index-inspect go-svc-cutover-index-ensure \
 	go-svc-cutover-index-verify go-svc-canonical-secrets-migrate: python-runtime-check
 	+@set -eu; \

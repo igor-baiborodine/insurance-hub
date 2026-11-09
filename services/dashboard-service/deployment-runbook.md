@@ -165,9 +165,9 @@ export DEPLOY_ENV=local-dev
 export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
 export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
-make go-svc-retirement-inspect SVC_NAME=dashboard
+make -C services/dashboard-service retirement-inspect
 export DASHBOARD_RETIREMENT_CONFIRM=retire-local-dev-dashboard-issue-290
-make go-svc-retirement-retire SVC_NAME=dashboard
+make -C services/dashboard-service retirement-retire
 unset DASHBOARD_RETIREMENT_CONFIRM
 ```
 
@@ -190,11 +190,11 @@ recorded manager fails closed. It preserves compatible populated state and never
 Bind the exact catalog coordinates before running:
 
 ```sh
-make go-svc-registration-inspect SVC_NAME=dashboard
+make -C services/dashboard-service registration-inspect
 export DASHBOARD_REGISTRATION_CONFIRM="ensure-${DEPLOY_ENV}-dashboard-issue-293"
-make go-svc-registration-ensure SVC_NAME=dashboard
+make -C services/dashboard-service registration-ensure
 unset DASHBOARD_REGISTRATION_CONFIRM
-make go-svc-registration-verify SVC_NAME=dashboard
+make -C services/dashboard-service registration-verify
 ```
 
 The inspect and verify owners require two matching Kafka metadata/progress snapshots, every exact
@@ -314,7 +314,7 @@ guarded deploy, status and verify commands above. For canonical return, keep bot
 and run the read-only return gate before restoring Java:
 
 ```sh
-make go-svc-canonical-return-check SVC_NAME=dashboard
+make -C services/dashboard-service canonical-return-check
 ```
 
 The gate rejects any running or terminating Java/Go Pod, canonical member, incomplete partition,
@@ -368,7 +368,7 @@ disposable evidence alone does not establish a QA result.
 ## Return from QA activation
 
 For a canonical return, first use reviewed Flux revisions to reconcile Go and Java to zero and run
-`go-svc-canonical-return-check SVC_NAME=dashboard`. Reconcile the retained Java Deployment only
+`make -C services/dashboard-service canonical-return-check`. Reconcile the retained Java Deployment only
 after that gate passes, qualify Java against the preserved canonical state, and then route back to
 Java. Keep monitoring and data resources unchanged. Record each source/applied revision, workload
 identity, route and progress snapshot before and after the return.
