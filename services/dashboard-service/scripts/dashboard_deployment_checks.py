@@ -161,6 +161,11 @@ def matching_reader_predecessor_config(actual: Any, expected: Any) -> bool:
     """Accept reviewed local ConfigMap predecessors before their replacement only."""
     if not isinstance(actual, dict) or not isinstance(expected, dict):
         return False
+    if expected.get("EVENT_PROCESSING_MODE") == "isolated":
+        implicit_isolated = dict(expected)
+        implicit_isolated.pop("EVENT_PROCESSING_MODE")
+        if actual == implicit_isolated:
+            return True
     if expected.get("EVENT_PROCESSING_MODE") == "canonical":
         isolated = dict(expected)
         isolated.update(
@@ -502,7 +507,7 @@ def event_activation_assets(environment: str) -> tuple[dict[str, Any], ...]:
     return activation_assets(environment, EVENT_ACTIVATION_PATCHES)
 
 
-def event_activation_enabled(environment: str) -> bool:
+def event_activation_mode(environment: str) -> str:
     root = ROOT / f"k8s/overlays/{environment}/svc/dashboard"
     try:
         kustomization = yaml.safe_load((root / "kustomization.yaml").read_text(encoding="utf-8"))
@@ -513,11 +518,23 @@ def event_activation_enabled(environment: str) -> bool:
         item.get("path") for item in kustomization.get("patches", []) if isinstance(item, dict)
     ]
     event_paths = {
-        path for path in paths if isinstance(path, str) and path.startswith("event-enabled-")
+        path
+        for path in paths
+        if isinstance(path, str)
+        and (path.startswith("event-enabled-") or path.startswith("canonical-"))
     }
-    expected = set(EVENT_ACTIVATION_PATCHES)
-    require(event_paths in (set(), expected), "event activation patch selection differs")
-    return event_paths == expected
+    modes = {
+        frozenset(): "disabled",
+        frozenset(EVENT_ACTIVATION_PATCHES): "isolated",
+        frozenset(CANONICAL_ACTIVATION_PATCHES): "canonical",
+    }
+    selected = modes.get(frozenset(event_paths), "")
+    require(bool(selected), "event activation patch selection differs")
+    return selected
+
+
+def event_activation_enabled(environment: str) -> bool:
+    return event_activation_mode(environment) != "disabled"
 
 
 def validate_event_activation_assets(environment: str) -> None:
@@ -653,7 +670,11 @@ def validate_canonical_activation_assets(environment: str) -> None:
         == [*expected_egress(environment), kafka_egress(environment)],
         "canonical activation egress differs",
     )
-    require(event_activation_enabled(environment), "PR1 must retain explicit isolated selection")
+    expected_selected_mode = "canonical" if environment == "local-dev" else "isolated"
+    require(
+        event_activation_mode(environment) == expected_selected_mode,
+        f"{environment} selected event mode differs",
+    )
 
 
 def validate_render(
@@ -671,7 +692,7 @@ def validate_render(
     )
     require(len(items) == 5, "Dashboard resource inventory differs")
     prefix = f"{environment}-"
-    mode = expected_mode or ("isolated" if event_activation_enabled(environment) else "disabled")
+    mode = expected_mode or event_activation_mode(environment)
     require(mode in {"disabled", "isolated", "canonical"}, "rendered event mode differs")
     event_enabled = mode != "disabled"
     expected_names = {
@@ -1199,7 +1220,19 @@ class Target:
             actual_spec = actual.get("spec", {})
             require(
                 actual_spec.get("selector") == desired_spec.get("selector")
-                and actual_spec.get("strategy") == desired_spec.get("strategy")
+                and (
+                    actual_spec.get("strategy") == desired_spec.get("strategy")
+                    or (
+                        previous_image
+                        and not require_deployment
+                        and desired_spec.get("strategy") == {"type": "Recreate"}
+                        and actual_spec.get("strategy")
+                        == {
+                            "type": "RollingUpdate",
+                            "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
+                        }
+                    )
+                )
                 and actual_spec.get("minReadySeconds") == desired_spec.get("minReadySeconds")
                 and actual_spec.get("progressDeadlineSeconds")
                 == desired_spec.get("progressDeadlineSeconds")
@@ -2565,7 +2598,7 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
         else:
             raise DeploymentError("deployed readiness was not reachable")
         event_enabled = event_activation_enabled(target.environment)
-        if event_enabled:
+        if event_enabled and target.processing_mode == "isolated":
             produce_registration_fixture(target)
             registration_http_results(http_port)
         for name, path, payload, field, field_type, allow_empty in (
@@ -2613,7 +2646,12 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             except Exception as error:
                 failures.append(f"{name}: {error}")
         try:
-            run_deployed_direct_rpc(grpc_port, "registration" if event_enabled else "shared-smoke")
+            run_deployed_direct_rpc(
+                grpc_port,
+                "registration"
+                if event_enabled and target.processing_mode == "isolated"
+                else "shared-smoke",
+            )
         except Exception as error:
             failures.append(f"direct RPC: {error}")
     finally:

@@ -222,7 +222,7 @@ class Target:
             require(owner in {"issue-290", OWNER}, "canonical Kafka trust is not adoptable")
             if owner == "issue-290":
                 require(
-                    "dashboard-event-administration" in managers,
+                    not managers or "dashboard-event-administration" in managers,
                     "canonical Kafka trust predecessor manager differs",
                 )
                 state = "adopted-issue-290"
