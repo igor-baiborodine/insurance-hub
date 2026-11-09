@@ -38,8 +38,10 @@ and requirements, specification, delivery steps, implementation, testing, and au
   concerns. Minimize checks that do not provide necessary confidence.
 - Treat Java service retirement as a one-time destructive operation. Do not automate it.
 - Use a direct Java-to-Go transition. Do not plan or perform Java-to-Go-to-Java rehearsals.
-- Develop Go services as greenfield implementations. Do not add migration-specific compatibility,
-  canonical or non-canonical cleanup, normalization, or transitional code for Java services.
+- The final implementation of a Go service should be as if it was developed from scratch, but at
+  the same time it should be compatible with its Java counterpart. Using this approach will exclude
+  canonical or non-canonical cleanup, other after-migration normalization, or transitional code for
+  Java services.
 
 These constraints are intended to accelerate development and conserve effort and resources.
 
