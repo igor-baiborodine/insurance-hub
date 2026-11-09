@@ -366,28 +366,33 @@ class Target:
         require(bool(ready) and ready[0], "no ready Kafka broker Pod is available")
         return ready[0]
 
-    def broker_topic_partitions(self, *, allow_absent: bool = False) -> list[int]:
-        broker = self.kafka_broker()
-        topics = set(
-            self.run(
-                "exec",
-                broker,
-                "-c",
-                "kafka",
-                "--",
-                "/opt/kafka/bin/kafka-topics.sh",
-                "--bootstrap-server",
-                "localhost:9092",
-                "--list",
-                namespace=self.data_namespace,
-            ).splitlines()
-        )
-        if TOPIC not in topics:
-            require(allow_absent, f"Kafka topic {TOPIC} is absent")
-            return []
+    def broker_topic_partitions(
+        self,
+        broker: str | None = None,
+        *,
+        allow_absent: bool = False,
+    ) -> list[int]:
+        selected_broker = broker or self.kafka_broker()
+        if allow_absent:
+            topics = set(
+                self.run(
+                    "exec",
+                    selected_broker,
+                    "-c",
+                    "kafka",
+                    "--",
+                    "/opt/kafka/bin/kafka-topics.sh",
+                    "--bootstrap-server",
+                    "localhost:9092",
+                    "--list",
+                    namespace=self.data_namespace,
+                ).splitlines()
+            )
+            if TOPIC not in topics:
+                return []
         topic = self.run(
             "exec",
-            broker,
+            selected_broker,
             "-c",
             "kafka",
             "--",
@@ -407,7 +412,7 @@ class Target:
 
     def kafka_snapshot(self) -> dict[str, Any]:
         broker = self.kafka_broker()
-        partitions = self.broker_topic_partitions()
+        partitions = self.broker_topic_partitions(broker)
         groups = set(
             self.run(
                 "exec",

@@ -156,7 +156,6 @@ def test_kafka_snapshot_requires_complete_in_range_registration_progress() -> No
     )
     selected.run = Mock(
         side_effect=[
-            "policy-registered\n",
             "Topic: policy-registered Partition: 0 Leader: 0 Replicas: 0 Isr: 0\n",
             "dashboard-service\n",
             "GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID\n"
