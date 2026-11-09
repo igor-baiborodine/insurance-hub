@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect canonical registration state and provision only Go access identities."""
+"""Inspect, ensure, and verify ordinary Dashboard registration resources."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from typing import Any
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 sys.path.insert(0, str(ROOT))
 
-import event_administration as shared  # noqa: E402
+import retirement_administration as shared  # noqa: E402
 from scripts.go.service.configuration import service_record, target_record  # noqa: E402
 from scripts.python.process_runner import CommandError  # noqa: E402
 
@@ -25,11 +25,11 @@ READER = "go_dashboard_total_sales_reader"
 WRITER = "go_dashboard_policy_stats_writer"
 TOPIC = "policy-registered"
 GROUP = "dashboard-service"
-ASSET = ROOT / "services/dashboard-service/internal/administration/canonical-registration.json"
+ASSET = ROOT / "services/dashboard-service/internal/administration/registration.json"
 
 
 class AdministrationError(RuntimeError):
-    """The canonical target or access boundary differs from the accepted contract."""
+    """The ordinary registration boundary differs from the accepted contract."""
 
 
 def require(condition: object, message: str) -> None:
@@ -41,12 +41,14 @@ def load_definition(path: Path = ASSET) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise AdministrationError("canonical administration asset is unavailable") from error
+        raise AdministrationError("registration administration asset is unavailable") from error
     require(
         value
         == {
+            "schemaVersion": 1,
             "owner": OWNER,
             "index": INDEX,
+            "mapping": value.get("mapping"),
             "reader": {
                 "role": READER,
                 "user": READER,
@@ -61,7 +63,15 @@ def load_definition(path: Path = ASSET) -> dict[str, Any]:
             "consumerGroup": GROUP,
             "cleanup": False,
         },
-        "canonical administration definition differs",
+        "registration administration definition differs",
+    )
+    mapping = value.get("mapping")
+    require(
+        isinstance(mapping, dict)
+        and mapping.get("dynamic") == "strict"
+        and set(mapping.get("properties", {}))
+        == {"number", "from", "to", "policyHolder", "productCode", "totalPremium", "agentLogin"},
+        "registration mapping differs",
     )
     return value
 
@@ -72,10 +82,10 @@ class Target:
     def __init__(self) -> None:
         record = service_record(ROOT, "dashboard")
         require(
-            record.get("canonicalEventAdministration")
+            record.get("registrationAdministration")
             == {
                 "owner": OWNER,
-                "asset": "services/dashboard-service/internal/administration/canonical-registration.json",
+                "asset": "services/dashboard-service/internal/administration/registration.json",
                 "index": INDEX,
                 "readerRole": READER,
                 "readerUser": READER,
@@ -84,7 +94,7 @@ class Target:
                 "registeredTopic": TOPIC,
                 "consumerGroup": GROUP,
             },
-            "canonical administration catalog contract differs",
+            "registration administration catalog contract differs",
         )
         self.environment = os.environ.get("DEPLOY_ENV", "")
         require(self.environment in record.get("environments", []), "DEPLOY_ENV is invalid")
@@ -95,16 +105,16 @@ class Target:
             "DEPLOY_DATA_NS": selected["dataNamespace"],
         }.items():
             require(os.environ.get(name, "") == value, f"{name} differs from the catalog")
-        event = selected.get("canonicalEventAdministration", {})
-        isolated = selected.get("eventAdministration", {})
+        event = selected.get("registrationAdministration", {})
+        retirement = selected.get("retirementAdministration", {})
         require(
             event.get("readerSecret") == f"{self.environment}-dashboard-elasticsearch"
             and event.get("writerSecret") == f"{self.environment}-dashboard-elasticsearch-writer"
             and event.get("kafkaWorkloadCASecret") == f"{self.environment}-dashboard-kafka-ca"
-            and isolated.get("readerSecret", "").endswith("-issue-290")
-            and isolated.get("writerSecret", "").endswith("-issue-290")
-            and isolated.get("kafkaWorkloadCASecret", "").endswith("-issue-290"),
-            "canonical and isolated Secret boundaries differ",
+            and retirement.get("readerSecret", "").endswith("-issue-290")
+            and retirement.get("writerSecret", "").endswith("-issue-290")
+            and retirement.get("kafkaWorkloadCASecret", "").endswith("-issue-290"),
+            "registration and retirement Secret boundaries differ",
         )
         self.context = selected["context"]
         self.namespace = selected["namespace"]
@@ -142,21 +152,39 @@ class Target:
             f"Secret/{name} identity or keys differ",
         )
 
-    def optional_writer_password(self) -> str:
-        value = self.json("get", "secret", self.writer_secret, "--ignore-not-found")
+    def optional_password(
+        self,
+        name: str,
+        identity: str,
+        component: str,
+        owner: str,
+    ) -> str:
+        value = self.json("get", "secret", name, "--ignore-not-found")
         if not value:
             return ""
         self.validate_secret(
-            value, self.writer_secret, {"username", "password"}, "elasticsearch-writer", OWNER
+            value,
+            name,
+            {"username", "password"},
+            component,
+            owner,
         )
         try:
             username = base64.b64decode(value["data"]["username"], validate=True).decode()
             password = base64.b64decode(value["data"]["password"], validate=True).decode()
         except (TypeError, ValueError, UnicodeDecodeError) as error:
-            raise AdministrationError("canonical writer Secret data is malformed") from error
-        require(username == WRITER, "canonical writer Secret username differs")
+            raise AdministrationError(f"Secret/{name} data is malformed") from error
+        require(username == identity, f"Secret/{name} username differs")
         shared.require_password(password)
         return password
+
+    def optional_writer_password(self) -> str:
+        return self.optional_password(
+            self.writer_secret,
+            WRITER,
+            "elasticsearch-writer",
+            OWNER,
+        )
 
     def apply_secret(
         self,
@@ -164,6 +192,7 @@ class Target:
         values: dict[str, str],
         component: str,
         *,
+        owner: str = OWNER,
         force_conflicts: bool = False,
     ) -> None:
         manifest = {
@@ -175,7 +204,7 @@ class Target:
                 "labels": {
                     "app.kubernetes.io/name": "dashboard-api",
                     "app.kubernetes.io/component": component,
-                    "insurance-hub.io/owner": OWNER,
+                    "insurance-hub.io/owner": owner,
                 },
             },
             "type": "Opaque",
@@ -187,7 +216,7 @@ class Target:
         arguments = [
             "apply",
             "--server-side",
-            "--field-manager=dashboard-canonical-event-administration",
+            "--field-manager=dashboard-registration-administration",
         ]
         if force_conflicts:
             arguments.append("--force-conflicts")
@@ -217,13 +246,13 @@ class Target:
             try:
                 stored = base64.b64decode(existing["data"]["ca.crt"], validate=True)
             except (TypeError, ValueError) as error:
-                raise AdministrationError("canonical Kafka trust data is malformed") from error
-            require(stored == certificate, "canonical Kafka trust differs")
-            require(owner in {"issue-290", OWNER}, "canonical Kafka trust is not adoptable")
+                raise AdministrationError("registration Kafka trust data is malformed") from error
+            require(stored == certificate, "registration Kafka trust differs")
+            require(owner in {"issue-290", OWNER}, "registration Kafka trust is not adoptable")
             if owner == "issue-290":
                 require(
                     not managers or "dashboard-event-administration" in managers,
-                    "canonical Kafka trust predecessor manager differs",
+                    "registration Kafka trust predecessor manager differs",
                 )
                 state = "adopted-issue-290"
             else:
@@ -240,9 +269,63 @@ class Target:
         try:
             stored = base64.b64decode(adopted["data"]["ca.crt"], validate=True)
         except (TypeError, ValueError) as error:
-            raise AdministrationError("canonical Kafka trust data is malformed") from error
-        require(stored == certificate, "canonical Kafka trust differs")
+            raise AdministrationError("registration Kafka trust data is malformed") from error
+        require(stored == certificate, "registration Kafka trust differs")
         return state
+
+    def ensure_topic(self) -> str:
+        existing = self.json(
+            "get",
+            "kafkatopic",
+            TOPIC,
+            "--ignore-not-found",
+            namespace=self.data_namespace,
+        )
+        if existing:
+            self.verify_topic(existing)
+            return "owned"
+        manifest = {
+            "apiVersion": "kafka.strimzi.io/v1beta2",
+            "kind": "KafkaTopic",
+            "metadata": {
+                "name": TOPIC,
+                "namespace": self.data_namespace,
+                "labels": {
+                    "strimzi.io/cluster": self.kafka_cluster,
+                    "insurance-hub.io/owner": OWNER,
+                },
+            },
+            "spec": {"partitions": 1, "replicas": self.kafka_replicas},
+        }
+        self.run(
+            "apply",
+            "--server-side",
+            "--field-manager=dashboard-registration-administration",
+            "-f",
+            "-",
+            namespace=self.data_namespace,
+            input_text=json.dumps(manifest),
+        )
+        self.verify_topic()
+        return "created"
+
+    def verify_topic(self, value: dict[str, Any] | None = None) -> None:
+        topic = value or self.json(
+            "get",
+            "kafkatopic",
+            TOPIC,
+            namespace=self.data_namespace,
+        )
+        metadata = topic.get("metadata", {})
+        require(
+            topic.get("kind") == "KafkaTopic"
+            and metadata.get("name") == TOPIC
+            and metadata.get("namespace") == self.data_namespace
+            and metadata.get("labels", {}).get("strimzi.io/cluster") == self.kafka_cluster
+            and metadata.get("labels", {}).get("insurance-hub.io/owner") == OWNER
+            and topic.get("spec") == {"partitions": 1, "replicas": self.kafka_replicas},
+            f"KafkaTopic/{TOPIC} differs",
+        )
 
     def kafka_snapshot(self) -> dict[str, Any]:
         pods = self.json(
@@ -280,8 +363,24 @@ class Target:
         )
         partitions = sorted({int(value) for value in re.findall(r"Partition:\s*(\d+)", topic)})
         require(
-            partitions and partitions == list(range(len(partitions))), "canonical topic differs"
+            partitions and partitions == list(range(len(partitions))), "registration topic differs"
         )
+        groups = set(
+            self.run(
+                "exec",
+                ready[0],
+                "-c",
+                "kafka",
+                "--",
+                "/opt/kafka/bin/kafka-consumer-groups.sh",
+                "--bootstrap-server",
+                "localhost:9092",
+                "--list",
+                namespace=self.data_namespace,
+            ).splitlines()
+        )
+        if GROUP not in groups:
+            return {"partitions": partitions, "offsets": {}, "activeMembers": 0}
         group = self.run(
             "exec",
             ready[0],
@@ -305,16 +404,19 @@ class Target:
             try:
                 partition, committed, log_end = map(int, fields[2:5])
             except ValueError as error:
-                raise AdministrationError("canonical group progress differs") from error
-            require(0 <= committed <= log_end, "canonical group offset is out of range")
+                raise AdministrationError("registration group progress differs") from error
+            require(0 <= committed <= log_end, "registration group offset is out of range")
             offsets[partition] = (committed, log_end)
             if len(fields) > 6 and fields[6] != "-":
                 members.add(fields[6])
-        require(set(offsets) == set(partitions), "canonical group partition progress is incomplete")
+        require(
+            set(offsets) == set(partitions),
+            "registration group partition progress is incomplete",
+        )
         return {"partitions": partitions, "offsets": offsets, "activeMembers": len(members)}
 
 
-def canonical_role() -> dict[str, Any]:
+def writer_role() -> dict[str, Any]:
     return {
         "cluster": [],
         "indices": [
@@ -332,18 +434,58 @@ def canonical_role() -> dict[str, Any]:
     }
 
 
-def inspect_index(client: shared.ElasticsearchClient) -> int:
+def mapping_is_compatible(actual: dict[str, Any], expected: dict[str, Any]) -> bool:
+    if actual.get("dynamic") != expected.get("dynamic"):
+        return False
+    properties = actual.get("properties", {})
+    expected_properties = expected.get("properties", {})
+    for name, contract in expected_properties.items():
+        current = properties.get(name, {})
+        if current.get("type") != contract.get("type"):
+            return False
+        expected_keyword = contract.get("fields", {}).get("keyword")
+        if (
+            expected_keyword
+            and current.get("fields", {}).get("keyword", {}).get("type") != "keyword"
+        ):
+            return False
+    return True
+
+
+def inspect_index(
+    client: shared.ElasticsearchClient,
+    definition: dict[str, Any],
+    *,
+    allow_absent: bool = False,
+) -> int | None:
     status, mapping = client.request("GET", f"/{INDEX}/_mapping")
+    if status == 404 and allow_absent:
+        return None
     require(
         status == 200 and isinstance(mapping, dict) and set(mapping) == {INDEX},
-        "canonical index differs",
+        "registration index differs",
+    )
+    require(
+        mapping_is_compatible(mapping[INDEX].get("mappings", {}), definition),
+        "registration index mapping differs",
     )
     status, count = client.request("GET", f"/{INDEX}/_count")
     require(
         status == 200 and isinstance(count, dict) and isinstance(count.get("count"), int),
-        "canonical index count differs",
+        "registration index count differs",
     )
     return int(count["count"])
+
+
+def ensure_index(client: shared.ElasticsearchClient, definition: dict[str, Any]) -> int:
+    count = inspect_index(client, definition, allow_absent=True)
+    if count is not None:
+        return count
+    status, _ = client.request("PUT", f"/{INDEX}", {"mappings": definition})
+    require(status == 200, "create registration index failed")
+    created = inspect_index(client, definition)
+    require(created == 0, "new registration index is not empty")
+    return 0
 
 
 def stable_kafka_progress(first: dict[str, Any], second: dict[str, Any]) -> bool:
@@ -364,8 +506,24 @@ def stable_kafka_progress(first: dict[str, Any], second: dict[str, Any]) -> bool
 
 def verify_reader(client: shared.ElasticsearchClient) -> None:
     status, roles = client.request("GET", f"/_security/role/{READER}")
-    require(status == 200 and isinstance(roles, dict), "canonical reader role is absent")
-    expected = {
+    require(status == 200 and isinstance(roles, dict), "registration reader role is absent")
+    status, users = client.request("GET", f"/_security/user/{READER}")
+    require(status == 200 and isinstance(users, dict), "registration reader user is absent")
+    require(
+        shared.normalize_role(roles.get(READER, {})) == reader_role(),
+        "registration reader role differs",
+    )
+    user = users.get(READER, {})
+    require(
+        user.get("roles") == [READER]
+        and user.get("enabled") is True
+        and user.get("metadata") == {"owner": "issue-287"},
+        "registration reader user differs",
+    )
+
+
+def reader_role() -> dict[str, Any]:
+    return {
         "cluster": [],
         "indices": [
             {
@@ -380,60 +538,79 @@ def verify_reader(client: shared.ElasticsearchClient) -> None:
         "remote_indices": [],
         "remote_cluster": [],
     }
-    require(
-        shared.normalize_role(roles.get(READER, {})) == expected, "canonical reader role differs"
-    )
 
 
 def verify_writer(client: shared.ElasticsearchClient) -> None:
     status, roles = client.request("GET", f"/_security/role/{WRITER}")
-    require(status == 200 and isinstance(roles, dict), "canonical writer role is absent")
+    require(status == 200 and isinstance(roles, dict), "registration writer role is absent")
     status, users = client.request("GET", f"/_security/user/{WRITER}")
-    require(status == 200 and isinstance(users, dict), "canonical writer user is absent")
+    require(status == 200 and isinstance(users, dict), "registration writer user is absent")
     require(
-        shared.normalize_role(roles.get(WRITER, {})) == canonical_role(),
-        "canonical writer role differs",
+        shared.normalize_role(roles.get(WRITER, {})) == writer_role(),
+        "registration writer role differs",
     )
     user = users.get(WRITER, {})
     require(
         user.get("roles") == [WRITER]
         and user.get("enabled") is True
         and user.get("metadata") == {"owner": OWNER},
-        "canonical writer user differs",
+        "registration writer user differs",
     )
 
 
-def require_writer_owned_or_absent(client: shared.ElasticsearchClient) -> None:
+def require_identity_owned_or_absent(
+    client: shared.ElasticsearchClient,
+    identity: str,
+    owner: str,
+) -> None:
     for path, label in (
-        (f"/_security/role/{WRITER}", "role"),
-        (f"/_security/user/{WRITER}", "user"),
+        (f"/_security/role/{identity}", "role"),
+        (f"/_security/user/{identity}", "user"),
     ):
         status, value = client.request("GET", path)
-        require(status in {200, 404}, f"inspect canonical writer {label} failed")
+        require(status in {200, 404}, f"inspect registration {identity} {label} failed")
         if status == 200:
             require(
                 isinstance(value, dict)
-                and value.get(WRITER, {}).get("metadata") == {"owner": OWNER},
-                f"canonical writer {label} is not owned",
+                and value.get(identity, {}).get("metadata") == {"owner": owner},
+                f"registration {identity} {label} is not owned",
             )
 
 
 def apply_writer(client: shared.ElasticsearchClient, password: str) -> None:
-    status, _ = client.request("PUT", f"/_security/role/{WRITER}", canonical_role())
-    require(status == 200, "apply canonical writer role failed")
+    status, _ = client.request("PUT", f"/_security/role/{WRITER}", writer_role())
+    require(status == 200, "apply registration writer role failed")
     status, _ = client.request(
         "PUT",
         f"/_security/user/{WRITER}",
         {
             "password": password,
             "roles": [WRITER],
-            "full_name": "Dashboard canonical policy statistics writer",
+            "full_name": "Dashboard policy statistics writer",
             "metadata": {"owner": OWNER},
             "enabled": True,
         },
     )
-    require(status == 200, "apply canonical writer user failed")
+    require(status == 200, "apply registration writer user failed")
     verify_writer(client)
+
+
+def apply_reader(client: shared.ElasticsearchClient, password: str) -> None:
+    status, _ = client.request("PUT", f"/_security/role/{READER}", reader_role())
+    require(status == 200, "apply registration reader role failed")
+    status, _ = client.request(
+        "PUT",
+        f"/_security/user/{READER}",
+        {
+            "password": password,
+            "roles": [READER],
+            "full_name": "Dashboard total-sales reader",
+            "metadata": {"owner": "issue-287"},
+            "enabled": True,
+        },
+    )
+    require(status == 200, "apply registration reader user failed")
+    verify_reader(client)
 
 
 def verify_effective_privileges(client: shared.ElasticsearchClient, identity: str) -> None:
@@ -488,37 +665,40 @@ def verify_secrets(target: Target) -> tuple[str, str]:
         reader, target.reader_secret, {"username", "password"}, "elasticsearch-reader", "issue-287"
     )
     username = base64.b64decode(reader["data"]["username"], validate=True).decode()
-    require(username == READER, "canonical reader Secret username differs")
+    require(username == READER, "registration reader Secret username differs")
     reader_password = base64.b64decode(reader["data"]["password"], validate=True).decode()
     shared.require_password(reader_password)
     writer_password = target.optional_writer_password()
-    require(bool(writer_password), "canonical writer Secret is absent")
+    require(bool(writer_password), "registration writer Secret is absent")
     trust = target.json("get", "secret", target.kafka_ca_secret)
     target.validate_secret(trust, target.kafka_ca_secret, {"ca.crt"}, "kafka-trust", OWNER)
     require(
         target.secret_value(target.namespace, target.kafka_ca_secret, "ca.crt")
         == target.secret_value(target.data_namespace, target.kafka_public_ca_secret, "ca.crt"),
-        "canonical Kafka trust differs",
+        "registration Kafka trust differs",
     )
     return reader_password, writer_password
 
 
 def execute(operation: str) -> None:
-    require(operation in {"inspect", "ensure-access", "verify"}, "unsupported canonical operation")
-    if operation == "ensure-access":
+    require(operation in {"inspect", "ensure", "verify"}, "unsupported registration operation")
+    if operation == "ensure":
         environment = os.environ.get("DEPLOY_ENV", "")
         require(
-            os.environ.get("DASHBOARD_CANONICAL_CONFIRM")
-            == f"ensure-access-{environment}-dashboard-{OWNER}",
-            "DASHBOARD_CANONICAL_CONFIRM differs",
+            os.environ.get("DASHBOARD_REGISTRATION_CONFIRM")
+            == f"ensure-{environment}-dashboard-{OWNER}",
+            "DASHBOARD_REGISTRATION_CONFIRM differs",
         )
-    load_definition()
+    definition = load_definition()["mapping"]
     target = Target()
     target.verify_boundary()
     kafka_ca = target.secret_value(target.data_namespace, target.kafka_public_ca_secret, "ca.crt")
     require(b"BEGIN CERTIFICATE" in kafka_ca, "Kafka public CA differs")
-    if operation == "ensure-access":
+    if operation == "ensure":
         target.ensure_kafka_trust(kafka_ca)
+        target.ensure_topic()
+    else:
+        target.verify_topic()
     certificate = (
         target.secret_value(target.data_namespace, target.public_ca_secret, "ca.crt")
         if target.public_ca_secret
@@ -529,14 +709,31 @@ def execute(operation: str) -> None:
     time.sleep(1)
     second = target.kafka_snapshot()
     require(
-        stable_kafka_progress(first, second), "canonical Kafka metadata or progress is not stable"
+        stable_kafka_progress(first, second),
+        "registration Kafka metadata or progress is not stable",
     )
     with shared.PortForward(target) as port:
         admin = shared.client_for(target, "elastic", password, port, certificate)
-        count = inspect_index(admin)
-        verify_reader(admin)
-        if operation == "ensure-access":
-            require_writer_owned_or_absent(admin)
+        if operation == "ensure":
+            count = ensure_index(admin, definition)
+            require_identity_owned_or_absent(admin, READER, "issue-287")
+            reader_password = (
+                target.optional_password(
+                    target.reader_secret,
+                    READER,
+                    "elasticsearch-reader",
+                    "issue-287",
+                )
+                or shared.new_password()
+            )
+            apply_reader(admin, reader_password)
+            target.apply_secret(
+                target.reader_secret,
+                {"username": READER, "password": reader_password},
+                "elasticsearch-reader",
+                owner="issue-287",
+            )
+            require_identity_owned_or_absent(admin, WRITER, OWNER)
             writer_password = target.optional_writer_password() or shared.new_password()
             apply_writer(admin, writer_password)
             target.apply_secret(
@@ -545,9 +742,14 @@ def execute(operation: str) -> None:
                 "elasticsearch-writer",
             )
             require(
-                inspect_index(admin) == count, "access provisioning changed canonical documents"
+                inspect_index(admin, definition) == count,
+                "registration provisioning changed documents",
             )
-        if operation in {"ensure-access", "verify"}:
+        else:
+            count = inspect_index(admin, definition)
+            require(count is not None, "registration index is absent")
+            verify_reader(admin)
+        if operation in {"ensure", "verify"}:
             verify_writer(admin)
             reader_password, writer_password = verify_secrets(target)
             verify_effective_privileges(
@@ -577,7 +779,7 @@ def execute(operation: str) -> None:
 def cli(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     try:
-        require(len(arguments) == 1, "one canonical operation is required")
+        require(len(arguments) == 1, "one registration operation is required")
         execute(arguments[0])
     except KeyboardInterrupt:
         return 130
@@ -589,7 +791,7 @@ def cli(argv: list[str] | None = None) -> int:
         UnicodeDecodeError,
         ValueError,
     ) as error:
-        print(f"dashboard-canonical-event: {error}", file=sys.stderr)
+        print(f"dashboard-registration: {error}", file=sys.stderr)
         return 1
     return 0
 
