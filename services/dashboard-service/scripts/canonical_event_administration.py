@@ -158,7 +158,14 @@ class Target:
         shared.require_password(password)
         return password
 
-    def apply_secret(self, name: str, values: dict[str, str], component: str) -> None:
+    def apply_secret(
+        self,
+        name: str,
+        values: dict[str, str],
+        component: str,
+        *,
+        force_conflicts: bool = False,
+    ) -> None:
         manifest = {
             "apiVersion": "v1",
             "kind": "Secret",
@@ -177,14 +184,65 @@ class Target:
                 for key, value in values.items()
             },
         }
-        self.run(
+        arguments = [
             "apply",
             "--server-side",
             "--field-manager=dashboard-canonical-event-administration",
-            "-f",
-            "-",
-            input_text=json.dumps(manifest),
+        ]
+        if force_conflicts:
+            arguments.append("--force-conflicts")
+        self.run(*arguments, "-f", "-", input_text=json.dumps(manifest))
+
+    def ensure_kafka_trust(self, certificate: bytes) -> str:
+        existing = self.json("get", "secret", self.kafka_ca_secret, "--ignore-not-found")
+        state = "absent"
+        if existing:
+            metadata = existing.get("metadata", {})
+            owner = metadata.get("labels", {}).get("insurance-hub.io/owner")
+            managers = {
+                item.get("manager")
+                for item in metadata.get("managedFields", [])
+                if isinstance(item, dict)
+            }
+            require(
+                existing.get("kind") == "Secret"
+                and metadata.get("name") == self.kafka_ca_secret
+                and metadata.get("namespace") == self.namespace
+                and metadata.get("labels", {}).get("app.kubernetes.io/name") == "dashboard-api"
+                and metadata.get("labels", {}).get("app.kubernetes.io/component") == "kafka-trust"
+                and existing.get("type", "Opaque") == "Opaque"
+                and set(existing.get("data", {})) == {"ca.crt"},
+                f"Secret/{self.kafka_ca_secret} identity or keys differ",
+            )
+            try:
+                stored = base64.b64decode(existing["data"]["ca.crt"], validate=True)
+            except (TypeError, ValueError) as error:
+                raise AdministrationError("canonical Kafka trust data is malformed") from error
+            require(stored == certificate, "canonical Kafka trust differs")
+            require(owner in {"issue-290", OWNER}, "canonical Kafka trust is not adoptable")
+            if owner == "issue-290":
+                require(
+                    "dashboard-event-administration" in managers,
+                    "canonical Kafka trust predecessor manager differs",
+                )
+                state = "adopted-issue-290"
+            else:
+                state = "owned"
+
+        self.apply_secret(
+            self.kafka_ca_secret,
+            {"ca.crt": certificate.decode()},
+            "kafka-trust",
+            force_conflicts=state == "adopted-issue-290",
         )
+        adopted = self.json("get", "secret", self.kafka_ca_secret)
+        self.validate_secret(adopted, self.kafka_ca_secret, {"ca.crt"}, "kafka-trust", OWNER)
+        try:
+            stored = base64.b64decode(adopted["data"]["ca.crt"], validate=True)
+        except (TypeError, ValueError) as error:
+            raise AdministrationError("canonical Kafka trust data is malformed") from error
+        require(stored == certificate, "canonical Kafka trust differs")
+        return state
 
     def kafka_snapshot(self) -> dict[str, Any]:
         pods = self.json(
@@ -286,6 +344,22 @@ def inspect_index(client: shared.ElasticsearchClient) -> int:
         "canonical index count differs",
     )
     return int(count["count"])
+
+
+def stable_kafka_progress(first: dict[str, Any], second: dict[str, Any]) -> bool:
+    if first.get("partitions") != second.get("partitions") or first.get(
+        "activeMembers"
+    ) != second.get("activeMembers"):
+        return False
+    first_offsets = first.get("offsets", {})
+    second_offsets = second.get("offsets", {})
+    if set(first_offsets) != set(second_offsets):
+        return False
+    return all(
+        first_offsets[partition][0] == second_offsets[partition][0]
+        and second_offsets[partition][1] >= first_offsets[partition][1]
+        for partition in first_offsets
+    )
 
 
 def verify_reader(client: shared.ElasticsearchClient) -> None:
@@ -441,6 +515,10 @@ def execute(operation: str) -> None:
     load_definition()
     target = Target()
     target.verify_boundary()
+    kafka_ca = target.secret_value(target.data_namespace, target.kafka_public_ca_secret, "ca.crt")
+    require(b"BEGIN CERTIFICATE" in kafka_ca, "Kafka public CA differs")
+    if operation == "ensure-access":
+        target.ensure_kafka_trust(kafka_ca)
     certificate = (
         target.secret_value(target.data_namespace, target.public_ca_secret, "ca.crt")
         if target.public_ca_secret
@@ -450,7 +528,9 @@ def execute(operation: str) -> None:
     first = target.kafka_snapshot()
     time.sleep(1)
     second = target.kafka_snapshot()
-    require(first == second, "canonical Kafka metadata or progress is not stable")
+    require(
+        stable_kafka_progress(first, second), "canonical Kafka metadata or progress is not stable"
+    )
     with shared.PortForward(target) as port:
         admin = shared.client_for(target, "elastic", password, port, certificate)
         count = inspect_index(admin)
@@ -463,13 +543,6 @@ def execute(operation: str) -> None:
                 target.writer_secret,
                 {"username": WRITER, "password": writer_password},
                 "elasticsearch-writer",
-            )
-            kafka_ca = target.secret_value(
-                target.data_namespace, target.kafka_public_ca_secret, "ca.crt"
-            )
-            require(b"BEGIN CERTIFICATE" in kafka_ca, "Kafka public CA differs")
-            target.apply_secret(
-                target.kafka_ca_secret, {"ca.crt": kafka_ca.decode()}, "kafka-trust"
             )
             require(
                 inspect_index(admin) == count, "access provisioning changed canonical documents"

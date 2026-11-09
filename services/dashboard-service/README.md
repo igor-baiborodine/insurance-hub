@@ -108,7 +108,7 @@ value.
 | HTTP limits | Header/body `16384`/`4096` bytes; read-header/read/write/idle `5s`/`10s`/`10s`/`30s` |
 | gRPC limits | Receive/send `1048576`/`8388608` bytes |
 | Elasticsearch | `ELASTICSEARCH_URL=http://127.0.0.1:9200`, fixed `ELASTICSEARCH_INDEX=policy_stats`, optional paired `ELASTICSEARCH_USERNAME`/`ELASTICSEARCH_PASSWORD`, HTTPS-only `ELASTICSEARCH_CA_FILE`, `ELASTICSEARCH_TIMEOUT=5s` maximum |
-| Registration worker | `EVENT_PROCESSING_MODE=disabled|isolated|canonical` with coherent `EVENT_WORKERS_ENABLED`; isolated selects the issue-290 index/topic/group and suffixed Secrets, canonical selects only `policy_stats`, `policy-registered`, `dashboard-service` and ordinary Secrets. Canonical startup requires stable, complete, in-range committed progress and no active member before group acquisition. |
+| Registration worker | `EVENT_PROCESSING_MODE=disabled|isolated|canonical` with coherent `EVENT_WORKERS_ENABLED`; isolated selects the issue-290 index/topic/group and suffixed Elasticsearch Secrets while PR1 preserves the existing ordinary Kafka-trust Secret name, and canonical selects only `policy_stats`, `policy-registered`, `dashboard-service` and ordinary Secrets. Canonical startup requires stable commits, complete in-range progress and no active member before group acquisition; new log-end arrivals may increase the backlog. |
 | Sales trends | Required `SALES_TRENDS_TIME_ZONE`; exact available IANA name loaded once at startup. Empty, `Local`, whitespace-altered and unknown values fail. Local-dev and QA use `GMT`. |
 | Telemetry | `OTEL_ENABLED=false`, optional `OTEL_EXPORTER_OTLP_ENDPOINT`; exporter timeout defaults to `2s` and accepts positive Go duration syntax. Deployed configuration omits `OTEL_EXPORTER_OTLP_TIMEOUT`, and deployment guards reject an override. |
 | Logging | `LOG_LEVEL=info`; safe structured fields only |
@@ -227,9 +227,12 @@ does not reset the consumer group.
 Canonical administration is separately dispatched as `go-svc-canonical-event-inspect`,
 `go-svc-canonical-event-ensure-access` and `go-svc-canonical-event-verify`. It inspects the existing
 index and stable Kafka topic/group progress, reuses the issue-287 reader, and may provision only
-the issue-293 exact-index writer plus ordinary writer and Kafka-trust Secrets. It never creates,
+the issue-293 exact-index writer plus ordinary writer and Kafka-trust Secrets. Before any
+Elasticsearch mutation, ensure-access either creates the ordinary trust Secret or adopts only the
+exact issue-290 predecessor with matching CA bytes and its recorded field manager. It never creates,
 deletes, remaps, seeds or retires canonical state. The isolated retirement owner rejects ordinary
-canonical names before its first inspection or deletion.
+canonical names before its first inspection or deletion. `go-svc-canonical-return-check` observes
+both workloads, terminating Pods, canonical membership and stable progress before Java return.
 
 The guarded local-dev sequence uses catalog service `dashboard`, context
 `kind-local-dev-insurance-hub` and namespace coordinate `local-dev-all`:

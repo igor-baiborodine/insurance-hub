@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import dashboard_deployment_checks as checks
+import ownership_transition as transition
 import pytest
 import yaml
 from scripts.go.service import deployment as lifecycle
@@ -1398,6 +1399,7 @@ def test_java_snapshot_requires_declared_stable_available_resources() -> None:
 
 
 def test_canonical_snapshot_rejects_successor_before_java_quiescence() -> None:
+    # given
     target = Mock(environment="local-dev", namespace="local-dev-all")
     target.processing_mode = "canonical"
     deployment = {
@@ -1410,24 +1412,142 @@ def test_canonical_snapshot_rejects_successor_before_java_quiescence() -> None:
         "status": {"replicas": 1},
     }
     target.json.side_effect = lambda *args: deployment if args[1] == "deployment" else {"items": []}
-    with pytest.raises(checks.DeploymentError, match="not quiescent"):
-        checks.role_snapshot(target)
 
+    # when / then
+    with (
+        patch.object(checks, "canonical_transfer_observation") as observation,
+        pytest.raises(checks.DeploymentError, match="not quiescent"),
+    ):
+        checks.role_snapshot(target)
+    observation.assert_not_called()
+
+    # given
     deployment["spec"]["replicas"] = 0
     deployment["status"]["replicas"] = 0
-    target.json.side_effect = lambda *args: (
-        deployment
-        if args[1] == "deployment"
-        else {"items": [{"metadata": {"deletionTimestamp": "now"}}]}
+    unsafe_states = (
+        transition.OwnershipState(0, 0, 0, 1, 1),
+        transition.OwnershipState(0, 0, 0, 0, 1),
     )
-    with pytest.raises(checks.DeploymentError, match="Pods still exist"):
-        checks.role_snapshot(target)
+    progress = transition.ProgressState(stable=True, complete=True, in_range=True)
 
-    target.json.side_effect = lambda *args: deployment if args[1] == "deployment" else {"items": []}
-    assert checks.role_snapshot(target) == {
+    for state in unsafe_states:
+        # when / then
+        with (
+            patch.object(checks, "canonical_transfer_observation", return_value=(state, progress)),
+            pytest.raises(checks.DeploymentError),
+        ):
+            checks.role_snapshot(target)
+
+    # when
+    with patch.object(
+        checks,
+        "canonical_transfer_observation",
+        return_value=(transition.OwnershipState(0, 0, 0, 0, 0), progress),
+    ):
+        snapshot = checks.role_snapshot(target)
+
+    # then
+    assert snapshot == {
         "deployment/local-dev-dashboard-api-legacy": "java-uid",
-        "phase": "quiescent",
+        "phase": "exclusive",
     }
+
+
+def test_canonical_transfer_observation_counts_terminating_go_and_group_member() -> None:
+    # given
+    target = Mock(environment="local-dev", data_namespace="local-dev-all")
+    target.json.side_effect = [
+        {"items": []},
+        {"items": [{"metadata": {"deletionTimestamp": "now"}}]},
+    ]
+    progress = transition.ProgressState(stable=True, complete=True, in_range=True)
+
+    # when
+    with patch.object(
+        checks,
+        "canonical_progress_observation",
+        return_value=({"activeMembers": 1}, progress),
+    ):
+        state, observed_progress = checks.canonical_transfer_observation(target)
+
+    # then
+    assert state == transition.OwnershipState(0, 0, 0, 1, 1)
+    assert observed_progress == progress
+
+
+def test_canonical_kafka_snapshot_observes_group_members_and_progress() -> None:
+    # given
+    target = Mock(
+        environment="local-dev",
+        data_namespace="local-dev-all",
+        configuration={"canonicalEventAdministration": {"kafkaCluster": "local-dev-kafka"}},
+    )
+    target.data_json.return_value = {
+        "items": [
+            {
+                "metadata": {
+                    "name": "local-dev-kafka-0",
+                    "labels": {"strimzi.io/broker-role": "true"},
+                },
+                "status": {
+                    "phase": "Running",
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                },
+            }
+        ]
+    }
+    target.namespace_kubectl.side_effect = [
+        "Topic: policy-registered Partition: 0 Leader: 0 Replicas: 0 Isr: 0\n",
+        "GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID\n"
+        "dashboard-service policy-registered 0 7 9 2 go-member /host client\n",
+    ]
+
+    # when
+    snapshot = checks.canonical_kafka_snapshot(target)
+
+    # then
+    assert snapshot == {"partitions": [0], "offsets": {0: (7, 9)}, "activeMembers": 1}
+
+
+def test_canonical_return_snapshot_requires_observed_quiescence() -> None:
+    # given
+    target = Mock(environment="local-dev", namespace="local-dev-all")
+    deployments = {
+        "local-dev-dashboard-api-legacy": {
+            "metadata": {"name": "local-dev-dashboard-api-legacy", "namespace": "local-dev-all"},
+            "spec": {"replicas": 0},
+            "status": {"replicas": 0},
+        },
+        "local-dev-dashboard-api": {
+            "metadata": {"name": "local-dev-dashboard-api", "namespace": "local-dev-all"},
+            "spec": {"replicas": 0},
+            "status": {"replicas": 0},
+        },
+    }
+    target.json.side_effect = lambda _get, _kind, name: deployments[name]
+    progress = transition.ProgressState(stable=True, complete=True, in_range=True)
+
+    # when
+    with patch.object(
+        checks,
+        "canonical_transfer_observation",
+        return_value=(transition.OwnershipState(0, 0, 0, 0, 0), progress),
+    ):
+        snapshot = checks.canonical_return_snapshot(target)
+
+    # then
+    assert snapshot == {"environment": "local-dev", "phase": "quiescent", "status": "passed"}
+
+    # when / then
+    with (
+        patch.object(
+            checks,
+            "canonical_transfer_observation",
+            return_value=(transition.OwnershipState(0, 0, 0, 1, 0), progress),
+        ),
+        pytest.raises(checks.DeploymentError, match="requires quiescence"),
+    ):
+        checks.canonical_return_snapshot(target)
 
 
 @pytest.mark.parametrize("defect", ["absent", "replaced", "selector", "unavailable"])

@@ -286,6 +286,7 @@ func TestWorker_CheckRequiresStableAssignment(t *testing.T) {
 }
 
 func TestVerifyCanonicalProgress_RequiresStableCompleteInRangeSnapshot(t *testing.T) {
+	// given
 	tests := []struct {
 		name      string
 		client    progressRequestClient
@@ -316,25 +317,39 @@ func TestVerifyCanonicalProgress_RequiresStableCompleteInRangeSnapshot(t *testin
 			wantError: "invalid committed progress",
 		},
 		{
-			name: "changing bounds",
+			name: "growing log end",
 			client: progressRequestClient{
-				start:     0,
-				committed: 4,
-				end:       4,
-				changeEnd: true,
+				start:       0,
+				committed:   4,
+				end:         4,
+				secondEndBy: 1,
+			},
+		},
+		{
+			name: "decreasing log end",
+			client: progressRequestClient{
+				start:       0,
+				committed:   4,
+				end:         5,
+				secondEndBy: -1,
 			},
 			wantError: "Kafka progress changed",
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			client := test.client
+
+			// when
 			err := verifyCanonicalProgress(
 				context.Background(),
 				&client,
 				"policy-registered",
 				"dashboard-service",
 			)
+
+			// then
 			if test.wantError == "" && err != nil {
 				t.Fatal(err)
 			}
@@ -526,12 +541,12 @@ type fakeClient struct {
 }
 
 type progressRequestClient struct {
-	start     int64
-	committed int64
-	end       int64
-	active    bool
-	changeEnd bool
-	endReads  int
+	start       int64
+	committed   int64
+	end         int64
+	active      bool
+	secondEndBy int64
+	endReads    int
 }
 
 type staticRequestClient struct {
@@ -585,8 +600,8 @@ func (client *progressRequestClient) Request(
 		offset := client.start
 		if typed.Topics[0].Partitions[0].Timestamp == -1 {
 			offset = client.end
-			if client.changeEnd && client.endReads > 0 {
-				offset++
+			if client.endReads > 0 {
+				offset += client.secondEndBy
 			}
 			client.endReads++
 		}

@@ -19,6 +19,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+import canonical_event_administration as canonical
 import ownership_transition as transition
 import yaml
 
@@ -574,7 +575,7 @@ def validate_event_activation_assets(environment: str) -> None:
             {
                 "name": "kafka-ca",
                 "secret": {
-                    "secretName": f"{prefix}-dashboard-kafka-ca-issue-290",
+                    "secretName": f"{prefix}-dashboard-kafka-ca",
                     "items": [{"key": "ca.crt", "path": "ca.crt"}],
                     "defaultMode": 292,
                 },
@@ -768,11 +769,7 @@ def validate_render(
             {
                 "name": "kafka-ca",
                 "secret": {
-                    "secretName": (
-                        f"{environment}-dashboard-kafka-ca-issue-290"
-                        if mode == "isolated"
-                        else f"{environment}-dashboard-kafka-ca"
-                    ),
+                    "secretName": (f"{environment}-dashboard-kafka-ca"),
                     "items": [{"key": "ca.crt", "path": "ca.crt"}],
                     "defaultMode": 292,
                 },
@@ -1545,7 +1542,7 @@ def role_snapshot(target: Target) -> dict[str, Any]:
 
 
 def canonical_quiescence_snapshot(target: Target) -> dict[str, Any]:
-    """Reject canonical successor startup until the whole Java workload is absent."""
+    """Require an observed exclusive boundary before or after canonical Go startup."""
     name = f"{target.environment}-dashboard-api-legacy"
     deployment = target.json("get", "deployment", name)
     metadata = deployment.get("metadata", {})
@@ -1557,16 +1554,147 @@ def canonical_quiescence_snapshot(target: Target) -> dict[str, Any]:
         and deployment.get("status", {}).get("replicas", 0) == 0,
         "canonical Java Deployment is not quiescent",
     )
-    pods = target.json(
-        "get",
-        "pods",
-        "-l",
-        "app.kubernetes.io/name=dashboard-api-legacy",
-    ).get("items", [])
-    require(not pods, "canonical Java Pods still exist or are terminating")
-    state = transition.OwnershipState(0, 0, 0, 0, 0)
-    require(transition.phase(state) == "quiescent", "canonical ownership is not quiescent")
-    return {f"deployment/{name}": metadata.get("uid", ""), "phase": "quiescent"}
+    state, progress = canonical_transfer_observation(target)
+    try:
+        phase = transition.phase(state)
+        if phase == "quiescent":
+            transition.require_successor_start(state, progress)
+        else:
+            require(phase == "go-owned", "canonical ownership is not exclusive")
+            require(
+                progress.stable and progress.complete and progress.in_range,
+                "canonical committed progress is not safe",
+            )
+    except transition.TransitionError as error:
+        raise DeploymentError(str(error)) from error
+    return {f"deployment/{name}": metadata.get("uid", ""), "phase": "exclusive"}
+
+
+def pod_counts(items: list[dict[str, Any]]) -> tuple[int, int]:
+    terminating = sum(bool(item.get("metadata", {}).get("deletionTimestamp")) for item in items)
+    return len(items) - terminating, terminating
+
+
+def canonical_kafka_snapshot(target: Target) -> dict[str, Any]:
+    event = target.configuration.get("canonicalEventAdministration", {})
+    cluster = event.get("kafkaCluster", "")
+    require(cluster == f"{target.environment}-kafka", "canonical Kafka cluster differs")
+    pods = target.data_json("get", "pods", "-l", f"strimzi.io/cluster={cluster}").get("items", [])
+    ready = sorted(
+        pod.get("metadata", {}).get("name", "")
+        for pod in pods
+        if not pod.get("metadata", {}).get("deletionTimestamp")
+        and pod.get("metadata", {}).get("labels", {}).get("strimzi.io/broker-role") == "true"
+        and pod.get("status", {}).get("phase") == "Running"
+        and any(
+            condition.get("type") == "Ready" and condition.get("status") == "True"
+            for condition in pod.get("status", {}).get("conditions", [])
+        )
+    )
+    require(bool(ready) and ready[0], "no ready canonical Kafka broker Pod is available")
+    topic = target.namespace_kubectl(
+        target.data_namespace,
+        "exec",
+        ready[0],
+        "-c",
+        "kafka",
+        "--",
+        "/opt/kafka/bin/kafka-topics.sh",
+        "--bootstrap-server",
+        "localhost:9092",
+        "--describe",
+        "--topic",
+        canonical.TOPIC,
+    )
+    partitions = sorted({int(value) for value in re.findall(r"Partition:\s*(\d+)", topic)})
+    require(partitions == list(range(len(partitions))) and partitions, "canonical topic differs")
+    group = target.namespace_kubectl(
+        target.data_namespace,
+        "exec",
+        ready[0],
+        "-c",
+        "kafka",
+        "--",
+        "/opt/kafka/bin/kafka-consumer-groups.sh",
+        "--bootstrap-server",
+        "localhost:9092",
+        "--describe",
+        "--group",
+        canonical.GROUP,
+    )
+    offsets: dict[int, tuple[int, int]] = {}
+    members: set[str] = set()
+    for line in group.splitlines():
+        fields = line.split()
+        if len(fields) < 6 or fields[0] != canonical.GROUP or fields[1] != canonical.TOPIC:
+            continue
+        try:
+            partition, committed, log_end = map(int, fields[2:5])
+        except ValueError as error:
+            raise DeploymentError("canonical group progress differs") from error
+        require(0 <= committed <= log_end, "canonical group offset is out of range")
+        offsets[partition] = (committed, log_end)
+        if len(fields) > 6 and fields[6] != "-":
+            members.add(fields[6])
+    require(set(offsets) == set(partitions), "canonical group partition progress is incomplete")
+    return {"partitions": partitions, "offsets": offsets, "activeMembers": len(members)}
+
+
+def canonical_progress_observation(
+    target: Target,
+) -> tuple[dict[str, Any], transition.ProgressState]:
+    first = canonical_kafka_snapshot(target)
+    time.sleep(1)
+    second = canonical_kafka_snapshot(target)
+    return second, transition.ProgressState(
+        stable=canonical.stable_kafka_progress(first, second),
+        complete=bool(second["partitions"]),
+        in_range=True,
+    )
+
+
+def canonical_transfer_observation(
+    target: Target,
+) -> tuple[transition.OwnershipState, transition.ProgressState]:
+    java_pods = target.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api-legacy").get(
+        "items", []
+    )
+    java_running, java_terminating = pod_counts(java_pods)
+    go_pods = target.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api").get(
+        "items", []
+    )
+    go_running, go_terminating = pod_counts(go_pods)
+    kafka, progress = canonical_progress_observation(target)
+    return (
+        transition.OwnershipState(
+            java_running=java_running,
+            java_terminating=java_terminating,
+            go_running=go_running,
+            go_terminating=go_terminating,
+            canonical_members=kafka["activeMembers"],
+        ),
+        progress,
+    )
+
+
+def canonical_return_snapshot(target: Target) -> dict[str, Any]:
+    java_name = f"{target.environment}-dashboard-api-legacy"
+    go_name = f"{target.environment}-dashboard-api"
+    for name in (java_name, go_name):
+        deployment = target.json("get", "deployment", name)
+        require(
+            deployment.get("metadata", {}).get("name") == name
+            and deployment.get("metadata", {}).get("namespace") == target.namespace
+            and deployment.get("spec", {}).get("replicas") == 0
+            and deployment.get("status", {}).get("replicas", 0) == 0,
+            f"Deployment/{name} is not stopped for canonical return",
+        )
+    state, progress = canonical_transfer_observation(target)
+    try:
+        transition.require_predecessor_return(state, progress)
+    except transition.TransitionError as error:
+        raise DeploymentError(str(error)) from error
+    return {"environment": target.environment, "phase": "quiescent", "status": "passed"}
 
 
 def record_snapshot(stage: str, value: dict[str, Any]) -> None:
@@ -2556,8 +2684,14 @@ def validate_java_edge_identity(environment: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     require(
-        len(arguments) == 1 and arguments[0] in {"render", "check"}, "unsupported check operation"
+        len(arguments) == 1 and arguments[0] in {"render", "check", "return-check"},
+        "unsupported check operation",
     )
+    if arguments[0] == "return-check":
+        target = Target()
+        target.coordinates()
+        print(json.dumps(canonical_return_snapshot(target), sort_keys=True))
+        return 0
     environments = (
         [os.environ.get("DEPLOY_ENV", "")] if arguments[0] == "render" else ["local-dev", "qa"]
     )

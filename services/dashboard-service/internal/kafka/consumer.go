@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -271,10 +270,27 @@ func verifyCanonicalProgress(
 	if err != nil {
 		return err
 	}
-	if !maps.Equal(first, second) {
+	if !canonicalProgressStable(first, second) {
 		return errors.New("preflight dashboard registration worker: Kafka progress changed")
 	}
 	return nil
+}
+
+func canonicalProgressStable(
+	first map[int32]partitionProgress,
+	second map[int32]partitionProgress,
+) bool {
+	if len(first) != len(second) {
+		return false
+	}
+	for partition, before := range first {
+		after, present := second[partition]
+		if !present || before.start != after.start || before.committed != after.committed ||
+			after.end < before.end {
+			return false
+		}
+	}
+	return true
 }
 
 func readCanonicalProgress(

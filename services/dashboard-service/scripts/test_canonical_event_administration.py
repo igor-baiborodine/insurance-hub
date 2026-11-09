@@ -161,6 +161,93 @@ def test_kafka_snapshot_requires_complete_in_range_canonical_progress() -> None:
     }
 
 
+def test_stable_kafka_progress_accepts_new_arrivals_without_commit_changes() -> None:
+    # given
+    first = {"partitions": [0], "offsets": {0: (7, 9)}, "activeMembers": 0}
+    second = {"partitions": [0], "offsets": {0: (7, 10)}, "activeMembers": 0}
+
+    # when
+    stable = administration.stable_kafka_progress(first, second)
+
+    # then
+    assert stable
+
+
+def test_kafka_trust_adopts_exact_issue_290_predecessor() -> None:
+    # given
+    certificate = b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
+    encoded = administration.base64.b64encode(certificate).decode("ascii")
+    selected = object.__new__(administration.Target)
+    selected.namespace = "local-dev-all"
+    selected.kafka_ca_secret = "local-dev-dashboard-kafka-ca"
+    predecessor = {
+        "kind": "Secret",
+        "metadata": {
+            "name": selected.kafka_ca_secret,
+            "namespace": selected.namespace,
+            "labels": {
+                "app.kubernetes.io/name": "dashboard-api",
+                "app.kubernetes.io/component": "kafka-trust",
+                "insurance-hub.io/owner": "issue-290",
+            },
+            "managedFields": [{"manager": "dashboard-event-administration"}],
+        },
+        "type": "Opaque",
+        "data": {"ca.crt": encoded},
+    }
+    adopted = {
+        **predecessor,
+        "metadata": {
+            **predecessor["metadata"],
+            "labels": {
+                **predecessor["metadata"]["labels"],
+                "insurance-hub.io/owner": administration.OWNER,
+            },
+            "managedFields": [{"manager": "dashboard-canonical-event-administration"}],
+        },
+    }
+    selected.json = Mock(side_effect=[predecessor, adopted])
+    selected.run = Mock()
+
+    # when
+    state = selected.ensure_kafka_trust(certificate)
+
+    # then
+    assert state == "adopted-issue-290"
+    assert "--force-conflicts" in selected.run.call_args.args
+
+
+def test_kafka_trust_rejects_foreign_predecessor_before_apply() -> None:
+    # given
+    certificate = b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
+    selected = object.__new__(administration.Target)
+    selected.namespace = "local-dev-all"
+    selected.kafka_ca_secret = "local-dev-dashboard-kafka-ca"
+    selected.json = Mock(
+        return_value={
+            "kind": "Secret",
+            "metadata": {
+                "name": selected.kafka_ca_secret,
+                "namespace": selected.namespace,
+                "labels": {
+                    "app.kubernetes.io/name": "dashboard-api",
+                    "app.kubernetes.io/component": "kafka-trust",
+                    "insurance-hub.io/owner": "foreign-owner",
+                },
+                "managedFields": [{"manager": "foreign-manager"}],
+            },
+            "type": "Opaque",
+            "data": {"ca.crt": administration.base64.b64encode(certificate).decode("ascii")},
+        }
+    )
+    selected.run = Mock()
+
+    # when / then
+    with pytest.raises(administration.AdministrationError, match="not adoptable"):
+        selected.ensure_kafka_trust(certificate)
+    selected.run.assert_not_called()
+
+
 def test_effective_writer_permission_rejects_mapping_admin_and_isolated_index() -> None:
     client = Mock()
     response = {

@@ -256,6 +256,7 @@
         "canonical-event-inspect",
         "canonical-event-ensure-access",
         "canonical-event-verify",
+        "canonical-return-check",
         "deploy-test-tooling",
         "deploy-test"
       ],
