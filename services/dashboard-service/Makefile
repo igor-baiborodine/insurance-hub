@@ -157,7 +157,7 @@ deploy-render: ## Render one Dashboard overlay without applying it
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/dashboard_deployment_checks.py render
 
-deploy-check: python-runtime-check ## Validate isolated Dashboard overlays and Java preservation
+deploy-check: python-runtime-check ## Validate Dashboard overlays, activation modes and Java preservation
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/dashboard_deployment_checks.py check
 

@@ -339,10 +339,11 @@ then change the route after Java qualifies.
 
 ## Stage and observe QA
 
-The shared QA aggregate contains both `./dashboard` and `./dashboard/legacy`. The release owner
-publishes the reviewed semantic image, records its immutable digest and exact image source revision,
-and updates the Go overlay through the guarded release workflow. Flux performs the persistent QA
-mutation while the Java resource and route remain authoritative.
+The shared QA aggregate contains both `./dashboard` and `./dashboard/legacy`. The accepted current
+state keeps Java at zero replicas and selects canonical Go event processing plus the Go edge route.
+The release owner publishes a reviewed semantic image, records its immutable digest and exact image
+source revision, and updates the Go overlay through the guarded release workflow. Flux performs
+every persistent QA mutation; direct status and verification commands do not own desired state.
 
 Do not apply, delete, load an image, scale a workload, live-patch desired state or suspend Flux in
 QA. Status is read-only. Verification requires separate authorization for its short-lived probe
@@ -382,12 +383,11 @@ disposable evidence alone does not establish a QA result.
 
 ## Return from QA activation
 
-If isolated QA acceptance must stop, revert the reviewed Go Dashboard source change and let Flux
-restore the prior Go state while Java remains authoritative. During a later canonical return,
-first reconcile Go and Java to zero and run `go-svc-canonical-return-check SVC_NAME=dashboard`,
-then reconcile the retained Java Deployment before routing back to Java. Keep monitoring and data
-resources unchanged. Record each source/applied revision, workload identity, route and progress
-snapshot before and after the return.
+For a canonical return, first use reviewed Flux revisions to reconcile Go and Java to zero and run
+`go-svc-canonical-return-check SVC_NAME=dashboard`. Reconcile the retained Java Deployment only
+after that gate passes, qualify Java against the preserved canonical state, and then route back to
+Java. Keep monitoring and data resources unchanged. Record each source/applied revision, workload
+identity, route and progress snapshot before and after the return.
 
 ## Diagnostics, stop conditions and recovery
 

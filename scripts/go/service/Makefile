@@ -47,7 +47,7 @@ go-svc-deploy-render: python-runtime-check ## Render one cataloged Go service's 
 		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) deploy-render)"; \
 		$(MAKE) --no-print-directory -C "$$module_path" deploy-render DEPLOY_ENV="$(DEPLOY_ENV)"
 
-go-svc-deploy-check: python-runtime-check ## Validate one cataloged Go service's isolated deployment overlays. Usage: make go-svc-deploy-check SVC_NAME=<svc-name>
+go-svc-deploy-check: python-runtime-check ## Validate one cataloged Go service's deployment overlays. Usage: make go-svc-deploy-check SVC_NAME=<svc-name>
 	+@set -eu; \
 		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) deploy-check)"; \
 		$(MAKE) --no-print-directory -C "$$module_path" deploy-check
