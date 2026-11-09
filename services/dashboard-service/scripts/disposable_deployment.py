@@ -2044,6 +2044,29 @@ def create_canonical_topic(cluster: Cluster) -> None:
     )
 
 
+def initialize_registration_progress(cluster: Cluster) -> None:
+    kafka_cli(
+        cluster,
+        "kafka-consumer-groups.sh",
+        "--bootstrap-server",
+        "localhost:9093",
+        "--command-config",
+        "/etc/kafka/secrets/client.properties",
+        "--group",
+        CANONICAL_GROUP,
+        "--topic",
+        CANONICAL_TOPIC,
+        "--reset-offsets",
+        "--to-earliest",
+        "--execute",
+    )
+    require(
+        consumer_group_offsets(cluster, CANONICAL_GROUP, CANONICAL_TOPIC)
+        == [OffsetSnapshot(0, 0, 0)],
+        "ordinary registration group did not initialize at the empty topic boundary",
+    )
+
+
 def canonical_member_count(cluster: Cluster) -> int:
     output = kafka_cli(
         cluster,
@@ -2809,6 +2832,7 @@ def run() -> None:
         kafka_ca = setup_kafka(cluster, kafka_image)
         verify_kafka_tls(cluster, kafka_ca)
         create_canonical_topic(cluster)
+        initialize_registration_progress(cluster)
         enabled_render, _enabled_items = render(
             cluster,
             runtime_image,
