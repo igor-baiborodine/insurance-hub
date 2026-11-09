@@ -6,6 +6,7 @@
   - [Qualify the candidate](#qualify-the-candidate)
   - [Provision reader prerequisites](#provision-reader-prerequisites)
   - [Prepare isolated registration resources](#prepare-isolated-registration-resources)
+  - [Prepare canonical access and transfer](#prepare-canonical-access-and-transfer)
   - [Deploy to local development](#deploy-to-local-development)
   - [Stop and return in local development](#stop-and-return-in-local-development)
   - [Stage and observe QA](#stage-and-observe-qa)
@@ -18,12 +19,10 @@
 # Dashboard deployment runbook
 
 This runbook owns qualification and guarded operation of the private Go Dashboard queries and its
-disabled-by-default isolated registration candidate. The default workload reads `policy_stats`.
-The candidate uses `policy_stats_issue_290`, `policy-registered-issue-290` and
-`dashboard-service-issue-290`; Java retains canonical writer, setup, edge retry, public route and
-event authority.
-Issue 291 completes the service operating handoff. Issue 292 owns the later full removal and
-restoration rehearsal.
+registration worker. PR1 keeps local-dev and QA explicitly isolated on the issue-290 index, topic,
+group and suffixed Secrets. It also prepares the unselected canonical configuration for
+`policy_stats`, `policy-registered` and `dashboard-service`. Java retains canonical and edge
+authority until the separate transfer gate and environment operation are authorized.
 
 Use the companion [observability runbook](observability-runbook.md) for Dashboard monitoring
 source validation, QA provisioning/read-back, investigation and monitoring restoration. The two
@@ -40,6 +39,9 @@ namespace `qa-data` and the shared Flux source on branch `main` at `./k8s/overla
 The Go resources are `dashboard-api`, `dashboard-api-management`, `dashboard-config` and the
 `dashboard-api` NetworkPolicy after the environment prefix is applied. The protected Java
 Deployment and Service are both named `dashboard-api-legacy` after the same prefix.
+
+The Go Deployment uses `Recreate`; canonical authority must never use a surging rollout. The edge
+route remains a separate setting and continues to select Java in PR1.
 
 ## Qualify the candidate
 
@@ -145,10 +147,10 @@ apply the Dashboard workload directly.
 
 ## Prepare isolated registration resources
 
-PR1 keeps both shared overlays at `EVENT_WORKERS_ENABLED=false`. The checked-in activation patches
-are guarded inputs for the later authorized activation step; the active kustomizations do not
-reference them. Disabled renders keep the canonical reader, omit writer credentials and Kafka
-trust, and have no Kafka egress.
+PR1 keeps both shared overlays explicitly selected as `EVENT_PROCESSING_MODE=isolated` with the
+transition guard enabled. They use issue-290 reader, writer and Kafka-trust Secret names; the trust
+name now has the same `-issue-290` cleanup boundary as the other fixture credentials. Separate
+canonical patches are rendered and validated by the deployment check but remain unselected.
 
 The event setup owner targets only `policy_stats_issue_290`,
 `policy-registered-issue-290` and the future `dashboard-service-issue-290` consumer group. It
@@ -185,6 +187,38 @@ progress for later handoff and return evidence. When a later ticket explicitly a
 resource belongs to issue 290, then removes only the exact index, identities, Secrets and topic.
 Setup and verification never reset the consumer group; any later group-offset removal needs its own
 broker-state check and authorization.
+
+## Prepare canonical access and transfer
+
+Canonical inspection and verification are read-only. Access provisioning creates or updates only
+the exact-index `go_dashboard_policy_stats_writer`, its ordinary workload Secret and the ordinary
+Kafka CA Secret. It reuses the issue-287 reader and never creates, remaps, seeds or deletes the
+canonical index, topic or group. Bind the exact catalog coordinates before running:
+
+```sh
+make go-svc-canonical-event-inspect SVC_NAME=dashboard
+export DASHBOARD_CANONICAL_CONFIRM="ensure-access-${DEPLOY_ENV}-dashboard-issue-293"
+make go-svc-canonical-event-ensure-access SVC_NAME=dashboard
+unset DASHBOARD_CANONICAL_CONFIRM
+make go-svc-canonical-event-verify SVC_NAME=dashboard
+```
+
+The inspect and verify owners require two matching Kafka metadata/progress snapshots, every exact
+topic partition, in-range committed offsets and the exact canonical index/identities. Provisioning
+must preserve the initial document count. There is deliberately no canonical retire command.
+
+Forward transfer records index and per-partition progress, stops the whole Java Dashboard
+Deployment, and proves zero running or terminating Java Pods and zero canonical members before one
+Go canonical Pod starts. The runtime repeats stable progress checks before it acquires the group.
+Only after the Go workload and canonical effects qualify may the edge route select Go. Return stops
+Go first, proves the same quiescent boundary and stable progress, restores retained Java, and then
+routes to Java. An interrupted action re-inspects and classifies actual state before retry; overlap,
+unknown members or incomplete/out-of-range progress stops the procedure.
+
+Bound each local action to 180 seconds and local return to 10 minutes. Bound each QA revision to
+10 minutes and QA return to 30 minutes. Classify a safe abort phase within 60 seconds and initiate
+the selected return within 120 seconds. Record query downtime separately. QA writes remain owned
+by reviewed `qa-svc` Flux revisions; do not use the direct local controller there.
 
 ## Deploy to local development
 
@@ -269,15 +303,17 @@ attempt a write that could mutate canonical state if permissions drift.
 
 ## Stop and return in local development
 
-The bounded stop command scales only `local-dev-dashboard-api` to zero:
+The bounded Go stop command scales only `local-dev-dashboard-api` to zero:
 
 ```sh
 make go-svc-stop SVC_NAME=dashboard
 ```
 
-Confirm that all Go endpoints disappear and that the Java Deployment and Service UIDs and
-availability remain unchanged. Restore the same accepted image with the guarded deploy, status and
-verify commands above. Leave the Go workload ready after the issue 286 stop scenario.
+For an isolated deployment, confirm that all Go endpoints disappear and that the Java Deployment
+and Service UIDs and availability remain unchanged. Restore the same accepted image with the
+guarded deploy, status and verify commands above. For canonical return, keep Go stopped, verify no
+Go Pod or canonical member remains and progress is stable/in range, restore the retained Java
+Deployment, and change the route only after Java qualifies.
 
 ## Stage and observe QA
 
@@ -324,10 +360,12 @@ disposable evidence alone does not establish a QA result.
 
 ## Return from QA activation
 
-If QA acceptance must stop, revert only the reviewed `./dashboard` inclusion through Git and let
-Flux remove the Go resources. Keep `./dashboard/legacy`, the shared Flux source and all Java,
-monitoring and data resources unchanged. Record the source/applied revisions and Java UIDs before
-and after the return. A final remove-and-restore rehearsal remains issue 292 work.
+If isolated QA acceptance must stop, revert the reviewed Go Dashboard source change and let Flux
+restore the prior Go state while Java remains authoritative. During a later canonical return,
+first reconcile Go to zero and prove no Go Pod or canonical member remains, then reconcile the
+retained Java Deployment and verify progress before routing back to Java. Keep monitoring and data
+resources unchanged. Record each source/applied revision, workload identity, route and progress
+snapshot before and after the return.
 
 ## Diagnostics, stop conditions and recovery
 
@@ -335,10 +373,10 @@ Stop before a target mutation when any declared environment, context, namespace,
 Dashboard resource name, source revision, image reference/digest, Secret shape, Elasticsearch
 index/identity, Kafka topic/group or current Flux owner differs from the recorded candidate. Stop
 after mutation for a placeholder/mismatched runtime identity, an unexpected ready Pod, failed
-business/management probe, lost Java availability, reader privilege expansion, writer access to
-`policy_stats`, worker access to the canonical topic/group, an unexplained readiness failure or
-incomplete owned cleanup. Preserve the first failure and current source/image/resource identities
-before retrying.
+business/management probe, ownership overlap, reader privilege expansion, a writer or worker that
+does not match the selected isolated/canonical mode, unstable or out-of-range committed progress,
+an unexplained readiness failure or incomplete owned cleanup. Preserve the first failure and
+current source/image/resource identities before retrying.
 
 Use `go-svc-deploy-status SVC_NAME=dashboard` for the selected target before classifying stale
 source or image state. Check the exact Deployment, ConfigMap, Services, NetworkPolicy, Pod image ID
@@ -384,6 +422,6 @@ Retain the following without credentials or business data:
 - owned disposable/probe cleanup and final accepted state.
 
 Issue 291 owns the monitoring and service-root operating procedures. Issue 292 owns cumulative
-practical load, full application downgrade/removal/reinstallation/restoration and isolated
-authority handover. Later epic tickets own route/traffic transfer, canonical writer changes and
-Java retirement. Nothing in this runbook authorizes those actions.
+practical load and full application restoration evidence. Issue 293 owns canonical transfer in
+separate local-dev and QA gates, including independent edge routing. Later epic work owns final
+Java retirement. Nothing in this runbook alone authorizes a shared-target transfer.

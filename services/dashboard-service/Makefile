@@ -8,8 +8,10 @@ INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py scripts/deployment.py \
-	scripts/event_administration.py scripts/reader_administration.py \
-	scripts/test_event_administration.py scripts/test_reader_administration.py \
+	scripts/event_administration.py scripts/canonical_event_administration.py \
+	scripts/ownership_transition.py scripts/reader_administration.py \
+	scripts/test_event_administration.py scripts/test_canonical_event_administration.py \
+	scripts/test_ownership_transition.py scripts/test_reader_administration.py \
 	scripts/disposable_deployment.py scripts/image_check.py scripts/service_process.py \
 	scripts/test_image_check.py \
 	scripts/elasticsearch_integration.py scripts/test_elasticsearch_integration.py \
@@ -25,6 +27,8 @@ PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_image_check.py \
 	scripts/test_deployment.py \
 	scripts/test_event_administration.py \
+	scripts/test_canonical_event_administration.py \
+	scripts/test_ownership_transition.py \
 	scripts/test_reader_administration.py \
 	scripts/test_disposable_command.py \
 	scripts/test_service_process.py \
@@ -120,7 +124,8 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	image-build image-check _image-check-existing deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop \
 	reader-ensure reader-verify reader-rotate event-fixture-setup event-fixture-verify \
-	event-fixture-retire deploy-test-tooling deploy-test \
+	event-fixture-retire canonical-event-inspect canonical-event-ensure-access \
+	canonical-event-verify deploy-test-tooling deploy-test \
 	_deploy-test-rpc \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
@@ -164,9 +169,14 @@ event-fixture-setup event-fixture-verify event-fixture-retire: python-runtime-ch
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/event_administration.py '$(@:event-fixture-%=%)'
 
+canonical-event-inspect canonical-event-ensure-access canonical-event-verify: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/canonical_event_administration.py '$(@:canonical-event-%=%)'
+
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Dashboard deployment guards
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" -m pytest -q scripts/test_deployment.py scripts/test_event_administration.py \
+		scripts/test_canonical_event_administration.py scripts/test_ownership_transition.py \
 		scripts/test_reader_administration.py
 
 deploy-test: python-toolchain-check $(QUALIFICATION_IMAGE_PREREQUISITE) ## Exercise Dashboard in an owned disposable Kind namespace

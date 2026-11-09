@@ -35,7 +35,7 @@ spec:
       volumes:
         - name: kafka-ca
           secret:
-            secretName: qa-dashboard-kafka-ca
+            secretName: qa-dashboard-kafka-ca-issue-290
             items:
               - key: ca.crt
                 path: ca.crt

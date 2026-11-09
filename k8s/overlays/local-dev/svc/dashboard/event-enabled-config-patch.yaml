@@ -3,6 +3,7 @@ kind: ConfigMap
 metadata:
   name: dashboard-config
 data:
+  EVENT_PROCESSING_MODE: isolated
   EVENT_WORKERS_ENABLED: "true"
   PROBE_TIMEOUT: 30s
   ELASTICSEARCH_INDEX: policy_stats_issue_290

@@ -208,7 +208,7 @@ class Target:
                 "kafkaCluster": "local-dev-kafka",
                 "kafkaBootstrap": "local-dev-kafka-kafka-bootstrap:9093",
                 "kafkaPublicCASecret": "local-dev-kafka-cluster-ca-cert",
-                "kafkaWorkloadCASecret": "local-dev-dashboard-kafka-ca",
+                "kafkaWorkloadCASecret": "local-dev-dashboard-kafka-ca-issue-290",
                 "kafkaReplicas": 1,
             },
             "qa": {
@@ -221,7 +221,7 @@ class Target:
                 "kafkaCluster": "qa-kafka",
                 "kafkaBootstrap": "qa-kafka-kafka-bootstrap.qa-data.svc:9093",
                 "kafkaPublicCASecret": "qa-kafka-cluster-ca-cert",
-                "kafkaWorkloadCASecret": "qa-dashboard-kafka-ca",
+                "kafkaWorkloadCASecret": "qa-dashboard-kafka-ca-issue-290",
                 "kafkaReplicas": 3,
             },
         }[self.environment]
@@ -722,6 +722,16 @@ def verify_setup(
 
 
 def retire(target: Target, admin: ElasticsearchClient, definition: Definition) -> None:
+    require(
+        OWNER == "issue-290"
+        and INDEX == "policy_stats_issue_290"
+        and TOPIC == "policy-registered-issue-290"
+        and GROUP == "dashboard-service-issue-290"
+        and target.reader_secret.endswith("-issue-290")
+        and target.writer_secret.endswith("-issue-290")
+        and target.kafka_ca_secret.endswith("-issue-290"),
+        "isolated retirement boundary differs",
+    )
     count = inspect_index(admin, definition)
     identities: list[str] = []
     for identity in (WRITER, READER):
