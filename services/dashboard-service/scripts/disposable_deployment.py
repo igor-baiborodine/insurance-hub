@@ -47,9 +47,16 @@ EVENT_READER_USERNAME = event_admin.READER
 EVENT_READER_PASSWORD = "issue-290-disposable-reader-password"
 EVENT_WRITER_USERNAME = event_admin.WRITER
 EVENT_WRITER_PASSWORD = "issue-290-disposable-writer-password"
+CANONICAL_WRITER_USERNAME = "dashboard_disposable_canonical_writer"
+CANONICAL_WRITER_PASSWORD = "issue-293-disposable-writer-password"
 ELASTICSEARCH_NAME = "dashboard-disposable-elasticsearch"
 KAFKA_NAME = "local-dev-kafka"
 KAFKA_BOOTSTRAP = "local-dev-kafka-kafka-bootstrap"
+CANONICAL_INDEX = "policy_stats"
+CANONICAL_TOPIC = "policy-registered"
+CANONICAL_GROUP = "dashboard-service"
+JAVA_DEPLOYMENT = "local-dev-dashboard-api-legacy"
+JAVA_SERVICE = "local-dev-dashboard-api-legacy"
 DASHBOARD_HTTP_SERVICE_PORT = 80
 HTTP_STATUS_MARKER = "__INSURANCE_HUB_HTTP_STATUS__="
 MAX_HTTP_BODY_BYTES = 4096
@@ -82,6 +89,13 @@ class CandidateIdentity(NamedTuple):
     version: str
     local_image_id: str
     registry_digest: str | None
+
+
+class JavaCandidateIdentity(NamedTuple):
+    """Content identity of the retained Java return candidate."""
+
+    image: str
+    local_image_id: str
 
 
 class OffsetSnapshot(NamedTuple):
@@ -154,6 +168,21 @@ def load_qualification() -> dict[str, Any]:
         "qualification post-restore oracle differs",
     )
     return value
+
+
+def canonical_query_oracles(qualification: dict[str, Any]) -> list[dict[str, Any]]:
+    """Use the retained Java-created canonical date-key representation."""
+
+    queries = json.loads(json.dumps(qualification["queries"]))
+    trends = next(query for query in queries if query["name"] == "sales-trends")
+    periods = trends["expectedResponse"]["periodSales"]
+    require(
+        [item["period"] for item in periods] == ["2026-01-01", "2026-01-02"],
+        "isolated trends oracle differs before canonical adaptation",
+    )
+    periods[0]["period"] = "2026-01-01T00:00:00.000Z"
+    periods[1]["period"] = "2026-01-02T00:00:00.000Z"
+    return queries
 
 
 def prepare_candidate_image(image: str, expected_revision: str) -> CandidateIdentity:
@@ -245,6 +274,32 @@ def prepare_kind_candidate(image: str, candidate: CandidateIdentity) -> str:
         "Kind candidate tag does not resolve to the selected registry digest",
     )
     return runtime_image
+
+
+def prepare_java_candidate(image: str) -> JavaCandidateIdentity:
+    """Load and identify the retained Java candidate without inventing source labels."""
+
+    require(
+        image == "insurance-hub-dashboard-api-legacy:latest"
+        or bool(re.fullmatch(r".+@sha256:[0-9a-f]{64}", image)),
+        "QUALIFICATION_JAVA_IMAGE_REF is not an accepted Java candidate",
+    )
+    if "@sha256:" in image:
+        command(
+            ["docker", "pull", image],
+            timeout=300,
+            activity="pull immutable Java Dashboard qualification image",
+        )
+    details = json.loads(command(["docker", "image", "inspect", image]))
+    require(len(details) == 1, "Java Dashboard candidate image is absent")
+    local_image_id = str(details[0].get("Id", ""))
+    image_content_digest(local_image_id, "local Java Docker")
+    command(
+        ["kind", "load", "docker-image", image, "--name", KIND_CLUSTER],
+        timeout=120,
+        activity="load retained Java Dashboard image into existing Kind cluster",
+    )
+    return JavaCandidateIdentity(image, local_image_id)
 
 
 def safe_environment(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -513,7 +568,10 @@ def kafka_resources(
             "metadata": {"name": KAFKA_BOOTSTRAP, "namespace": namespace, "labels": labels},
             "spec": {
                 "selector": labels,
-                "ports": [{"name": "tls", "port": 9093, "targetPort": 9093}],
+                "ports": [
+                    {"name": "plain", "port": 9092, "targetPort": 9092},
+                    {"name": "tls", "port": 9093, "targetPort": 9093},
+                ],
             },
         },
         {
@@ -539,6 +597,7 @@ def kafka_resources(
                                 "image": image,
                                 "imagePullPolicy": "IfNotPresent",
                                 "ports": [
+                                    {"name": "plain", "containerPort": 9092},
                                     {"name": "tls", "containerPort": 9093},
                                     {"name": "controller", "containerPort": 9094},
                                 ],
@@ -562,20 +621,25 @@ def kafka_resources(
                                     {
                                         "name": "KAFKA_LISTENERS",
                                         "value": (
-                                            "SSL://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094,"
+                                            "PLAINTEXT://0.0.0.0:9092,SSL://0.0.0.0:9093,"
+                                            "CONTROLLER://0.0.0.0:9094,"
                                             "INTERNAL://0.0.0.0:9095"
                                         ),
                                     },
                                     {
                                         "name": "KAFKA_ADVERTISED_LISTENERS",
                                         "value": (
+                                            f"PLAINTEXT://{KAFKA_BOOTSTRAP}:9092,"
                                             f"SSL://{KAFKA_BOOTSTRAP}:9093,"
                                             "INTERNAL://localhost:9095"
                                         ),
                                     },
                                     {
                                         "name": "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP",
-                                        "value": "SSL:SSL,CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT",
+                                        "value": (
+                                            "PLAINTEXT:PLAINTEXT,SSL:SSL,"
+                                            "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT"
+                                        ),
                                     },
                                     {
                                         "name": "KAFKA_CONTROLLER_LISTENER_NAMES",
@@ -624,6 +688,93 @@ def kafka_resources(
     ]
 
 
+def java_resources(
+    namespace: str,
+    candidate: JavaCandidateIdentity,
+) -> list[dict[str, Any]]:
+    """Render the retained Java owner against the disposable canonical resources."""
+
+    labels = {
+        OWNER_LABEL: namespace,
+        "app.kubernetes.io/name": "dashboard-api-legacy",
+        "app.kubernetes.io/component": "api",
+    }
+    return [
+        {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {"name": "local-dev-dashboard-config-legacy", "namespace": namespace},
+            "data": {
+                "ELASTIC_SCHEME": "http",
+                "ELASTIC_HOST": ELASTICSEARCH_NAME,
+                "ELASTIC_PORT": "9200",
+                "ELASTIC_USERNAME": ADMIN_USERNAME,
+                "KAFKA_HOST": KAFKA_BOOTSTRAP,
+                "KAFKA_PORT": "9092",
+                "TRACING_ZIPKIN_ENABLED": "false",
+            },
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {"name": JAVA_SERVICE, "namespace": namespace, "labels": labels},
+            "spec": {
+                "selector": labels,
+                "ports": [{"name": "http", "port": 80, "targetPort": 8080}],
+            },
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {"name": JAVA_DEPLOYMENT, "namespace": namespace, "labels": labels},
+            "spec": {
+                "replicas": 1,
+                "strategy": {"type": "Recreate"},
+                "selector": {"matchLabels": labels},
+                "template": {
+                    "metadata": {"labels": labels},
+                    "spec": {
+                        "automountServiceAccountToken": False,
+                        "containers": [
+                            {
+                                "name": "dashboard-api-legacy",
+                                "image": candidate.image,
+                                "imagePullPolicy": "IfNotPresent",
+                                "ports": [{"name": "http", "containerPort": 8080}],
+                                "envFrom": [
+                                    {"configMapRef": {"name": "local-dev-dashboard-config-legacy"}}
+                                ],
+                                "env": [
+                                    {
+                                        "name": "ELASTIC_PASSWORD",
+                                        "valueFrom": {
+                                            "secretKeyRef": {
+                                                "name": ELASTICSEARCH_NAME,
+                                                "key": "admin-password",
+                                            }
+                                        },
+                                    },
+                                    {
+                                        "name": "KAFKA_CONSUMERS_DEFAULT_GROUP_ID",
+                                        "value": CANONICAL_GROUP,
+                                    },
+                                    {"name": "MICRONAUT_SERVER_HOST", "value": "0.0.0.0"},
+                                ],
+                                "readinessProbe": {
+                                    "httpGet": {"path": "/health", "port": "http"},
+                                    "periodSeconds": 2,
+                                    "timeoutSeconds": 2,
+                                    "failureThreshold": 90,
+                                },
+                            }
+                        ],
+                    },
+                },
+            },
+        },
+    ]
+
+
 def render(
     cluster: Cluster,
     image: str,
@@ -631,8 +782,9 @@ def render(
     elasticsearch_image: str,
     registry_digest: str | None = None,
     *,
-    event_enabled: bool = False,
+    event_mode: str = "disabled",
 ) -> tuple[str, list[dict[str, Any]]]:
+    require(event_mode in {"disabled", "isolated", "canonical"}, "event mode differs")
     text = checks.render("local-dev")
     items = checks.validate_render("local-dev", text)
     for item in items:
@@ -669,6 +821,8 @@ def render(
             "ELASTICSEARCH_INDEX": "policy_stats",
             "ELASTICSEARCH_USERNAME": READER_USERNAME,
             "ELASTICSEARCH_TIMEOUT": "5s",
+            "EVENT_PROCESSING_MODE": event_mode,
+            "EVENT_WORKERS_ENABLED": "false" if event_mode == "disabled" else "true",
         }
     )
     environment = dashboard_container["env"]
@@ -731,14 +885,31 @@ def render(
             "ports": [{"port": 9200, "protocol": "TCP"}],
         },
     ]
-    if event_enabled:
+    if event_mode != "disabled":
+        canonical = event_mode == "canonical"
+        selected_index = CANONICAL_INDEX if canonical else event_admin.INDEX
+        selected_group = CANONICAL_GROUP if canonical else event_admin.GROUP
+        selected_topic = CANONICAL_TOPIC if canonical else event_admin.TOPIC
+        reader_secret = (
+            "local-dev-dashboard-elasticsearch"
+            if canonical
+            else "local-dev-dashboard-elasticsearch-issue-290"
+        )
+        writer_secret = (
+            "local-dev-dashboard-elasticsearch-writer"
+            if canonical
+            else "local-dev-dashboard-elasticsearch-writer-issue-290"
+        )
+        reader_username = READER_USERNAME if canonical else EVENT_READER_USERNAME
+        reader_password = READER_PASSWORD if canonical else EVENT_READER_PASSWORD
+        writer_username = CANONICAL_WRITER_USERNAME if canonical else EVENT_WRITER_USERNAME
+        writer_password = CANONICAL_WRITER_PASSWORD if canonical else EVENT_WRITER_PASSWORD
         config.update(
             {
-                "EVENT_WORKERS_ENABLED": "true",
-                "ELASTICSEARCH_INDEX": event_admin.INDEX,
+                "ELASTICSEARCH_INDEX": selected_index,
                 "KAFKA_BROKERS": f"{KAFKA_BOOTSTRAP}:9093",
-                "KAFKA_GROUP": event_admin.GROUP,
-                "KAFKA_REGISTERED_TOPIC": event_admin.TOPIC,
+                "KAFKA_GROUP": selected_group,
+                "KAFKA_REGISTERED_TOPIC": selected_topic,
                 "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
             }
         )
@@ -754,16 +925,16 @@ def render(
             }
         ]
         for name, secret, key in (
-            ("ELASTICSEARCH_USERNAME", "local-dev-dashboard-elasticsearch-issue-290", "username"),
-            ("ELASTICSEARCH_PASSWORD", "local-dev-dashboard-elasticsearch-issue-290", "password"),
+            ("ELASTICSEARCH_USERNAME", reader_secret, "username"),
+            ("ELASTICSEARCH_PASSWORD", reader_secret, "password"),
             (
                 "ELASTICSEARCH_WRITER_USERNAME",
-                "local-dev-dashboard-elasticsearch-writer-issue-290",
+                writer_secret,
                 "username",
             ),
             (
                 "ELASTICSEARCH_WRITER_PASSWORD",
-                "local-dev-dashboard-elasticsearch-writer-issue-290",
+                writer_secret,
                 "password",
             ),
         ):
@@ -804,15 +975,15 @@ def render(
         )
         for name, username, password, component in (
             (
-                "local-dev-dashboard-elasticsearch-issue-290",
-                EVENT_READER_USERNAME,
-                EVENT_READER_PASSWORD,
+                reader_secret,
+                reader_username,
+                reader_password,
                 "elasticsearch-reader",
             ),
             (
-                "local-dev-dashboard-elasticsearch-writer-issue-290",
-                EVENT_WRITER_USERNAME,
-                EVENT_WRITER_PASSWORD,
+                writer_secret,
+                writer_username,
+                writer_password,
                 "elasticsearch-writer",
             ),
         ):
@@ -1247,10 +1418,54 @@ def setup_elasticsearch(cluster: Cluster, suffix: str = "") -> None:
             json.dumps({"password": READER_PASSWORD, "roles": ["dashboard_disposable_reader"]}),
         ),
         (
+            "canonical-writer-role",
+            "PUT",
+            f"/_security/role/{CANONICAL_WRITER_USERNAME}",
+            json.dumps(
+                {
+                    "cluster": [],
+                    "indices": [{"names": [CANONICAL_INDEX], "privileges": ["index"]}],
+                },
+                separators=(",", ":"),
+            ),
+        ),
+        (
+            "canonical-writer-user",
+            "PUT",
+            f"/_security/user/{CANONICAL_WRITER_USERNAME}",
+            json.dumps(
+                {
+                    "password": CANONICAL_WRITER_PASSWORD,
+                    "roles": [CANONICAL_WRITER_USERNAME],
+                },
+                separators=(",", ":"),
+            ),
+        ),
+        (
             "fixture-index",
             "PUT",
             "/policy_stats",
-            '{"settings":{"number_of_shards":1,"number_of_replicas":0},"mappings":{"properties":{"agentLogin":{"type":"text","fields":{"keyword":{"type":"keyword"}}},"productCode":{"type":"text","fields":{"keyword":{"type":"keyword"}}},"from":{"type":"date"},"totalPremium":{"type":"double"}}}}',
+            json.dumps(
+                {
+                    "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+                    "mappings": {
+                        "properties": {
+                            "number": {"type": "keyword"},
+                            "agentLogin": {
+                                "type": "text",
+                                "fields": {"keyword": {"type": "keyword"}},
+                            },
+                            "productCode": {
+                                "type": "text",
+                                "fields": {"keyword": {"type": "keyword"}},
+                            },
+                            "from": {"type": "date"},
+                            "totalPremium": {"type": "double"},
+                        }
+                    },
+                },
+                separators=(",", ":"),
+            ),
         ),
         (
             "fixture-unrelated",
@@ -1564,7 +1779,11 @@ def direct_rpc(cluster: Cluster) -> None:
         )
 
 
-def produce_qualification_event(cluster: Cluster, event: dict[str, Any]) -> None:
+def produce_qualification_event(
+    cluster: Cluster,
+    event: dict[str, Any],
+    topic: str = event_admin.TOPIC,
+) -> None:
     kafka_cli(
         cluster,
         "kafka-console-producer.sh",
@@ -1573,7 +1792,7 @@ def produce_qualification_event(cluster: Cluster, event: dict[str, Any]) -> None
         "--producer.config",
         "/etc/kafka/secrets/client.properties",
         "--topic",
-        event_admin.TOPIC,
+        topic,
         input_text=json.dumps(event["value"], separators=(",", ":")) + "\n",
         timeout=20,
     )
@@ -1583,22 +1802,30 @@ def wait_for_qualification_document(
     client: event_admin.ElasticsearchClient,
     event: dict[str, Any],
     visibility_seconds: int,
+    index: str = event_admin.INDEX,
+    *,
+    java_null_compatibility: bool = False,
 ) -> float:
-    expected = event["expectedDocument"]
+    expected = dict(event["expectedDocument"])
+    if java_null_compatibility and expected.get("agentLogin") is None:
+        expected.pop("agentLogin")
     document_id = expected["number"]
     started = time.monotonic()
     deadline = started + visibility_seconds
+    last_result: Any = None
     while time.monotonic() < deadline:
         try:
-            status, result = client.request(
-                "GET", f"/{event_admin.INDEX}/_doc/{document_id}?refresh=true"
-            )
+            status, result = client.request("GET", f"/{index}/_doc/{document_id}?refresh=true")
         except event_admin.AdministrationError:
             status, result = 0, None
+        last_result = result
         if status == 200 and isinstance(result, dict) and result.get("_source") == expected:
             return time.monotonic() - started
         time.sleep(0.25)
-    raise CheckFailed(f"qualification event {event['name']} was not visible within its bound")
+    raise CheckFailed(
+        f"qualification event {event['name']} was not visible within its bound; "
+        f"last synthetic document={last_result!r}"
+    )
 
 
 def run_qualification_events(
@@ -1606,11 +1833,21 @@ def run_qualification_events(
     client: event_admin.ElasticsearchClient,
     events: list[dict[str, Any]],
     visibility_seconds: int,
+    *,
+    topic: str = event_admin.TOPIC,
+    index: str = event_admin.INDEX,
+    java_null_compatibility: bool = False,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for event in events:
-        produce_qualification_event(cluster, event)
-        elapsed = wait_for_qualification_document(client, event, visibility_seconds)
+        produce_qualification_event(cluster, event, topic)
+        elapsed = wait_for_qualification_document(
+            client,
+            event,
+            visibility_seconds,
+            index,
+            java_null_compatibility=java_null_compatibility,
+        )
         results.append({"name": event["name"], "visibilitySeconds": round(elapsed, 3)})
         print(f"PASS qualification event {event['name']} visible in {elapsed:.3f}s", flush=True)
     return results
@@ -1648,9 +1885,10 @@ def run_query_workload(
     queries: list[dict[str, Any]],
     repetitions: int,
     request_deadline: int,
+    service: str = "local-dev-dashboard-api",
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
-    with forwarded_service(cluster, "local-dev-dashboard-api", DASHBOARD_HTTP_SERVICE_PORT) as port:
+    with forwarded_service(cluster, service, DASHBOARD_HTTP_SERVICE_PORT) as port:
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=request_deadline)
         try:
             for query in queries:
@@ -1674,13 +1912,17 @@ def run_query_workload(
     return results
 
 
-def parse_consumer_group_offsets(output: str) -> list[OffsetSnapshot]:
+def parse_consumer_group_offsets(
+    output: str,
+    group: str = event_admin.GROUP,
+    topic: str = event_admin.TOPIC,
+) -> list[OffsetSnapshot]:
     offsets: list[OffsetSnapshot] = []
     for line in output.splitlines():
         fields = line.split()
         if len(fields) < 5 or fields[0] == "GROUP":
             continue
-        if fields[0] != event_admin.GROUP or fields[1] != event_admin.TOPIC:
+        if fields[0] != group or fields[1] != topic:
             continue
         try:
             offsets.append(OffsetSnapshot(int(fields[2]), int(fields[3]), int(fields[4])))
@@ -1694,7 +1936,11 @@ def parse_consumer_group_offsets(output: str) -> list[OffsetSnapshot]:
     return sorted(offsets)
 
 
-def consumer_group_offsets(cluster: Cluster) -> list[OffsetSnapshot]:
+def consumer_group_offsets(
+    cluster: Cluster,
+    group: str = event_admin.GROUP,
+    topic: str = event_admin.TOPIC,
+) -> list[OffsetSnapshot]:
     output = kafka_cli(
         cluster,
         "kafka-consumer-groups.sh",
@@ -1704,21 +1950,24 @@ def consumer_group_offsets(cluster: Cluster) -> list[OffsetSnapshot]:
         "/etc/kafka/secrets/client.properties",
         "--describe",
         "--group",
-        event_admin.GROUP,
+        group,
     )
-    return parse_consumer_group_offsets(output)
+    return parse_consumer_group_offsets(output, group, topic)
 
 
 def wait_for_committed_offsets(
     cluster: Cluster,
     minimum: dict[int, int],
     seconds: int = 30,
+    *,
+    group: str = event_admin.GROUP,
+    topic: str = event_admin.TOPIC,
 ) -> list[OffsetSnapshot]:
     deadline = time.monotonic() + seconds
     observed: list[OffsetSnapshot] = []
     while time.monotonic() < deadline:
         try:
-            observed = consumer_group_offsets(cluster)
+            observed = consumer_group_offsets(cluster, group, topic)
         except CheckFailed:
             observed = []
         by_partition = {offset.partition: offset for offset in observed}
@@ -1734,14 +1983,15 @@ def wait_for_committed_offsets(
 def capture_state(
     client: event_admin.ElasticsearchClient,
     offsets: list[OffsetSnapshot],
+    index: str = event_admin.INDEX,
 ) -> StateSnapshot:
-    status, mapping_result = client.request("GET", f"/{event_admin.INDEX}/_mapping")
+    status, mapping_result = client.request("GET", f"/{index}/_mapping")
     require(status == 200 and isinstance(mapping_result, dict), "qualification mapping is absent")
-    mapping = mapping_result.get(event_admin.INDEX, {}).get("mappings")
+    mapping = mapping_result.get(index, {}).get("mappings")
     require(isinstance(mapping, dict), "qualification mapping differs")
     status, search_result = client.request(
         "POST",
-        f"/{event_admin.INDEX}/_search",
+        f"/{index}/_search",
         {"size": 100, "query": {"prefix": {"number": "SYN-292-"}}},
     )
     require(status == 200 and isinstance(search_result, dict), "qualification documents are absent")
@@ -1798,6 +2048,189 @@ def dashboard_pod_state(cluster: Cluster) -> dict[str, Any]:
         "imageID": status.get("imageID"),
         "restartCount": status.get("restartCount"),
     }
+
+
+def create_canonical_topic(cluster: Cluster) -> None:
+    kafka_cli(
+        cluster,
+        "kafka-topics.sh",
+        "--bootstrap-server",
+        "localhost:9093",
+        "--command-config",
+        "/etc/kafka/secrets/client.properties",
+        "--create",
+        "--if-not-exists",
+        "--topic",
+        CANONICAL_TOPIC,
+        "--partitions",
+        "1",
+        "--replication-factor",
+        "1",
+    )
+
+
+def canonical_member_count(cluster: Cluster) -> int:
+    output = kafka_cli(
+        cluster,
+        "kafka-consumer-groups.sh",
+        "--bootstrap-server",
+        "localhost:9093",
+        "--command-config",
+        "/etc/kafka/secrets/client.properties",
+        "--describe",
+        "--group",
+        CANONICAL_GROUP,
+        "--members",
+        "--verbose",
+    )
+    return sum(
+        1 for line in output.splitlines() if line.split() and line.split()[0] == CANONICAL_GROUP
+    )
+
+
+def wait_for_canonical_members(cluster: Cluster, expected: int, seconds: int = 90) -> None:
+    wait_for(
+        f"canonical group member count {expected}",
+        lambda: canonical_member_count(cluster) == expected,
+        seconds,
+    )
+
+
+def scale_owner(cluster: Cluster, deployment: str, replicas: int) -> None:
+    cluster.kubectl("scale", f"deployment/{deployment}", f"--replicas={replicas}")
+    if replicas:
+        cluster.kubectl(
+            "rollout",
+            "status",
+            f"deployment/{deployment}",
+            "--timeout=180s",
+            timeout=210,
+            activity=f"wait for {deployment} rollout",
+        )
+        return
+
+    def stopped() -> bool:
+        item = cluster.json("get", "deployment", deployment)
+        pods = cluster.json(
+            "get",
+            "pods",
+            "-l",
+            f"app.kubernetes.io/name={'dashboard-api-legacy' if deployment == JAVA_DEPLOYMENT else 'dashboard-api'}",
+        ).get("items", [])
+        return item.get("status", {}).get("replicas", 0) == 0 and not pods
+
+    wait_for(f"{deployment} stopped without terminating Pods", stopped, 180)
+
+
+def java_pod_state(
+    cluster: Cluster,
+    candidate: JavaCandidateIdentity,
+) -> dict[str, Any]:
+    items = cluster.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api-legacy").get(
+        "items", []
+    )
+    require(len(items) == 1, "qualification expected one Java Dashboard Pod")
+    pod = items[0]
+    status = pod.get("status", {}).get("containerStatuses", [{}])[0]
+    node = str(pod.get("spec", {}).get("nodeName", ""))
+    require(bool(node), "Java Dashboard node identity is absent")
+    inspected = json.loads(
+        command(
+            ["docker", "exec", node, "crictl", "inspecti", candidate.image],
+            timeout=30,
+            activity="inspect loaded Java Dashboard image in Kind containerd",
+        )
+    )
+    content = require_matching_image_content(
+        candidate.local_image_id,
+        candidate.image,
+        inspected,
+        str(status.get("imageID", "")),
+    )
+    return {
+        "uid": pod.get("metadata", {}).get("uid"),
+        "image": pod.get("spec", {}).get("containers", [{}])[0].get("image"),
+        "imageID": status.get("imageID"),
+        "restartCount": status.get("restartCount"),
+        "localImageID": content.local,
+        "containerdImageID": content.containerd,
+        "podImageID": content.pod,
+    }
+
+
+def apply_java_owner(cluster: Cluster, candidate: JavaCandidateIdentity) -> None:
+    cluster.kubectl(
+        "apply",
+        "--server-side",
+        "--field-manager=dashboard-disposable",
+        "-f",
+        "-",
+        input_text=yaml.safe_dump_all(
+            java_resources(cluster.namespace, candidate),
+            explicit_start=True,
+            sort_keys=False,
+        ),
+    )
+    scale_owner(cluster, JAVA_DEPLOYMENT, 1)
+    java_pod_state(cluster, candidate)
+    wait_for_canonical_members(cluster, 1)
+
+
+def apply_go_owner(
+    cluster: Cluster,
+    candidate: CandidateIdentity,
+    runtime_image: str,
+    elasticsearch_image: str,
+    *,
+    fail_readiness: bool = False,
+) -> None:
+    rendered, items = render(
+        cluster,
+        runtime_image,
+        candidate.revision[:12],
+        elasticsearch_image,
+        candidate.registry_digest,
+        event_mode="canonical",
+    )
+    if fail_readiness:
+        deployment = checks.resource(items, "Deployment", "local-dev-dashboard-api")
+        deployment["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]["httpGet"][
+            "path"
+        ] = "/issue-293-controlled-abort"
+        rendered = yaml.safe_dump_all(items, explicit_start=True, sort_keys=False)
+    cluster.kubectl(
+        "apply",
+        "--server-side",
+        "--field-manager=dashboard-disposable",
+        "-f",
+        "-",
+        input_text=rendered,
+    )
+    if fail_readiness:
+        wait_for_canonical_members(cluster, 1)
+        deployment = cluster.json("get", "deployment", "local-dev-dashboard-api")
+        require(
+            deployment.get("status", {}).get("availableReplicas", 0) == 0,
+            "controlled-abort successor unexpectedly became ready",
+        )
+        return
+    cluster.kubectl(
+        "rollout",
+        "status",
+        "deployment/local-dev-dashboard-api",
+        "--timeout=180s",
+        timeout=210,
+        activity="wait for canonical Go Dashboard rollout",
+    )
+    wait_for("canonical Go Dashboard endpoint ready", lambda: endpoint_count(cluster) == 1)
+    wait_for_canonical_members(cluster, 1)
+    verify_runtime_identity(
+        cluster,
+        candidate.version,
+        runtime_image,
+        candidate.local_image_id,
+        candidate.registry_digest,
+    )
 
 
 def run_bounded_smoke(
@@ -1923,6 +2356,225 @@ def run_stop_restore(
     }
 
 
+def run_java_go_java_rehearsal(
+    cluster: Cluster,
+    qualification: dict[str, Any],
+    candidate: CandidateIdentity,
+    runtime_image: str,
+    java_candidate: JavaCandidateIdentity,
+    elasticsearch_image: str,
+) -> dict[str, Any]:
+    """Exercise exclusive canonical ownership, controlled abort and Java return."""
+
+    visibility_seconds = qualification["measurement"]["eventVisibilitySeconds"]
+    transition_record: list[dict[str, Any]] = []
+    create_canonical_topic(cluster)
+    scale_owner(cluster, "local-dev-dashboard-api", 0)
+    wait_for_canonical_members(cluster, 0)
+    apply_java_owner(cluster, java_candidate)
+    java_initial = java_pod_state(cluster, java_candidate)
+    with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
+        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        baseline_events = run_qualification_events(
+            cluster,
+            client,
+            [qualification["events"][0], qualification["events"][2]],
+            visibility_seconds,
+            topic=CANONICAL_TOPIC,
+            index=CANONICAL_INDEX,
+            java_null_compatibility=True,
+        )
+        baseline_offsets = wait_for_committed_offsets(
+            cluster,
+            {0: 2},
+            group=CANONICAL_GROUP,
+            topic=CANONICAL_TOPIC,
+        )
+        baseline = capture_state(client, baseline_offsets, CANONICAL_INDEX)
+    require(
+        [item["id"] for item in baseline.documents] == ["SYN-292-001", "SYN-292-002"],
+        "canonical baseline does not contain exactly two synthetic documents",
+    )
+    require(
+        all(offset.committed > 0 for offset in baseline.offsets),
+        "canonical baseline commits are not nonzero",
+    )
+    transition_record.append({"phase": "java-baseline", "members": 1, "goPods": 0})
+
+    abort_started = time.monotonic()
+    scale_owner(cluster, JAVA_DEPLOYMENT, 0)
+    wait_for_canonical_members(cluster, 0)
+    apply_go_owner(
+        cluster,
+        candidate,
+        runtime_image,
+        elasticsearch_image,
+        fail_readiness=True,
+    )
+    transition_record.append({"phase": "failed-go-not-ready", "members": 1, "javaPods": 0})
+    scale_owner(cluster, "local-dev-dashboard-api", 0)
+    wait_for_canonical_members(cluster, 0)
+    apply_java_owner(cluster, java_candidate)
+    abort_seconds = time.monotonic() - abort_started
+    require(abort_seconds <= 600, "controlled abort and Java return exceeded ten minutes")
+    with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
+        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        abort_return = capture_state(
+            client,
+            consumer_group_offsets(cluster, CANONICAL_GROUP, CANONICAL_TOPIC),
+            CANONICAL_INDEX,
+        )
+    require_same_state("controlled-abort Java return", baseline, abort_return)
+    transition_record.append({"phase": "abort-java-return", "members": 1, "goPods": 0})
+
+    forward_started = time.monotonic()
+    scale_owner(cluster, JAVA_DEPLOYMENT, 0)
+    wait_for_canonical_members(cluster, 0)
+    apply_go_owner(cluster, candidate, runtime_image, elasticsearch_image)
+    forward_seconds = time.monotonic() - forward_started
+    require(forward_seconds <= 180, "canonical Go activation exceeded three minutes")
+    with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
+        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        replacement_result = run_qualification_events(
+            cluster,
+            client,
+            [qualification["events"][1]],
+            visibility_seconds,
+            topic=CANONICAL_TOPIC,
+            index=CANONICAL_INDEX,
+        )[0]
+        expected_offsets = {offset.partition: offset.committed + 1 for offset in baseline.offsets}
+        go_offsets = wait_for_committed_offsets(
+            cluster,
+            expected_offsets,
+            group=CANONICAL_GROUP,
+            topic=CANONICAL_TOPIC,
+        )
+        go_state = capture_state(client, go_offsets, CANONICAL_INDEX)
+    require(go_state.mapping == baseline.mapping, "canonical Go replacement changed the mapping")
+    require(
+        go_state.documents
+        == [
+            {
+                "id": qualification["events"][1]["expectedDocument"]["number"],
+                "source": qualification["events"][1]["expectedDocument"],
+            },
+            {
+                "id": qualification["events"][2]["expectedDocument"]["number"],
+                "source": {
+                    name: value
+                    for name, value in qualification["events"][2]["expectedDocument"].items()
+                    if name != "agentLogin"
+                },
+            },
+        ],
+        "canonical same-ID replacement did not retain exactly two documents",
+    )
+    run_query_workload(
+        cluster,
+        canonical_query_oracles(qualification),
+        qualification["measurement"]["requestsPerQuery"],
+        qualification["measurement"]["requestDeadlineSeconds"],
+    )
+    transition_record.append({"phase": "go-owned", "members": 1, "javaPods": 0})
+
+    return_started = time.monotonic()
+    scale_owner(cluster, "local-dev-dashboard-api", 0)
+    wait_for_canonical_members(cluster, 0)
+    apply_java_owner(cluster, java_candidate)
+    return_seconds = time.monotonic() - return_started
+    require(return_seconds <= 600, "successful Java return exceeded ten minutes")
+    with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
+        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        post_return_event = run_qualification_events(
+            cluster,
+            client,
+            [qualification["events"][3]],
+            visibility_seconds,
+            topic=CANONICAL_TOPIC,
+            index=CANONICAL_INDEX,
+            java_null_compatibility=True,
+        )[0]
+        after_offsets = wait_for_committed_offsets(
+            cluster,
+            {offset.partition: offset.committed + 1 for offset in go_state.offsets},
+            group=CANONICAL_GROUP,
+            topic=CANONICAL_TOPIC,
+        )
+        after = capture_state(client, after_offsets, CANONICAL_INDEX)
+    require(after.mapping == baseline.mapping, "post-return Java event changed the mapping")
+    require(
+        after.documents
+        == go_state.documents
+        + [
+            {
+                "id": qualification["events"][3]["expectedDocument"]["number"],
+                "source": {
+                    name: value
+                    for name, value in qualification["events"][3]["expectedDocument"].items()
+                    if name != "agentLogin"
+                },
+            }
+        ],
+        "post-return Java document advancement differs",
+    )
+    run_query_workload(
+        cluster,
+        [qualification["postRestoreQuery"]],
+        1,
+        qualification["measurement"]["requestDeadlineSeconds"],
+        JAVA_SERVICE,
+    )
+    java_return = java_pod_state(cluster, java_candidate)
+    transition_record.append({"phase": "java-returned", "members": 1, "goPods": 0})
+
+    scale_owner(cluster, JAVA_DEPLOYMENT, 0)
+    wait_for_canonical_members(cluster, 0)
+    isolated_render, _items = render(
+        cluster,
+        runtime_image,
+        candidate.revision[:12],
+        elasticsearch_image,
+        candidate.registry_digest,
+        event_mode="isolated",
+    )
+    cluster.kubectl(
+        "apply",
+        "--server-side",
+        "--field-manager=dashboard-disposable",
+        "-f",
+        "-",
+        input_text=isolated_render,
+    )
+    cluster.kubectl(
+        "rollout",
+        "status",
+        "deployment/local-dev-dashboard-api",
+        "--timeout=180s",
+        timeout=210,
+        activity="restore isolated Go Dashboard after canonical rehearsal",
+    )
+    wait_for("restored isolated Dashboard endpoint ready", lambda: endpoint_count(cluster) == 1)
+
+    return {
+        "baselineEvents": baseline_events,
+        "baseline": safe_state_record(baseline),
+        "controlledAbort": {
+            "returnSeconds": round(abort_seconds, 3),
+            "returned": safe_state_record(abort_return),
+        },
+        "forwardSeconds": round(forward_seconds, 3),
+        "replacementEvent": replacement_result,
+        "goState": safe_state_record(go_state),
+        "returnSeconds": round(return_seconds, 3),
+        "postReturnEvent": post_return_event,
+        "after": safe_state_record(after),
+        "javaInitial": java_initial,
+        "javaReturn": java_return,
+        "transitions": transition_record,
+    }
+
+
 def write_qualification_report(report: dict[str, Any]) -> None:
     raw_path = os.environ.get("QUALIFICATION_REPORT_FILE", "")
     if not raw_path:
@@ -1964,6 +2616,7 @@ def verify_isolated_kafka_names(cluster: Cluster) -> None:
 
 def run() -> None:
     image = os.environ.get("IMAGE_REF", "")
+    java_image = os.environ.get("QUALIFICATION_JAVA_IMAGE_REF", "")
     expected_revision = os.environ.get("QUALIFICATION_SOURCE_REVISION", "")
     elasticsearch_image = os.environ.get("ELASTICSEARCH_IMAGE", "")
     kafka_image = os.environ.get("KAFKA_IMAGE", "")
@@ -1979,6 +2632,7 @@ def run() -> None:
     qualification = load_qualification()
     candidate = prepare_candidate_image(image, expected_revision)
     runtime_image = prepare_kind_candidate(image, candidate)
+    java_candidate = prepare_java_candidate(java_image)
     source_short = candidate.revision[:12]
     namespace = f"dashboard-disposable-{os.getpid()}-{secrets.token_hex(3)}"
     cluster = Cluster(namespace)
@@ -2131,7 +2785,7 @@ def run() -> None:
             source_short,
             elasticsearch_image,
             candidate.registry_digest,
-            event_enabled=True,
+            event_mode="isolated",
         )
         cluster.kubectl(
             "apply",
@@ -2151,9 +2805,16 @@ def run() -> None:
         )
         wait_for("event-enabled Dashboard endpoint ready", lambda: endpoint_count(cluster) == 1)
         smoke = run_bounded_smoke(cluster, qualification)
-        restoration = run_stop_restore(cluster, qualification, candidate, runtime_image)
+        handover = run_java_go_java_rehearsal(
+            cluster,
+            qualification,
+            candidate,
+            runtime_image,
+            java_candidate,
+            elasticsearch_image,
+        )
         report = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "candidate": {
                 "sourceRevision": candidate.revision,
                 "version": candidate.version,
@@ -2161,9 +2822,13 @@ def run() -> None:
                 "runtimeImage": runtime_image,
                 "registryDigest": candidate.registry_digest,
             },
+            "javaCandidate": {
+                "image": java_candidate.image,
+                "localImageID": java_candidate.local_image_id,
+            },
             "target": {"context": CONTEXT, "namespace": namespace},
             "smoke": smoke,
-            "restoration": restoration,
+            "handover": handover,
         }
         dashboard_pod = cluster.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api")[
             "items"

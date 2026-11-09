@@ -26,6 +26,7 @@ PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_event_integration.py \
 	scripts/test_image_check.py \
 	scripts/test_deployment.py \
+	scripts/test_disposable_deployment.py \
 	scripts/test_event_administration.py \
 	scripts/test_canonical_event_administration.py \
 	scripts/test_ownership_transition.py \
@@ -97,6 +98,7 @@ IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
 QUALIFICATION_IMAGE_REF ?=
 QUALIFICATION_SOURCE_REVISION ?=
 QUALIFICATION_REPORT_FILE ?=
+QUALIFICATION_JAVA_IMAGE_REF ?= insurance-hub-dashboard-api-legacy:latest
 QUALIFICATION_EFFECTIVE_IMAGE_REF := $(if $(strip $(QUALIFICATION_IMAGE_REF)),$(QUALIFICATION_IMAGE_REF),$(IMAGE_REF))
 QUALIFICATION_IMAGE_PREREQUISITE := $(if $(strip $(QUALIFICATION_IMAGE_REF)),,image-build)
 TARGET_PLATFORM ?= linux/amd64
@@ -184,6 +186,7 @@ deploy-test: python-toolchain-check $(QUALIFICATION_IMAGE_PREREQUISITE) ## Exerc
 		IMAGE_REF="$(QUALIFICATION_EFFECTIVE_IMAGE_REF)" \
 		QUALIFICATION_SOURCE_REVISION="$(QUALIFICATION_SOURCE_REVISION)" \
 		QUALIFICATION_REPORT_FILE="$(QUALIFICATION_REPORT_FILE)" \
+		QUALIFICATION_JAVA_IMAGE_REF="$(QUALIFICATION_JAVA_IMAGE_REF)" \
 		ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" KAFKA_IMAGE="$(KAFKA_IMAGE)" \
 		GO="$(GO)" MAKE_COMMAND="$(MAKE)" TOOLS_DIR="$(TOOLS_DIR)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_disposable_deployment.py

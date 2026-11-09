@@ -174,12 +174,17 @@ values, amounts, topics, groups, credentials and raw dependency errors.
 the configured Kind cluster, then creates one uniquely owned namespace. It first proves the
 disabled query deployment, then enables only the disposable issue-290 inputs, checks reader/writer
 permissions and the accepted mapping-authority limit, verifies Kafka TLS/hostname handling, and
-projects an isolated registration. Its fixture setup is explicit test administration; serving
-never creates or seeds state. The test removes its namespace and does not establish a local-dev or
-QA deployment result. The guarded deployment stage requires the exact target ECK Service, reader
-Secret and QA public-CA copy before mutation. `go-svc-deploy-verify` creates and removes bounded
-qualification Pods and one untrusted namespace to prove allowed and denied caller identities plus
-the reader's effective read-only privileges. The
+projects an isolated registration. It then uses `QUALIFICATION_JAVA_IMAGE_REF` for one bounded
+disposable canonical rehearsal. The rehearsal establishes two Java-owned documents and nonzero
+commits, stops Java before Go, exercises a failed Go readiness transition and ordered Java return,
+then completes Java to Go to Java with a same-ID replacement and a new post-return event/query.
+Every owner change waits for terminating Pods and canonical group membership to disappear. Its
+fixture setup is explicit test administration; serving never creates or seeds state. The test
+removes its namespace and does not establish a local-dev or QA deployment result. The guarded
+deployment stage requires the exact target ECK Service, reader Secret and QA public-CA copy before
+mutation. `go-svc-deploy-verify` creates and removes bounded qualification Pods and one untrusted
+namespace to prove allowed and denied caller identities plus the reader's effective read-only
+privileges. The
 [deployment runbook](deployment-runbook.md) records
 those side effects, coordinates and cleanup.
 
