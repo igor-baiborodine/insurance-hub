@@ -14,10 +14,10 @@
 # Dashboard service
 
 `dashboard-service` is the private Go Dashboard process. It exposes total-sales, agent-sales and
-sales-trends queries and supports closed `disabled`, `isolated` and `canonical` event modes. PR1
-keeps both shared overlays explicitly isolated while retaining Java canonical authority and the
-Java edge route. The prepared canonical mode reuses `policy_stats`, `policy-registered` and
-`dashboard-service` only after the guarded ownership-transfer prerequisites pass.
+sales-trends queries and supports closed `disabled`, `isolated` and `canonical` event modes. The
+local-dev and QA overlays select canonical `policy_stats`, `policy-registered` and
+`dashboard-service`; the Java Dashboard Deployments remain stopped as compatible return resources.
+The isolated issue-290 path remains available only until the separately gated retirement in #294.
 
 The standalone module is
 `github.com/igor-baiborodine/insurance-hub/services/dashboard-service`. It resolves the published
@@ -108,7 +108,7 @@ value.
 | HTTP limits | Header/body `16384`/`4096` bytes; read-header/read/write/idle `5s`/`10s`/`10s`/`30s` |
 | gRPC limits | Receive/send `1048576`/`8388608` bytes |
 | Elasticsearch | `ELASTICSEARCH_URL=http://127.0.0.1:9200`, fixed `ELASTICSEARCH_INDEX=policy_stats`, optional paired `ELASTICSEARCH_USERNAME`/`ELASTICSEARCH_PASSWORD`, HTTPS-only `ELASTICSEARCH_CA_FILE`, `ELASTICSEARCH_TIMEOUT=5s` maximum |
-| Registration worker | `EVENT_PROCESSING_MODE=disabled|isolated|canonical` with coherent `EVENT_WORKERS_ENABLED`; isolated selects the issue-290 index/topic/group and suffixed Elasticsearch Secrets while PR1 preserves the existing ordinary Kafka-trust Secret name, and canonical selects only `policy_stats`, `policy-registered`, `dashboard-service` and ordinary Secrets. Canonical startup requires stable commits, complete in-range progress and no active member before group acquisition; new log-end arrivals may increase the backlog. |
+| Registration worker | `EVENT_PROCESSING_MODE=disabled|isolated|canonical` with coherent `EVENT_WORKERS_ENABLED`; isolated selects the retained issue-290 index/topic/group and suffixed Elasticsearch Secrets, while canonical selects only `policy_stats`, `policy-registered`, `dashboard-service` and ordinary Secrets. Both active shared overlays select canonical mode. Canonical startup requires stable commits, complete in-range progress and no active member before group acquisition; new log-end arrivals may increase the backlog. |
 | Sales trends | Required `SALES_TRENDS_TIME_ZONE`; exact available IANA name loaded once at startup. Empty, `Local`, whitespace-altered and unknown values fail. Local-dev and QA use `GMT`. |
 | Telemetry | `OTEL_ENABLED=false`, optional `OTEL_EXPORTER_OTLP_ENDPOINT`; exporter timeout defaults to `2s` and accepts positive Go duration syntax. Deployed configuration omits `OTEL_EXPORTER_OTLP_TIMEOUT`, and deployment guards reject an override. |
 | Logging | `LOG_LEVEL=info`; safe structured fields only |
