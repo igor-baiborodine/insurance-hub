@@ -1,12 +1,12 @@
-"""Canonical Dashboard administration guards; unit tests never contact a cluster."""
+"""Ordinary Dashboard registration guards; unit tests never contact a cluster."""
 
 from __future__ import annotations
 
 import os
 from unittest.mock import Mock, patch
 
-import canonical_event_administration as administration
 import pytest
+import registration_administration as administration
 
 
 def environment(name: str = "local-dev") -> dict[str, str]:
@@ -22,9 +22,9 @@ def environment(name: str = "local-dev") -> dict[str, str]:
 def record() -> dict[str, object]:
     return {
         "environments": ["local-dev", "qa"],
-        "canonicalEventAdministration": {
+        "registrationAdministration": {
             "owner": "issue-293",
-            "asset": "services/dashboard-service/internal/administration/canonical-registration.json",
+            "asset": "services/dashboard-service/internal/administration/registration.json",
             "index": "policy_stats",
             "readerRole": "go_dashboard_total_sales_reader",
             "readerUser": "go_dashboard_total_sales_reader",
@@ -57,13 +57,13 @@ def target(name: str = "local-dev") -> dict[str, object]:
         "context": "kind-local-dev-insurance-hub" if local else "qa-insurance-hub",
         "namespace": "local-dev-all" if local else "qa-svc",
         "dataNamespace": "local-dev-all" if local else "qa-data",
-        "canonicalEventAdministration": common
+        "registrationAdministration": common
         | {
             "readerSecret": f"{prefix}-dashboard-elasticsearch",
             "writerSecret": f"{prefix}-dashboard-elasticsearch-writer",
             "kafkaWorkloadCASecret": f"{prefix}-dashboard-kafka-ca",
         },
-        "eventAdministration": common
+        "retirementAdministration": common
         | {
             "readerSecret": f"{prefix}-dashboard-elasticsearch-issue-290",
             "writerSecret": f"{prefix}-dashboard-elasticsearch-writer-issue-290",
@@ -73,7 +73,7 @@ def target(name: str = "local-dev") -> dict[str, object]:
 
 
 @pytest.mark.parametrize("name", ["local-dev", "qa"])
-def test_target_separates_canonical_and_isolated_secrets(name: str) -> None:
+def test_target_separates_registration_and_retirement_secrets(name: str) -> None:
     with (
         patch.dict(os.environ, environment(name), clear=True),
         patch.object(administration, "service_record", return_value=record()),
@@ -85,25 +85,25 @@ def test_target_separates_canonical_and_isolated_secrets(name: str) -> None:
     assert selected.kafka_ca_secret == f"{name}-dashboard-kafka-ca"
 
 
-def test_ensure_access_requires_confirmation_before_target_selection() -> None:
+def test_ensure_requires_confirmation_before_target_selection() -> None:
     with (
         patch.dict(os.environ, environment(), clear=True),
         patch.object(administration, "Target") as selected,
-        pytest.raises(administration.AdministrationError, match="DASHBOARD_CANONICAL_CONFIRM"),
+        pytest.raises(administration.AdministrationError, match="DASHBOARD_REGISTRATION_CONFIRM"),
     ):
-        administration.execute("ensure-access")
+        administration.execute("ensure")
     selected.assert_not_called()
 
 
-def test_canonical_writer_role_targets_only_policy_stats() -> None:
-    assert administration.canonical_role()["indices"] == [
+def test_registration_writer_role_targets_only_policy_stats() -> None:
+    assert administration.writer_role()["indices"] == [
         {
             "names": ["policy_stats"],
             "privileges": ["index"],
             "allow_restricted_indices": False,
         }
     ]
-    assert "issue_290" not in str(administration.canonical_role())
+    assert "issue_290" not in str(administration.writer_role())
 
 
 def test_foreign_writer_blocks_before_mutation() -> None:
@@ -113,21 +113,28 @@ def test_foreign_writer_blocks_before_mutation() -> None:
         {administration.WRITER: {"metadata": {"owner": "foreign"}}},
     )
     with pytest.raises(administration.AdministrationError, match="not owned"):
-        administration.require_writer_owned_or_absent(client)
+        administration.require_identity_owned_or_absent(
+            client,
+            administration.WRITER,
+            administration.OWNER,
+        )
     assert client.request.call_count == 1
 
 
-def test_no_canonical_retire_operation_exists() -> None:
+def test_no_registration_retire_operation_exists() -> None:
     with (
         patch.dict(os.environ, environment(), clear=True),
         patch.object(administration, "Target") as selected,
-        pytest.raises(administration.AdministrationError, match="unsupported canonical operation"),
+        pytest.raises(
+            administration.AdministrationError,
+            match="unsupported registration operation",
+        ),
     ):
         administration.execute("retire")
     selected.assert_not_called()
 
 
-def test_kafka_snapshot_requires_complete_in_range_canonical_progress() -> None:
+def test_kafka_snapshot_requires_complete_in_range_registration_progress() -> None:
     selected = object.__new__(administration.Target)
     selected.kafka_cluster = "local-dev-kafka"
     selected.data_namespace = "local-dev-all"
@@ -150,6 +157,7 @@ def test_kafka_snapshot_requires_complete_in_range_canonical_progress() -> None:
     selected.run = Mock(
         side_effect=[
             "Topic: policy-registered Partition: 0 Leader: 0 Replicas: 0 Isr: 0\n",
+            "dashboard-service\n",
             "GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID\n"
             "dashboard-service policy-registered 0 7 9 2 - - -\n",
         ]
@@ -159,6 +167,25 @@ def test_kafka_snapshot_requires_complete_in_range_canonical_progress() -> None:
         "offsets": {0: (7, 9)},
         "activeMembers": 0,
     }
+
+
+def test_ensure_topic_preserves_compatible_broker_topic_without_creating_resource() -> None:
+    selected = object.__new__(administration.Target)
+    selected.data_namespace = "local-dev-all"
+    selected.json = Mock(return_value={})
+    selected.run = Mock()
+    selected.broker_topic_partitions = Mock(return_value=[0])
+
+    assert selected.ensure_topic() == "preserved"
+    selected.run.assert_not_called()
+
+
+def test_topic_inspection_accepts_absent_resource_for_existing_broker_state() -> None:
+    selected = object.__new__(administration.Target)
+    selected.data_namespace = "local-dev-all"
+    selected.json = Mock(return_value={})
+
+    assert not selected.verify_topic(allow_absent=True)
 
 
 def test_stable_kafka_progress_accepts_new_arrivals_without_commit_changes() -> None:
@@ -171,6 +198,41 @@ def test_stable_kafka_progress_accepts_new_arrivals_without_commit_changes() -> 
 
     # then
     assert stable
+
+
+def test_ensure_index_creates_empty_mapping_only_when_absent() -> None:
+    definition = administration.load_definition()["mapping"]
+    client = Mock()
+    with patch.object(administration, "inspect_index", side_effect=[None, 0]) as inspect:
+        client.request.return_value = (200, {})
+
+        count = administration.ensure_index(client, definition)
+
+    assert count == 0
+    client.request.assert_called_once_with(
+        "PUT",
+        "/policy_stats",
+        {"mappings": definition},
+    )
+    assert inspect.call_count == 2
+
+
+def test_ensure_index_preserves_compatible_populated_state() -> None:
+    definition = administration.load_definition()["mapping"]
+    client = Mock()
+    with patch.object(administration, "inspect_index", return_value=7):
+        count = administration.ensure_index(client, definition)
+
+    assert count == 7
+    client.request.assert_not_called()
+
+
+def test_mapping_compatibility_rejects_unexpected_dynamic_policy() -> None:
+    definition = administration.load_definition()["mapping"]
+    actual = administration.json.loads(administration.json.dumps(definition))
+    actual["dynamic"] = "strict"
+
+    assert not administration.mapping_is_compatible(actual, definition)
 
 
 @pytest.mark.parametrize(
@@ -210,7 +272,7 @@ def test_kafka_trust_adopts_exact_issue_290_predecessor(
                 **predecessor["metadata"]["labels"],
                 "insurance-hub.io/owner": administration.OWNER,
             },
-            "managedFields": [{"manager": "dashboard-canonical-event-administration"}],
+            "managedFields": [{"manager": "dashboard-registration-administration"}],
         },
     }
     selected.json = Mock(side_effect=[predecessor, adopted])

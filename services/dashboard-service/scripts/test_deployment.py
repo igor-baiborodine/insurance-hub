@@ -15,9 +15,9 @@ import dashboard_deployment_checks as checks
 import ownership_transition as transition
 import pytest
 import yaml
+from scripts.go.service import deployment as lifecycle
 
 import deployment
-from scripts.go.service import deployment as lifecycle
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -468,7 +468,7 @@ def test_direct_rpc_invokes_the_service_owner_with_the_selected_address() -> Non
             "--no-print-directory",
             "-C",
             "services/dashboard-service",
-            "_deploy-test-rpc",
+            "_deploy-smoke-rpc",
         ],
         timeout=60,
         environment={
@@ -1501,7 +1501,7 @@ def test_canonical_kafka_snapshot_observes_group_members_and_progress() -> None:
     target = Mock(
         environment="local-dev",
         data_namespace="local-dev-all",
-        configuration={"canonicalEventAdministration": {"kafkaCluster": "local-dev-kafka"}},
+        configuration={"registrationAdministration": {"kafkaCluster": "local-dev-kafka"}},
     )
     target.data_json.return_value = {
         "items": [

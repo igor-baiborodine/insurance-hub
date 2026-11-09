@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock, patch
+
 import disposable_deployment
 import pytest
 
@@ -49,6 +51,33 @@ dashboard-service-issue-290 policy-registered-issue-290 0 9 9 0
         disposable_deployment.CANONICAL_GROUP,
         disposable_deployment.CANONICAL_TOPIC,
     ) == [disposable_deployment.OffsetSnapshot(0, 4, 4)]
+
+
+def test_registration_progress_initializes_exact_empty_group() -> None:
+    cluster = Mock()
+    describe = """GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG
+dashboard-service policy-registered 0 0 0 0
+"""
+    with patch.object(
+        disposable_deployment,
+        "kafka_cli",
+        side_effect=["", describe],
+    ) as kafka_cli:
+        disposable_deployment.initialize_registration_progress(cluster)
+
+    assert kafka_cli.call_args_list[0].args[2:] == (
+        "--bootstrap-server",
+        "localhost:9093",
+        "--command-config",
+        "/etc/kafka/secrets/client.properties",
+        "--group",
+        "dashboard-service",
+        "--topic",
+        "policy-registered",
+        "--reset-offsets",
+        "--to-earliest",
+        "--execute",
+    )
 
 
 def test_java_owner_uses_plaintext_only_inside_disposable_fixture() -> None:

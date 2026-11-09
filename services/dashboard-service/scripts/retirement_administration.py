@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Administer Dashboard issue-290 registration resources on exact enrolled targets."""
+"""Inspect and retire Dashboard issue-290 resources on exact enrolled targets."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ READER = "go_dashboard_issue_290_reader"
 WRITER = "go_dashboard_issue_290_writer"
 TOPIC = "policy-registered-issue-290"
 GROUP = "dashboard-service-issue-290"
-ASSET = ROOT / "services/dashboard-service/internal/administration/registration.json"
+ASSET = ROOT / "services/dashboard-service/internal/administration/retirement-registration.json"
 MAX_RESPONSE_BYTES = 64 * 1024
 PASSWORD_BYTES = 48
 
@@ -60,7 +60,7 @@ def command(arguments: list[str], *, input_text: str | None = None, timeout: int
             input_text=input_text,
             timeout_seconds=timeout,
             teardown_seconds=10,
-            activity="Dashboard event administration",
+            activity="Dashboard retirement administration",
         )
     except CommandError as error:
         raise AdministrationError(
@@ -78,12 +78,12 @@ def load_definition(path: Path = ASSET) -> Definition:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise AdministrationError("registration administration asset is unavailable") from error
+        raise AdministrationError("retirement administration asset is unavailable") from error
     require(
         value.get("schemaVersion") == 1
         and value.get("owner") == OWNER
         and value.get("index") == INDEX,
-        "registration administration identity differs",
+        "retirement administration identity differs",
     )
     mapping = value.get("mapping")
     require(
@@ -91,7 +91,7 @@ def load_definition(path: Path = ASSET) -> Definition:
         and mapping.get("dynamic") == "strict"
         and set(mapping.get("properties", {}))
         == {"number", "from", "to", "policyHolder", "productCode", "totalPremium", "agentLogin"},
-        "registration mapping differs",
+        "retirement mapping differs",
     )
     return Definition(mapping)
 
@@ -170,12 +170,12 @@ class Target:
 
     def __init__(self) -> None:
         record = service_record(ROOT, SERVICE)
-        contract = record.get("eventAdministration", {})
+        contract = record.get("retirementAdministration", {})
         require(
             contract
             == {
                 "owner": OWNER,
-                "asset": "services/dashboard-service/internal/administration/registration.json",
+                "asset": "services/dashboard-service/internal/administration/retirement-registration.json",
                 "index": INDEX,
                 "readerRole": READER,
                 "readerUser": READER,
@@ -184,7 +184,7 @@ class Target:
                 "registeredTopic": TOPIC,
                 "consumerGroup": GROUP,
             },
-            "event administration catalog contract differs",
+            "retirement administration catalog contract differs",
         )
         self.environment = os.environ.get("DEPLOY_ENV", "")
         require(self.environment in record.get("environments", []), "DEPLOY_ENV is invalid")
@@ -196,7 +196,7 @@ class Target:
         }
         for name, value in expected_coordinates.items():
             require(os.environ.get(name, "") == value, f"{name} differs from the catalog")
-        event = selected.get("eventAdministration", {})
+        event = selected.get("retirementAdministration", {})
         expected = {
             "local-dev": {
                 "service": "local-dev-elasticsearch-es-http",
@@ -225,7 +225,7 @@ class Target:
                 "kafkaReplicas": 3,
             },
         }[self.environment]
-        require(event == expected, "event target catalog contract differs")
+        require(event == expected, "retirement target catalog contract differs")
         self.context = selected["context"]
         self.namespace = selected["namespace"]
         self.data_namespace = selected["dataNamespace"]
@@ -410,6 +410,91 @@ class Target:
             and value.get("spec") == {"partitions": 1, "replicas": self.kafka_replicas},
             f"KafkaTopic/{TOPIC} differs",
         )
+
+    def kafka_broker(self) -> str:
+        pods = self.json(
+            "get",
+            "pods",
+            "-l",
+            f"strimzi.io/cluster={self.kafka_cluster}",
+            namespace=self.data_namespace,
+        ).get("items", [])
+        ready = sorted(
+            pod.get("metadata", {}).get("name", "")
+            for pod in pods
+            if not pod.get("metadata", {}).get("deletionTimestamp")
+            and pod.get("metadata", {}).get("labels", {}).get("strimzi.io/broker-role") == "true"
+            and pod.get("status", {}).get("phase") == "Running"
+            and any(
+                condition.get("type") == "Ready" and condition.get("status") == "True"
+                for condition in pod.get("status", {}).get("conditions", [])
+            )
+        )
+        require(bool(ready) and ready[0], "no ready Kafka broker Pod is available")
+        return ready[0]
+
+    def consumer_group_state(self) -> dict[str, Any]:
+        broker = self.kafka_broker()
+        base = (
+            "exec",
+            broker,
+            "-c",
+            "kafka",
+            "--",
+            "/opt/kafka/bin/kafka-consumer-groups.sh",
+            "--bootstrap-server",
+            "localhost:9092",
+        )
+        groups = set(self.run(*base, "--list", namespace=self.data_namespace).splitlines())
+        if GROUP not in groups:
+            return {"present": False, "activeMembers": 0, "offsets": []}
+        output = self.run(*base, "--describe", "--group", GROUP, namespace=self.data_namespace)
+        offsets: list[dict[str, int]] = []
+        members: set[str] = set()
+        for line in output.splitlines():
+            fields = line.split()
+            if len(fields) < 6 or fields[0] != GROUP:
+                continue
+            require(fields[1] == TOPIC, "retirement group contains an unexpected topic")
+            try:
+                partition, committed, log_end = map(int, fields[2:5])
+            except ValueError as error:
+                raise AdministrationError("retirement group progress differs") from error
+            require(0 <= committed <= log_end, "retirement group offset is out of range")
+            offsets.append({"partition": partition, "committed": committed, "logEnd": log_end})
+            if len(fields) > 6 and fields[6] != "-":
+                members.add(fields[6])
+        require(bool(offsets), "retirement group partition progress is incomplete")
+        require(
+            len({item["partition"] for item in offsets}) == len(offsets),
+            "retirement group contains duplicate partitions",
+        )
+        return {
+            "present": True,
+            "activeMembers": len(members),
+            "offsets": sorted(offsets, key=lambda item: item["partition"]),
+        }
+
+    def delete_consumer_group(self) -> None:
+        state = self.consumer_group_state()
+        require(state["activeMembers"] == 0, "retirement group still has active members")
+        if state["present"]:
+            broker = self.kafka_broker()
+            self.run(
+                "exec",
+                broker,
+                "-c",
+                "kafka",
+                "--",
+                "/opt/kafka/bin/kafka-consumer-groups.sh",
+                "--bootstrap-server",
+                "localhost:9092",
+                "--delete",
+                "--group",
+                GROUP,
+                namespace=self.data_namespace,
+            )
+        require(not self.consumer_group_state()["present"], "retirement group was not deleted")
 
 
 class PortForward:
@@ -721,7 +806,76 @@ def verify_setup(
     return count
 
 
-def retire(target: Target, admin: ElasticsearchClient, definition: Definition) -> None:
+def retirement_secrets(target: Target) -> tuple[tuple[str, str, set[str]], ...]:
+    return (
+        (target.reader_secret, "elasticsearch-reader", {"username", "password"}),
+        (target.writer_secret, "elasticsearch-writer", {"username", "password"}),
+        (target.kafka_ca_secret, "kafka-trust", {"ca.crt"}),
+    )
+
+
+def inspect_retirement(
+    target: Target,
+    admin: ElasticsearchClient,
+    definition: Definition,
+) -> dict[str, Any]:
+    count = inspect_index(admin, definition)
+    identities: dict[str, dict[str, bool]] = {}
+    for identity in (WRITER, READER):
+        stored_role, stored_user = inspect_identity(admin, identity)
+        identities[identity] = {
+            "role": stored_role is not None,
+            "user": stored_user is not None,
+        }
+    topic = target.json(
+        "get", "kafkatopic", TOPIC, "--ignore-not-found", namespace=target.data_namespace
+    )
+    if topic:
+        target.verify_topic()
+    secrets: dict[str, bool] = {}
+    for name, component, keys in retirement_secrets(target):
+        value = target.json("get", "secret", name, "--ignore-not-found")
+        if value:
+            target.validate_secret(value, name, keys, component)
+        secrets[name] = bool(value)
+    return {
+        "documents": count,
+        "identities": identities,
+        "topicPresent": bool(topic),
+        "secrets": secrets,
+        "consumerGroup": target.consumer_group_state(),
+    }
+
+
+def verify_absent(target: Target, admin: ElasticsearchClient) -> None:
+    for path, label in (
+        (f"/{INDEX}", "index"),
+        (f"/_security/role/{READER}", "reader role"),
+        (f"/_security/user/{READER}", "reader user"),
+        (f"/_security/role/{WRITER}", "writer role"),
+        (f"/_security/user/{WRITER}", "writer user"),
+    ):
+        status, _ = admin.request("GET", path)
+        require_status(status, {404}, f"verify absent retirement {label}")
+    require(
+        not target.json(
+            "get", "kafkatopic", TOPIC, "--ignore-not-found", namespace=target.data_namespace
+        ),
+        f"KafkaTopic/{TOPIC} still exists",
+    )
+    for name, _component, _keys in retirement_secrets(target):
+        require(
+            not target.json("get", "secret", name, "--ignore-not-found"),
+            f"Secret/{name} still exists",
+        )
+    require(not target.consumer_group_state()["present"], "retirement group still exists")
+
+
+def retire(
+    target: Target,
+    admin: ElasticsearchClient,
+    definition: Definition,
+) -> dict[str, Any]:
     require(
         OWNER == "issue-290"
         and INDEX == "policy_stats_issue_290"
@@ -730,32 +884,15 @@ def retire(target: Target, admin: ElasticsearchClient, definition: Definition) -
         and target.reader_secret.endswith("-issue-290")
         and target.writer_secret.endswith("-issue-290")
         and target.kafka_ca_secret.endswith("-issue-290"),
-        "isolated retirement boundary differs",
+        "retirement boundary differs",
     )
-    count = inspect_index(admin, definition)
-    identities: list[str] = []
+    state = inspect_retirement(target, admin, definition)
+    require(
+        state["consumerGroup"]["activeMembers"] == 0,
+        "retirement group still has active members",
+    )
+    target.delete_consumer_group()
     for identity in (WRITER, READER):
-        stored_role, stored_user = inspect_identity(admin, identity)
-        for value in (stored_role, stored_user):
-            if value is not None:
-                require(value.get("metadata") == {"owner": OWNER}, f"{identity} is not owned")
-        identities.append(identity)
-    topic = target.json(
-        "get", "kafkatopic", TOPIC, "--ignore-not-found", namespace=target.data_namespace
-    )
-    if topic:
-        target.verify_topic()
-    secrets = (
-        (target.reader_secret, "elasticsearch-reader", {"username", "password"}),
-        (target.writer_secret, "elasticsearch-writer", {"username", "password"}),
-        (target.kafka_ca_secret, "kafka-trust", {"ca.crt"}),
-    )
-    for name, component, keys in secrets:
-        value = target.json("get", "secret", name, "--ignore-not-found")
-        if value:
-            target.validate_secret(value, name, keys, component)
-
-    for identity in identities:
         for path, label in (
             (f"/_security/user/{identity}", "user"),
             (f"/_security/role/{identity}", "role"),
@@ -763,21 +900,23 @@ def retire(target: Target, admin: ElasticsearchClient, definition: Definition) -
             status, _ = admin.request("DELETE", path)
             require_status(status, {200, 404}, f"delete {identity} {label}")
     target.run("delete", "kafkatopic", TOPIC, "--ignore-not-found", namespace=target.data_namespace)
-    for name, _component, _keys in secrets:
+    for name, _component, _keys in retirement_secrets(target):
         target.run("delete", "secret", name, "--ignore-not-found")
-    if count is not None:
+    if state["documents"] is not None:
         status, _ = admin.request("DELETE", f"/{INDEX}")
-        require_status(status, {200}, "delete isolated index")
+        require_status(status, {200}, "delete retirement index")
+    verify_absent(target, admin)
+    return state
 
 
 def execute(operation: str) -> None:
-    require(operation in {"setup", "verify", "retire"}, "unsupported event operation")
-    if operation != "verify":
+    require(operation in {"inspect", "retire"}, "unsupported retirement operation")
+    if operation == "retire":
         environment = os.environ.get("DEPLOY_ENV", "")
-        expected = f"{operation}-{environment}-dashboard-event-{OWNER}"
+        expected = f"retire-{environment}-dashboard-{OWNER}"
         require(
-            os.environ.get("DASHBOARD_EVENT_CONFIRM") == expected,
-            f"DASHBOARD_EVENT_CONFIRM must equal {expected}",
+            os.environ.get("DASHBOARD_RETIREMENT_CONFIRM") == expected,
+            f"DASHBOARD_RETIREMENT_CONFIRM must equal {expected}",
         )
     definition = load_definition()
     target = Target()
@@ -792,18 +931,17 @@ def execute(operation: str) -> None:
     ).decode("utf-8")
     with PortForward(target) as port:
         admin = client_for(target, "elastic", admin_password, port, certificate)
-        if operation == "setup":
-            count = apply_setup(target, admin, definition, certificate)
-        elif operation == "verify":
-            count = verify_setup(target, admin, definition, certificate)
-        else:
-            count = inspect_index(admin, definition)
+        state = (
             retire(target, admin, definition)
+            if operation == "retire"
+            else inspect_retirement(target, admin, definition)
+        )
     print(
         json.dumps(
             {
                 "consumerGroup": GROUP,
-                "documents": count,
+                "activeMembers": state["consumerGroup"]["activeMembers"],
+                "documents": state["documents"],
                 "environment": target.environment,
                 "index": INDEX,
                 "operation": operation,
@@ -818,7 +956,7 @@ def execute(operation: str) -> None:
 def cli(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     try:
-        require(len(arguments) == 1, "one event operation is required")
+        require(len(arguments) == 1, "one retirement operation is required")
         execute(arguments[0])
     except KeyboardInterrupt:
         return 130
@@ -829,7 +967,7 @@ def cli(argv: list[str] | None = None) -> int:
         UnicodeDecodeError,
         ValueError,
     ) as error:
-        print(f"dashboard-event: {error}", file=sys.stderr)
+        print(f"dashboard-retirement: {error}", file=sys.stderr)
         return 1
     return 0
 

@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 import dashboard_deployment_checks as checks
-import event_administration as event_admin
+import registration_administration as registration_admin
+import retirement_administration as retirement_admin
 import yaml
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
@@ -43,9 +44,9 @@ ADMIN_USERNAME = "elastic"
 ADMIN_PASSWORD = "issue-287-disposable-admin-password"
 READER_USERNAME = "dashboard_disposable_reader"
 READER_PASSWORD = "issue-287-disposable-reader-password"
-EVENT_READER_USERNAME = event_admin.READER
+EVENT_READER_USERNAME = retirement_admin.READER
 EVENT_READER_PASSWORD = "issue-290-disposable-reader-password"
-EVENT_WRITER_USERNAME = event_admin.WRITER
+EVENT_WRITER_USERNAME = retirement_admin.WRITER
 EVENT_WRITER_PASSWORD = "issue-290-disposable-writer-password"
 CANONICAL_WRITER_USERNAME = "dashboard_disposable_canonical_writer"
 CANONICAL_WRITER_PASSWORD = "issue-293-disposable-writer-password"
@@ -887,9 +888,9 @@ def render(
     ]
     if event_mode != "disabled":
         canonical = event_mode == "canonical"
-        selected_index = CANONICAL_INDEX if canonical else event_admin.INDEX
-        selected_group = CANONICAL_GROUP if canonical else event_admin.GROUP
-        selected_topic = CANONICAL_TOPIC if canonical else event_admin.TOPIC
+        selected_index = CANONICAL_INDEX if canonical else retirement_admin.INDEX
+        selected_group = CANONICAL_GROUP if canonical else retirement_admin.GROUP
+        selected_topic = CANONICAL_TOPIC if canonical else retirement_admin.TOPIC
         reader_secret = (
             "local-dev-dashboard-elasticsearch"
             if canonical
@@ -1087,7 +1088,7 @@ def setup_kafka(cluster: Cluster, image: str) -> bytes:
         "--create",
         "--if-not-exists",
         "--topic",
-        event_admin.TOPIC,
+        retirement_admin.TOPIC,
         "--partitions",
         "1",
         "--replication-factor",
@@ -1389,7 +1390,7 @@ def endpoint_count(cluster: Cluster) -> int:
 
 
 def setup_elasticsearch(cluster: Cluster, suffix: str = "") -> None:
-    definition = event_admin.load_definition()
+    definition = registration_admin.load_definition()["mapping"]
     base = [
         "--fail-with-body",
         "--silent",
@@ -1441,100 +1442,6 @@ def setup_elasticsearch(cluster: Cluster, suffix: str = "") -> None:
                 separators=(",", ":"),
             ),
         ),
-        (
-            "fixture-index",
-            "PUT",
-            "/policy_stats",
-            json.dumps(
-                {
-                    "settings": {"number_of_shards": 1, "number_of_replicas": 0},
-                    "mappings": {
-                        "properties": {
-                            "number": {"type": "keyword"},
-                            "agentLogin": {
-                                "type": "text",
-                                "fields": {"keyword": {"type": "keyword"}},
-                            },
-                            "productCode": {
-                                "type": "text",
-                                "fields": {"keyword": {"type": "keyword"}},
-                            },
-                            "from": {"type": "date"},
-                            "totalPremium": {"type": "double"},
-                        }
-                    },
-                },
-                separators=(",", ":"),
-            ),
-        ),
-        (
-            "fixture-unrelated",
-            "PUT",
-            "/unrelated_stats",
-            '{"settings":{"number_of_shards":1,"number_of_replicas":0}}',
-        ),
-        (
-            "fixture-document",
-            "POST",
-            "/policy_stats/_doc/disposable?refresh=true",
-            '{"agentLogin":"safe-agent","productCode":"SAFE","from":"2019-06-01","totalPremium":1000.0}',
-        ),
-        (
-            "event-index",
-            "PUT",
-            f"/{event_admin.INDEX}",
-            json.dumps(
-                {
-                    "settings": {"number_of_shards": 1, "number_of_replicas": 0},
-                    "mappings": definition.mapping,
-                },
-                separators=(",", ":"),
-            ),
-        ),
-        (
-            "event-reader-role",
-            "PUT",
-            f"/_security/role/{EVENT_READER_USERNAME}",
-            json.dumps(
-                event_admin.role(EVENT_READER_USERNAME, ["read", "view_index_metadata"]),
-                separators=(",", ":"),
-            ),
-        ),
-        (
-            "event-reader-user",
-            "PUT",
-            f"/_security/user/{EVENT_READER_USERNAME}",
-            json.dumps(
-                event_admin.user(
-                    EVENT_READER_USERNAME,
-                    EVENT_READER_PASSWORD,
-                    "disposable reader",
-                ),
-                separators=(",", ":"),
-            ),
-        ),
-        (
-            "event-writer-role",
-            "PUT",
-            f"/_security/role/{EVENT_WRITER_USERNAME}",
-            json.dumps(
-                event_admin.role(EVENT_WRITER_USERNAME, ["index"]),
-                separators=(",", ":"),
-            ),
-        ),
-        (
-            "event-writer-user",
-            "PUT",
-            f"/_security/user/{EVENT_WRITER_USERNAME}",
-            json.dumps(
-                event_admin.user(
-                    EVENT_WRITER_USERNAME,
-                    EVENT_WRITER_PASSWORD,
-                    "disposable writer",
-                ),
-                separators=(",", ":"),
-            ),
-        ),
     )
     for name, method, path, body in requests:
         probe(
@@ -1543,6 +1450,40 @@ def setup_elasticsearch(cluster: Cluster, suffix: str = "") -> None:
             [*base, "--request", method, "--data", body, f"http://{ELASTICSEARCH_NAME}:9200{path}"],
             seconds=150,
         )
+    with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
+        client = retirement_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        status, value = client.request("GET", f"/{CANONICAL_INDEX}/_mapping")
+        if status == 404:
+            status, _ = client.request(
+                "PUT",
+                f"/{CANONICAL_INDEX}",
+                {
+                    "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+                    "mappings": definition,
+                },
+            )
+            require(status == 200, "create ordinary registration index failed")
+        else:
+            require(
+                status == 200
+                and isinstance(value, dict)
+                and set(value) == {CANONICAL_INDEX}
+                and registration_admin.mapping_is_compatible(
+                    value[CANONICAL_INDEX].get("mappings", {}),
+                    definition,
+                ),
+                "ordinary registration index differs",
+            )
+        status, _ = client.request("GET", "/unrelated_stats/_mapping")
+        if status == 404:
+            status, _ = client.request(
+                "PUT",
+                "/unrelated_stats",
+                {"settings": {"number_of_shards": 1, "number_of_replicas": 0}},
+            )
+            require(status == 200, "create unrelated permission fixture failed")
+        else:
+            require(status == 200, "unrelated permission fixture differs")
 
 
 def verify_reader_permissions(cluster: Cluster) -> None:
@@ -1572,6 +1513,40 @@ def verify_reader_permissions(cluster: Cluster) -> None:
     require(not failures, "reader permission checks failed: " + " | ".join(failures))
 
 
+def verify_registration_writer_permissions(cluster: Cluster) -> None:
+    base = [
+        "--user",
+        f"{CANONICAL_WRITER_USERNAME}:{CANONICAL_WRITER_PASSWORD}",
+        "--header",
+        "Content-Type: application/json",
+    ]
+    denied = (
+        ("registration-writer-read-denied", [f"/{CANONICAL_INDEX}/_count"]),
+        (
+            "registration-writer-delete-denied",
+            ["--request", "DELETE", f"/{CANONICAL_INDEX}/_doc/denied"],
+        ),
+        (
+            "registration-writer-other-index-denied",
+            ["--request", "PUT", "--data", "{}", "/unrelated_stats/_doc/denied"],
+        ),
+        ("registration-writer-security-denied", ["/_security/role"]),
+    )
+    failures: list[str] = []
+    for name, arguments in denied:
+        try:
+            path = arguments[-1]
+            response = http_probe(
+                cluster,
+                name,
+                [*base, *arguments[:-1], f"http://{ELASTICSEARCH_NAME}:9200{path}"],
+            )
+            require_elasticsearch_permission_denied(name, response)
+        except (CheckFailed, checks.DeploymentError, OSError, ValueError) as error:
+            failures.append(f"{name}: {error}")
+    require(not failures, "registration writer permission checks failed: " + " | ".join(failures))
+
+
 def verify_event_permissions(cluster: Cluster) -> None:
     reader_base = [
         "--user",
@@ -1582,7 +1557,7 @@ def verify_event_permissions(cluster: Cluster) -> None:
     response = http_probe(
         cluster,
         "event-reader-count",
-        [*reader_base, f"http://{ELASTICSEARCH_NAME}:9200/{event_admin.INDEX}/_count"],
+        [*reader_base, f"http://{ELASTICSEARCH_NAME}:9200/{retirement_admin.INDEX}/_count"],
     )
     require(response.status == 200, "event reader could not count the isolated index")
     response = http_probe(
@@ -1594,7 +1569,7 @@ def verify_event_permissions(cluster: Cluster) -> None:
             "PUT",
             "--data",
             "{}",
-            f"http://{ELASTICSEARCH_NAME}:9200/{event_admin.INDEX}/_doc/denied",
+            f"http://{ELASTICSEARCH_NAME}:9200/{retirement_admin.INDEX}/_doc/denied",
         ],
     )
     require_elasticsearch_permission_denied("event-reader-write-denied", response)
@@ -1614,15 +1589,15 @@ def verify_event_permissions(cluster: Cluster) -> None:
             "PUT",
             "--data",
             '{"properties":{"number":{"type":"keyword"}}}',
-            f"http://{ELASTICSEARCH_NAME}:9200/{event_admin.INDEX}/_mapping",
+            f"http://{ELASTICSEARCH_NAME}:9200/{retirement_admin.INDEX}/_mapping",
         ],
     )
     require(response.status == 200, "accepted writer mapping authority was not observed")
     denied = (
-        ("event-writer-read-denied", [f"/{event_admin.INDEX}/_count"]),
+        ("event-writer-read-denied", [f"/{retirement_admin.INDEX}/_count"]),
         (
             "event-writer-delete-denied",
-            ["--request", "DELETE", f"/{event_admin.INDEX}/_doc/denied"],
+            ["--request", "DELETE", f"/{retirement_admin.INDEX}/_doc/denied"],
         ),
         (
             "event-writer-other-index-denied",
@@ -1758,7 +1733,7 @@ def direct_rpc(cluster: Cluster) -> None:
                 "--no-print-directory",
                 "-C",
                 "services/dashboard-service",
-                "_deploy-test-rpc",
+                "_deploy-smoke-rpc",
                 f"TOOLS_DIR={os.environ.get('TOOLS_DIR', '')}",
                 f"COMMON_GO_TOOLING_PYTHON={sys.executable}",
             ],
@@ -1782,7 +1757,7 @@ def direct_rpc(cluster: Cluster) -> None:
 def produce_qualification_event(
     cluster: Cluster,
     event: dict[str, Any],
-    topic: str = event_admin.TOPIC,
+    topic: str = retirement_admin.TOPIC,
 ) -> None:
     kafka_cli(
         cluster,
@@ -1799,10 +1774,10 @@ def produce_qualification_event(
 
 
 def wait_for_qualification_document(
-    client: event_admin.ElasticsearchClient,
+    client: retirement_admin.ElasticsearchClient,
     event: dict[str, Any],
     visibility_seconds: int,
-    index: str = event_admin.INDEX,
+    index: str = retirement_admin.INDEX,
     *,
     java_null_compatibility: bool = False,
 ) -> float:
@@ -1816,7 +1791,7 @@ def wait_for_qualification_document(
     while time.monotonic() < deadline:
         try:
             status, result = client.request("GET", f"/{index}/_doc/{document_id}?refresh=true")
-        except event_admin.AdministrationError:
+        except retirement_admin.AdministrationError:
             status, result = 0, None
         last_result = result
         if status == 200 and isinstance(result, dict) and result.get("_source") == expected:
@@ -1830,12 +1805,12 @@ def wait_for_qualification_document(
 
 def run_qualification_events(
     cluster: Cluster,
-    client: event_admin.ElasticsearchClient,
+    client: retirement_admin.ElasticsearchClient,
     events: list[dict[str, Any]],
     visibility_seconds: int,
     *,
-    topic: str = event_admin.TOPIC,
-    index: str = event_admin.INDEX,
+    topic: str = retirement_admin.TOPIC,
+    index: str = retirement_admin.INDEX,
     java_null_compatibility: bool = False,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
@@ -1914,8 +1889,8 @@ def run_query_workload(
 
 def parse_consumer_group_offsets(
     output: str,
-    group: str = event_admin.GROUP,
-    topic: str = event_admin.TOPIC,
+    group: str = retirement_admin.GROUP,
+    topic: str = retirement_admin.TOPIC,
 ) -> list[OffsetSnapshot]:
     offsets: list[OffsetSnapshot] = []
     for line in output.splitlines():
@@ -1938,8 +1913,8 @@ def parse_consumer_group_offsets(
 
 def consumer_group_offsets(
     cluster: Cluster,
-    group: str = event_admin.GROUP,
-    topic: str = event_admin.TOPIC,
+    group: str = retirement_admin.GROUP,
+    topic: str = retirement_admin.TOPIC,
 ) -> list[OffsetSnapshot]:
     output = kafka_cli(
         cluster,
@@ -1960,8 +1935,8 @@ def wait_for_committed_offsets(
     minimum: dict[int, int],
     seconds: int = 30,
     *,
-    group: str = event_admin.GROUP,
-    topic: str = event_admin.TOPIC,
+    group: str = retirement_admin.GROUP,
+    topic: str = retirement_admin.TOPIC,
 ) -> list[OffsetSnapshot]:
     deadline = time.monotonic() + seconds
     observed: list[OffsetSnapshot] = []
@@ -1981,9 +1956,9 @@ def wait_for_committed_offsets(
 
 
 def capture_state(
-    client: event_admin.ElasticsearchClient,
+    client: retirement_admin.ElasticsearchClient,
     offsets: list[OffsetSnapshot],
-    index: str = event_admin.INDEX,
+    index: str = retirement_admin.INDEX,
 ) -> StateSnapshot:
     status, mapping_result = client.request("GET", f"/{index}/_mapping")
     require(status == 200 and isinstance(mapping_result, dict), "qualification mapping is absent")
@@ -2066,6 +2041,29 @@ def create_canonical_topic(cluster: Cluster) -> None:
         "1",
         "--replication-factor",
         "1",
+    )
+
+
+def initialize_registration_progress(cluster: Cluster) -> None:
+    kafka_cli(
+        cluster,
+        "kafka-consumer-groups.sh",
+        "--bootstrap-server",
+        "localhost:9093",
+        "--command-config",
+        "/etc/kafka/secrets/client.properties",
+        "--group",
+        CANONICAL_GROUP,
+        "--topic",
+        CANONICAL_TOPIC,
+        "--reset-offsets",
+        "--to-earliest",
+        "--execute",
+    )
+    require(
+        consumer_group_offsets(cluster, CANONICAL_GROUP, CANONICAL_TOPIC)
+        == [OffsetSnapshot(0, 0, 0)],
+        "ordinary registration group did not initialize at the empty topic boundary",
     )
 
 
@@ -2241,7 +2239,7 @@ def run_bounded_smoke(
     started = time.monotonic()
     pod_before = dashboard_pod_state(cluster)
     with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
-        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        client = retirement_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
         events = run_qualification_events(
             cluster,
             client,
@@ -2276,15 +2274,24 @@ def run_stop_restore(
     image: str,
 ) -> dict[str, Any]:
     configuration = deployment_configuration_sha256(cluster)
-    before_offsets = wait_for_committed_offsets(cluster, {0: 3})
+    before_offsets = wait_for_committed_offsets(
+        cluster,
+        {0: 3},
+        group=CANONICAL_GROUP,
+        topic=CANONICAL_TOPIC,
+    )
     with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
-        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
-        before = capture_state(client, before_offsets)
+        client = retirement_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        before = capture_state(client, before_offsets, CANONICAL_INDEX)
     cluster.kubectl("scale", "deployment/local-dev-dashboard-api", "--replicas=0")
     wait_for("Dashboard stopped for retained-state check", lambda: endpoint_count(cluster) == 0)
     with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
-        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
-        stopped = capture_state(client, consumer_group_offsets(cluster))
+        client = retirement_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        stopped = capture_state(
+            client,
+            consumer_group_offsets(cluster, CANONICAL_GROUP, CANONICAL_TOPIC),
+            CANONICAL_INDEX,
+        )
     require_same_state("stopped Dashboard", before, stopped)
     cluster.kubectl("scale", "deployment/local-dev-dashboard-api", "--replicas=1")
     cluster.kubectl(
@@ -2308,18 +2315,29 @@ def run_stop_restore(
         candidate.registry_digest,
     )
     with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
-        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
-        restored = capture_state(client, consumer_group_offsets(cluster))
+        client = retirement_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        restored = capture_state(
+            client,
+            consumer_group_offsets(cluster, CANONICAL_GROUP, CANONICAL_TOPIC),
+            CANONICAL_INDEX,
+        )
         require_same_state("restored Dashboard", before, restored)
         event_result = run_qualification_events(
             cluster,
             client,
             [qualification["events"][3]],
             qualification["measurement"]["eventVisibilitySeconds"],
+            topic=CANONICAL_TOPIC,
+            index=CANONICAL_INDEX,
         )[0]
         expected_offsets = {offset.partition: offset.committed + 1 for offset in before.offsets}
-        after_offsets = wait_for_committed_offsets(cluster, expected_offsets)
-        after = capture_state(client, after_offsets)
+        after_offsets = wait_for_committed_offsets(
+            cluster,
+            expected_offsets,
+            group=CANONICAL_GROUP,
+            topic=CANONICAL_TOPIC,
+        )
+        after = capture_state(client, after_offsets, CANONICAL_INDEX)
     require(after.mapping == before.mapping, "post-restore mapping changed")
     require(
         after.documents
@@ -2356,6 +2374,85 @@ def run_stop_restore(
     }
 
 
+def run_go_only_smoke(
+    cluster: Cluster,
+    qualification: dict[str, Any],
+    candidate: CandidateIdentity,
+    image: str,
+) -> dict[str, Any]:
+    visibility_seconds = qualification["measurement"]["eventVisibilitySeconds"]
+    started = time.monotonic()
+    with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
+        client = retirement_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        registration_events = run_qualification_events(
+            cluster,
+            client,
+            [qualification["events"][0], qualification["events"][2]],
+            visibility_seconds,
+            topic=CANONICAL_TOPIC,
+            index=CANONICAL_INDEX,
+        )
+        replacement = run_qualification_events(
+            cluster,
+            client,
+            [qualification["events"][1]],
+            visibility_seconds,
+            topic=CANONICAL_TOPIC,
+            index=CANONICAL_INDEX,
+        )[0]
+        offsets = wait_for_committed_offsets(
+            cluster,
+            {0: 3},
+            group=CANONICAL_GROUP,
+            topic=CANONICAL_TOPIC,
+        )
+        before_rerun = capture_state(client, offsets, CANONICAL_INDEX)
+    require(
+        before_rerun.documents
+        == [
+            {
+                "id": qualification["events"][1]["expectedDocument"]["number"],
+                "source": qualification["events"][1]["expectedDocument"],
+            },
+            {
+                "id": qualification["events"][2]["expectedDocument"]["number"],
+                "source": qualification["events"][2]["expectedDocument"],
+            },
+        ],
+        "same-ID registration replacement retained stale or duplicate state",
+    )
+    queries = run_query_workload(
+        cluster,
+        qualification["queries"],
+        1,
+        qualification["measurement"]["requestDeadlineSeconds"],
+    )
+    setup_elasticsearch(cluster, "-rerun")
+    create_canonical_topic(cluster)
+    with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
+        client = retirement_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        after_rerun = capture_state(
+            client,
+            consumer_group_offsets(cluster, CANONICAL_GROUP, CANONICAL_TOPIC),
+            CANONICAL_INDEX,
+        )
+    require_same_state("ordinary setup rerun", before_rerun, after_rerun)
+    restart = run_stop_restore(cluster, qualification, candidate, image)
+    elapsed = time.monotonic() - started
+    require(
+        elapsed <= qualification["measurement"]["maximumSeconds"],
+        "Go-only deployment smoke exceeded five minutes",
+    )
+    return {
+        "elapsedSeconds": round(elapsed, 3),
+        "registrations": registration_events,
+        "replacement": replacement,
+        "queries": queries,
+        "setupRerun": safe_state_record(after_rerun),
+        "restart": restart,
+    }
+
+
 def run_java_go_java_rehearsal(
     cluster: Cluster,
     qualification: dict[str, Any],
@@ -2374,7 +2471,7 @@ def run_java_go_java_rehearsal(
     apply_java_owner(cluster, java_candidate)
     java_initial = java_pod_state(cluster, java_candidate)
     with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
-        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        client = retirement_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
         baseline_events = run_qualification_events(
             cluster,
             client,
@@ -2418,7 +2515,7 @@ def run_java_go_java_rehearsal(
     abort_seconds = time.monotonic() - abort_started
     require(abort_seconds <= 600, "controlled abort and Java return exceeded ten minutes")
     with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
-        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        client = retirement_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
         abort_return = capture_state(
             client,
             consumer_group_offsets(cluster, CANONICAL_GROUP, CANONICAL_TOPIC),
@@ -2434,7 +2531,7 @@ def run_java_go_java_rehearsal(
     forward_seconds = time.monotonic() - forward_started
     require(forward_seconds <= 180, "canonical Go activation exceeded three minutes")
     with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
-        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        client = retirement_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
         replacement_result = run_qualification_events(
             cluster,
             client,
@@ -2485,7 +2582,7 @@ def run_java_go_java_rehearsal(
     return_seconds = time.monotonic() - return_started
     require(return_seconds <= 600, "successful Java return exceeded ten minutes")
     with forwarded_service(cluster, ELASTICSEARCH_NAME, 9200) as port:
-        client = event_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
+        client = retirement_admin.ElasticsearchClient(port, ADMIN_USERNAME, ADMIN_PASSWORD)
         post_return_event = run_qualification_events(
             cluster,
             client,
@@ -2608,15 +2705,14 @@ def verify_isolated_kafka_names(cluster: Cluster) -> None:
             "--list",
         ).splitlines()
     )
-    require(event_admin.TOPIC in topics, "isolated registration topic is absent")
+    require(retirement_admin.TOPIC in topics, "isolated registration topic is absent")
     require("policy-registered" not in topics, "canonical registration topic was created")
-    require(event_admin.GROUP in groups, "isolated Dashboard group is absent")
+    require(retirement_admin.GROUP in groups, "isolated Dashboard group is absent")
     require("dashboard-service" not in groups, "canonical Dashboard group was joined")
 
 
 def run() -> None:
     image = os.environ.get("IMAGE_REF", "")
-    java_image = os.environ.get("QUALIFICATION_JAVA_IMAGE_REF", "")
     expected_revision = os.environ.get("QUALIFICATION_SOURCE_REVISION", "")
     elasticsearch_image = os.environ.get("ELASTICSEARCH_IMAGE", "")
     kafka_image = os.environ.get("KAFKA_IMAGE", "")
@@ -2632,7 +2728,6 @@ def run() -> None:
     qualification = load_qualification()
     candidate = prepare_candidate_image(image, expected_revision)
     runtime_image = prepare_kind_candidate(image, candidate)
-    java_candidate = prepare_java_candidate(java_image)
     source_short = candidate.revision[:12]
     namespace = f"dashboard-disposable-{os.getpid()}-{secrets.token_hex(3)}"
     cluster = Cluster(namespace)
@@ -2704,48 +2799,6 @@ def run() -> None:
         )
         wait_for("Dashboard endpoint ready", lambda: endpoint_count(cluster) == 1)
         verify_reader_permissions(cluster)
-        sales_cases = (
-            (
-                "business-total-sales",
-                '{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}',
-                "http://local-dev-dashboard-api/dashboard/totalsales",
-                '{"total":{"policiesCount":1,"premiumAmount":1000.00},'
-                '"perProductTotal":{"SAFE":{"policiesCount":1,"premiumAmount":1000.00}}}',
-            ),
-            (
-                "business-agent-sales",
-                '{"agentLogin":"safe-agent","productCode":"SAFE",'
-                '"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}',
-                "http://local-dev-dashboard-api/dashboard/agentssales",
-                '{"perAgentTotal":{"safe-agent":{"policiesCount":1,"premiumAmount":1000.0}}}',
-            ),
-            (
-                "business-sales-trends",
-                '{"productCode":"SAFE","saleDateFrom":"2019-01-01",'
-                '"saleDateTo":"2020-01-01","aggregationUnitCode":"MONTH"}',
-                "http://local-dev-dashboard-api/dashboard/trends",
-                '{"periodSales":[{"periodDate":[2019,6,1],'
-                '"period":"2019-06-01T00:00:00.000Z","policiesCount":1,'
-                '"premiumAmount":1000.00}]}',
-            ),
-        )
-        sales_failures: list[str] = []
-        for name, payload, url, expected in sales_cases:
-            try:
-                response = http_probe(
-                    cluster,
-                    name,
-                    ["--header", "Content-Type: application/json", "--data", payload, url],
-                    labels={checks.BUSINESS_CLIENT_LABEL: "true"},
-                )
-                require_http_response(name, response, 200, expected)
-            except (CheckFailed, checks.DeploymentError, OSError, ValueError) as error:
-                sales_failures.append(f"{name}: {error}")
-        try:
-            direct_rpc(cluster)
-        except (CheckFailed, checks.DeploymentError, OSError, ValueError) as error:
-            sales_failures.append(f"direct RPC: {error}")
-        require(not sales_failures, "sales verification failed: " + " | ".join(sales_failures))
         verify_runtime_identity(
             cluster,
             candidate.version,
@@ -2778,14 +2831,15 @@ def run() -> None:
         require(not denial_failures, "CNI denial checks failed: " + " | ".join(denial_failures))
         kafka_ca = setup_kafka(cluster, kafka_image)
         verify_kafka_tls(cluster, kafka_ca)
-        verify_event_permissions(cluster)
+        create_canonical_topic(cluster)
+        initialize_registration_progress(cluster)
         enabled_render, _enabled_items = render(
             cluster,
             runtime_image,
             source_short,
             elasticsearch_image,
             candidate.registry_digest,
-            event_mode="isolated",
+            event_mode="canonical",
         )
         cluster.kubectl(
             "apply",
@@ -2801,20 +2855,16 @@ def run() -> None:
             "deployment/local-dev-dashboard-api",
             "--timeout=180s",
             timeout=210,
-            activity="wait for event-enabled Dashboard rollout",
+            activity="wait for registration-enabled Dashboard rollout",
         )
-        wait_for("event-enabled Dashboard endpoint ready", lambda: endpoint_count(cluster) == 1)
-        smoke = run_bounded_smoke(cluster, qualification)
-        handover = run_java_go_java_rehearsal(
-            cluster,
-            qualification,
-            candidate,
-            runtime_image,
-            java_candidate,
-            elasticsearch_image,
+        wait_for(
+            "registration-enabled Dashboard endpoint ready",
+            lambda: endpoint_count(cluster) == 1,
         )
+        verify_registration_writer_permissions(cluster)
+        smoke = run_go_only_smoke(cluster, qualification, candidate, runtime_image)
         report = {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "candidate": {
                 "sourceRevision": candidate.revision,
                 "version": candidate.version,
@@ -2822,93 +2872,12 @@ def run() -> None:
                 "runtimeImage": runtime_image,
                 "registryDigest": candidate.registry_digest,
             },
-            "javaCandidate": {
-                "image": java_candidate.image,
-                "localImageID": java_candidate.local_image_id,
-            },
             "target": {"context": CONTEXT, "namespace": namespace},
             "smoke": smoke,
-            "handover": handover,
         }
-        dashboard_pod = cluster.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api")[
-            "items"
-        ][0]
-        dashboard_ip = dashboard_pod["status"]["podIP"]
-        cluster.kubectl("scale", f"deployment/{ELASTICSEARCH_NAME}", "--replicas=0")
-        wait_for("Dashboard endpoint withdrawn", lambda: endpoint_count(cluster) == 0)
-        response = http_probe(
-            cluster,
-            "dependency-ready-denied",
-            [f"http://{dashboard_ip}:8081/readyz"],
-            labels={checks.MANAGEMENT_CLIENT_LABEL: "true"},
-        )
-        require_http_response("dependency-ready-denied", response, 503, "not ready\n")
-        response = http_probe(
-            cluster,
-            "dependency-live",
-            [f"http://{dashboard_ip}:8081/livez"],
-            labels={checks.MANAGEMENT_CLIENT_LABEL: "true"},
-        )
-        require_http_response("dependency-live", response, 200, "live\n")
-        dependency_failures: list[str] = []
-        for name, payload, url, _expected in sales_cases:
-            dependency_name = name.replace("business-", "dependency-") + "-safe"
-            try:
-                response = http_probe(
-                    cluster,
-                    dependency_name,
-                    [
-                        "--header",
-                        "Content-Type: application/json",
-                        "--data",
-                        payload,
-                        url.replace(
-                            "http://local-dev-dashboard-api", f"http://{dashboard_ip}:8080"
-                        ),
-                    ],
-                    labels={checks.BUSINESS_CLIENT_LABEL: "true"},
-                )
-                require_http_response(
-                    dependency_name,
-                    response,
-                    503,
-                    '{"code":14,"message":"service unavailable","details":[]}',
-                )
-            except (CheckFailed, checks.DeploymentError, OSError, ValueError) as error:
-                dependency_failures.append(f"{dependency_name}: {error}")
-        require(
-            not dependency_failures,
-            "dependency sales checks failed: " + " | ".join(dependency_failures),
-        )
-        cluster.kubectl("scale", f"deployment/{ELASTICSEARCH_NAME}", "--replicas=1")
-        cluster.kubectl(
-            "rollout",
-            "status",
-            f"deployment/{ELASTICSEARCH_NAME}",
-            "--timeout=180s",
-            timeout=210,
-            activity="wait for disposable Elasticsearch recovery",
-        )
-        setup_elasticsearch(cluster, "-recovery")
-        wait_for(
-            "Dashboard endpoint recovered after dependency", lambda: endpoint_count(cluster) == 1
-        )
-        pod = cluster.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api")["items"][0][
-            "metadata"
-        ]["name"]
-        cluster.kubectl("delete", "pod", pod, "--wait=false")
-        cluster.kubectl(
-            "rollout",
-            "status",
-            "deployment/local-dev-dashboard-api",
-            "--timeout=180s",
-            timeout=210,
-            activity="wait for replacement Dashboard rollout",
-        )
-        wait_for("Dashboard endpoint recovered", lambda: endpoint_count(cluster) == 1)
         print(
-            "dashboard-disposable: disabled queries, isolated TLS registration, reader/writer "
-            "permissions, identity, dependency loss, health, CNI denial and restart passed"
+            "dashboard-disposable: ordinary setup, three queries, replacement, setup rerun, "
+            "permissions, health, CNI denial and restart passed"
         )
     finally:
         if created:

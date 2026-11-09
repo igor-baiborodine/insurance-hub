@@ -1,51 +1,41 @@
 {
   "schemaVersion": 1,
-  "owner": "issue-290",
-  "index": "policy_stats_issue_290",
+  "owner": "issue-293",
+  "index": "policy_stats",
   "mapping": {
-    "dynamic": "strict",
     "properties": {
       "number": {
-        "type": "keyword"
+        "type": "text",
+        "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
       },
-      "from": {
-        "type": "date",
-        "format": "strict_date"
-      },
-      "to": {
-        "type": "date",
-        "format": "strict_date"
-      },
+      "from": {"type": "date"},
+      "to": {"type": "date"},
       "policyHolder": {
         "type": "text",
-        "fields": {
-          "keyword": {
-            "type": "keyword",
-            "ignore_above": 256
-          }
-        }
+        "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
       },
       "productCode": {
         "type": "text",
-        "fields": {
-          "keyword": {
-            "type": "keyword",
-            "ignore_above": 256
-          }
-        }
+        "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
       },
-      "totalPremium": {
-        "type": "double"
-      },
+      "totalPremium": {"type": "float"},
       "agentLogin": {
         "type": "text",
-        "fields": {
-          "keyword": {
-            "type": "keyword",
-            "ignore_above": 256
-          }
-        }
+        "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
       }
     }
-  }
+  },
+  "reader": {
+    "role": "go_dashboard_total_sales_reader",
+    "user": "go_dashboard_total_sales_reader",
+    "privileges": ["read", "view_index_metadata"]
+  },
+  "writer": {
+    "role": "go_dashboard_policy_stats_writer",
+    "user": "go_dashboard_policy_stats_writer",
+    "privileges": ["index"]
+  },
+  "topic": "policy-registered",
+  "consumerGroup": "dashboard-service",
+  "cleanup": false
 }

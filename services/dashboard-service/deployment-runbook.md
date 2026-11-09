@@ -5,8 +5,8 @@
   - [Deployment coordinates](#deployment-coordinates)
   - [Qualify the candidate](#qualify-the-candidate)
   - [Provision reader prerequisites](#provision-reader-prerequisites)
-  - [Prepare isolated registration resources](#prepare-isolated-registration-resources)
-  - [Prepare canonical access and transfer](#prepare-canonical-access-and-transfer)
+  - [Inspect or retire temporary registration resources](#inspect-or-retire-temporary-registration-resources)
+  - [Prepare registration access and transfer](#prepare-registration-access-and-transfer)
   - [Deploy to local development](#deploy-to-local-development)
   - [Stop and return in local development](#stop-and-return-in-local-development)
   - [Stage and observe QA](#stage-and-observe-qa)
@@ -51,8 +51,7 @@ Run these read-only or disposable checks from the repository root:
 ```sh
 make go-svc-deploy-check SVC_NAME=dashboard
 make go-svc-deploy-test-tooling SVC_NAME=dashboard
-make go-svc-deploy-test SVC_NAME=dashboard \
-  QUALIFICATION_JAVA_IMAGE_REF='EXPLICIT_RETAINED_JAVA_IMAGE'
+make go-svc-deploy-smoke SVC_NAME=dashboard
 make monitoring-assets-check ENV_NAME=qa SVC_NAME=dashboard
 make test-monitoring ENV_NAME=qa SVC_NAME=dashboard
 make -C services/dashboard-service test-event-integration
@@ -63,27 +62,22 @@ existing immutable registry candidate without rebuilding it, pass its digest-qua
 the full matching OCI source revision and an absolute JSON report path:
 
 ```sh
-make go-svc-deploy-test SVC_NAME=dashboard \
+make go-svc-deploy-smoke SVC_NAME=dashboard \
   QUALIFICATION_IMAGE_REF='ghcr.io/igor-baiborodine/insurance-hub/dashboard-api:VERSION@sha256:DIGEST' \
   QUALIFICATION_SOURCE_REVISION='FULL_40_CHARACTER_REVISION' \
-  QUALIFICATION_JAVA_IMAGE_REF='EXPLICIT_RETAINED_JAVA_IMAGE' \
   QUALIFICATION_REPORT_FILE="$PWD/dashboard-qualification.json"
 ```
 
 The disposable test loads the candidate image plus pinned Elasticsearch and Kafka images into the
 existing configured `local-dev-insurance-hub` Kind cluster, then creates and removes one uniquely
-owned namespace. It proves the disabled query deployment first. It then enables only the
-disposable issue-290 reader/writer/Kafka inputs, verifies exact-index permissions and the accepted
-writer mapping-authority limit, checks Kafka CA/hostname TLS behavior, consumes the isolated topic
-and proves the canonical topic/group remain untouched. Its bounded qualification sends three
-registrations, including same-ID replacement, and makes ten requests for each query through one
-client. Before dependency reinitialization, it snapshots documents, mapping and committed offsets,
-stops only the Go Deployment, restores the same candidate and configuration, compares retained
-state, and proves one new event advances both state and offsets. The JSON report contains only the
-synthetic state and identity evidence. The test retains the existing HTTP/RPC, dependency-loss,
-liveness, recovery, network-denial and replacement checks. It does not create or delete the
-cluster. A render, fake adapter or disposable pass does not establish a local-dev or QA deployment
-result.
+owned namespace. It proves the disabled query deployment first, enables the ordinary registration
+path, verifies exact-index permissions and Kafka CA/hostname TLS behavior, and sends three
+registrations including a same-ID replacement. It exercises all three query operations, snapshots
+documents, mapping and committed offsets, restarts only the Go Deployment, compares retained state,
+reruns setup to prove it preserves populated state, and proves one new event advances state and
+offsets. The JSON report contains only synthetic state and identity evidence. It does not create or
+delete the cluster. A render, fake adapter or disposable pass does not establish a local-dev or QA
+deployment result.
 
 The monitoring checks validate Dashboard request, Elasticsearch and registration panels, alerts,
 Prometheus rule tests and the collected disposable fixture. The registration owner distinguishes
@@ -148,75 +142,65 @@ apply or verification restores its credential. Do not hand-create, copy or print
 After QA ensure succeeds, leave the shared Flux owner active and wait for it to reconcile; do not
 apply the Dashboard workload directly.
 
-## Prepare isolated registration resources
+## Inspect or retire temporary registration resources
 
 PR1 keeps both shared overlays explicitly selected as `EVENT_PROCESSING_MODE=isolated` with the
 transition guard enabled. They use issue-290 reader and writer Secret names. The selected Kafka
 volume retains the existing ordinary trust name so the PR1 merge cannot require an unproven Secret
-rename. The issue-290 setup/retirement owner targets a suffixed trust Secret for new fixture setup
-and later cleanup, but that unselected resource is not a prerequisite for PR1 reconciliation.
+rename. The issue-290 retirement owner targets a suffixed trust Secret for cleanup, but that
+unselected resource is not a prerequisite for PR1 reconciliation.
 Separate canonical patches are rendered and validated by the deployment check but remain unselected.
 
-The event setup owner targets only `policy_stats_issue_290`,
-`policy-registered-issue-290` and the future `dashboard-service-issue-290` consumer group. It
-creates the index only when absent, adopts compatible empty or populated state without seeding or
-rewriting it, and provisions the separate `go_dashboard_issue_290_reader` and
-`go_dashboard_issue_290_writer` identities. The writer's native Elasticsearch `index` privilege
-can submit compatible mapping updates; this is the accepted issue-290 limit. The shared broker has
-no topic/group ACL, so exact configuration and NetworkPolicy are guards rather than broker
-authorization proof.
+The temporary retirement owner targets only `policy_stats_issue_290`,
+`policy-registered-issue-290` and the `dashboard-service-issue-290` consumer group, plus the
+separate issue-290 reader/writer identities and Secrets. The shared broker has no topic/group ACL,
+so exact configuration and NetworkPolicy are guards rather than broker authorization proof.
 
-After separately authorizing setup on the selected environment, export the same exact coordinates
-used by deployment. For local development:
+Inspection is read-only. Retirement is a separate destructive operation that requires explicit
+authorization for the selected environment. Export the same exact coordinates used by deployment.
+For local development:
 
 ```sh
 export DEPLOY_ENV=local-dev
 export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
 export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
-export DASHBOARD_EVENT_CONFIRM=setup-local-dev-dashboard-event-issue-290
-make go-svc-event-fixture-setup SVC_NAME=dashboard
-unset DASHBOARD_EVENT_CONFIRM
-make go-svc-event-fixture-verify SVC_NAME=dashboard
+make -C services/dashboard-service retirement-inspect
+export DASHBOARD_RETIREMENT_CONFIRM=retire-local-dev-dashboard-issue-290
+make -C services/dashboard-service retirement-retire
+unset DASHBOARD_RETIREMENT_CONFIRM
 ```
 
 For QA, use `qa-insurance-hub`, `qa-svc`, `qa-data` and confirmation
-`setup-qa-dashboard-event-issue-290`. Setup and verify fail before effects when coordinates,
-existing mappings, roles, Secrets, Kafka cluster/listener, topic ownership or CA material differ.
-Normal deployment/status/verification never invokes setup.
+`retire-qa-dashboard-issue-290`. Inspection is read-only. Retirement fails before effects when
+coordinates, ownership, mappings, roles, Secrets, Kafka cluster/listener or topic ownership differ,
+or when the exact consumer group has active members. It deletes the exact group before the topic,
+tolerates retirement Secrets that are already absent, and verifies that every owned resource is
+absent. Normal deployment/status/verification never invokes retirement.
 
-Retirement is deliberately separate because issue 290 retains isolated documents and consumer
-progress for later handoff and return evidence. When a later ticket explicitly authorizes removal, use
-`retire-<environment>-dashboard-event-issue-290` as `DASHBOARD_EVENT_CONFIRM` and run
-`make go-svc-event-fixture-retire SVC_NAME=dashboard`. The owner first verifies every present
-resource belongs to issue 290, then removes only the exact index, identities, Secrets and topic.
-Setup and verification never reset the consumer group; any later group-offset removal needs its own
-broker-state check and authorization.
+## Prepare registration access and transfer
 
-## Prepare canonical access and transfer
-
-Canonical inspection and verification are read-only. Access provisioning creates or updates only
-the exact-index `go_dashboard_policy_stats_writer`, its ordinary workload Secret and the ordinary
-Kafka CA Secret. Before any Elasticsearch mutation it inspects that trust Secret. An absent Secret
-may be created; an issue-293 Secret may be refreshed; and an issue-290 predecessor may be adopted
-only when its identity and `ca.crt` bytes match the selected broker and it either records the
-`dashboard-event-administration` field manager or has no field-manager history. A foreign recorded
-manager fails closed. The adoption transfers server-side field ownership without changing the CA,
-so the still-isolated Pod remains usable until it is stopped. Any foreign or ambiguous predecessor
-fails before effects. It reuses the issue-287 reader and never creates, remaps, seeds or deletes the
-canonical index, topic or group. Bind the exact catalog coordinates before running:
+Registration inspection and verification are read-only. Ensure creates or updates only the
+exact-index reader and writer identities, ordinary workload Secrets, ordinary Kafka CA Secret,
+ordinary topic and empty index mapping. Before any Elasticsearch mutation it inspects the trust
+Secret. An absent Secret may be created; an issue-293 Secret may be refreshed; and an issue-290
+predecessor may be adopted only when its identity and `ca.crt` bytes match the selected broker and
+it either records the expected retirement field manager or has no field-manager history. A foreign
+recorded manager fails closed. It preserves compatible populated state and never seeds documents.
+Bind the exact catalog coordinates before running:
 
 ```sh
-make go-svc-canonical-event-inspect SVC_NAME=dashboard
-export DASHBOARD_CANONICAL_CONFIRM="ensure-access-${DEPLOY_ENV}-dashboard-issue-293"
-make go-svc-canonical-event-ensure-access SVC_NAME=dashboard
-unset DASHBOARD_CANONICAL_CONFIRM
-make go-svc-canonical-event-verify SVC_NAME=dashboard
+make -C services/dashboard-service registration-inspect
+export DASHBOARD_REGISTRATION_CONFIRM="ensure-${DEPLOY_ENV}-dashboard-issue-293"
+make -C services/dashboard-service registration-ensure
+unset DASHBOARD_REGISTRATION_CONFIRM
+make -C services/dashboard-service registration-verify
 ```
 
 The inspect and verify owners require two matching Kafka metadata/progress snapshots, every exact
-topic partition, in-range committed offsets and the exact canonical index/identities. Provisioning
-must preserve the initial document count. There is deliberately no canonical retire command.
+topic partition, in-range committed offsets and the exact ordinary index/identities. Provisioning
+must preserve the initial document count. Ordinary registration administration has no retire
+command.
 
 Forward transfer records index and per-partition progress, stops the whole Java Dashboard
 Deployment, and proves zero running or terminating Java Pods and zero canonical members before one
@@ -330,7 +314,7 @@ guarded deploy, status and verify commands above. For canonical return, keep bot
 and run the read-only return gate before restoring Java:
 
 ```sh
-make go-svc-canonical-return-check SVC_NAME=dashboard
+make -C services/dashboard-service canonical-return-check
 ```
 
 The gate rejects any running or terminating Java/Go Pod, canonical member, incomplete partition,
@@ -384,7 +368,7 @@ disposable evidence alone does not establish a QA result.
 ## Return from QA activation
 
 For a canonical return, first use reviewed Flux revisions to reconcile Go and Java to zero and run
-`go-svc-canonical-return-check SVC_NAME=dashboard`. Reconcile the retained Java Deployment only
+`make -C services/dashboard-service canonical-return-check`. Reconcile the retained Java Deployment only
 after that gate passes, qualify Java against the preserved canonical state, and then route back to
 Java. Keep monitoring and data resources unchanged. Record each source/applied revision, workload
 identity, route and progress snapshot before and after the return.

@@ -8,9 +8,9 @@ INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py scripts/deployment.py \
-	scripts/event_administration.py scripts/canonical_event_administration.py \
+	scripts/retirement_administration.py scripts/registration_administration.py \
 	scripts/ownership_transition.py scripts/reader_administration.py \
-	scripts/test_event_administration.py scripts/test_canonical_event_administration.py \
+	scripts/test_retirement_administration.py scripts/test_registration_administration.py \
 	scripts/test_ownership_transition.py scripts/test_reader_administration.py \
 	scripts/disposable_deployment.py scripts/image_check.py scripts/service_process.py \
 	scripts/test_image_check.py \
@@ -27,8 +27,8 @@ PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_image_check.py \
 	scripts/test_deployment.py \
 	scripts/test_disposable_deployment.py \
-	scripts/test_event_administration.py \
-	scripts/test_canonical_event_administration.py \
+	scripts/test_retirement_administration.py \
+	scripts/test_registration_administration.py \
 	scripts/test_ownership_transition.py \
 	scripts/test_reader_administration.py \
 	scripts/test_disposable_command.py \
@@ -98,7 +98,6 @@ IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
 QUALIFICATION_IMAGE_REF ?=
 QUALIFICATION_SOURCE_REVISION ?=
 QUALIFICATION_REPORT_FILE ?=
-QUALIFICATION_JAVA_IMAGE_REF ?=
 QUALIFICATION_EFFECTIVE_IMAGE_REF := $(if $(strip $(QUALIFICATION_IMAGE_REF)),$(QUALIFICATION_IMAGE_REF),$(IMAGE_REF))
 QUALIFICATION_IMAGE_PREREQUISITE := $(if $(strip $(QUALIFICATION_IMAGE_REF)),,image-build)
 TARGET_PLATFORM ?= linux/amd64
@@ -125,18 +124,15 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	test-coverage-tooling test-integration test-elasticsearch-integration test-event-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
 	image-build image-check _image-check-existing deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop \
-	reader-ensure reader-verify reader-rotate event-fixture-setup event-fixture-verify \
-	event-fixture-retire canonical-event-inspect canonical-event-ensure-access \
-	canonical-event-verify canonical-return-check deploy-test-tooling deploy-test \
-	_qualification-java-image-check \
-	_deploy-test-rpc \
+	reader-ensure reader-verify reader-rotate registration-inspect registration-ensure \
+	registration-verify retirement-inspect retirement-retire canonical-return-check \
+	deploy-test-tooling deploy-smoke _deploy-smoke-rpc \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
 	shared-candidate-generated shared-candidate-breaking shared-candidate-integration \
 	shared-candidate-image
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
-export QUALIFICATION_JAVA_IMAGE_REF
 
 image-build: python-runtime-check ## Build the pinned linux/amd64 Dashboard runtime image
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
@@ -169,13 +165,13 @@ reader-ensure reader-verify reader-rotate: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/reader_administration.py '$(@:reader-%=%)'
 
-event-fixture-setup event-fixture-verify event-fixture-retire: python-runtime-check
+retirement-inspect retirement-retire: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/event_administration.py '$(@:event-fixture-%=%)'
+		"$(PYTHON)" scripts/retirement_administration.py '$(@:retirement-%=%)'
 
-canonical-event-inspect canonical-event-ensure-access canonical-event-verify: python-runtime-check
+registration-inspect registration-ensure registration-verify: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/canonical_event_administration.py '$(@:canonical-event-%=%)'
+		"$(PYTHON)" scripts/registration_administration.py '$(@:registration-%=%)'
 
 canonical-return-check: python-runtime-check ## Verify the stopped canonical boundary before Java return
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
@@ -183,34 +179,30 @@ canonical-return-check: python-runtime-check ## Verify the stopped canonical bou
 
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Dashboard deployment guards
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		"$(PYTHON)" -m pytest -q scripts/test_deployment.py scripts/test_event_administration.py \
-		scripts/test_canonical_event_administration.py scripts/test_ownership_transition.py \
+		"$(PYTHON)" -m pytest -q -m 'not integration' \
+		scripts/test_deployment.py scripts/test_disposable_command.py \
+		scripts/test_disposable_deployment.py scripts/test_retirement_administration.py \
+		scripts/test_registration_administration.py scripts/test_ownership_transition.py \
 		scripts/test_reader_administration.py
 
-_qualification-java-image-check:
-	@test -n "$${QUALIFICATION_JAVA_IMAGE_REF:-}" || { \
-		echo 'deploy-test: QUALIFICATION_JAVA_IMAGE_REF is required' >&2; exit 1; \
-	}
-
-deploy-test: _qualification-java-image-check python-toolchain-check $(QUALIFICATION_IMAGE_PREREQUISITE) ## Exercise Dashboard in an owned disposable Kind namespace
+deploy-smoke: python-toolchain-check $(QUALIFICATION_IMAGE_PREREQUISITE) ## Smoke Dashboard in an owned disposable Kind namespace
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		IMAGE_REF="$(QUALIFICATION_EFFECTIVE_IMAGE_REF)" \
 		QUALIFICATION_SOURCE_REVISION="$(QUALIFICATION_SOURCE_REVISION)" \
 		QUALIFICATION_REPORT_FILE="$(QUALIFICATION_REPORT_FILE)" \
-		QUALIFICATION_JAVA_IMAGE_REF="$(QUALIFICATION_JAVA_IMAGE_REF)" \
 		ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" KAFKA_IMAGE="$(KAFKA_IMAGE)" \
 		GO="$(GO)" MAKE_COMMAND="$(MAKE)" TOOLS_DIR="$(TOOLS_DIR)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_disposable_deployment.py
 
-_deploy-test-rpc: verify-tools
+_deploy-smoke-rpc: verify-tools
 	@test -n "$${DASHBOARD_DEPLOYMENT_GRPC_ADDR:-}" || { \
-		echo '_deploy-test-rpc: DASHBOARD_DEPLOYMENT_GRPC_ADDR is required' >&2; exit 1; \
+		echo '_deploy-smoke-rpc: DASHBOARD_DEPLOYMENT_GRPC_ADDR is required' >&2; exit 1; \
 	}
 	@case "$${DASHBOARD_DEPLOYMENT_RPC_SCENARIO:-}" in \
 		owned-fixture) test_name=TestDeployedDirectRPC;; \
 		shared-smoke) test_name=TestDeployedDirectRPCSharedSmoke;; \
 		registration) test_name=TestDeployedDirectRPCRegistration;; \
-		*) echo '_deploy-test-rpc: DASHBOARD_DEPLOYMENT_RPC_SCENARIO must be owned-fixture, shared-smoke or registration' >&2; exit 1;; \
+		*) echo '_deploy-smoke-rpc: DASHBOARD_DEPLOYMENT_RPC_SCENARIO must be owned-fixture, shared-smoke or registration' >&2; exit 1;; \
 	esac; \
 	GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
 		-run="^$${test_name}$$" -json ./internal/service

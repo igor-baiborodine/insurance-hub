@@ -1,4 +1,4 @@
-"""Dashboard event administration guard tests; unit cases never contact a cluster."""
+"""Dashboard retirement administration guards; unit cases never contact a cluster."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
-import event_administration as administration
 import pytest
+import retirement_administration as administration
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -24,9 +24,9 @@ def target_environment(name: str = "local-dev") -> dict[str, str]:
 def service_record() -> dict[str, object]:
     return {
         "environments": ["local-dev", "qa"],
-        "eventAdministration": {
+        "retirementAdministration": {
             "owner": administration.OWNER,
-            "asset": "services/dashboard-service/internal/administration/registration.json",
+            "asset": "services/dashboard-service/internal/administration/retirement-registration.json",
             "index": administration.INDEX,
             "readerRole": administration.READER,
             "readerUser": administration.READER,
@@ -45,7 +45,7 @@ def target_record(name: str = "local-dev") -> dict[str, object]:
         "context": "kind-local-dev-insurance-hub" if local else "qa-insurance-hub",
         "namespace": "local-dev-all" if local else "qa-svc",
         "dataNamespace": "local-dev-all" if local else "qa-data",
-        "eventAdministration": {
+        "retirementAdministration": {
             "service": f"{prefix}-elasticsearch-es-http",
             "adminSecret": f"{prefix}-elasticsearch-es-elastic-user",
             "readerSecret": f"{prefix}-dashboard-elasticsearch-issue-290",
@@ -92,16 +92,110 @@ def test_target_rejects_wrong_coordinates_before_cluster_access() -> None:
         administration.Target()
 
 
-@pytest.mark.parametrize("operation", ["setup", "retire"])
-def test_mutations_require_exact_confirmation_before_target_selection(operation: str) -> None:
+def test_retire_requires_exact_confirmation_before_target_selection() -> None:
     with (
         patch.dict(administration.os.environ, target_environment(), clear=True),
         patch.object(administration, "Target") as target,
-        pytest.raises(administration.AdministrationError, match="DASHBOARD_EVENT_CONFIRM"),
+        pytest.raises(administration.AdministrationError, match="DASHBOARD_RETIREMENT_CONFIRM"),
     ):
-        administration.execute(operation)
+        administration.execute("retire")
 
     target.assert_not_called()
+
+
+def test_group_inspection_reports_active_member_and_complete_progress() -> None:
+    selected = object.__new__(administration.Target)
+    selected.kafka_cluster = "qa-kafka"
+    selected.data_namespace = "qa-data"
+    selected.json = Mock(
+        return_value={
+            "items": [
+                {
+                    "metadata": {
+                        "name": "qa-kafka-0",
+                        "labels": {"strimzi.io/broker-role": "true"},
+                    },
+                    "status": {
+                        "phase": "Running",
+                        "conditions": [{"type": "Ready", "status": "True"}],
+                    },
+                }
+            ]
+        }
+    )
+    selected.run = Mock(
+        side_effect=[
+            "dashboard-service-issue-290\n",
+            "GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID\n"
+            "dashboard-service-issue-290 policy-registered-issue-290 0 4 4 0 member-1 /host client\n",
+        ]
+    )
+
+    state = selected.consumer_group_state()
+
+    assert state == {
+        "present": True,
+        "activeMembers": 1,
+        "offsets": [{"partition": 0, "committed": 4, "logEnd": 4}],
+    }
+
+
+def test_group_deletion_is_idempotent_and_verifies_absence() -> None:
+    selected = object.__new__(administration.Target)
+    selected.data_namespace = "qa-data"
+    selected.consumer_group_state = Mock(
+        side_effect=[
+            {"present": True, "activeMembers": 0, "offsets": []},
+            {"present": False, "activeMembers": 0, "offsets": []},
+        ]
+    )
+    selected.kafka_broker = Mock(return_value="qa-kafka-0")
+    selected.run = Mock(return_value="")
+
+    selected.delete_consumer_group()
+
+    assert "--delete" in selected.run.call_args.args
+    assert selected.run.call_args.kwargs["namespace"] == "qa-data"
+
+
+def test_retire_rejects_active_group_before_mutation() -> None:
+    selected = SimpleNamespace(
+        reader_secret="qa-dashboard-elasticsearch-issue-290",
+        writer_secret="qa-dashboard-elasticsearch-writer-issue-290",
+        kafka_ca_secret="qa-dashboard-kafka-ca-issue-290",
+        delete_consumer_group=Mock(),
+    )
+    admin = Mock()
+    state = {
+        "documents": 0,
+        "consumerGroup": {"present": True, "activeMembers": 1, "offsets": []},
+    }
+    with (
+        patch.object(administration, "inspect_retirement", return_value=state),
+        pytest.raises(administration.AdministrationError, match="active members"),
+    ):
+        administration.retire(selected, admin, administration.load_definition())
+
+    selected.delete_consumer_group.assert_not_called()
+    admin.request.assert_not_called()
+
+
+def test_absence_verification_rejects_remaining_topic() -> None:
+    selected = SimpleNamespace(
+        data_namespace="qa-data",
+        reader_secret="qa-dashboard-elasticsearch-issue-290",
+        writer_secret="qa-dashboard-elasticsearch-writer-issue-290",
+        kafka_ca_secret="qa-dashboard-kafka-ca-issue-290",
+        json=Mock(return_value={"metadata": {"name": administration.TOPIC}}),
+        consumer_group_state=Mock(
+            return_value={"present": False, "activeMembers": 0, "offsets": []}
+        ),
+    )
+    admin = Mock()
+    admin.request.return_value = (404, {})
+
+    with pytest.raises(administration.AdministrationError, match="still exists"):
+        administration.verify_absent(selected, admin)
 
 
 def owned_secret(name: str, username: str, password: str, component: str) -> dict[str, object]:
@@ -302,7 +396,7 @@ def test_retire_refuses_foreign_topic_before_any_topic_or_secret_deletion() -> N
     target.run.assert_not_called()
 
 
-def test_retire_rejects_every_canonical_resource_name_before_inspection() -> None:
+def test_retire_rejects_every_ordinary_resource_name_before_inspection() -> None:
     definition = administration.load_definition()
     target = SimpleNamespace(
         reader_secret="local-dev-dashboard-elasticsearch",

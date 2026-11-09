@@ -19,8 +19,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-import canonical_event_administration as canonical
 import ownership_transition as transition
+import registration_administration as registration
 import yaml
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
@@ -1608,7 +1608,7 @@ def pod_counts(items: list[dict[str, Any]]) -> tuple[int, int]:
 
 
 def canonical_kafka_snapshot(target: Target) -> dict[str, Any]:
-    event = target.configuration.get("canonicalEventAdministration", {})
+    event = target.configuration.get("registrationAdministration", {})
     cluster = event.get("kafkaCluster", "")
     require(cluster == f"{target.environment}-kafka", "canonical Kafka cluster differs")
     pods = target.data_json("get", "pods", "-l", f"strimzi.io/cluster={cluster}").get("items", [])
@@ -1636,7 +1636,7 @@ def canonical_kafka_snapshot(target: Target) -> dict[str, Any]:
         "localhost:9092",
         "--describe",
         "--topic",
-        canonical.TOPIC,
+        registration.TOPIC,
     )
     partitions = sorted({int(value) for value in re.findall(r"Partition:\s*(\d+)", topic)})
     require(partitions == list(range(len(partitions))) and partitions, "canonical topic differs")
@@ -1652,13 +1652,13 @@ def canonical_kafka_snapshot(target: Target) -> dict[str, Any]:
         "localhost:9092",
         "--describe",
         "--group",
-        canonical.GROUP,
+        registration.GROUP,
     )
     offsets: dict[int, tuple[int, int]] = {}
     members: set[str] = set()
     for line in group.splitlines():
         fields = line.split()
-        if len(fields) < 6 or fields[0] != canonical.GROUP or fields[1] != canonical.TOPIC:
+        if len(fields) < 6 or fields[0] != registration.GROUP or fields[1] != registration.TOPIC:
             continue
         try:
             partition, committed, log_end = map(int, fields[2:5])
@@ -1679,7 +1679,7 @@ def canonical_progress_observation(
     time.sleep(1)
     second = canonical_kafka_snapshot(target)
     return second, transition.ProgressState(
-        stable=canonical.stable_kafka_progress(first, second),
+        stable=registration.stable_kafka_progress(first, second),
         complete=bool(second["partitions"]),
         in_range=True,
     )
@@ -2388,7 +2388,7 @@ def run_deployed_direct_rpc(port: int, scenario: str = "shared-smoke") -> None:
             "--no-print-directory",
             "-C",
             "services/dashboard-service",
-            "_deploy-test-rpc",
+            "_deploy-smoke-rpc",
         ],
         timeout=60,
         environment={

@@ -145,7 +145,7 @@ make -C services/dashboard-service image-check
 
 make go-svc-deploy-check SVC_NAME=dashboard
 make go-svc-deploy-test-tooling SVC_NAME=dashboard
-make go-svc-deploy-test SVC_NAME=dashboard
+make go-svc-deploy-smoke SVC_NAME=dashboard
 ```
 
 `check` covers exact pins, Go/protobuf formatting and lint, race-enabled tests, build, dependency
@@ -170,16 +170,13 @@ increase; disabled reports enabled zero; a stalled worker has increasing in-flig
 runtime samples indicate telemetry loss. Logs, traces and labels omit event bodies, policy/customer
 values, amounts, topics, groups, credentials and raw dependency errors.
 
-`go-svc-deploy-test` loads that exact image plus digest-pinned Elasticsearch and Kafka images into
-the configured Kind cluster, then creates one uniquely owned namespace. It first proves the
-disabled query deployment, then enables only the disposable issue-290 inputs, checks reader/writer
-permissions and the accepted mapping-authority limit, verifies Kafka TLS/hostname handling, and
-projects an isolated registration. It then uses `QUALIFICATION_JAVA_IMAGE_REF` for one bounded
-disposable canonical rehearsal. The rehearsal establishes two Java-owned documents and nonzero
-commits, stops Java before Go, exercises a failed Go readiness transition and ordered Java return,
-then completes Java to Go to Java with a same-ID replacement and a new post-return event/query.
-Every owner change waits for terminating Pods and canonical group membership to disappear. Its
-fixture setup is explicit test administration; serving never creates or seeds state. The test
+`go-svc-deploy-smoke` loads that exact image plus digest-pinned Elasticsearch and Kafka images into
+the configured Kind cluster, then creates one uniquely owned namespace. It proves the disabled
+query deployment, enables the ordinary registration path, checks reader/writer permissions and
+Kafka TLS/hostname handling, and registers three synthetic events including a same-ID replacement.
+It exercises all three query operations, restarts the Go deployment, verifies retained documents
+and offsets, reruns setup to prove it preserves populated state, and registers one follow-up event.
+Its fixture setup is explicit test administration; serving never creates or seeds state. The smoke
 removes its namespace and does not establish a local-dev or QA deployment result. The guarded
 deployment stage requires the exact target ECK Service, reader Secret and QA public-CA copy before
 mutation. `go-svc-deploy-verify` creates and removes bounded qualification Pods and one untrusted
@@ -214,26 +211,19 @@ mutation requires the environment-specific `DASHBOARD_READER_CONFIRM` value docu
 owner never creates or changes `policy_stats`, prints credentials, or places credentials on a host
 command line.
 
-The issue-290 event administration owner is separately dispatched as
-`go-svc-event-fixture-setup`, `go-svc-event-fixture-verify` and
-`go-svc-event-fixture-retire`. Setup creates `policy_stats_issue_290` only when absent, adopts a
-compatible empty or populated index without rewriting documents, and provisions the exact
-`go_dashboard_issue_290_reader`/`go_dashboard_issue_290_writer` identities, workload Secrets,
-broker CA and registration topic. Verify is read-only. Setup and retirement require the exact
-`DASHBOARD_EVENT_CONFIRM` values documented in the deployment runbook. Retirement removes the exact
-index, identities, Secrets and topic, so it remains a separately authorized later operation; it
-does not reset the consumer group.
+Ordinary registration administration is owned by the service-local `registration-inspect`,
+`registration-ensure` and `registration-verify` targets. It inspects the existing index and
+stable Kafka topic/group progress, reuses the issue-287 reader, and provisions the issue-293
+exact-index writer plus ordinary workload and Kafka-trust Secrets. Ensure creates the exact empty
+mapping, topic, roles and trust only when absent, preserves compatible populated state, and rejects
+foreign ownership or incompatible state. It never seeds documents.
 
-Canonical administration is separately dispatched as `go-svc-canonical-event-inspect`,
-`go-svc-canonical-event-ensure-access` and `go-svc-canonical-event-verify`. It inspects the existing
-index and stable Kafka topic/group progress, reuses the issue-287 reader, and may provision only
-the issue-293 exact-index writer plus ordinary writer and Kafka-trust Secrets. Before any
-Elasticsearch mutation, ensure-access either creates the ordinary trust Secret or adopts only the
-exact issue-290 predecessor with matching CA bytes. It accepts the expected issue-290 field manager
-or a historical Secret with no field-manager record; any foreign recorded manager fails before
-server-side apply. It never creates, deletes, remaps, seeds or retires canonical state. The isolated
-retirement owner rejects ordinary canonical names before its first inspection or deletion.
-`go-svc-canonical-return-check` observes both workloads, terminating Pods, canonical membership and
+The temporary issue-290 owner is exposed through the service-local `retirement-inspect` and
+`retirement-retire` targets. Inspection is read-only and accepts already-absent retirement Secrets.
+Retirement requires exact issue-290 ownership, rejects active consumer-group members, deletes the
+exact group and owned resources, and verifies every postcondition. The isolated retirement owner
+rejects ordinary registration names before its first inspection or deletion.
+`canonical-return-check` observes both workloads, terminating Pods, canonical membership and
 stable progress before Java return.
 
 The guarded local-dev sequence uses catalog service `dashboard`, context

@@ -250,15 +250,8 @@
         "reader-ensure",
         "reader-verify",
         "reader-rotate",
-        "event-fixture-setup",
-        "event-fixture-verify",
-        "event-fixture-retire",
-        "canonical-event-inspect",
-        "canonical-event-ensure-access",
-        "canonical-event-verify",
-        "canonical-return-check",
         "deploy-test-tooling",
-        "deploy-test"
+        "deploy-smoke"
       ],
       "releaseTargets": [
         "qa"
@@ -269,9 +262,9 @@
         "role": "go_dashboard_total_sales_reader",
         "user": "go_dashboard_total_sales_reader"
       },
-      "eventAdministration": {
+      "retirementAdministration": {
         "owner": "issue-290",
-        "asset": "services/dashboard-service/internal/administration/registration.json",
+        "asset": "services/dashboard-service/internal/administration/retirement-registration.json",
         "index": "policy_stats_issue_290",
         "readerRole": "go_dashboard_issue_290_reader",
         "readerUser": "go_dashboard_issue_290_reader",
@@ -295,7 +288,7 @@
             "workloadCASecret": "",
             "serverName": ""
           },
-          "eventAdministration": {
+          "retirementAdministration": {
             "service": "local-dev-elasticsearch-es-http",
             "adminSecret": "local-dev-elasticsearch-es-elastic-user",
             "readerSecret": "local-dev-dashboard-elasticsearch-issue-290",
@@ -309,7 +302,7 @@
             "kafkaReplicas": 1
           },
           "kindCluster": "local-dev-insurance-hub",
-          "canonicalEventAdministration": {
+          "registrationAdministration": {
             "service": "local-dev-elasticsearch-es-http",
             "adminSecret": "local-dev-elasticsearch-es-elastic-user",
             "readerSecret": "local-dev-dashboard-elasticsearch",
@@ -337,7 +330,7 @@
             "workloadCASecret": "qa-dashboard-elasticsearch-ca",
             "serverName": "qa-elasticsearch-es-http.qa-data.svc"
           },
-          "eventAdministration": {
+          "retirementAdministration": {
             "service": "qa-elasticsearch-es-http",
             "adminSecret": "qa-elasticsearch-es-elastic-user",
             "readerSecret": "qa-dashboard-elasticsearch-issue-290",
@@ -360,7 +353,7 @@
             "sharedPath": "./k8s/overlays/qa/svc",
             "branch": "main"
           },
-          "canonicalEventAdministration": {
+          "registrationAdministration": {
             "service": "qa-elasticsearch-es-http",
             "adminSecret": "qa-elasticsearch-es-elastic-user",
             "readerSecret": "qa-dashboard-elasticsearch",
@@ -375,9 +368,9 @@
           }
         }
       },
-      "canonicalEventAdministration": {
+      "registrationAdministration": {
         "owner": "issue-293",
-        "asset": "services/dashboard-service/internal/administration/canonical-registration.json",
+        "asset": "services/dashboard-service/internal/administration/registration.json",
         "index": "policy_stats",
         "readerRole": "go_dashboard_total_sales_reader",
         "readerUser": "go_dashboard_total_sales_reader",

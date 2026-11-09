@@ -147,15 +147,8 @@ def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() 
         "reader-ensure",
         "reader-verify",
         "reader-rotate",
-        "event-fixture-setup",
-        "event-fixture-verify",
-        "event-fixture-retire",
-        "canonical-event-inspect",
-        "canonical-event-ensure-access",
-        "canonical-event-verify",
-        "canonical-return-check",
         "deploy-test-tooling",
-        "deploy-test",
+        "deploy-smoke",
     ]
     catalog = resolve.load_catalog(script_dir / "catalog.json")
 
@@ -174,7 +167,14 @@ def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() 
     assert record["deploymentTargets"]["local-dev"]["dataNamespace"] == "local-dev-all"
     assert record["deploymentTargets"]["qa"]["dataNamespace"] == "qa-data"
     assert paths == ["services/dashboard-service"] * len(expected)
-    for unsupported in ("fixture-setup", "deploy-test-flux", "initialize"):
+    for unsupported in (
+        "fixture-setup",
+        "registration-inspect",
+        "retirement-inspect",
+        "canonical-return-check",
+        "deploy-test-flux",
+        "initialize",
+    ):
         with pytest.raises(resolve.DispatchError, match="does not support capability"):
             resolve.resolve_service(root, script_dir / "catalog.json", "dashboard", unsupported)
 
