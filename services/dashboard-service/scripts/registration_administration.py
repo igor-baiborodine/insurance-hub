@@ -68,7 +68,7 @@ def load_definition(path: Path = ASSET) -> dict[str, Any]:
     mapping = value.get("mapping")
     require(
         isinstance(mapping, dict)
-        and mapping.get("dynamic") == "strict"
+        and "dynamic" not in mapping
         and set(mapping.get("properties", {}))
         == {"number", "from", "to", "policyHolder", "productCode", "totalPremium", "agentLogin"},
         "registration mapping differs",
@@ -284,6 +284,8 @@ class Target:
         if existing:
             self.verify_topic(existing)
             return "owned"
+        if self.broker_topic_partitions(allow_absent=True):
+            return "preserved"
         manifest = {
             "apiVersion": "kafka.strimzi.io/v1beta2",
             "kind": "KafkaTopic",
@@ -307,15 +309,29 @@ class Target:
             input_text=json.dumps(manifest),
         )
         self.verify_topic()
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            if self.broker_topic_partitions(allow_absent=True):
+                break
+            time.sleep(1)
+        else:
+            raise AdministrationError(f"Kafka topic {TOPIC} was not created")
         return "created"
 
-    def verify_topic(self, value: dict[str, Any] | None = None) -> None:
-        topic = value or self.json(
-            "get",
-            "kafkatopic",
-            TOPIC,
-            namespace=self.data_namespace,
-        )
+    def verify_topic(
+        self,
+        value: dict[str, Any] | None = None,
+        *,
+        allow_absent: bool = False,
+    ) -> bool:
+        topic = value
+        if topic is None:
+            arguments = ["get", "kafkatopic", TOPIC]
+            if allow_absent:
+                arguments.append("--ignore-not-found")
+            topic = self.json(*arguments, namespace=self.data_namespace)
+        if not topic and allow_absent:
+            return False
         metadata = topic.get("metadata", {})
         require(
             topic.get("kind") == "KafkaTopic"
@@ -326,8 +342,9 @@ class Target:
             and topic.get("spec") == {"partitions": 1, "replicas": self.kafka_replicas},
             f"KafkaTopic/{TOPIC} differs",
         )
+        return True
 
-    def kafka_snapshot(self) -> dict[str, Any]:
+    def kafka_broker(self) -> str:
         pods = self.json(
             "get",
             "pods",
@@ -347,9 +364,30 @@ class Target:
             )
         )
         require(bool(ready) and ready[0], "no ready Kafka broker Pod is available")
+        return ready[0]
+
+    def broker_topic_partitions(self, *, allow_absent: bool = False) -> list[int]:
+        broker = self.kafka_broker()
+        topics = set(
+            self.run(
+                "exec",
+                broker,
+                "-c",
+                "kafka",
+                "--",
+                "/opt/kafka/bin/kafka-topics.sh",
+                "--bootstrap-server",
+                "localhost:9092",
+                "--list",
+                namespace=self.data_namespace,
+            ).splitlines()
+        )
+        if TOPIC not in topics:
+            require(allow_absent, f"Kafka topic {TOPIC} is absent")
+            return []
         topic = self.run(
             "exec",
-            ready[0],
+            broker,
             "-c",
             "kafka",
             "--",
@@ -365,10 +403,15 @@ class Target:
         require(
             partitions and partitions == list(range(len(partitions))), "registration topic differs"
         )
+        return partitions
+
+    def kafka_snapshot(self) -> dict[str, Any]:
+        broker = self.kafka_broker()
+        partitions = self.broker_topic_partitions()
         groups = set(
             self.run(
                 "exec",
-                ready[0],
+                broker,
                 "-c",
                 "kafka",
                 "--",
@@ -383,7 +426,7 @@ class Target:
             return {"partitions": partitions, "offsets": {}, "activeMembers": 0}
         group = self.run(
             "exec",
-            ready[0],
+            broker,
             "-c",
             "kafka",
             "--",
@@ -698,7 +741,7 @@ def execute(operation: str) -> None:
         target.ensure_kafka_trust(kafka_ca)
         target.ensure_topic()
     else:
-        target.verify_topic()
+        target.verify_topic(allow_absent=True)
     certificate = (
         target.secret_value(target.data_namespace, target.public_ca_secret, "ca.crt")
         if target.public_ca_secret

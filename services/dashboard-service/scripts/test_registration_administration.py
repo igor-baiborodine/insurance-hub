@@ -156,6 +156,7 @@ def test_kafka_snapshot_requires_complete_in_range_registration_progress() -> No
     )
     selected.run = Mock(
         side_effect=[
+            "policy-registered\n",
             "Topic: policy-registered Partition: 0 Leader: 0 Replicas: 0 Isr: 0\n",
             "dashboard-service\n",
             "GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID\n"
@@ -167,6 +168,25 @@ def test_kafka_snapshot_requires_complete_in_range_registration_progress() -> No
         "offsets": {0: (7, 9)},
         "activeMembers": 0,
     }
+
+
+def test_ensure_topic_preserves_compatible_broker_topic_without_creating_resource() -> None:
+    selected = object.__new__(administration.Target)
+    selected.data_namespace = "local-dev-all"
+    selected.json = Mock(return_value={})
+    selected.run = Mock()
+    selected.broker_topic_partitions = Mock(return_value=[0])
+
+    assert selected.ensure_topic() == "preserved"
+    selected.run.assert_not_called()
+
+
+def test_topic_inspection_accepts_absent_resource_for_existing_broker_state() -> None:
+    selected = object.__new__(administration.Target)
+    selected.data_namespace = "local-dev-all"
+    selected.json = Mock(return_value={})
+
+    assert not selected.verify_topic(allow_absent=True)
 
 
 def test_stable_kafka_progress_accepts_new_arrivals_without_commit_changes() -> None:
@@ -208,10 +228,10 @@ def test_ensure_index_preserves_compatible_populated_state() -> None:
     client.request.assert_not_called()
 
 
-def test_mapping_compatibility_rejects_non_strict_existing_mapping() -> None:
+def test_mapping_compatibility_rejects_unexpected_dynamic_policy() -> None:
     definition = administration.load_definition()["mapping"]
     actual = administration.json.loads(administration.json.dumps(definition))
-    actual["dynamic"] = False
+    actual["dynamic"] = "strict"
 
     assert not administration.mapping_is_compatible(actual, definition)
 

@@ -3,11 +3,13 @@
   "owner": "issue-293",
   "index": "policy_stats",
   "mapping": {
-    "dynamic": "strict",
     "properties": {
-      "number": {"type": "keyword"},
-      "from": {"type": "date", "format": "strict_date"},
-      "to": {"type": "date", "format": "strict_date"},
+      "number": {
+        "type": "text",
+        "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
+      },
+      "from": {"type": "date"},
+      "to": {"type": "date"},
       "policyHolder": {
         "type": "text",
         "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
@@ -16,7 +18,7 @@
         "type": "text",
         "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
       },
-      "totalPremium": {"type": "double"},
+      "totalPremium": {"type": "float"},
       "agentLogin": {
         "type": "text",
         "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
