@@ -2423,7 +2423,7 @@ def run_go_only_smoke(
     )
     queries = run_query_workload(
         cluster,
-        canonical_query_oracles(qualification),
+        qualification["queries"],
         1,
         qualification["measurement"]["requestDeadlineSeconds"],
     )
