@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   name: dashboard-api-legacy
 spec:
+  replicas: 0
   template:
     spec:
       containers:
