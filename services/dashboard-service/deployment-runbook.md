@@ -199,9 +199,10 @@ Canonical inspection and verification are read-only. Access provisioning creates
 the exact-index `go_dashboard_policy_stats_writer`, its ordinary workload Secret and the ordinary
 Kafka CA Secret. Before any Elasticsearch mutation it inspects that trust Secret. An absent Secret
 may be created; an issue-293 Secret may be refreshed; and an issue-290 predecessor may be adopted
-only when its identity, `dashboard-event-administration` field manager and `ca.crt` bytes match the
-selected broker. The adoption transfers server-side field ownership without changing the CA, so
-the still-isolated Pod remains usable until it is stopped. Any foreign or ambiguous predecessor
+only when its identity and `ca.crt` bytes match the selected broker and it either records the
+`dashboard-event-administration` field manager or has no field-manager history. A foreign recorded
+manager fails closed. The adoption transfers server-side field ownership without changing the CA,
+so the still-isolated Pod remains usable until it is stopped. Any foreign or ambiguous predecessor
 fails before effects. It reuses the issue-287 reader and never creates, remaps, seeds or deletes the
 canonical index, topic or group. Bind the exact catalog coordinates before running:
 
@@ -283,6 +284,10 @@ make go-svc-deploy-verify SVC_NAME=dashboard
 The predecessor input accepts only a source-derived local Dashboard image. It permits that exact
 image, Deployment version labels and ConfigMap `SERVICE_VERSION` only before apply. Final status
 and verification require the selected replacement identity everywhere.
+
+For the first PR1 reconciliation only, preflight also accepts the exact historical local-dev
+predecessor with implicit isolated mode and the prior `RollingUpdate` strategy. Apply must replace
+those values with explicit mode selection and `Recreate`; final status rejects the predecessor.
 
 Preflight requires the namespace-local `local-dev-dashboard-elasticsearch` Secret to contain only
 the exact reader username and password, requires the reader identity

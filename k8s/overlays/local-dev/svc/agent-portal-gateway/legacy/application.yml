@@ -4,3 +4,6 @@ micronaut:
       product-service:
         urls:
           - http://local-dev-product-api.local-dev-all.svc.cluster.local:80
+      dashboard-service:
+        urls:
+          - http://local-dev-dashboard-api.local-dev-all.svc.cluster.local:80

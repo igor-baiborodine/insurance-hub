@@ -173,7 +173,14 @@ def test_stable_kafka_progress_accepts_new_arrivals_without_commit_changes() -> 
     assert stable
 
 
-def test_kafka_trust_adopts_exact_issue_290_predecessor() -> None:
+@pytest.mark.parametrize(
+    "managed_fields",
+    [[], [{"manager": "dashboard-event-administration"}]],
+    ids=["historical-managerless", "managed"],
+)
+def test_kafka_trust_adopts_exact_issue_290_predecessor(
+    managed_fields: list[dict[str, str]],
+) -> None:
     # given
     certificate = b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
     encoded = administration.base64.b64encode(certificate).decode("ascii")
@@ -190,7 +197,7 @@ def test_kafka_trust_adopts_exact_issue_290_predecessor() -> None:
                 "app.kubernetes.io/component": "kafka-trust",
                 "insurance-hub.io/owner": "issue-290",
             },
-            "managedFields": [{"manager": "dashboard-event-administration"}],
+            "managedFields": managed_fields,
         },
         "type": "Opaque",
         "data": {"ca.crt": encoded},
@@ -215,6 +222,37 @@ def test_kafka_trust_adopts_exact_issue_290_predecessor() -> None:
     # then
     assert state == "adopted-issue-290"
     assert "--force-conflicts" in selected.run.call_args.args
+
+
+def test_kafka_trust_rejects_issue_290_predecessor_with_foreign_manager() -> None:
+    # given
+    certificate = b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
+    selected = object.__new__(administration.Target)
+    selected.namespace = "local-dev-all"
+    selected.kafka_ca_secret = "local-dev-dashboard-kafka-ca"
+    selected.json = Mock(
+        return_value={
+            "kind": "Secret",
+            "metadata": {
+                "name": selected.kafka_ca_secret,
+                "namespace": selected.namespace,
+                "labels": {
+                    "app.kubernetes.io/name": "dashboard-api",
+                    "app.kubernetes.io/component": "kafka-trust",
+                    "insurance-hub.io/owner": "issue-290",
+                },
+                "managedFields": [{"manager": "foreign-manager"}],
+            },
+            "type": "Opaque",
+            "data": {"ca.crt": administration.base64.b64encode(certificate).decode("ascii")},
+        }
+    )
+    selected.run = Mock()
+
+    # when / then
+    with pytest.raises(administration.AdministrationError, match="predecessor manager"):
+        selected.ensure_kafka_trust(certificate)
+    selected.run.assert_not_called()
 
 
 def test_kafka_trust_rejects_foreign_predecessor_before_apply() -> None:

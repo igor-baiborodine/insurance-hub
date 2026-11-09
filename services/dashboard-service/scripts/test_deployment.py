@@ -522,13 +522,16 @@ def test_verify_runs_rpc_and_access_after_all_http_smokes_fail() -> None:
 
 
 @pytest.mark.parametrize("trend_body", [b"{}", b'{"periodSales":[]}'])
-def test_verify_accepts_empty_and_populated_trend_envelopes(trend_body: bytes) -> None:
+def test_verify_canonical_accepts_empty_and_populated_trend_envelopes(
+    trend_body: bytes,
+) -> None:
     target = Mock(
         kubectl_binary="kubectl",
         context="kind-local-dev-insurance-hub",
         namespace="local-dev-all",
         business="local-dev-dashboard-api",
         management="local-dev-dashboard-api-management",
+        processing_mode="canonical",
     )
     processes = [Mock(), Mock(), Mock()]
     for process in processes:
@@ -539,7 +542,8 @@ def test_verify_accepts_empty_and_populated_trend_envelopes(trend_body: bytes) -
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
         patch.object(checks.subprocess, "Popen", side_effect=processes),
         patch.object(checks, "_wait_for_port_forward"),
-        patch.object(checks, "event_activation_enabled", return_value=False),
+        patch.object(checks, "event_activation_enabled", return_value=True),
+        patch.object(checks, "produce_registration_fixture") as fixture,
         patch.object(
             checks,
             "_http",
@@ -556,6 +560,7 @@ def test_verify_accepts_empty_and_populated_trend_envelopes(trend_body: bytes) -
         checks.verify(target, [])
 
     rpc.assert_called_once_with(19090, "shared-smoke")
+    fixture.assert_not_called()
     access.assert_called_once_with(target)
 
 
@@ -761,32 +766,29 @@ def test_render_requires_the_runtime_config_map_linkage() -> None:
 
 
 @pytest.mark.parametrize(
-    ("environment", "enabled"),
-    [("local-dev", True), ("qa", True)],
+    ("environment", "mode"),
+    [("local-dev", "canonical"), ("qa", "isolated")],
 )
-def test_event_activation_assets_and_selected_state_are_exact(
-    environment: str, enabled: bool
-) -> None:
+def test_event_activation_assets_and_selected_state_are_exact(environment: str, mode: str) -> None:
     checks.validate_event_activation_assets(environment)
     checks.validate_canonical_activation_assets(environment)
-    assert checks.event_activation_enabled(environment) is enabled
+    assert checks.event_activation_mode(environment) == mode
+    assert checks.event_activation_enabled(environment)
     items = checks.documents(checks.render(environment))
     config = checks.resource(items, "ConfigMap", f"{environment}-dashboard-config")
     deployment = checks.resource(items, "Deployment", f"{environment}-dashboard-api")
     policy = checks.resource(items, "NetworkPolicy", f"{environment}-dashboard-api")
     container = deployment["spec"]["template"]["spec"]["containers"][0]
 
-    assert config["data"]["EVENT_WORKERS_ENABLED"] == str(enabled).lower()
-    assert config["data"]["EVENT_PROCESSING_MODE"] == "isolated"
-    assert ("KAFKA_BROKERS" in config["data"]) is enabled
+    assert config["data"]["EVENT_WORKERS_ENABLED"] == "true"
+    assert config["data"]["EVENT_PROCESSING_MODE"] == mode
+    assert "KAFKA_BROKERS" in config["data"]
     assert (
         any(item.get("name", "").startswith("ELASTICSEARCH_WRITER_") for item in container["env"])
-        is enabled
+        is True
     )
-    assert (
-        any(item.get("name") == "kafka-ca" for item in container.get("volumeMounts", [])) is enabled
-    )
-    assert (checks.kafka_egress(environment) in policy["spec"]["egress"]) is enabled
+    assert any(item.get("name") == "kafka-ca" for item in container.get("volumeMounts", []))
+    assert checks.kafka_egress(environment) in policy["spec"]["egress"]
 
 
 def test_event_activation_rejects_partial_or_foreign_patch_selection(
@@ -938,6 +940,21 @@ def test_canonical_rollout_accepts_only_the_exact_isolated_predecessor() -> None
     assert checks.matching_reader_predecessor_environment(isolated_env, expected_env)
     isolated_env[0]["valueFrom"]["secretKeyRef"]["name"] = "foreign"
     assert not checks.matching_reader_predecessor_environment(isolated_env, expected_env)
+
+
+def test_isolated_rollout_accepts_only_the_exact_implicit_mode_predecessor() -> None:
+    # given
+    expected = {
+        "EVENT_PROCESSING_MODE": "isolated",
+        "EVENT_WORKERS_ENABLED": "true",
+        "ELASTICSEARCH_INDEX": "policy_stats_issue_290",
+    }
+    implicit = {key: value for key, value in expected.items() if key != "EVENT_PROCESSING_MODE"}
+
+    # when / then
+    assert checks.matching_reader_predecessor_config(implicit, expected)
+    implicit["ELASTICSEARCH_INDEX"] = "foreign"
+    assert not checks.matching_reader_predecessor_config(implicit, expected)
 
 
 @pytest.mark.parametrize(
@@ -1120,6 +1137,10 @@ def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:
         "git-abcdef123456"
     )
     live_deployment["spec"]["template"]["spec"]["containers"][0]["image"] = previous_image
+    live_deployment["spec"]["strategy"] = {
+        "type": "RollingUpdate",
+        "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
+    }
     actual[("configmap", "local-dev-dashboard-config")]["data"]["SERVICE_VERSION"] = (
         "git-abcdef123456"
     )

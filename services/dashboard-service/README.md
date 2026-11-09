@@ -229,10 +229,12 @@ Canonical administration is separately dispatched as `go-svc-canonical-event-ins
 index and stable Kafka topic/group progress, reuses the issue-287 reader, and may provision only
 the issue-293 exact-index writer plus ordinary writer and Kafka-trust Secrets. Before any
 Elasticsearch mutation, ensure-access either creates the ordinary trust Secret or adopts only the
-exact issue-290 predecessor with matching CA bytes and its recorded field manager. It never creates,
-deletes, remaps, seeds or retires canonical state. The isolated retirement owner rejects ordinary
-canonical names before its first inspection or deletion. `go-svc-canonical-return-check` observes
-both workloads, terminating Pods, canonical membership and stable progress before Java return.
+exact issue-290 predecessor with matching CA bytes. It accepts the expected issue-290 field manager
+or a historical Secret with no field-manager record; any foreign recorded manager fails before
+server-side apply. It never creates, deletes, remaps, seeds or retires canonical state. The isolated
+retirement owner rejects ordinary canonical names before its first inspection or deletion.
+`go-svc-canonical-return-check` observes both workloads, terminating Pods, canonical membership and
+stable progress before Java return.
 
 The guarded local-dev sequence uses catalog service `dashboard`, context
 `kind-local-dev-insurance-hub` and namespace coordinate `local-dev-all`:
