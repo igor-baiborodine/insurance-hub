@@ -104,7 +104,7 @@ def test_main_rejects_ambient_target_without_running_commands_or_leaking_value(
     assert sentinel not in captured.err
 
 
-def test_main_passes_only_exact_issue_290_coordinates_to_go(
+def test_main_passes_only_exact_ordinary_coordinates_to_go(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -120,10 +120,10 @@ def test_main_passes_only_exact_issue_290_coordinates_to_go(
     go_call = next(call for call in calls if call[0][0] == "go-controlled")
     environment = go_call[1]["env"]
     assert isinstance(environment, dict)
-    assert environment["DASHBOARD_TEST_REGISTERED_TOPIC"] == "policy-registered-issue-290"
-    assert environment["DASHBOARD_TEST_CONSUMER_GROUP"] == "dashboard-service-issue-290"
-    assert environment["DASHBOARD_TEST_EVENT_INDEX"] == "policy_stats_issue_290"
-    assert environment["DASHBOARD_TEST_EVENT_OWNERSHIP"] == "issue-290-disposable"
+    assert environment["DASHBOARD_TEST_REGISTERED_TOPIC"] == "policy-registered"
+    assert environment["DASHBOARD_TEST_CONSUMER_GROUP"] == "dashboard-service"
+    assert environment["DASHBOARD_TEST_EVENT_INDEX"] == "policy_stats"
+    assert environment["DASHBOARD_TEST_EVENT_OWNERSHIP"] == "dashboard-disposable"
     assert "policy-registered" not in {
         environment["DASHBOARD_TEST_REGISTERED_TOPIC"],
         environment["DASHBOARD_TEST_CONSUMER_GROUP"],

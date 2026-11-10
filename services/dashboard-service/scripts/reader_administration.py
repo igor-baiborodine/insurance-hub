@@ -428,7 +428,7 @@ def require_status(status: int, accepted: set[int], action: str) -> None:
 def require_password(password: str) -> None:
     require(
         bool(re.fullmatch(r"[A-Za-z0-9_-]{64}", password)),
-        "Dashboard reader password is not canonical",
+        "Dashboard reader password does not match the accepted encoding",
     )
 
 

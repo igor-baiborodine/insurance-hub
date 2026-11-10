@@ -33,7 +33,6 @@ configMapGenerator:
       - GRPC_MAX_SEND_BYTES=8388608
       - ELASTICSEARCH_INDEX=policy_stats
       - ELASTICSEARCH_TIMEOUT=5s
-      - EVENT_PROCESSING_MODE=disabled
       - EVENT_WORKERS_ENABLED=false
       - SALES_TRENDS_TIME_ZONE=GMT
       - LOG_LEVEL=info

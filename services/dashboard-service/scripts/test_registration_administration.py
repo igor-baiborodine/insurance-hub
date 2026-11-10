@@ -63,17 +63,11 @@ def target(name: str = "local-dev") -> dict[str, object]:
             "writerSecret": f"{prefix}-dashboard-elasticsearch-writer",
             "kafkaWorkloadCASecret": f"{prefix}-dashboard-kafka-ca",
         },
-        "retirementAdministration": common
-        | {
-            "readerSecret": f"{prefix}-dashboard-elasticsearch-issue-290",
-            "writerSecret": f"{prefix}-dashboard-elasticsearch-writer-issue-290",
-            "kafkaWorkloadCASecret": f"{prefix}-dashboard-kafka-ca-issue-290",
-        },
     }
 
 
 @pytest.mark.parametrize("name", ["local-dev", "qa"])
-def test_target_separates_registration_and_retirement_secrets(name: str) -> None:
+def test_target_selects_only_ordinary_registration_secrets(name: str) -> None:
     with (
         patch.dict(os.environ, environment(name), clear=True),
         patch.object(administration, "service_record", return_value=record()),
@@ -103,7 +97,7 @@ def test_registration_writer_role_targets_only_policy_stats() -> None:
             "allow_restricted_indices": False,
         }
     ]
-    assert "issue_290" not in str(administration.writer_role())
+    assert administration.writer_role()["indices"][0]["names"] == ["policy_stats"]
 
 
 def test_foreign_writer_blocks_before_mutation() -> None:
@@ -235,88 +229,6 @@ def test_mapping_compatibility_rejects_unexpected_dynamic_policy() -> None:
     assert not administration.mapping_is_compatible(actual, definition)
 
 
-@pytest.mark.parametrize(
-    "managed_fields",
-    [[], [{"manager": "dashboard-event-administration"}]],
-    ids=["historical-managerless", "managed"],
-)
-def test_kafka_trust_adopts_exact_issue_290_predecessor(
-    managed_fields: list[dict[str, str]],
-) -> None:
-    # given
-    certificate = b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
-    encoded = administration.base64.b64encode(certificate).decode("ascii")
-    selected = object.__new__(administration.Target)
-    selected.namespace = "local-dev-all"
-    selected.kafka_ca_secret = "local-dev-dashboard-kafka-ca"
-    predecessor = {
-        "kind": "Secret",
-        "metadata": {
-            "name": selected.kafka_ca_secret,
-            "namespace": selected.namespace,
-            "labels": {
-                "app.kubernetes.io/name": "dashboard-api",
-                "app.kubernetes.io/component": "kafka-trust",
-                "insurance-hub.io/owner": "issue-290",
-            },
-            "managedFields": managed_fields,
-        },
-        "type": "Opaque",
-        "data": {"ca.crt": encoded},
-    }
-    adopted = {
-        **predecessor,
-        "metadata": {
-            **predecessor["metadata"],
-            "labels": {
-                **predecessor["metadata"]["labels"],
-                "insurance-hub.io/owner": administration.OWNER,
-            },
-            "managedFields": [{"manager": "dashboard-registration-administration"}],
-        },
-    }
-    selected.json = Mock(side_effect=[predecessor, adopted])
-    selected.run = Mock()
-
-    # when
-    state = selected.ensure_kafka_trust(certificate)
-
-    # then
-    assert state == "adopted-issue-290"
-    assert "--force-conflicts" in selected.run.call_args.args
-
-
-def test_kafka_trust_rejects_issue_290_predecessor_with_foreign_manager() -> None:
-    # given
-    certificate = b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
-    selected = object.__new__(administration.Target)
-    selected.namespace = "local-dev-all"
-    selected.kafka_ca_secret = "local-dev-dashboard-kafka-ca"
-    selected.json = Mock(
-        return_value={
-            "kind": "Secret",
-            "metadata": {
-                "name": selected.kafka_ca_secret,
-                "namespace": selected.namespace,
-                "labels": {
-                    "app.kubernetes.io/name": "dashboard-api",
-                    "app.kubernetes.io/component": "kafka-trust",
-                    "insurance-hub.io/owner": "issue-290",
-                },
-                "managedFields": [{"manager": "foreign-manager"}],
-            },
-            "type": "Opaque",
-            "data": {"ca.crt": administration.base64.b64encode(certificate).decode("ascii")},
-        }
-    )
-    selected.run = Mock()
-
-    # when / then
-    with pytest.raises(administration.AdministrationError, match="predecessor manager"):
-        selected.ensure_kafka_trust(certificate)
-    selected.run.assert_not_called()
-
-
 def test_kafka_trust_rejects_foreign_predecessor_before_apply() -> None:
     # given
     certificate = b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
@@ -343,12 +255,12 @@ def test_kafka_trust_rejects_foreign_predecessor_before_apply() -> None:
     selected.run = Mock()
 
     # when / then
-    with pytest.raises(administration.AdministrationError, match="not adoptable"):
+    with pytest.raises(administration.AdministrationError, match="not owned"):
         selected.ensure_kafka_trust(certificate)
     selected.run.assert_not_called()
 
 
-def test_effective_writer_permission_rejects_mapping_admin_and_isolated_index() -> None:
+def test_effective_writer_permission_rejects_mapping_admin_and_foreign_index() -> None:
     client = Mock()
     response = {
         "cluster": {"manage_security": False, "monitor": False},
@@ -360,7 +272,7 @@ def test_effective_writer_permission_rejects_mapping_admin_and_isolated_index() 
                 "delete": False,
                 "manage": False,
             },
-            "policy_stats_issue_290": {
+            "policy_stats_other": {
                 "read": False,
                 "index": False,
                 "delete": False,

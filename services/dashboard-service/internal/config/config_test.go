@@ -71,21 +71,18 @@ func TestLoad_DefaultsWithRequiredSalesTrendsTimeZone(t *testing.T) {
 	if got.SalesTrendsTimeZone == nil || got.SalesTrendsTimeZone.String() != "GMT" {
 		t.Errorf("SalesTrendsTimeZone = %v, want GMT", got.SalesTrendsTimeZone)
 	}
-	if got.Events.Mode != EventProcessingDisabled || got.Events.Enabled ||
-		len(got.Events.Brokers) != 0 || got.Events.Writer.URL != "" {
+	if got.Events.Enabled || len(got.Events.Brokers) != 0 || got.Events.Writer.URL != "" {
 		t.Errorf("event worker defaults = %+v, want disabled and empty", got.Events)
 	}
 }
 
-func TestLoad_EnabledEventWorkerRequiresAndPreservesIsolatedSettings(t *testing.T) {
+func TestLoad_EnabledEventWorkerRequiresAndPreservesOrdinarySettings(t *testing.T) {
 	// given
 	values := map[string]string{
-		EnvEventProcessingMode:  string(EventProcessingIsolated),
-		EnvElasticsearchIndex:   defaultProjectionIndex,
 		EnvEventWorkersEnabled:  "true",
 		EnvKafkaBrokers:         "kafka-a.example:9093, kafka-b.example:9093",
-		EnvKafkaGroup:           isolatedKafkaGroup,
-		EnvKafkaRegisteredTopic: isolatedRegisteredTopic,
+		EnvKafkaGroup:           defaultKafkaGroup,
+		EnvKafkaRegisteredTopic: defaultRegisteredTopic,
 		EnvKafkaCAFile:          "/var/run/kafka/ca.crt",
 		EnvWriterUsername:       "writer",
 		EnvWriterPassword:       "private-password",
@@ -97,10 +94,10 @@ func TestLoad_EnabledEventWorkerRequiresAndPreservesIsolatedSettings(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Events.Mode != EventProcessingIsolated || !got.Events.Enabled ||
-		len(got.Events.Brokers) != 2 || got.Events.Group != isolatedKafkaGroup ||
-		got.Events.RegisteredTopic != isolatedRegisteredTopic ||
-		got.Events.Writer.Index != defaultProjectionIndex ||
+	if !got.Events.Enabled || len(got.Events.Brokers) != 2 ||
+		got.Events.Group != defaultKafkaGroup ||
+		got.Events.RegisteredTopic != defaultRegisteredTopic ||
+		got.Events.Writer.Index != defaultElasticsearchIndex ||
 		got.Events.Writer.URL != got.Elasticsearch.URL ||
 		got.Events.Writer.Username != "writer" ||
 		got.Events.Writer.Password != "private-password" {
@@ -110,8 +107,6 @@ func TestLoad_EnabledEventWorkerRequiresAndPreservesIsolatedSettings(t *testing.
 
 func TestLoad_EnabledEventWorkerFailsOnIncompleteOrWrongTargetSettings(t *testing.T) {
 	valid := map[string]string{
-		EnvEventProcessingMode: string(EventProcessingIsolated),
-		EnvElasticsearchIndex:  defaultProjectionIndex,
 		EnvEventWorkersEnabled: "true",
 		EnvKafkaBrokers:        "kafka.example:9093",
 		EnvKafkaCAFile:         "/var/run/kafka/ca.crt",
@@ -123,13 +118,6 @@ func TestLoad_EnabledEventWorkerFailsOnIncompleteOrWrongTargetSettings(t *testin
 		setting string
 		change  func(map[string]string)
 	}{
-		{
-			"canonical reader index",
-			EnvElasticsearchIndex,
-			func(values map[string]string) {
-				values[EnvElasticsearchIndex] = defaultElasticsearchIndex
-			},
-		},
 		{
 			"brokers",
 			EnvKafkaBrokers,
@@ -158,12 +146,12 @@ func TestLoad_EnabledEventWorkerFailsOnIncompleteOrWrongTargetSettings(t *testin
 		{
 			"wrong group",
 			EnvKafkaGroup,
-			func(values map[string]string) { values[EnvKafkaGroup] = "dashboard-service" },
+			func(values map[string]string) { values[EnvKafkaGroup] = "foreign-group" },
 		},
 		{
 			"wrong topic",
 			EnvKafkaRegisteredTopic,
-			func(values map[string]string) { values[EnvKafkaRegisteredTopic] = "policy-registered" },
+			func(values map[string]string) { values[EnvKafkaRegisteredTopic] = "foreign-topic" },
 		},
 	}
 	for _, test := range tests {
@@ -190,57 +178,18 @@ func TestLoad_EnabledEventWorkerFailsOnIncompleteOrWrongTargetSettings(t *testin
 	}
 }
 
-func TestLoad_CanonicalEventWorkerSelectsOnlyCanonicalTuple(t *testing.T) {
-	values := map[string]string{
-		EnvEventProcessingMode:  "canonical",
-		EnvElasticsearchIndex:   "policy_stats",
-		EnvEventWorkersEnabled:  "true",
-		EnvKafkaBrokers:         "kafka.example:9093",
-		EnvKafkaGroup:           "dashboard-service",
-		EnvKafkaRegisteredTopic: "policy-registered",
-		EnvKafkaCAFile:          "/var/run/kafka/ca.crt",
-		EnvWriterUsername:       "writer",
-		EnvWriterPassword:       "private-password",
-	}
-
-	got, err := load(mapLookup(values))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Events.Mode != EventProcessingCanonical || !got.Events.Enabled ||
-		got.Events.Group != "dashboard-service" ||
-		got.Events.RegisteredTopic != "policy-registered" ||
-		got.Events.Writer.Index != "policy_stats" {
-		t.Fatalf("canonical event settings = %+v", got.Events)
-	}
-}
-
-func TestLoad_EventModeAndTransitionGuardFailClosed(t *testing.T) {
+func TestLoad_EventWorkerGuardFailsClosed(t *testing.T) {
 	tests := []struct {
 		name    string
 		values  map[string]string
 		setting string
 	}{
 		{
-			name: "unknown mode",
-			values: map[string]string{
-				EnvEventProcessingMode: "private-unknown-mode",
-			},
-			setting: EnvEventProcessingMode,
-		},
-		{
-			name: "canonical with disabled guard",
-			values: map[string]string{
-				EnvEventProcessingMode: string(EventProcessingCanonical),
-			},
-			setting: EnvEventWorkersEnabled,
-		},
-		{
-			name: "disabled with enabled guard",
+			name: "enabled without dependencies",
 			values: map[string]string{
 				EnvEventWorkersEnabled: "true",
 			},
-			setting: EnvEventWorkersEnabled,
+			setting: EnvKafkaBrokers,
 		},
 		{
 			name: "disabled with event dependency",
@@ -255,36 +204,33 @@ func TestLoad_EventModeAndTransitionGuardFailClosed(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := load(mapLookup(test.values))
 			setting, _ := kitconfig.ErrorDetails(err)
-			if err == nil || setting != test.setting ||
-				strings.Contains(err.Error(), "private-unknown-mode") {
+			if err == nil || setting != test.setting {
 				t.Fatalf("load() error = %v, setting = %q", err, setting)
 			}
 		})
 	}
 }
 
-func TestLoad_EnabledModesRejectMixedCoordinates(t *testing.T) {
+func TestLoad_EnabledWorkerRejectsForeignCoordinates(t *testing.T) {
 	for _, test := range []struct {
 		name  string
-		mode  string
 		index string
 		group string
 		topic string
 	}{
 		{
-			name: "canonical mode with isolated group", mode: "canonical",
-			index: "policy_stats", group: "dashboard-service-issue-290",
+			name:  "foreign group",
+			index: "policy_stats", group: "foreign-group",
 			topic: "policy-registered",
 		},
 		{
-			name: "isolated mode with canonical index", mode: "isolated",
-			index: "policy_stats", group: "dashboard-service-issue-290",
-			topic: "policy-registered-issue-290",
+			name:  "foreign index",
+			index: "foreign-index", group: "dashboard-service",
+			topic: "policy-registered",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := load(mapLookup(map[string]string{
-				EnvEventProcessingMode:  test.mode,
 				EnvElasticsearchIndex:   test.index,
 				EnvEventWorkersEnabled:  "true",
 				EnvKafkaBrokers:         "kafka.example:9093",

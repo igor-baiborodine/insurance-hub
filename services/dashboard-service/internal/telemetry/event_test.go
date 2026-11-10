@@ -19,7 +19,7 @@ import (
 
 func TestEventObserver_RecordsBoundedRegistrationAndCommitSignals(t *testing.T) {
 	// given
-	const privateMarker = "SYN-290-private-customer"
+	const privateMarker = "SYN-private-customer"
 	var logs bytes.Buffer
 	recorder := tracetest.NewSpanRecorder()
 	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))

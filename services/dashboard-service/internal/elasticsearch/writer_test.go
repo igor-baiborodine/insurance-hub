@@ -28,12 +28,12 @@ func TestWriter_ReplacesExactDocumentWithRefreshAndReceivedPremium(t *testing.T)
 			requests = append(requests, body)
 			paths = append(paths, request.Method+" "+request.URL.RequestURI())
 			response.WriteHeader(http.StatusCreated)
-			_, _ = response.Write([]byte(`{"_id":"SYN-290-001","result":"created"}`))
+			_, _ = response.Write([]byte(`{"_id":"SYN-001","result":"created"}`))
 		}),
 	)
 	defer server.Close()
 	client, err := New(
-		Config{Endpoint: server.URL, Index: ProjectionIndex, Timeout: time.Second},
+		Config{Endpoint: server.URL, Index: PolicyIndex, Timeout: time.Second},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestWriter_ReplacesExactDocumentWithRefreshAndReceivedPremium(t *testing.T)
 	agent := "synthetic-agent"
 	premium := writerPremium(t, "9007199254740993.1234567")
 	policy := domain.PolicyProjection{
-		Number: "SYN-290-001", From: writerDate(t, "2026-01-01"),
+		Number: "SYN-001", From: writerDate(t, "2026-01-01"),
 		To: writerDate(t, "2026-12-31"), PolicyHolder: &holder,
 		ProductCode: &product, TotalPremium: premium, AgentLogin: &agent,
 	}
@@ -62,15 +62,15 @@ func TestWriter_ReplacesExactDocumentWithRefreshAndReceivedPremium(t *testing.T)
 
 	// then
 	if err != nil || len(requests) != 2 ||
-		paths[0] != "PUT /policy_stats_issue_290/_doc/SYN-290-001?refresh=true" ||
+		paths[0] != "PUT /policy_stats/_doc/SYN-001?refresh=true" ||
 		paths[1] != paths[0] {
 		t.Fatalf("replacement paths = %v, error = %v", paths, err)
 	}
 	wantFirst := []byte(
-		`{"number":"SYN-290-001","from":"2026-01-01","to":"2026-12-31","policyHolder":"Synthetic Holder A","productCode":"HSI","totalPremium":9007199254740993.1234567,"agentLogin":"synthetic-agent"}`,
+		`{"number":"SYN-001","from":"2026-01-01","to":"2026-12-31","policyHolder":"Synthetic Holder A","productCode":"HSI","totalPremium":9007199254740993.1234567,"agentLogin":"synthetic-agent"}`,
 	)
 	wantSecond := []byte(
-		`{"number":"SYN-290-001","from":"2026-01-01","to":"2026-12-31","policyHolder":"Synthetic Holder A","productCode":"HSI","totalPremium":9007199254740993.1234567,"agentLogin":null}`,
+		`{"number":"SYN-001","from":"2026-01-01","to":"2026-12-31","policyHolder":"Synthetic Holder A","productCode":"HSI","totalPremium":9007199254740993.1234567,"agentLogin":null}`,
 	)
 	if !bytes.Equal(requests[0], wantFirst) || !bytes.Equal(requests[1], wantSecond) {
 		t.Fatalf("replacement bodies = %s / %s", requests[0], requests[1])
@@ -89,7 +89,7 @@ func TestWriter_EmitsAllSevenFieldsForNullAndEmptyValues(t *testing.T) {
 	)
 	defer server.Close()
 	client, err := New(
-		Config{Endpoint: server.URL, Index: ProjectionIndex, Timeout: time.Second},
+		Config{Endpoint: server.URL, Index: PolicyIndex, Timeout: time.Second},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -114,13 +114,13 @@ func TestWriter_EmitsAllSevenFieldsForNullAndEmptyValues(t *testing.T) {
 	}
 }
 
-func TestWriter_UsesSelectedCanonicalIndex(t *testing.T) {
+func TestWriter_UsesSelectedIndex(t *testing.T) {
 	var path string
 	server := httptest.NewServer(
 		http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 			response.Header().Set("X-Elastic-Product", "Elasticsearch")
 			path = request.Method + " " + request.URL.RequestURI()
-			_, _ = response.Write([]byte(`{"_id":"SYN-CANONICAL","result":"created"}`))
+			_, _ = response.Write([]byte(`{"_id":"SYN-ORDINARY","result":"created"}`))
 		}),
 	)
 	defer server.Close()
@@ -135,10 +135,10 @@ func TestWriter_UsesSelectedCanonicalIndex(t *testing.T) {
 
 	err = writer.ReplacePolicy(
 		context.Background(),
-		domain.PolicyProjection{Number: "SYN-CANONICAL"},
+		domain.PolicyProjection{Number: "SYN-ORDINARY"},
 	)
-	if err != nil || path != "PUT /policy_stats/_doc/SYN-CANONICAL?refresh=true" {
-		t.Fatalf("canonical replacement = %q, %v", path, err)
+	if err != nil || path != "PUT /policy_stats/_doc/SYN-ORDINARY?refresh=true" {
+		t.Fatalf("replacement = %q, %v", path, err)
 	}
 }
 
@@ -173,7 +173,7 @@ func TestWriter_ClassifiesRejectedAndOversizedResponses(t *testing.T) {
 			client, err := New(
 				Config{
 					Endpoint: server.URL,
-					Index:    ProjectionIndex,
+					Index:    PolicyIndex,
 					Timeout:  time.Second,
 				},
 			)
@@ -188,7 +188,7 @@ func TestWriter_ClassifiesRejectedAndOversizedResponses(t *testing.T) {
 			// when
 			err = writer.ReplacePolicy(
 				context.Background(),
-				domain.PolicyProjection{Number: "SYN-290-FAIL"},
+				domain.PolicyProjection{Number: "SYN-FAIL"},
 			)
 
 			// then
@@ -217,7 +217,7 @@ func TestWriter_PropagatesCancellationAndRequiresDashboardClient(t *testing.T) {
 	defer server.Close()
 	defer close(release)
 	client, err := New(
-		Config{Endpoint: server.URL, Index: ProjectionIndex, Timeout: time.Second},
+		Config{Endpoint: server.URL, Index: PolicyIndex, Timeout: time.Second},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestWriter_PropagatesCancellationAndRequiresDashboardClient(t *testing.T) {
 
 	// when
 	go func() {
-		result <- writer.ReplacePolicy(ctx, domain.PolicyProjection{Number: "SYN-290-CANCEL"})
+		result <- writer.ReplacePolicy(ctx, domain.PolicyProjection{Number: "SYN-CANCEL"})
 	}()
 	select {
 	case <-started:
@@ -240,20 +240,20 @@ func TestWriter_PropagatesCancellationAndRequiresDashboardClient(t *testing.T) {
 	}
 	cancel()
 	writeErr := <-result
-	canonicalClient, err := New(
+	secondClient, err := New(
 		Config{Endpoint: server.URL, Index: PolicyIndex, Timeout: time.Second},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	canonicalWriter, canonicalErr := NewWriter(canonicalClient)
+	secondWriter, writerErr := NewWriter(secondClient)
 	_, missingErr := NewWriter(nil)
 
 	// then
-	if !errors.Is(writeErr, context.Canceled) || canonicalErr != nil ||
-		canonicalWriter == nil ||
+	if !errors.Is(writeErr, context.Canceled) || writerErr != nil ||
+		secondWriter == nil ||
 		!errors.Is(missingErr, ErrClientRequired) {
-		t.Fatalf("errors = %v / %v / %v", writeErr, canonicalErr, missingErr)
+		t.Fatalf("errors = %v / %v / %v", writeErr, writerErr, missingErr)
 	}
 }
 

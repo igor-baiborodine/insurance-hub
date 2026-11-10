@@ -200,7 +200,7 @@ func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*
 					"preflight dashboard registration worker: create Kafka inspector",
 				)
 			}
-			if err := verifyCanonicalProgress(
+			if err := verifyCommittedProgress(
 				ctx,
 				inspector,
 				settings.Topic,
@@ -230,7 +230,7 @@ func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*
 	return worker, nil
 }
 
-// Preflight proves canonical progress before constructing a group consumer.
+// Preflight proves committed progress before constructing a group consumer.
 func (worker *Worker) Preflight(ctx context.Context) error {
 	if worker == nil {
 		return errors.New("preflight dashboard registration worker: worker is required")
@@ -256,27 +256,27 @@ type partitionProgress struct {
 	end       int64
 }
 
-func verifyCanonicalProgress(
+func verifyCommittedProgress(
 	ctx context.Context,
 	client requestClient,
 	topic string,
 	group string,
 ) error {
-	first, err := readCanonicalProgress(ctx, client, topic, group)
+	first, err := readCommittedProgress(ctx, client, topic, group)
 	if err != nil {
 		return err
 	}
-	second, err := readCanonicalProgress(ctx, client, topic, group)
+	second, err := readCommittedProgress(ctx, client, topic, group)
 	if err != nil {
 		return err
 	}
-	if !canonicalProgressStable(first, second) {
+	if !committedProgressStable(first, second) {
 		return errors.New("preflight dashboard registration worker: Kafka progress changed")
 	}
 	return nil
 }
 
-func canonicalProgressStable(
+func committedProgressStable(
 	first map[int32]partitionProgress,
 	second map[int32]partitionProgress,
 ) bool {
@@ -293,7 +293,7 @@ func canonicalProgressStable(
 	return true
 }
 
-func readCanonicalProgress(
+func readCommittedProgress(
 	ctx context.Context,
 	client requestClient,
 	topic string,

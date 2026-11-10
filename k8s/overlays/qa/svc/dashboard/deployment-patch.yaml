@@ -19,14 +19,34 @@ spec:
                 secretKeyRef:
                   name: qa-dashboard-elasticsearch
                   key: password
+            - name: ELASTICSEARCH_WRITER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: qa-dashboard-elasticsearch-writer
+                  key: username
+            - name: ELASTICSEARCH_WRITER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: qa-dashboard-elasticsearch-writer
+                  key: password
           volumeMounts:
             - name: elasticsearch-ca
               mountPath: /etc/dashboard/elasticsearch
+              readOnly: true
+            - name: kafka-ca
+              mountPath: /etc/dashboard/kafka
               readOnly: true
       volumes:
         - name: elasticsearch-ca
           secret:
             secretName: qa-dashboard-elasticsearch-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 292
+        - name: kafka-ca
+          secret:
+            secretName: qa-dashboard-kafka-ca
             items:
               - key: ca.crt
                 path: ca.crt

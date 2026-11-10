@@ -484,7 +484,7 @@ func (runtime *runningService) configureWorker(
 			return observedCtx, observation.Finish
 		},
 		CommitFailure:            eventObserver.RecordCommitFailure,
-		RequireCommittedProgress: settings.Mode == config.EventProcessingCanonical,
+		RequireCommittedProgress: true,
 	}, runtime.projection, logger)
 	return err
 }

@@ -32,7 +32,7 @@ func TestNewProductionProjection_ValidatesDependenciesAndConfiguration(t *testin
 			name: "unreadable CA",
 			settings: config.Elasticsearch{
 				URL:     "https://example:9200",
-				Index:   dashboardelasticsearch.ProjectionIndex,
+				Index:   dashboardelasticsearch.PolicyIndex,
 				CAFile:  t.TempDir() + "/missing.crt",
 				Timeout: time.Second,
 			},
@@ -41,7 +41,7 @@ func TestNewProductionProjection_ValidatesDependenciesAndConfiguration(t *testin
 		{
 			name: "invalid client configuration",
 			settings: config.Elasticsearch{
-				URL: "invalid", Index: dashboardelasticsearch.ProjectionIndex,
+				URL: "invalid", Index: dashboardelasticsearch.PolicyIndex,
 				Timeout: time.Second,
 			},
 			observer: observer,
@@ -61,7 +61,7 @@ func TestNewProductionProjection_ValidatesDependenciesAndConfiguration(t *testin
 	}
 }
 
-func TestNewProductionProjection_AcceptsCanonicalWriter(t *testing.T) {
+func TestNewProductionProjection_AcceptsOrdinaryWriter(t *testing.T) {
 	projection, err := newProductionProjection(
 		config.Elasticsearch{
 			URL:     "http://example:9200",
@@ -87,23 +87,23 @@ func TestProductionProjection_ProjectsChecksAndCloses(t *testing.T) {
 			case "/_security/user/_has_privileges":
 				_, _ = writer.Write(
 					[]byte(
-						`{"has_all_requested":true,"index":{"policy_stats_issue_290":{"index":true}}}`,
+						`{"has_all_requested":true,"index":{"policy_stats":{"index":true}}}`,
 					),
 				)
-			case "/policy_stats_issue_290/_doc/SYN-290-PROJECTION":
+			case "/policy_stats/_doc/SYN-PROJECTION":
 				body, err := io.ReadAll(request.Body)
 				if err != nil {
 					t.Error(err)
 				}
 				if !strings.Contains(
 					string(body),
-					`"number":"SYN-290-PROJECTION"`,
+					`"number":"SYN-PROJECTION"`,
 				) {
 					t.Errorf("projection body = %s", body)
 				}
 				writer.WriteHeader(http.StatusCreated)
 				_, _ = writer.Write(
-					[]byte(`{"_id":"SYN-290-PROJECTION","result":"created"}`),
+					[]byte(`{"_id":"SYN-PROJECTION","result":"created"}`),
 				)
 			default:
 				t.Errorf("unexpected request = %s", request.URL.RequestURI())
@@ -114,7 +114,7 @@ func TestProductionProjection_ProjectsChecksAndCloses(t *testing.T) {
 	defer server.Close()
 	projection, err := newProductionProjection(
 		config.Elasticsearch{
-			URL: server.URL, Index: dashboardelasticsearch.ProjectionIndex,
+			URL: server.URL, Index: dashboardelasticsearch.PolicyIndex,
 			Timeout: time.Second,
 		},
 		testDependencyObserver(t),
@@ -127,7 +127,7 @@ func TestProductionProjection_ProjectsChecksAndCloses(t *testing.T) {
 	checkErr := projection.Check(context.Background())
 	projectErr := projection.ProjectPolicy(
 		context.Background(),
-		application.PolicyEvent{Number: "SYN-290-PROJECTION"},
+		application.PolicyEvent{Number: "SYN-PROJECTION"},
 	)
 	projection.CloseIdleConnections()
 
@@ -137,7 +137,7 @@ func TestProductionProjection_ProjectsChecksAndCloses(t *testing.T) {
 	}
 	want := []string{
 		"POST /_security/user/_has_privileges",
-		"PUT /policy_stats_issue_290/_doc/SYN-290-PROJECTION?refresh=true",
+		"PUT /policy_stats/_doc/SYN-PROJECTION?refresh=true",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("requests = %q, want %q", requests, want)

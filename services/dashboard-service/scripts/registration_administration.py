@@ -15,7 +15,7 @@ from typing import Any
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 sys.path.insert(0, str(ROOT))
 
-import retirement_administration as shared  # noqa: E402
+import administration as shared  # noqa: E402
 from scripts.go.service.configuration import service_record, target_record  # noqa: E402
 from scripts.python.process_runner import CommandError  # noqa: E402
 
@@ -106,15 +106,11 @@ class Target:
         }.items():
             require(os.environ.get(name, "") == value, f"{name} differs from the catalog")
         event = selected.get("registrationAdministration", {})
-        retirement = selected.get("retirementAdministration", {})
         require(
             event.get("readerSecret") == f"{self.environment}-dashboard-elasticsearch"
             and event.get("writerSecret") == f"{self.environment}-dashboard-elasticsearch-writer"
-            and event.get("kafkaWorkloadCASecret") == f"{self.environment}-dashboard-kafka-ca"
-            and retirement.get("readerSecret", "").endswith("-issue-290")
-            and retirement.get("writerSecret", "").endswith("-issue-290")
-            and retirement.get("kafkaWorkloadCASecret", "").endswith("-issue-290"),
-            "registration and retirement Secret boundaries differ",
+            and event.get("kafkaWorkloadCASecret") == f"{self.environment}-dashboard-kafka-ca",
+            "registration Secret boundaries differ",
         )
         self.context = selected["context"]
         self.namespace = selected["namespace"]
@@ -248,26 +244,23 @@ class Target:
             except (TypeError, ValueError) as error:
                 raise AdministrationError("registration Kafka trust data is malformed") from error
             require(stored == certificate, "registration Kafka trust differs")
-            require(owner in {"issue-290", OWNER}, "registration Kafka trust is not adoptable")
-            if owner == "issue-290":
-                require(
-                    not managers or "dashboard-event-administration" in managers,
-                    "registration Kafka trust predecessor manager differs",
-                )
-                state = "adopted-issue-290"
-            else:
-                state = "owned"
+            require(owner == OWNER, "registration Kafka trust is not owned")
+            require(
+                not managers or "dashboard-registration-administration" in managers,
+                "registration Kafka trust manager differs",
+            )
+            state = "owned"
 
         self.apply_secret(
             self.kafka_ca_secret,
             {"ca.crt": certificate.decode()},
             "kafka-trust",
-            force_conflicts=state == "adopted-issue-290",
+            force_conflicts=False,
         )
-        adopted = self.json("get", "secret", self.kafka_ca_secret)
-        self.validate_secret(adopted, self.kafka_ca_secret, {"ca.crt"}, "kafka-trust", OWNER)
+        current = self.json("get", "secret", self.kafka_ca_secret)
+        self.validate_secret(current, self.kafka_ca_secret, {"ca.crt"}, "kafka-trust", OWNER)
         try:
-            stored = base64.b64decode(adopted["data"]["ca.crt"], validate=True)
+            stored = base64.b64decode(current["data"]["ca.crt"], validate=True)
         except (TypeError, ValueError) as error:
             raise AdministrationError("registration Kafka trust data is malformed") from error
         require(stored == certificate, "registration Kafka trust differs")
@@ -679,7 +672,7 @@ def verify_effective_privileges(client: shared.ElasticsearchClient, identity: st
                     ],
                 },
                 {
-                    "names": ["policy_stats_issue_290"],
+                    "names": ["policy_stats_other"],
                     "privileges": ["read", "index", "delete", "manage"],
                 },
             ],
@@ -697,7 +690,7 @@ def verify_effective_privileges(client: shared.ElasticsearchClient, identity: st
         and isinstance(value, dict)
         and value.get("cluster") == {"manage_security": False, "monitor": False}
         and value.get("index", {}).get(INDEX) == selected
-        and value.get("index", {}).get("policy_stats_issue_290")
+        and value.get("index", {}).get("policy_stats_other")
         == {"read": False, "index": False, "delete": False, "manage": False},
         f"{identity} effective privileges differ",
     )

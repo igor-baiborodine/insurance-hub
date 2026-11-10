@@ -7,11 +7,10 @@ DEPLOY_ENV ?=
 INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
-PYTHON_TOOLING_FILES := $(wildcard scripts/dashboard_deployment_checks.py scripts/deployment.py \
-	scripts/retirement_administration.py scripts/registration_administration.py \
-	scripts/ownership_transition.py scripts/reader_administration.py \
-	scripts/test_retirement_administration.py scripts/test_registration_administration.py \
-	scripts/test_ownership_transition.py scripts/test_reader_administration.py \
+PYTHON_TOOLING_FILES := $(wildcard scripts/administration.py \
+	scripts/dashboard_deployment_checks.py scripts/deployment.py \
+	scripts/registration_administration.py scripts/reader_administration.py \
+	scripts/test_registration_administration.py scripts/test_reader_administration.py \
 	scripts/disposable_deployment.py scripts/image_check.py scripts/service_process.py \
 	scripts/test_image_check.py \
 	scripts/elasticsearch_integration.py scripts/test_elasticsearch_integration.py \
@@ -27,9 +26,7 @@ PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_image_check.py \
 	scripts/test_deployment.py \
 	scripts/test_disposable_deployment.py \
-	scripts/test_retirement_administration.py \
 	scripts/test_registration_administration.py \
-	scripts/test_ownership_transition.py \
 	scripts/test_reader_administration.py \
 	scripts/test_disposable_command.py \
 	scripts/test_service_process.py \
@@ -125,7 +122,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	image-build image-check _image-check-existing deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop \
 	reader-ensure reader-verify reader-rotate registration-inspect registration-ensure \
-	registration-verify retirement-inspect retirement-retire canonical-return-check \
+	registration-verify \
 	deploy-test-tooling deploy-smoke _deploy-smoke-rpc \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
@@ -153,7 +150,7 @@ deploy-render: ## Render one Dashboard overlay without applying it
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/dashboard_deployment_checks.py render
 
-deploy-check: python-runtime-check ## Validate Dashboard overlays, activation modes and Java preservation
+deploy-check: python-runtime-check ## Validate the ordinary Dashboard overlays and safeguards
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/dashboard_deployment_checks.py check
 
@@ -165,24 +162,26 @@ reader-ensure reader-verify reader-rotate: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/reader_administration.py '$(@:reader-%=%)'
 
-retirement-inspect retirement-retire: python-runtime-check
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/retirement_administration.py '$(@:retirement-%=%)'
-
 registration-inspect registration-ensure registration-verify: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/registration_administration.py '$(@:registration-%=%)'
 
-canonical-return-check: python-runtime-check ## Verify the stopped canonical boundary before Java return
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/dashboard_deployment_checks.py return-check
-
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Dashboard deployment guards
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" -m pytest -q -m 'not integration' \
-		scripts/test_deployment.py scripts/test_disposable_command.py \
-		scripts/test_disposable_deployment.py scripts/test_retirement_administration.py \
-		scripts/test_registration_administration.py scripts/test_ownership_transition.py \
+		scripts/test_deployment.py::test_target_rejects_wrong_coordinates_before_cluster_access \
+		scripts/test_deployment.py::test_render_rejects_foreign_dependencies_and_incomplete_inventory \
+		scripts/test_deployment.py::test_render_requires_the_runtime_config_map_linkage \
+		scripts/test_deployment.py::test_render_rejects_undeclared_runtime_configuration \
+		scripts/test_deployment.py::test_render_requires_the_application_exporter_timeout_default \
+		scripts/test_deployment.py::test_render_requires_the_accepted_sales_trends_time_zone \
+		scripts/test_deployment.py::test_render_rejects_weakened_target_security \
+		scripts/test_deployment.py::test_java_edge_identity_requires_the_dedicated_dashboard_marker \
+		scripts/test_deployment.py::test_live_state_rejects_wrong_resource_identity \
+		scripts/test_deployment.py::test_live_state_accepts_the_complete_rendered_contract \
+		scripts/test_disposable_command.py \
+		scripts/test_disposable_deployment.py \
+		scripts/test_registration_administration.py \
 		scripts/test_reader_administration.py
 
 deploy-smoke: python-toolchain-check $(QUALIFICATION_IMAGE_PREREQUISITE) ## Smoke Dashboard in an owned disposable Kind namespace

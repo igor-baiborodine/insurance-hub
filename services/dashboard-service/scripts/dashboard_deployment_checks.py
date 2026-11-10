@@ -8,19 +8,15 @@ import binascii
 import json
 import os
 import re
-import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
-import ownership_transition as transition
-import registration_administration as registration
 import yaml
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
@@ -36,7 +32,6 @@ SERVICE = "dashboard"
 EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
 BUSINESS_CLIENT_LABEL = "insurance-hub.io/dashboard-business-client"
 MANAGEMENT_CLIENT_LABEL = "insurance-hub.io/dashboard-management-client"
-JAVA_NAMES = {"dashboard-api-legacy"}
 DENIED_QUALIFICATION_PODS = {
     "dashboard-qualification-marker-only",
     "dashboard-qualification-marker-only-agent-denied",
@@ -55,28 +50,7 @@ PROBE_IMAGE = (
     "docker.io/curlimages/curl:8.16.0@"
     "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
 )
-EVENT_ACTIVATION_PATCHES = (
-    "event-enabled-config-patch.yaml",
-    "event-enabled-deployment-patch.yaml",
-    "event-enabled-network-policy-patch.yaml",
-)
-CANONICAL_ACTIVATION_PATCHES = (
-    "canonical-config-patch.yaml",
-    "canonical-deployment-patch.yaml",
-    "event-enabled-network-policy-patch.yaml",
-)
-REGISTRATION_TOPIC = "policy-registered-issue-290"
-REGISTRATION_FIXTURE = {
-    "policy": {
-        "number": "SYN-290-001",
-        "from": [2026, 1, 1],
-        "to": [2026, 12, 31],
-        "policyHolder": "Synthetic Holder A",
-        "productCode": "HSI",
-        "totalPremium": 123.45,
-        "agentLogin": None,
-    }
-}
+ROLLOUT_TIMEOUT_SECONDS = {"local-dev": 180, "qa": 600}
 
 
 class DeploymentError(RuntimeError):
@@ -157,194 +131,10 @@ def normalized_policy_spec(value: Any) -> Any:
     return result
 
 
-def matching_reader_predecessor_config(actual: Any, expected: Any) -> bool:
-    """Accept reviewed local ConfigMap predecessors before their replacement only."""
-    if not isinstance(actual, dict) or not isinstance(expected, dict):
-        return False
-    if expected.get("EVENT_PROCESSING_MODE") == "isolated":
-        implicit_isolated = dict(expected)
-        implicit_isolated.pop("EVENT_PROCESSING_MODE")
-        if actual == implicit_isolated:
-            return True
-    if expected.get("EVENT_PROCESSING_MODE") == "canonical":
-        isolated = dict(expected)
-        isolated.update(
-            {
-                "EVENT_PROCESSING_MODE": "isolated",
-                "ELASTICSEARCH_INDEX": "policy_stats_issue_290",
-                "KAFKA_GROUP": "dashboard-service-issue-290",
-                "KAFKA_REGISTERED_TOPIC": "policy-registered-issue-290",
-            }
-        )
-        if actual == isolated:
-            return True
-    if expected.get("EVENT_WORKERS_ENABLED") == "true":
-        interrupted_activation = dict(expected)
-        interrupted_activation["PROBE_TIMEOUT"] = "2s"
-        if actual == interrupted_activation:
-            return True
-        event_predecessor = dict(expected)
-        event_predecessor.update(
-            {
-                "ELASTICSEARCH_INDEX": "policy_stats",
-                "EVENT_WORKERS_ENABLED": "false",
-            }
-        )
-        for name in ("KAFKA_BROKERS", "KAFKA_GROUP", "KAFKA_REGISTERED_TOPIC", "KAFKA_CA_FILE"):
-            event_predecessor.pop(name, None)
-        if actual == event_predecessor:
-            return True
-        pre_event_predecessor = dict(event_predecessor)
-        pre_event_predecessor.pop("EVENT_WORKERS_ENABLED", None)
-        if actual == pre_event_predecessor:
-            return True
-    event_predecessor = dict(expected)
-    event_predecessor.pop("EVENT_WORKERS_ENABLED", None)
-    if actual == event_predecessor:
-        return True
-    reader_predecessor = dict(expected)
-    reader_predecessor.pop("SALES_TRENDS_TIME_ZONE", None)
-    if actual == reader_predecessor:
-        return True
-    reader_predecessor.pop("EVENT_WORKERS_ENABLED", None)
-    if actual == reader_predecessor:
-        return True
-    pre_reader_predecessor = {
-        key: value
-        for key, value in expected.items()
-        if key
-        not in {
-            "ELASTICSEARCH_INDEX",
-            "ELASTICSEARCH_TIMEOUT",
-            "ELASTICSEARCH_URL",
-            "EVENT_WORKERS_ENABLED",
-            "SALES_TRENDS_TIME_ZONE",
-        }
-    }
-    pre_reader_predecessor["OTEL_EXPORTER_OTLP_TIMEOUT"] = "2s"
-    return actual == pre_reader_predecessor
-
-
-def matching_reader_predecessor_environment(actual: Any, expected: Any) -> bool:
-    """Accept the reviewed pre-reader container environment before replacement only."""
-    if actual == expected:
-        return True
-    if not isinstance(actual, list) or not isinstance(expected, list):
-        return False
-    names = {item.get("name") for item in expected}
-    isolated = []
-    for item in expected:
-        candidate = json.loads(json.dumps(item))
-        secret = candidate.get("valueFrom", {}).get("secretKeyRef", {})
-        name = secret.get("name", "")
-        if name.endswith("-dashboard-elasticsearch") or name.endswith(
-            "-dashboard-elasticsearch-writer"
-        ):
-            secret["name"] = name + "-issue-290"
-        isolated.append(candidate)
-    if actual == isolated:
-        return True
-    if {"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"}.issubset(names):
-        predecessor = []
-        for item in expected:
-            name = item.get("name")
-            if name in {"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"}:
-                continue
-            if name in {"ELASTICSEARCH_USERNAME", "ELASTICSEARCH_PASSWORD"}:
-                predecessor.append(
-                    {
-                        "name": name,
-                        "valueFrom": {
-                            "secretKeyRef": {
-                                "name": "local-dev-dashboard-elasticsearch",
-                                "key": "username" if name.endswith("USERNAME") else "password",
-                            }
-                        },
-                    }
-                )
-            else:
-                predecessor.append(item)
-        if actual == predecessor:
-            return True
-    predecessor_names = {"ELASTICSEARCH_USERNAME", "ELASTICSEARCH_PASSWORD"}
-    if {"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"}.issubset(names):
-        predecessor_names.update({"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"})
-    predecessor = [item for item in expected if item.get("name") not in predecessor_names]
-    return actual == predecessor
-
-
-def matching_reader_predecessor_network_policy(actual: Any, expected: Any) -> bool:
-    """Accept the reviewed pre-reader deny-all-egress policy before replacement only."""
-    if normalized_policy_spec(actual) == normalized_policy_spec(expected):
-        return True
-    if not isinstance(expected, dict):
-        return False
-    event_predecessor = dict(expected)
-    egress = event_predecessor.get("egress")
-    if isinstance(egress, list) and egress:
-        event_predecessor["egress"] = egress[:-1]
-        if normalized_policy_spec(actual) == normalized_policy_spec(event_predecessor):
-            return True
-    predecessor = {
-        "podSelector": expected.get("podSelector"),
-        "policyTypes": expected.get("policyTypes"),
-        "ingress": [
-            {
-                "from": [{"podSelector": {"matchLabels": {BUSINESS_CLIENT_LABEL: "true"}}}],
-                "ports": [
-                    {"port": 8080, "protocol": "TCP"},
-                    {"port": 9090, "protocol": "TCP"},
-                ],
-            },
-            {
-                "from": [{"podSelector": {"matchLabels": {MANAGEMENT_CLIENT_LABEL: "true"}}}],
-                "ports": [{"port": 8081, "protocol": "TCP"}],
-            },
-        ],
-    }
-    return normalized_policy_spec(actual) == normalized_policy_spec(predecessor)
-
-
-def event_activation_predecessor_list(actual: Any, expected: Any) -> bool:
-    """Accept the exact disabled trust boundary only during a declared local replacement."""
-    if actual == expected:
-        return True
-    if not isinstance(actual, list) or not isinstance(expected, list):
-        return False
-    isolated = json.loads(json.dumps(expected))
-    for item in isolated:
-        secret = item.get("secret", {})
-        name = secret.get("secretName", "")
-        if name.endswith("-dashboard-kafka-ca"):
-            secret["secretName"] = name + "-issue-290"
-    if actual == isolated:
-        return True
-    return actual == [item for item in expected if item.get("name") != "kafka-ca"]
-
-
 def render(environment: str) -> str:
     record = service_record(ROOT, SERVICE)
     target = target_record(ROOT, record, environment)
     return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(ROOT / target["overlay"])])
-
-
-def render_canonical(environment: str) -> str:
-    """Render the prepared canonical patches without selecting them in repository state."""
-    source = ROOT / f"k8s/overlays/{environment}/svc/dashboard"
-    with tempfile.TemporaryDirectory(prefix=".dashboard-canonical-", dir=source.parent) as name:
-        candidate = Path(name)
-        for item in source.iterdir():
-            if item.is_file():
-                shutil.copy2(item, candidate / item.name)
-        path = candidate / "kustomization.yaml"
-        value = yaml.safe_load(path.read_text(encoding="utf-8"))
-        for patch in value.get("patches", []):
-            if patch.get("path") == "event-enabled-config-patch.yaml":
-                patch["path"] = "canonical-config-patch.yaml"
-            elif patch.get("path") == "event-enabled-deployment-patch.yaml":
-                patch["path"] = "canonical-deployment-patch.yaml"
-        path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
-        return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(candidate)])
 
 
 def expected_ingress(environment: str) -> list[dict[str, Any]]:
@@ -490,195 +280,7 @@ def kafka_egress(environment: str) -> dict[str, Any]:
     }
 
 
-def activation_assets(environment: str, names: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
-    root = ROOT / f"k8s/overlays/{environment}/svc/dashboard"
-    values: list[dict[str, Any]] = []
-    for name in names:
-        try:
-            value = yaml.safe_load((root / name).read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError) as error:
-            raise DeploymentError(f"Dashboard event activation asset {name} is invalid") from error
-        require(isinstance(value, dict), f"Dashboard event activation asset {name} is invalid")
-        values.append(value)
-    return tuple(values)
-
-
-def event_activation_assets(environment: str) -> tuple[dict[str, Any], ...]:
-    return activation_assets(environment, EVENT_ACTIVATION_PATCHES)
-
-
-def event_activation_mode(environment: str) -> str:
-    root = ROOT / f"k8s/overlays/{environment}/svc/dashboard"
-    try:
-        kustomization = yaml.safe_load((root / "kustomization.yaml").read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as error:
-        raise DeploymentError("Dashboard Kustomization is invalid") from error
-    require(isinstance(kustomization, dict), "Dashboard Kustomization is invalid")
-    paths = [
-        item.get("path") for item in kustomization.get("patches", []) if isinstance(item, dict)
-    ]
-    event_paths = {
-        path
-        for path in paths
-        if isinstance(path, str)
-        and (path.startswith("event-enabled-") or path.startswith("canonical-"))
-    }
-    modes = {
-        frozenset(): "disabled",
-        frozenset(EVENT_ACTIVATION_PATCHES): "isolated",
-        frozenset(CANONICAL_ACTIVATION_PATCHES): "canonical",
-    }
-    selected = modes.get(frozenset(event_paths), "")
-    require(bool(selected), "event activation patch selection differs")
-    return selected
-
-
-def event_activation_enabled(environment: str) -> bool:
-    return event_activation_mode(environment) != "disabled"
-
-
-def validate_event_activation_assets(environment: str) -> None:
-    require(environment in {"local-dev", "qa"}, "deployment environment is invalid")
-    config, deployment, network = event_activation_assets(environment)
-    prefix = environment
-    expected_config = {
-        "EVENT_PROCESSING_MODE": "isolated",
-        "EVENT_WORKERS_ENABLED": "true",
-        "PROBE_TIMEOUT": "30s",
-        "ELASTICSEARCH_INDEX": "policy_stats_issue_290",
-        "KAFKA_BROKERS": (
-            "local-dev-kafka-kafka-bootstrap:9093"
-            if environment == "local-dev"
-            else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
-        ),
-        "KAFKA_GROUP": "dashboard-service-issue-290",
-        "KAFKA_REGISTERED_TOPIC": "policy-registered-issue-290",
-        "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
-    }
-    require(
-        config.get("kind") == "ConfigMap"
-        and config.get("metadata", {}).get("name") == "dashboard-config"
-        and config.get("data") == expected_config,
-        "event activation configuration differs",
-    )
-    pod = deployment.get("spec", {}).get("template", {}).get("spec", {})
-    containers = pod.get("containers", [])
-    require(
-        deployment.get("kind") == "Deployment"
-        and deployment.get("metadata", {}).get("name") == "dashboard-api"
-        and len(containers) == 1
-        and containers[0].get("name") == "dashboard-api",
-        "event activation Deployment identity differs",
-    )
-    env = {item.get("name"): item for item in containers[0].get("env", [])}
-    expected_secrets = {
-        "ELASTICSEARCH_USERNAME": f"{prefix}-dashboard-elasticsearch-issue-290",
-        "ELASTICSEARCH_PASSWORD": f"{prefix}-dashboard-elasticsearch-issue-290",
-        "ELASTICSEARCH_WRITER_USERNAME": (f"{prefix}-dashboard-elasticsearch-writer-issue-290"),
-        "ELASTICSEARCH_WRITER_PASSWORD": (f"{prefix}-dashboard-elasticsearch-writer-issue-290"),
-    }
-    require(set(env) == set(expected_secrets), "event activation Secret inputs differ")
-    for name, secret in expected_secrets.items():
-        key = "username" if name.endswith("USERNAME") else "password"
-        require(
-            env[name].get("valueFrom", {}).get("secretKeyRef") == {"name": secret, "key": key},
-            f"event activation {name} differs",
-        )
-    require(
-        containers[0].get("volumeMounts")
-        == [{"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}]
-        and pod.get("volumes")
-        == [
-            {
-                "name": "kafka-ca",
-                "secret": {
-                    "secretName": f"{prefix}-dashboard-kafka-ca",
-                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                    "defaultMode": 292,
-                },
-            }
-        ],
-        "event activation Kafka trust mount differs",
-    )
-    require(
-        network.get("kind") == "NetworkPolicy"
-        and network.get("metadata", {}).get("name") == "dashboard-api"
-        and network.get("spec", {}).get("egress")
-        == [*expected_egress(environment), kafka_egress(environment)],
-        "event activation egress differs",
-    )
-    event_activation_enabled(environment)
-
-
-def validate_canonical_activation_assets(environment: str) -> None:
-    """Validate the unselected canonical state without granting it authority."""
-    config, deployment, network = activation_assets(environment, CANONICAL_ACTIVATION_PATCHES)
-    brokers = (
-        "local-dev-kafka-kafka-bootstrap:9093"
-        if environment == "local-dev"
-        else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
-    )
-    require(
-        config.get("data")
-        == {
-            "EVENT_PROCESSING_MODE": "canonical",
-            "EVENT_WORKERS_ENABLED": "true",
-            "PROBE_TIMEOUT": "30s",
-            "ELASTICSEARCH_INDEX": "policy_stats",
-            "KAFKA_BROKERS": brokers,
-            "KAFKA_GROUP": "dashboard-service",
-            "KAFKA_REGISTERED_TOPIC": "policy-registered",
-            "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
-        },
-        "canonical activation configuration differs",
-    )
-    pod = deployment.get("spec", {}).get("template", {}).get("spec", {})
-    container = pod.get("containers", [{}])[0]
-    env = {item.get("name"): item for item in container.get("env", [])}
-    reader = f"{environment}-dashboard-elasticsearch"
-    writer = f"{environment}-dashboard-elasticsearch-writer"
-    expected = {
-        "ELASTICSEARCH_USERNAME": (reader, "username"),
-        "ELASTICSEARCH_PASSWORD": (reader, "password"),
-        "ELASTICSEARCH_WRITER_USERNAME": (writer, "username"),
-        "ELASTICSEARCH_WRITER_PASSWORD": (writer, "password"),
-    }
-    require(set(env) == set(expected), "canonical activation Secret inputs differ")
-    for name, (secret, key) in expected.items():
-        require(
-            env[name].get("valueFrom", {}).get("secretKeyRef") == {"name": secret, "key": key},
-            f"canonical activation {name} differs",
-        )
-    require(
-        pod.get("volumes")
-        == [
-            {
-                "name": "kafka-ca",
-                "secret": {
-                    "secretName": f"{environment}-dashboard-kafka-ca",
-                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                    "defaultMode": 292,
-                },
-            }
-        ]
-        and container.get("volumeMounts")
-        == [{"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}],
-        "canonical activation Kafka trust differs",
-    )
-    require(
-        network.get("spec", {}).get("egress")
-        == [*expected_egress(environment), kafka_egress(environment)],
-        "canonical activation egress differs",
-    )
-    require(
-        event_activation_mode(environment) == "canonical",
-        f"{environment} selected event mode differs",
-    )
-
-
-def validate_render(
-    environment: str, text: str, expected_mode: str | None = None
-) -> list[dict[str, Any]]:
+def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(environment in {"local-dev", "qa"}, "deployment environment is invalid")
     lower = text.lower()
     require(
@@ -691,9 +293,7 @@ def validate_render(
     )
     require(len(items) == 5, "Dashboard resource inventory differs")
     prefix = f"{environment}-"
-    mode = expected_mode or event_activation_mode(environment)
-    require(mode in {"disabled", "isolated", "canonical"}, "rendered event mode differs")
-    event_enabled = mode != "disabled"
+    workers_enabled = True
     expected_names = {
         "ConfigMap": {prefix + "dashboard-config"},
         "Deployment": {prefix + "dashboard-api"},
@@ -739,7 +339,7 @@ def validate_render(
         "HEALTH_ADDR": "0.0.0.0:8081",
         "LOG_LEVEL": "info",
         "REQUEST_TIMEOUT": "8s",
-        "PROBE_TIMEOUT": "30s" if event_enabled else "2s",
+        "PROBE_TIMEOUT": "30s" if workers_enabled else "2s",
         "SHUTDOWN_TIMEOUT": "10s",
         "HTTP_MAX_HEADER_BYTES": "16384",
         "HTTP_MAX_BODY_BYTES": "4096",
@@ -754,10 +354,9 @@ def validate_render(
             if environment == "local-dev"
             else "https://qa-elasticsearch-es-http.qa-data.svc:9200"
         ),
-        "ELASTICSEARCH_INDEX": "policy_stats_issue_290" if mode == "isolated" else "policy_stats",
+        "ELASTICSEARCH_INDEX": "policy_stats",
         "ELASTICSEARCH_TIMEOUT": "5s",
-        "EVENT_PROCESSING_MODE": mode,
-        "EVENT_WORKERS_ENABLED": "true" if event_enabled else "false",
+        "EVENT_WORKERS_ENABLED": "true",
         "SALES_TRENDS_TIME_ZONE": "GMT",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
     }
@@ -766,7 +365,7 @@ def validate_render(
             "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
         )
         expected_config["ELASTICSEARCH_CA_FILE"] = "/etc/dashboard/elasticsearch/ca.crt"
-    if event_enabled:
+    if workers_enabled:
         expected_config.update(
             {
                 "KAFKA_BROKERS": (
@@ -774,33 +373,29 @@ def validate_render(
                     if environment == "local-dev"
                     else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
                 ),
-                "KAFKA_GROUP": (
-                    "dashboard-service-issue-290" if mode == "isolated" else "dashboard-service"
-                ),
-                "KAFKA_REGISTERED_TOPIC": (
-                    "policy-registered-issue-290" if mode == "isolated" else "policy-registered"
-                ),
+                "KAFKA_GROUP": "dashboard-service",
+                "KAFKA_REGISTERED_TOPIC": "policy-registered",
                 "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
             }
         )
     expected_volumes: list[dict[str, Any]] = []
-    if event_enabled:
-        expected_volumes.append(
-            {
-                "name": "kafka-ca",
-                "secret": {
-                    "secretName": (f"{environment}-dashboard-kafka-ca"),
-                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                    "defaultMode": 292,
-                },
-            }
-        )
     if environment == "qa":
         expected_volumes.append(
             {
                 "name": "elasticsearch-ca",
                 "secret": {
                     "secretName": "qa-dashboard-elasticsearch-ca",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 292,
+                },
+            }
+        )
+    if workers_enabled:
+        expected_volumes.append(
+            {
+                "name": "kafka-ca",
+                "secret": {
+                    "secretName": (f"{environment}-dashboard-kafka-ca"),
                     "items": [{"key": "ca.crt", "path": "ca.crt"}],
                     "defaultMode": 292,
                 },
@@ -842,10 +437,6 @@ def validate_render(
     require(len(containers) == 1, "container inventory differs")
     container = containers[0]
     expected_mounts: list[dict[str, Any]] = []
-    if event_enabled:
-        expected_mounts.append(
-            {"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}
-        )
     if environment == "qa":
         expected_mounts.append(
             {
@@ -853,6 +444,10 @@ def validate_render(
                 "mountPath": "/etc/dashboard/elasticsearch",
                 "readOnly": True,
             }
+        )
+    if workers_enabled:
+        expected_mounts.append(
+            {"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}
         )
     require(
         container.get("name") == "dashboard-api"
@@ -878,17 +473,13 @@ def validate_render(
         ports == {("http", 8080), ("grpc", 9090), ("management", 8081)}, "container ports differ"
     )
     env = {item.get("name"): item for item in container.get("env", [])}
-    reader_secret = (
-        f"{environment}-dashboard-elasticsearch-issue-290"
-        if mode == "isolated"
-        else f"{environment}-dashboard-elasticsearch"
-    )
+    reader_secret = f"{environment}-dashboard-elasticsearch"
     expected_env_names = {
         "SERVICE_INSTANCE_ID",
         "ELASTICSEARCH_USERNAME",
         "ELASTICSEARCH_PASSWORD",
     }
-    if event_enabled:
+    if workers_enabled:
         expected_env_names.update(
             {"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"}
         )
@@ -902,12 +493,8 @@ def validate_render(
         and set(env) == expected_env_names,
         "runtime identity environment differs",
     )
-    if event_enabled:
-        writer_secret = (
-            f"{environment}-dashboard-elasticsearch-writer-issue-290"
-            if mode == "isolated"
-            else f"{environment}-dashboard-elasticsearch-writer"
-        )
+    if workers_enabled:
+        writer_secret = f"{environment}-dashboard-elasticsearch-writer"
         require(
             env["ELASTICSEARCH_WRITER_USERNAME"].get("valueFrom", {}).get("secretKeyRef")
             == {"name": writer_secret, "key": "username"}
@@ -964,7 +551,7 @@ def validate_render(
         policy_spec.get("egress", [])
         == [
             *expected_egress(environment),
-            *([kafka_egress(environment)] if event_enabled else []),
+            *([kafka_egress(environment)] if workers_enabled else []),
         ],
         "NetworkPolicy egress differs",
     )
@@ -1063,11 +650,6 @@ class Target:
         text = render(self.environment)
         items = validate_render(self.environment, text)
         deployment = resource(items, "Deployment", self.deployment)
-        self.processing_mode = str(
-            resource(items, "ConfigMap", f"{self.environment}-dashboard-config")["data"][
-                "EVENT_PROCESSING_MODE"
-            ]
-        )
         image = deployment["spec"]["template"]["spec"]["containers"][0]["image"]
         requested = os.environ.get("DEPLOY_IMAGE_REF", "")
         if requested:
@@ -1165,16 +747,7 @@ class Target:
                     key: value for key, value in desired_data.items() if key != "SERVICE_VERSION"
                 }
                 require(
-                    (
-                        actual_stable_data == desired_stable_data
-                        or (
-                            previous_image
-                            and not require_deployment
-                            and matching_reader_predecessor_config(
-                                actual_stable_data, desired_stable_data
-                            )
-                        )
-                    )
+                    actual_stable_data == desired_stable_data
                     and actual_data.get("SERVICE_VERSION") in allowed_versions
                     and not actual.get("binaryData")
                     and actual.get("immutable") in (None, False),
@@ -1199,17 +772,8 @@ class Target:
 
             if kind == "NetworkPolicy":
                 require(
-                    (
-                        normalized_policy_spec(actual.get("spec"))
-                        == normalized_policy_spec(desired.get("spec"))
-                        or (
-                            previous_image
-                            and not require_deployment
-                            and matching_reader_predecessor_network_policy(
-                                actual.get("spec"), desired.get("spec")
-                            )
-                        )
-                    ),
+                    normalized_policy_spec(actual.get("spec"))
+                    == normalized_policy_spec(desired.get("spec")),
                     f"live NetworkPolicy/{name} differs from rendered policy",
                 )
                 continue
@@ -1219,19 +783,7 @@ class Target:
             actual_spec = actual.get("spec", {})
             require(
                 actual_spec.get("selector") == desired_spec.get("selector")
-                and (
-                    actual_spec.get("strategy") == desired_spec.get("strategy")
-                    or (
-                        previous_image
-                        and not require_deployment
-                        and desired_spec.get("strategy") == {"type": "Recreate"}
-                        and actual_spec.get("strategy")
-                        == {
-                            "type": "RollingUpdate",
-                            "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
-                        }
-                    )
-                )
+                and actual_spec.get("strategy") == desired_spec.get("strategy")
                 and actual_spec.get("minReadySeconds") == desired_spec.get("minReadySeconds")
                 and actual_spec.get("progressDeadlineSeconds")
                 == desired_spec.get("progressDeadlineSeconds")
@@ -1273,16 +825,7 @@ class Target:
                 and pod.get("hostIPC") is not True
                 and pod.get("serviceAccountName") in (None, "default")
                 and not pod.get("initContainers")
-                and (
-                    pod.get("volumes", []) == desired_pod.get("volumes", [])
-                    or (
-                        previous_image
-                        and not require_deployment
-                        and event_activation_predecessor_list(
-                            pod.get("volumes", []), desired_pod.get("volumes", [])
-                        )
-                    )
-                ),
+                and pod.get("volumes", []) == desired_pod.get("volumes", []),
                 f"live Deployment/{name} Pod security settings differ",
             )
             desired_containers = desired_pod.get("containers", [])
@@ -1312,30 +855,6 @@ class Target:
                     require(
                         container.get(field) in allowed_images,
                         f"live Deployment/{name} container image differs",
-                    )
-                elif field == "name" and previous_image and not require_deployment:
-                    require(
-                        container.get(field) in {desired_container.get(field), "dashboard-service"},
-                        f"live Deployment/{name} container name differs",
-                    )
-                elif field == "env" and previous_image and not require_deployment:
-                    require(
-                        matching_reader_predecessor_environment(
-                            container.get(field), desired_container.get(field)
-                        ),
-                        f"live Deployment/{name} container env differs",
-                    )
-                elif field == "imagePullPolicy" and previous_image and not require_deployment:
-                    require(
-                        container.get(field) in {desired_container.get(field), "IfNotPresent"},
-                        f"live Deployment/{name} container imagePullPolicy differs",
-                    )
-                elif field == "volumeMounts" and previous_image and not require_deployment:
-                    require(
-                        event_activation_predecessor_list(
-                            container.get(field, []), desired_container.get(field, [])
-                        ),
-                        f"live Deployment/{name} container {field} differs",
                     )
                 else:
                     require(
@@ -1514,219 +1033,16 @@ def secret_and_image(target: Target, image: str) -> None:
 
 
 def role_snapshot(target: Target) -> dict[str, Any]:
-    if getattr(target, "processing_mode", "isolated") == "canonical":
-        return canonical_quiescence_snapshot(target)
-    values: dict[str, Any] = {}
-    expected_uids = {
-        "deployment": os.environ.get("DEPLOY_JAVA_DEPLOYMENT_UID", ""),
-        "service": os.environ.get("DEPLOY_JAVA_SERVICE_UID", ""),
+    """Identify the ordinary state boundary protected during an API rollout."""
+    registration = target.configuration.get("registrationAdministration", {})
+    return {
+        "environment": target.environment,
+        "index": "policy_stats",
+        "kafkaCluster": registration.get("kafkaCluster", ""),
+        "kafkaBootstrap": registration.get("kafkaBootstrap", ""),
+        "topic": "policy-registered",
+        "group": "dashboard-service",
     }
-    for kind in ("deployment", "service"):
-        for suffix in JAVA_NAMES:
-            name = f"{target.environment}-{suffix}"
-            item = target.json("get", kind, name, "--ignore-not-found")
-            metadata = item.get("metadata", {})
-            uid = metadata.get("uid", "")
-            require(
-                item.get("kind") == kind.title()
-                and metadata.get("name") == name
-                and metadata.get("namespace") == target.namespace
-                and isinstance(uid, str)
-                and bool(uid)
-                and uid == expected_uids[kind]
-                and not metadata.get("deletionTimestamp")
-                and labels_include(
-                    metadata.get("labels"),
-                    {
-                        "app.kubernetes.io/name": suffix,
-                        "app.kubernetes.io/instance": f"insurance-hub-{suffix}",
-                        "app.kubernetes.io/component": "api",
-                    },
-                ),
-                f"authoritative Java {kind}/{name} identity differs",
-            )
-            if kind == "deployment":
-                replicas = item.get("spec", {}).get("replicas")
-                status = item.get("status", {})
-                require(
-                    isinstance(replicas, int)
-                    and replicas > 0
-                    and status.get("availableReplicas") == replicas
-                    and status.get("readyReplicas") == replicas
-                    and status.get("unavailableReplicas", 0) == 0,
-                    f"authoritative Java Deployment/{name} is unavailable",
-                )
-            else:
-                require(
-                    item.get("spec", {}).get("type") == "ClusterIP"
-                    and item.get("spec", {}).get("selector")
-                    == {
-                        "app.kubernetes.io/component": "api",
-                        "app.kubernetes.io/managed-by": "kustomize",
-                        "app.kubernetes.io/name": suffix,
-                        "app.kubernetes.io/part-of": "insurance-hub",
-                        "environment": target.environment,
-                    },
-                    f"authoritative Java Service/{name} differs",
-                )
-            values[f"{kind}/{name}"] = uid
-    return values
-
-
-def canonical_quiescence_snapshot(target: Target) -> dict[str, Any]:
-    """Require an observed exclusive boundary before or after canonical Go startup."""
-    name = f"{target.environment}-dashboard-api-legacy"
-    deployment = target.json("get", "deployment", name)
-    metadata = deployment.get("metadata", {})
-    require(
-        metadata.get("name") == name
-        and metadata.get("namespace") == target.namespace
-        and not metadata.get("deletionTimestamp")
-        and deployment.get("spec", {}).get("replicas") == 0
-        and deployment.get("status", {}).get("replicas", 0) == 0,
-        "canonical Java Deployment is not quiescent",
-    )
-    state, progress = canonical_transfer_observation(target)
-    try:
-        phase = transition.phase(state)
-        if phase == "quiescent":
-            transition.require_successor_start(state, progress)
-        else:
-            require(phase == "go-owned", "canonical ownership is not exclusive")
-            require(
-                progress.stable and progress.complete and progress.in_range,
-                "canonical committed progress is not safe",
-            )
-    except transition.TransitionError as error:
-        raise DeploymentError(str(error)) from error
-    return {f"deployment/{name}": metadata.get("uid", ""), "phase": "exclusive"}
-
-
-def pod_counts(items: list[dict[str, Any]]) -> tuple[int, int]:
-    terminating = sum(bool(item.get("metadata", {}).get("deletionTimestamp")) for item in items)
-    return len(items) - terminating, terminating
-
-
-def canonical_kafka_snapshot(target: Target) -> dict[str, Any]:
-    event = target.configuration.get("registrationAdministration", {})
-    cluster = event.get("kafkaCluster", "")
-    require(cluster == f"{target.environment}-kafka", "canonical Kafka cluster differs")
-    pods = target.data_json("get", "pods", "-l", f"strimzi.io/cluster={cluster}").get("items", [])
-    ready = sorted(
-        pod.get("metadata", {}).get("name", "")
-        for pod in pods
-        if not pod.get("metadata", {}).get("deletionTimestamp")
-        and pod.get("metadata", {}).get("labels", {}).get("strimzi.io/broker-role") == "true"
-        and pod.get("status", {}).get("phase") == "Running"
-        and any(
-            condition.get("type") == "Ready" and condition.get("status") == "True"
-            for condition in pod.get("status", {}).get("conditions", [])
-        )
-    )
-    require(bool(ready) and ready[0], "no ready canonical Kafka broker Pod is available")
-    topic = target.namespace_kubectl(
-        target.data_namespace,
-        "exec",
-        ready[0],
-        "-c",
-        "kafka",
-        "--",
-        "/opt/kafka/bin/kafka-topics.sh",
-        "--bootstrap-server",
-        "localhost:9092",
-        "--describe",
-        "--topic",
-        registration.TOPIC,
-    )
-    partitions = sorted({int(value) for value in re.findall(r"Partition:\s*(\d+)", topic)})
-    require(partitions == list(range(len(partitions))) and partitions, "canonical topic differs")
-    group = target.namespace_kubectl(
-        target.data_namespace,
-        "exec",
-        ready[0],
-        "-c",
-        "kafka",
-        "--",
-        "/opt/kafka/bin/kafka-consumer-groups.sh",
-        "--bootstrap-server",
-        "localhost:9092",
-        "--describe",
-        "--group",
-        registration.GROUP,
-    )
-    offsets: dict[int, tuple[int, int]] = {}
-    members: set[str] = set()
-    for line in group.splitlines():
-        fields = line.split()
-        if len(fields) < 6 or fields[0] != registration.GROUP or fields[1] != registration.TOPIC:
-            continue
-        try:
-            partition, committed, log_end = map(int, fields[2:5])
-        except ValueError as error:
-            raise DeploymentError("canonical group progress differs") from error
-        require(0 <= committed <= log_end, "canonical group offset is out of range")
-        offsets[partition] = (committed, log_end)
-        if len(fields) > 6 and fields[6] != "-":
-            members.add(fields[6])
-    require(set(offsets) == set(partitions), "canonical group partition progress is incomplete")
-    return {"partitions": partitions, "offsets": offsets, "activeMembers": len(members)}
-
-
-def canonical_progress_observation(
-    target: Target,
-) -> tuple[dict[str, Any], transition.ProgressState]:
-    first = canonical_kafka_snapshot(target)
-    time.sleep(1)
-    second = canonical_kafka_snapshot(target)
-    return second, transition.ProgressState(
-        stable=registration.stable_kafka_progress(first, second),
-        complete=bool(second["partitions"]),
-        in_range=True,
-    )
-
-
-def canonical_transfer_observation(
-    target: Target,
-) -> tuple[transition.OwnershipState, transition.ProgressState]:
-    java_pods = target.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api-legacy").get(
-        "items", []
-    )
-    java_running, java_terminating = pod_counts(java_pods)
-    go_pods = target.json("get", "pods", "-l", "app.kubernetes.io/name=dashboard-api").get(
-        "items", []
-    )
-    go_running, go_terminating = pod_counts(go_pods)
-    kafka, progress = canonical_progress_observation(target)
-    return (
-        transition.OwnershipState(
-            java_running=java_running,
-            java_terminating=java_terminating,
-            go_running=go_running,
-            go_terminating=go_terminating,
-            canonical_members=kafka["activeMembers"],
-        ),
-        progress,
-    )
-
-
-def canonical_return_snapshot(target: Target) -> dict[str, Any]:
-    java_name = f"{target.environment}-dashboard-api-legacy"
-    go_name = f"{target.environment}-dashboard-api"
-    for name in (java_name, go_name):
-        deployment = target.json("get", "deployment", name)
-        require(
-            deployment.get("metadata", {}).get("name") == name
-            and deployment.get("metadata", {}).get("namespace") == target.namespace
-            and deployment.get("spec", {}).get("replicas") == 0
-            and deployment.get("status", {}).get("replicas", 0) == 0,
-            f"Deployment/{name} is not stopped for canonical return",
-        )
-    state, progress = canonical_transfer_observation(target)
-    try:
-        transition.require_predecessor_return(state, progress)
-    except transition.TransitionError as error:
-        raise DeploymentError(str(error)) from error
-    return {"environment": target.environment, "phase": "quiescent", "status": "passed"}
 
 
 def record_snapshot(stage: str, value: dict[str, Any]) -> None:
@@ -1746,7 +1062,7 @@ def initialization_complete(_target: Target) -> None:
 
 
 def rollout(target: Target) -> None:
-    seconds = transition.LIMITS[target.environment]["action_seconds"]
+    seconds = ROLLOUT_TIMEOUT_SECONDS[target.environment]
     target.kubectl(
         "rollout",
         "status",
@@ -2401,103 +1717,6 @@ def run_deployed_direct_rpc(port: int, scenario: str = "shared-smoke") -> None:
     validate_direct_rpc_output(output, test_name)
 
 
-def produce_registration_fixture(target: Target) -> None:
-    listing = target.data_json(
-        "get", "pods", "-l", f"strimzi.io/cluster={target.environment}-kafka"
-    )
-    brokers = sorted(
-        item.get("metadata", {}).get("name", "")
-        for item in listing.get("items", [])
-        if item.get("metadata", {}).get("labels", {}).get("strimzi.io/broker-role") == "true"
-        and any(
-            condition.get("type") == "Ready" and condition.get("status") == "True"
-            for condition in item.get("status", {}).get("conditions", [])
-        )
-    )
-    require(brokers and all(brokers), "ready Kafka broker inventory differs")
-    payload = json.dumps(REGISTRATION_FIXTURE, separators=(",", ":"))
-    record = f"SYN-290-KEY-IGNORED|{payload}"
-    target.namespace_kubectl(
-        target.data_namespace,
-        "exec",
-        f"pod/{brokers[0]}",
-        "-c",
-        "kafka",
-        "--",
-        "bash",
-        "-c",
-        (
-            'printf "%s\\n" "$1" | '
-            "/opt/kafka/bin/kafka-console-producer.sh "
-            "--bootstrap-server 127.0.0.1:9092 "
-            f"--topic {REGISTRATION_TOPIC} "
-            "--property parse.key=true "
-            "--property 'key.separator=|' "
-            "--producer-property acks=all"
-        ),
-        "_",
-        record,
-        timeout=30,
-    )
-
-
-def registration_http_results(port: int) -> None:
-    deadline = time.monotonic() + 30
-    last: dict[str, Any] = {}
-    while time.monotonic() < deadline:
-        cases = (
-            (
-                "/dashboard/totalsales",
-                {"saleDateFrom": "2026-01-01", "saleDateTo": "2026-02-01"},
-                lambda value: value.get("total") == {"policiesCount": 1, "premiumAmount": 123.45},
-            ),
-            (
-                "/dashboard/agentssales",
-                {"saleDateFrom": "2026-01-01", "saleDateTo": "2026-02-01"},
-                lambda value: not value or value.get("perAgentTotal") == {},
-            ),
-            (
-                "/dashboard/trends",
-                {
-                    "saleDateFrom": "2026-01-01",
-                    "saleDateTo": "2026-02-01",
-                    "aggregationUnitCode": "DAY",
-                },
-                lambda value: (
-                    value.get("periodSales")
-                    == [
-                        {
-                            "periodDate": [2026, 1, 1],
-                            "period": "2026-01-01",
-                            "policiesCount": 1,
-                            "premiumAmount": 123.45,
-                        }
-                    ]
-                ),
-            ),
-        )
-        passed = True
-        for path, payload, expected in cases:
-            status, body = _http(
-                f"http://127.0.0.1:{port}{path}",
-                json.dumps(payload).encode(),
-            )
-            try:
-                value = json.loads(body)
-            except json.JSONDecodeError:
-                value = {}
-            last[path] = {"status": status, "value": value}
-            if status != 200 or not isinstance(value, dict) or not expected(value):
-                passed = False
-        if passed:
-            return
-        time.sleep(0.25)
-    raise DeploymentError(
-        "deployed registration query results differ: "
-        + json.dumps(last, sort_keys=True, separators=(",", ":"))
-    )
-
-
 def verify_shared_http_operation(
     port: int,
     path: str,
@@ -2596,10 +1815,6 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                 time.sleep(0.2)
         else:
             raise DeploymentError("deployed readiness was not reachable")
-        event_enabled = event_activation_enabled(target.environment)
-        if event_enabled and target.processing_mode == "isolated":
-            produce_registration_fixture(target)
-            registration_http_results(http_port)
         for name, path, payload, field, field_type, allow_empty in (
             (
                 "total-sales HTTP",
@@ -2647,9 +1862,7 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
         try:
             run_deployed_direct_rpc(
                 grpc_port,
-                "registration"
-                if event_enabled and target.processing_mode == "isolated"
-                else "shared-smoke",
+                "shared-smoke",
             )
         except Exception as error:
             failures.append(f"direct RPC: {error}")
@@ -2667,10 +1880,10 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
         failures.append(f"access qualification: {error}")
     try:
         require(
-            role_snapshot(target) == before, "Java resource identity changed during verification"
+            role_snapshot(target) == before, "ordinary state boundary changed during verification"
         )
     except Exception as error:
-        failures.append(f"Java identity: {error}")
+        failures.append(f"ordinary state boundary: {error}")
     require(not failures, "Dashboard verification failed: " + " | ".join(failures))
 
 
@@ -2685,7 +1898,7 @@ def stop(target: Target, _items: list[dict[str, Any]]) -> None:
         time.sleep(1)
     else:
         raise DeploymentError("Dashboard stop exceeded 90 seconds")
-    require(role_snapshot(target) == before, "Java resource identity changed during stop")
+    require(role_snapshot(target) == before, "ordinary state boundary changed during stop")
 
 
 def validate_qa_aggregate(resources: Any) -> None:
@@ -2721,14 +1934,9 @@ def validate_java_edge_identity(environment: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     require(
-        len(arguments) == 1 and arguments[0] in {"render", "check", "return-check"},
+        len(arguments) == 1 and arguments[0] in {"render", "check"},
         "unsupported check operation",
     )
-    if arguments[0] == "return-check":
-        target = Target()
-        target.coordinates()
-        print(json.dumps(canonical_return_snapshot(target), sort_keys=True))
-        return 0
     environments = (
         [os.environ.get("DEPLOY_ENV", "")] if arguments[0] == "render" else ["local-dev", "qa"]
     )
@@ -2742,14 +1950,8 @@ def main(argv: list[str] | None = None) -> int:
         qa_root = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
         validate_qa_aggregate(qa_root.get("resources"))
         for environment in ("local-dev", "qa"):
-            validate_event_activation_assets(environment)
-            validate_canonical_activation_assets(environment)
-            validate_render(environment, render_canonical(environment), "canonical")
             validate_java_edge_identity(environment)
-        print(
-            "dashboard-deployment-check: local-dev/QA renders and guarded event activation "
-            "assets passed"
-        )
+        print("dashboard-deployment-check: ordinary local-dev/QA renders and edge identity passed")
     return 0
 
 

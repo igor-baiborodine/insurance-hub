@@ -340,7 +340,6 @@ func TestRun_EnabledWorkerUsesExactSettingsAndBoundedLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings.Events = config.Events{
-		Mode:            config.EventProcessingCanonical,
 		Enabled:         true,
 		Brokers:         []string{"kafka.example:9093"},
 		Group:           "dashboard-service",
@@ -422,10 +421,10 @@ func TestRun_EnabledWorkerConstructionFailureCleansProjection(t *testing.T) {
 	settings.Events = config.Events{
 		Enabled:         true,
 		Brokers:         []string{"kafka.example:9093"},
-		Group:           "dashboard-service-issue-290",
-		RegisteredTopic: "policy-registered-issue-290",
+		Group:           "dashboard-service",
+		RegisteredTopic: "policy-registered",
 		CAFile:          caFile,
-		Writer:          config.Elasticsearch{Index: "policy_stats_issue_290"},
+		Writer:          config.Elasticsearch{Index: "policy_stats"},
 	}
 	projection := &fakeProjectionRuntime{}
 	failure := errors.New("construct registration worker")

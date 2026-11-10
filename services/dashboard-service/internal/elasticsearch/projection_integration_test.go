@@ -24,7 +24,7 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 	if endpoint == "" || adminUsername == "" || adminPassword == "" {
 		t.Fatal("owned Elasticsearch endpoint and paired credentials are required")
 	}
-	adminRequest(t, http.MethodPut, endpoint+"/"+ProjectionIndex, projectionIndexDefinition,
+	adminRequest(t, http.MethodPut, endpoint+"/"+PolicyIndex, projectionIndexDefinition,
 		adminUsername, adminPassword, http.StatusOK)
 	t.Cleanup(func() {
 		for _, target := range []string{
@@ -32,8 +32,8 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 			"/_security/user/dashboard_projection_reader",
 			"/_security/role/dashboard_projection_writer",
 			"/_security/role/dashboard_projection_reader",
-			"/" + ProjectionIndex,
-			"/policy_stats_issue_290_other",
+			"/" + PolicyIndex,
+			"/policy_stats_other",
 		} {
 			integrationRequest(
 				t,
@@ -48,7 +48,7 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 	adminRequest(
 		t,
 		http.MethodPut,
-		endpoint+"/policy_stats_issue_290_other",
+		endpoint+"/policy_stats_other",
 		`{"settings":{"number_of_replicas":0}}`,
 		adminUsername,
 		adminPassword,
@@ -57,24 +57,24 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 	adminRequest(
 		t,
 		http.MethodPut,
-		endpoint+"/"+ProjectionIndex+"/_doc/SYN-290-SENTINEL?refresh=true",
-		`{"number":"SYN-290-SENTINEL","from":null,"to":null,"policyHolder":null,"productCode":null,"totalPremium":null,"agentLogin":null}`,
+		endpoint+"/"+PolicyIndex+"/_doc/SYN-SENTINEL?refresh=true",
+		`{"number":"SYN-SENTINEL","from":null,"to":null,"policyHolder":null,"productCode":null,"totalPremium":null,"agentLogin":null}`,
 		adminUsername,
 		adminPassword,
 		http.StatusCreated,
 	)
 	const writerUsername = "dashboard_projection_writer"
-	const writerPassword = "issue-290-writer-password"
+	const writerPassword = "dashboard-writer-password"
 	const readerUsername = "dashboard_projection_reader"
-	const readerPassword = "issue-290-reader-password"
+	const readerPassword = "dashboard-reader-password"
 	adminRequest(t, http.MethodPut, endpoint+"/_security/role/dashboard_projection_writer",
-		`{"indices":[{"names":["policy_stats_issue_290"],"privileges":["index"]}]}`,
+		`{"indices":[{"names":["policy_stats"],"privileges":["index"]}]}`,
 		adminUsername, adminPassword, http.StatusOK)
 	adminRequest(
 		t,
 		http.MethodPut,
 		endpoint+"/_security/role/dashboard_projection_reader",
-		`{"indices":[{"names":["policy_stats_issue_290"],"privileges":["read","view_index_metadata"]}]}`,
+		`{"indices":[{"names":["policy_stats"],"privileges":["read","view_index_metadata"]}]}`,
 		adminUsername,
 		adminPassword,
 		http.StatusOK,
@@ -86,7 +86,7 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 		`{"password":"`+readerPassword+`","roles":["dashboard_projection_reader"]}`,
 		adminUsername, adminPassword, http.StatusOK)
 	writerClient, err := New(Config{
-		Endpoint: endpoint, Index: ProjectionIndex, Username: writerUsername,
+		Endpoint: endpoint, Index: PolicyIndex, Username: writerUsername,
 		Password: writerPassword, Timeout: 5 * time.Second,
 	})
 	if err != nil {
@@ -102,7 +102,7 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	readerClient, err := New(Config{
-		Endpoint: endpoint, Index: ProjectionIndex, Username: readerUsername,
+		Endpoint: endpoint, Index: PolicyIndex, Username: readerUsername,
 		Password: readerPassword, Timeout: 5 * time.Second,
 	})
 	if err != nil {
@@ -110,10 +110,10 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 	}
 	defer readerClient.CloseIdleConnections()
 	if err := readerClient.Check(context.Background()); err != nil {
-		t.Fatalf("isolated reader readiness = %v", err)
+		t.Fatalf("reader readiness = %v", err)
 	}
 	if err := writerClient.CheckWrite(context.Background()); err != nil {
-		t.Fatalf("isolated writer readiness = %v", err)
+		t.Fatalf("writer readiness = %v", err)
 	}
 	holder := "Synthetic Holder A"
 	product := "HSI"
@@ -131,7 +131,7 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	event := application.PolicyEvent{
-		Number: "SYN-290-PRECISE", From: &from, To: &to, PolicyHolder: &holder,
+		Number: "SYN-PRECISE", From: &from, To: &to, PolicyHolder: &holder,
 		ProductCode: &product, TotalPremium: &premium, AgentLogin: &agent,
 	}
 
@@ -146,7 +146,7 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 	storedStatus, stored := integrationRequest(
 		t,
 		http.MethodGet,
-		endpoint+"/"+ProjectionIndex+"/_doc/"+event.Number,
+		endpoint+"/"+PolicyIndex+"/_doc/"+event.Number,
 		"",
 		readerUsername,
 		readerPassword,
@@ -154,15 +154,15 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 	_, indexed := integrationRequest(
 		t,
 		http.MethodPost,
-		endpoint+"/"+ProjectionIndex+"/_search",
-		`{"size":1,"_source":false,"fields":["totalPremium"],"query":{"ids":{"values":["SYN-290-PRECISE"]}}}`,
+		endpoint+"/"+PolicyIndex+"/_search",
+		`{"size":1,"_source":false,"fields":["totalPremium"],"query":{"ids":{"values":["SYN-PRECISE"]}}}`,
 		readerUsername,
 		readerPassword,
 	)
 	_, sentinel := integrationRequest(
 		t,
 		http.MethodGet,
-		endpoint+"/"+ProjectionIndex+"/_doc/SYN-290-SENTINEL",
+		endpoint+"/"+PolicyIndex+"/_doc/SYN-SENTINEL",
 		"",
 		readerUsername,
 		readerPassword,
@@ -170,7 +170,7 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 	readerWriteStatus, _ := integrationRequest(
 		t,
 		http.MethodPut,
-		endpoint+"/"+ProjectionIndex+"/_doc/reader-denied",
+		endpoint+"/"+PolicyIndex+"/_doc/reader-denied",
 		`{}`,
 		readerUsername,
 		readerPassword,
@@ -178,7 +178,7 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 	writerReadStatus, _ := integrationRequest(
 		t,
 		http.MethodGet,
-		endpoint+"/"+ProjectionIndex+"/_doc/"+event.Number,
+		endpoint+"/"+PolicyIndex+"/_doc/"+event.Number,
 		"",
 		writerUsername,
 		writerPassword,
@@ -186,7 +186,7 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 	otherWriteStatus, _ := integrationRequest(
 		t,
 		http.MethodPut,
-		endpoint+"/policy_stats_issue_290_other/_doc/denied",
+		endpoint+"/policy_stats_other/_doc/denied",
 		`{}`,
 		writerUsername,
 		writerPassword,
@@ -194,7 +194,7 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 	deleteStatus, _ := integrationRequest(
 		t,
 		http.MethodDelete,
-		endpoint+"/"+ProjectionIndex+"/_doc/"+event.Number,
+		endpoint+"/"+PolicyIndex+"/_doc/"+event.Number,
 		"",
 		writerUsername,
 		writerPassword,
@@ -227,7 +227,7 @@ func TestElasticsearchProjection_AcceptedWriterMatrix(t *testing.T) {
 	if indexedPremium == premium.String() {
 		t.Fatalf("indexed double unexpectedly preserved source token %q", indexedPremium)
 	}
-	if !bytes.Contains(sentinel, []byte(`"SYN-290-SENTINEL"`)) {
+	if !bytes.Contains(sentinel, []byte(`"SYN-SENTINEL"`)) {
 		t.Fatalf("pre-existing projection document changed: %s", sentinel)
 	}
 	for operation, status := range map[string]int{

@@ -76,7 +76,7 @@ func TestNew_RequiresExactBoundedReadOnlyConfiguration(t *testing.T) {
 }
 
 func TestNew_AcceptsOnlyDashboardIndexProfiles(t *testing.T) {
-	for _, index := range []string{PolicyIndex, ProjectionIndex} {
+	for _, index := range []string{PolicyIndex, PolicyIndex} {
 		t.Run(index, func(t *testing.T) {
 			// when
 			client, err := New(Config{
@@ -303,12 +303,12 @@ func TestClient_CheckWriteRequiresExactPrivilege(t *testing.T) {
 		{
 			name:   "all privileges denied",
 			status: http.StatusOK,
-			body:   `{"has_all_requested":false,"index":{"policy_stats_issue_290":{"index":false}}}`,
+			body:   `{"has_all_requested":false,"index":{"policy_stats":{"index":false}}}`,
 		},
 		{
 			name:   "index privilege denied",
 			status: http.StatusOK,
-			body:   `{"has_all_requested":true,"index":{"policy_stats_issue_290":{"index":false}}}`,
+			body:   `{"has_all_requested":true,"index":{"policy_stats":{"index":false}}}`,
 		},
 		{
 			name:   "request rejected",
@@ -338,7 +338,7 @@ func TestClient_CheckWriteRequiresExactPrivilege(t *testing.T) {
 							request.URL.Path != "/_security/user/_has_privileges" ||
 							string(
 								body,
-							) != `{"index":[{"names":["policy_stats_issue_290"],"privileges":["index"]}]}` {
+							) != `{"index":[{"names":["policy_stats"],"privileges":["index"]}]}` {
 							t.Errorf(
 								"privilege request = %s %s %s",
 								request.Method,
@@ -353,7 +353,7 @@ func TestClient_CheckWriteRequiresExactPrivilege(t *testing.T) {
 			)
 			defer server.Close()
 			client, err := New(Config{
-				Endpoint: server.URL, Index: ProjectionIndex, Timeout: time.Second,
+				Endpoint: server.URL, Index: PolicyIndex, Timeout: time.Second,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -371,7 +371,7 @@ func TestClient_CheckWriteRequiresExactPrivilege(t *testing.T) {
 }
 
 func TestClient_CheckWriteUsesSelectedExactIndex(t *testing.T) {
-	for _, index := range []string{"policy_stats", "policy_stats_issue_290"} {
+	for _, index := range []string{"policy_stats", "policy_stats"} {
 		t.Run(index, func(t *testing.T) {
 			var requestBody string
 			server := httptest.NewServer(
@@ -416,14 +416,14 @@ func TestClient_CheckWriteRequiresDashboardClientAndPropagatesCancellation(t *te
 			writer.Header().Set("X-Elastic-Product", "Elasticsearch")
 			_, _ = writer.Write(
 				[]byte(
-					`{"has_all_requested":true,"index":{"policy_stats_issue_290":{"index":true}}}`,
+					`{"has_all_requested":true,"index":{"policy_stats":{"index":true}}}`,
 				),
 			)
 		}),
 	)
 	defer server.Close()
 	projection, err := New(Config{
-		Endpoint: server.URL, Index: ProjectionIndex, Timeout: time.Second,
+		Endpoint: server.URL, Index: PolicyIndex, Timeout: time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)

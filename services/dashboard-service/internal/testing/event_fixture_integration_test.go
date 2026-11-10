@@ -41,10 +41,10 @@ import (
 )
 
 const (
-	eventFixtureOwnership = "issue-290-disposable"
-	eventFixtureTopic     = "policy-registered-issue-290"
-	eventFixtureGroup     = "dashboard-service-issue-290"
-	eventFixtureIndex     = "policy_stats_issue_290"
+	eventFixtureOwnership = "dashboard-disposable"
+	eventFixtureTopic     = "policy-registered"
+	eventFixtureGroup     = "dashboard-service"
+	eventFixtureIndex     = "policy_stats"
 )
 
 type eventOracle struct {
@@ -273,8 +273,8 @@ func verifyHandlerFailureCommitParity(
 	source oracleEvent,
 ) {
 	t.Helper()
-	first := registrationWithNumber(t, source, "SYN-290-FAIL-1")
-	second := registrationWithNumber(t, source, "SYN-290-FAIL-2")
+	first := registrationWithNumber(t, source, "SYN-FAIL-1")
+	second := registrationWithNumber(t, source, "SYN-FAIL-2")
 	produceFixtureEvents(t, ctx, producer, environment.Topic, first, second)
 	projection := &failingProjection{}
 	worker, err := dashboardkafka.NewWorker(dashboardkafka.Settings{
@@ -376,9 +376,9 @@ func loadEventOracle(t *testing.T) eventOracle {
 	if oracle.Resources.RegisteredTopic != eventFixtureTopic ||
 		oracle.Resources.ConsumerGroup != eventFixtureGroup ||
 		oracle.Resources.Index != eventFixtureIndex ||
-		oracle.Resources.SyntheticIDPrefix != "SYN-290-" {
+		oracle.Resources.SyntheticIDPrefix != "SYN-" {
 		t.Fatal(
-			"event oracle resources are not the accepted issue-290 isolation coordinates",
+			"event oracle resources do not use the ordinary coordinates",
 		)
 	}
 	return oracle
@@ -527,7 +527,7 @@ func assertRegistrationOracle(t *testing.T, event oracleEvent) {
 	if len(expected) != 7 {
 		t.Fatalf("expected document fields = %d, want 7", len(expected))
 	}
-	if envelope.Policy.Number != "SYN-290-001" || event.Key == envelope.Policy.Number {
+	if envelope.Policy.Number != "SYN-001" || event.Key == envelope.Policy.Number {
 		t.Fatal(
 			"oracle must retain payload identity independently of a mismatched Kafka key",
 		)
@@ -552,7 +552,7 @@ func assertRegistrationOracle(t *testing.T, event oracleEvent) {
 func requireEventEnvironment(t *testing.T, oracle eventOracle) eventEnvironment {
 	t.Helper()
 	if os.Getenv("DASHBOARD_TEST_EVENT_OWNERSHIP") != eventFixtureOwnership {
-		t.Fatal("DASHBOARD_TEST_EVENT_OWNERSHIP must select issue-290-disposable")
+		t.Fatal("DASHBOARD_TEST_EVENT_OWNERSHIP must select dashboard-disposable")
 	}
 	environment := eventEnvironment{
 		Broker:        os.Getenv("DASHBOARD_TEST_KAFKA_BROKERS"),
@@ -587,7 +587,7 @@ func requireEventEnvironment(t *testing.T, oracle eventOracle) eventEnvironment 
 	if environment.Topic != oracle.Resources.RegisteredTopic ||
 		environment.ConsumerGroup != oracle.Resources.ConsumerGroup ||
 		environment.Index != oracle.Resources.Index {
-		t.Fatal("event integration resources differ from the accepted issue-290 oracle")
+		t.Fatal("event integration resources differ from the accepted oracle")
 	}
 	return environment
 }

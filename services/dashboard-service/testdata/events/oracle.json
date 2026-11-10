@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
-  "ownership": "issue-290-disposable",
+  "ownership": "dashboard-disposable",
   "resources": {
-    "registeredTopic": "policy-registered-issue-290",
-    "consumerGroup": "dashboard-service-issue-290",
-    "index": "policy_stats_issue_290",
-    "syntheticIdPrefix": "SYN-290-"
+    "registeredTopic": "policy-registered",
+    "consumerGroup": "dashboard-service",
+    "index": "policy_stats",
+    "syntheticIdPrefix": "SYN-"
   },
   "events": {
     "registration": {
-      "key": "SYN-290-KEY-IGNORED",
+      "key": "SYN-KEY-IGNORED",
       "value": {
         "policy": {
-          "number": "SYN-290-001",
+          "number": "SYN-001",
           "from": [2026, 1, 1],
           "to": [2026, 12, 31],
           "policyHolder": "Synthetic Holder A",
@@ -22,7 +22,7 @@
         }
       },
       "expectedDocument": {
-        "number": "SYN-290-001",
+        "number": "SYN-001",
         "from": "2026-01-01",
         "to": "2026-12-31",
         "policyHolder": "Synthetic Holder A",
