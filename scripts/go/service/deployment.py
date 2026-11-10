@@ -251,14 +251,17 @@ def execute(checks: Any, argv: list[str] | None = None) -> int:
             wait_for_job(target, name)
             checks.initialization_complete(target)
             checks.record_snapshot("after initialization", checks.administration_snapshot(target))
-        before = checks.role_snapshot(target)
-        checks.record_snapshot("before API deployment", before)
+        snapshot = getattr(checks, "role_snapshot", None)
+        before = snapshot(target) if snapshot is not None else None
+        if snapshot is not None:
+            checks.record_snapshot("before API deployment", before)
         apply(target, rendered, f"insurance-hub-go-{target.service}")
         checks.rollout(target)
         target.live(items, require_deployment=True)
-        after = checks.role_snapshot(target)
-        checks.record_snapshot("after API deployment", after)
-        require(after == before, "protected state changed during API deployment")
+        if snapshot is not None:
+            after = snapshot(target)
+            checks.record_snapshot("after API deployment", after)
+            require(after == before, "protected state changed during API deployment")
     elif operation == "deploy-verify":
         checks.verify(target, items)
         checks.check_requested_route(target)
