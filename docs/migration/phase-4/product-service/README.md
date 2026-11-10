@@ -96,9 +96,9 @@ combined gateway/Go test. The Product module's full `check` owns the direct Go H
 the two local gates do not execute it twice. The [security reproduction and token-handling guide](security-baseline.md#reproduction)
 records prerequisites, disposable cleanup, and safe live-token handling. The separate
 [`product-security-verify` handoff](security-baseline.md#go-deployment-exposure-gate-for-issue-134)
-probes only an explicitly selected, already running target. Issue #134 combined it with effective
-exposure, database-grant, and unchanged Java-routing checks in local-dev and QA; later regression
-runs must retain those separate checks.
+probes only an explicitly selected, already running target. Current regression runs combine it with
+effective exposure, database-grant, retired Java Product absence, and Java gateway-to-Go routing
+checks in local-dev and QA.
 
 ## Authoritative layout
 
@@ -358,7 +358,8 @@ Disposable Testcontainers databases and listeners are created and stopped by the
 Live capture and verification do not reset shared data. Local-dev and QA remain mutually exclusive;
 stop the active target, start the other, and rerun preflight after every switch. Temporary token and
 authorization-header files must remain outside the corpus and be removed after the run. Existing
-Java routing, seeding, and schema ownership remain active until their later gates authorize change.
+Java gateway routing to Go, ordinary seeding, and schema ownership remain active operational
+boundaries.
 
 ## Acceptance evidence
 

@@ -46,8 +46,10 @@ The [Go Product configuration](../../../../services/product-service/internal/con
 consumes a separate PostgreSQL reader URL and has no gateway signing-key setting.
 The [local-dev gateway destination](../../../../legacy/agent-portal-gateway/src/main/resources/application-local-dev.yml)
 and [QA gateway destination](../../../../legacy/agent-portal-gateway/src/main/resources/application-qa.yml)
-still name the Java Product Service. Issue #134 subsequently confirmed their effective routing in
-both deployed environments with live gateway responses and direct Java response comparisons.
+retain the historical Java Product Service defaults. Issue #134 confirmed that earlier effective
+routing with live gateway responses and direct Java response comparisons. Current environment
+overlays supply the Java gateway's route to the Go Product Service; the Java Product workload is
+retired in local-dev and QA.
 
 The gateway marks both `GET /api/products` and `GET /api/products/{productCode}` as authenticated.
 Micronaut verifies a signed token, requires a subject, and rejects an expired token. The observed
@@ -198,12 +200,13 @@ environment.
 Before each local-dev or QA acceptance or regression run, complete these checks in sequence:
 
 1. Stop the prior environment and its forwards. Select the new Kubernetes context, verify its
-   namespace, target cluster/revision, ready Go and Java workloads, and current UTC host and node
-   clocks. Correct QA clock drift before token-dependent captures; compare with the accepted
-   environment snapshot only after the context and clock preflight passes.
+   namespace, target cluster/revision, ready Go Product workload and Java gateway, retired Java
+   Product absence, and current UTC host and node clocks. Correct QA clock drift before
+   token-dependent captures; compare with the accepted environment snapshot only after the context
+   and clock preflight passes.
 2. Inspect both rendered manifests and effective Deployment, Pod, Service, EndpointSlice, Ingress,
-   Gateway, HTTPRoute, GRPCRoute, and any other installed route resources. Require distinct Go and
-   Java workload labels/selectors and a ready Go endpoint behind the intended Go Service. Require
+   Gateway, HTTPRoute, GRPCRoute, and any other installed route resources. Require the expected Go
+   workload labels/selectors and a ready Go endpoint behind the intended Go Service. Require
    internal `ClusterIP` Services for Go business HTTP/gRPC and management ports. Reject any
    Go-related external IP, NodePort, LoadBalancer, Ingress/Gateway route, host port, or host network
    setting that publishes those listeners outside the intended cluster boundary. Include management
@@ -213,8 +216,8 @@ Before each local-dev or QA acceptance or regression run, complete these checks 
    write/DDL behavior through the database role proof; preserve the accepted catalog/schema
    before and after. The verifier does not inspect PostgreSQL or prove those grants.
 4. Run the anonymous read-only verifier through explicit Go Service forwards and retain its result.
-   Verify the existing Java gateway destination and effective routing still select the Java Product
-   Service, using a separate live gateway observation. Do not infer routing from the Go probe.
+   Verify the existing Java gateway destination and effective routing select the Go Product Service,
+   using a separate live gateway observation. Do not infer routing from the direct Go probe.
 5. Repeat the context, namespace, clock, rendered/effective resource, role, and read checks after
    switching to the second environment. Keep fixture loading and negative dependency tests on
    disposable infrastructure only.
@@ -222,9 +225,10 @@ Before each local-dev or QA acceptance or regression run, complete these checks 
 Anonymous internal Product access is the selected parity behavior. `ClusterIP` does not authenticate
 or restrict reachable in-cluster clients. This gate makes no claim of gateway-exclusive access,
 mTLS, or workload identity. The verifier alone does not prove complete deployment acceptance;
-issue #134 combined it with effective exposure, reader, catalog, lifecycle, and Java-routing
-evidence in both environments. The final coordinates and rerun procedure are in the
-[deployment runbook](deployment-runbook.md#acceptance-evidence-and-handoff).
+issue #134 historically combined it with effective exposure, reader, catalog, lifecycle, and the
+then-current Java Product routing evidence in both environments. Current reruns require Java
+gateway-to-Go routing and retired Java Product absence. The final coordinates and rerun procedure
+are in the [deployment runbook](deployment-runbook.md#acceptance-evidence-and-handoff).
 
 ## Reproduction
 
