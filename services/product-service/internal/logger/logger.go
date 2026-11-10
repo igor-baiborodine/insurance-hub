@@ -15,5 +15,5 @@ func New(output io.Writer, serviceName string, level slog.Level) *slog.Logger {
 }
 
 func NewIdentity(output io.Writer, identity config.Identity, level slog.Level) *slog.Logger {
-	return kitlogger.NewIdentity(output, identity, level)
+	return kitlogger.NewIdentity(output, identity.Identity, level)
 }

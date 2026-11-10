@@ -15,6 +15,8 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	collectormetric "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 
+	kitidentity "github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
+
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
 )
 
@@ -52,6 +54,12 @@ func TestNew_RejectsInvalidProductIdentityBeforeExport(t *testing.T) {
 	_, err = New(context.Background(), "product-service", settings)
 	if err == nil || err.Error() != "initialize telemetry: invalid resource identity" {
 		t.Errorf("invalid version = %v", err)
+	}
+	settings.Identity.ServiceVersion = "git-6c4669c81d3a"
+	settings.Identity.ServiceInstance = "local-test"
+	_, err = New(context.Background(), "product-service", settings)
+	if err == nil || err.Error() != "initialize telemetry: invalid resource identity" {
+		t.Errorf("local enabled instance = %v", err)
 	}
 }
 
@@ -98,8 +106,8 @@ func TestNew_ExportsProductRequestMetricWithOriginalBucketsAndIdentity(t *testin
 			}
 			if attributes["service.namespace"] != "insurance-hub" ||
 				attributes["service.name"] != "product-service" ||
-				attributes["service.version"] != "test-telemetry" ||
-				attributes["service.instance.id"] != "123e4567-e89b-42d3-a456-426614174000" ||
+				attributes["service.version"] != "git-6c4669c81d3a" ||
+				attributes["service.instance.id"] != "test-instance" ||
 				attributes["deployment.environment.name"] != "test" ||
 				attributes["insurance_hub.service.implementation"] != "go" {
 				t.Errorf("Product metric identity = %#v", attributes)
@@ -182,10 +190,10 @@ func testTelemetrySettings(timeout time.Duration) config.Telemetry {
 	return config.Telemetry{
 		Enabled: true, ExporterEndpoint: mustURL("http://127.0.0.1:4317"),
 		ExporterTimeout: timeout,
-		Identity: config.Identity{
+		Identity: kitidentity.Identity{
 			ServiceNamespace: "insurance-hub", ServiceName: "product-service",
-			ServiceVersion:  "test-telemetry",
-			ServiceInstance: "123e4567-e89b-42d3-a456-426614174000",
+			ServiceVersion:  "git-6c4669c81d3a",
+			ServiceInstance: "test-instance",
 			Environment:     "test", Implementation: "go",
 		},
 	}

@@ -1,8 +1,6 @@
 package config
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -63,12 +61,12 @@ type Config struct {
 	kitconfig.Telemetry
 }
 
-// Identity is the application-owned resource and log identity. Kubernetes fields are added by Alloy.
-type Identity = kitidentity.Identity
+// Identity adds Product validation policy to the shared resource and log fields.
+type Identity struct{ kitidentity.Identity }
 
 // DevelopmentIdentity labels startup diagnostics before configuration is validated.
 func DevelopmentIdentity(serviceName string) Identity {
-	return kitidentity.DevelopmentIdentity(serviceName, os.Getpid())
+	return Identity{Identity: kitidentity.DevelopmentIdentity(serviceName, os.Getpid())}
 }
 
 // Address is a validated TCP listen address with a host and numeric port.
@@ -427,7 +425,7 @@ func loadTelemetry(lookup lookupEnv, serviceName string) (Telemetry, error) {
 		Enabled:          enabled,
 		ExporterEndpoint: endpoint,
 		ExporterTimeout:  timeout,
-		Identity:         identity,
+		Identity:         identity.Identity,
 	}
 	if err := kitconfig.ValidateTelemetry(settings); err != nil {
 		return Telemetry{}, err
@@ -436,64 +434,103 @@ func loadTelemetry(lookup lookupEnv, serviceName string) (Telemetry, error) {
 }
 
 func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity, error) {
-	defaultEnvironment := "development"
-	if enabled {
-		defaultEnvironment = ""
+	identity := DevelopmentIdentity(serviceName)
+	fields := []struct {
+		name  string
+		value *string
+	}{
+		{environmentSetting, &identity.Environment},
+		{serviceVersionSetting, &identity.ServiceVersion},
+		{serviceInstanceSetting, &identity.ServiceInstance},
 	}
-	environment, err := valueOrDefault(lookup, environmentSetting, defaultEnvironment)
-	if err != nil {
-		return Identity{}, err
-	}
-	version, err := valueOrDefault(lookup, serviceVersionSetting, "development")
-	if err != nil {
-		return Identity{}, err
-	}
-	instance, err := valueOrDefault(lookup, serviceInstanceSetting, "")
-	if err != nil {
-		return Identity{}, err
-	}
-	if environment == "test" && instance != "" {
-		return Identity{}, invalid(serviceInstanceSetting, "must be generated in test mode")
-	}
-	if environment == "test" {
-		instance, err = randomInstanceID()
-		if err != nil {
-			return Identity{}, invalid(
-				serviceInstanceSetting,
-				"could not generate test instance ID",
-			)
+	for _, field := range fields {
+		fallback := *field.value
+		if enabled {
+			fallback = ""
 		}
-	} else if environment == "development" && instance == "" {
-		instance = DevelopmentIdentity(serviceName).ServiceInstance
+		value, err := valueOrDefault(lookup, field.name, fallback)
+		if err != nil {
+			return Identity{}, err
+		}
+		*field.value = value
 	}
-	identity := Identity{
-		ServiceNamespace: "insurance-hub",
-		ServiceName:      serviceName,
-		ServiceVersion:   version,
-		ServiceInstance:  instance,
-		Environment:      environment,
-		Implementation:   "go",
-	}
-	if err := kitidentity.ValidateDeployment(
-		identity,
-		DefaultServiceName,
-		enabled,
-	); err != nil {
+	if err := identity.Validate(enabled); err != nil {
 		return Identity{}, err
 	}
 	return identity, nil
 }
 
-func randomInstanceID() (string, error) {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return "", err
+// Validate enforces Product's logical and deployed identity contract.
+func (identity Identity) Validate(enabled bool) error {
+	if identity.ServiceNamespace != "insurance-hub" || identity.Implementation != "go" {
+		return kitconfig.Invalid(
+			"telemetry identity",
+			"must use the insurance-hub namespace and Go implementation",
+		)
 	}
-	value[6] = value[6]&0x0f | 0x40
-	value[8] = value[8]&0x3f | 0x80
-	encoded := hex.EncodeToString(value[:])
-	return encoded[:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" +
-		encoded[16:20] + "-" + encoded[20:], nil
+	if identity.ServiceName != DefaultServiceName {
+		return kitconfig.Invalid(
+			serviceNameSetting,
+			"must identify the Product service",
+		)
+	}
+	for _, field := range []struct{ name, value string }{
+		{serviceNameSetting, identity.ServiceName},
+		{environmentSetting, identity.Environment},
+		{serviceVersionSetting, identity.ServiceVersion},
+		{serviceInstanceSetting, identity.ServiceInstance},
+	} {
+		if !validIdentityValue(field.value) {
+			return kitconfig.Invalid(
+				field.name,
+				"must contain 1 through 128 ASCII letters, digits, dots, underscores or hyphens",
+			)
+		}
+	}
+	if enabled &&
+		(identity.Environment == "development" || identity.ServiceVersion == "development" || strings.HasPrefix(identity.ServiceInstance, "local-")) {
+		return kitconfig.Invalid(
+			"telemetry identity",
+			"must use explicit non-development environment, version and instance when enabled",
+		)
+	}
+	if identity.Environment != "development" && !validSourceVersion(identity.ServiceVersion) {
+		return kitconfig.Invalid(
+			serviceVersionSetting,
+			"must be git- followed by 12 nonzero lowercase source revision characters",
+		)
+	}
+	return nil
+}
+
+func validSourceVersion(value string) bool {
+	if len(value) != len("git-")+12 || !strings.HasPrefix(value, "git-") {
+		return false
+	}
+	suffix := strings.TrimPrefix(value, "git-")
+	allZero := true
+	for _, ch := range suffix {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+		if ch != '0' {
+			allZero = false
+		}
+	}
+	return !allZero
+}
+
+func validIdentityValue(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for _, ch := range value {
+		if (ch < 'a' || ch > 'z') && (ch < 'A' || ch > 'Z') && (ch < '0' || ch > '9') &&
+			ch != '.' && ch != '_' && ch != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func parseOptionalEndpoint(lookup lookupEnv, enabled bool) (*url.URL, error) {

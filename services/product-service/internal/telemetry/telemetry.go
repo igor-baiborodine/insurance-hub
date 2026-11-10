@@ -11,7 +11,6 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
-	kitidentity "github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
 	kittelemetry "github.com/igor-baiborodine/insurance-hub/libs/servicekit/telemetry"
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
@@ -52,8 +51,8 @@ func New(ctx context.Context, serviceName string, settings config.Telemetry) (*P
 		if settings.Identity.ServiceName != serviceName {
 			return nil, errors.New("initialize telemetry: service identity mismatch")
 		}
-		if err := kitidentity.ValidateDeployment(
-			settings.Identity, config.DefaultServiceName, true,
+		if err := (config.Identity{Identity: settings.Identity}).Validate(
+			true,
 		); err != nil {
 			return nil, errors.New("initialize telemetry: invalid resource identity")
 		}

@@ -520,7 +520,8 @@ func telemetryEnvironment(endpoint string) []string {
 		"OTEL_EXPORTER_OTLP_ENDPOINT=" + endpoint,
 		"OTEL_EXPORTER_OTLP_TIMEOUT=2s",
 		"DEPLOYMENT_ENVIRONMENT=test",
-		"SERVICE_VERSION=test-telemetry",
+		"SERVICE_VERSION=git-6c4669c81d3a",
+		"SERVICE_INSTANCE_ID=test-instance",
 	}
 }
 

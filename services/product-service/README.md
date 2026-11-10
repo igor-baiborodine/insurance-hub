@@ -261,7 +261,7 @@ parameter is rejected.
 
 | Setting                       | Default           | Constraint                                                                                                              |
 |-------------------------------|-------------------|-------------------------------------------------------------------------------------------------------------------------|
-| `SERVICE_NAME`                | `product-service` | Non-empty, non-blank service identity.                                                                                  |
+| `SERVICE_NAME`                | `product-service` | Fixed Product service identity.                                                                                         |
 | `HTTP_ADDR`                   | `127.0.0.1:8081`  | Business HTTP host and numeric port.                                                                                    |
 | `GRPC_ADDR`                   | `127.0.0.1:9090`  | Business gRPC host and numeric port.                                                                                    |
 | `HEALTH_ADDR`                 | `127.0.0.1:8080`  | Management HTTP host and numeric port; all listener addresses must differ.                                              |
@@ -284,20 +284,18 @@ parameter is rejected.
 | `OTEL_ENABLED`                | `false`           | Boolean; disabled mode requires no collector.                                                                           |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset             | HTTP(S) OTLP/gRPC URL, required only when telemetry is enabled.                                                         |
 | `OTEL_EXPORTER_OTLP_TIMEOUT`  | `2s`              | Positive; no greater than `SHUTDOWN_TIMEOUT`.                                                                           |
-| `DEPLOYMENT_ENVIRONMENT`      | `development`     | Enabled telemetry accepts `test` or a valid release environment such as `qa`, `staging`, `preprod` or `preview-42`; development remains disabled. |
-| `SERVICE_VERSION`             | `development`     | Release environments require `sha-` followed by 7–40 lowercase hexadecimal characters; disposable tests require `test-<revision>`. |
-| `SERVICE_INSTANCE_ID`         | local process ID  | Release environments require a UUID-shaped Pod UID; tests generate a UUIDv4 and reject a supplied instance. |
+| `DEPLOYMENT_ENVIRONMENT`      | `development`     | Explicit non-development value when telemetry is enabled.                                                              |
+| `SERVICE_VERSION`             | `development`     | Outside development, `git-` followed by exactly 12 nonzero lowercase hexadecimal source-revision characters.           |
+| `SERVICE_INSTANCE_ID`         | local process ID  | Explicit ordinary instance value when telemetry is enabled; Kubernetes supplies the Pod UID.                           |
 
 Enabled telemetry fixes `SERVICE_NAME=product-service` and `OTEL_EXPORTER_OTLP_TIMEOUT=2s`.
-Product opts into ServiceKit's [deployment identity policy](../../libs/servicekit/identity/deployment.go)
-both during configuration loading and telemetry construction. Environment names contain 1–63
-lowercase ASCII letters, digits or hyphens, start with a letter, and end with a letter or digit.
-Every valid name other than `development` and `test` uses the release identity rule, whether
-telemetry is enabled or disabled; new release names need no registration. The UUID-shaped instance
-has 36 hexadecimal-and-dash characters in the standard positions, without a version/variant check;
-Kubernetes supplies it through the Pod UID Downward API. Development requires version `development`
-and a `local-` instance. Test versions match `^test-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.
-Invalid identities produce safe setting/reason diagnostics without echoing rejected values.
+Product owns the deployment identity policy used during configuration loading and telemetry
+construction. Name, environment, version and instance contain 1–128 ASCII letters, digits, dots,
+underscores or hyphens. Enabled telemetry rejects development defaults and local instances. Every
+non-development environment requires the same canonical `git-<12 lowercase hexadecimal>` source
+version even when export is disabled; the all-zero revision is invalid. Tests supply an ordinary
+stable instance such as `test-instance`. Invalid identities produce safe setting/reason diagnostics
+without echoing rejected values.
 
 The application supplies the six approved non-Kubernetes identity fields on trace and metric
 resources and on validated service logs. Alloy adds Kubernetes identity later. QA telemetry and
@@ -352,7 +350,7 @@ installation requires explicit `make bootstrap-tools`.
 
 | Boundary | Aligned behavior | Intentional Product adaptation |
 | --- | --- | --- |
-| [Config](internal/config/config.go) and [startup](cmd/server/main.go) | ServiceKit value groups, parsing/host predicates and safe diagnostics; opt-in deployment identity validation. | Ordered loading, three listeners, database URL/pool validation and linked timeout budgets; release SHA/Pod UID and generated test UUID identity; enabled exporter timeout stays 2s. |
+| [Config](internal/config/config.go) and [startup](cmd/server/main.go) | ServiceKit value groups, parsing/host predicates and safe diagnostics. | Ordered loading, three listeners, database URL/pool validation, linked timeout budgets and Product-owned fixed-name/canonical-source identity policy; enabled exporter timeout stays 2s. |
 | [Logger](internal/logger/logger.go) | UTC JSON, six-field identity, trace correlation, recursive redaction and completion records independent of diagnostic threshold. | Product completion message and service identity. |
 | [Health](internal/health/health.go) | Bounded dependency probes recheck cancellation and lifecycle readiness after success; withdrawal during a probe returns 503; liveness stays independent. | PostgreSQL read-access probe supplied by composition. |
 | [gRPC](internal/grpc/server.go) | Known methods begin observation before decoding and finish once at the final stats event. All 17 canonical status names remain distinct; invalid codes normalize to UNKNOWN. Pre-handler rejection and send-size failure appear in completion logs and metrics. Unknown methods do not create Product observations or arbitrary method labels. | ListProducts/GetProduct contracts, Product validation/mapping and bounded list/get operation labels. |

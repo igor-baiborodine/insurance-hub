@@ -3,17 +3,12 @@ package config
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 )
 
 const testDatabaseURL = "postgresql://product_reader:reader-password@127.0.0.1:5432/product"
-
-var testUUIDPattern = regexp.MustCompile(
-	`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
-)
 
 func TestLoad_Defaults(t *testing.T) {
 	// given
@@ -97,7 +92,8 @@ func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 		otelEndpointSetting:          "https://collector.internal:4317",
 		otelTimeoutSetting:           "2s",
 		environmentSetting:           "test",
-		serviceVersionSetting:        "test-config-overrides",
+		serviceVersionSetting:        "git-6c4669c81d3a",
+		serviceInstanceSetting:       "test-instance",
 	}
 
 	// when
@@ -139,9 +135,9 @@ func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 		t.Errorf("unexpected telemetry overrides: %#v", settings.Telemetry)
 	}
 	if identity := settings.Identity; identity.ServiceNamespace != "insurance-hub" ||
-		identity.ServiceName != "product-service" || identity.ServiceVersion != "test-config-overrides" ||
+		identity.ServiceName != "product-service" || identity.ServiceVersion != "git-6c4669c81d3a" ||
 		identity.Environment != "test" || identity.Implementation != "go" ||
-		!testUUIDPattern.MatchString(identity.ServiceInstance) {
+		identity.ServiceInstance != "test-instance" {
 		t.Errorf("unexpected test telemetry identity: %#v", identity)
 	}
 }
@@ -411,55 +407,52 @@ func TestLoad_RequiresEndpointForEnabledTelemetry(t *testing.T) {
 	assertSettingError(t, err, otelEndpointSetting)
 }
 
-func TestLoad_AcceptsQAIdentityAndGeneratesDistinctTestInstances(t *testing.T) {
+func TestLoad_AcceptsExplicitQAAndTestIdentity(t *testing.T) {
 	// given
 	qaValues := map[string]string{
 		databaseURLSetting:     testDatabaseURL,
 		otelEnabledSetting:     "true",
 		otelEndpointSetting:    "http://collector.internal:4317",
 		environmentSetting:     "qa",
-		serviceVersionSetting:  "sha-6c4669c81d3a",
+		serviceVersionSetting:  "git-6c4669c81d3a",
 		serviceInstanceSetting: "123e4567-e89b-42d3-a456-426614174000",
 	}
 	testValues := map[string]string{
-		databaseURLSetting:    testDatabaseURL,
-		otelEnabledSetting:    "true",
-		otelEndpointSetting:   "http://127.0.0.1:4317",
-		environmentSetting:    "test",
-		serviceVersionSetting: "test-6c4669c",
+		databaseURLSetting:     testDatabaseURL,
+		otelEnabledSetting:     "true",
+		otelEndpointSetting:    "http://127.0.0.1:4317",
+		environmentSetting:     "test",
+		serviceVersionSetting:  "git-6c4669c81d3a",
+		serviceInstanceSetting: "test-instance",
 	}
 
 	// when
 	qa, qaErr := load(mapLookup(qaValues))
-	first, firstErr := load(mapLookup(testValues))
-	second, secondErr := load(mapLookup(testValues))
+	testSettings, testErr := load(mapLookup(testValues))
 
 	// then
-	if qaErr != nil || firstErr != nil || secondErr != nil {
-		t.Fatalf("load identities: qa=%v first=%v second=%v", qaErr, firstErr, secondErr)
+	if qaErr != nil || testErr != nil {
+		t.Fatalf("load identities: qa=%v test=%v", qaErr, testErr)
 	}
 	if qa.Identity.ServiceInstance != qaValues[serviceInstanceSetting] ||
 		qa.Identity.Environment != "qa" ||
 		qa.Identity.ServiceVersion != qaValues[serviceVersionSetting] {
 		t.Errorf("unexpected QA identity: %#v", qa.Identity)
 	}
-	firstID := first.Identity.ServiceInstance
-	secondID := second.Identity.ServiceInstance
-	if !testUUIDPattern.MatchString(firstID) || !testUUIDPattern.MatchString(secondID) ||
-		firstID == secondID ||
-		firstID[14] != '4' ||
-		secondID[14] != '4' {
-		t.Errorf("test instances are not distinct UUIDv4 values: %q, %q", firstID, secondID)
+	if testSettings.Identity.ServiceInstance != "test-instance" ||
+		testSettings.Identity.Environment != "test" ||
+		testSettings.Identity.ServiceVersion != "git-6c4669c81d3a" {
+		t.Errorf("unexpected test identity: %#v", testSettings.Identity)
 	}
 }
 
-func TestLoad_ReleaseEnvironmentsUseSharedDeploymentPolicy(t *testing.T) {
+func TestLoad_ReleaseEnvironmentsUseProductIdentityPolicy(t *testing.T) {
 	// given
 	base := map[string]string{
 		databaseURLSetting:     testDatabaseURL,
 		otelEnabledSetting:     "true",
 		otelEndpointSetting:    "http://collector.internal:4317",
-		serviceVersionSetting:  "sha-6c4669c81d3a",
+		serviceVersionSetting:  "git-6c4669c81d3a",
 		serviceInstanceSetting: "123e4567-e89b-42d3-a456-426614174000",
 	}
 	for _, environment := range []string{"staging", "preprod", "preview-42"} {
@@ -480,12 +473,12 @@ func TestLoad_ReleaseEnvironmentsUseSharedDeploymentPolicy(t *testing.T) {
 		})
 	}
 	for _, scenario := range []struct {
-		name, setting, value string
+		name, setting, value, want string
 	}{
-		{"malformed environment", environmentSetting, "Preview_42"},
-		{"mutable version", serviceVersionSetting, "latest"},
-		{"local instance", serviceInstanceSetting, "local-123"},
-		{"wrong enabled service", serviceNameSetting, "other-service"},
+		{"malformed environment", environmentSetting, "preview/42", environmentSetting},
+		{"mutable version", serviceVersionSetting, "latest", serviceVersionSetting},
+		{"local instance", serviceInstanceSetting, "local-123", "telemetry identity"},
+		{"wrong enabled service", serviceNameSetting, "other-service", serviceNameSetting},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			values := mapLookupValues(base)
@@ -494,7 +487,7 @@ func TestLoad_ReleaseEnvironmentsUseSharedDeploymentPolicy(t *testing.T) {
 			// when
 			_, err := load(mapLookup(values))
 			// then
-			assertSettingError(t, err, scenario.setting)
+			assertSettingError(t, err, scenario.want)
 			if strings.Contains(err.Error(), scenario.value) {
 				t.Error("identity failure disclosed rejected value")
 			}
@@ -510,27 +503,23 @@ func mapLookupValues(values map[string]string) map[string]string {
 	return copy
 }
 
-func TestLoad_RejectsSuppliedTestInstance(t *testing.T) {
-	// given
-	values := map[string]string{
-		databaseURLSetting:     testDatabaseURL,
-		otelEnabledSetting:     "true",
-		otelEndpointSetting:    "http://127.0.0.1:4317",
-		environmentSetting:     "test",
-		serviceVersionSetting:  "test-local-run",
-		serviceInstanceSetting: "123e4567-e89b-42d3-a456-426614174000",
+func TestLoad_RejectsNonCanonicalSourceVersionsWhenExportIsDisabled(t *testing.T) {
+	for _, version := range []string{"sha-6c4669c81d3a", "git-000000000000", "git-6C4669C81D3A"} {
+		t.Run(version, func(t *testing.T) {
+			_, err := load(mapLookup(map[string]string{
+				databaseURLSetting:     testDatabaseURL,
+				environmentSetting:     "qa",
+				serviceVersionSetting:  version,
+				serviceInstanceSetting: "test-instance",
+			}))
+			assertSettingError(t, err, serviceVersionSetting)
+		})
 	}
-
-	// when
-	_, err := load(mapLookup(values))
-
-	// then
-	assertSettingError(t, err, serviceInstanceSetting)
 }
 
 func TestLoad_RejectsInvalidEnabledIdentityWithoutEchoingValues(t *testing.T) {
 	// given
-	const privateMarker = "private-identity-marker"
+	const privateMarker = "private-identity-marker\n"
 	tests := []struct {
 		name    string
 		setting string
@@ -546,7 +535,7 @@ func TestLoad_RejectsInvalidEnabledIdentityWithoutEchoingValues(t *testing.T) {
 		},
 		{name: "missing QA Pod UID", want: serviceInstanceSetting},
 		{
-			name:    "invalid QA Pod UID",
+			name:    "invalid QA instance",
 			setting: serviceInstanceSetting,
 			value:   privateMarker,
 			want:    serviceInstanceSetting,
@@ -572,7 +561,7 @@ func TestLoad_RejectsInvalidEnabledIdentityWithoutEchoingValues(t *testing.T) {
 				otelEnabledSetting:     "true",
 				otelEndpointSetting:    "http://collector.internal:4317",
 				environmentSetting:     "qa",
-				serviceVersionSetting:  "sha-6c4669c81d3a",
+				serviceVersionSetting:  "git-6c4669c81d3a",
 				serviceInstanceSetting: "123e4567-e89b-42d3-a456-426614174000",
 			}
 			switch test.name {
@@ -680,7 +669,7 @@ func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
 		databaseURLSetting:  testDatabaseURL,
 		otelEnabledSetting:  "true",
 		otelEndpointSetting: "http://collector.internal:4317",
-		environmentSetting:  "Preview_42",
+		environmentSetting:  "Preview/42",
 	}))
 	if identityValidation == nil {
 		t.Fatal("invalid deployment environment accepted")
@@ -698,10 +687,10 @@ func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
 			"must be a positive duration",
 		},
 		{
-			"wrapped shared identity validation",
+			"wrapped Product identity validation",
 			fmt.Errorf("private-wrapper: %w", identityValidation),
 			"DEPLOYMENT_ENVIRONMENT",
-			"must be a valid lowercase environment name",
+			"must contain 1 through 128 ASCII letters, digits, dots, underscores or hyphens",
 		},
 		{
 			"unknown error",
