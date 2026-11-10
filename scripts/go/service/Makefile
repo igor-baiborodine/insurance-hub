@@ -23,9 +23,6 @@ export SVC_NAME
 	go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-smoke \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
-	go-svc-fixture-setup go-svc-fixture-verify go-svc-fixture-retire \
-	go-svc-cutover-index-inspect go-svc-cutover-index-ensure go-svc-cutover-index-verify \
-	go-svc-canonical-secrets-migrate \
 	go-svc-deploy-test-flux \
 	go-svc-dispatch-test go-svc-release-select go-svc-release-prepare go-svc-release-test go-svc-release-test-collect
 
@@ -60,23 +57,13 @@ go-svc-stop: ## Stop only the selected direct-target Deployment
 go-svc-reader-ensure: ## Idempotently provision the selected service's guarded reader prerequisites
 go-svc-reader-verify: ## Verify the selected service's reader identity and workload Secrets
 go-svc-reader-rotate: ## Explicitly rotate and recover the selected service's reader credentials
-go-svc-fixture-setup: ## Create the selected service's accepted fixture and least-privilege identity
-go-svc-fixture-verify: ## Verify the selected service's fixture and reader permission boundary
-go-svc-fixture-retire: ## Remove only the selected service's accepted fixture and identity
-go-svc-cutover-index-inspect: ## Inspect the canonical Policy Search index without mutation
-go-svc-cutover-index-ensure: ## Guardedly create the canonical index and cutover identities
-go-svc-cutover-index-verify: ## Verify canonical index and least-privilege cutover identities
-go-svc-canonical-secrets-migrate: ## Copy accepted Policy Search Secret data to ordinary names
 go-svc-deploy-test-tooling: ## Test selected-service deployment guards and cleanup
 go-svc-deploy-smoke: ## Smoke one service in an owned disposable Kind namespace
 go-svc-deploy-test-flux: ## Exercise one service with pinned Flux/CNPG in an owned Kind cluster
 go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-smoke \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
-	go-svc-deploy-test-flux go-svc-fixture-setup go-svc-fixture-verify \
-	go-svc-fixture-retire \
-	go-svc-cutover-index-inspect go-svc-cutover-index-ensure \
-	go-svc-cutover-index-verify go-svc-canonical-secrets-migrate: python-runtime-check
+	go-svc-deploy-test-flux: python-runtime-check
 	+@set -eu; \
 		capability='$(@:go-svc-%=%)'; \
 		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) "$$capability")"; \

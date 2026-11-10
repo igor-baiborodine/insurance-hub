@@ -399,12 +399,8 @@ def policy_search_reads(
     except json.JSONDecodeError as error:
         raise VerificationError("Policy Search response is malformed") from error
     policies = response.get("policies", []) if isinstance(response, dict) else None
-    canonical_query = (
-        deployment_settings.get("ELASTICSEARCH_INDEX") == "policy-views"
-        and deployment_settings.get("EVENT_WORKERS_ENABLED") == "false"
-    )
     require(
-        isinstance(policies, list) and (policies or canonical_query),
+        isinstance(policies, list) and bool(policies),
         "Policy Search response has no policies",
     )
     return len(policies)

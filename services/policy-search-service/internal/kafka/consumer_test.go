@@ -169,8 +169,8 @@ func TestWorker_ExtractsTraceContextAndRecordsBoundedOutcome(t *testing.T) {
 func TestNewWorker_RejectsEmptyCACertificate(t *testing.T) {
 	// given
 	settings := Settings{
-		Brokers: []string{"kafka.example:9093"}, Group: "issue-230",
-		Topic: "policy-registered-issue-230", ClientID: "policy-registered-listener",
+		Brokers: []string{"kafka.example:9093"}, Group: "policy-search-service",
+		Topic: "policy-registered", ClientID: "policy-registered-listener",
 		EventType: "registered", CACert: []byte(" \n\t"),
 	}
 

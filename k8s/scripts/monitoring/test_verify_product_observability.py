@@ -383,7 +383,7 @@ class TestProductObservabilityVerification:
                 {"health": 1001, "policy-search": 1002},
                 "b" * 32,
                 {
-                    "ELASTICSEARCH_INDEX": "policy-views-issue-229",
+                    "ELASTICSEARCH_INDEX": "policy-views",
                     "EVENT_WORKERS_ENABLED": "true",
                 },
             )
@@ -500,19 +500,8 @@ class TestProductObservabilityVerification:
             "Dashboard dependency_sales_trends metric",
         ]
 
-    def test_policy_search_probe_accepts_empty_canonical_query_phase_only(self) -> None:
+    def test_policy_search_probe_rejects_empty_results(self) -> None:
         responses = ["live\n", "ready\n", "{}"]
-        with mock.patch.object(verifier, "request_text", side_effect=responses):
-            rows = verifier.policy_search_reads(
-                {"health": 1001, "policy-search": 1002},
-                "b" * 32,
-                {
-                    "ELASTICSEARCH_INDEX": "policy-views",
-                    "EVENT_WORKERS_ENABLED": "false",
-                },
-            )
-        assert rows == 0
-
         with (
             mock.patch.object(verifier, "request_text", side_effect=responses),
             pytest.raises(verifier.VerificationError, match="has no policies"),
@@ -521,7 +510,7 @@ class TestProductObservabilityVerification:
                 {"health": 1001, "policy-search": 1002},
                 "b" * 32,
                 {
-                    "ELASTICSEARCH_INDEX": "policy-views-issue-229",
+                    "ELASTICSEARCH_INDEX": "policy-views",
                     "EVENT_WORKERS_ENABLED": "true",
                 },
             )

@@ -91,15 +91,9 @@ These operations are explicit and are never hidden inside `check`:
 | `make format-proto`      | Rewrites only `api/policysearch/v1/policy_search_service.proto` with pinned Buf.                                               | Verified pinned tools.                                                                         |
 | `make gen-proto`         | Removes and regenerates the exact declared Go/gateway/Swagger inventory under `gen/`.                                     | Pinned Buf and generators already installed; BSR access unless cached.                         |
 | `make run`               | Starts `./cmd/server`; it changes no repository file.                                                                      | Go 1.27.3; readonly modules; runtime settings below.                                           |
-| `make fixture-setup` | Idempotently creates only the issue-229 index, fixture, native reader role/user and workload-owned Secrets on the exact selected target. | Exact catalog coordinates, current Kubernetes context, ECK administrative Secret and `FIXTURE_CONFIRM=setup-policy-views-issue-229`. |
-| `make fixture-verify` | Reads the fixture and verifies the workload identity has the exact read privileges while writes, mapping/index administration, other indices and security administration remain denied. | Exact catalog coordinates and the workload Secret; no administrative credential. |
-| `make fixture-retire` | Removes only the issue-229 index, native reader role/user and workload-owned Secrets. | Exact catalog coordinates, ECK administrative Secret and `FIXTURE_CONFIRM=retire-policy-views-issue-229`. |
-| `make event-fixture-setup` | Idempotently creates only the two issue-230 `KafkaTopic` resources, the separate Elasticsearch writer role/user, and workload-owned writer/Kafka CA Secrets. It does not recreate or reset the issue-229 query index. | Exact catalog coordinates, Strimzi/ECK administrative resources and `FIXTURE_CONFIRM=event-setup-policy-views-issue-229`. |
-| `make event-fixture-verify` | Verifies topic ownership, cert-only Kafka trust and the writer's exact-index document-write boundary, including read, unrelated-index and security denials. | Exact catalog coordinates and workload-owned Secrets; no setup or retirement is implied. |
-| `make event-fixture-retire` | Removes only the issue-230 topics, writer role/user and event workload Secrets; it preserves the query index, reader identity and Java resources. | Exact catalog coordinates, ECK administrative Secret and `FIXTURE_CONFIRM=event-retire-policy-views-issue-229`. |
-| `make cutover-index-inspect` | Reads the canonical `policy-views` presence, exact mapping, alias state and document count without changing it. | Exact catalog coordinates, current Kubernetes context and ECK administrative Secret. |
-| `make cutover-index-ensure` | Creates `policy-views` only when absent, preserves an existing compatible empty index, and creates issue-235 reader/writer identities plus workload trust Secrets. It never copies, deletes or rewrites documents. | Exact catalog coordinates, ECK administrative Secret and `CUTOVER_CONFIRM=ensure-policy-views`; rejects mapping/alias drift or existing documents pending a separately accepted complete manifest. |
-| `make cutover-index-verify` | Uses only the cutover workload identities to verify the exact-index reader/writer boundary and unrelated-index/security denials. | Exact catalog coordinates and cutover workload Secrets; no mutation is implied. |
+| `make resource-inspect` | Reads the `policy-views` presence, exact mapping, alias state and document count without changing it. | Exact catalog coordinates, current Kubernetes context and ECK administrative Secret. |
+| `make resource-ensure` | Creates missing `policy-views` resources and workload trust Secrets while preserving compatible populated data and existing credentials. It never copies, deletes or rewrites documents. | Exact catalog coordinates, ECK administrative Secret and `POLICY_SEARCH_RESOURCE_CONFIRM=ensure-policy-search-resources`; rejects mapping, alias, access or trust drift before mutation. |
+| `make resource-verify` | Uses only the workload identities to verify the exact-index reader/writer boundary and unrelated-index/security denials. | Exact catalog coordinates and workload Secrets; no mutation is implied. |
 
 Generated bindings must never be edited by hand. `gen-proto` owns only:
 
@@ -130,12 +124,12 @@ require `bootstrap-tools` to have been run explicitly.
 | `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.3; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.3, readonly modules, and a C compiler.                                                                                                                                     |
-| `make coverage-check`       | Race-enabled unit coverage across `./...`, with generated bindings and the qualification client excluded from the 75% statement gate.                                                                                                                                     | Go 1.27.3, readonly modules, a C compiler, and managed Python.                                                                                                                      |
+| `make coverage-check`       | Race-enabled unit coverage across `./...`, with generated bindings and the disposable smoke client excluded from the 75% statement gate.                                                                                                                                  | Go 1.27.3, readonly modules, a C compiler, and managed Python.                                                                                                                      |
 | `make test-integration`     | Real-listener HTTP-to-RPC composition, byte and presence semantics, readiness loss and recovery, and graceful shutdown. `INTEGRATION_COVERAGE_FILE` optionally records the selected suite for hosted reporting.                                                          | Go 1.27.3, readonly modules, and a C compiler.                                                                                                                                     |
-| `make test-event-integration` | Independent event oracle and exact isolated resource ownership against disposable pinned Kafka 4.1.0 over a generated, hostname-verified TLS identity and Elasticsearch 8.19.6. The runner rejects ambient endpoints, creates only the `*-issue-230` topics/group and synthetic document, verifies required test discovery, and removes both containers and generated credentials on success, failure, timeout or interruption. | Docker, OpenSSL, Go 1.27.3, readonly modules, a C compiler and image access unless both pinned images are cached. The target never contacts a shared Kafka or Elasticsearch endpoint. |
+| `make test-event-integration` | Independent event and search expectations against disposable pinned Kafka 4.1.0 over generated hostname-verified TLS and Elasticsearch 8.19.6. The runner rejects ambient endpoints, uses the ordinary topics/group/index, verifies HTTP/direct RPC and event test discovery, and removes both containers and generated credentials. | Docker, OpenSSL, Go 1.27.3, readonly modules, a C compiler and image access unless both pinned images are cached. The target never contacts a shared Kafka or Elasticsearch endpoint. |
 | `make build`                | Every package under `./...` and an executable `server`, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.3; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
-| `make check`                | Tool/configuration verification, Go and Protobuf format and lint checks, 75% race-enabled unit coverage, real-listener, Elasticsearch and event-fixture integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, gateway contract, vulnerability, Python, and Servicekit checks. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts persistent services, or deploys. Disposable integration containers are always removed. |
+| `make check`                | Tool/configuration verification, Go and Protobuf format and lint checks, 75% race-enabled unit coverage, real-listener, Elasticsearch and event integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, gateway contract, vulnerability, Python, and Servicekit checks. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts persistent services, or deploys. Disposable integration containers are always removed. |
 | `make test-tooling`         | Pytest-managed Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation. Child commands have 20-minute phase deadlines inside a 60-minute suite deadline, 30-second activity heartbeats, and bounded process-group cleanup. | Verified Python and Go tools; temporary storage and the network/cache prerequisites of nested checks. |
 
 The `test-tooling` runner handles SIGINT and SIGTERM, unwinds the active child process group, and
@@ -144,15 +138,12 @@ returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make repo
 the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
-The event-fixture target starts disposable pinned Kafka and Elasticsearch containers and runs only
-`TestEventFixture_*` from `internal/testing`. Its checked-in oracle owns C230-01–07 inputs and
-expected outcomes independently of the consumer implementation. It drives both production workers
-through registration, termination, malformed-record and replacement paths. It fails when either
-image, Docker, exact test discovery or cleanup is unavailable; required integration never passes by
-skip.
-The existing Elasticsearch target separately exercises the query adapter and real HTTP-to-RPC
-runtime. Image and deployment owners include a disposable Kind-namespace check. Mock generation,
-database integration and migrations remain inapplicable.
+The event integration target starts disposable pinned Kafka and Elasticsearch containers and runs
+the independent C230-01–07 event expectations together with the real HTTP-to-RPC search runtime.
+It drives production workers through registration, termination, malformed-record, replacement and
+restart paths. The disposable Kind smoke additionally exercises the index/access ensure helper
+directly, access boundaries and a populated-state setup rerun; it does not exercise the Kubernetes
+Secret and CA orchestration in `resource-ensure`. Required integration never passes by skip.
 
 ### Go file selection
 
@@ -260,14 +251,14 @@ do not repeat its supplied value.
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Required when telemetry is enabled. An `http` or `https` OTLP/gRPC URL with host and numeric port; credentials, query, fragment and HTTP path are rejected. |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | `2s` | Positive duration reserved at the end of `SHUTDOWN_TIMEOUT`. |
 | `ELASTICSEARCH_URL` | `http://127.0.0.1:9200` | An `http` or `https` origin without credentials, path, query or fragment. |
-| `ELASTICSEARCH_INDEX` | `policy-views-issue-229` | Lowercase Elasticsearch index name. Query, projection writes, readiness and writer privilege checks use this one value. The inactive cutover phases select `policy-views`. |
+| `ELASTICSEARCH_INDEX` | `policy-views` | Lowercase Elasticsearch index name. Query, projection writes, readiness and writer privilege checks use this one value. |
 | `ELASTICSEARCH_USERNAME` | unset | Optional workload username; must be set together with `ELASTICSEARCH_PASSWORD`. |
 | `ELASTICSEARCH_PASSWORD` | unset | Optional workload password; must be set together with `ELASTICSEARCH_USERNAME`. |
 | `ELASTICSEARCH_CA_FILE` | unset | Optional public CA file for HTTPS only. The file is read during startup. |
 | `ELASTICSEARCH_TIMEOUT` | `5s` | Positive duration no greater than five seconds; a shorter caller deadline remains authoritative. |
 | `EVENT_WORKERS_ENABLED` | `false` | Boolean. Disabled mode creates no Kafka or writer client and needs no event settings or Secrets. |
 | `KAFKA_BROKERS` | unset | Required when workers are enabled; comma-separated `host:port` bootstrap addresses. |
-| `KAFKA_GROUP` | `policy-search-service` when enabled | Nonempty consumer group. Isolated verification overrides this with `policy-search-service-issue-230`. |
+| `KAFKA_GROUP` | `policy-search-service` when enabled | Nonempty consumer group used by both event workers. |
 | `KAFKA_REGISTERED_TOPIC` | `policy-registered` when enabled | Nonempty registered-event topic; must differ from the terminated topic. |
 | `KAFKA_TERMINATED_TOPIC` | `policy-terminated` when enabled | Nonempty terminated-event topic; must differ from the registered topic. |
 | `KAFKA_CA_FILE` | unset | Required when workers are enabled; public CA file used with TLS 1.2 or newer and hostname verification. |
@@ -431,7 +422,7 @@ source improvements through its own reviewed changes.
 | `internal/logger`, `internal/telemetry` | Safe request, event and Elasticsearch search/replace signals; shared provider construction with local policy and metric views. |
 | `internal/domain` | Policy and strict calendar-date values without transport or datastore types. |
 | `internal/application` | Search and policy-view writer ports, descending `dateFrom` ordering of the already selected hit window, and event-to-read-model projection with received date presence preserved. |
-| `internal/elasticsearch` | Official Elasticsearch 8.19 client configuration, the query adapter, and whole-document number-keyed replacement for the isolated `policy-views-issue-229` index. |
+| `internal/elasticsearch` | Official Elasticsearch 8.19 client configuration, the query adapter, and whole-document number-keyed replacement for the `policy-views` index. |
 | `internal/kafka` | Two franz-go clients with explicit legacy group/reset/commit/timing settings; decode the existing envelope, skip malformed records without payload logs, invoke projection synchronously, and perform bounded final-position commit and close. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/policysearch/v1`, `gen/policysearch/v1`, `gen/openapiv2/policysearch/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
@@ -488,16 +479,10 @@ management and telemetry resources within the shared deadline.
 
 ### Event processing and diagnostics walkthrough
 
-The checked-in local-dev overlay keeps `EVENT_WORKERS_ENABLED=false`, so its default query
-operation never depends on event Secrets or Kafka. The active QA overlay also keeps workers
-disabled while selecting the canonical `policy-views` index and cutover reader credentials. It
-contains no Kafka CA mount, writer credentials or Kafka egress; Java retains sole consumer
-ownership. Event activation uses the exact selected topics/group, TLS 9093 bootstrap, a cert-only
-Kafka CA mount, separate writer credentials, a bounded 30-second initial assignment budget and one
-broker-only TCP 9093 egress rule. The egress input is a JSON patch that appends to the active
-policy, and QA activation remains Git/Flux owned. Deployment checks render both the enabled and
-disabled forms through Kustomize, compare them with the deployment composition, and reject
-undeclared transitions, duplicate patches or event references in the disabled render.
+The local-dev and QA overlays select the ordinary `policy-views`, `policy-registered`,
+`policy-terminated` and `policy-search-service` resource tuple. Enabled workers use the TLS 9093
+bootstrap, a cert-only Kafka CA mount, separate writer credentials, a bounded 30-second initial
+assignment budget and broker-only TCP 9093 egress. QA changes remain Git/Flux owned.
 
 When enabled, each worker extracts incoming W3C trace headers, records a fixed event-type span,
 decodes the existing envelope and synchronously replaces the number-keyed Elasticsearch document.
@@ -507,10 +492,7 @@ single-index `index` privilege through Elasticsearch's non-mutating self-check a
 consumers to hold assignments. Logs and metric labels never contain an event body, topic, group,
 policy number, customer value, credential or raw error.
 
-Use `make event-fixture-verify` for resource and permission diagnostics. In QA, trace and metric
+Use `make resource-verify` for index and permission diagnostics. In QA, trace and metric
 delivery uses the configured Alloy endpoint; collector failure follows the provider's bounded,
-rate-limited diagnostics and does not expose event data. Returning to the accepted query
-predecessor requires the full disabled configuration, removal of Kafka egress and event Secret
-references, and preservation of the issue-230 topics, group offsets and synthetic documents. See
-the [deployment runbook](deployment-runbook.md) for the exact setup, diagnostic and return-state
-commands.
+rate-limited diagnostics and does not expose event data. See the
+[deployment runbook](deployment-runbook.md) for ordinary setup and deployment commands.

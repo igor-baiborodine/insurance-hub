@@ -28,7 +28,6 @@ from scripts.python.process_runner import CommandError, run_command  # noqa: E40
 
 SERVICE = "policy-search"
 EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
-JAVA_NAMES = {"policy-search-api-legacy"}
 BUSINESS_CLIENT_LABEL = "insurance-hub.io/policy-search-business-client"
 
 
@@ -142,17 +141,6 @@ def matching_network_policy_spec(actual: Any, expected: Any) -> bool:
     return actual_normalized == expected_normalized
 
 
-def matching_echo_predecessor_network_policy(actual: Any, expected: Any) -> bool:
-    """Accept the Echo deny-all-egress policy before query dependencies are staged."""
-    if matching_network_policy_spec(actual, expected):
-        return True
-    if not isinstance(expected, dict):
-        return False
-    predecessor = dict(expected)
-    predecessor.pop("egress", None)
-    return matching_network_policy_spec(actual, predecessor)
-
-
 def matching_config_map_reference(actual: Any, expected: Any) -> bool:
     if actual == expected:
         return True
@@ -197,22 +185,6 @@ def matching_named_entries(actual: Any, expected: Any) -> bool:
     return sorted(actual, key=lambda item: item["name"]) == sorted(
         expected, key=lambda item: item["name"]
     )
-
-
-def matching_echo_predecessor_environment(actual: Any, expected: Any) -> bool:
-    """Accept the reviewed Echo environment before its first query rollout only."""
-    if matching_named_entries(actual, expected):
-        return True
-    if not isinstance(actual, list) or not isinstance(expected, list):
-        return False
-    query_only = {
-        "ELASTICSEARCH_USERNAME",
-        "ELASTICSEARCH_PASSWORD",
-        "ELASTICSEARCH_WRITER_USERNAME",
-        "ELASTICSEARCH_WRITER_PASSWORD",
-    }
-    predecessor = [item for item in expected if item.get("name") not in query_only]
-    return matching_named_entries(actual, predecessor)
 
 
 def staged_image_matches(environment: str, image: str) -> bool:
@@ -685,14 +657,6 @@ class Target:
                 continue
 
             if kind == "NetworkPolicy":
-                if previous_image and not require_deployment:
-                    require(
-                        matching_echo_predecessor_network_policy(
-                            actual.get("spec"), desired.get("spec")
-                        ),
-                        f"live NetworkPolicy/{name} differs from rendered policy",
-                    )
-                    continue
                 require(
                     matching_network_policy_spec(actual.get("spec"), desired.get("spec")),
                     f"live NetworkPolicy/{name} differs from rendered policy",
@@ -791,14 +755,6 @@ class Target:
                         f"live Deployment/{name} container {field} differs",
                     )
                     continue
-                if field == "env" and previous_image and not require_deployment:
-                    require(
-                        matching_echo_predecessor_environment(
-                            container.get(field), desired_container.get(field)
-                        ),
-                        f"live Deployment/{name} container {field} differs",
-                    )
-                    continue
                 if field == "env":
                     require(
                         matching_named_entries(container.get(field), desired_container.get(field)),
@@ -884,16 +840,6 @@ def secret_and_image(target: Target, image: str) -> None:
         details[0].get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision", "")
     )
     require(revision[:12] == image.rsplit(".", 1)[1], "image source revision differs")
-
-
-def role_snapshot(target: Target) -> dict[str, Any]:
-    values: dict[str, Any] = {}
-    for kind in ("deployment", "service"):
-        for suffix in JAVA_NAMES:
-            name = f"{target.environment}-{suffix}"
-            item = target.json("get", kind, name, "--ignore-not-found")
-            values[f"{kind}/{name}"] = item.get("metadata", {}).get("uid", "")
-    return values
 
 
 def record_snapshot(stage: str, value: dict[str, Any]) -> None:
@@ -989,7 +935,6 @@ def validate_deployed_search(status: int, body: bytes) -> None:
 
 def verify(target: Target, items: list[dict[str, Any]]) -> None:
     target.live(items, require_deployment=True)
-    before = role_snapshot(target)
     http_port, management_port = _free_port(), _free_port()
     process = subprocess.Popen(
         [
@@ -1041,11 +986,9 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             except subprocess.TimeoutExpired:
                 child.kill()
                 child.wait(timeout=5)
-    require(role_snapshot(target) == before, "Java resource identity changed during verification")
 
 
 def stop(target: Target, _items: list[dict[str, Any]]) -> None:
-    before = role_snapshot(target)
     target.kubectl("scale", f"deployment/{target.deployment}", "--replicas=0", "--timeout=60s")
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
@@ -1055,7 +998,6 @@ def stop(target: Target, _items: list[dict[str, Any]]) -> None:
         time.sleep(1)
     else:
         raise DeploymentError("Policy Search stop exceeded 90 seconds")
-    require(role_snapshot(target) == before, "Java resource identity changed during stop")
 
 
 def validate_gateway_business_admission(environment: str) -> None:

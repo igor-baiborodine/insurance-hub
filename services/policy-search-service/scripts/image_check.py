@@ -92,7 +92,7 @@ def create_fixture(endpoint: str) -> None:
     }
     require(
         request(
-            endpoint + "/policy-views-issue-229",
+            endpoint + "/policy-views",
             json.dumps(mapping).encode(),
             "PUT",
         )[0]
@@ -107,7 +107,7 @@ def create_fixture(endpoint: str) -> None:
     }
     require(
         request(
-            endpoint + "/policy-views-issue-229/_doc/accepted?refresh=true",
+            endpoint + "/policy-views/_doc/accepted?refresh=true",
             json.dumps(document).encode(),
             "PUT",
         )[0]

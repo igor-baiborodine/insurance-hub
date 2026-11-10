@@ -69,7 +69,7 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Errorf("Telemetry.ExporterTimeout = %v, want 2s", got.ExporterTimeout)
 	}
 	if got.Elasticsearch.URL != "http://127.0.0.1:9200" ||
-		got.Elasticsearch.Index != "policy-views-issue-229" ||
+		got.Elasticsearch.Index != "policy-views" ||
 		got.Elasticsearch.Timeout != 5*time.Second || got.Elasticsearch.Username != "" ||
 		got.Elasticsearch.Password != "" || got.Elasticsearch.CAFile != "" {
 		t.Errorf("Elasticsearch defaults = %+v", got.Elasticsearch)
@@ -84,9 +84,9 @@ func TestLoad_EnabledEventWorkersRequireAndPreserveIsolatedSettings(t *testing.T
 	values := map[string]string{
 		EnvEventWorkersEnabled:  "true",
 		EnvKafkaBrokers:         "kafka-a.example:9093, kafka-b.example:9093",
-		EnvKafkaGroup:           "policy-search-service-issue-230",
-		EnvKafkaRegisteredTopic: "policy-registered-issue-230",
-		EnvKafkaTerminatedTopic: "policy-terminated-issue-230",
+		EnvKafkaGroup:           "policy-search-service",
+		EnvKafkaRegisteredTopic: "policy-registered",
+		EnvKafkaTerminatedTopic: "policy-terminated",
 		EnvKafkaCAFile:          "/var/run/kafka/ca.crt",
 		EnvWriterUsername:       "writer",
 		EnvWriterPassword:       "private-password",

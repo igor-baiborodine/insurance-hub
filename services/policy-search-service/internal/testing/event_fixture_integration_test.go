@@ -32,8 +32,8 @@ import (
 )
 
 const (
-	eventFixtureOwnership = "issue-230-disposable"
-	eventFixtureIndex     = "policy-views-issue-229"
+	eventFixtureOwnership = "policy-search-disposable"
+	eventFixtureIndex     = "policy-views"
 )
 
 type eventOracle struct {
@@ -142,7 +142,7 @@ func TestEventFixture_RealKafkaAndElasticsearchResources(t *testing.T) {
 		environment.TerminatedTopic,
 	)
 	consumerOptions := append(kafkaTLSOptions(t, environment),
-		kgo.ClientID("issue-230-event-fixture"),
+		kgo.ClientID("policy-search-disposable-observer"),
 		kgo.ConsumerGroup(environment.ConsumerGroup),
 		kgo.ConsumeTopics(environment.RegisteredTopic),
 		kgo.ConsumeStartOffset(kgo.NewOffset().AtStart()),
@@ -703,13 +703,13 @@ func loadEventOracle(t *testing.T) eventOracle {
 			oracle.Ownership,
 		)
 	}
-	if oracle.Resources.RegisteredTopic != "policy-registered-issue-230" ||
-		oracle.Resources.TerminatedTopic != "policy-terminated-issue-230" ||
-		oracle.Resources.ConsumerGroup != "policy-search-service-issue-230" ||
+	if oracle.Resources.RegisteredTopic != "policy-registered" ||
+		oracle.Resources.TerminatedTopic != "policy-terminated" ||
+		oracle.Resources.ConsumerGroup != "policy-search-service" ||
 		oracle.Resources.Index != eventFixtureIndex ||
 		oracle.Resources.SyntheticIDPrefix != "SYN-230-" {
 		t.Fatalf(
-			"event oracle resources are not the accepted issue-230 isolation coordinates",
+			"event oracle resources are not the ordinary service coordinates",
 		)
 	}
 	return oracle
@@ -749,7 +749,7 @@ func assertOracleProjection(t *testing.T, event oracleEvent) {
 func requireEventEnvironment(t *testing.T, oracle eventOracle) eventEnvironment {
 	t.Helper()
 	if os.Getenv("POLICY_SEARCH_TEST_EVENT_OWNERSHIP") != eventFixtureOwnership {
-		t.Fatal("POLICY_SEARCH_TEST_EVENT_OWNERSHIP must select issue-230-disposable")
+		t.Fatal("POLICY_SEARCH_TEST_EVENT_OWNERSHIP must select the disposable owner")
 	}
 	environment := eventEnvironment{
 		Broker:          os.Getenv("POLICY_SEARCH_TEST_KAFKA_BROKERS"),
@@ -782,7 +782,7 @@ func requireEventEnvironment(t *testing.T, oracle eventOracle) eventEnvironment 
 	if environment.RegisteredTopic != oracle.Resources.RegisteredTopic ||
 		environment.TerminatedTopic != oracle.Resources.TerminatedTopic ||
 		environment.ConsumerGroup != oracle.Resources.ConsumerGroup {
-		t.Fatal("event integration resources differ from the accepted issue-230 oracle")
+		t.Fatal("event integration resources differ from the ordinary oracle")
 	}
 	return environment
 }

@@ -12,23 +12,25 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-import fixture_administration as fixture_admin
 import policy_search_deployment_checks as deployment_checks
+import resource_administration as service_admin
 import yaml
+from administration import AdministrationError, ElasticsearchClient, require_status
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 MODULE = ROOT / "services/policy-search-service"
 CONTEXT = "kind-local-dev-insurance-hub"
 KIND_CLUSTER = "local-dev-insurance-hub"
 OWNER_LABEL = "insurance-hub.io/policy-search-disposable"
-REGISTERED_TOPIC = "policy-registered-issue-230"
-TERMINATED_TOPIC = "policy-terminated-issue-230"
+REGISTERED_TOPIC = "policy-registered"
+TERMINATED_TOPIC = "policy-terminated"
 
 
 class CheckFailed(RuntimeError):
@@ -114,8 +116,8 @@ def render(
     config["data"]["SERVICE_VERSION"] = f"git-{source_short}"
     config["data"].update(
         {
-            "ELASTICSEARCH_INDEX": "policy-views-issue-229",
-            "KAFKA_GROUP": "policy-search-service-issue-230",
+            "ELASTICSEARCH_INDEX": "policy-views",
+            "KAFKA_GROUP": "policy-search-service",
             "KAFKA_REGISTERED_TOPIC": REGISTERED_TOPIC,
             "KAFKA_TERMINATED_TOPIC": TERMINATED_TOPIC,
         }
@@ -124,11 +126,12 @@ def render(
         f"http://local-dev-elasticsearch-es-http.{cluster.namespace}.svc:9200"
     )
     policy = next(item for item in items if item["kind"] == "NetworkPolicy")
-    for rule in policy["spec"]["egress"]:
-        for peer in rule.get("to", []):
-            labels = peer.get("namespaceSelector", {}).get("matchLabels", {})
-            if labels.get("kubernetes.io/metadata.name") == "local-dev-all":
-                labels["kubernetes.io/metadata.name"] = cluster.namespace
+    for direction, peer_key in (("ingress", "from"), ("egress", "to")):
+        for rule in policy["spec"][direction]:
+            for peer in rule.get(peer_key, []):
+                labels = peer.get("namespaceSelector", {}).get("matchLabels", {})
+                if labels.get("kubernetes.io/metadata.name") == "local-dev-all":
+                    labels["kubernetes.io/metadata.name"] = cluster.namespace
     return yaml.safe_dump_all(items, explicit_start=True, sort_keys=False), items
 
 
@@ -209,16 +212,16 @@ def endpoint_count(cluster: Cluster) -> int:
 
 
 def build_probe(image: str, source_short: str) -> str:
-    probe_image = f"insurance-hub-policy-search-qualification:git-{source_short}"
-    with tempfile.TemporaryDirectory(prefix="policy-search-qualification-") as directory:
-        binary = Path(directory) / "qualification-client"
+    probe_image = f"insurance-hub-policy-search-smoke:git-{source_short}"
+    with tempfile.TemporaryDirectory(prefix="policy-search-smoke-") as directory:
+        binary = Path(directory) / "smoke-client"
         command(
             [
                 "make",
                 "-C",
                 str(MODULE),
-                "build-qualification-client",
-                f"QUALIFICATION_CLIENT_OUTPUT={binary}",
+                "build-smoke-client",
+                f"SMOKE_CLIENT_OUTPUT={binary}",
             ],
             timeout=180,
         )
@@ -229,7 +232,7 @@ def build_probe(image: str, source_short: str) -> str:
                 "--tag",
                 probe_image,
                 "--file",
-                str(MODULE / "testdata/qualification/Dockerfile"),
+                str(MODULE / "testdata/smoke/Dockerfile"),
                 directory,
             ],
             timeout=180,
@@ -422,9 +425,8 @@ def setup_elasticsearch(
         "--timeout=180s",
         timeout=200,
     )
-    fixture = fixture_admin.load_fixture()
     with port_forward(cluster) as port:
-        admin = fixture_admin.ElasticsearchClient(port, "elastic", admin_password)
+        admin = ElasticsearchClient(port, "elastic", admin_password)
         started = time.monotonic()
         deadline = started + 180
         heartbeat = started + 30
@@ -435,7 +437,7 @@ def setup_elasticsearch(
                 last_status = f"HTTP {status}"
                 if status == 200:
                     break
-            except fixture_admin.AdministrationError:
+            except AdministrationError:
                 last_status = "connection failure"
             now = time.monotonic()
             if now >= heartbeat:
@@ -472,24 +474,32 @@ def setup_elasticsearch(
                 f"disposable Elasticsearch did not become ready: {last_status}; restarts={restarts}"
                 f"; observations={json.dumps(observations, sort_keys=True)}"
             )
-        fixture_admin.setup_fixture(admin, fixture, reader_password)
-        fixture_admin.setup_event_access(admin, fixture, writer_password)
-        reader = fixture_admin.ElasticsearchClient(port, "go_policy_search_reader", reader_password)
-        fixture_admin.verify_fixture(reader, fixture)
-        writer = fixture_admin.ElasticsearchClient(
-            port, fixture_admin.EVENT_WRITER, writer_password
+        service_admin.ensure_index_and_access(admin, reader_password, writer_password)
+        status, _ = admin.request(
+            "PUT",
+            f"/{service_admin.INDEX}/_doc/disposable-search?refresh=true",
+            {
+                "number": "POLICY-SYNTHETIC-001",
+                "policyHolder": "Synthetic Person",
+                "dateFrom": "2026-01-01",
+                "dateTo": "2026-12-31",
+            },
         )
-        fixture_admin.verify_event_access(writer, fixture)
+        require_status(status, {200, 201}, "create disposable search document")
+        reader = ElasticsearchClient(port, service_admin.READER, reader_password)
+        service_admin.verify_identity(reader, service_admin.READER)
+        writer = ElasticsearchClient(port, service_admin.WRITER, writer_password)
+        service_admin.verify_identity(writer, service_admin.WRITER)
     credentials = []
     for name, username, password in (
         (
             "local-dev-policy-search-elasticsearch",
-            "go_policy_search_reader",
+            service_admin.READER,
             reader_password,
         ),
         (
             "local-dev-policy-search-elasticsearch-writer",
-            fixture_admin.EVENT_WRITER,
+            service_admin.WRITER,
             writer_password,
         ),
     ):
@@ -883,6 +893,38 @@ def verify_network_denial(cluster: Cluster, probe_image: str) -> None:
         )
 
 
+def verify_business_transports(cluster: Cluster, probe_image: str) -> None:
+    labels = {
+        "app.kubernetes.io/name": "agent-portal-gateway-legacy",
+        "app.kubernetes.io/instance": "insurance-hub-agent-portal-gateway-legacy",
+        "app.kubernetes.io/component": "gateway",
+        "environment": "local-dev",
+        "insurance-hub.io/policy-search-business-client": "true",
+    }
+    probe(
+        cluster,
+        probe_image,
+        "allowed-http",
+        [
+            "--mode=http",
+            "--address=http://local-dev-policy-search-api/policies",
+            "--query=Synthetic Person",
+        ],
+        labels,
+    )
+    probe(
+        cluster,
+        probe_image,
+        "allowed-grpc",
+        [
+            "--mode=grpc",
+            "--address=local-dev-policy-search-api:9090",
+            "--query=POLICY-SYNTHETIC-001",
+        ],
+        labels,
+    )
+
+
 def verify_search(cluster: Cluster, query: str) -> None:
     with port_forward(cluster, "local-dev-policy-search-api", 80) as port:
         encoded_query = urllib.parse.urlencode({"q": query})
@@ -896,52 +938,141 @@ def verify_search(cluster: Cluster, query: str) -> None:
     deployment_checks.validate_deployed_search(status, body)
 
 
+def verify_http_edges(cluster: Cluster) -> None:
+    with port_forward(cluster, "local-dev-policy-search-api", 80) as port:
+        base = f"http://127.0.0.1:{port}/policies"
+        try:
+            urllib.request.urlopen(base, timeout=5)
+        except urllib.error.HTTPError as error:
+            require(error.code == 400, "missing HTTP q status differs")
+        else:
+            raise CheckFailed("missing HTTP q was accepted")
+        with urllib.request.urlopen(base + "?q=NO_MATCH_TOKEN", timeout=5) as response:
+            require(
+                response.status == 200 and response.read() == b"{}", "no-match response differs"
+            )
+
+
+def projection_advanced(
+    result: object,
+    expected: dict[str, Any],
+    previous_seq_no: int,
+) -> tuple[bool, int]:
+    if not isinstance(result, dict):
+        return False, previous_seq_no
+    seq_no = result.get("_seq_no")
+    if result.get("_source") != expected or not isinstance(seq_no, int):
+        return False, previous_seq_no
+    if seq_no <= previous_seq_no:
+        return False, previous_seq_no
+    return True, seq_no
+
+
 def exercise_event_projection(
     cluster: Cluster,
     admin_password: str,
 ) -> None:
     oracle = json.loads((MODULE / "testdata/events/oracle.json").read_text(encoding="utf-8"))
     registration = oracle.get("events", {}).get("registration", {})
+    termination = oracle.get("events", {}).get("termination", {})
     event = registration.get("value")
-    expected = registration.get("expectedDocument")
+    registered = registration.get("expectedDocument")
+    terminated = termination.get("expectedDocument")
     require(
-        oracle.get("ownership") == "issue-230-disposable"
+        oracle.get("ownership") == "policy-search-disposable"
         and registration.get("key") == "SYN-230-001"
+        and termination.get("key") == registration.get("key")
         and isinstance(event, dict)
-        and isinstance(expected, dict),
+        and isinstance(registered, dict)
+        and isinstance(terminated, dict),
         "event oracle differs",
     )
-    kafka_cli(
-        cluster,
-        "kafka-console-producer.sh",
-        "--bootstrap-server",
-        "localhost:9093",
-        "--producer.config",
-        "/etc/kafka/secrets/client.properties",
-        "--topic",
-        REGISTERED_TOPIC,
-        input_text=json.dumps(event, separators=(",", ":")) + "\n",
-    )
-    fixture = fixture_admin.load_fixture()
     with port_forward(cluster) as port:
-        admin = fixture_admin.ElasticsearchClient(port, "elastic", admin_password)
-        projected: dict[str, Any] | None = None
+        admin = ElasticsearchClient(port, "elastic", admin_password)
+        previous_seq_no = -1
+        for event_number, (topic, payload, expected) in enumerate(
+            (
+                (REGISTERED_TOPIC, registration["value"], registered),
+                (REGISTERED_TOPIC, registration["value"], registered),
+                (TERMINATED_TOPIC, termination["value"], terminated),
+            ),
+            start=1,
+        ):
+            kafka_cli(
+                cluster,
+                "kafka-console-producer.sh",
+                "--bootstrap-server",
+                "localhost:9093",
+                "--producer.config",
+                "/etc/kafka/secrets/client.properties",
+                "--topic",
+                topic,
+                input_text=json.dumps(payload, separators=(",", ":")) + "\n",
+            )
+            projected_seq_no = previous_seq_no
 
-        def stored() -> bool:
-            nonlocal projected
-            try:
-                status, result = admin.request(
-                    "GET", f"/{fixture.index}/_doc/{registration['key']}"
+            def stored(
+                expected: dict[str, Any] = expected,
+                after_seq_no: int = previous_seq_no,
+            ) -> bool:
+                nonlocal projected_seq_no
+                try:
+                    status, result = admin.request(
+                        "GET", f"/{service_admin.INDEX}/_doc/{registration['key']}"
+                    )
+                except AdministrationError:
+                    return False
+                if status != 200:
+                    return False
+                advanced, projected_seq_no = projection_advanced(
+                    result,
+                    expected,
+                    after_seq_no,
                 )
-            except fixture_admin.AdministrationError:
-                return False
-            if status == 200 and isinstance(result, dict):
-                projected = result.get("_source")
-            return projected == expected
+                return advanced
 
-        wait_for(cluster, "deployed event projection", stored, seconds=90)
-        status, _ = admin.request("POST", f"/{fixture.index}/_refresh")
-        fixture_admin.require_status(status, {200}, "refresh projected event document")
+            wait_for(cluster, f"deployed event projection {event_number}", stored, seconds=90)
+            previous_seq_no = projected_seq_no
+        require(
+            registered.get("dateTo") == "2026-12-31" and terminated.get("dateTo") == "2026-06-30",
+            "event date transition differs",
+        )
+        status, _ = admin.request("POST", f"/{service_admin.INDEX}/_refresh")
+        require_status(status, {200}, "refresh projected event document")
+        status, result = admin.request(
+            "POST",
+            f"/{service_admin.INDEX}/_count",
+            {"query": {"term": {"number": registration["key"]}}},
+        )
+        require_status(status, {200}, "count projected event document")
+        require(
+            isinstance(result, dict) and result.get("count") == 1,
+            "duplicate event created more than one document",
+        )
+        status, result = admin.request("GET", f"/{service_admin.INDEX}/_doc/{registration['key']}")
+        require_status(status, {200}, "recheck projected event document")
+        require(
+            isinstance(result, dict)
+            and result.get("_source") == terminated
+            and isinstance(result.get("_seq_no"), int)
+            and result["_seq_no"] >= previous_seq_no,
+            "final terminated projection differs",
+        )
+
+
+def verify_setup_rerun(
+    cluster: Cluster,
+    admin_password: str,
+    reader_password: str,
+    writer_password: str,
+) -> None:
+    with port_forward(cluster) as port:
+        admin = ElasticsearchClient(port, "elastic", admin_password)
+        before = service_admin.inspect_index(admin)
+        ensured = service_admin.ensure_index_and_access(admin, reader_password, writer_password)
+        after = service_admin.inspect_index(admin)
+    require(before.documents >= 2, "populated disposable state is missing")
+    require(ensured == before and after == before, "setup rerun changed populated state")
 
 
 def main() -> int:
@@ -992,9 +1123,12 @@ def main() -> int:
         )
         require(endpoint_count(cluster) == 1, "business endpoint did not become ready")
         verify_network_denial(cluster, probe_image)
+        verify_business_transports(cluster, probe_image)
         verify_search(cluster, "Synthetic Person")
+        verify_http_edges(cluster)
         exercise_event_projection(cluster, admin_password)
         verify_search(cluster, 'number:"SYN-230-001"')
+        verify_setup_rerun(cluster, admin_password, reader_password, writer_password)
         elasticsearch_pods = cluster.json(
             "get",
             "pods",

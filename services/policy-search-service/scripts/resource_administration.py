@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard the issue-235 canonical Elasticsearch index and workload identities."""
+"""Manage the ordinary Policy Search resource boundary."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from typing import Any
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 sys.path.insert(0, str(ROOT))
 
-from fixture_administration import (  # noqa: E402
+from administration import (  # noqa: E402, I001
     AdministrationError,
     ElasticsearchClient,
     PortForward,
@@ -29,6 +29,7 @@ from scripts.go.service.configuration import service_record, target_record  # no
 from scripts.python.process_runner import CommandError  # noqa: E402
 
 SERVICE = "policy-search"
+OWNER = "policy-search"
 INDEX = "policy-views"
 READER = "go_policy_search_cutover_reader"
 WRITER = "go_policy_search_cutover_writer"
@@ -50,16 +51,26 @@ class IndexState:
     mapping_sha256: str
 
 
+@dataclass(frozen=True)
+class IdentityState:
+    identity: str
+    description: str
+    privileges: tuple[str, ...]
+    role_exists: bool
+    user_exists: bool
+    password: str | None
+
+
 class Target:
     """Resolve exact catalog coordinates before cluster access."""
 
     def __init__(self) -> None:
         record = service_record(ROOT, SERVICE)
-        cutover = record.get("administration", {}).get("cutover", {})
+        setup = record.get("administration", {}).get("setup", {})
         require(
-            cutover
+            setup
             == {
-                "owner": "issue-235",
+                "owner": OWNER,
                 "index": INDEX,
                 "readerRole": READER,
                 "readerUser": READER,
@@ -69,7 +80,7 @@ class Target:
                 "terminatedTopic": "policy-terminated",
                 "consumerGroup": "policy-search-service",
             },
-            "cutover administration catalog contract differs",
+            "administration catalog contract differs",
         )
         self.environment = os.environ.get("DEPLOY_ENV", "")
         require(self.environment in record.get("environments", []), "DEPLOY_ENV is invalid")
@@ -81,7 +92,7 @@ class Target:
         }
         for name, value in expected.items():
             require(os.environ.get(name, "") == value, f"{name} differs from the catalog")
-        administration = selected.get("fixtureAdministration", {})
+        administration = selected.get("serviceAdministration", {})
         for name in (
             "service",
             "adminSecret",
@@ -178,13 +189,17 @@ class Target:
         except ValueError as error:
             raise AdministrationError(f"Secret/{name} has malformed {key}") from error
 
-    def optional_password(self, name: str, expected_identity: str) -> str:
+    def optional_password(self, name: str, expected_identity: str) -> str | None:
         secret = self.json("get", "secret", name, "--ignore-not-found")
         data = secret.get("data", {})
+        if not data:
+            return None
         encoded_username = data.get("username")
-        encoded = secret.get("data", {}).get("password")
-        if not encoded:
-            return ""
+        encoded = data.get("password")
+        require(
+            isinstance(encoded_username, str) and isinstance(encoded, str),
+            "canonical Secret credentials are malformed",
+        )
         try:
             username = base64.b64decode(encoded_username, validate=True).decode("utf-8")
             password = base64.b64decode(encoded, validate=True).decode("utf-8")
@@ -194,13 +209,24 @@ class Target:
         require(len(password) >= 32, "canonical Secret password is too short")
         return password
 
+    def optional_secret_value(self, name: str, key: str) -> bytes | None:
+        secret = self.json("get", "secret", name, "--ignore-not-found")
+        data = secret.get("data", {})
+        if not data:
+            return None
+        require(set(data) == {key}, f"Secret/{name} keys differ")
+        encoded = data.get(key)
+        require(isinstance(encoded, str) and encoded, f"Secret/{name} is missing {key}")
+        try:
+            return base64.b64decode(encoded, validate=True)
+        except ValueError as error:
+            raise AdministrationError(f"Secret/{name} has malformed {key}") from error
+
     def apply_secret(
         self,
         name: str,
         data: dict[str, str],
         component: str,
-        *,
-        force_conflicts: bool = False,
     ) -> None:
         secret = {
             "apiVersion": "v1",
@@ -211,7 +237,7 @@ class Target:
                 "labels": {
                     "app.kubernetes.io/name": "policy-search-api",
                     "app.kubernetes.io/component": component,
-                    "insurance-hub.io/owner": "issue-235",
+                    "insurance-hub.io/owner": OWNER,
                 },
             },
             "type": "Opaque",
@@ -222,8 +248,6 @@ class Target:
             "--server-side",
             "--field-manager=policy-search-canonical",
         ]
-        if force_conflicts:
-            arguments.append("--force-conflicts")
         self.run(
             *arguments,
             "-f",
@@ -254,49 +278,137 @@ def inspect_index(client: ElasticsearchClient) -> IndexState:
     return IndexState(True, count, mapping_digest())
 
 
+def inspect_index_and_access(
+    client: ElasticsearchClient,
+    reader_password: str | None,
+    writer_password: str | None,
+) -> tuple[IndexState, tuple[IdentityState, IdentityState]]:
+    state = inspect_index(client)
+    identities = (
+        inspect_identity(
+            client, READER, ("read", "view_index_metadata"), reader_password, "reader"
+        ),
+        inspect_identity(client, WRITER, ("index",), writer_password, "writer"),
+    )
+    return state, identities
+
+
 def ensure_index_and_access(
     client: ElasticsearchClient,
     reader_password: str,
     writer_password: str,
 ) -> IndexState:
-    state = inspect_index(client)
-    require(
-        not state.exists or state.documents == 0,
-        "canonical index contains documents; record an accepted complete manifest before continuing",
-    )
+    state, identities = inspect_index_and_access(client, reader_password, writer_password)
     if not state.exists:
         status, _ = client.request("PUT", f"/{INDEX}", {"mappings": MAPPING})
         require_status(status, {200}, "create canonical index")
         state = inspect_index(client)
-    for identity, privileges, password, description in (
-        (READER, ["read", "view_index_metadata"], reader_password, "reader"),
-        (WRITER, ["index"], writer_password, "writer"),
-    ):
-        role = {
-            "cluster": [],
-            "indices": [
-                {
-                    "names": [INDEX],
-                    "privileges": privileges,
-                    "allow_restricted_indices": False,
-                }
-            ],
-            "applications": [],
-            "run_as": [],
-            "metadata": {"owner": "issue-235"},
-        }
-        status, _ = client.request("PUT", f"/_security/role/{identity}", role)
-        require_status(status, {200}, f"create cutover {description} role")
-        user = {
-            "password": password,
-            "roles": [identity],
-            "full_name": f"Policy Search issue-235 {description}",
-            "metadata": {"owner": "issue-235"},
-            "enabled": True,
-        }
-        status, _ = client.request("PUT", f"/_security/user/{identity}", user)
-        require_status(status, {200}, f"create cutover {description} user")
+    for identity, password in zip(identities, (reader_password, writer_password), strict=True):
+        if not identity.role_exists:
+            status, _ = client.request(
+                "PUT",
+                f"/_security/role/{identity.identity}",
+                role_definition(identity.privileges),
+            )
+            require_status(status, {200}, f"create {identity.description} role")
+        if not identity.user_exists:
+            status, _ = client.request(
+                "PUT",
+                f"/_security/user/{identity.identity}",
+                user_definition(identity.identity, identity.description, password),
+            )
+            require_status(status, {200}, f"create {identity.description} user")
     return state
+
+
+def persist_missing_credentials(
+    target: Target,
+    client: ElasticsearchClient,
+    reader_password: str | None,
+    writer_password: str | None,
+) -> tuple[str, str]:
+    inspect_index_and_access(client, reader_password, writer_password)
+    passwords: list[str] = []
+    for password, name, identity, component in (
+        (reader_password, target.reader_secret, READER, "elasticsearch-reader"),
+        (writer_password, target.writer_secret, WRITER, "elasticsearch-writer"),
+    ):
+        if password is None:
+            password = secrets.token_urlsafe(32)
+            target.apply_secret(
+                name,
+                {"username": identity, "password": password},
+                component,
+            )
+        passwords.append(password)
+    return passwords[0], passwords[1]
+
+
+def role_definition(privileges: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        "cluster": [],
+        "indices": [
+            {
+                "names": [INDEX],
+                "privileges": list(privileges),
+                "allow_restricted_indices": False,
+            }
+        ],
+        "applications": [],
+        "run_as": [],
+        "metadata": {"owner": OWNER},
+    }
+
+
+def user_definition(identity: str, description: str, password: str = "") -> dict[str, Any]:
+    user: dict[str, Any] = {
+        "roles": [identity],
+        "full_name": f"Policy Search {description}",
+        "metadata": {"owner": OWNER},
+        "enabled": True,
+    }
+    if password:
+        user["password"] = password
+    return user
+
+
+def inspect_identity(
+    client: ElasticsearchClient,
+    identity: str,
+    privileges: tuple[str, ...],
+    password: str | None,
+    description: str,
+) -> IdentityState:
+    status, value = client.request("GET", f"/_security/role/{identity}")
+    require_status(status, {200, 404}, f"inspect {description} role")
+    role_exists = status == 200
+    if role_exists:
+        actual = value.get(identity) if isinstance(value, dict) else None
+        normalized = dict(actual) if isinstance(actual, dict) else {}
+        transient = normalized.pop("transient_metadata", {})
+        normalized.pop("remote_indices", None)
+        normalized.pop("remote_cluster", None)
+        normalized.pop("metadata", None)
+        expected = role_definition(privileges)
+        expected.pop("metadata")
+        require(
+            normalized == expected and transient in ({}, {"enabled": True}),
+            f"existing {description} role differs",
+        )
+
+    status, value = client.request("GET", f"/_security/user/{identity}")
+    require_status(status, {200, 404}, f"inspect {description} user")
+    user_exists = status == 200
+    if user_exists:
+        actual = value.get(identity) if isinstance(value, dict) else None
+        require(
+            isinstance(actual, dict)
+            and actual.get("roles") == [identity]
+            and actual.get("enabled") is True,
+            f"existing {description} user differs",
+        )
+        require(password is not None, f"canonical {description} Secret is missing")
+    return IdentityState(identity, description, privileges, role_exists, user_exists, password)
 
 
 def verify_identity(client: ElasticsearchClient, identity: str) -> None:
@@ -316,17 +428,17 @@ def verify_identity(client: ElasticsearchClient, identity: str) -> None:
                 ],
             },
             {
-                "names": ["policy-views-issue-229", "policy-views-other"],
+                "names": ["policy-views-other"],
                 "privileges": ["read", "view_index_metadata", "index", "manage"],
             },
         ],
     }
     status, value = client.request("POST", "/_security/user/_has_privileges", request)
-    require_status(status, {200}, f"verify cutover {privilege} privileges")
-    require(isinstance(value, dict), "cutover privilege response is malformed")
+    require_status(status, {200}, f"verify {privilege} privileges")
+    require(isinstance(value, dict), "privilege response is malformed")
     require(
         value.get("cluster") == {"manage_security": False, "monitor": False},
-        "cutover cluster privileges differ",
+        "cluster privileges differ",
     )
     indices = value.get("index", {})
     expected = {
@@ -337,155 +449,30 @@ def verify_identity(client: ElasticsearchClient, identity: str) -> None:
         "delete_index": False,
         "manage": False,
     }
-    require(indices.get(INDEX) == expected, "cutover exact-index privileges differ")
-    for other in ("policy-views-issue-229", "policy-views-other"):
+    require(indices.get(INDEX) == expected, "exact-index privileges differ")
+    for other in ("policy-views-other",):
         require(
             indices.get(other)
             == {"read": False, "view_index_metadata": False, "index": False, "manage": False},
-            "cutover other-index privileges differ",
+            "other-index privileges differ",
         )
 
 
 def workload_client(target: Target, name: str, identity: str, port: int) -> ElasticsearchClient:
     username = target.secret_value(target.namespace, name, "username").decode("utf-8")
     password = target.secret_value(target.namespace, name, "password").decode("utf-8")
-    require(username == identity, "cutover workload Secret username differs")
+    require(username == identity, "workload Secret username differs")
     return client_for(target, username, password, port)
-
-
-def migrate_secret(
-    target: Target,
-    source_variable: str,
-    target_name: str,
-    keys: tuple[str, ...],
-    component: str,
-    identity: str = "",
-) -> tuple[str, str]:
-    source_name = os.environ.get(source_variable, "")
-    require(source_name, f"{source_variable} is required")
-    require(
-        source_name.startswith(f"{target.environment}-policy-search-")
-        and "-cutover-" in source_name,
-        f"{source_variable} is outside the obsolete Policy Search Secret boundary",
-    )
-    require(source_name != target_name, f"{source_variable} must differ from its target")
-    source = target.json("get", "secret", source_name)
-    encoded = source.get("data", {})
-    require(
-        isinstance(encoded, dict) and set(encoded) == set(keys),
-        f"Secret/{source_name} keys differ",
-    )
-    decoded: dict[str, str] = {}
-    try:
-        for key in keys:
-            decoded[key] = base64.b64decode(encoded[key], validate=True).decode("utf-8")
-    except (TypeError, ValueError, UnicodeDecodeError) as error:
-        raise AdministrationError(f"Secret/{source_name} data is malformed") from error
-    if identity:
-        require(decoded["username"] == identity, f"Secret/{source_name} username differs")
-        require(len(decoded["password"]) >= 32, f"Secret/{source_name} password is too short")
-    target.apply_secret(
-        target_name,
-        decoded,
-        component,
-        force_conflicts=True,
-    )
-    migrated = target.json("get", "secret", target_name)
-    require(migrated.get("data") == encoded, f"Secret/{target_name} data differs after migration")
-    return source_name, target_name
-
-
-def migrate_secrets(target: Target) -> list[tuple[str, str]]:
-    specifications = [
-        (
-            "POLICY_SEARCH_READER_SOURCE_SECRET",
-            target.reader_secret,
-            ("username", "password"),
-            "canonical-elasticsearch-reader",
-            READER,
-        ),
-        (
-            "POLICY_SEARCH_WRITER_SOURCE_SECRET",
-            target.writer_secret,
-            ("username", "password"),
-            "canonical-elasticsearch-writer",
-            WRITER,
-        ),
-        (
-            "POLICY_SEARCH_KAFKA_CA_SOURCE_SECRET",
-            target.kafka_ca_secret,
-            ("ca.crt",),
-            "canonical-kafka-trust",
-            "",
-        ),
-    ]
-    elasticsearch_ca_source = os.environ.get("POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET", "")
-    if target.elasticsearch_ca_secret:
-        require(
-            elasticsearch_ca_source,
-            "POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET is required",
-        )
-        specifications.append(
-            (
-                "POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET",
-                target.elasticsearch_ca_secret,
-                ("ca.crt",),
-                "canonical-elasticsearch-trust",
-                "",
-            )
-        )
-    else:
-        require(
-            not elasticsearch_ca_source,
-            "POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET must be empty for this target",
-        )
-    sources = [os.environ.get(specification[0], "") for specification in specifications]
-    destinations = [specification[1] for specification in specifications]
-    for specification, source in zip(specifications, sources, strict=True):
-        require(source, f"{specification[0]} is required")
-    require(
-        len(set(sources)) == len(sources),
-        "canonical Secret migration source names collide",
-    )
-    require(
-        len(set(destinations)) == len(destinations),
-        "canonical Secret migration target names collide",
-    )
-    return [migrate_secret(target, *specification) for specification in specifications]
 
 
 def execute(operation: str) -> None:
     if operation == "ensure":
         require(
-            os.environ.get("CUTOVER_CONFIRM") == "ensure-policy-views",
-            "CUTOVER_CONFIRM must equal ensure-policy-views",
-        )
-    if operation == "migrate-secrets":
-        environment = os.environ.get("DEPLOY_ENV", "")
-        require(environment in {"local-dev", "qa"}, "DEPLOY_ENV is invalid")
-        expected = f"migrate-{environment}-policy-search-secrets"
-        require(
-            os.environ.get("SECRET_MIGRATION_CONFIRM") == expected,
-            f"SECRET_MIGRATION_CONFIRM must equal {expected}",
+            os.environ.get("POLICY_SEARCH_RESOURCE_CONFIRM") == "ensure-policy-search-resources",
+            "POLICY_SEARCH_RESOURCE_CONFIRM must equal ensure-policy-search-resources",
         )
     target = Target()
     target.verify_boundary()
-    if operation == "migrate-secrets":
-        migrations = migrate_secrets(target)
-        print(
-            json.dumps(
-                {
-                    "environment": target.environment,
-                    "migrations": [
-                        {"source": source, "target": destination}
-                        for source, destination in migrations
-                    ],
-                    "migrate-secrets": "passed",
-                },
-                sort_keys=True,
-            )
-        )
-        return
     if operation == "verify":
         with PortForward(target) as port:
             reader = workload_client(target, target.reader_secret, READER, port)
@@ -494,7 +481,7 @@ def execute(operation: str) -> None:
             writer = workload_client(target, target.writer_secret, WRITER, port)
             verify_identity(writer, WRITER)
             status, _ = writer.request("GET", f"/{INDEX}/_count")
-            require_status(status, {403}, "verify cutover writer read denial")
+            require_status(status, {403}, "verify writer read denial")
         print(
             json.dumps(
                 {
@@ -516,40 +503,36 @@ def execute(operation: str) -> None:
         if operation == "inspect":
             state = inspect_index(admin)
         else:
-            reader_password = target.optional_password(
-                target.reader_secret, READER
-            ) or secrets.token_urlsafe(32)
-            writer_password = target.optional_password(
-                target.writer_secret, WRITER
-            ) or secrets.token_urlsafe(32)
-            state = ensure_index_and_access(admin, reader_password, writer_password)
-            target.apply_secret(
-                target.reader_secret,
-                {"username": READER, "password": reader_password},
-                "cutover-elasticsearch-reader",
-            )
-            target.apply_secret(
-                target.writer_secret,
-                {"username": WRITER, "password": writer_password},
-                "cutover-elasticsearch-writer",
-            )
+            trust: list[tuple[str, bytes, str]] = []
             if target.public_ca_secret:
                 ca = target.secret_value(target.data_namespace, target.public_ca_secret, "ca.crt")
-                target.apply_secret(
-                    target.elasticsearch_ca_secret,
-                    {"ca.crt": ca.decode("utf-8")},
-                    "cutover-elasticsearch-trust",
-                )
+                existing = target.optional_secret_value(target.elasticsearch_ca_secret, "ca.crt")
+                require(existing in {None, ca}, "canonical Elasticsearch CA Secret differs")
+                trust.append((target.elasticsearch_ca_secret, ca, "elasticsearch-trust"))
             kafka_ca = target.secret_value(
                 target.data_namespace,
                 target.kafka_public_ca_secret,
                 "ca.crt",
             )
-            target.apply_secret(
-                target.kafka_ca_secret,
-                {"ca.crt": kafka_ca.decode("utf-8")},
-                "cutover-kafka-trust",
+            existing = target.optional_secret_value(target.kafka_ca_secret, "ca.crt")
+            require(existing in {None, kafka_ca}, "canonical Kafka CA Secret differs")
+            trust.append((target.kafka_ca_secret, kafka_ca, "kafka-trust"))
+            reader_password, writer_password = persist_missing_credentials(
+                target,
+                admin,
+                target.optional_password(target.reader_secret, READER),
+                target.optional_password(target.writer_secret, WRITER),
             )
+            state = ensure_index_and_access(admin, reader_password, writer_password)
+            for name, ca, component in trust:
+                existing = target.optional_secret_value(name, "ca.crt")
+                require(existing in {None, ca}, f"canonical Secret/{name} changed during ensure")
+                if existing is None:
+                    target.apply_secret(
+                        name,
+                        {"ca.crt": ca.decode("utf-8")},
+                        component,
+                    )
     print(
         json.dumps(
             {
@@ -568,8 +551,8 @@ def execute(operation: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     require(
-        len(arguments) == 1 and arguments[0] in {"inspect", "ensure", "verify", "migrate-secrets"},
-        "unsupported cutover operation",
+        len(arguments) == 1 and arguments[0] in {"inspect", "ensure", "verify"},
+        "unsupported resource administration operation",
     )
     execute(arguments[0])
     return 0
@@ -579,5 +562,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except (AdministrationError, CommandError, OSError, ValueError) as error:
-        print(f"policy-search-cutover: {error}", file=sys.stderr)
+        print(f"policy-search-resources: {error}", file=sys.stderr)
         raise SystemExit(1) from error

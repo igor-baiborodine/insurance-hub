@@ -98,35 +98,15 @@ def test_product_supports_every_cataloged_capability() -> None:
     assert paths == ["services/product-service"] * len(capabilities)
 
 
-def test_policy_search_fixture_operations_use_the_existing_dispatch() -> None:
-    # given
+def test_policy_search_administration_operations_are_not_shared_dispatch_capabilities() -> None:
+    # given / when
     script_dir = Path(resolve.__file__).resolve().parent
-    root = script_dir.parents[2]
-
-    # when
-    paths = [
-        resolve.resolve_service(
-            root,
-            script_dir / "catalog.json",
-            "policy-search",
-            capability,
-        )
-        for capability in (
-            "fixture-setup",
-            "fixture-verify",
-            "fixture-retire",
-            "event-fixture-setup",
-            "event-fixture-verify",
-            "event-fixture-retire",
-            "cutover-index-inspect",
-            "cutover-index-ensure",
-            "cutover-index-verify",
-            "canonical-secrets-migrate",
-        )
-    ]
+    record = resolve.load_catalog(script_dir / "catalog.json")["services"]["policy-search"]
 
     # then
-    assert paths == ["services/policy-search-service"] * 10
+    assert not any(
+        capability.startswith("administration-") for capability in record["capabilities"]
+    )
 
 
 def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() -> None:
@@ -168,7 +148,7 @@ def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() 
     assert record["deploymentTargets"]["qa"]["dataNamespace"] == "qa-data"
     assert paths == ["services/dashboard-service"] * len(expected)
     for unsupported in (
-        "fixture-setup",
+        "resource-ensure",
         "registration-inspect",
         "deploy-test-flux",
         "initialize",

@@ -46,10 +46,11 @@ def service_record(root: Path, service: str) -> dict[str, Any]:
     if administration is not None:
         require(isinstance(administration, dict), "invalid administration configuration")
         assets = administration.get("assets")
-        require(isinstance(assets, dict) and bool(assets), "administration assets are missing")
-        for label, value in assets.items():
-            require(bool(re.fullmatch(r"[a-z][a-z0-9-]*", label)), "invalid asset label")
-            require(checkout_path(root, value).is_file(), "administration asset is missing")
+        if assets is not None:
+            require(isinstance(assets, dict) and bool(assets), "administration assets are missing")
+            for label, value in assets.items():
+                require(bool(re.fullmatch(r"[a-z][a-z0-9-]*", label)), "invalid asset label")
+                require(checkout_path(root, value).is_file(), "administration asset is missing")
     return record
 
 
@@ -107,45 +108,40 @@ def target_record(root: Path, record: dict[str, Any], name: str) -> dict[str, An
             <= administration["jobDeadlineSeconds"],
             "migration, seed and minimum reserve budgets exceed the Job deadline",
         )
-    fixture = target.get("fixtureAdministration")
-    if fixture is not None:
-        require(isinstance(fixture, dict), "invalid fixture administration configuration")
+    administration = target.get("serviceAdministration")
+    if administration is not None:
+        require(isinstance(administration, dict), "invalid service administration configuration")
         for field in (
             "service",
             "adminSecret",
-            "workloadSecret",
-            "eventWriterSecret",
             "kafkaPublicCASecret",
-            "kafkaWorkloadCASecret",
             "canonicalReaderSecret",
             "canonicalWriterSecret",
             "canonicalKafkaCASecret",
         ):
             require(
-                bool(re.fullmatch(r"[a-z][a-z0-9-]{0,62}", fixture.get(field, ""))),
-                f"invalid fixture {field}",
+                bool(re.fullmatch(r"[a-z][a-z0-9-]{0,62}", administration.get(field, ""))),
+                f"invalid service administration {field}",
             )
         for field in (
             "publicCASecret",
-            "workloadCASecret",
             "canonicalElasticsearchCASecret",
         ):
-            value = fixture.get(field)
+            value = administration.get(field)
             if value:
                 require(
                     bool(re.fullmatch(r"[a-z][a-z0-9-]{0,62}", value)),
-                    f"invalid fixture {field}",
+                    f"invalid service administration {field}",
                 )
-        if fixture.get("publicCASecret"):
-            require(bool(fixture.get("workloadCASecret")), "workload CA Secret is missing")
+        if administration.get("publicCASecret"):
             require(
                 bool(
                     re.fullmatch(
                         r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?",
-                        fixture.get("serverName", ""),
+                        administration.get("serverName", ""),
                     )
                 ),
-                "invalid fixture serverName",
+                "invalid service administration serverName",
             )
     if target["mode"] == "flux":
         flux = target.get("flux", {})

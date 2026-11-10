@@ -10,19 +10,17 @@ export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/deployment.py scripts/disposable_deployment.py scripts/image_check.py \
 	scripts/elasticsearch_integration.py scripts/policy_search_deployment_checks.py scripts/scaffold_process.py \
 	scripts/event_integration.py \
-	scripts/cutover_administration.py \
-	scripts/fixture_administration.py scripts/fixture_administration_integration.py \
+	scripts/administration.py scripts/resource_administration.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_elasticsearch_integration.py \
 	scripts/test_event_integration.py \
-	scripts/test_cutover_administration.py \
-	scripts/test_fixture_administration.py \
+	scripts/test_resource_administration.py \
 	scripts/test_scaffold_process.py scripts/test_tooling.py \
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
-	scripts/test_deployment.py scripts/test_elasticsearch_integration.py scripts/test_fixture_administration.py \
+	scripts/test_deployment.py scripts/test_elasticsearch_integration.py \
 	scripts/test_event_integration.py \
-	scripts/test_cutover_administration.py \
+	scripts/test_resource_administration.py \
 	scripts/test_scaffold_process.py \
 	scripts/test_tooling_runner.py)
 
@@ -68,8 +66,6 @@ ELASTICSEARCH_CLIENT_VERSION := v8.19.7
 FRANZ_GO_VERSION := v1.22.2
 ELASTICSEARCH_IMAGE := docker.elastic.co/elasticsearch/elasticsearch:8.19.6@sha256:bfb2108076735fbfc5dcd5d49f12f5aa93fab9759034c55f7da3b4345606c903
 KAFKA_IMAGE := apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f
-LEGACY_POLICY_SEARCH_IMAGE ?= insurance-hub-policy-search-api-legacy:latest
-LEGACY_GATEWAY_IMAGE ?= insurance-hub-agent-portal-gateway-legacy:latest
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 TEST_PACKAGES ?= ./...
 COVERAGE_MINIMUM ?= 75
@@ -77,7 +73,6 @@ COVERAGE_EXCLUDE_PATHS := gen internal/testing
 INTEGRATION_COVERAGE_FILE ?=
 ELASTICSEARCH_INTEGRATION_COVERAGE_FILE ?= elasticsearch-integration-coverage.txt
 EVENT_INTEGRATION_COVERAGE_FILE ?= event-integration-coverage.txt
-EVENT_TRANSFER_REPORT ?=
 HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
@@ -112,12 +107,11 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
 	image-build image-check _image-check-existing test-integration test-elasticsearch-integration \
-	test-event-integration test-cutover-rehearsal _test-event-integration deploy-render deploy-check \
-	deploy-preflight deploy-status image-load deploy deploy-verify stop fixture-setup fixture-verify fixture-retire \
-	event-fixture-setup event-fixture-verify event-fixture-retire \
-	cutover-index-inspect cutover-index-ensure cutover-index-verify canonical-secrets-migrate \
+	test-event-integration deploy-render deploy-check \
+	deploy-preflight deploy-status image-load deploy deploy-verify stop \
+	resource-inspect resource-ensure resource-verify \
 	deploy-test-tooling deploy-test \
-	build-qualification-client \
+	build-smoke-client \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
 	shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image
@@ -153,18 +147,9 @@ test-elasticsearch-integration: python-runtime-check ## Exercise the query adapt
 		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" scripts/elasticsearch_integration.py
 
-test-event-integration: ## Exercise event fixtures against owned disposable Kafka and Elasticsearch
-	+@$(MAKE) --no-print-directory _test-event-integration EVENT_CUTOVER_REHEARSAL=0
-
-test-cutover-rehearsal: ## Exercise actual legacy images through disposable Java-to-Go-to-Java transfer
-	+@$(MAKE) --no-print-directory _test-event-integration EVENT_CUTOVER_REHEARSAL=1
-
-_test-event-integration: python-runtime-check
+test-event-integration: python-runtime-check ## Exercise Go events against owned disposable Kafka and Elasticsearch
 	@DOCKER="$(DOCKER)" GO="$(GO)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
 		KAFKA_IMAGE="$(KAFKA_IMAGE)" EVENT_INTEGRATION_COVERAGE_FILE="$(EVENT_INTEGRATION_COVERAGE_FILE)" \
-		LEGACY_POLICY_SEARCH_IMAGE="$(LEGACY_POLICY_SEARCH_IMAGE)" LEGACY_GATEWAY_IMAGE="$(LEGACY_GATEWAY_IMAGE)" \
-		EVENT_CUTOVER_REHEARSAL="$(EVENT_CUTOVER_REHEARSAL)" \
-		EVENT_TRANSFER_REPORT="$(EVENT_TRANSFER_REPORT)" \
 		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" scripts/event_integration.py
 
@@ -172,7 +157,7 @@ deploy-render: ## Render one Policy Search overlay without applying it
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/policy_search_deployment_checks.py render
 
-deploy-check: python-runtime-check ## Validate isolated Policy Search overlays and Java preservation
+deploy-check: python-runtime-check ## Validate isolated Policy Search steady-state overlays
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/policy_search_deployment_checks.py check
 
@@ -180,39 +165,27 @@ deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runt
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" scripts/deployment.py '$@'
 
-fixture-setup fixture-verify fixture-retire: python-runtime-check
+resource-inspect: ## Inspect the Policy Search resources without mutation
+resource-ensure: ## Create missing Policy Search resources without changing compatible state
+resource-verify: ## Verify the Policy Search index and least-privilege identities
+resource-inspect resource-ensure resource-verify: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/fixture_administration.py '$(@:fixture-%=%)'
-
-event-fixture-setup event-fixture-verify event-fixture-retire: python-runtime-check
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/fixture_administration.py '$(@:event-fixture-%=event-%)'
-
-cutover-index-inspect cutover-index-ensure cutover-index-verify: python-runtime-check
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/cutover_administration.py '$(@:cutover-index-%=%)'
-
-canonical-secrets-migrate: python-runtime-check
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/cutover_administration.py migrate-secrets
+		"$(PYTHON)" scripts/resource_administration.py '$(@:resource-%=%)'
 
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed deployment guards without a cluster
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		"$(PYTHON)" -m pytest -q scripts/test_deployment.py scripts/test_fixture_administration.py
+		"$(PYTHON)" -m pytest -q scripts/test_deployment.py scripts/test_resource_administration.py
 
 deploy-test: python-toolchain-check image-build ## Exercise the exact image in an owned disposable Kind namespace
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		DOCKER="$(DOCKER)" ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" \
-		"$(PYTHON)" scripts/fixture_administration_integration.py
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" \
 		ELASTICSEARCH_IMAGE="$(ELASTICSEARCH_IMAGE)" KAFKA_IMAGE="$(KAFKA_IMAGE)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_disposable_deployment.py
 
-build-qualification-client: ## Build the read-only disposable HTTP/gRPC qualification client
-	@test -n "$(strip $(QUALIFICATION_CLIENT_OUTPUT))" || { echo 'QUALIFICATION_CLIENT_OUTPUT is required' >&2; exit 1; }
+build-smoke-client: ## Build the read-only disposable HTTP/gRPC smoke client
+	@test -n "$(strip $(SMOKE_CLIENT_OUTPUT))" || { echo 'SMOKE_CLIENT_OUTPUT is required' >&2; exit 1; }
 	GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build \
-		-mod=readonly -trimpath -o "$(QUALIFICATION_CLIENT_OUTPUT)" \
-		./internal/testing/cmd/qualificationclient
+		-mod=readonly -trimpath -o "$(SMOKE_CLIENT_OUTPUT)" \
+		./internal/testing/cmd/smokeclient
 
 python-tooling-format-check: python-toolchain-check
 	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \
