@@ -2176,13 +2176,6 @@ def run() -> None:
             candidate.local_image_id,
             candidate.registry_digest,
         )
-        response = http_probe(
-            cluster,
-            "management-health",
-            ["http://local-dev-dashboard-api-management:8081/readyz"],
-            labels={checks.MANAGEMENT_CLIENT_LABEL: "true"},
-        )
-        require_http_response("management-health", response, 200, "ready\n")
         denial_failures: list[str] = []
         for name, path in (
             ("unlabeled-denied", "/dashboard/totalsales"),

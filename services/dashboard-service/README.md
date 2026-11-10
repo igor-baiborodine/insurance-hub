@@ -179,9 +179,9 @@ and offsets, reruns setup to prove it preserves populated state, and registers o
 Its fixture setup is explicit test administration; serving never creates or seeds state. The smoke
 removes its namespace and does not establish a local-dev or QA deployment result. The guarded
 deployment stage requires the exact target ECK Service, reader Secret and QA public-CA copy before
-mutation. `go-svc-deploy-verify` creates and removes bounded qualification Pods and one untrusted
-namespace to prove allowed and denied caller identities plus the reader's effective read-only
-privileges. The
+mutation. `go-svc-deploy-verify` checks both management health endpoints through a port-forward,
+checks the business HTTP and gRPC operations through port-forwards, then creates and removes one
+qualification Pod to prove the reader's effective read-only privileges. The
 [deployment runbook](deployment-runbook.md) records
 those side effects, coordinates and cleanup.
 

@@ -214,20 +214,16 @@ the exact reader username and password, requires the reader identity
 `go_dashboard_total_sales_reader`, and verifies the selected ECK HTTP Service before image or
 workload mutation. It never prints or passes credential values on a host command line.
 
-Verify the permitted HTTP total-sales, agent-sales and sales-trends requests, all three direct sales RPCs
-and management endpoints, then
-use labeled and unlabeled probe Pods to establish NetworkPolicy behavior. Confirm that OCI,
+Verify the permitted HTTP total-sales, agent-sales and sales-trends requests, all three direct sales
+RPCs and both management endpoints through the existing port-forwards. Confirm that OCI,
 runtime, Pod and ConfigMap versions agree; retain the full OCI revision, image tag and immutable
 digest separately. Verify exact-index reads, write/admin/unrelated-index denials, readiness during
 Elasticsearch loss and independent liveness. No Kafka setting, credential, topic or group belongs
 to the Go reader.
 
 `go-svc-deploy-verify` is a bounded target operation, not a read-only status command. It creates
-fifteen fixed-name qualification Pods and one fixed-name untrusted namespace, requires each name to
-be absent first, and removes every created resource. The probes use the pinned curl image, exercise
-all three allowed business operations, gRPC-listener and management identities, marker-only and
-business-to-management denial, and copied complete HTTP/gRPC identities in the untrusted
-namespace. The verifier also calls the deployed `GetTotalSales`, `GetAgentSales` and
+one fixed-name qualification Pod, requires the name to be absent first, and removes the Pod. The
+verifier calls the deployed `GetTotalSales`, `GetAgentSales` and
 `GetSalesTrends` RPCs through the business Service. Shared-state checks require successful
 operation envelopes without assuming fixture totals; the disposable owner retains the exact seeded
 result assertions. The reader probe mounts the workload Secret inside Kubernetes, verifies
@@ -325,8 +321,9 @@ Stop before a target mutation when any declared environment, context, namespace,
 Dashboard resource name, source revision, image reference/digest, Secret shape, Elasticsearch
 index/identity, Kafka topic/group or current Flux owner differs from the recorded candidate. Stop
 after mutation for a placeholder/mismatched runtime identity, an unexpected ready Pod, failed
-business/management probe, ownership overlap, reader privilege expansion, a writer or worker that
-does not match the ordinary registration coordinates, unstable or out-of-range committed progress,
+business probe or port-forwarded management health, ownership overlap, reader privilege expansion,
+a writer or worker that does not match the ordinary registration coordinates, unstable or
+out-of-range committed progress,
 an unexplained readiness failure or incomplete owned cleanup. Preserve the first failure and
 current source/image/resource identities before retrying.
 
@@ -348,9 +345,9 @@ Pod identity, reader permissions and monitoring behavior after reconciliation.
 If monitoring source differs from application source, restore it through the separate guarded
 procedure rather than treating an application rollback as monitoring restoration.
 
-Clean up only resources owned by the failed operation. The verifier owns its fixed probe Pods and
-untrusted namespace; the disposable deployment owns its unique namespace. Before retrying after an
-interruption, check those exact recorded names and preserve an unexpected resource for diagnosis.
+Clean up only resources owned by the failed operation. The verifier owns its fixed reader probe Pod;
+the disposable deployment owns its unique namespace. Before retrying after an interruption, check
+that exact recorded name and preserve an unexpected resource for diagnosis.
 Do not use broad namespace, Pod, process or consumer-group cleanup.
 
 Reader rotation remains an explicit administrative action with its own confirmation. Removing group

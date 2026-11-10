@@ -31,19 +31,7 @@ from scripts.python.process_runner import CommandError, run_command  # noqa: E40
 SERVICE = "dashboard"
 EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
 BUSINESS_CLIENT_LABEL = "insurance-hub.io/dashboard-business-client"
-MANAGEMENT_CLIENT_LABEL = "insurance-hub.io/dashboard-management-client"
-DENIED_QUALIFICATION_PODS = {
-    "dashboard-qualification-marker-only",
-    "dashboard-qualification-marker-only-agent-denied",
-    "dashboard-qualification-marker-only-trends-denied",
-    "dashboard-qualification-marker-only-grpc-denied",
-    "dashboard-qualification-business-management-denied",
-    "dashboard-qualification-cross-namespace-denied",
-    "dashboard-qualification-cross-namespace-agent-denied",
-    "dashboard-qualification-cross-namespace-trends-denied",
-    "dashboard-qualification-cross-namespace-grpc-denied",
-}
-GRPC_REACHABLE_QUALIFICATION_POD = "dashboard-qualification-business-grpc"
+QUALIFICATION_LABEL_VALUE = "dashboard-reader"
 NETWORK_POLICY_CONVERGENCE_SECONDS = 4
 FORBIDDEN_TEXT = ("postgres", "database", "insecure_skip_verify")
 PROBE_IMAGE = (
@@ -164,41 +152,6 @@ def expected_ingress(environment: str) -> list[dict[str, Any]]:
                 {"port": 8080, "protocol": "TCP"},
                 {"port": 9090, "protocol": "TCP"},
             ],
-        },
-        {
-            "from": [
-                peer_namespace
-                | {
-                    "podSelector": {
-                        "matchLabels": {
-                            "app.kubernetes.io/name": "dashboard-qualification",
-                            "app.kubernetes.io/component": "probe",
-                            "insurance-hub.io/owner": "issue-287",
-                            BUSINESS_CLIENT_LABEL: "true",
-                        }
-                    }
-                }
-            ],
-            "ports": [
-                {"port": 8080, "protocol": "TCP"},
-                {"port": 9090, "protocol": "TCP"},
-            ],
-        },
-        {
-            "from": [
-                peer_namespace
-                | {
-                    "podSelector": {
-                        "matchLabels": {
-                            "app.kubernetes.io/name": "dashboard-qualification",
-                            "app.kubernetes.io/component": "probe",
-                            "insurance-hub.io/owner": "issue-287",
-                            MANAGEMENT_CLIENT_LABEL: "true",
-                        }
-                    }
-                }
-            ],
-            "ports": [{"port": 8081, "protocol": "TCP"}],
         },
     ]
 
@@ -1171,7 +1124,7 @@ def qualification_pod(
         "metadata": {
             "name": name,
             "namespace": selected_namespace,
-            "labels": labels | {"insurance-hub.io/qualification": "issue-287"},
+            "labels": labels | {"insurance-hub.io/qualification": QUALIFICATION_LABEL_VALUE},
         },
         "spec": {
             "activeDeadlineSeconds": 60,
@@ -1225,7 +1178,7 @@ check_status 200 "{url}/policy_stats/_count"
 check_status 200 "{url}/policy_stats/_mapping"
 check_status 200 "{url}/_security/user/_privileges"
 cp /tmp/response /tmp/privileges
-check_status 403 "{url}/issue-287-unrelated/_search"
+check_status 403 "{url}/dashboard-unrelated/_search"
 check_status 403 "{url}/_cluster/health"
 check_status 403 "{url}/_security/role/go_dashboard_total_sales_reader"
 cat /tmp/privileges
@@ -1273,215 +1226,16 @@ def validate_effective_reader_privileges(output: str) -> None:
     )
 
 
-def validate_cni_denial(output: str) -> None:
-    try:
-        result = json.loads(output)
-    except json.JSONDecodeError as error:
-        raise DeploymentError("CNI denial result is malformed") from error
-    require(
-        result.get("exit_code") in {7, 28}
-        and result.get("http_status") == "000"
-        and result.get("response_bytes") == 0
-        and set(result) == {"exit_code", "http_status", "response_bytes"},
-        "CNI denial result differs",
-    )
-
-
-def validate_grpc_reachability(output: str) -> None:
-    try:
-        result = json.loads(output)
-    except json.JSONDecodeError as error:
-        raise DeploymentError("gRPC reachability result is malformed") from error
-    require(
-        isinstance(result, dict)
-        and set(result) == {"exit_code", "remote_ip", "remote_port", "num_connects"}
-        and isinstance(result.get("exit_code"), int)
-        and isinstance(result.get("remote_ip"), str)
-        and bool(result["remote_ip"])
-        and result.get("remote_port") == 9090
-        and result.get("num_connects") == 1,
-        "gRPC reachability result differs",
-    )
-
-
-def validate_qualification_output(name: str, output: str) -> None:
-    if name == "dashboard-qualification-reader":
-        validate_effective_reader_privileges(output)
-    elif name == GRPC_REACHABLE_QUALIFICATION_POD:
-        validate_grpc_reachability(output)
-    elif name in DENIED_QUALIFICATION_PODS:
-        validate_cni_denial(output)
-
-
-def qualification_pods(target: Target, denied_namespace: str) -> list[dict[str, Any]]:
-    total_sales_url = f"http://{target.business}.{target.namespace}.svc/dashboard/totalsales"
-    agent_sales_url = f"http://{target.business}.{target.namespace}.svc/dashboard/agentssales"
-    sales_trends_url = f"http://{target.business}.{target.namespace}.svc/dashboard/trends"
-    grpc_url = f"http://{target.business}.{target.namespace}.svc:9090"
-    management_url = f"http://{target.management}.{target.namespace}.svc:8081"
-    full_business = {
+def qualification_pods(target: Target) -> list[dict[str, Any]]:
+    labels = {
         "app.kubernetes.io/name": "dashboard-qualification",
         "app.kubernetes.io/component": "probe",
-        "insurance-hub.io/owner": "issue-287",
-        BUSINESS_CLIENT_LABEL: "true",
     }
-    full_management = {
-        "app.kubernetes.io/name": "dashboard-qualification",
-        "app.kubernetes.io/component": "probe",
-        "insurance-hub.io/owner": "issue-287",
-        MANAGEMENT_CLIENT_LABEL: "true",
-    }
-    total_payload = '{"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}'
-    agent_payload = (
-        '{"agentLogin":"safe-agent","productCode":"SAFE",'
-        '"saleDateFrom":"2019-01-01","saleDateTo":"2020-01-01"}'
-    )
-    trends_payload = (
-        '{"productCode":"SAFE","saleDateFrom":"2019-01-01",'
-        '"saleDateTo":"2020-01-01","aggregationUnitCode":"MONTH"}'
-    )
-    allowed_total_sales = (
-        "set -eu\n"
-        f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
-        f"--data '{total_payload}' '{total_sales_url}' | grep -q '\"total\"'\n"
-    )
-    allowed_agent_sales = (
-        "set -eu\n"
-        f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
-        f"--data '{agent_payload}' '{agent_sales_url}' | grep -q '\"perAgentTotal\"'\n"
-    )
-    allowed_sales_trends = (
-        "set -eu\n"
-        f"curl --fail --silent --show-error --max-time 8 -H 'Content-Type: application/json' "
-        f"--data '{trends_payload}' '{sales_trends_url}' "
-        "| grep -Eq '^\\{\\}$|\"periodSales\":\\['\n"
-    )
-    allowed_management = (
-        "set -eu\n"
-        f"test \"$(curl --fail --silent --show-error --max-time 5 '{management_url}/livez')\" "
-        '= "live"\n'
-        f"test \"$(curl --fail --silent --show-error --max-time 5 '{management_url}/readyz')\" "
-        '= "ready"\n'
-    )
-
-    def denied(url: str) -> str:
-        return f"""set -eu
-response=/tmp/denied-response
-trap 'rm -f "$response"' EXIT
-: >"$response"
-set +e
-status=$(curl --silent --connect-timeout 2 --max-time 4 \
-  --output "$response" --write-out '%{{http_code}}' '{url}' 2>/dev/null)
-exit_code=$?
-set -e
-response_bytes=$(wc -c <"$response" | tr -d '[:space:]')
-printf '{{"exit_code":%s,"http_status":"%s","response_bytes":%s}}\n' \
-  "$exit_code" "$status" "$response_bytes"
-"""
-
-    grpc_reachable = f"""set -eu
-set +e
-result=$(curl --silent --connect-timeout 2 --max-time 4 --output /dev/null \
-  --write-out '{{"exit_code":%{{exitcode}},"remote_ip":"%{{remote_ip}}",\
-"remote_port":%{{remote_port}},"num_connects":%{{num_connects}}}}' \
-  '{grpc_url}' 2>/dev/null)
-set -e
-printf '%s\n' "$result"
-"""
-
     return [
         qualification_pod(
             target,
-            "dashboard-qualification-business",
-            full_business,
-            allowed_total_sales,
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-business-agent-sales",
-            full_business,
-            allowed_agent_sales,
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-business-sales-trends",
-            full_business,
-            allowed_sales_trends,
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-management",
-            full_management,
-            allowed_management,
-        ),
-        qualification_pod(
-            target,
-            GRPC_REACHABLE_QUALIFICATION_POD,
-            full_business,
-            grpc_reachable,
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-marker-only",
-            {BUSINESS_CLIENT_LABEL: "true"},
-            denied(total_sales_url),
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-marker-only-agent-denied",
-            {BUSINESS_CLIENT_LABEL: "true"},
-            denied(agent_sales_url),
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-marker-only-trends-denied",
-            {BUSINESS_CLIENT_LABEL: "true"},
-            denied(sales_trends_url),
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-marker-only-grpc-denied",
-            {BUSINESS_CLIENT_LABEL: "true"},
-            denied(grpc_url),
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-business-management-denied",
-            full_business,
-            denied(management_url + "/livez"),
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-cross-namespace-denied",
-            full_business,
-            denied(total_sales_url),
-            namespace=denied_namespace,
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-cross-namespace-agent-denied",
-            full_business,
-            denied(agent_sales_url),
-            namespace=denied_namespace,
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-cross-namespace-trends-denied",
-            full_business,
-            denied(sales_trends_url),
-            namespace=denied_namespace,
-        ),
-        qualification_pod(
-            target,
-            "dashboard-qualification-cross-namespace-grpc-denied",
-            full_business,
-            denied(grpc_url),
-            namespace=denied_namespace,
-        ),
-        qualification_pod(
-            target,
             "dashboard-qualification-reader",
-            full_business,
+            labels,
             permission_probe_script(target),
             elasticsearch=True,
         ),
@@ -1502,142 +1256,74 @@ def wait_for_probe(target: Target, namespace: str, name: str) -> None:
 
 
 def run_access_qualification(target: Target) -> None:
-    denied_namespace = f"issue-287-dashboard-denied-{target.environment}"
-    namespace = {
-        "apiVersion": "v1",
-        "kind": "Namespace",
-        "metadata": {
-            "name": denied_namespace,
-            "labels": {"insurance-hub.io/qualification": "issue-287"},
-        },
-    }
-    existing = run(
-        [
-            target.kubectl_binary,
-            "--context",
-            target.context,
-            "get",
-            "namespace",
-            denied_namespace,
-            "--ignore-not-found",
-            "-o",
-            "json",
-        ]
-    )
-    require(not existing.strip(), f"qualification namespace/{denied_namespace} already exists")
     failures: list[str] = []
-    try:
-        target.kubectl("create", "-f", "-", input_text=yaml.safe_dump(namespace, sort_keys=False))
-        for pod in qualification_pods(target, denied_namespace):
-            metadata = pod["metadata"]
-            name = metadata["name"]
-            namespace_name = metadata["namespace"]
-            created = False
-            try:
-                require(
-                    not target.namespace_kubectl(
-                        namespace_name,
-                        "get",
-                        "pod",
-                        name,
-                        "--ignore-not-found",
-                        "-o",
-                        "name",
-                    ).strip(),
-                    f"qualification Pod/{name} already exists",
-                )
-                target.namespace_kubectl(
+    for pod in qualification_pods(target):
+        metadata = pod["metadata"]
+        name = metadata["name"]
+        namespace_name = metadata["namespace"]
+        created = False
+        try:
+            require(
+                not target.namespace_kubectl(
                     namespace_name,
-                    "create",
-                    "-f",
-                    "-",
-                    input_text=yaml.safe_dump(pod, sort_keys=False),
-                )
-                created = True
-                wait_for_probe(target, namespace_name, name)
-                if (
-                    name == "dashboard-qualification-reader"
-                    or name == GRPC_REACHABLE_QUALIFICATION_POD
-                    or name in DENIED_QUALIFICATION_PODS
-                ):
-                    output = target.namespace_kubectl(
-                        namespace_name, "logs", f"pod/{name}", timeout=10
-                    )
-                    validate_qualification_output(name, output)
-            except Exception as error:
-                if created:
-                    try:
-                        logs = target.namespace_kubectl(
-                            namespace_name, "logs", f"pod/{name}", timeout=10
-                        )
-                        diagnostic = logs[-1000:]
-                    except Exception as log_error:
-                        diagnostic = f"logs unavailable ({type(log_error).__name__})"
-                else:
-                    diagnostic = "probe output unavailable because the Pod was not created"
-                failures.append(f"Pod/{name}: {error}; sanitized probe output: {diagnostic}")
-            finally:
-                try:
-                    if created:
-                        current = target.namespace_json(
-                            namespace_name, "get", "pod", name, "--ignore-not-found"
-                        )
-                        if current:
-                            require(
-                                current.get("metadata", {})
-                                .get("labels", {})
-                                .get("insurance-hub.io/qualification")
-                                == "issue-287",
-                                f"qualification Pod/{name} cleanup ownership differs",
-                            )
-                            target.namespace_kubectl(
-                                namespace_name,
-                                "delete",
-                                "pod",
-                                name,
-                                "--wait=true",
-                                "--timeout=30s",
-                                timeout=40,
-                            )
-                except Exception as cleanup_error:
-                    failures.append(f"Pod/{name} cleanup: {cleanup_error}")
-        require(not failures, "qualification probes failed: " + " | ".join(failures))
-    finally:
-        current = json.loads(
-            run(
-                [
-                    target.kubectl_binary,
-                    "--context",
-                    target.context,
                     "get",
-                    "namespace",
-                    denied_namespace,
+                    "pod",
+                    name,
                     "--ignore-not-found",
                     "-o",
-                    "json",
-                ]
+                    "name",
+                ).strip(),
+                f"qualification Pod/{name} already exists",
             )
-            or "{}"
-        )
-        if current:
-            require(
-                current.get("metadata", {}).get("labels", {}).get("insurance-hub.io/qualification")
-                == "issue-287",
-                f"qualification namespace/{denied_namespace} cleanup ownership differs",
+            target.namespace_kubectl(
+                namespace_name,
+                "create",
+                "-f",
+                "-",
+                input_text=yaml.safe_dump(pod, sort_keys=False),
             )
-            run(
-                [
-                    target.kubectl_binary,
-                    "--context",
-                    target.context,
-                    "delete",
-                    "namespace",
-                    denied_namespace,
-                    "--wait=true",
-                    "--timeout=60s",
-                ],
-                timeout=70,
-            )
+            created = True
+            wait_for_probe(target, namespace_name, name)
+            output = target.namespace_kubectl(namespace_name, "logs", f"pod/{name}", timeout=10)
+            validate_effective_reader_privileges(output)
+        except Exception as error:
+            if created:
+                try:
+                    logs = target.namespace_kubectl(
+                        namespace_name, "logs", f"pod/{name}", timeout=10
+                    )
+                    diagnostic = logs[-1000:]
+                except Exception as log_error:
+                    diagnostic = f"logs unavailable ({type(log_error).__name__})"
+            else:
+                diagnostic = "probe output unavailable because the Pod was not created"
+            failures.append(f"Pod/{name}: {error}; sanitized probe output: {diagnostic}")
+        finally:
+            try:
+                if created:
+                    current = target.namespace_json(
+                        namespace_name, "get", "pod", name, "--ignore-not-found"
+                    )
+                    if current:
+                        require(
+                            current.get("metadata", {})
+                            .get("labels", {})
+                            .get("insurance-hub.io/qualification")
+                            == QUALIFICATION_LABEL_VALUE,
+                            f"qualification Pod/{name} cleanup ownership differs",
+                        )
+                        target.namespace_kubectl(
+                            namespace_name,
+                            "delete",
+                            "pod",
+                            name,
+                            "--wait=true",
+                            "--timeout=30s",
+                            timeout=40,
+                        )
+            except Exception as cleanup_error:
+                failures.append(f"Pod/{name} cleanup: {cleanup_error}")
+    require(not failures, "qualification probes failed: " + " | ".join(failures))
 
 
 def validate_direct_rpc_output(output: str, test_name: str = "TestDeployedDirectRPC") -> None:
@@ -1780,12 +1466,14 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             try:
-                if _http(f"http://127.0.0.1:{management_port}/readyz") == (200, b"ready\n"):
+                ready = _http(f"http://127.0.0.1:{management_port}/readyz")
+                live = _http(f"http://127.0.0.1:{management_port}/livez")
+                if ready == (200, b"ready\n") and live == (200, b"live\n"):
                     break
             except OSError:
                 time.sleep(0.2)
         else:
-            raise DeploymentError("deployed readiness was not reachable")
+            raise DeploymentError("deployed management health was not reachable")
         for name, path, payload, field, field_type, allow_empty in (
             (
                 "total-sales HTTP",

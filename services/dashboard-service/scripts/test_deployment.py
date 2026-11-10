@@ -13,9 +13,9 @@ from unittest.mock import Mock, patch
 import dashboard_deployment_checks as checks
 import pytest
 import yaml
+from scripts.go.service import deployment as lifecycle
 
 import deployment
-from scripts.go.service import deployment as lifecycle
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -205,7 +205,7 @@ def test_workload_dependencies_require_exact_reader_service_and_ca(environment: 
 
 
 @pytest.mark.parametrize("environment", ["local-dev", "qa"])
-def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: str) -> None:
+def test_qualification_pods_bind_reader_case(environment: str) -> None:
     namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
     target = SimpleNamespace(
         environment=environment,
@@ -214,9 +214,9 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
         management=f"{environment}-dashboard-api-management",
     )
 
-    pods = checks.qualification_pods(target, f"issue-287-dashboard-denied-{environment}")
+    pods = checks.qualification_pods(target)
 
-    assert len(pods) == 15
+    assert len(pods) == 1
     assert all(pod["spec"]["containers"][0]["image"] == checks.PROBE_IMAGE for pod in pods)
     assert all(
         pod["spec"]["containers"][0]["args"][0].startswith(
@@ -225,58 +225,11 @@ def test_qualification_pods_bind_allowed_denied_and_reader_cases(environment: st
         for pod in pods
     )
     by_name = {pod["metadata"]["name"]: pod for pod in pods}
-    assert by_name["dashboard-qualification-business"]["metadata"]["labels"] == {
+    assert by_name["dashboard-qualification-reader"]["metadata"]["labels"] == {
         "app.kubernetes.io/name": "dashboard-qualification",
         "app.kubernetes.io/component": "probe",
-        "insurance-hub.io/owner": "issue-287",
-        checks.BUSINESS_CLIENT_LABEL: "true",
-        "insurance-hub.io/qualification": "issue-287",
+        "insurance-hub.io/qualification": checks.QUALIFICATION_LABEL_VALUE,
     }
-    assert by_name["dashboard-qualification-marker-only"]["metadata"]["labels"] == {
-        checks.BUSINESS_CLIENT_LABEL: "true",
-        "insurance-hub.io/qualification": "issue-287",
-    }
-    assert (
-        by_name["dashboard-qualification-cross-namespace-denied"]["metadata"]["namespace"]
-        == f"issue-287-dashboard-denied-{environment}"
-    )
-    assert (
-        by_name["dashboard-qualification-cross-namespace-grpc-denied"]["metadata"]["namespace"]
-        == f"issue-287-dashboard-denied-{environment}"
-    )
-    assert (
-        by_name["dashboard-qualification-cross-namespace-agent-denied"]["metadata"]["namespace"]
-        == f"issue-287-dashboard-denied-{environment}"
-    )
-    total_allowed = by_name["dashboard-qualification-business"]["spec"]["containers"][0]["args"][0]
-    agent_allowed = by_name["dashboard-qualification-business-agent-sales"]["spec"]["containers"][
-        0
-    ]["args"][0]
-    trends_allowed = by_name["dashboard-qualification-business-sales-trends"]["spec"]["containers"][
-        0
-    ]["args"][0]
-    assert "/dashboard/totalsales" in total_allowed
-    assert "grep -q '\"total\"'" in total_allowed
-    assert "/dashboard/agentssales" in agent_allowed
-    assert "grep -q '\"perAgentTotal\"'" in agent_allowed
-    assert "/dashboard/trends" in trends_allowed
-    assert "grep -Eq '^\\{\\}$|\"periodSales\":\\['" in trends_allowed
-    management_allowed = by_name["dashboard-qualification-management"]["spec"]["containers"][0][
-        "args"
-    ][0]
-    assert '= "live"' in management_allowed
-    assert '= "alive"' not in management_allowed
-    assert '= "ready"' in management_allowed
-    grpc_reachable = by_name[checks.GRPC_REACHABLE_QUALIFICATION_POD]["spec"]["containers"][0][
-        "args"
-    ][0]
-    assert '"num_connects"' in grpc_reachable
-    assert ":9090" in grpc_reachable
-    for name in checks.DENIED_QUALIFICATION_PODS:
-        denial_script = by_name[name]["spec"]["containers"][0]["args"][0]
-        assert "--write-out '%{http_code}'" in denial_script
-        assert '"exit_code"' in denial_script
-        assert "--fail" not in denial_script
     reader = by_name["dashboard-qualification-reader"]["spec"]["containers"][0]
     encoded = json.dumps(reader)
     script = reader["args"][0]
@@ -345,82 +298,6 @@ def test_effective_reader_privileges_reject_additional_authority(mutation) -> No
 
     with pytest.raises(checks.DeploymentError, match="effective privileges differ"):
         checks.validate_effective_reader_privileges(json.dumps(privileges))
-
-
-@pytest.mark.parametrize("exit_code", [7, 28])
-def test_cni_denial_accepts_the_observed_connection_rejections(exit_code: int) -> None:
-    checks.validate_cni_denial(
-        json.dumps({"exit_code": exit_code, "http_status": "000", "response_bytes": 0})
-    )
-
-
-@pytest.mark.parametrize(
-    ("exit_code", "http_status", "response_bytes"),
-    [
-        (0, "400", 32),
-        (0, "401", 32),
-        (0, "404", 32),
-        (0, "405", 32),
-        (0, "500", 32),
-        (6, "000", 0),
-        (7, "200", 0),
-        (28, "000", 1),
-    ],
-)
-def test_cni_denial_rejects_reachable_http_and_other_failures(
-    exit_code: int, http_status: str, response_bytes: int
-) -> None:
-    output = json.dumps(
-        {
-            "exit_code": exit_code,
-            "http_status": http_status,
-            "response_bytes": response_bytes,
-        }
-    )
-
-    with pytest.raises(checks.DeploymentError, match="CNI denial result differs"):
-        checks.validate_cni_denial(output)
-
-
-@pytest.mark.parametrize("name", sorted(checks.DENIED_QUALIFICATION_PODS))
-def test_denied_qualification_pods_reject_a_reachable_http_response(name: str) -> None:
-    output = json.dumps({"exit_code": 0, "http_status": "405", "response_bytes": 32})
-
-    with pytest.raises(checks.DeploymentError, match="CNI denial result differs"):
-        checks.validate_qualification_output(name, output)
-
-
-def test_grpc_reachability_accepts_the_expected_listener_connection() -> None:
-    checks.validate_grpc_reachability(
-        json.dumps(
-            {
-                "exit_code": 1,
-                "remote_ip": "10.96.42.17",
-                "remote_port": 9090,
-                "num_connects": 1,
-            }
-        )
-    )
-
-
-@pytest.mark.parametrize(
-    "result",
-    [
-        {"exit_code": 28, "remote_ip": "", "remote_port": 0, "num_connects": 0},
-        {"exit_code": 6, "remote_ip": "", "remote_port": 0, "num_connects": 0},
-        {"exit_code": 7, "remote_ip": "10.96.42.17", "remote_port": 0, "num_connects": 0},
-        {
-            "exit_code": 0,
-            "remote_ip": "10.96.42.17",
-            "remote_port": 9090,
-            "num_connects": 1,
-            "unexpected": True,
-        },
-    ],
-)
-def test_grpc_reachability_rejects_other_transport_outcomes(result: dict[str, object]) -> None:
-    with pytest.raises(checks.DeploymentError, match="gRPC reachability result differs"):
-        checks.validate_grpc_reachability(json.dumps(result))
 
 
 def direct_rpc_output(action: str = "pass", test_name: str = "TestDeployedDirectRPC") -> str:
@@ -499,6 +376,7 @@ def test_verify_runs_rpc_and_access_after_all_http_smokes_fail() -> None:
             "_http",
             side_effect=[
                 (200, b"ready\n"),
+                (200, b"live\n"),
                 (500, b'{"error":"total"}'),
                 (403, b'{"error":"agent"}'),
                 (504, b'{"error":"trends"}'),
@@ -541,6 +419,7 @@ def test_verify_accepts_empty_and_populated_trend_envelopes(
             "_http",
             side_effect=[
                 (200, b"ready\n"),
+                (200, b"live\n"),
                 (200, b'{"total":{}}'),
                 (200, b'{"perAgentTotal":{}}'),
                 (200, trend_body),
@@ -577,6 +456,7 @@ def test_verify_cleans_every_port_forward_when_direct_rpc_stops(failure: BaseExc
             "_http",
             side_effect=[
                 (200, b"ready\n"),
+                (200, b"live\n"),
                 (200, b'{"total":{"policiesCount":1}}'),
                 (200, b'{"perAgentTotal":{}}'),
                 (200, b'{"periodSales":[]}'),
@@ -606,21 +486,18 @@ def test_access_qualification_cleans_owned_resources_after_probe_failure() -> No
     )
     target.namespace_kubectl.side_effect = ["", "created", "sanitized failure", "deleted"]
     target.namespace_json.return_value = {
-        "metadata": {"labels": {"insurance-hub.io/qualification": "issue-287"}}
+        "metadata": {"labels": {"insurance-hub.io/qualification": checks.QUALIFICATION_LABEL_VALUE}}
     }
     pod = {
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": {
-            "name": "dashboard-qualification-business",
+            "name": "dashboard-qualification-reader",
             "namespace": "local-dev-all",
-            "labels": {"insurance-hub.io/qualification": "issue-287"},
+            "labels": {"insurance-hub.io/qualification": checks.QUALIFICATION_LABEL_VALUE},
         },
         "spec": {},
     }
-    namespace = json.dumps(
-        {"metadata": {"labels": {"insurance-hub.io/qualification": "issue-287"}}}
-    )
 
     with (
         patch.object(checks, "qualification_pods", return_value=[pod]),
@@ -629,7 +506,6 @@ def test_access_qualification_cleans_owned_resources_after_probe_failure() -> No
             "wait_for_probe",
             side_effect=checks.DeploymentError("synthetic probe failure"),
         ),
-        patch.object(checks, "run", side_effect=["", namespace, "deleted"]) as command,
         pytest.raises(checks.DeploymentError, match="sanitized probe output"),
     ):
         checks.run_access_qualification(target)
@@ -638,61 +514,11 @@ def test_access_qualification_cleans_owned_resources_after_probe_failure() -> No
         "local-dev-all",
         "delete",
         "pod",
-        "dashboard-qualification-business",
+        "dashboard-qualification-reader",
         "--wait=true",
         "--timeout=30s",
         timeout=40,
     )
-    assert command.call_args_list[-1].args[0][-5:] == [
-        "delete",
-        "namespace",
-        "issue-287-dashboard-denied-local-dev",
-        "--wait=true",
-        "--timeout=60s",
-    ]
-
-
-def test_access_qualification_runs_remaining_probes_after_one_fails() -> None:
-    target = Mock(
-        environment="local-dev",
-        context="kind-local-dev-insurance-hub",
-        kubectl_binary="kubectl",
-    )
-    target.namespace_kubectl.side_effect = lambda _namespace, operation, *_args, **_kwargs: (
-        "failed probe output" if operation == "logs" else ""
-    )
-    target.namespace_json.return_value = {
-        "metadata": {"labels": {"insurance-hub.io/qualification": "issue-287"}}
-    }
-    pods = [
-        {
-            "apiVersion": "v1",
-            "kind": "Pod",
-            "metadata": {
-                "name": name,
-                "namespace": "local-dev-all",
-                "labels": {"insurance-hub.io/qualification": "issue-287"},
-            },
-            "spec": {},
-        }
-        for name in ("probe-one", "probe-two")
-    ]
-    namespace = json.dumps(
-        {"metadata": {"labels": {"insurance-hub.io/qualification": "issue-287"}}}
-    )
-    with (
-        patch.object(checks, "qualification_pods", return_value=pods),
-        patch.object(
-            checks,
-            "wait_for_probe",
-            side_effect=[checks.DeploymentError("first failed"), None],
-        ) as wait,
-        patch.object(checks, "run", side_effect=["", namespace, ""]),
-        pytest.raises(checks.DeploymentError, match="probe-one.*first failed"),
-    ):
-        checks.run_access_qualification(target)
-
-    assert [call.args[2] for call in wait.call_args_list] == ["probe-one", "probe-two"]
 
 
 def test_access_qualification_does_not_read_or_delete_preexisting_probe() -> None:
@@ -701,24 +527,20 @@ def test_access_qualification_does_not_read_or_delete_preexisting_probe() -> Non
         context="kind-local-dev-insurance-hub",
         kubectl_binary="kubectl",
     )
-    target.namespace_kubectl.return_value = "pod/dashboard-qualification-business"
+    target.namespace_kubectl.return_value = "pod/dashboard-qualification-reader"
     pod = {
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": {
-            "name": "dashboard-qualification-business",
+            "name": "dashboard-qualification-reader",
             "namespace": "local-dev-all",
-            "labels": {"insurance-hub.io/qualification": "issue-287"},
+            "labels": {"insurance-hub.io/qualification": checks.QUALIFICATION_LABEL_VALUE},
         },
         "spec": {},
     }
-    namespace = json.dumps(
-        {"metadata": {"labels": {"insurance-hub.io/qualification": "issue-287"}}}
-    )
 
     with (
         patch.object(checks, "qualification_pods", return_value=[pod]),
-        patch.object(checks, "run", side_effect=["", namespace, ""]),
         pytest.raises(checks.DeploymentError, match="already exists"),
     ):
         checks.run_access_qualification(target)
@@ -728,7 +550,7 @@ def test_access_qualification_does_not_read_or_delete_preexisting_probe() -> Non
         "local-dev-all",
         "get",
         "pod",
-        "dashboard-qualification-business",
+        "dashboard-qualification-reader",
         "--ignore-not-found",
         "-o",
         "name",

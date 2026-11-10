@@ -20,34 +20,6 @@ spec:
           protocol: TCP
         - port: 9090
           protocol: TCP
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: qa-svc
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: dashboard-qualification
-              app.kubernetes.io/component: probe
-              insurance-hub.io/owner: issue-287
-              insurance-hub.io/dashboard-business-client: "true"
-      ports:
-        - port: 8080
-          protocol: TCP
-        - port: 9090
-          protocol: TCP
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: qa-svc
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: dashboard-qualification
-              app.kubernetes.io/component: probe
-              insurance-hub.io/owner: issue-287
-              insurance-hub.io/dashboard-management-client: "true"
-      ports:
-        - port: 8081
-          protocol: TCP
   egress:
     - to:
         - namespaceSelector:
