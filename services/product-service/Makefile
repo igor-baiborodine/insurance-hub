@@ -89,8 +89,6 @@ SECURITY_HARNESS_OUTPUT ?=
 TELEMETRY_ACCEPTANCE_OUTPUT ?=
 DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md \
 	../../docs/migration/phase-4/product-service/deployment-runbook.md \
-	../../docs/migration/phase-4/product-service/established-cutover-runbook.md \
-	../../docs/migration/phase-4/product-service/qualification-runbook.md \
 	../../docs/migration/phase-4/product-service/observability-contract.md \
 	../../docs/migration/phase-4/product-service/observability-runbook.md
 EXTRA_TOOL_PACKAGES := \
@@ -118,7 +116,7 @@ pilot-test-json: ## Report selected uncached test execution as JSON for framewor
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage \
 	coverage-validate coverage-check test-integration test-telemetry-continuity \
-	build build-security-harness build-security-verifier build-qualification-client build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
+	build build-security-harness build-security-verifier build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
 	deploy-test-flux vulncheck check-servicekit check-candidate-servicekit \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
@@ -163,11 +161,6 @@ build-security-verifier: verify-tools ## Build the read-only Product security ve
 	@test -n "$(strip $(SECURITY_VERIFIER_OUTPUT))" || { echo "SECURITY_VERIFIER_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(SECURITY_VERIFIER_OUTPUT)" \
 		./internal/testing/cmd/securityverify
-
-build-qualification-client: verify-tools ## Build the read-only QA Product gRPC client at QUALIFICATION_CLIENT_OUTPUT
-	@test -n "$(strip $(QUALIFICATION_CLIENT_OUTPUT))" || { echo "QUALIFICATION_CLIENT_OUTPUT is required" >&2; exit 1; }
-	GOWORK=off $(GO) build -mod=readonly -o "$(QUALIFICATION_CLIENT_OUTPUT)" \
-		./internal/testing/cmd/qualificationclient
 
 build-lifecycle-client: verify-tools ## Build disposable HTTP/gRPC lifecycle client at LIFECYCLE_CLIENT_OUTPUT
 	@test -n "$(strip $(LIFECYCLE_CLIENT_OUTPUT))" || { echo "LIFECYCLE_CLIENT_OUTPUT is required" >&2; exit 1; }

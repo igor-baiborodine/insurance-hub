@@ -16,8 +16,8 @@
   - [Toolchain, refresh, and reset](#toolchain-refresh-and-reset)
   - [Acceptance evidence](#acceptance-evidence)
   - [Downstream handoff](#downstream-handoff)
-  - [Issue 174 tooling handoff for issue 136](#issue-174-tooling-handoff-for-issue-136)
-  - [Qualification limits](#qualification-limits)
+  - [Auxiliary tooling](#auxiliary-tooling)
+  - [Compatibility evidence limits](#compatibility-evidence-limits)
   - [Deployment operations](#deployment-operations)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -52,8 +52,8 @@ writes, new authorization rules, and Java writer-control changes are outside thi
 
 [Phase 4.1 issue #129](https://github.com/igor-baiborodine/insurance-hub/issues/129) records the
 completed Go development foundation and its boundary. Its scaffold, Make/CI interface, and module
-checks are available; Product-specific data, contracts, security, deployment, and qualification
-evidence are still owned by issues #131 through #136.
+checks are available; Product-specific data, contracts, security, deployment, and historical
+comparison evidence were delivered by issues #131 through #136.
 
 ## Go pilot implementation handoff
 
@@ -64,11 +64,10 @@ ownership. The [Product catalog architecture](../../../../services/product-servi
 shows the delivered packages and symbols, source-dependency direction, startup wiring, runtime
 database calls, mapping boundaries, and a get-product walkthrough.
 
-This link does not change the Java observations or accepted fixtures documented here. Java remains
-the active traffic, schema, seed, and write owner. Issue #133 has locally proved the interim
-application security boundary and supplied #134's deployment gate. Issue #134 delivered and proved
-the deployed exposure and shared read-only credentials in local-dev and QA. #135 owns telemetry
-delivery, #136 owns integrated qualification, and route cutover remains the separate #137 gate.
+This link does not change the Java observations or accepted fixtures documented here. The current
+Go service owns Product reads and schema/catalog administration while retaining those observations
+as compatibility evidence. The existing Java gateway routes Product reads to Go. Current release,
+deployment, telemetry, and network checks live with the Product service and its deployment runbook.
 
 ## Interim security proof and handoff
 
@@ -390,15 +389,15 @@ evidence.
 | --- | --- | --- |
 | #132 — Go Product service | Field/presence table, scenario parity matrix, HTTP/gRPC semantics, accepted fixture corpus, shared table decision | Delivered as the standalone Go service; see its README for the implemented contracts and validation. |
 | #133 — Security coexistence | Final entry/hop mapping and access fixtures | Isolated gateway/Go and direct-access proof plus #134 handoff delivered; final #133 acceptance remains to audit. Retired hosted-workflow results remain historical evidence. Any hardening requires a separate explicit decision. |
-| #134 — Deployment and data access | Same-table topology, candidate role/grants, snapshot identity, Java ownership, internal exposure boundary | Delivered in local-dev and QA: separate Secret/role, effective grants, workload wiring, no Go startup writes, internal-only Go exposure, unchanged Java routing/data, and reversible lifecycle all passed. Use the deployment runbook for fresh verification. |
-| #135 — Observability | Stable service boundaries, routes, scenario IDs, failure categories, and sanitization limits | Instrument the implemented HTTP/gRPC/database path; prove safe queryable logs, metrics, and traces without credentials, raw definitions, or unbounded product/question labels. |
-| #136 — Integrated qualification | Accepted corpora, comparator rules, replay commands, consumer inventory, and snapshot invalidation rules | Define measurable workloads and pass/abort thresholds; run Java/Go differential, gateway/frontend compatibility, failure, lifecycle, load, and rollback qualification against a matching snapshot. |
-| #137 — Separate cutover gate | Existing Java routes remain authoritative throughout #131–#136 | Specify target environments and release criteria, then switch only the approved routes after #136; measure the observation window and verify reconciler-safe rollback. Java retirement remains separate. |
+| #134 — Deployment and data access | Same-table topology, candidate role/grants, snapshot identity, and internal exposure boundary | Historical deployment evidence; use the current service checks and deployment runbook for fresh verification. |
+| #135 — Observability | Stable service boundaries, routes, scenario IDs, failure categories, and sanitization limits | Historical delivery evidence; current Product telemetry and QA pipeline checks live with the service and observability runbook. |
+| #136 — Integrated qualification | Accepted corpora, comparator rules, replay commands, consumer inventory, and snapshot invalidation rules | Historical comparison and acceptance evidence; ordinary checks no longer require the retired preview/restore harness. |
+| #137 — Route transition | Gateway and environment release evidence | Completed historical transition; the current Java gateway routes Product reads to the Go service. |
 
-## Issue 174 tooling handoff for issue 136
+## Auxiliary tooling
 
-Issue #174 is the auxiliary-tooling prerequisite for #136. Start with the reproducible setup and
-owner commands in [CONTRIBUTING.md](../../../../CONTRIBUTING.md#python-auxiliary-tooling). The
+Start with the reproducible setup and owner commands in
+[CONTRIBUTING.md](../../../../CONTRIBUTING.md#python-auxiliary-tooling). The
 supported baseline is managed CPython 3.14.8 with uv 0.13.1, pytest 9.1.1, and Ruff 0.17.1 from the
 root `.python-version`, `pyproject.toml`, `uv.lock`, and `.venv/`. Normal operations use
 `python-runtime-check`; development checks use `python-toolchain-check`. Neither target installs
@@ -414,34 +413,26 @@ operational CLIs require only the runtime environment and do not import pytest. 
 for this non-core tooling follow the repository's 80/20 direction while retaining every applicable
 safety check.
 
-The #135 observability commands and fixed budgets remain in the
-[observability runbook](observability-runbook.md). A complete full-duration local profile last took
-about 127 minutes: three overhead pairs took roughly 24.5 minutes each, healthy operation roughly
-45.8 minutes, and recovery roughly 7 minutes, followed by a short aggregate. Allow additional time
-for setup, image availability, and host load. Run only affected phases after a tooling change and
-rerun their aggregate on the same candidate; historical #135 or #174 records do not prove a changed
-#136 candidate.
+The observability commands and fixed budgets remain in the
+[observability runbook](observability-runbook.md). Run the smallest owner checks that cover a
+tooling change and keep fake, disposable, and live evidence distinct.
 
 Revision R2 retained short shell or Make interfaces, generated Maven wrappers, application entry
 points, and direct workflow interfaces represented by SH02, SH09–SH25, SH27, EX02–EX10, and
 MK01/MK05/MK13. Their recorded exclusions are not blanket policy-compliance claims. Local fake and
 disposable evidence does not establish shared QA state, hosted publication, live credentials, or
-operator permissions. #136 must supply its own exact source, image, environment, snapshot, workload,
-and live or disposable evidence. Issue #156's selected-module CI and trigger boundary remains
+operator permissions. Current validation must supply its own exact source, image, environment,
+snapshot, workload, and live or disposable evidence. Issue #156's selected-module CI and trigger
+boundary remains
 unchanged; the deferred dedicated Python static workflow is recorded as
 [issue-174-N01](../phase-4-nice-to-have-ledger.md#issue-174-n01-python-static-check-ci-workflow).
 
-## Qualification limits
-
-The [QA Product qualification runbook](qualification-runbook.md) records #136's preview route,
-focused HTTP/gRPC and Chrome checks, fixed Java/Go measurement, resource controls, restoration
-and cleanup procedure. It does not change the accepted #131 fixture or authorize #137 cutover.
+## Compatibility evidence limits
 
 Issue #131's baseline covers the four agreed demo products and the observed Java list/get behavior.
-By itself it does not qualify a Go implementation, protobuf definition, deployed restricted role,
-Go endpoint exposure, browser compatibility, telemetry delivery, load capacity, route cutover, or
-Java retirement. #132 and #133 provide the separate Go implementation and isolated application
-security evidence described above; #134 completes the local-dev and QA deployment gate. Full
+By itself it does not prove the current Go implementation, protobuf definition, deployed restricted
+role, endpoint exposure, browser compatibility, telemetry delivery, or load capacity. Use the
+current Product module and deployment owners for those checks. Full
 claim variants were exercised in the isolated access suite; the safe live subset
 covered valid, absent, malformed, and invalid-signature credentials. Local-dev and QA run different
 PostgreSQL patch versions recorded in the data baseline, so every later comparison must retain its
@@ -450,9 +441,7 @@ not a general security recommendation.
 
 ## Deployment operations
 
-The [Product Go deployment runbook](deployment-runbook.md) documents the #134 foundation,
-automatic scoped release and QA semantic-tag update, separate QA activation, reader lifecycle,
-verification, and recovery. The release automation kept Go outside QA reconciliation until the
-activation PR; the accepted QA aggregate now includes Go and Java together. Follow its evidence boundaries:
-disposable and CI checks do not establish live local-dev or QA acceptance, and existing gateway
-traffic remains on Java until #137.
+The [Product Go deployment runbook](deployment-runbook.md) documents scoped release preparation,
+initialization, reader lifecycle, verification, and recovery. Product has a dedicated QA release
+owner, and the existing Java gateway routes Product reads to Go. Follow the runbook's evidence
+boundaries: disposable and CI checks do not establish live local-dev or QA acceptance.

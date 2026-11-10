@@ -16,7 +16,6 @@ import pytest
 import check_render
 
 KEYS = tuple(deployment_check.OVERLAYS)
-QA_JAVA_URL = "http://qa-product-api-legacy.qa-svc.svc.cluster.local:80"
 QA_GO_URL = "http://qa-product-api.qa-svc.svc.cluster.local:80"
 Documents = dict[str, list[dict[str, Any]]]
 Mutation = Callable[[Documents], None]
@@ -41,16 +40,12 @@ def find_prefix(documents: list[dict[str, Any]], kind: str, prefix: str) -> dict
     return matches[0]
 
 
-def write_documents(
-    root: Path, values: Documents, prefix: str, *, release_active: bool = True
-) -> list[str]:
+def write_documents(root: Path, values: Documents, prefix: str) -> list[str]:
     arguments: list[str] = []
     for key in KEYS:
         path = root / f"{prefix}-{key}.json"
         path.write_text(json.dumps(values[key]), encoding="utf-8")
         arguments.extend((f"--{key}", str(path)))
-    if release_active:
-        arguments.append("--qa-release-active")
     return arguments
 
 
@@ -74,7 +69,7 @@ def rendered_documents() -> Documents:
 
 def bad_selector(values: Documents) -> None:
     service = find(values["local-go"], "Service", "local-dev-product-api")
-    service["spec"]["selector"]["app.kubernetes.io/name"] = "product-api-legacy"
+    service["spec"]["selector"]["app.kubernetes.io/name"] = "other-product-api"
 
 
 def wrong_port(values: Documents) -> None:
@@ -104,10 +99,6 @@ def external_exposure(values: Documents) -> None:
 
 def duplicate_qa_ownership(values: Documents) -> None:
     values["qa-aggregate"].extend(copy.deepcopy(values["qa-go"]))
-
-
-def stale_java_product(values: Documents) -> None:
-    values["qa-aggregate"].extend(copy.deepcopy(values["qa-legacy"]))
 
 
 def unreleased_qa_tag(values: Documents) -> None:
@@ -183,14 +174,12 @@ def qa_gateway_uses_management_port(values: Documents) -> None:
     )
 
 
-def select_qa_gateway_backend(values: Documents, selected_url: str) -> None:
+def replace_qa_gateway_backend(values: Documents, selected_url: str) -> None:
     for key in ("qa-gateway", "qa-aggregate"):
         config = find_prefix(values[key], "ConfigMap", "qa-gateway-product-route-config-")
         current = config["data"]["application.yml"]
-        assert QA_JAVA_URL in current or QA_GO_URL in current
-        config["data"]["application.yml"] = current.replace(
-            QA_JAVA_URL if QA_JAVA_URL in current else QA_GO_URL, selected_url
-        )
+        assert QA_GO_URL in current
+        config["data"]["application.yml"] = current.replace(QA_GO_URL, selected_url)
 
 
 def local_gateway_has_second_url(values: Documents) -> None:
@@ -198,7 +187,7 @@ def local_gateway_has_second_url(values: Documents) -> None:
         values["local-gateway"], "ConfigMap", "local-dev-gateway-product-route-config-"
     )
     config["data"]["application.yml"] += (
-        "          - http://local-dev-product-api-legacy.local-dev-all.svc.cluster.local:80\n"
+        "          - http://local-dev-product-api.local-dev-all.svc.cluster.local:80\n"
     )
 
 
@@ -221,11 +210,8 @@ def gateway_references_stale_config(values: Documents) -> None:
 def qa_aggregate_changes_gateway_route(values: Documents) -> None:
     config = find_prefix(values["qa-aggregate"], "ConfigMap", "qa-gateway-product-route-config-")
     current = config["data"]["application.yml"]
-    assert QA_JAVA_URL in current or QA_GO_URL in current
-    config["data"]["application.yml"] = current.replace(
-        QA_JAVA_URL if QA_JAVA_URL in current else QA_GO_URL,
-        QA_GO_URL if QA_JAVA_URL in current else QA_JAVA_URL,
-    )
+    assert QA_GO_URL in current
+    config["data"]["application.yml"] = current.replace(QA_GO_URL, QA_GO_URL + "/changed")
 
 
 CASES: list[tuple[str, Mutation, str]] = [
@@ -238,9 +224,8 @@ CASES: list[tuple[str, Mutation, str]] = [
     (
         "duplicate QA Product ownership",
         duplicate_qa_ownership,
-        "still contains Go Product after release activation",
+        "must not contain Product release objects",
     ),
-    ("stale Java Product desired state", stale_java_product, "stale Java Product objects"),
     ("unreleased QA image tag", unreleased_qa_tag, "qa image reference is invalid"),
     ("invalid QA image tag", invalid_qa_tag, "qa image reference is invalid"),
     ("old QA image tag", old_qa_tag, "qa image reference is invalid"),
@@ -259,8 +244,8 @@ CASES: list[tuple[str, Mutation, str]] = [
         missing_gateway_product_label,
         "Product admission label",
     ),
-    ("QA gateway uses management port", qa_gateway_uses_management_port, "expected Product URL"),
-    ("multiple local-dev gateway URLs", local_gateway_has_second_url, "expected Product URL"),
+    ("QA gateway uses management port", qa_gateway_uses_management_port, "current Product URL"),
+    ("multiple local-dev gateway URLs", local_gateway_has_second_url, "current Product URL"),
     ("gateway subPath mount", gateway_mount_uses_subpath, "without subPath"),
     (
         "stale gateway ConfigMap mount",
@@ -295,57 +280,21 @@ def test_canonical_qa_source_tag_is_accepted(
 
 
 @pytest.mark.integration
-def test_staged_shared_qa_ownership_is_accepted(
-    rendered_documents: Documents,
-    tmp_path: Path,
-) -> None:
-    # given
-    values = active_documents(rendered_documents)
-    values["qa-aggregate"].extend(copy.deepcopy(values["qa-go"]))
-
-    # when
-    status = check_render.main(write_documents(tmp_path, values, "staged", release_active=False))
-
-    # then
-    assert status == 0
-
-
-@pytest.mark.integration
-def test_staged_shared_qa_owner_requires_product(
+def test_unexpected_gateway_backend_is_rejected(
     rendered_documents: Documents,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     # given
     values = active_documents(rendered_documents)
+    replace_qa_gateway_backend(values, "http://qa-other-product-api.qa-svc.svc.cluster.local:80")
 
     # when
-    status = check_render.main(
-        write_documents(tmp_path, values, "missing-staged", release_active=False)
-    )
+    status = check_render.main(write_documents(tmp_path, values, "unexpected-backend"))
 
     # then
     assert status == 1
-    assert "does not contain Go Product" in capsys.readouterr().err
-
-
-@pytest.mark.integration
-@pytest.mark.integration
-def test_java_fallback_gateway_route_is_rejected(
-    rendered_documents: Documents,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    # given
-    values = active_documents(rendered_documents)
-    select_qa_gateway_backend(values, QA_JAVA_URL)
-
-    # when
-    status = check_render.main(write_documents(tmp_path, values, "java-fallback"))
-
-    # then
-    assert status == 1
-    assert "must route to Go Product" in capsys.readouterr().err
+    assert "current Product URL" in capsys.readouterr().err
 
 
 @pytest.mark.integration
@@ -355,8 +304,6 @@ def test_go_gateway_route_is_accepted(
 ) -> None:
     # given
     values = active_documents(rendered_documents)
-    select_qa_gateway_backend(values, QA_GO_URL)
-
     # when
     status = check_render.main(write_documents(tmp_path, values, "go-route"))
 

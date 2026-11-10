@@ -192,6 +192,7 @@ class Target:
             ("Deployment", self.deployment),
             ("Service", self.business),
             ("Service", self.management),
+            ("NetworkPolicy", self.deployment),
         }
         config_maps = [
             name
@@ -202,7 +203,7 @@ class Target:
         require(
             expected.issubset(names)
             and len(config_maps) == 1
-            and len(items) == 4
+            and len(items) == 5
             and all(item.get("metadata", {}).get("namespace") == self.namespace for item in items),
             "rendered resources differ from the selected Product Go inventory",
         )
@@ -327,10 +328,6 @@ class Target:
             )
         else:
             require(not require_deployment, "Go Deployment is absent")
-        legacy = self.json(
-            "get", "deployment", self.prefix + "product-api-legacy", "--ignore-not-found"
-        )
-        require(legacy.get("kind") != "Deployment", "stale Java Product Deployment is present")
         expected_config = next(item for item in items if item.get("kind") == "ConfigMap")
         config = self.json(
             "get", "configmap", expected_config["metadata"]["name"], "--ignore-not-found"
@@ -454,10 +451,6 @@ class Target:
                 ),
                 "Go business Service has no ready endpoint",
             )
-        legacy_service = self.json(
-            "get", "service", self.prefix + "product-api-legacy", "--ignore-not-found"
-        )
-        require(legacy_service.get("kind") != "Service", "stale Java Product Service is present")
         gateway = self.json("get", "deployment", self.prefix + "agent-portal-gateway-legacy")
         gateway_spec = gateway.get("spec", {}).get("template", {}).get("spec", {})
         require(
@@ -471,13 +464,10 @@ class Target:
             "Java gateway deployment is not ready in the selected environment",
         )
         self.routes()
-        print(
-            "product-deployment: Go resources, Java absence, gateway identity and cluster routes checked"
-        )
+        print("product-deployment: Go resources, gateway identity and cluster routes checked")
 
-    def gateway_route(self, phase: str) -> dict[str, Any]:
+    def gateway_route(self) -> dict[str, Any]:
         """Verify the effective mounted Product override in every serving gateway Pod."""
-        require(phase in {"java", "go"}, "DEPLOY_EXPECTED_GATEWAY_PHASE must be java or go")
         gateway_name = self.prefix + "agent-portal-gateway-legacy"
         gateway = self.json("get", "deployment", gateway_name)
         desired = gateway.get("spec", {}).get("replicas", 1)
@@ -536,12 +526,8 @@ class Target:
             urls = parsed["micronaut"]["http"]["services"]["product-service"]["urls"]
         except (yaml.YAMLError, KeyError, TypeError) as error:
             raise DeploymentError("gateway Product override is malformed") from error
-        expected = (
-            f"http://{self.prefix}product-api-legacy.{self.namespace}.svc.cluster.local:80"
-            if phase == "java"
-            else f"http://{self.business}.{self.namespace}.svc.cluster.local:80"
-        )
-        require(urls == [expected], "gateway Product override selects the wrong phase")
+        expected = f"http://{self.business}.{self.namespace}.svc.cluster.local:80"
+        require(urls == [expected], "gateway Product override does not select the Product API")
         pods = self.json("get", "pods", "-l", "app.kubernetes.io/name=agent-portal-gateway-legacy")
         slices = self.json(
             "get", "endpointslices", "-l", f"kubernetes.io/service-name={gateway_name}"
@@ -603,7 +589,6 @@ class Target:
             "serving gateway endpoints do not match Ready replacement Pods",
         )
         return {
-            "phase": phase,
             "product_url": expected,
             "config_map": config_name,
             "gateway_pods": serving,
@@ -857,10 +842,7 @@ def initialization_complete(target: Target) -> None:
 
 
 def check_requested_route(target: Target) -> None:
-    phase = os.environ.get("DEPLOY_EXPECTED_GATEWAY_PHASE", "")
-    require(phase in ("", "java", "go"), "DEPLOY_EXPECTED_GATEWAY_PHASE must be java or go")
-    if phase:
-        print("product-deployment: gateway route " + json.dumps(target.gateway_route(phase)))
+    print("product-deployment: gateway route " + json.dumps(target.gateway_route()))
 
 
 def stop(target: Target, items: list[dict[str, Any]]) -> None:

@@ -19,6 +19,8 @@ TOOL_NAMES = (
     "buf",
     "protoc-gen-go",
     "protoc-gen-go-grpc",
+    "protoc-gen-grpc-gateway",
+    "protoc-gen-openapiv2",
     "golangci-lint",
     "govulncheck",
     "sqlc",

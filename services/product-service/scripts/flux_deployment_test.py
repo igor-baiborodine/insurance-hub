@@ -251,7 +251,7 @@ class GitSource:
                 timeout=30,
             )
 
-    def write(self, release: str, *, transfer: bool) -> str:
+    def write(self, release: str) -> str:
         job = yaml.safe_load(BASE_JOB.read_text(encoding="utf-8"))
         job["metadata"]["namespace"] = self.cluster.namespace
         pod = job["spec"]["template"]["spec"]
@@ -291,16 +291,10 @@ class GitSource:
             },
         )
         release_config = self._configmap("product-release-state", {"release": release})
-        transferred = self._configmap("product-owned-resource", {"owner": "product"})
-        if not transfer:
-            transferred["metadata"]["annotations"] = {
-                "kustomize.toolkit.fluxcd.io/prune": "disabled"
-            }
-        api_resources = ["release.yaml"]
+        owned = self._configmap("product-owned-resource", {"owner": "product"})
+        api_resources = ["release.yaml", "product-owned.yaml"]
         self._write_yaml("api/release.yaml", release_config)
-        if transfer:
-            self._write_yaml("api/product-owned.yaml", transferred)
-            api_resources.append("product-owned.yaml")
+        self._write_yaml("api/product-owned.yaml", owned)
         self._write_yaml(
             "api/kustomization.yaml",
             {
@@ -313,9 +307,6 @@ class GitSource:
         self._write_yaml(
             "shared/unrelated.yaml", self._configmap("unrelated-service-state", {"state": "ready"})
         )
-        if not transfer:
-            self._write_yaml("shared/product-owned.yaml", transferred)
-            shared_resources.append("product-owned.yaml")
         self._write_yaml(
             "shared/kustomization.yaml",
             {
@@ -785,7 +776,7 @@ def run() -> None:
         primary, passwords = prepare_database(cluster)
         with tempfile.TemporaryDirectory(prefix="product-flux-source-") as directory:
             source = GitSource(cluster, Path(directory), image)
-            commit_a = source.write("release-a", transfer=False)
+            commit_a = source.write("release-a")
             url = source.serve()
             image_digest = cluster.command(
                 ["docker", "image", "inspect", image, "--format", "{{.Id}}"],
@@ -828,7 +819,7 @@ def run() -> None:
                 == "4",
                 "reader cannot read the seeded catalog",
             )
-            commit_b = source.write("release-b", transfer=True)
+            commit_b = source.write("release-b")
             id_b, documents_b, target_b = generated_release(cluster, commit_b, image_digest, url, 1)
             bundle_b = retained_release_documents(bundle_a, documents_b, target_b)
             source_b = f"product-release-{id_b}"
@@ -906,7 +897,7 @@ def run() -> None:
                     "metadata"
                 ]["uid"]
                 == product_uid,
-                "Product ownership transfer changed resource UID",
+                "Product release changed the owned resource UID",
             )
             require(
                 cluster.object("configmap", "unrelated-service-state", cluster.namespace)[
@@ -965,7 +956,7 @@ RESET ROLE;
             )
             print(
                 "PASS root retention, old-success mismatch, failure, retry, recreation, "
-                "ownership and isolation",
+                "stable ownership and isolation",
                 flush=True,
             )
     finally:

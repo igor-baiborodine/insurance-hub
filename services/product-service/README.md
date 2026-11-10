@@ -13,11 +13,12 @@
 
 # Product catalog read service
 
-This standalone module is the Go Product pilot. Its executable serves the Product HTTP API through
+This standalone module is the Go Product service. Its executable serves the Product HTTP API through
 generated gRPC-Gateway handlers, the generated Product v1 gRPC API, and management health routes
 from one explicit composition root.
 It uses one process-owned PostgreSQL pool for catalog reads and dependency-aware readiness. The
-service remains an internal migration candidate; do not route production Product traffic to it.
+existing Java gateway routes Product reads to this internal service; the business and management
+listeners remain private ClusterIP endpoints.
 
 The module path is
 `github.com/igor-baiborodine/insurance-hub/services/product-service`. It resolves with
@@ -166,9 +167,8 @@ contract checks: authenticated PostgreSQL role denials and protected target mark
 plus actual local-dev/QA Kustomize renders and negative release-lifecycle checks. It requires the existing
 managed Python environment, Docker, the already provisioned PostgreSQL image above and `kubectl`.
 It creates and removes isolated containers and temporary render directories; it installs no tools,
-contacts no Kubernetes API and reads no live credentials. These checks do not qualify Flux
-reconciliation or deployed TLS. Java Product is assumed absent; desired state must not recreate it.
-Historical databases remain adoption inputs.
+contacts no Kubernetes API and reads no live credentials. These checks do not prove Flux
+reconciliation or deployed TLS. Historical databases remain adoption inputs.
 
 The reader integration suite uses the same disposable database and QA snapshot:
 
@@ -396,10 +396,12 @@ a published library tag or change another consumer's pin.
 
 ## Runtime contracts and boundaries
 
-The two business listeners are intentionally anonymous internal entries for this migration stage.
+The two business listeners are intentionally anonymous internal entries.
 They do not validate JWTs, enforce Product roles, or expose gRPC reflection or HTTP profiling.
-They must not be published directly. Issue #133's isolated gateway/direct tests prove the accepted
-credential and identity-propagation matrix; #134 owns internal-only deployed exposure.
+They must not be published directly. The legacy gateway authenticates the user-facing request and
+calls Product over the private HTTP service. NetworkPolicy admits HTTP 8080 and RPC 9090 only from
+that labeled gateway, denies management 8081 to ordinary Pods, and limits egress to DNS,
+PostgreSQL, and QA Alloy when telemetry is enabled.
 
 | Entry | Successful behavior | Bounded failure behavior |
 | --- | --- | --- |
@@ -415,13 +417,13 @@ and its transport-owned DTO mapper. The
 versioned gRPC schema is [`api/product/v1/product_service.proto`](api/product/v1/product_service.proto),
 with generated Go bindings under [`gen/product/v1`](gen/product/v1). Structured logs redact
 credentials, tokens, request/response payloads, and arbitrary error causes. Telemetry is disabled by
-default and requires no collector; #135 owns usable pipeline and delivery qualification.
+default and requires no collector; QA enables OTLP through its release configuration.
 
 The `read-only` suite proves the runtime identity has only the required database connect, schema
 use, and Product table select privileges. Issue #190 owns separate migrator/seeder identities,
 protected target enrollment, and a prerequisite Job; the service never falls back to an owner
-credential and never migrates or seeds during API startup. Java Product is absent from current
-desired state. Earlier differential and cutover evidence remains historical compatibility input.
+credential and never migrates or seeds during API startup. Earlier differential evidence remains
+historical compatibility input.
 
 ### Interim security validation
 
@@ -447,11 +449,11 @@ the hosted Product security workflow has been retired. The
 the broader local checks and evidence are required.
 
 `make product-security-verify` is a separate read-only probe for an explicitly selected, already
-running Go target. The [#134 exposure gate](../../docs/migration/phase-4/product-service/security-baseline.md#go-deployment-exposure-gate-for-issue-134)
-defines its endpoint/context inputs and the rendered/effective resource, read-only role, and
-unchanged Java-routing checks still required in local-dev and QA. Anonymous internal access is an
-interim compatibility constraint; `ClusterIP` does not authenticate in-cluster callers. #135 owns
-telemetry delivery, #136 integrated qualification, and #137 any traffic cutover.
+running Go target. The [deployment runbook](../../docs/migration/phase-4/product-service/deployment-runbook.md)
+defines its endpoint/context inputs and the rendered/effective resource and read-only role checks.
+Anonymous internal access is a compatibility constraint; `ClusterIP` does not authenticate
+in-cluster callers, so the NetworkPolicy and gateway admission label are part of the deployed
+boundary.
 
 ## Product catalog architecture
 
@@ -561,8 +563,9 @@ Docker context policy, module manifests, and non-test content copied from `cmd`,
 `internal`; documentation, scripts, tests, generator inputs, and local validation configuration do
 not publish an image. The workflow creates the scoped semantic release, builds once, publishes
 semantic and short-SHA image tags, resolves the image digest, and commits the semantic version plus
-an immutable dormant Product source/prerequisite/API tuple. The explicit QA Flux root excludes that
-tuple until a separate reviewed activation change.
+an immutable Product source/prerequisite/API tuple. Release preparation derives
+`git-<12-hex-source>` from the verified full source commit and supplies it to the QA workload labels,
+configuration, logs, and telemetry. The QA Flux root includes the Product release bundle.
 
 **Go Module PR Check** runs Product's focused `check-go-pr` target only when a qualifying
 Product input changes and the complete pull-request diff touches no second supported Go module. It
@@ -583,3 +586,5 @@ bundle. Administration manifests live below `product/base/administration` and ea
 `product/administration` overlay, outside the API's Kustomize resource list. The shared deployment
 engine owns Job ordering and release checks; Product-specific workload and SQL probes remain in
 [`product_deployment_checks.py`](scripts/product_deployment_checks.py).
+The local-dev and QA API overlays also own the Product NetworkPolicy. Both allow gateway HTTP/RPC,
+DNS, and Product PostgreSQL only; QA additionally allows OTLP to its Alloy instance.

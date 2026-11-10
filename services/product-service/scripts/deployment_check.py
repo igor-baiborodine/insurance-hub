@@ -23,9 +23,7 @@ from scripts.python.process_runner import CommandError, run_command  # noqa: E40
 
 OVERLAYS = {
     "local-go": "k8s/overlays/local-dev/svc/product",
-    "local-legacy": "k8s/overlays/local-dev/svc/product/legacy",
     "qa-go": "k8s/overlays/qa/svc/product",
-    "qa-legacy": "k8s/overlays/qa/svc/product/legacy",
     "qa-aggregate": "k8s/overlays/qa/svc",
     "local-gateway": "k8s/overlays/local-dev/svc/agent-portal-gateway/legacy",
     "qa-gateway": "k8s/overlays/qa/svc/agent-portal-gateway/legacy",
@@ -118,12 +116,8 @@ def main(_argv: Sequence[str] | None = None) -> int:
             arguments = [
                 "--local-go",
                 str(paths["local-go"]),
-                "--local-legacy",
-                str(paths["local-legacy"]),
                 "--qa-go",
                 str(paths["qa-go"]),
-                "--qa-legacy",
-                str(paths["qa-legacy"]),
                 "--qa-aggregate",
                 str(paths["qa-aggregate"]),
                 "--local-gateway",
@@ -133,12 +127,12 @@ def main(_argv: Sequence[str] | None = None) -> int:
             ]
             flux_root = yaml.safe_load(QA_FLUX_ROOT.read_text(encoding="utf-8"))
             resources = flux_root.get("resources", []) if isinstance(flux_root, dict) else []
-            if QA_RELEASE_BUNDLE in resources:
-                bundle = QA_FLUX_ROOT.parent / QA_RELEASE_BUNDLE
-                if not bundle.is_file():
-                    raise DeploymentCheckError("active QA Product release bundle is missing")
-                validate_release_identity(bundle, rendered["qa-go"])
-                arguments.append("--qa-release-active")
+            if QA_RELEASE_BUNDLE not in resources:
+                raise DeploymentCheckError("QA Product release bundle is not active")
+            bundle = QA_FLUX_ROOT.parent / QA_RELEASE_BUNDLE
+            if not bundle.is_file():
+                raise DeploymentCheckError("active QA Product release bundle is missing")
+            validate_release_identity(bundle, rendered["qa-go"])
             if check_render.main(arguments) != 0:
                 return 1
     except (DeploymentCheckError, OSError, TypeError, ValueError) as error:

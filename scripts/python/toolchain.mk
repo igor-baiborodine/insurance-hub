@@ -94,14 +94,6 @@ PYTHON_PRODUCT_TOOLING_FILES := \
 	scripts/product_baseline/test_compare_http.py \
 	scripts/product_baseline/test_fixtures.py \
 	scripts/product_baseline/verify.py \
-	scripts/product_qualification/__init__.py \
-	scripts/product_qualification/core.py \
-	scripts/product_qualification/measure.py \
-	scripts/product_qualification/observe.py \
-	scripts/product_qualification/ops.py \
-	scripts/product_qualification/test_core.py \
-	scripts/product_qualification/test_measure.py \
-	scripts/product_qualification/test_ops.py \
 	scripts/product_deployment/__init__.py \
 	scripts/product_deployment/administration.py \
 	scripts/product_deployment/reader.py \
@@ -358,9 +350,6 @@ python-product-tooling-test-fast: python-toolchain-check ## Run fast Product too
 		scripts/product_baseline/test_catalog_roundtrip.py \
 		scripts/product_baseline/test_compare_http.py \
 		scripts/product_baseline/test_fixtures.py \
-		scripts/product_qualification/test_core.py \
-		scripts/product_qualification/test_measure.py \
-		scripts/product_qualification/test_ops.py \
 		scripts/product_security/test_validators.py \
 		scripts/postgres/service/test_administration_roles.py \
 		scripts/postgres/service/test_reader.py \

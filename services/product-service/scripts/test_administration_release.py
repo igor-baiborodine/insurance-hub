@@ -140,26 +140,14 @@ def test_explicit_retry_changes_only_prerequisite_identity():
     assert first[2]["spec"]["dependsOn"] != retry[2]["spec"]["dependsOn"]
 
 
-def test_product_transfer_preserves_unrelated_inventory():
+def test_product_release_owner_preserves_unrelated_inventory():
     # given
-    # Java Product is absent at this migration stage. Checked-in legacy references are stale.
-    # Only Go Product transfers owners; unrelated services retain their exact resources.
     source = ROOT / "k8s/overlays/qa/svc/kustomization.yaml"
     original = yaml.safe_load(source.read_text())
     assert "./product" not in original["resources"]
     kubectl = os.environ.get("KUBECTL", "kubectl")
-    transferred = deployment_check.render(kubectl, source.parent)
+    shared = deployment_check.render(kubectl, source.parent)
     product = deployment_check.render(kubectl, source.parent / "product")
-    legacy = deployment_check.render(kubectl, source.parent / "product/legacy")
-    # when
-    with tempfile.TemporaryDirectory(dir=source.parent, prefix="q04-render-") as directory:
-        scratch = Path(directory)
-        remaining = {
-            "resources": ["../" + item.removeprefix("./") for item in original["resources"]]
-            + ["../product"]
-        }
-        (scratch / "kustomization.yaml").write_text(yaml.safe_dump(remaining))
-        staged = deployment_check.render(kubectl, scratch)
 
     def identity(item):
         return (
@@ -170,25 +158,21 @@ def test_product_transfer_preserves_unrelated_inventory():
         )
 
     # then
-    legacy_ids = {identity(item) for item in legacy}
-    moved_ids = {identity(item) for item in product}
+    shared_ids = {identity(item) for item in shared}
+    product_ids = {identity(item) for item in product}
+    assert shared_ids.isdisjoint(product_ids)
     assert all(
         "kustomize.toolkit.fluxcd.io/prune" not in item["metadata"].get("annotations", {})
         for item in product
     )
-    expected = {identity(item): item for item in staged if identity(item) not in moved_ids}
-    assert {identity(item): item for item in transferred} == expected
-    assert {identity(item): item for item in product} == {
-        identity(item): item for item in staged if identity(item) in moved_ids
-    }
-
-    def require_java_absent(items):
-        assert not ({identity(item) for item in items} & legacy_ids), "Java Product reintroduced"
-
-    require_java_absent(transferred + product)
-    # when / then
-    with pytest.raises(AssertionError, match="Java Product reintroduced"):
-        require_java_absent(transferred + product + legacy)
+    for relative in original["resources"]:
+        child_ids = {
+            identity(item)
+            for item in deployment_check.render(
+                kubectl, source.parent / relative.removeprefix("./")
+            )
+        }
+        assert child_ids <= shared_ids
 
 
 @pytest.mark.parametrize(
@@ -268,22 +252,27 @@ def test_api_and_shared_qa_owner_separate_release_and_credentials():
     assert "seeder-creds" not in rendered
     identities = {(item["kind"], item["metadata"]["name"]) for item in aggregate}
     assert ("Deployment", "qa-product-api") not in identities
-    assert ("Deployment", "qa-product-api-legacy") not in identities
     assert not any("product-init" in name for _, name in identities)
 
 
-def test_product_release_bundle_is_active_after_reviewed_transfer():
+def test_product_release_bundle_is_the_active_owner():
     # given / when
     root = yaml.safe_load((ROOT / "k8s/flux/qa/kustomization.yaml").read_text())
     documents = list(
         yaml.safe_load_all((ROOT / "k8s/flux/qa/releases/product/release.yaml").read_text())
     )
-    source = next(item for item in documents if item.get("kind") == "GitRepository")
     api = next(
         item
         for item in documents
         if item.get("kind") == "Kustomization"
         and item.get("metadata", {}).get("name") == "qa-product-api"
+    )
+    source_name = api["spec"]["sourceRef"]["name"]
+    source = next(
+        item
+        for item in documents
+        if item.get("kind") == "GitRepository"
+        and item.get("metadata", {}).get("name") == source_name
     )
     revision = source["spec"]["ref"]["commit"]
     pinned_overlay = yaml.safe_load(
@@ -303,7 +292,7 @@ def test_product_release_bundle_is_active_after_reviewed_transfer():
 
     # then
     assert root["resources"] == ["./flux-system", "./releases/product/release.yaml"]
-    assert api["spec"]["sourceRef"]["name"] == source["metadata"]["name"]
+    assert source["metadata"]["name"] == source_name
     assert api["metadata"]["annotations"]["insurance-hub.io/source-revision"] == revision
     assert (
         pinned_overlay.get("commonAnnotations", {}).get("kustomize.toolkit.fluxcd.io/prune") is None
