@@ -98,28 +98,15 @@ def test_product_supports_every_cataloged_capability() -> None:
     assert paths == ["services/product-service"] * len(capabilities)
 
 
-def test_policy_search_administration_operations_use_the_existing_dispatch() -> None:
-    # given
+def test_policy_search_administration_operations_are_not_shared_dispatch_capabilities() -> None:
+    # given / when
     script_dir = Path(resolve.__file__).resolve().parent
-    root = script_dir.parents[2]
-
-    # when
-    paths = [
-        resolve.resolve_service(
-            root,
-            script_dir / "catalog.json",
-            "policy-search",
-            capability,
-        )
-        for capability in (
-            "administration-inspect",
-            "administration-setup",
-            "administration-verify",
-        )
-    ]
+    record = resolve.load_catalog(script_dir / "catalog.json")["services"]["policy-search"]
 
     # then
-    assert paths == ["services/policy-search-service"] * 3
+    assert not any(
+        capability.startswith("administration-") for capability in record["capabilities"]
+    )
 
 
 def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() -> None:

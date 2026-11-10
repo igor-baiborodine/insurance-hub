@@ -23,7 +23,6 @@ export SVC_NAME
 	go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-smoke \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
-	go-svc-administration-inspect go-svc-administration-setup go-svc-administration-verify \
 	go-svc-deploy-test-flux \
 	go-svc-dispatch-test go-svc-release-select go-svc-release-prepare go-svc-release-test go-svc-release-test-collect
 
@@ -58,18 +57,13 @@ go-svc-stop: ## Stop only the selected direct-target Deployment
 go-svc-reader-ensure: ## Idempotently provision the selected service's guarded reader prerequisites
 go-svc-reader-verify: ## Verify the selected service's reader identity and workload Secrets
 go-svc-reader-rotate: ## Explicitly rotate and recover the selected service's reader credentials
-go-svc-administration-inspect: ## Inspect the Policy Search index without mutation
-go-svc-administration-setup: ## Create missing Policy Search resources without changing compatible state
-go-svc-administration-verify: ## Verify the Policy Search index and least-privilege identities
 go-svc-deploy-test-tooling: ## Test selected-service deployment guards and cleanup
 go-svc-deploy-smoke: ## Smoke one service in an owned disposable Kind namespace
 go-svc-deploy-test-flux: ## Exercise one service with pinned Flux/CNPG in an owned Kind cluster
 go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-smoke \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
-	go-svc-deploy-test-flux \
-	go-svc-administration-inspect go-svc-administration-setup \
-	go-svc-administration-verify: python-runtime-check
+	go-svc-deploy-test-flux: python-runtime-check
 	+@set -eu; \
 		capability='$(@:go-svc-%=%)'; \
 		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) "$$capability")"; \

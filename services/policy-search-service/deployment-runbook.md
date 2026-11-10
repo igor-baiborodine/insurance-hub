@@ -151,11 +151,11 @@ Setup requires its exact confirmation, preserves a compatible populated index an
 credentials, creates only missing resources, and rejects mapping, alias, access or trust drift:
 
 ```sh
-make go-svc-administration-inspect SVC_NAME=policy-search
+make -C services/policy-search-service administration-inspect
 export POLICY_SEARCH_SETUP_CONFIRM=setup-policy-views
-make go-svc-administration-setup SVC_NAME=policy-search
+make -C services/policy-search-service administration-setup
 unset POLICY_SEARCH_SETUP_CONFIRM
-make go-svc-administration-verify SVC_NAME=policy-search
+make -C services/policy-search-service administration-verify
 ```
 
 The setup operation creates no Kafka topic or group and changes no gateway route. It prepares the
@@ -227,7 +227,7 @@ still exported. QA requires its source revision and digest; local-dev requires i
 ```sh
 make go-svc-deploy-status SVC_NAME=policy-search
 make go-svc-deploy-verify SVC_NAME=policy-search
-make go-svc-administration-verify SVC_NAME=policy-search
+make -C services/policy-search-service administration-verify
 ```
 
 Status and verification check exact live inventory, source/image identity, private exposure,

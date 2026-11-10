@@ -165,6 +165,9 @@ deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runt
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" scripts/deployment.py '$@'
 
+administration-inspect: ## Inspect the Policy Search index without mutation
+administration-setup: ## Create missing Policy Search resources without changing compatible state
+administration-verify: ## Verify the Policy Search index and least-privilege identities
 administration-inspect administration-setup administration-verify: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/administration.py '$(@:administration-%=%)'

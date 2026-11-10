@@ -117,9 +117,6 @@
         "deploy",
         "deploy-verify",
         "stop",
-        "administration-inspect",
-        "administration-setup",
-        "administration-verify",
         "deploy-test-tooling",
         "deploy-test"
       ],
