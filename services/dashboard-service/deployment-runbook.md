@@ -151,7 +151,12 @@ unset DASHBOARD_REGISTRATION_CONFIRM
 make -C services/dashboard-service registration-verify
 ```
 
-The owners require two matching Kafka metadata/progress snapshots, every topic partition, in-range committed offsets and the exact ordinary index and identities. Provisioning must preserve the initial document count. Registration administration has no destructive command.
+The owners require two matching Kafka metadata/progress snapshots and the exact ordinary index and
+identities. When the consumer group exists, every topic partition must have an in-range committed
+offset. The owner does not initialize a missing `dashboard-service` consumer group; worker
+activation requires committed progress prepared outside this administration scope. The disposable
+smoke initializes only its isolated group. Provisioning must preserve the initial document count.
+Registration administration has no destructive command.
 
 ## Deploy to local development
 
