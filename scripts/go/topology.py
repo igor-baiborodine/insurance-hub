@@ -835,7 +835,7 @@ def ci_check(root: Path, inventory: dict[str, Any]) -> None:
             "make go-scaffold-check-copy",
             "make -C services/product-service check-ci",
             "make go-svc-",
-            "make postgres-svc-role",
+            "make resource-",
             "make product-baseline-",
             "make product-security-",
             "kubectl ",

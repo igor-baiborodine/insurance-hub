@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provision Product administration identities and workload Secrets outside the API."""
+"""Administer Product PostgreSQL resources outside the API process."""
 
 from __future__ import annotations
 
@@ -19,14 +19,15 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+SERVICE_SCRIPTS = Path(__file__).resolve().parent
+if str(SERVICE_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SERVICE_SCRIPTS))
 
-from scripts.product_deployment import reader  # noqa: E402
+import administration as reader  # noqa: E402
+from product_process import run_cli  # noqa: E402
 
 ROLES = ("go_product_reader", "go_product_migrator", "go_product_seeder")
-ADMIN_ROLES = ROLES[1:]
 CA_MOUNTS = {
     "go_product_reader": reader.CA_MOUNT,
     "go_product_migrator": "/etc/product-admin/migrator/ca.crt",
@@ -108,11 +109,26 @@ class AdministrationKubernetes(reader.Kubernetes):
         return f"{self.environment}-postgres-product-{SECRET_SUFFIX[role]}"
 
     def put_named_secret(self, name: str, values: dict[str, bytes]) -> None:
+        components = {
+            self.role_secret("go_product_reader"): "postgres-reader",
+            self.role_secret("go_product_migrator"): "postgres-migrator",
+            self.role_secret("go_product_seeder"): "postgres-seeder",
+            self.target_secret: "postgres-administration",
+        }
+        reader.require(name in components, "unsupported Product resource Secret")
         payload = {
             "apiVersion": "v1",
             "kind": "Secret",
             "type": "Opaque",
-            "metadata": {"name": name, "namespace": self.svc_ns},
+            "metadata": {
+                "name": name,
+                "namespace": self.svc_ns,
+                "labels": {
+                    "app.kubernetes.io/name": "product-api",
+                    "app.kubernetes.io/component": components[name],
+                    "insurance-hub.io/owner": "product",
+                },
+            },
             "data": {key: base64.b64encode(value).decode() for key, value in values.items()},
         }
         self.kubectl("-n", self.svc_ns, "apply", "-f", "-", input_text=json.dumps(payload))
@@ -141,7 +157,7 @@ class AdministrationKubernetes(reader.Kubernetes):
                     port = listener.getsockname()[1]
                 process = subprocess.Popen(
                     [
-                        "kubectl",
+                        reader.KUBECTL,
                         f"--context={self.context}",
                         "-n",
                         self.data_ns,
@@ -367,7 +383,7 @@ def compensation_sql(
     return ";\n".join(statements) + ";\n"
 
 
-def provision(manager: AdministrationKubernetes) -> None:
+def ensure(manager: AdministrationKubernetes) -> None:
     before = role_inventory(manager)
     existing_roles = {item["rolname"] for item in before["roles"]}
     expected_membership = {
@@ -394,17 +410,19 @@ def provision(manager: AdministrationKubernetes) -> None:
     written: list[str] = []
     try:
         for role in ROLES:
-            if existing_secrets[role] is None:
-                name = manager.role_secret(role)
-                manager.put_named_secret(
-                    name, secret_values(role, passwords[role], manager.hostname, ca)
-                )
-                written.append(name)
-        if manager.get_secret(manager.target_secret, manager.svc_ns) is None:
-            manager.put_named_secret(
-                manager.target_secret,
-                {"target.json": json.dumps(target, sort_keys=True).encode()},
+            name = manager.role_secret(role)
+            desired = existing_secrets[role] or secret_values(
+                role, passwords[role], manager.hostname, ca
             )
+            manager.put_named_secret(name, desired)
+            if existing_secrets[role] is None:
+                written.append(name)
+        target_exists = manager.get_secret(manager.target_secret, manager.svc_ns) is not None
+        manager.put_named_secret(
+            manager.target_secret,
+            {"target.json": json.dumps(target, sort_keys=True).encode()},
+        )
+        if not target_exists:
             written.append(manager.target_secret)
         check_role_contract(role_inventory(manager), target)
     except Exception as error:
@@ -443,7 +461,7 @@ def provision(manager: AdministrationKubernetes) -> None:
         raise reader.RoleError(
             "administration provisioning failed; partial state compensated"
         ) from error
-    print(f"product-administration: provisioned {manager.environment} roles and workload Secrets")
+    print(f"product-resources: ensured {manager.environment} roles and workload Secrets")
 
 
 def verify(manager: AdministrationKubernetes) -> None:
@@ -524,30 +542,30 @@ def rotate(manager: AdministrationKubernetes) -> None:
         all(value is not None for value in existing_secrets.values()),
         "rotation requires complete Product administration Secrets",
     )
-    recovery_path = Path(os.environ.get("POSTGRES_ROLE_RECOVERY_FILE", ""))
+    recovery_path = Path(os.environ.get("PRODUCT_RESOURCE_RECOVERY_FILE", ""))
     reader.require(
         recovery_path.is_absolute() and not recovery_path.exists(),
-        "POSTGRES_ROLE_RECOVERY_FILE must be an absolute unused path",
+        "PRODUCT_RESOURCE_RECOVERY_FILE must be an absolute unused path",
     )
     try:
         descriptor = os.open(recovery_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except OSError as error:
         raise reader.RoleError("protected recovery file could not be created") from error
     with os.fdopen(descriptor, "w") as output:
-        json.dump({role: passwords[role] for role in ADMIN_ROLES}, output, sort_keys=True)
+        json.dump({role: passwords[role] for role in ROLES}, output, sort_keys=True)
         output.write("\n")
-    replacements = {role: secrets.token_urlsafe(48) for role in ADMIN_ROLES}
+    replacements = {role: secrets.token_urlsafe(48) for role in ROLES}
     ca = manager.ca()
     try:
         manager.admin(
             "BEGIN; "
             + " ".join(
                 f"ALTER ROLE {role} PASSWORD {reader.sql_literal(replacements[role])};"
-                for role in ADMIN_ROLES
+                for role in ROLES
             )
             + " COMMIT;"
         )
-        for role in ADMIN_ROLES:
+        for role in ROLES:
             manager.put_named_secret(
                 manager.role_secret(role),
                 secret_values(role, replacements[role], manager.hostname, ca),
@@ -559,11 +577,11 @@ def rotate(manager: AdministrationKubernetes) -> None:
                 "BEGIN; "
                 + " ".join(
                     f"ALTER ROLE {role} PASSWORD {reader.sql_literal(passwords[role])};"
-                    for role in ADMIN_ROLES
+                    for role in ROLES
                 )
                 + " COMMIT;"
             )
-            for role in ADMIN_ROLES:
+            for role in ROLES:
                 value = existing_secrets[role]
                 reader.require(value is not None, "rotation recovery Secret is missing")
                 manager.put_named_secret(manager.role_secret(role), value)
@@ -574,23 +592,52 @@ def rotate(manager: AdministrationKubernetes) -> None:
         raise reader.RoleError(
             "administration rotation failed; previous credentials restored"
         ) from error
-    print(f"product-administration: rotated {manager.environment}; retain protected recovery input")
+    print(f"product-resources: rotated {manager.environment}; retain protected recovery input")
 
 
 def snapshot(manager: AdministrationKubernetes) -> dict[str, object]:
     table = manager.admin("SELECT to_regclass('public.product') IS NOT NULL;") == "t"
-    result = {"roles": role_inventory(manager), "productTable": table}
+    secrets_inventory = {}
+    for role in ROLES:
+        value = manager.get_secret(manager.role_secret(role), manager.svc_ns)
+        secrets_inventory[role] = {
+            "present": value is not None,
+            "keys": sorted(value) if value is not None else [],
+        }
+    target = manager.get_secret(manager.target_secret, manager.svc_ns)
+    secrets_inventory["target"] = {
+        "present": target is not None,
+        "keys": sorted(target) if target is not None else [],
+    }
+    result = {
+        "roles": role_inventory(manager),
+        "secrets": secrets_inventory,
+        "productTable": table,
+    }
     if table:
         result["product"] = json.loads(manager.admin(reader.SNAPSHOT_SQL))
     return result
 
 
 def revoke(manager: AdministrationKubernetes) -> None:
+    _, existing_secrets, target = read_or_create_inputs(manager)
     reader.require(
-        os.environ.get("POSTGRES_ROLE_CONFIRM_REVOKE")
-        == f"product/administration/{manager.environment}",
-        "explicit POSTGRES_ROLE_CONFIRM_REVOKE=product/administration/<environment> is required",
+        all(value is not None for value in existing_secrets.values()),
+        "revocation requires complete Product resource Secrets",
     )
+    check_role_contract(role_inventory(manager), target)
+    before = reader.snapshot(manager.admin)
+    deployed = manager.kubectl(
+        "-n",
+        manager.svc_ns,
+        "get",
+        "deployment",
+        f"{manager.environment}-product-api",
+        "--ignore-not-found",
+        "-o",
+        "name",
+    )
+    reader.require(not deployed, "Product deployment still exists; stop it before revocation")
     jobs = manager.kubectl(
         "-n",
         manager.svc_ns,
@@ -604,34 +651,54 @@ def revoke(manager: AdministrationKubernetes) -> None:
     reader.require(not jobs, "Product initialization Jobs still exist")
     manager.admin(
         "BEGIN; "
-        "REVOKE CONNECT ON DATABASE product FROM go_product_migrator,go_product_seeder; "
-        "REVOKE ALL ON SCHEMA public FROM go_product_migrator,go_product_seeder; "
-        "REVOKE ALL ON ALL TABLES IN SCHEMA public FROM go_product_migrator,go_product_seeder; "
+        "REVOKE CONNECT ON DATABASE product FROM "
+        "go_product_reader,go_product_migrator,go_product_seeder; "
+        "REVOKE ALL ON SCHEMA public FROM go_product_reader,go_product_migrator,go_product_seeder; "
+        "REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "
+        "go_product_reader,go_product_migrator,go_product_seeder; "
         "REVOKE USAGE ON SCHEMA product_admin FROM go_product_migrator,go_product_seeder; "
         "REVOKE SELECT ON product_admin.target_identity FROM go_product_migrator,go_product_seeder; "
         "REVOKE product FROM go_product_migrator; "
-        "DROP ROLE go_product_seeder; DROP ROLE go_product_migrator; COMMIT;"
+        "DELETE FROM product_admin.target_identity WHERE singleton; "
+        "DROP ROLE go_product_seeder; DROP ROLE go_product_migrator; "
+        "DROP ROLE go_product_reader; COMMIT;"
     )
-    for role in ADMIN_ROLES:
+    for role in ROLES:
         manager.delete_named_secret(manager.role_secret(role))
-    print(f"product-administration: revoked {manager.environment} elevated roles and Secrets")
+    manager.delete_named_secret(manager.target_secret)
+    reader.require(
+        reader.snapshot(manager.admin) == before,
+        "catalog/schema identity changed during resource revocation",
+    )
+    print(f"product-resources: revoked {manager.environment} roles and Secrets")
+
+
+def require_confirmation(operation: str, environment: str) -> None:
+    reader.require(
+        environment in reader.ENVIRONMENTS, "PRODUCT_RESOURCE_ENV must be local-dev or qa"
+    )
+    expected = f"{operation}-{environment}-product-resources"
+    reader.require(
+        os.environ.get("PRODUCT_RESOURCE_CONFIRM") == expected,
+        f"PRODUCT_RESOURCE_CONFIRM must equal {expected}",
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     reader.require(
-        len(arguments) == 1
-        and arguments[0] in {"inventory", "snapshot", "provision", "verify", "rotate", "revoke"},
-        "unsupported administration action",
+        len(arguments) == 1 and arguments[0] in {"inspect", "ensure", "verify", "rotate", "revoke"},
+        "unsupported resource operation",
     )
-    manager = AdministrationKubernetes(os.environ.get("POSTGRES_ROLE_ENV", ""))
     action = arguments[0]
-    if action == "inventory":
-        print(json.dumps(role_inventory(manager), sort_keys=True))
-    elif action == "snapshot":
+    environment = os.environ.get("PRODUCT_RESOURCE_ENV", "")
+    if action in {"ensure", "rotate", "revoke"}:
+        require_confirmation(action, environment)
+    manager = AdministrationKubernetes(environment)
+    if action == "inspect":
         print(json.dumps(snapshot(manager), sort_keys=True))
-    elif action == "provision":
-        provision(manager)
+    elif action == "ensure":
+        ensure(manager)
     elif action == "verify":
         verify(manager)
     elif action == "rotate":
@@ -652,13 +719,13 @@ def cli(argv: Sequence[str] | None = None) -> int:
             UnicodeError,
             json.JSONDecodeError,
         ) as error:
-            print(f"product-administration: {error}", file=sys.stderr)
+            print(f"product-resources: {error}", file=sys.stderr)
             return 2
         except OSError:
-            print("product-administration: local process operation failed", file=sys.stderr)
+            print("product-resources: local process operation failed", file=sys.stderr)
             return 2
 
-    return reader.run_cli(execute, name="product-administration")
+    return run_cli(execute, name="product-resources")
 
 
 if __name__ == "__main__":

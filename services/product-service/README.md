@@ -586,5 +586,8 @@ bundle. Administration manifests live below `product/base/administration` and ea
 `product/administration` overlay, outside the API's Kustomize resource list. The shared deployment
 engine owns Job ordering and release checks; Product-specific workload and SQL probes remain in
 [`product_deployment_checks.py`](scripts/product_deployment_checks.py).
+PostgreSQL roles and workload Secrets use this module's `resource-inspect`, guarded
+`resource-ensure`, `resource-verify`, `resource-rotate`, and `resource-revoke` targets. Their
+implementation and focused tests are service-local; API startup never invokes them.
 The local-dev and QA API overlays also own the Product NetworkPolicy. Both allow gateway HTTP/RPC,
 DNS, and Product PostgreSQL only; QA additionally allows OTLP to its Alloy instance.

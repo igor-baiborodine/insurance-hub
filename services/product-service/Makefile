@@ -119,6 +119,8 @@ pilot-test-json: ## Report selected uncached test execution as JSON for framewor
 	build build-security-harness build-security-verifier build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
 	deploy-test-flux vulncheck check-servicekit check-candidate-servicekit \
+	resource-inspect resource-ensure resource-verify resource-rotate resource-revoke \
+	resource-test-fast resource-test-integration \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
 	shared-candidate-generated shared-candidate-breaking shared-candidate-integration \
@@ -151,6 +153,27 @@ deploy-test: python-toolchain-check image-build ## Exercise the image and render
 
 deploy-test-flux: python-toolchain-check image-build ## Exercise Product prerequisites with pinned Flux/CNPG in an owned disposable Kind cluster
 	@PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" $(PYTHON) scripts/flux_deployment_test.py
+
+resource-inspect: ## Inspect Product PostgreSQL resources without mutation
+resource-ensure: ## Ensure Product PostgreSQL roles and workload Secrets
+resource-verify: ## Verify Product resources and effective workload permissions
+resource-rotate: ## Rotate Product PostgreSQL credentials with recovery
+resource-revoke: ## Revoke inactive Product PostgreSQL resources
+resource-inspect resource-ensure resource-verify resource-rotate resource-revoke: python-runtime-check
+	@PYTHONPATH="$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/resource_administration.py '$(@:resource-%=%)'
+
+resource-test-fast: python-toolchain-check ## Exercise Product resource guards with fake adapters
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
+		-m 'not integration and not acceptance' \
+		services/product-service/scripts/test_administration.py \
+		services/product-service/scripts/test_resource_administration.py
+
+resource-test-integration: python-toolchain-check ## Exercise Product permissions in disposable PostgreSQL
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
+		-m integration services/product-service/scripts/test_administration.py \
+		services/product-service/scripts/test_resource_administration.py \
+		services/product-service/scripts/test_resource_administration_integration.py
 
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
 	@test -n "$(strip $(SECURITY_HARNESS_OUTPUT))" || { echo "SECURITY_HARNESS_OUTPUT is required" >&2; exit 1; }
@@ -255,11 +278,11 @@ check-administration-design-fast: python-toolchain-check ## Run render-only Q04 
 
 check-administration-design-integration: python-toolchain-check ## Run disposable PostgreSQL Q04 checks; requires cached PostgreSQL image and Docker
 	@$(MAKE) --no-print-directory python-format-check python-lint \
-		PYTHON_FILES=scripts/postgres/service/test_administration_design.py
+		PYTHON_FILES=services/product-service/scripts/test_resource_administration_integration.py
 	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest --collect-only -q \
-		-m integration scripts/postgres/service/test_administration_design.py
+		-m integration services/product-service/scripts/test_resource_administration_integration.py
 	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q \
-		-m integration scripts/postgres/service/test_administration_design.py
+		-m integration services/product-service/scripts/test_resource_administration_integration.py
 
 gen-sql:
 	@test "$$($(SQLC) version)" = "$(SQLC_VERSION)"

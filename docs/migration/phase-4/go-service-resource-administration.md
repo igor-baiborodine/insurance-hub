@@ -24,6 +24,9 @@ The implemented references are Dashboard's
 [registration administration](../../../services/dashboard-service/scripts/registration_administration.py),
 and Policy Search's
 [resource administration](../../../services/policy-search-service/scripts/resource_administration.py).
+Product adopts the same public interface through its
+[resource administration](../../../services/product-service/scripts/resource_administration.py)
+while retaining its PostgreSQL-specific resource contract.
 
 Resource administration is separate from application startup and ordinary deployment. A service
 must not create or repair dependency resources while starting. Database schema migration and seed
@@ -225,6 +228,6 @@ service, preserve its public targets unless the ticket explicitly includes align
 Dashboard's existing reader and registration entry points can therefore happen independently of
 using the same naming and safety rules for future work.
 
-Dashboard and Policy Search remain implementation examples, not libraries to import. Copy the
-small pattern that applies to the new resource boundary and keep the inventory, compatibility
+Dashboard, Policy Search and Product remain implementation examples, not libraries to import. Copy
+the small pattern that applies to the new resource boundary and keep the inventory, compatibility
 rules and tests owned by the consuming service.

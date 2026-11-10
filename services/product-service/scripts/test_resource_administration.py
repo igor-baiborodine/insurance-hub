@@ -15,8 +15,12 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.postgres.service.test_reader import IMAGE, run
-from scripts.product_deployment import administration
+SERVICE_SCRIPTS = Path(__file__).resolve().parent
+if str(SERVICE_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SERVICE_SCRIPTS))
+
+import resource_administration as administration  # noqa: E402
+from test_administration import IMAGE, run  # noqa: E402
 
 PASSWORD = "administration-disposable-only"
 
@@ -67,14 +71,82 @@ def test_target_document_binds_cluster_uid_and_separate_namespaces() -> None:
     }
 
 
-def test_role_catalog_dispatches_combined_administration_profile() -> None:
-    # when
-    from scripts.postgres.service import dispatch
+def test_named_secret_uses_stable_service_ownership_labels() -> None:
+    # given
+    manager = object.__new__(administration.AdministrationKubernetes)
+    manager.environment = "qa"
+    manager.svc_ns = "qa-svc"
+    manager.target_secret = "qa-postgres-product-admin-target"
+    sent = {}
 
-    path = dispatch.resolve("verify", "product", "administration")
+    def kubectl(*_arguments: str, input_text: str | None = None) -> str:
+        sent.update(json.loads(input_text or "{}"))
+        return ""
+
+    manager.kubectl = kubectl
+
+    # when
+    manager.put_named_secret(
+        "qa-postgres-product-reader-creds",
+        {"database-url": b"synthetic", "ca.crt": b"test-ca"},
+    )
 
     # then
-    assert path == Path(administration.__file__).resolve()
+    assert sent["metadata"] == {
+        "name": "qa-postgres-product-reader-creds",
+        "namespace": "qa-svc",
+        "labels": {
+            "app.kubernetes.io/name": "product-api",
+            "app.kubernetes.io/component": "postgres-reader",
+            "insurance-hub.io/owner": "product",
+        },
+    }
+
+
+@pytest.mark.parametrize("operation", ["ensure", "rotate", "revoke"])
+def test_mutation_requires_confirmation_before_target_contact(
+    monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    # given
+    contacted = False
+
+    def target(_environment: str):
+        nonlocal contacted
+        contacted = True
+        raise AssertionError("target must not be contacted")
+
+    monkeypatch.setattr(administration, "AdministrationKubernetes", target)
+    monkeypatch.setenv("PRODUCT_RESOURCE_ENV", "qa")
+    monkeypatch.delenv("PRODUCT_RESOURCE_CONFIRM", raising=False)
+
+    # when / then
+    with pytest.raises(
+        administration.reader.RoleError,
+        match=f"PRODUCT_RESOURCE_CONFIRM must equal {operation}-qa-product-resources",
+    ):
+        administration.main([operation])
+    assert contacted is False
+
+
+def test_inspect_uses_service_local_snapshot_without_confirmation(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given
+    manager = object()
+    expected = {"roles": {}, "secrets": {}, "productTable": False}
+    monkeypatch.setenv("PRODUCT_RESOURCE_ENV", "qa")
+    monkeypatch.delenv("PRODUCT_RESOURCE_CONFIRM", raising=False)
+    monkeypatch.setattr(administration, "AdministrationKubernetes", lambda _environment: manager)
+    monkeypatch.setattr(
+        administration, "snapshot", lambda current: expected if current is manager else {}
+    )
+
+    # when
+    status = administration.main(["inspect"])
+
+    # then
+    assert status == 0
+    assert json.loads(capsys.readouterr().out) == expected
 
 
 def test_administration_script_runs_from_outside_repository(tmp_path: Path) -> None:
@@ -90,7 +162,7 @@ def test_administration_script_runs_from_outside_repository(tmp_path: Path) -> N
     # then
     assert result.returncode == 2
     assert result.stdout == ""
-    assert result.stderr == "product-administration: unsupported administration action\n"
+    assert result.stderr == "product-resources: unsupported resource operation\n"
 
 
 class DisposableAdministration:
@@ -148,16 +220,28 @@ class DisposableAdministration:
         return b"-----BEGIN CERTIFICATE-----\ntest-only\n-----END CERTIFICATE-----\n"
 
     def kubectl(self, *arguments: str) -> str:
-        assert arguments == (
-            "-n",
-            self.svc_ns,
-            "get",
-            "jobs",
-            "-l",
-            "app.kubernetes.io/name=product-init",
-            "-o",
-            "name",
-        )
+        assert arguments in {
+            (
+                "-n",
+                self.svc_ns,
+                "get",
+                "deployment",
+                "qa-product-api",
+                "--ignore-not-found",
+                "-o",
+                "name",
+            ),
+            (
+                "-n",
+                self.svc_ns,
+                "get",
+                "jobs",
+                "-l",
+                "app.kubernetes.io/name=product-init",
+                "-o",
+                "name",
+            ),
+        }
         return ""
 
     @contextmanager
@@ -270,7 +354,7 @@ def test_initial_provision_secret_failure_compensates_and_retries() -> None:
             administration.reader.RoleError,
             match="administration provisioning failed; partial state compensated",
         ):
-            administration.provision(manager)
+            administration.ensure(manager)
 
         # then
         assert manager.secrets == {}
@@ -285,7 +369,7 @@ def test_initial_provision_secret_failure_compensates_and_retries() -> None:
         assert manager.admin("SELECT count(*) FROM product_admin.target_identity;") == "0"
 
         manager.fail_secret = None
-        administration.provision(manager)
+        administration.ensure(manager)
         administration.verify(manager)
 
 
@@ -310,7 +394,7 @@ def test_initial_provision_compensation_preserves_existing_reader() -> None:
             administration.reader.RoleError,
             match="administration provisioning failed; partial state compensated",
         ):
-            administration.provision(manager)
+            administration.ensure(manager)
 
         # then
         state = administration.role_inventory(manager)
@@ -333,7 +417,7 @@ def test_provisioned_roles_and_secrets_enforce_real_permissions() -> None:
     # given
     with disposable_database() as manager:
         # when
-        administration.provision(manager)
+        administration.ensure(manager)
         administration.verify(manager)
         first_secrets = json.loads(
             json.dumps(
@@ -360,7 +444,7 @@ def test_provisioned_roles_and_secrets_enforce_real_permissions() -> None:
         )
         administration.verify(manager)
         administration.reader.consumer_gate(administration.reader.inventory(manager.admin))
-        administration.provision(manager)
+        administration.ensure(manager)
 
         # then
         assert first_secrets == {
@@ -376,7 +460,7 @@ def test_provisioned_roles_and_secrets_enforce_real_permissions() -> None:
             recovery = Path(directory) / "administration-recovery.json"
             with patch.dict(
                 os.environ,
-                {"POSTGRES_ROLE_RECOVERY_FILE": str(recovery)},
+                {"PRODUCT_RESOURCE_RECOVERY_FILE": str(recovery)},
                 clear=False,
             ):
                 administration.rotate(manager)
@@ -384,19 +468,12 @@ def test_provisioned_roles_and_secrets_enforce_real_permissions() -> None:
             assert recovery.read_text() != ""
         administration.verify(manager)
 
-        with patch.dict(
-            os.environ,
-            {"POSTGRES_ROLE_CONFIRM_REVOKE": "product/administration/qa"},
-            clear=False,
-        ):
-            administration.revoke(manager)
+        administration.revoke(manager)
         assert (
             manager.admin(
                 "SELECT count(*) FROM pg_roles WHERE rolname IN "
-                "('go_product_migrator','go_product_seeder');"
+                "('go_product_reader','go_product_migrator','go_product_seeder');"
             )
             == "0"
         )
-        assert (
-            manager.admin("SELECT to_regclass('product_admin.target_identity') IS NOT NULL;") == "t"
-        )
+        assert manager.admin("SELECT count(*) FROM product_admin.target_identity;") == "0"

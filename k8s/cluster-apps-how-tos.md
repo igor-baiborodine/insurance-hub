@@ -114,17 +114,20 @@ unset GITHUB_TOKEN_FILE
 make flux-status
 make cluster-qa-monitoring-deploy
 make cluster-infra-deploy
-export POSTGRES_ROLE_ENV=qa
-export POSTGRES_ROLE_CONTEXT=qa-insurance-hub
-export POSTGRES_ROLE_DATA_NS=qa-data
-export POSTGRES_ROLE_SVC_NS=qa-svc
-export POSTGRES_ROLE_CLUSTER=qa-postgres-product
-export POSTGRES_ROLE_SECRET=qa-postgres-product-reader-creds
-export POSTGRES_ROLE_DB_HOST=qa-postgres-product-rw.qa-data.svc.cluster.local
-make postgres-svc-role-provision SVC_NAME=product ROLE_PROFILE=reader
-make postgres-svc-role-verify SVC_NAME=product ROLE_PROFILE=reader
-unset POSTGRES_ROLE_ENV POSTGRES_ROLE_CONTEXT POSTGRES_ROLE_DATA_NS POSTGRES_ROLE_SVC_NS
-unset POSTGRES_ROLE_CLUSTER POSTGRES_ROLE_SECRET POSTGRES_ROLE_DB_HOST
+export PRODUCT_RESOURCE_ENV=qa
+export PRODUCT_RESOURCE_CONTEXT=qa-insurance-hub
+export PRODUCT_RESOURCE_DATA_NS=qa-data
+export PRODUCT_RESOURCE_SVC_NS=qa-svc
+export PRODUCT_RESOURCE_CLUSTER=qa-postgres-product
+export PRODUCT_RESOURCE_READER_SECRET=qa-postgres-product-reader-creds
+export PRODUCT_RESOURCE_DB_HOST=qa-postgres-product-rw.qa-data.svc.cluster.local
+export PRODUCT_RESOURCE_CONFIRM=ensure-qa-product-resources
+make -C services/product-service resource-ensure
+unset PRODUCT_RESOURCE_CONFIRM
+make -C services/product-service resource-verify
+unset PRODUCT_RESOURCE_ENV PRODUCT_RESOURCE_CONTEXT PRODUCT_RESOURCE_DATA_NS
+unset PRODUCT_RESOURCE_SVC_NS PRODUCT_RESOURCE_CLUSTER PRODUCT_RESOURCE_READER_SECRET
+unset PRODUCT_RESOURCE_DB_HOST
 make cluster-svc-deploy
 make flux-reconcile
 make flux-status
@@ -326,17 +329,20 @@ Ready before it returns. On QA, provision the restricted reader used by the Flux
 deployment after that aggregate succeeds and before running `cluster-svc-deploy`:
 
 ```bash
-export POSTGRES_ROLE_ENV=qa
-export POSTGRES_ROLE_CONTEXT=qa-insurance-hub
-export POSTGRES_ROLE_DATA_NS=qa-data
-export POSTGRES_ROLE_SVC_NS=qa-svc
-export POSTGRES_ROLE_CLUSTER=qa-postgres-product
-export POSTGRES_ROLE_SECRET=qa-postgres-product-reader-creds
-export POSTGRES_ROLE_DB_HOST=qa-postgres-product-rw.qa-data.svc.cluster.local
-make postgres-svc-role-provision SVC_NAME=product ROLE_PROFILE=reader
-make postgres-svc-role-verify SVC_NAME=product ROLE_PROFILE=reader
-unset POSTGRES_ROLE_ENV POSTGRES_ROLE_CONTEXT POSTGRES_ROLE_DATA_NS POSTGRES_ROLE_SVC_NS
-unset POSTGRES_ROLE_CLUSTER POSTGRES_ROLE_SECRET POSTGRES_ROLE_DB_HOST
+export PRODUCT_RESOURCE_ENV=qa
+export PRODUCT_RESOURCE_CONTEXT=qa-insurance-hub
+export PRODUCT_RESOURCE_DATA_NS=qa-data
+export PRODUCT_RESOURCE_SVC_NS=qa-svc
+export PRODUCT_RESOURCE_CLUSTER=qa-postgres-product
+export PRODUCT_RESOURCE_READER_SECRET=qa-postgres-product-reader-creds
+export PRODUCT_RESOURCE_DB_HOST=qa-postgres-product-rw.qa-data.svc.cluster.local
+export PRODUCT_RESOURCE_CONFIRM=ensure-qa-product-resources
+make -C services/product-service resource-ensure
+unset PRODUCT_RESOURCE_CONFIRM
+make -C services/product-service resource-verify
+unset PRODUCT_RESOURCE_ENV PRODUCT_RESOURCE_CONTEXT PRODUCT_RESOURCE_DATA_NS
+unset PRODUCT_RESOURCE_SVC_NS PRODUCT_RESOURCE_CLUSTER PRODUCT_RESOURCE_READER_SECRET
+unset PRODUCT_RESOURCE_DB_HOST
 ```
 
 The provision target creates a random credential and the two-key workload Secret without printing

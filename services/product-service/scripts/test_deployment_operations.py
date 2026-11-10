@@ -109,16 +109,26 @@ class DeploymentGuardTests(unittest.TestCase):
             kubernetes.assert_not_called()
 
     def test_snapshot_rejects_unexpected_output_fields(self) -> None:
-        safe = {"rows": 4, "catalog": "a" * 32, "columns": "b" * 32, "tableOwner": "product"}
-        with patch.object(deployment, "role_action", return_value=deployment.json.dumps(safe)):
-            self.assertEqual(deployment.role_snapshot(object()), safe)
+        safe = {
+            "roles": {"roles": [], "memberships": [], "target": {}},
+            "secrets": {},
+            "productTable": True,
+            "product": {
+                "rows": 4,
+                "catalog": "a" * 32,
+                "columns": "b" * 32,
+                "tableOwner": "product",
+            },
+        }
+        with patch.object(deployment, "resource_action", return_value=deployment.json.dumps(safe)):
+            self.assertEqual(deployment.resource_snapshot(object()), safe)
         with patch.object(
             deployment,
-            "role_action",
+            "resource_action",
             return_value=deployment.json.dumps({**safe, "database-url": "synthetic-secret"}),
         ):
-            with self.assertRaisesRegex(deployment.DeploymentError, "unexpected catalog identity"):
-                deployment.role_snapshot(object())
+            with self.assertRaisesRegex(deployment.DeploymentError, "unexpected state"):
+                deployment.resource_snapshot(object())
 
     def test_volume_guard_accepts_kubernetes_default_and_rejects_other_secret(self) -> None:
         desired = [

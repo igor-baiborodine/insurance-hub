@@ -6,7 +6,6 @@ import io
 import json
 import os
 import re
-import signal
 import subprocess
 import sys
 import tempfile
@@ -17,43 +16,16 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.product_deployment import reader
-
 ROOT = Path(__file__).resolve().parents[3]
-MODULE = ROOT / "scripts/product_deployment/reader.py"
+SERVICE_SCRIPTS = Path(__file__).resolve().parent
+if str(SERVICE_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SERVICE_SCRIPTS))
+
+import administration as reader  # noqa: E402
+
 IMAGE = (
     "postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
 )
-
-
-@pytest.mark.parametrize(
-    ("requested_signal", "expected_status"),
-    [(signal.SIGINT, 130), (signal.SIGTERM, 143)],
-)
-def test_reader_cli_signal_boundary_preserves_status_and_unwinds(
-    monkeypatch: pytest.MonkeyPatch,
-    requested_signal: signal.Signals,
-    expected_status: int,
-) -> None:
-    # given
-    cleaned = False
-
-    def interrupted(_argv=None):
-        nonlocal cleaned
-        try:
-            os.kill(os.getpid(), requested_signal)
-        finally:
-            cleaned = True
-        return 0
-
-    monkeypatch.setattr(reader, "main", interrupted)
-
-    # when
-    status = reader.cli([])
-
-    # then
-    assert status == expected_status
-    assert cleaned
 
 
 def check(condition, message):
@@ -68,44 +40,6 @@ def run(argv, *, input_text=None, env=None, timeout=45):
     if result.returncode:
         raise AssertionError(f"test command failed: {argv[0]} (exit {result.returncode})")
     return result.stdout.strip()
-
-
-def test_dispatch_guards() -> None:
-    dispatch = ROOT / "scripts/postgres/service/dispatch.py"
-    for service, profile, action in (
-        ("", "reader", "inventory"),
-        ("product", "", "inventory"),
-        ("../product", "reader", "inventory"),
-        ("unknown", "reader", "inventory"),
-        ("product", "admin", "inventory"),
-        ("product", "reader", "deploy"),
-    ):
-        env = dict(os.environ, SVC_NAME=service, ROLE_PROFILE=profile)
-        result = subprocess.run(
-            [sys.executable, str(dispatch), action],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        check(result.returncode != 0, f"dispatch accepted invalid {service}/{profile}/{action}")
-        check(
-            "password" not in result.stderr.lower(), "dispatch diagnostic exposed credential text"
-        )
-    selected = reader_path("product", "reader")
-    check(selected == MODULE, "Product reader did not resolve to its service-owned script")
-    from scripts.postgres.service import dispatch as module
-
-    check(
-        module.resolve("snapshot", "product", "reader") == MODULE,
-        "Product snapshot did not resolve to its service-owned script",
-    )
-
-
-def reader_path(service: str, profile: str) -> Path:
-    from scripts.postgres.service import dispatch as module
-
-    return module.resolve("inventory", service, profile)
 
 
 def test_secret_adapter() -> None:
@@ -429,7 +363,7 @@ RESET ROLE;
         old = reader.password_from_url(manager.secret["database-url"].decode(), manager.hostname)
         manager.fail_put = True
         with tempfile.TemporaryDirectory() as directory:
-            os.environ["POSTGRES_ROLE_RECOVERY_FILE"] = str(Path(directory) / "recovery")
+            os.environ["PRODUCT_RESOURCE_RECOVERY_FILE"] = str(Path(directory) / "recovery")
             try:
                 reader.rotate(manager)
                 raise AssertionError("injected Secret failure did not stop rotation")
@@ -437,10 +371,10 @@ RESET ROLE;
                 check(old not in str(error), "rotation failure diagnostic exposed credential")
             reader.verify(manager)
             check(
-                Path(os.environ["POSTGRES_ROLE_RECOVERY_FILE"]).stat().st_mode & 0o777 == 0o600,
+                Path(os.environ["PRODUCT_RESOURCE_RECOVERY_FILE"]).stat().st_mode & 0o777 == 0o600,
                 "rotation recovery file is not private",
             )
-            os.environ["POSTGRES_ROLE_RECOVERY_FILE"] = str(Path(directory) / "recovery-next")
+            os.environ["PRODUCT_RESOURCE_RECOVERY_FILE"] = str(Path(directory) / "recovery-next")
             # An established session finishes while the password changes; the old password
             # must fail on a new connection after rotation.
             passfile = Path(directory) / "old-session-pass"
@@ -497,8 +431,8 @@ RESET ROLE;
                     raise AssertionError("old credential opened a new connection")
                 except reader.RoleError:
                     pass
-            os.environ["POSTGRES_ROLE_RESTORE_FILE"] = str(Path(directory) / "recovery")
-            os.environ["POSTGRES_ROLE_RECOVERY_FILE"] = str(Path(directory) / "recovery-of-new")
+            os.environ["PRODUCT_RESOURCE_RESTORE_FILE"] = str(Path(directory) / "recovery")
+            os.environ["PRODUCT_RESOURCE_RECOVERY_FILE"] = str(Path(directory) / "recovery-of-new")
             reader.rotate(manager)
             restored = reader.password_from_url(
                 manager.secret["database-url"].decode(), manager.hostname
@@ -510,7 +444,7 @@ RESET ROLE;
                     raise AssertionError("rotated credential opened a connection after recovery")
                 except reader.RoleError:
                     pass
-            os.environ.pop("POSTGRES_ROLE_RESTORE_FILE")
+            os.environ.pop("PRODUCT_RESOURCE_RESTORE_FILE")
 
         # Unknown effective consumer blocks PUBLIC revocation before database changes.
         manager.admin(
@@ -559,7 +493,6 @@ RESET ROLE;
         manager.secret = prior_secret
         reader.verify(manager)
 
-        os.environ["POSTGRES_ROLE_CONFIRM_REVOKE"] = "product/reader/disposable"
         reader.revoke(manager)
         check(
             reader.inventory(manager.admin)["reader"] is None and manager.secret is None,
@@ -574,8 +507,7 @@ RESET ROLE;
 
 if __name__ == "__main__":
     try:
-        print("product-reader-test: checking dispatch and Kubernetes adapters", flush=True)
-        test_dispatch_guards()
+        print("product-reader-test: checking Kubernetes adapters", flush=True)
         test_secret_adapter()
         test_deployment_ca_contract()
         test_forward_cleanup()

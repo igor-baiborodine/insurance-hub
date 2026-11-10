@@ -710,76 +710,62 @@ def forwards(target: Target) -> Iterator[dict[str, int]]:
                 child.wait(timeout=5)
 
 
-def role_environment(target: Target, profile: str = "reader") -> dict[str, str]:
-    role_env = {
-        "POSTGRES_ROLE_ENV": target.environment,
-        "POSTGRES_ROLE_CONTEXT": target.context,
-        "POSTGRES_ROLE_DATA_NS": target.data_namespace,
-        "POSTGRES_ROLE_SVC_NS": target.namespace,
-        "POSTGRES_ROLE_CLUSTER": target.prefix + "postgres-product",
-        "POSTGRES_ROLE_SECRET": target.secret,
-        "POSTGRES_ROLE_DB_HOST": target.prefix
+def resource_environment(target: Target) -> dict[str, str]:
+    resource_env = {
+        "PRODUCT_RESOURCE_ENV": target.environment,
+        "PRODUCT_RESOURCE_CONTEXT": target.context,
+        "PRODUCT_RESOURCE_DATA_NS": target.data_namespace,
+        "PRODUCT_RESOURCE_SVC_NS": target.namespace,
+        "PRODUCT_RESOURCE_CLUSTER": target.prefix + "postgres-product",
+        "PRODUCT_RESOURCE_READER_SECRET": target.secret,
+        "PRODUCT_RESOURCE_DB_HOST": target.prefix
         + "postgres-product-rw."
         + target.data_namespace
         + ".svc.cluster.local",
     }
     environment = os.environ.copy()
-    environment.update(role_env)
-    environment["SVC_NAME"] = "product"
-    environment["ROLE_PROFILE"] = profile
+    environment.update(resource_env)
     return environment
 
 
-def role_action(target: Target, action: str, profile: str = "reader") -> str:
-    require(action in {"snapshot", "verify"}, "unsupported read-only role action")
+def resource_action(target: Target, action: str) -> str:
+    require(action in {"inspect", "verify"}, "unsupported read-only resource action")
     try:
         result = subprocess.run(
-            ["make", f"postgres-svc-role-{action}"],
+            [
+                "make",
+                "--no-print-directory",
+                "-C",
+                str(ROOT / "services" / "product-service"),
+                f"resource-{action}",
+            ],
             cwd=ROOT,
-            env=role_environment(target, profile),
+            env=resource_environment(target),
             capture_output=True,
             text=True,
             timeout=180,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise DeploymentError(f"{profile} {action} unavailable or timed out") from error
-    require(result.returncode == 0, f"{profile} {action} failed; inspect the role safely")
+        raise DeploymentError(f"resource {action} unavailable or timed out") from error
+    require(result.returncode == 0, f"resource {action} failed; inspect Product safely")
     return result.stdout.strip()
 
 
-def role_snapshot(target: Target) -> dict[str, Any]:
+def resource_snapshot(target: Target) -> dict[str, Any]:
     try:
-        value = json.loads(role_action(target, "snapshot"))
+        value = json.loads(resource_action(target, "inspect"))
     except ValueError as error:
-        raise DeploymentError("reader snapshot is malformed") from error
+        raise DeploymentError("resource inspection is malformed") from error
     require(
         isinstance(value, dict)
-        and set(value) == {"rows", "catalog", "columns", "tableOwner"}
-        and value.get("tableOwner") == "product"
-        and all(
-            isinstance(value.get(key), str) and re.fullmatch(r"[0-9a-f]{32}", value[key])
-            for key in ("catalog", "columns")
-        )
-        and isinstance(value.get("rows"), int),
-        "reader snapshot has unexpected catalog identity",
-    )
-    return value
-
-
-def administration_snapshot(target: Target) -> dict[str, Any]:
-    try:
-        value = json.loads(role_action(target, "snapshot", "administration"))
-    except ValueError as error:
-        raise DeploymentError("administration snapshot is malformed") from error
-    require(
-        isinstance(value, dict)
-        and set(value).issubset({"roles", "productTable", "product"})
-        and set(value).issuperset({"roles", "productTable"})
+        and set(value).issubset({"roles", "secrets", "productTable", "product"})
+        and set(value).issuperset({"roles", "secrets", "productTable"})
         and isinstance(value["roles"], dict)
+        and isinstance(value["secrets"], dict)
         and isinstance(value["productTable"], bool)
         and (value["productTable"] == ("product" in value)),
-        "administration snapshot has unexpected state",
+        "resource inspection has unexpected state",
     )
     return value
 
@@ -790,11 +776,10 @@ def record_snapshot(stage: str, value: dict[str, Any]) -> None:
 
 def verify(target: Target, items: list[dict[str, Any]]) -> None:
     target.live(items, require_deployment=True)
-    initialization_check(target)
-    before = role_snapshot(target)
+    before = resource_snapshot(target)
     record_snapshot("before verification", before)
-    role_action(target, "verify")
-    environment = role_environment(target)
+    resource_action(target, "verify")
+    environment = resource_environment(target)
     with forwards(target) as ports:
         environment.update(
             {
@@ -820,7 +805,7 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
         except (OSError, subprocess.TimeoutExpired) as error:
             raise DeploymentError("Product access verification unavailable or timed out") from error
         require(result.returncode == 0, "Product access verification failed")
-    after = role_snapshot(target)
+    after = resource_snapshot(target)
     record_snapshot("after verification", after)
     require(after == before, "catalog/schema identity changed during verification")
     print("product-deployment: reader identity, safe SQL probes and Go HTTP/gRPC reads passed")
@@ -831,14 +816,12 @@ def check_render() -> None:
 
 
 def initialization_check(target: Target) -> None:
-    role_action(target, "verify", "administration")
+    resource_action(target, "verify")
 
 
 def initialization_complete(target: Target) -> None:
     initialization_check(target)
-    require(
-        administration_snapshot(target)["productTable"] is True, "Product initialization is absent"
-    )
+    require(resource_snapshot(target)["productTable"] is True, "Product initialization is absent")
 
 
 def check_requested_route(target: Target) -> None:
@@ -847,7 +830,7 @@ def check_requested_route(target: Target) -> None:
 
 def stop(target: Target, items: list[dict[str, Any]]) -> None:
     target.live(items, require_deployment=True)
-    before = role_snapshot(target)
+    before = resource_snapshot(target)
     record_snapshot("before stop", before)
     deployment = target.json("get", "deployment", target.deployment)
     version = deployment.get("metadata", {}).get("resourceVersion", "")
@@ -885,7 +868,7 @@ def stop(target: Target, items: list[dict[str, Any]]) -> None:
         ),
         "Go Service still has a ready endpoint after stop",
     )
-    after = role_snapshot(target)
+    after = resource_snapshot(target)
     record_snapshot("after stop", after)
     require(after == before, "catalog/schema identity changed during local stop")
     print("product-deployment: local Go Deployment scaled to zero; Product data preserved")
