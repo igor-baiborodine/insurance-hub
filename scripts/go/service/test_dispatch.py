@@ -148,7 +148,7 @@ def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() 
     assert record["deploymentTargets"]["qa"]["dataNamespace"] == "qa-data"
     assert paths == ["services/dashboard-service"] * len(expected)
     for unsupported in (
-        "administration-setup",
+        "resource-ensure",
         "registration-inspect",
         "deploy-test-flux",
         "initialize",

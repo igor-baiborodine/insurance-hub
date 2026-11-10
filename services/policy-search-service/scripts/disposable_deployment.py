@@ -19,10 +19,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-import administration as service_admin
 import policy_search_deployment_checks as deployment_checks
+import resource_administration as service_admin
 import yaml
-from administration_support import AdministrationError, ElasticsearchClient, require_status
+from administration import AdministrationError, ElasticsearchClient, require_status
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 MODULE = ROOT / "services/policy-search-service"

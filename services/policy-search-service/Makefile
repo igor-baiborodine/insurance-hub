@@ -10,17 +10,17 @@ export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/deployment.py scripts/disposable_deployment.py scripts/image_check.py \
 	scripts/elasticsearch_integration.py scripts/policy_search_deployment_checks.py scripts/scaffold_process.py \
 	scripts/event_integration.py \
-	scripts/administration.py scripts/administration_support.py \
+	scripts/administration.py scripts/resource_administration.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_elasticsearch_integration.py \
 	scripts/test_event_integration.py \
-	scripts/test_administration.py \
+	scripts/test_resource_administration.py \
 	scripts/test_scaffold_process.py scripts/test_tooling.py \
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_elasticsearch_integration.py \
 	scripts/test_event_integration.py \
-	scripts/test_administration.py \
+	scripts/test_resource_administration.py \
 	scripts/test_scaffold_process.py \
 	scripts/test_tooling_runner.py)
 
@@ -109,7 +109,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	image-build image-check _image-check-existing test-integration test-elasticsearch-integration \
 	test-event-integration deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop \
-	administration-inspect administration-setup administration-verify \
+	resource-inspect resource-ensure resource-verify \
 	deploy-test-tooling deploy-test \
 	build-smoke-client \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
@@ -165,16 +165,16 @@ deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runt
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" scripts/deployment.py '$@'
 
-administration-inspect: ## Inspect the Policy Search index without mutation
-administration-setup: ## Create missing Policy Search resources without changing compatible state
-administration-verify: ## Verify the Policy Search index and least-privilege identities
-administration-inspect administration-setup administration-verify: python-runtime-check
+resource-inspect: ## Inspect the Policy Search resources without mutation
+resource-ensure: ## Create missing Policy Search resources without changing compatible state
+resource-verify: ## Verify the Policy Search index and least-privilege identities
+resource-inspect resource-ensure resource-verify: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/administration.py '$(@:administration-%=%)'
+		"$(PYTHON)" scripts/resource_administration.py '$(@:resource-%=%)'
 
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed deployment guards without a cluster
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		"$(PYTHON)" -m pytest -q scripts/test_deployment.py scripts/test_administration.py
+		"$(PYTHON)" -m pytest -q scripts/test_deployment.py scripts/test_resource_administration.py
 
 deploy-test: python-toolchain-check image-build ## Exercise the exact image in an owned disposable Kind namespace
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" \

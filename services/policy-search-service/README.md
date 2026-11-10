@@ -91,9 +91,9 @@ These operations are explicit and are never hidden inside `check`:
 | `make format-proto`      | Rewrites only `api/policysearch/v1/policy_search_service.proto` with pinned Buf.                                               | Verified pinned tools.                                                                         |
 | `make gen-proto`         | Removes and regenerates the exact declared Go/gateway/Swagger inventory under `gen/`.                                     | Pinned Buf and generators already installed; BSR access unless cached.                         |
 | `make run`               | Starts `./cmd/server`; it changes no repository file.                                                                      | Go 1.27.3; readonly modules; runtime settings below.                                           |
-| `make administration-inspect` | Reads the `policy-views` presence, exact mapping, alias state and document count without changing it. | Exact catalog coordinates, current Kubernetes context and ECK administrative Secret. |
-| `make administration-setup` | Creates missing `policy-views` resources and workload trust Secrets while preserving compatible populated data and existing credentials. It never copies, deletes or rewrites documents. | Exact catalog coordinates, ECK administrative Secret and `POLICY_SEARCH_SETUP_CONFIRM=setup-policy-views`; rejects mapping, alias, access or trust drift before setup mutation. |
-| `make administration-verify` | Uses only the workload identities to verify the exact-index reader/writer boundary and unrelated-index/security denials. | Exact catalog coordinates and workload Secrets; no mutation is implied. |
+| `make resource-inspect` | Reads the `policy-views` presence, exact mapping, alias state and document count without changing it. | Exact catalog coordinates, current Kubernetes context and ECK administrative Secret. |
+| `make resource-ensure` | Creates missing `policy-views` resources and workload trust Secrets while preserving compatible populated data and existing credentials. It never copies, deletes or rewrites documents. | Exact catalog coordinates, ECK administrative Secret and `POLICY_SEARCH_RESOURCE_CONFIRM=ensure-policy-search-resources`; rejects mapping, alias, access or trust drift before mutation. |
+| `make resource-verify` | Uses only the workload identities to verify the exact-index reader/writer boundary and unrelated-index/security denials. | Exact catalog coordinates and workload Secrets; no mutation is implied. |
 
 Generated bindings must never be edited by hand. `gen-proto` owns only:
 
@@ -491,7 +491,7 @@ single-index `index` privilege through Elasticsearch's non-mutating self-check a
 consumers to hold assignments. Logs and metric labels never contain an event body, topic, group,
 policy number, customer value, credential or raw error.
 
-Use `make administration-verify` for index and permission diagnostics. In QA, trace and metric
+Use `make resource-verify` for index and permission diagnostics. In QA, trace and metric
 delivery uses the configured Alloy endpoint; collector failure follows the provider's bounded,
 rate-limited diagnostics and does not expose event data. See the
 [deployment runbook](deployment-runbook.md) for ordinary setup and deployment commands.

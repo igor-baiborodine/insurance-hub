@@ -1,12 +1,12 @@
-"""Policy Search administration guards; unit cases never contact a cluster."""
+"""Policy Search resource-administration guards; unit cases never contact a cluster."""
 
 from __future__ import annotations
 
 import os
 from unittest.mock import Mock, patch
 
-import administration
 import pytest
+import resource_administration as administration
 
 
 class FakeClient:
@@ -85,7 +85,7 @@ def test_inspect_accepts_absent_or_exact_populated_index() -> None:
     assert absent.mapping_sha256 == present.mapping_sha256
 
 
-def test_setup_preserves_populated_index_and_existing_access() -> None:
+def test_ensure_preserves_populated_index_and_existing_access() -> None:
     client = FakeClient(
         [
             (200, None),
@@ -107,7 +107,7 @@ def test_setup_preserves_populated_index_and_existing_access() -> None:
     assert all(method == "GET" for method, _, _ in client.requests[1:])
 
 
-def test_setup_creates_only_missing_index_and_access() -> None:
+def test_ensure_creates_only_missing_index_and_access() -> None:
     client = FakeClient(
         [
             (404, None),
@@ -168,7 +168,7 @@ def test_setup_creates_only_missing_index_and_access() -> None:
         ),
     ],
 )
-def test_setup_rejects_incompatible_state_before_mutation(responses, message: str) -> None:
+def test_ensure_rejects_incompatible_state_before_mutation(responses, message: str) -> None:
     client = FakeClient(responses)
 
     with pytest.raises(administration.AdministrationError, match=message):
@@ -177,7 +177,7 @@ def test_setup_rejects_incompatible_state_before_mutation(responses, message: st
     assert all(method != "PUT" for method, _, _ in client.requests)
 
 
-def test_setup_rejects_existing_user_without_canonical_secret() -> None:
+def test_ensure_rejects_existing_user_without_canonical_secret() -> None:
     client = FakeClient(
         [
             (200, None),
@@ -220,11 +220,11 @@ def test_verify_identity_requires_exact_boundary() -> None:
     assert client.requests[0][0:2] == ("POST", "/_security/user/_has_privileges")
 
 
-def test_setup_requires_confirmation_before_target_contact() -> None:
+def test_ensure_requires_confirmation_before_target_contact() -> None:
     with (
         patch.dict(os.environ, {}, clear=True),
         patch.object(administration, "Target", return_value=Mock()) as target,
-        pytest.raises(administration.AdministrationError, match="POLICY_SEARCH_SETUP_CONFIRM"),
+        pytest.raises(administration.AdministrationError, match="POLICY_SEARCH_RESOURCE_CONFIRM"),
     ):
-        administration.execute("setup")
+        administration.execute("ensure")
     target.assert_not_called()
