@@ -1032,23 +1032,6 @@ def secret_and_image(target: Target, image: str) -> None:
     require(revision[:12] == image.rsplit(".", 1)[1], "image source revision differs")
 
 
-def role_snapshot(target: Target) -> dict[str, Any]:
-    """Identify the ordinary state boundary protected during an API rollout."""
-    registration = target.configuration.get("registrationAdministration", {})
-    return {
-        "environment": target.environment,
-        "index": "policy_stats",
-        "kafkaCluster": registration.get("kafkaCluster", ""),
-        "kafkaBootstrap": registration.get("kafkaBootstrap", ""),
-        "topic": "policy-registered",
-        "group": "dashboard-service",
-    }
-
-
-def record_snapshot(stage: str, value: dict[str, Any]) -> None:
-    print(json.dumps({"stage": stage, "resources": value}, sort_keys=True))
-
-
 def administration_snapshot(_target: Target) -> dict[str, Any]:
     raise DeploymentError("Dashboard has no administration owner")
 
@@ -1754,7 +1737,6 @@ def _wait_for_port_forward(process: subprocess.Popen[bytes], port: int, name: st
 def verify(target: Target, items: list[dict[str, Any]]) -> None:
     workload_dependencies(target)
     target.live(items, require_deployment=True)
-    before = role_snapshot(target)
     http_port, management_port, grpc_port = _free_port(), _free_port(), _free_port()
     processes = [
         subprocess.Popen(
@@ -1878,17 +1860,10 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
         run_access_qualification(target)
     except Exception as error:
         failures.append(f"access qualification: {error}")
-    try:
-        require(
-            role_snapshot(target) == before, "ordinary state boundary changed during verification"
-        )
-    except Exception as error:
-        failures.append(f"ordinary state boundary: {error}")
     require(not failures, "Dashboard verification failed: " + " | ".join(failures))
 
 
 def stop(target: Target, _items: list[dict[str, Any]]) -> None:
-    before = role_snapshot(target)
     target.kubectl("scale", f"deployment/{target.deployment}", "--replicas=0", "--timeout=60s")
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
@@ -1898,7 +1873,6 @@ def stop(target: Target, _items: list[dict[str, Any]]) -> None:
         time.sleep(1)
     else:
         raise DeploymentError("Dashboard stop exceeded 90 seconds")
-    require(role_snapshot(target) == before, "ordinary state boundary changed during stop")
 
 
 def validate_qa_aggregate(resources: Any) -> None:

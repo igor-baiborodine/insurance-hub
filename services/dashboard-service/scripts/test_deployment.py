@@ -778,27 +778,6 @@ def test_ordinary_worker_configuration_is_rendered_directly(environment: str) ->
     assert checks.kafka_egress(environment) in policy["spec"]["egress"]
 
 
-def test_role_snapshot_uses_only_ordinary_coordinates() -> None:
-    target = SimpleNamespace(
-        environment="local-dev",
-        configuration={
-            "registrationAdministration": {
-                "kafkaCluster": "local-dev-kafka",
-                "kafkaBootstrap": "local-dev-kafka-kafka-bootstrap:9093",
-            }
-        },
-    )
-
-    assert checks.role_snapshot(target) == {
-        "environment": "local-dev",
-        "index": "policy_stats",
-        "kafkaCluster": "local-dev-kafka",
-        "kafkaBootstrap": "local-dev-kafka-kafka-bootstrap:9093",
-        "topic": "policy-registered",
-        "group": "dashboard-service",
-    }
-
-
 @pytest.mark.parametrize(
     ("environment", "key"),
     [
