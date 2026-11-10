@@ -35,16 +35,15 @@ var (
 
 // Settings captures the explicit Java-compatible registration client behavior.
 type Settings struct {
-	Brokers                  []string
-	Group                    string
-	Topic                    string
-	ClientID                 string
-	CACert                   []byte
-	EventType                string
-	Propagator               propagation.TextMapPropagator
-	Observe                  func(context.Context, string) (context.Context, func(context.Context, string, error))
-	CommitFailure            func(context.Context, string)
-	RequireCommittedProgress bool
+	Brokers       []string
+	Group         string
+	Topic         string
+	ClientID      string
+	CACert        []byte
+	EventType     string
+	Propagator    propagation.TextMapPropagator
+	Observe       func(context.Context, string) (context.Context, func(context.Context, string, error))
+	CommitFailure func(context.Context, string)
 }
 
 type projection interface {
@@ -173,60 +172,42 @@ func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*
 		RootCAs:    roots,
 	}
 	baseOptions = append(baseOptions, kgo.DialTLSConfig(tlsSettings))
-	consumerOptions = append(consumerOptions, kgo.DialTLSConfig(tlsSettings))
-	if settings.RequireCommittedProgress {
-		consumerOptions = append(
-			consumerOptions,
-			kgo.ConsumeResetOffset(kgo.NoResetOffset()),
-		)
-	} else {
-		consumerOptions = append(
-			consumerOptions,
-			kgo.ConsumeStartOffset(kgo.NewOffset().AtStart()),
-			kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
-		)
-	}
+	consumerOptions = append(
+		consumerOptions,
+		kgo.DialTLSConfig(tlsSettings),
+		kgo.ConsumeResetOffset(kgo.NoResetOffset()),
+	)
 	worker := &Worker{
 		projection: projection,
 		logger:     logger, assigned: assigned,
 		eventType: settings.EventType, propagator: settings.Propagator,
 		observe: settings.Observe, commitFailure: settings.CommitFailure,
 	}
-	if settings.RequireCommittedProgress {
-		worker.preflight = func(ctx context.Context) (consumerClient, error) {
-			inspector, err := kgo.NewClient(baseOptions...)
-			if err != nil {
-				return nil, errors.New(
-					"preflight dashboard registration worker: create Kafka inspector",
-				)
-			}
-			if err := verifyCommittedProgress(
-				ctx,
-				inspector,
-				settings.Topic,
-				settings.Group,
-			); err != nil {
-				inspector.Close()
-				return nil, err
-			}
-			inspector.Close()
-			consumer, err := kgo.NewClient(consumerOptions...)
-			if err != nil {
-				return nil, errors.New(
-					"preflight dashboard registration worker: create Kafka consumer",
-				)
-			}
-			return franzClient{client: consumer}, nil
+	worker.preflight = func(ctx context.Context) (consumerClient, error) {
+		inspector, err := kgo.NewClient(baseOptions...)
+		if err != nil {
+			return nil, errors.New(
+				"preflight dashboard registration worker: create Kafka inspector",
+			)
 		}
-		return worker, nil
+		if err := verifyCommittedProgress(
+			ctx,
+			inspector,
+			settings.Topic,
+			settings.Group,
+		); err != nil {
+			inspector.Close()
+			return nil, err
+		}
+		inspector.Close()
+		consumer, err := kgo.NewClient(consumerOptions...)
+		if err != nil {
+			return nil, errors.New(
+				"preflight dashboard registration worker: create Kafka consumer",
+			)
+		}
+		return franzClient{client: consumer}, nil
 	}
-	consumer, err := kgo.NewClient(consumerOptions...)
-	if err != nil {
-		return nil, errors.New(
-			"configure dashboard registration worker: create Kafka client",
-		)
-	}
-	worker.client = franzClient{client: consumer}
 	return worker, nil
 }
 

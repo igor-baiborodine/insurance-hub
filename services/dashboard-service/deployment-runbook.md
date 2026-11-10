@@ -19,7 +19,7 @@
 This runbook owns qualification and guarded operation of the private Go Dashboard queries and its
 registration worker. Local-dev and QA use `policy_stats`, `policy-registered` and
 `dashboard-service` with ordinary Elasticsearch and Kafka trust Secrets. The retained Java source
-and manifests are outside this source step's removal scope and are not deployment prerequisites.
+and manifests are separate legacy assets and are not deployment prerequisites.
 
 Use the companion [observability runbook](observability-runbook.md) for Dashboard monitoring
 source validation, QA provisioning/read-back, investigation and monitoring restoration. The two
@@ -247,8 +247,9 @@ Confirm that the Go endpoints disappear. Restore the same accepted image with th
 
 ## Stage and observe QA
 
-The shared QA aggregate retains both `./dashboard` and `./dashboard/legacy` under the explicit
-source constraint for this step. The Go overlay directly selects ordinary event processing.
+The shared QA aggregate composes the Go service through `./dashboard`. Its separate
+`./dashboard/legacy` entry preserves the retained Java manifests. The Go overlay directly selects
+ordinary event processing.
 The release owner publishes a reviewed semantic image, records its immutable digest and exact image
 source revision, and updates the Go overlay through the guarded release workflow. Flux performs
 every persistent QA mutation; direct status and verification commands do not own desired state.

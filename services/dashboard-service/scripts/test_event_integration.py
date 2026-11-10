@@ -124,10 +124,6 @@ def test_main_passes_only_exact_ordinary_coordinates_to_go(
     assert environment["DASHBOARD_TEST_CONSUMER_GROUP"] == "dashboard-service"
     assert environment["DASHBOARD_TEST_EVENT_INDEX"] == "policy_stats"
     assert environment["DASHBOARD_TEST_EVENT_OWNERSHIP"] == "dashboard-disposable"
-    assert "policy-registered" not in {
-        environment["DASHBOARD_TEST_REGISTERED_TOPIC"],
-        environment["DASHBOARD_TEST_CONSUMER_GROUP"],
-    }
     assert go_call[0][-1] == "./internal/testing"
     assert "-tags=integration" in go_call[0]
 

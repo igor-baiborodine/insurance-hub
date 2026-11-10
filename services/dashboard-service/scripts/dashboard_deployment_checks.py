@@ -293,7 +293,6 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     )
     require(len(items) == 5, "Dashboard resource inventory differs")
     prefix = f"{environment}-"
-    workers_enabled = True
     expected_names = {
         "ConfigMap": {prefix + "dashboard-config"},
         "Deployment": {prefix + "dashboard-api"},
@@ -339,7 +338,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "HEALTH_ADDR": "0.0.0.0:8081",
         "LOG_LEVEL": "info",
         "REQUEST_TIMEOUT": "8s",
-        "PROBE_TIMEOUT": "30s" if workers_enabled else "2s",
+        "PROBE_TIMEOUT": "30s",
         "SHUTDOWN_TIMEOUT": "10s",
         "HTTP_MAX_HEADER_BYTES": "16384",
         "HTTP_MAX_BODY_BYTES": "4096",
@@ -357,6 +356,14 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "ELASTICSEARCH_INDEX": "policy_stats",
         "ELASTICSEARCH_TIMEOUT": "5s",
         "EVENT_WORKERS_ENABLED": "true",
+        "KAFKA_BROKERS": (
+            "local-dev-kafka-kafka-bootstrap:9093"
+            if environment == "local-dev"
+            else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
+        ),
+        "KAFKA_GROUP": "dashboard-service",
+        "KAFKA_REGISTERED_TOPIC": "policy-registered",
+        "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
         "SALES_TRENDS_TIME_ZONE": "GMT",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
     }
@@ -365,19 +372,6 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
         )
         expected_config["ELASTICSEARCH_CA_FILE"] = "/etc/dashboard/elasticsearch/ca.crt"
-    if workers_enabled:
-        expected_config.update(
-            {
-                "KAFKA_BROKERS": (
-                    "local-dev-kafka-kafka-bootstrap:9093"
-                    if environment == "local-dev"
-                    else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
-                ),
-                "KAFKA_GROUP": "dashboard-service",
-                "KAFKA_REGISTERED_TOPIC": "policy-registered",
-                "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
-            }
-        )
     expected_volumes: list[dict[str, Any]] = []
     if environment == "qa":
         expected_volumes.append(
@@ -390,17 +384,16 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
                 },
             }
         )
-    if workers_enabled:
-        expected_volumes.append(
-            {
-                "name": "kafka-ca",
-                "secret": {
-                    "secretName": (f"{environment}-dashboard-kafka-ca"),
-                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                    "defaultMode": 292,
-                },
-            }
-        )
+    expected_volumes.append(
+        {
+            "name": "kafka-ca",
+            "secret": {
+                "secretName": (f"{environment}-dashboard-kafka-ca"),
+                "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                "defaultMode": 292,
+            },
+        }
+    )
     require(
         "OTEL_EXPORTER_OTLP_TIMEOUT" not in data,
         "exporter timeout must use the application default",
@@ -445,10 +438,9 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
                 "readOnly": True,
             }
         )
-    if workers_enabled:
-        expected_mounts.append(
-            {"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}
-        )
+    expected_mounts.append(
+        {"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}
+    )
     require(
         container.get("name") == "dashboard-api"
         and container.get("imagePullPolicy")
@@ -478,11 +470,9 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "SERVICE_INSTANCE_ID",
         "ELASTICSEARCH_USERNAME",
         "ELASTICSEARCH_PASSWORD",
+        "ELASTICSEARCH_WRITER_USERNAME",
+        "ELASTICSEARCH_WRITER_PASSWORD",
     }
-    if workers_enabled:
-        expected_env_names.update(
-            {"ELASTICSEARCH_WRITER_USERNAME", "ELASTICSEARCH_WRITER_PASSWORD"}
-        )
     require(
         env.get("SERVICE_INSTANCE_ID", {}).get("valueFrom", {}).get("fieldRef", {}).get("fieldPath")
         == "metadata.uid"
@@ -493,15 +483,14 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         and set(env) == expected_env_names,
         "runtime identity environment differs",
     )
-    if workers_enabled:
-        writer_secret = f"{environment}-dashboard-elasticsearch-writer"
-        require(
-            env["ELASTICSEARCH_WRITER_USERNAME"].get("valueFrom", {}).get("secretKeyRef")
-            == {"name": writer_secret, "key": "username"}
-            and env["ELASTICSEARCH_WRITER_PASSWORD"].get("valueFrom", {}).get("secretKeyRef")
-            == {"name": writer_secret, "key": "password"},
-            "writer environment differs",
-        )
+    writer_secret = f"{environment}-dashboard-elasticsearch-writer"
+    require(
+        env["ELASTICSEARCH_WRITER_USERNAME"].get("valueFrom", {}).get("secretKeyRef")
+        == {"name": writer_secret, "key": "username"}
+        and env["ELASTICSEARCH_WRITER_PASSWORD"].get("valueFrom", {}).get("secretKeyRef")
+        == {"name": writer_secret, "key": "password"},
+        "writer environment differs",
+    )
     probes = {
         "startupProbe": ({"path": "/livez", "port": "management", "scheme": "HTTP"}, 2, 2, 30),
         "livenessProbe": ({"path": "/livez", "port": "management", "scheme": "HTTP"}, 10, 2, 3),
@@ -551,7 +540,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         policy_spec.get("egress", [])
         == [
             *expected_egress(environment),
-            *([kafka_egress(environment)] if workers_enabled else []),
+            kafka_egress(environment),
         ],
         "NetworkPolicy egress differs",
     )

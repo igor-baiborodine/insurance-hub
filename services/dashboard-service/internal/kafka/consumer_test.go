@@ -224,7 +224,7 @@ func TestNewWorker_RejectsEmptyCACertificate(t *testing.T) {
 	}
 }
 
-func TestNewWorker_CommittedSettingsDeferGroupConsumerUntilPreflight(t *testing.T) {
+func TestNewWorker_DefersGroupConsumerUntilPreflight(t *testing.T) {
 	// given
 	server := httptest.NewTLSServer(
 		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
@@ -234,13 +234,12 @@ func TestNewWorker_CommittedSettingsDeferGroupConsumerUntilPreflight(t *testing.
 	})
 	server.Close()
 	settings := Settings{
-		Brokers:                  []string{"kafka.example:9093"},
-		Group:                    "dashboard-service",
-		Topic:                    "policy-registered",
-		ClientID:                 "policy-registered-dashboard-listener",
-		CACert:                   certificate,
-		EventType:                "registered",
-		RequireCommittedProgress: true,
+		Brokers:   []string{"kafka.example:9093"},
+		Group:     "dashboard-service",
+		Topic:     "policy-registered",
+		ClientID:  "policy-registered-dashboard-listener",
+		CACert:    certificate,
+		EventType: "registered",
 	}
 
 	// when

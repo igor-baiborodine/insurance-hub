@@ -16,7 +16,8 @@
 `dashboard-service` is the private Go Dashboard process. It exposes total-sales, agent-sales and
 sales-trends queries and optionally runs the registration worker. Local-dev and QA use the single
 ordinary `policy_stats` index, `policy-registered` topic and `dashboard-service` consumer group.
-The retained Java Dashboard source and manifests are outside this step's removal scope.
+The retained Java Dashboard source and manifests are separate legacy assets and are not used by the
+Go service workflow.
 
 The standalone module is
 `github.com/igor-baiborodine/insurance-hub/services/dashboard-service`. It resolves the published

@@ -483,8 +483,7 @@ func (runtime *runningService) configureWorker(
 			observedCtx, observation := eventObserver.Start(ctx, eventType)
 			return observedCtx, observation.Finish
 		},
-		CommitFailure:            eventObserver.RecordCommitFailure,
-		RequireCommittedProgress: true,
+		CommitFailure: eventObserver.RecordCommitFailure,
 	}, runtime.projection, logger)
 	return err
 }

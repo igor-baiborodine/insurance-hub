@@ -375,8 +375,8 @@ func TestRun_EnabledWorkerUsesExactSettingsAndBoundedLifecycle(t *testing.T) {
 	deps.newWorker = func(got dashboardkafka.Settings, _ projectionRuntime, _ *slog.Logger) (eventWorker, error) {
 		if got.ClientID != "policy-registered-dashboard-listener" ||
 			got.Group != "dashboard-service" || got.Topic != "policy-registered" ||
-			got.EventType != "registered" || !got.RequireCommittedProgress ||
-			got.Propagator == nil || got.Observe == nil || got.CommitFailure == nil ||
+			got.EventType != "registered" || got.Propagator == nil || got.Observe == nil ||
+			got.CommitFailure == nil ||
 			string(got.CACert) != "test CA" {
 			t.Fatalf("worker settings = %+v", got)
 		}

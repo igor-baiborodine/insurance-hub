@@ -129,6 +129,7 @@ func TestEventFixture_ProductionWorkerProjectsRegistration(t *testing.T) {
 	t.Cleanup(producer.Close)
 	waitForKafka(t, ctx, producer)
 	createEventTopic(t, ctx, producer, environment.Topic)
+	initializeEventProgress(t, ctx, producer, environment.Topic, environment.ConsumerGroup)
 	httpClient := &http.Client{
 		Transport: &http.Transport{Proxy: nil},
 		Timeout:   5 * time.Second,
@@ -158,6 +159,9 @@ func TestEventFixture_ProductionWorkerProjectsRegistration(t *testing.T) {
 	}, productionProjection{useCase: useCase}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("construct production registration worker: %v", err)
+	}
+	if err := worker.Preflight(ctx); err != nil {
+		t.Fatalf("preflight production registration worker: %v", err)
 	}
 	workerContext, cancelWorker := context.WithCancel(ctx)
 	workerResult := make(chan error, 1)
@@ -285,6 +289,9 @@ func verifyHandlerFailureCommitParity(
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := worker.Preflight(ctx); err != nil {
+		t.Fatal(err)
+	}
 	workerContext, cancelWorker := context.WithCancel(ctx)
 	result := make(chan error, 1)
 	go func() { result <- worker.Run(workerContext) }()
@@ -325,6 +332,9 @@ func verifyHandlerFailureCommitParity(
 		CACert: environment.KafkaCA, EventType: "registered",
 	}, productionProjection{useCase: useCase}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Preflight(ctx); err != nil {
 		t.Fatal(err)
 	}
 	restartContext, cancelRestart := context.WithCancel(ctx)
@@ -638,6 +648,38 @@ func createEventTopic(t *testing.T, ctx context.Context, client *kgo.Client, top
 	}
 	if len(created.Topics) != 1 || created.Topics[0].ErrorCode != 0 {
 		t.Fatal("create owned event topic did not return one successful result")
+	}
+}
+
+func initializeEventProgress(
+	t *testing.T,
+	ctx context.Context,
+	client *kgo.Client,
+	topic string,
+	group string,
+) {
+	t.Helper()
+	partition := kmsg.NewOffsetCommitRequestTopicPartition()
+	partition.Partition = 0
+	partition.Offset = 0
+	requestTopic := kmsg.NewOffsetCommitRequestTopic()
+	requestTopic.Topic = topic
+	requestTopic.Partitions = append(requestTopic.Partitions, partition)
+	request := kmsg.NewPtrOffsetCommitRequest()
+	request.Group = group
+	request.Topics = append(request.Topics, requestTopic)
+	response, err := client.Request(ctx, request)
+	if err != nil {
+		t.Fatalf("initialize fixture consumer progress: %v", err)
+	}
+	committed, ok := response.(*kmsg.OffsetCommitResponse)
+	if !ok || len(committed.Topics) != 1 || committed.Topics[0].Topic != topic ||
+		len(committed.Topics[0].Partitions) != 1 ||
+		committed.Topics[0].Partitions[0].Partition != 0 ||
+		committed.Topics[0].Partitions[0].ErrorCode != 0 {
+		t.Fatal(
+			"initialize fixture consumer progress did not return one successful partition",
+		)
 	}
 }
 

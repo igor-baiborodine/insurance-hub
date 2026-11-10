@@ -180,6 +180,7 @@ deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Dashboard de
 		scripts/test_deployment.py::test_java_edge_identity_requires_the_dedicated_dashboard_marker \
 		scripts/test_deployment.py::test_live_state_rejects_wrong_resource_identity \
 		scripts/test_deployment.py::test_live_state_accepts_the_complete_rendered_contract \
+		scripts/test_event_integration.py::test_main_passes_only_exact_ordinary_coordinates_to_go \
 		scripts/test_disposable_command.py \
 		scripts/test_disposable_deployment.py \
 		scripts/test_registration_administration.py \
