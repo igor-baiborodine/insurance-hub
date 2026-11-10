@@ -34,9 +34,15 @@ Treat API contracts, DTOs, validation, persistence behavior, and security behavi
 Insurance Hub is a learning project. Keep every ticket proportionate and simple across its scope
 and requirements, specification, delivery steps, implementation, testing, and auxiliary tooling.
 
+At the start of every new session, explicitly acknowledge that these constraints apply and are
+important before beginning repository work.
+
 - Limit testing to focused smoke tests that cover the affected behavior and essential safety
   concerns. Minimize checks that do not provide necessary confidence.
-- Treat Java service retirement as a one-time destructive operation. Do not automate it.
+- Treat Java service retirement as a one-time destructive operation that removes all deployed
+  resources owned by the retired Java service from the `local-dev` and `qa` environments. Retirement
+  does not authorize or imply removing Java legacy source code or any related repository resources,
+  including deployment manifests. Do not automate it.
 - Use a direct Java-to-Go transition. Do not plan or perform Java-to-Go-to-Java rehearsals.
 - The final implementation of a Go service should be as if it was developed from scratch, but at
   the same time it should be compatible with its Java counterpart. Using this approach will exclude
