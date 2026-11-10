@@ -141,8 +141,9 @@ tooling fixtures are removed after successful, failed, and interrupted sessions.
 The event integration target starts disposable pinned Kafka and Elasticsearch containers and runs
 the independent C230-01–07 event expectations together with the real HTTP-to-RPC search runtime.
 It drives production workers through registration, termination, malformed-record, replacement and
-restart paths. The disposable Kind smoke additionally exercises explicit administration setup,
-access boundaries and a populated-state setup rerun. Required integration never passes by skip.
+restart paths. The disposable Kind smoke additionally exercises the index/access ensure helper
+directly, access boundaries and a populated-state setup rerun; it does not exercise the Kubernetes
+Secret and CA orchestration in `resource-ensure`. Required integration never passes by skip.
 
 ### Go file selection
 

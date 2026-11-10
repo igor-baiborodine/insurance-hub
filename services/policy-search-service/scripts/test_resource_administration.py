@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
 import pytest
@@ -21,6 +22,63 @@ class FakeClient:
         self.requests.append((method, path, body))
         assert self.responses, f"unexpected request {method} {path}"
         return self.responses.pop(0)
+
+
+class FakeEnsureTarget:
+    environment = "local-dev"
+    namespace = "local-dev-all"
+    data_namespace = "local-dev-all"
+    admin_secret = "admin-secret"
+    public_ca_secret = "public-elasticsearch-ca"
+    elasticsearch_ca_secret = "policy-search-elasticsearch-ca"
+    kafka_public_ca_secret = "public-kafka-ca"
+    kafka_ca_secret = "policy-search-kafka-ca"
+    reader_secret = "policy-search-reader"
+    writer_secret = "policy-search-writer"
+
+    def __init__(
+        self,
+        reader_password: str | None,
+        writer_password: str | None,
+        elasticsearch_ca: bytes | None,
+        kafka_ca: bytes | None,
+    ) -> None:
+        self.passwords = {
+            self.reader_secret: reader_password,
+            self.writer_secret: writer_password,
+        }
+        self.canonical_cas = {
+            self.elasticsearch_ca_secret: elasticsearch_ca,
+            self.kafka_ca_secret: kafka_ca,
+        }
+        self.applied: list[tuple[str, dict[str, str], str]] = []
+        self.boundary_verified = False
+
+    def verify_boundary(self) -> None:
+        self.boundary_verified = True
+
+    def secret_value(self, namespace: str, name: str, key: str) -> bytes:
+        del namespace, key
+        return {
+            self.admin_secret: b"admin-password",
+            self.public_ca_secret: b"elasticsearch-ca",
+            self.kafka_public_ca_secret: b"kafka-ca",
+        }[name]
+
+    def optional_secret_value(self, name: str, key: str) -> bytes | None:
+        del key
+        return self.canonical_cas[name]
+
+    def optional_password(self, name: str, identity: str) -> str | None:
+        del identity
+        return self.passwords[name]
+
+    def apply_secret(self, name: str, data: dict[str, str], component: str) -> None:
+        self.applied.append((name, data, component))
+        if "password" in data:
+            self.passwords[name] = data["password"]
+        if "ca.crt" in data:
+            self.canonical_cas[name] = data["ca.crt"].encode()
 
 
 def canonical_definition() -> dict:
@@ -330,6 +388,99 @@ def test_verify_identity_requires_exact_boundary() -> None:
     administration.verify_identity(client, administration.READER)
 
     assert client.requests[0][0:2] == ("POST", "/_security/user/_has_privileges")
+
+
+def test_execute_ensure_preserves_existing_credentials_and_cas() -> None:
+    target = FakeEnsureTarget(
+        "existing-reader-password",
+        "existing-writer-password",
+        b"elasticsearch-ca",
+        b"kafka-ca",
+    )
+    admin = Mock()
+    state = administration.IndexState(True, 3, administration.mapping_digest())
+    with (
+        patch.dict(
+            os.environ,
+            {"POLICY_SEARCH_RESOURCE_CONFIRM": "ensure-policy-search-resources"},
+            clear=True,
+        ),
+        patch.object(administration, "Target", return_value=target),
+        patch.object(administration, "PortForward", return_value=nullcontext(9200)),
+        patch.object(administration, "client_for", return_value=admin),
+        patch.object(administration, "inspect_index_and_access") as inspect,
+        patch.object(administration, "ensure_index_and_access", return_value=state) as ensure,
+    ):
+        administration.execute("ensure")
+
+    assert target.boundary_verified
+    assert target.applied == []
+    inspect.assert_called_once()
+    ensure.assert_called_once_with(admin, "existing-reader-password", "existing-writer-password")
+
+
+def test_execute_ensure_creates_missing_credentials_and_cas() -> None:
+    target = FakeEnsureTarget(None, None, None, None)
+    admin = Mock()
+    state = administration.IndexState(True, 0, administration.mapping_digest())
+    with (
+        patch.dict(
+            os.environ,
+            {"POLICY_SEARCH_RESOURCE_CONFIRM": "ensure-policy-search-resources"},
+            clear=True,
+        ),
+        patch.object(administration, "Target", return_value=target),
+        patch.object(administration, "PortForward", return_value=nullcontext(9200)),
+        patch.object(administration, "client_for", return_value=admin),
+        patch.object(administration, "inspect_index_and_access"),
+        patch.object(administration, "ensure_index_and_access", return_value=state) as ensure,
+        patch.object(
+            administration.secrets,
+            "token_urlsafe",
+            side_effect=("generated-reader", "generated-writer"),
+        ),
+    ):
+        administration.execute("ensure")
+
+    assert [name for name, _, _ in target.applied] == [
+        target.reader_secret,
+        target.writer_secret,
+        target.elasticsearch_ca_secret,
+        target.kafka_ca_secret,
+    ]
+    assert target.applied[0][1] == {
+        "username": administration.READER,
+        "password": "generated-reader",
+    }
+    assert target.applied[1][1] == {
+        "username": administration.WRITER,
+        "password": "generated-writer",
+    }
+    assert target.applied[2][1] == {"ca.crt": "elasticsearch-ca"}
+    assert target.applied[3][1] == {"ca.crt": "kafka-ca"}
+    ensure.assert_called_once_with(admin, "generated-reader", "generated-writer")
+
+
+def test_execute_ensure_rejects_ca_drift_before_mutation() -> None:
+    target = FakeEnsureTarget(None, None, b"elasticsearch-ca", b"different-kafka-ca")
+    with (
+        patch.dict(
+            os.environ,
+            {"POLICY_SEARCH_RESOURCE_CONFIRM": "ensure-policy-search-resources"},
+            clear=True,
+        ),
+        patch.object(administration, "Target", return_value=target),
+        patch.object(administration, "PortForward", return_value=nullcontext(9200)),
+        patch.object(administration, "client_for", return_value=Mock()),
+        patch.object(administration, "inspect_index_and_access") as inspect,
+        patch.object(administration, "ensure_index_and_access") as ensure,
+        pytest.raises(administration.AdministrationError, match="Kafka CA Secret differs"),
+    ):
+        administration.execute("ensure")
+
+    assert target.applied == []
+    inspect.assert_not_called()
+    ensure.assert_not_called()
 
 
 def test_ensure_requires_confirmation_before_target_contact() -> None:
