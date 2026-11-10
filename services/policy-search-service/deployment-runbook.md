@@ -50,18 +50,19 @@ documents, resets offsets, changes the legacy topics/group, deletes canonical st
 Java. If the index appears with documents, aliases or an incompatible mapping, the owner stops for
 an accepted manifest or revised plan before changing identities.
 
-Business ports are reachable only from same-namespace Pods labeled
-`insurance-hub.io/policy-search-business-client=true`. Management port 8081 requires
-`insurance-hub.io/policy-search-management-client=true`; kubelet probe traffic follows Kubernetes
-node-origin semantics. Egress permits cluster DNS and the selected environment's ECK Elasticsearch
-service. When event workers are enabled, it also permits the selected Kafka bootstrap service. QA
-adds OTLP/gRPC egress to the selected Alloy Pods in `qa-monitoring`; local-dev telemetry is disabled
-and has no collector dependency.
+Business ports are reachable only from the exact legacy agent-portal gateway identity in the
+selected service namespace. No Pod identity is admitted to management port 8081; kubelet probe
+traffic follows Kubernetes node-origin semantics, and deployment verification uses a bounded local
+port-forward. Egress permits cluster DNS and the selected environment's ECK Elasticsearch service.
+When event workers are enabled, it also permits the selected Kafka bootstrap service. QA adds
+OTLP/gRPC egress to the selected Alloy Pods in `qa-monitoring`; local-dev telemetry is disabled and
+has no collector dependency.
 
 The legacy agent-portal gateway Pod carries the business-client label. The active QA configuration
 routes Policy Search queries to the Go business Service while preserving the existing Java HTTP
-edge and HTTP-to-RPC translation. The label grants the required NetworkPolicy admission; local-dev
-continues inheriting its Java Policy Search route.
+edge and HTTP-to-RPC translation. Its full name, instance, component, environment and capability
+labels grant the required NetworkPolicy admission; local-dev continues inheriting its Java Policy
+Search route.
 
 The active QA and local-dev renders select the canonical `policy-views` index, canonical topics
 `policy-registered` and `policy-terminated`, group `policy-search-service`, reader/writer
@@ -308,10 +309,9 @@ Status and verification check exact live inventory, source/image identity, priva
 health, reader and writer boundaries, event configuration and a synthetic query through the
 business Service while confirming the Java resource identities remain unchanged.
 
-For independent reachability, create bounded probe Pods in `$DEPLOY_SVC_NS`. Label allowed
-business and management probes with the exact labels in this runbook. Otherwise identical
-unlabeled probes must time out on ports 8080, 9090 and 8081. Delete only the named probes after
-recording their results.
+Deployment verification reaches business and management Services through bounded local
+port-forwards. The disposable smoke retains unlabeled Pod checks for default-deny behavior on ports
+8080, 9090 and 8081; steady-state manifests contain no synthetic probe identities.
 
 For QA, use the [observability runbook](observability-runbook.md) to verify Alloy delivery,
 dashboard data, alert state and safe log/trace correlation for the same source, image and Pod

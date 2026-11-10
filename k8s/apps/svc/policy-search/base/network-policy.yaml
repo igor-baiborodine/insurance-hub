@@ -10,21 +10,5 @@ spec:
   policyTypes:
     - Ingress
     - Egress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              insurance-hub.io/policy-search-business-client: "true"
-      ports:
-        - port: 8080
-          protocol: TCP
-        - port: 9090
-          protocol: TCP
-    - from:
-        - podSelector:
-            matchLabels:
-              insurance-hub.io/policy-search-management-client: "true"
-      ports:
-        - port: 8081
-          protocol: TCP
+  ingress: []
   egress: []

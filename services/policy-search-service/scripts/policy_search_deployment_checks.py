@@ -30,7 +30,6 @@ SERVICE = "policy-search"
 EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
 JAVA_NAMES = {"policy-search-api-legacy"}
 BUSINESS_CLIENT_LABEL = "insurance-hub.io/policy-search-business-client"
-MANAGEMENT_CLIENT_LABEL = "insurance-hub.io/policy-search-management-client"
 
 
 class DeploymentError(RuntimeError):
@@ -80,6 +79,36 @@ def resource(items: list[dict[str, Any]], kind: str, name: str) -> dict[str, Any
     ]
     require(len(matches) == 1, f"expected exactly one {kind}/{name}")
     return matches[0]
+
+
+def expected_ingress(environment: str) -> list[dict[str, Any]]:
+    namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
+    return [
+        {
+            "from": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": namespace}
+                    },
+                    "podSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "agent-portal-gateway-legacy",
+                            "app.kubernetes.io/instance": (
+                                "insurance-hub-agent-portal-gateway-legacy"
+                            ),
+                            "app.kubernetes.io/component": "gateway",
+                            "environment": environment,
+                            BUSINESS_CLIENT_LABEL: "true",
+                        }
+                    },
+                }
+            ],
+            "ports": [
+                {"port": 8080, "protocol": "TCP"},
+                {"port": 9090, "protocol": "TCP"},
+            ],
+        }
+    ]
 
 
 def labels_include(actual: Any, expected: Any) -> bool:
@@ -382,19 +411,8 @@ def validate_render(
     require(len(policies) == 1, "overlay must own one NetworkPolicy")
     policy = policies[0]["spec"]
     encoded_policy = json.dumps(policy, sort_keys=True)
-    require(BUSINESS_CLIENT_LABEL in encoded_policy, "business caller label is missing")
-    require(MANAGEMENT_CLIENT_LABEL in encoded_policy, "management caller label is missing")
-    peer_selectors = [
-        peer.get("podSelector", {}).get("matchLabels", {})
-        for rule in policy.get("ingress", [])
-        for peer in rule.get("from", [])
-    ]
     require(
-        peer_selectors
-        == [
-            {BUSINESS_CLIENT_LABEL: "true"},
-            {MANAGEMENT_CLIENT_LABEL: "true"},
-        ],
+        policy.get("ingress") == expected_ingress(environment),
         "caller selectors differ",
     )
     expected_data_namespace = "local-dev-all" if environment == "local-dev" else "qa-data"
