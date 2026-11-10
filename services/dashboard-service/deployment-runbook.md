@@ -136,7 +136,8 @@ Rotation generates a new credential, updates the dedicated identity, applies the
 and verifies the effective privilege boundary. When an earlier owned Secret exists, a failed Secret
 apply or verification restores its credential. Do not hand-create, copy or print credential data.
 After QA ensure succeeds, leave the shared Flux owner active and wait for it to reconcile; do not
-apply the Dashboard workload directly.
+apply the Dashboard workload directly. The release hold below is the only documented exception to
+leaving that owner active.
 
 ## Prepare ordinary registration resources
 
@@ -247,10 +248,10 @@ The release owner publishes a reviewed semantic image, records its immutable dig
 source revision, and updates the Go overlay through the guarded release workflow. Flux performs
 every persistent QA mutation; direct status and verification commands do not own desired state.
 
-Do not apply, delete, load an image, scale a workload, live-patch desired state or suspend Flux in
-QA. Status is read-only. Verification requires separate authorization for its short-lived probe
-Pods and namespace, plus the full commit reported by the shared `qa-svc` Flux source and applied
-revision:
+Do not apply, delete, load an image, scale a workload or live-patch desired state in QA. Suspend
+Flux only for the bounded release hold below. Status is read-only. Verification requires separate
+authorization for its short-lived probe Pods and namespace, plus the full commit reported by the
+shared `qa-svc` Flux source and applied revision:
 
 ```sh
 export DEPLOY_ENV=qa
@@ -280,6 +281,37 @@ Pod image ID, runtime identity, labeled and denied network probes, health and th
 results, reader permission denials, dependency behavior and Alloy delivery. Configuration or
 disposable evidence alone does not establish a QA result.
 
+When an accepted source/configuration change cannot start with the image currently pinned in QA,
+an authorized release owner may hold `qa-svc` reconciliation while the matching image is published.
+Use the hold only for that incompatible transition; it does not transfer desired-state ownership
+away from Flux.
+
+Before merging the source change, require the `qa-insurance-hub` context, a Ready `qa-svc`
+Kustomization and the recorded current source/applied revision. Then suspend the exact owner and
+verify that its desired state reports the suspension:
+
+```sh
+flux suspend kustomization qa-svc --namespace flux-system --context qa-insurance-hub
+kubectl --context qa-insurance-hub --namespace flux-system get kustomization qa-svc \
+  -o jsonpath='{.spec.suspend}{"\n"}'
+```
+
+Keep the hold in place until the release workflow has published an image built from the accepted
+source and committed the matching semantic tag and `SERVICE_VERSION` to the QA overlay on `main`.
+Inspect that commit and the rendered Dashboard configuration before resuming. If publication or the
+overlay update fails, leave the hold in place and repair the reviewed Git source; do not patch QA.
+
+Resume the same owner only after the image/configuration pair is present in `main`, then observe the
+reconciliation and run the authorized status/verification sequence with the resulting full Flux
+revision and immutable image digest:
+
+```sh
+flux resume kustomization qa-svc --namespace flux-system --context qa-insurance-hub
+flux reconcile kustomization qa-svc --namespace flux-system --context qa-insurance-hub \
+  --with-source
+flux get kustomization qa-svc --namespace flux-system --context qa-insurance-hub
+```
+
 
 ## Diagnostics, stop conditions and recovery
 
@@ -302,9 +334,11 @@ For local development, recovery uses the captured accepted image and the same gu
 image-load, deploy, status and verify sequence. `go-svc-stop` may scale only
 `local-dev-dashboard-api`; it does not remove dependency resources.
 
-For QA, do not patch the workload or suspend Flux. Revert the reviewed Dashboard source change,
-let `qa-svc` reconcile, and record both source and applied revisions. Verify the exact prior image
-digest, Pod identity, reader permissions and monitoring behavior after reconciliation.
+For QA, do not patch the workload. Outside an authorized incompatible-release hold, revert the
+reviewed Dashboard source change, let `qa-svc` reconcile, and record both source and applied
+revisions. During a hold, keep `qa-svc` suspended until the repaired image/configuration pair is
+reviewed in Git, then resume it through the procedure above. Verify the exact prior image digest,
+Pod identity, reader permissions and monitoring behavior after reconciliation.
 If monitoring source differs from application source, restore it through the separate guarded
 procedure rather than treating an application rollback as monitoring restoration.
 
