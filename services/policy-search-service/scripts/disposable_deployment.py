@@ -12,6 +12,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
+import urllib.request
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -354,7 +356,11 @@ def elasticsearch_resources(cluster: Cluster, image: str, admin_password: str) -
 
 
 @contextmanager
-def port_forward(cluster: Cluster):
+def port_forward(
+    cluster: Cluster,
+    service: str = "local-dev-elasticsearch-es-http",
+    remote_port: int = 9200,
+):
     port = 0
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -367,8 +373,8 @@ def port_forward(cluster: Cluster):
             "--namespace",
             cluster.namespace,
             "port-forward",
-            "service/local-dev-elasticsearch-es-http",
-            f"{port}:9200",
+            f"service/{service}",
+            f"{port}:{remote_port}",
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -379,12 +385,12 @@ def port_forward(cluster: Cluster):
         stable_since = time.monotonic()
         while time.monotonic() < deadline:
             if process.poll() is not None:
-                raise CheckFailed("Elasticsearch port-forward stopped early")
+                raise CheckFailed(f"{service} port-forward stopped early")
             if time.monotonic() - stable_since >= 1:
                 break
             time.sleep(0.1)
         else:
-            raise CheckFailed("Elasticsearch port-forward did not become ready")
+            raise CheckFailed(f"{service} port-forward did not become ready")
         yield port
     finally:
         if process.poll() is None:
@@ -861,30 +867,9 @@ def setup_kafka(cluster: Cluster, image: str) -> None:
         )
 
 
-def exercise(cluster: Cluster, probe_image: str) -> None:
+def verify_network_denial(cluster: Cluster, probe_image: str) -> None:
     business = "local-dev-policy-search-api"
     management = "local-dev-policy-search-api-management"
-    probe(
-        cluster,
-        probe_image,
-        "allowed-http",
-        ["--mode=http", f"--address=http://{business}/policies"],
-        {"insurance-hub.io/policy-search-business-client": "true"},
-    )
-    probe(
-        cluster,
-        probe_image,
-        "allowed-grpc",
-        ["--mode=grpc", f"--address={business}:9090"],
-        {"insurance-hub.io/policy-search-business-client": "true"},
-    )
-    probe(
-        cluster,
-        probe_image,
-        "allowed-management",
-        ["--mode=health", f"--address=http://{management}:8081/readyz"],
-        {"insurance-hub.io/policy-search-management-client": "true"},
-    )
     for name, address in (
         ("denied-http", f"{business}:80"),
         ("denied-grpc", f"{business}:9090"),
@@ -898,9 +883,21 @@ def exercise(cluster: Cluster, probe_image: str) -> None:
         )
 
 
+def verify_search(cluster: Cluster, query: str) -> None:
+    with port_forward(cluster, "local-dev-policy-search-api", 80) as port:
+        encoded_query = urllib.parse.urlencode({"q": query})
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/policies?{encoded_query}", timeout=5
+            ) as response:
+                status, body = response.status, response.read()
+        except OSError as error:
+            raise CheckFailed("Policy Search HTTP verification failed") from error
+    deployment_checks.validate_deployed_search(status, body)
+
+
 def exercise_event_projection(
     cluster: Cluster,
-    probe_image: str,
     admin_password: str,
 ) -> None:
     oracle = json.loads((MODULE / "testdata/events/oracle.json").read_text(encoding="utf-8"))
@@ -945,17 +942,6 @@ def exercise_event_projection(
         wait_for(cluster, "deployed event projection", stored, seconds=90)
         status, _ = admin.request("POST", f"/{fixture.index}/_refresh")
         fixture_admin.require_status(status, {200}, "refresh projected event document")
-    probe(
-        cluster,
-        probe_image,
-        "event-http",
-        [
-            "--mode=http",
-            "--address=http://local-dev-policy-search-api/policies",
-            '--query=number:"SYN-230-001"',
-        ],
-        {"insurance-hub.io/policy-search-business-client": "true"},
-    )
 
 
 def main() -> int:
@@ -1005,8 +991,10 @@ def main() -> int:
             timeout=200,
         )
         require(endpoint_count(cluster) == 1, "business endpoint did not become ready")
-        exercise(cluster, probe_image)
-        exercise_event_projection(cluster, probe_image, admin_password)
+        verify_network_denial(cluster, probe_image)
+        verify_search(cluster, "Synthetic Person")
+        exercise_event_projection(cluster, admin_password)
+        verify_search(cluster, 'number:"SYN-230-001"')
         elasticsearch_pods = cluster.json(
             "get",
             "pods",
@@ -1077,13 +1065,7 @@ def main() -> int:
             "--timeout=180s",
             timeout=200,
         )
-        probe(
-            cluster,
-            probe_image,
-            "restart-http",
-            ["--mode=http", "--address=http://local-dev-policy-search-api/policies"],
-            {"insurance-hub.io/policy-search-business-client": "true"},
-        )
+        verify_search(cluster, "Synthetic Person")
         cluster.kubectl("scale", "deployment/local-dev-policy-search-api", "--replicas=0")
         wait_for(cluster, "scale-to-zero endpoint removal", lambda: endpoint_count(cluster) == 0)
         cluster.kubectl("apply", "-f", "-", input_text=rendered)
