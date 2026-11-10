@@ -78,6 +78,31 @@ def test_deploy_waits_for_initialization_before_api_apply(
     ) + ["api-yaml", "rollout"]
 
 
+def test_deploy_without_protected_state_hook(monkeypatch):
+    # given
+    events = []
+    target = SimpleNamespace(
+        service="dashboard",
+        configuration={"mode": "direct", "initialization": None},
+        coordinates=lambda: None,
+        rendered=lambda: ("api-yaml", [], "image"),
+        live=lambda *a, **k: None,
+    )
+    hooks = SimpleNamespace(
+        Target=lambda: target,
+        check_render=lambda: None,
+        secret_and_image=lambda *a: None,
+        rollout=lambda *a: events.append("rollout"),
+    )
+    monkeypatch.setattr(deployment, "apply", lambda target, text, manager: events.append(text))
+
+    # when
+    assert deployment.execute(hooks, ["deploy"]) == 0
+
+    # then
+    assert events == ["api-yaml", "rollout"]
+
+
 def test_failed_job_never_applies_api_and_is_retained(monkeypatch):
     # given
     target = SimpleNamespace(

@@ -13,9 +13,9 @@ from unittest.mock import Mock, patch
 import dashboard_deployment_checks as checks
 import pytest
 import yaml
-from scripts.go.service import deployment as lifecycle
 
 import deployment
+from scripts.go.service import deployment as lifecycle
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -491,7 +491,6 @@ def test_verify_runs_rpc_and_access_after_all_http_smokes_fail() -> None:
         process.wait.return_value = 0
     with (
         patch.object(checks, "workload_dependencies"),
-        patch.object(checks, "role_snapshot", return_value={"ordinary": "unchanged"}),
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
         patch.object(checks.subprocess, "Popen", side_effect=processes),
         patch.object(checks, "_wait_for_port_forward"),
@@ -534,7 +533,6 @@ def test_verify_accepts_empty_and_populated_trend_envelopes(
         process.wait.return_value = 0
     with (
         patch.object(checks, "workload_dependencies"),
-        patch.object(checks, "role_snapshot", return_value={"ordinary": "unchanged"}),
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
         patch.object(checks.subprocess, "Popen", side_effect=processes),
         patch.object(checks, "_wait_for_port_forward"),
@@ -571,7 +569,6 @@ def test_verify_cleans_every_port_forward_when_direct_rpc_stops(failure: BaseExc
         process.wait.return_value = 0
     with (
         patch.object(checks, "workload_dependencies"),
-        patch.object(checks, "role_snapshot", return_value={"ordinary": "unchanged"}),
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
         patch.object(checks.subprocess, "Popen", side_effect=processes) as popen,
         patch.object(checks, "_wait_for_port_forward"),
