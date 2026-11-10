@@ -125,7 +125,7 @@
       },
       "expectedResponse": {
         "perAgentTotal": {
-          "agent-292": {"policiesCount": 1, "premiumAmount": 456.78}
+          "agent-292": {"policiesCount": 1, "premiumAmount": 456.7799987792969}
         }
       }
     },

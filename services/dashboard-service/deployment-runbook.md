@@ -5,12 +5,10 @@
   - [Deployment coordinates](#deployment-coordinates)
   - [Qualify the candidate](#qualify-the-candidate)
   - [Provision reader prerequisites](#provision-reader-prerequisites)
-  - [Inspect or retire temporary registration resources](#inspect-or-retire-temporary-registration-resources)
-  - [Prepare registration access and transfer](#prepare-registration-access-and-transfer)
+  - [Prepare ordinary registration resources](#prepare-ordinary-registration-resources)
   - [Deploy to local development](#deploy-to-local-development)
-  - [Stop and return in local development](#stop-and-return-in-local-development)
+  - [Stop in local development](#stop-in-local-development)
   - [Stage and observe QA](#stage-and-observe-qa)
-  - [Return from QA activation](#return-from-qa-activation)
   - [Diagnostics, stop conditions and recovery](#diagnostics-stop-conditions-and-recovery)
   - [Evidence checklist and later ownership](#evidence-checklist-and-later-ownership)
 
@@ -19,11 +17,9 @@
 # Dashboard deployment runbook
 
 This runbook owns qualification and guarded operation of the private Go Dashboard queries and its
-registration worker. PR1 keeps local-dev and QA explicitly isolated on the issue-290 index, topic
-and group with suffixed Elasticsearch Secrets. It preserves the selected ordinary Kafka-trust
-Secret name through automatic reconciliation. It also prepares the unselected canonical configuration for
-`policy_stats`, `policy-registered` and `dashboard-service`. Java retains canonical and edge
-authority until the separate transfer gate and environment operation are authorized.
+registration worker. Local-dev and QA use `policy_stats`, `policy-registered` and
+`dashboard-service` with ordinary Elasticsearch and Kafka trust Secrets. The retained Java source
+and manifests are separate legacy assets and are not deployment prerequisites.
 
 Use the companion [observability runbook](observability-runbook.md) for Dashboard monitoring
 source validation, QA provisioning/read-back, investigation and monitoring restoration. The two
@@ -41,8 +37,8 @@ The Go resources are `dashboard-api`, `dashboard-api-management`, `dashboard-con
 `dashboard-api` NetworkPolicy after the environment prefix is applied. The protected Java
 Deployment and Service are both named `dashboard-api-legacy` after the same prefix.
 
-The Go Deployment uses `Recreate`; canonical authority must never use a surging rollout. The edge
-route remains a separate setting and continues to select Java in PR1.
+The Go Deployment uses `Recreate`; registration ownership must never use a surging rollout. The
+edge route remains a separate setting.
 
 ## Qualify the candidate
 
@@ -140,54 +136,12 @@ Rotation generates a new credential, updates the dedicated identity, applies the
 and verifies the effective privilege boundary. When an earlier owned Secret exists, a failed Secret
 apply or verification restores its credential. Do not hand-create, copy or print credential data.
 After QA ensure succeeds, leave the shared Flux owner active and wait for it to reconcile; do not
-apply the Dashboard workload directly.
+apply the Dashboard workload directly. The release hold below is the only documented exception to
+leaving that owner active.
 
-## Inspect or retire temporary registration resources
+## Prepare ordinary registration resources
 
-PR1 keeps both shared overlays explicitly selected as `EVENT_PROCESSING_MODE=isolated` with the
-transition guard enabled. They use issue-290 reader and writer Secret names. The selected Kafka
-volume retains the existing ordinary trust name so the PR1 merge cannot require an unproven Secret
-rename. The issue-290 retirement owner targets a suffixed trust Secret for cleanup, but that
-unselected resource is not a prerequisite for PR1 reconciliation.
-Separate canonical patches are rendered and validated by the deployment check but remain unselected.
-
-The temporary retirement owner targets only `policy_stats_issue_290`,
-`policy-registered-issue-290` and the `dashboard-service-issue-290` consumer group, plus the
-separate issue-290 reader/writer identities and Secrets. The shared broker has no topic/group ACL,
-so exact configuration and NetworkPolicy are guards rather than broker authorization proof.
-
-Inspection is read-only. Retirement is a separate destructive operation that requires explicit
-authorization for the selected environment. Export the same exact coordinates used by deployment.
-For local development:
-
-```sh
-export DEPLOY_ENV=local-dev
-export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
-export DEPLOY_SVC_NS=local-dev-all
-export DEPLOY_DATA_NS=local-dev-all
-make -C services/dashboard-service retirement-inspect
-export DASHBOARD_RETIREMENT_CONFIRM=retire-local-dev-dashboard-issue-290
-make -C services/dashboard-service retirement-retire
-unset DASHBOARD_RETIREMENT_CONFIRM
-```
-
-For QA, use `qa-insurance-hub`, `qa-svc`, `qa-data` and confirmation
-`retire-qa-dashboard-issue-290`. Inspection is read-only. Retirement fails before effects when
-coordinates, ownership, mappings, roles, Secrets, Kafka cluster/listener or topic ownership differ,
-or when the exact consumer group has active members. It deletes the exact group before the topic,
-tolerates retirement Secrets that are already absent, and verifies that every owned resource is
-absent. Normal deployment/status/verification never invokes retirement.
-
-## Prepare registration access and transfer
-
-Registration inspection and verification are read-only. Ensure creates or updates only the
-exact-index reader and writer identities, ordinary workload Secrets, ordinary Kafka CA Secret,
-ordinary topic and empty index mapping. Before any Elasticsearch mutation it inspects the trust
-Secret. An absent Secret may be created; an issue-293 Secret may be refreshed; and an issue-290
-predecessor may be adopted only when its identity and `ca.crt` bytes match the selected broker and
-it either records the expected retirement field manager or has no field-manager history. A foreign
-recorded manager fails closed. It preserves compatible populated state and never seeds documents.
-Bind the exact catalog coordinates before running:
+Registration inspection and verification are read-only. Ensure creates only the accepted empty mapping, ordinary reader and writer identities, workload Secrets, Kafka CA Secret and topic when they are absent. It preserves compatible populated state, rejects foreign ownership or incompatible mappings and never seeds documents. Bind the exact catalog coordinates before running:
 
 ```sh
 make -C services/dashboard-service registration-inspect
@@ -197,23 +151,12 @@ unset DASHBOARD_REGISTRATION_CONFIRM
 make -C services/dashboard-service registration-verify
 ```
 
-The inspect and verify owners require two matching Kafka metadata/progress snapshots, every exact
-topic partition, in-range committed offsets and the exact ordinary index/identities. Provisioning
-must preserve the initial document count. Ordinary registration administration has no retire
-command.
-
-Forward transfer records index and per-partition progress, stops the whole Java Dashboard
-Deployment, and proves zero running or terminating Java Pods and zero canonical members before one
-Go canonical Pod starts. The runtime repeats stable progress checks before it acquires the group.
-Only after the Go workload and canonical effects qualify may the edge route select Go. Return stops
-Go first, proves the same quiescent boundary and stable progress, restores retained Java, and then
-routes to Java. An interrupted action re-inspects and classifies actual state before retry; overlap,
-unknown members or incomplete/out-of-range progress stops the procedure.
-
-Bound each local action to 180 seconds and local return to 10 minutes. Bound each QA revision to
-10 minutes and QA return to 30 minutes. Classify a safe abort phase within 60 seconds and initiate
-the selected return within 120 seconds. Record query downtime separately. QA writes remain owned
-by reviewed `qa-svc` Flux revisions; do not use the direct local controller there.
+The owners require two matching Kafka metadata/progress snapshots and the exact ordinary index and
+identities. When the consumer group exists, every topic partition must have an in-range committed
+offset. The owner does not initialize a missing `dashboard-service` consumer group; worker
+activation requires committed progress prepared outside this administration scope. The disposable
+smoke initializes only its isolated group. Provisioning must preserve the initial document count.
+Registration administration has no destructive command.
 
 ## Deploy to local development
 
@@ -240,9 +183,6 @@ export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
 export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
 : "${DEPLOY_IMAGE_REF:?set the exact source-derived local Dashboard image reference}"
-: "${DEPLOY_JAVA_DEPLOYMENT_UID:?set the recorded local-dev Java Deployment UID}"
-: "${DEPLOY_JAVA_SERVICE_UID:?set the recorded local-dev Java Service UID}"
-
 make go-svc-deploy-preflight SVC_NAME=dashboard
 make go-svc-image-load SVC_NAME=dashboard
 make go-svc-deploy SVC_NAME=dashboard
@@ -269,17 +209,12 @@ The predecessor input accepts only a source-derived local Dashboard image. It pe
 image, Deployment version labels and ConfigMap `SERVICE_VERSION` only before apply. Final status
 and verification require the selected replacement identity everywhere.
 
-For the first PR1 reconciliation only, preflight also accepts the exact historical local-dev
-predecessor with implicit isolated mode and the prior `RollingUpdate` strategy. Apply must replace
-those values with explicit mode selection and `Recreate`; final status rejects the predecessor.
-
 Preflight requires the namespace-local `local-dev-dashboard-elasticsearch` Secret to contain only
 the exact reader username and password, requires the reader identity
 `go_dashboard_total_sales_reader`, and verifies the selected ECK HTTP Service before image or
 workload mutation. It never prints or passes credential values on a host command line.
 
-Before and after deployment, record the Java Deployment and Service UIDs and availability. Verify
-the permitted HTTP total-sales, agent-sales and sales-trends requests, all three direct sales RPCs
+Verify the permitted HTTP total-sales, agent-sales and sales-trends requests, all three direct sales RPCs
 and management endpoints, then
 use labeled and unlabeled probe Pods to establish NetworkPolicy behavior. Confirm that OCI,
 runtime, Pod and ConfigMap versions agree; retain the full OCI revision, image tag and immutable
@@ -298,9 +233,9 @@ operation envelopes without assuming fixture totals; the disposable owner retain
 result assertions. The reader probe mounts the workload Secret inside Kubernetes, verifies
 exact-index count/mapping and the authenticated effective-privilege response, and checks
 unrelated-index, cluster-health and security-role denial with read-only requests. It does not
-attempt a write that could mutate canonical state if permissions drift.
+attempt a write that could mutate ordinary state if permissions drift.
 
-## Stop and return in local development
+## Stop in local development
 
 The bounded Go stop command scales only `local-dev-dashboard-api` to zero:
 
@@ -308,31 +243,21 @@ The bounded Go stop command scales only `local-dev-dashboard-api` to zero:
 make go-svc-stop SVC_NAME=dashboard
 ```
 
-For an isolated deployment, confirm that all Go endpoints disappear and that the Java Deployment
-and Service UIDs and availability remain unchanged. Restore the same accepted image with the
-guarded deploy, status and verify commands above. For canonical return, keep both workloads at zero
-and run the read-only return gate before restoring Java:
-
-```sh
-make -C services/dashboard-service canonical-return-check
-```
-
-The gate rejects any running or terminating Java/Go Pod, canonical member, incomplete partition,
-changed commit or out-of-range progress. Restore the retained Java Deployment only after it passes,
-then change the route after Java qualifies.
+Confirm that the Go endpoints disappear. Restore the same accepted image with the guarded deploy, status and verify commands above.
 
 ## Stage and observe QA
 
-The shared QA aggregate contains both `./dashboard` and `./dashboard/legacy`. The accepted current
-state keeps Java at zero replicas and selects canonical Go event processing plus the Go edge route.
+The shared QA aggregate composes the Go service through `./dashboard`. Its separate
+`./dashboard/legacy` entry preserves the retained Java manifests. The Go overlay directly selects
+ordinary event processing.
 The release owner publishes a reviewed semantic image, records its immutable digest and exact image
 source revision, and updates the Go overlay through the guarded release workflow. Flux performs
 every persistent QA mutation; direct status and verification commands do not own desired state.
 
-Do not apply, delete, load an image, scale a workload, live-patch desired state or suspend Flux in
-QA. Status is read-only. Verification requires separate authorization for its short-lived probe
-Pods and namespace, plus the full commit reported by the shared `qa-svc` Flux source and applied
-revision:
+Do not apply, delete, load an image, scale a workload or live-patch desired state in QA. Suspend
+Flux only for the bounded release hold below. Status is read-only. Verification requires separate
+authorization for its short-lived probe Pods and namespace, plus the full commit reported by the
+shared `qa-svc` Flux source and applied revision:
 
 ```sh
 export DEPLOY_ENV=qa
@@ -341,9 +266,6 @@ export DEPLOY_SVC_NS=qa-svc
 export DEPLOY_DATA_NS=qa-data
 : "${DEPLOY_SOURCE_REVISION:?set the full Flux source applied revision}"
 : "${DEPLOY_IMAGE_DIGEST:?set the sha256 registry digest}"
-: "${DEPLOY_JAVA_DEPLOYMENT_UID:?set the recorded QA Java Deployment UID}"
-: "${DEPLOY_JAVA_SERVICE_UID:?set the recorded QA Java Service UID}"
-
 make go-svc-deploy-status SVC_NAME=dashboard
 make go-svc-deploy-verify SVC_NAME=dashboard
 ```
@@ -365,22 +287,46 @@ Pod image ID, runtime identity, labeled and denied network probes, health and th
 results, reader permission denials, dependency behavior and Alloy delivery. Configuration or
 disposable evidence alone does not establish a QA result.
 
-## Return from QA activation
+When an accepted source/configuration change cannot start with the image currently pinned in QA,
+an authorized release owner may hold `qa-svc` reconciliation while the matching image is published.
+Use the hold only for that incompatible transition; it does not transfer desired-state ownership
+away from Flux.
 
-For a canonical return, first use reviewed Flux revisions to reconcile Go and Java to zero and run
-`make -C services/dashboard-service canonical-return-check`. Reconcile the retained Java Deployment only
-after that gate passes, qualify Java against the preserved canonical state, and then route back to
-Java. Keep monitoring and data resources unchanged. Record each source/applied revision, workload
-identity, route and progress snapshot before and after the return.
+Before merging the source change, require the `qa-insurance-hub` context, a Ready `qa-svc`
+Kustomization and the recorded current source/applied revision. Then suspend the exact owner and
+verify that its desired state reports the suspension:
+
+```sh
+flux suspend kustomization qa-svc --namespace flux-system --context qa-insurance-hub
+kubectl --context qa-insurance-hub --namespace flux-system get kustomization qa-svc \
+  -o jsonpath='{.spec.suspend}{"\n"}'
+```
+
+Keep the hold in place until the release workflow has published an image built from the accepted
+source and committed the matching semantic tag and `SERVICE_VERSION` to the QA overlay on `main`.
+Inspect that commit and the rendered Dashboard configuration before resuming. If publication or the
+overlay update fails, leave the hold in place and repair the reviewed Git source; do not patch QA.
+
+Resume the same owner only after the image/configuration pair is present in `main`, then observe the
+reconciliation and run the authorized status/verification sequence with the resulting full Flux
+revision and immutable image digest:
+
+```sh
+flux resume kustomization qa-svc --namespace flux-system --context qa-insurance-hub
+flux reconcile kustomization qa-svc --namespace flux-system --context qa-insurance-hub \
+  --with-source
+flux get kustomization qa-svc --namespace flux-system --context qa-insurance-hub
+```
+
 
 ## Diagnostics, stop conditions and recovery
 
-Stop before a target mutation when any declared environment, context, namespace, Java UID,
+Stop before a target mutation when any declared environment, context, namespace,
 Dashboard resource name, source revision, image reference/digest, Secret shape, Elasticsearch
 index/identity, Kafka topic/group or current Flux owner differs from the recorded candidate. Stop
 after mutation for a placeholder/mismatched runtime identity, an unexpected ready Pod, failed
 business/management probe, ownership overlap, reader privilege expansion, a writer or worker that
-does not match the selected isolated/canonical mode, unstable or out-of-range committed progress,
+does not match the ordinary registration coordinates, unstable or out-of-range committed progress,
 an unexplained readiness failure or incomplete owned cleanup. Preserve the first failure and
 current source/image/resource identities before retrying.
 
@@ -392,12 +338,13 @@ collector failure must not make liveness depend on Alloy.
 
 For local development, recovery uses the captured accepted image and the same guarded preflight,
 image-load, deploy, status and verify sequence. `go-svc-stop` may scale only
-`local-dev-dashboard-api`; it does not remove dependency resources. Verify Java UIDs and
-availability before and after recovery.
+`local-dev-dashboard-api`; it does not remove dependency resources.
 
-For QA, do not patch the workload or suspend Flux. Revert the reviewed Dashboard source change,
-let `qa-svc` reconcile, and record both source and applied revisions. Verify the exact prior image
-digest, Pod identity, Java UIDs, reader permissions and monitoring behavior after reconciliation.
+For QA, do not patch the workload. Outside an authorized incompatible-release hold, revert the
+reviewed Dashboard source change, let `qa-svc` reconcile, and record both source and applied
+revisions. During a hold, keep `qa-svc` suspended until the repaired image/configuration pair is
+reviewed in Git, then resume it through the procedure above. Verify the exact prior image digest,
+Pod identity, reader permissions and monitoring behavior after reconciliation.
 If monitoring source differs from application source, restore it through the separate guarded
 procedure rather than treating an application rollback as monitoring restoration.
 
@@ -406,9 +353,8 @@ untrusted namespace; the disposable deployment owns its unique namespace. Before
 interruption, check those exact recorded names and preserve an unexpected resource for diagnosis.
 Do not use broad namespace, Pod, process or consumer-group cleanup.
 
-Reader rotation and issue-290 event-resource retirement remain explicit administrative actions
-with their own confirmations. Never use retirement as routine deployment recovery. Removing group
-offsets, canonical data, shared Kafka/Elasticsearch/Alloy resources, Java authority or persistent
+Reader rotation remains an explicit administrative action with its own confirmation. Removing group
+offsets, ordinary data, shared Kafka/Elasticsearch/Alloy resources, Java authority or persistent
 QA Flux ownership is outside this runbook.
 
 ## Evidence checklist and later ownership
@@ -423,11 +369,9 @@ Retain the following without credentials or business data:
   topic/group without secret values;
 - render/preflight/status/verify results, all three HTTP/RPC outcomes, readiness/liveness,
   dependency fault/recovery and allowed/denied network/reader observations;
-- Java Deployment/Service UIDs and availability before and after the operation;
 - monitoring dashboard/rule identities, bounded investigation results and any stop/recovery path;
 - owned disposable/probe cleanup and final accepted state.
 
 Issue 291 owns the monitoring and service-root operating procedures. Issue 292 owns cumulative
-practical load and full application restoration evidence. Issue 293 owns canonical transfer in
-separate local-dev and QA gates, including independent edge routing. Later epic work owns final
-Java retirement. Nothing in this runbook alone authorizes a shared-target transfer.
+practical load and full application restoration evidence. Nothing in this runbook alone authorizes
+a shared-target mutation.

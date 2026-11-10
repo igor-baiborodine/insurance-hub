@@ -14,10 +14,10 @@
 # Dashboard service
 
 `dashboard-service` is the private Go Dashboard process. It exposes total-sales, agent-sales and
-sales-trends queries and supports closed `disabled`, `isolated` and `canonical` event modes. The
-local-dev and QA overlays select canonical `policy_stats`, `policy-registered` and
-`dashboard-service`; the Java Dashboard Deployments remain stopped as compatible return resources.
-The isolated issue-290 path remains available only until the separately gated retirement in #294.
+sales-trends queries and optionally runs the registration worker. Local-dev and QA use the single
+ordinary `policy_stats` index, `policy-registered` topic and `dashboard-service` consumer group.
+The retained Java Dashboard source and manifests are separate legacy assets and are not used by the
+Go service workflow.
 
 The standalone module is
 `github.com/igor-baiborodine/insurance-hub/services/dashboard-service`. It resolves the published
@@ -85,8 +85,8 @@ the worker before the documented HTTP-first RPC drain.
 | `internal/grpc` | Register all three sales operations, enforce request validation and map safe gRPC statuses |
 | `internal/application` | Own three query use cases plus the received registration projection and narrow ports |
 | `internal/domain` | Own date/filter presence, aggregation units, periods, counts, projection values and exact decimal tokens |
-| `internal/elasticsearch` | Execute bounded analytics reads and mode-selected refreshed whole-document replacement through separate clients |
-| `internal/kafka` | Inspect canonical progress before group acquisition and consume one selected registration topic with bounded commit and stop behavior |
+| `internal/elasticsearch` | Execute bounded analytics reads and refreshed whole-document replacement through separate clients on the ordinary index |
+| `internal/kafka` | Inspect ordinary progress before group acquisition and consume the registration topic with bounded commit and stop behavior |
 | `internal/service` | Compose listeners/providers/query dependencies and the conditional worker, readiness, rollback and drain |
 | `internal/logger` | Emit safe completion records with Dashboard runtime identity |
 | `internal/telemetry` | Own bounded HTTP/RPC, Elasticsearch, registration, commit-failure and worker-state signals over Servicekit providers |
@@ -108,7 +108,7 @@ value.
 | HTTP limits | Header/body `16384`/`4096` bytes; read-header/read/write/idle `5s`/`10s`/`10s`/`30s` |
 | gRPC limits | Receive/send `1048576`/`8388608` bytes |
 | Elasticsearch | `ELASTICSEARCH_URL=http://127.0.0.1:9200`, fixed `ELASTICSEARCH_INDEX=policy_stats`, optional paired `ELASTICSEARCH_USERNAME`/`ELASTICSEARCH_PASSWORD`, HTTPS-only `ELASTICSEARCH_CA_FILE`, `ELASTICSEARCH_TIMEOUT=5s` maximum |
-| Registration worker | `EVENT_PROCESSING_MODE=disabled|isolated|canonical` with coherent `EVENT_WORKERS_ENABLED`; isolated selects the retained issue-290 index/topic/group and suffixed Elasticsearch Secrets, while canonical selects only `policy_stats`, `policy-registered`, `dashboard-service` and ordinary Secrets. Both active shared overlays select canonical mode. Canonical startup requires stable commits, complete in-range progress and no active member before group acquisition; new log-end arrivals may increase the backlog. |
+| Registration worker | `EVENT_WORKERS_ENABLED=false|true`; when enabled, the fixed coordinates are `policy_stats`, `policy-registered` and `dashboard-service`, with ordinary reader/writer Secrets. Startup requires stable commits, complete in-range progress and no active member before group acquisition; new log-end arrivals may increase the backlog. |
 | Sales trends | Required `SALES_TRENDS_TIME_ZONE`; exact available IANA name loaded once at startup. Empty, `Local`, whitespace-altered and unknown values fail. Local-dev and QA use `GMT`. |
 | Telemetry | `OTEL_ENABLED=false`, optional `OTEL_EXPORTER_OTLP_ENDPOINT`; exporter timeout defaults to `2s` and accepts positive Go duration syntax. Deployed configuration omits `OTEL_EXPORTER_OTLP_TIMEOUT`, and deployment guards reject an override. |
 | Logging | `LOG_LEVEL=info`; safe structured fields only |
@@ -158,7 +158,7 @@ or read another index; dependency loss withdraws readiness while liveness remain
 the business response stays safe; shutdown remains bounded.
 
 `make -C services/dashboard-service test-event-integration` owns disposable TLS Kafka and
-Elasticsearch, creates only the issue-290 topic/group/index, runs the production registration
+Elasticsearch, creates only the ordinary topic/group/index, runs the production registration
 worker, and exercises the resulting document through direct RPC and the generated HTTP-to-RPC
 gateway for all three cumulative queries. Its index setup and cleanup are fixture administration;
 normal serving never creates, seeds or remaps state.
@@ -218,14 +218,6 @@ exact-index writer plus ordinary workload and Kafka-trust Secrets. Ensure create
 mapping, topic, roles and trust only when absent, preserves compatible populated state, and rejects
 foreign ownership or incompatible state. It never seeds documents.
 
-The temporary issue-290 owner is exposed through the service-local `retirement-inspect` and
-`retirement-retire` targets. Inspection is read-only and accepts already-absent retirement Secrets.
-Retirement requires exact issue-290 ownership, rejects active consumer-group members, deletes the
-exact group and owned resources, and verifies every postcondition. The isolated retirement owner
-rejects ordinary registration names before its first inspection or deletion.
-`canonical-return-check` observes both workloads, terminating Pods, canonical membership and
-stable progress before Java return.
-
 The guarded local-dev sequence uses catalog service `dashboard`, context
 `kind-local-dev-insurance-hub` and namespace coordinate `local-dev-all`:
 
@@ -235,9 +227,6 @@ export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
 export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
 : "${DEPLOY_IMAGE_REF:?set the exact source-derived local Dashboard image reference}"
-: "${DEPLOY_JAVA_DEPLOYMENT_UID:?set the recorded local-dev Java Deployment UID}"
-: "${DEPLOY_JAVA_SERVICE_UID:?set the recorded local-dev Java Service UID}"
-
 make go-svc-deploy-preflight SVC_NAME=dashboard
 make go-svc-image-load SVC_NAME=dashboard
 make go-svc-deploy SVC_NAME=dashboard
@@ -249,10 +238,8 @@ When replacing an existing local release, export its exact running image as
 `DEPLOY_PREVIOUS_IMAGE_REF` before preflight. Keep it set through `go-svc-deploy`, then unset it
 before status and verification. The deployment runbook contains the complete command sequence.
 
-`go-svc-stop` scales only the Go Dashboard Deployment to zero. Canonical transfer separately stops
-the whole Java Deployment, proves that no running or terminating Java Pod or canonical member
-remains, and then starts one Go Pod through the non-surging `Recreate` strategy. Return stops Go
-first and proves the same boundary before Java resumes. The edge route changes independently. The
+`go-svc-stop` scales only the Go Dashboard Deployment to zero. The Go workload uses the non-surging
+`Recreate` strategy, and the edge route remains independently owned. The
 [Dashboard deployment runbook](deployment-runbook.md) owns the complete procedure and budgets.
 
 The [Dashboard observability runbook](observability-runbook.md) owns monitoring validation,

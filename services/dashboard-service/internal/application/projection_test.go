@@ -41,7 +41,7 @@ func TestProjectPolicy_MapsAllReceivedValuesAndReplacesByNumber(t *testing.T) {
 	agent := "synthetic-agent"
 	premium := projectionPremium(t, "9007199254740993.1234567")
 	event := PolicyEvent{
-		Number: "SYN-290-001", From: from, To: to, PolicyHolder: &holder,
+		Number: "SYN-001", From: from, To: to, PolicyHolder: &holder,
 		ProductCode: &product, TotalPremium: premium, AgentLogin: &agent,
 	}
 	replacement := event
@@ -109,8 +109,8 @@ func TestProjectPolicy_RejectsIdentityAndPreservesFailures(t *testing.T) {
 
 	// when
 	missingErr := useCase.Execute(context.Background(), PolicyEvent{})
-	canceledErr := useCase.Execute(canceled, PolicyEvent{Number: "SYN-290-CANCEL"})
-	writeErr := useCase.Execute(context.Background(), PolicyEvent{Number: "SYN-290-FAIL"})
+	canceledErr := useCase.Execute(canceled, PolicyEvent{Number: "SYN-CANCEL"})
+	writeErr := useCase.Execute(context.Background(), PolicyEvent{Number: "SYN-FAIL"})
 	_, constructorErr := NewProjectPolicy(nil)
 
 	// then

@@ -170,8 +170,6 @@ def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() 
     for unsupported in (
         "fixture-setup",
         "registration-inspect",
-        "retirement-inspect",
-        "canonical-return-check",
         "deploy-test-flux",
         "initialize",
     ):

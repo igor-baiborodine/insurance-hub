@@ -17,10 +17,10 @@ from scripts.python.process_runner import CommandError
 from service_process import child_environment
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
-REGISTERED_TOPIC = "policy-registered-issue-290"
-CONSUMER_GROUP = "dashboard-service-issue-290"
-INDEX = "policy_stats_issue_290"
-OWNERSHIP = "issue-290-disposable"
+REGISTERED_TOPIC = "policy-registered"
+CONSUMER_GROUP = "dashboard-service"
+INDEX = "policy_stats"
+OWNERSHIP = "dashboard-disposable"
 AMBIENT_TARGET_VARIABLES = (
     "DASHBOARD_TEST_ELASTICSEARCH_URL",
     "DASHBOARD_TEST_KAFKA_BROKERS",
@@ -156,7 +156,7 @@ def create_kafka_certificates(
             "-days",
             "1",
             "-subj",
-            "/CN=issue-290-disposable-ca",
+            "/CN=dashboard-disposable-ca",
             "-keyout",
             str(ca_key),
             "-out",
@@ -275,7 +275,7 @@ def main() -> int:
                 "volume",
                 "create",
                 "--label",
-                "insurance-hub.owner=issue-290-disposable",
+                "insurance-hub.owner=dashboard-disposable",
                 kafka_secrets_volume,
             ],
             cwd=MODULE_ROOT,

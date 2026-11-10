@@ -50,7 +50,7 @@ def rendered_items() -> list[dict[str, object]]:
             "data": {
                 "SERVICE_VERSION": "git-aaaaaaaaaaaa",
                 "EVENT_WORKERS_ENABLED": "true",
-                "KAFKA_BROKERS": "canonical-kafka:9093",
+                "KAFKA_BROKERS": "registration-kafka:9093",
                 "KAFKA_GROUP": "dashboard-service",
                 "KAFKA_REGISTERED_TOPIC": "policy-registered",
                 "KAFKA_CA_FILE": "/etc/dashboard/kafka/ca.crt",
@@ -165,7 +165,6 @@ def test_render_adds_owned_dependency_reader_secret_and_exact_identity(
     )["data"]
     assert config["SERVICE_VERSION"] == "git-0123456789ab"
     assert config["ELASTICSEARCH_USERNAME"] == disposable_deployment.READER_USERNAME
-    assert config["EVENT_PROCESSING_MODE"] == "disabled"
     assert config["EVENT_WORKERS_ENABLED"] == "false"
     assert not any(name.startswith("KAFKA_") for name in config)
     environment = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
@@ -210,7 +209,9 @@ def test_render_adds_owned_dependency_reader_secret_and_exact_identity(
     assert policy["spec"]["egress"][1]["ports"] == [{"port": 9200, "protocol": "TCP"}]
 
 
-def test_event_enabled_render_uses_only_issue_290_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_registration_enabled_render_uses_only_ordinary_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     items = rendered_items()
     monkeypatch.setattr(disposable_deployment.checks, "render", lambda _environment: "rendered")
     monkeypatch.setattr(
@@ -225,26 +226,26 @@ def test_event_enabled_render_uses_only_issue_290_inputs(monkeypatch: pytest.Mon
         "insurance-hub-dashboard-api:1.0.0-local.0123456789ab",
         "0123456789ab",
         "elasticsearch@example@sha256:" + "a" * 64,
-        event_mode="isolated",
+        workers_enabled=True,
     )
 
     config = disposable_deployment.checks.resource(
         actual, "ConfigMap", "local-dev-dashboard-config"
     )["data"]
     assert config["EVENT_WORKERS_ENABLED"] == "true"
-    assert config["ELASTICSEARCH_INDEX"] == "policy_stats_issue_290"
-    assert config["KAFKA_REGISTERED_TOPIC"] == "policy-registered-issue-290"
+    assert config["ELASTICSEARCH_INDEX"] == "policy_stats"
+    assert config["KAFKA_REGISTERED_TOPIC"] == "policy-registered"
     deployment = disposable_deployment.checks.resource(
         actual, "Deployment", "local-dev-dashboard-api"
     )
     container = deployment["spec"]["template"]["spec"]["containers"][0]
     environment = {item["name"]: item for item in container["env"]}
     assert environment["ELASTICSEARCH_USERNAME"]["valueFrom"]["secretKeyRef"]["name"] == (
-        "local-dev-dashboard-elasticsearch-issue-290"
+        "local-dev-dashboard-elasticsearch"
     )
     assert (
         environment["ELASTICSEARCH_WRITER_USERNAME"]["valueFrom"]["secretKeyRef"]["name"]
-        == "local-dev-dashboard-elasticsearch-writer-issue-290"
+        == "local-dev-dashboard-elasticsearch-writer"
     )
     assert container["volumeMounts"] == [
         {"name": "kafka-ca", "mountPath": "/etc/dashboard/kafka", "readOnly": True}
@@ -492,7 +493,7 @@ def test_runtime_registry_digest_must_match_containerd_and_pod() -> None:
 def test_offset_parser_and_state_comparison_reject_reset() -> None:
     output = """
 GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID
-dashboard-service-issue-290 policy-registered-issue-290 0 3 3 0 - - -
+dashboard-service policy-registered 0 3 3 0 - - -
 """
     offsets = disposable_deployment.parse_consumer_group_offsets(output)
     mapping = {"dynamic": "strict"}

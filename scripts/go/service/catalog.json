@@ -262,17 +262,6 @@
         "role": "go_dashboard_total_sales_reader",
         "user": "go_dashboard_total_sales_reader"
       },
-      "retirementAdministration": {
-        "owner": "issue-290",
-        "asset": "services/dashboard-service/internal/administration/retirement-registration.json",
-        "index": "policy_stats_issue_290",
-        "readerRole": "go_dashboard_issue_290_reader",
-        "readerUser": "go_dashboard_issue_290_reader",
-        "writerRole": "go_dashboard_issue_290_writer",
-        "writerUser": "go_dashboard_issue_290_writer",
-        "registeredTopic": "policy-registered-issue-290",
-        "consumerGroup": "dashboard-service-issue-290"
-      },
       "deploymentTargets": {
         "local-dev": {
           "mode": "direct",
@@ -287,19 +276,6 @@
             "publicCASecret": "",
             "workloadCASecret": "",
             "serverName": ""
-          },
-          "retirementAdministration": {
-            "service": "local-dev-elasticsearch-es-http",
-            "adminSecret": "local-dev-elasticsearch-es-elastic-user",
-            "readerSecret": "local-dev-dashboard-elasticsearch-issue-290",
-            "writerSecret": "local-dev-dashboard-elasticsearch-writer-issue-290",
-            "publicCASecret": "",
-            "serverName": "",
-            "kafkaCluster": "local-dev-kafka",
-            "kafkaBootstrap": "local-dev-kafka-kafka-bootstrap:9093",
-            "kafkaPublicCASecret": "local-dev-kafka-cluster-ca-cert",
-            "kafkaWorkloadCASecret": "local-dev-dashboard-kafka-ca-issue-290",
-            "kafkaReplicas": 1
           },
           "kindCluster": "local-dev-insurance-hub",
           "registrationAdministration": {
@@ -329,19 +305,6 @@
             "publicCASecret": "qa-elasticsearch-es-http-certs-public",
             "workloadCASecret": "qa-dashboard-elasticsearch-ca",
             "serverName": "qa-elasticsearch-es-http.qa-data.svc"
-          },
-          "retirementAdministration": {
-            "service": "qa-elasticsearch-es-http",
-            "adminSecret": "qa-elasticsearch-es-elastic-user",
-            "readerSecret": "qa-dashboard-elasticsearch-issue-290",
-            "writerSecret": "qa-dashboard-elasticsearch-writer-issue-290",
-            "publicCASecret": "qa-elasticsearch-es-http-certs-public",
-            "serverName": "qa-elasticsearch-es-http.qa-data.svc",
-            "kafkaCluster": "qa-kafka",
-            "kafkaBootstrap": "qa-kafka-kafka-bootstrap.qa-data.svc:9093",
-            "kafkaPublicCASecret": "qa-kafka-cluster-ca-cert",
-            "kafkaWorkloadCASecret": "qa-dashboard-kafka-ca-issue-290",
-            "kafkaReplicas": 3
           },
           "flux": {
             "namespace": "flux-system",

@@ -340,7 +340,6 @@ func TestRun_EnabledWorkerUsesExactSettingsAndBoundedLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings.Events = config.Events{
-		Mode:            config.EventProcessingCanonical,
 		Enabled:         true,
 		Brokers:         []string{"kafka.example:9093"},
 		Group:           "dashboard-service",
@@ -376,8 +375,8 @@ func TestRun_EnabledWorkerUsesExactSettingsAndBoundedLifecycle(t *testing.T) {
 	deps.newWorker = func(got dashboardkafka.Settings, _ projectionRuntime, _ *slog.Logger) (eventWorker, error) {
 		if got.ClientID != "policy-registered-dashboard-listener" ||
 			got.Group != "dashboard-service" || got.Topic != "policy-registered" ||
-			got.EventType != "registered" || !got.RequireCommittedProgress ||
-			got.Propagator == nil || got.Observe == nil || got.CommitFailure == nil ||
+			got.EventType != "registered" || got.Propagator == nil || got.Observe == nil ||
+			got.CommitFailure == nil ||
 			string(got.CACert) != "test CA" {
 			t.Fatalf("worker settings = %+v", got)
 		}
@@ -422,10 +421,10 @@ func TestRun_EnabledWorkerConstructionFailureCleansProjection(t *testing.T) {
 	settings.Events = config.Events{
 		Enabled:         true,
 		Brokers:         []string{"kafka.example:9093"},
-		Group:           "dashboard-service-issue-290",
-		RegisteredTopic: "policy-registered-issue-290",
+		Group:           "dashboard-service",
+		RegisteredTopic: "policy-registered",
 		CAFile:          caFile,
-		Writer:          config.Elasticsearch{Index: "policy_stats_issue_290"},
+		Writer:          config.Elasticsearch{Index: "policy_stats"},
 	}
 	projection := &fakeProjectionRuntime{}
 	failure := errors.New("construct registration worker")

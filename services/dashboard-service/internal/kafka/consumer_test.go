@@ -27,7 +27,7 @@ func TestWorker_SkipsMalformedAndStopsFailedFetchedBatch(t *testing.T) {
 		{Value: []byte(`{"policy":`)},
 		{
 			Value: []byte(
-				`{"policy":{"number":"SYN-290-001","from":[2026,1,1],"to":[2026,12,31],"policyHolder":"Synthetic Holder A","productCode":"HSI","totalPremium":123.456700,"agentLogin":null}}`,
+				`{"policy":{"number":"SYN-001","from":[2026,1,1],"to":[2026,12,31],"policyHolder":"Synthetic Holder A","productCode":"HSI","totalPremium":123.456700,"agentLogin":null}}`,
 			),
 		},
 		{Value: []byte(`{"policy":{"number":"must-not-run"}}`)},
@@ -51,14 +51,14 @@ func TestWorker_SkipsMalformedAndStopsFailedFetchedBatch(t *testing.T) {
 	}
 
 	// then
-	if got := projection.events(); len(got) != 1 || got[0].Number != "SYN-290-001" {
+	if got := projection.events(); len(got) != 1 || got[0].Number != "SYN-001" {
 		t.Fatalf("projected events = %+v", got)
 	}
 	if consumer.allowCount() == 0 {
 		t.Fatal("worker did not release a blocked rebalance")
 	}
 	if bytes.Contains(logs.Bytes(), []byte("Synthetic Holder A")) ||
-		bytes.Contains(logs.Bytes(), []byte("SYN-290-001")) {
+		bytes.Contains(logs.Bytes(), []byte("SYN-001")) {
 		t.Fatalf("diagnostic exposed event payload: %s", logs.String())
 	}
 }
@@ -165,7 +165,7 @@ func TestWorker_ExtractsTraceContextAndRecordsBoundedOutcome(t *testing.T) {
 				),
 			},
 		},
-		Value: []byte(`{"policy":{"number":"SYN-290-TRACE","policyHolder":"Synthetic"}}`),
+		Value: []byte(`{"policy":{"number":"SYN-TRACE","policyHolder":"Synthetic"}}`),
 	}}}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -208,8 +208,8 @@ func TestNewWorker_RejectsEmptyCACertificate(t *testing.T) {
 	// given
 	settings := Settings{
 		Brokers:   []string{"kafka.example:9093"},
-		Group:     "issue-290",
-		Topic:     "policy-registered-issue-290",
+		Group:     "dashboard-service",
+		Topic:     "policy-registered",
 		ClientID:  "policy-registered-dashboard-listener",
 		EventType: "registered",
 		CACert:    []byte(" \n\t"),
@@ -224,7 +224,7 @@ func TestNewWorker_RejectsEmptyCACertificate(t *testing.T) {
 	}
 }
 
-func TestNewWorker_CanonicalSettingsDeferGroupConsumerUntilPreflight(t *testing.T) {
+func TestNewWorker_DefersGroupConsumerUntilPreflight(t *testing.T) {
 	// given
 	server := httptest.NewTLSServer(
 		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
@@ -234,13 +234,12 @@ func TestNewWorker_CanonicalSettingsDeferGroupConsumerUntilPreflight(t *testing.
 	})
 	server.Close()
 	settings := Settings{
-		Brokers:                  []string{"kafka.example:9093"},
-		Group:                    "dashboard-service",
-		Topic:                    "policy-registered",
-		ClientID:                 "policy-registered-dashboard-listener",
-		CACert:                   certificate,
-		EventType:                "registered",
-		RequireCommittedProgress: true,
+		Brokers:   []string{"kafka.example:9093"},
+		Group:     "dashboard-service",
+		Topic:     "policy-registered",
+		ClientID:  "policy-registered-dashboard-listener",
+		CACert:    certificate,
+		EventType: "registered",
 	}
 
 	// when
@@ -251,7 +250,7 @@ func TestNewWorker_CanonicalSettingsDeferGroupConsumerUntilPreflight(t *testing.
 	}
 	if worker.client != nil || worker.preflight == nil {
 		t.Fatalf(
-			"canonical worker before preflight = client:%v preflight:%t",
+			"worker before preflight = client:%v preflight:%t",
 			worker.client,
 			worker.preflight != nil,
 		)
@@ -285,7 +284,7 @@ func TestWorker_CheckRequiresStableAssignment(t *testing.T) {
 	}
 }
 
-func TestVerifyCanonicalProgress_RequiresStableCompleteInRangeSnapshot(t *testing.T) {
+func TestVerifyCommittedProgress_RequiresStableCompleteInRangeSnapshot(t *testing.T) {
 	// given
 	tests := []struct {
 		name      string
@@ -342,7 +341,7 @@ func TestVerifyCanonicalProgress_RequiresStableCompleteInRangeSnapshot(t *testin
 			client := test.client
 
 			// when
-			err := verifyCanonicalProgress(
+			err := verifyCommittedProgress(
 				context.Background(),
 				&client,
 				"policy-registered",
@@ -356,7 +355,7 @@ func TestVerifyCanonicalProgress_RequiresStableCompleteInRangeSnapshot(t *testin
 			if test.wantError != "" &&
 				(err == nil || !strings.Contains(err.Error(), test.wantError)) {
 				t.Fatalf(
-					"verifyCanonicalProgress() error = %v, want %q",
+					"verifyCommittedProgress() error = %v, want %q",
 					err,
 					test.wantError,
 				)
@@ -365,7 +364,7 @@ func TestVerifyCanonicalProgress_RequiresStableCompleteInRangeSnapshot(t *testin
 	}
 }
 
-func TestWorker_PreflightConstructsCanonicalConsumerOnlyAfterGuard(t *testing.T) {
+func TestWorker_PreflightConstructsCommittedConsumerOnlyAfterGuard(t *testing.T) {
 	consumer := &fakeClient{}
 	calls := 0
 	worker := &Worker{preflight: func(context.Context) (consumerClient, error) {
@@ -373,7 +372,7 @@ func TestWorker_PreflightConstructsCanonicalConsumerOnlyAfterGuard(t *testing.T)
 		return consumer, nil
 	}}
 	if worker.client != nil {
-		t.Fatal("canonical consumer existed before preflight")
+		t.Fatal("group consumer existed before preflight")
 	}
 	if err := worker.Preflight(context.Background()); err != nil {
 		t.Fatal(err)
@@ -419,7 +418,7 @@ func TestWorker_PreflightFailsClosedWithoutUsableConsumer(t *testing.T) {
 	}
 }
 
-func TestCanonicalProgressReadersValidateBrokerResponseShape(t *testing.T) {
+func TestCommittedProgressReadersValidateBrokerResponseShape(t *testing.T) {
 	topic := "policy-registered"
 	t.Run("legacy committed offsets", func(t *testing.T) {
 		client := staticRequestClient{response: &kmsg.OffsetFetchResponse{

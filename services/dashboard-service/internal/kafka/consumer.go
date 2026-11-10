@@ -35,16 +35,15 @@ var (
 
 // Settings captures the explicit Java-compatible registration client behavior.
 type Settings struct {
-	Brokers                  []string
-	Group                    string
-	Topic                    string
-	ClientID                 string
-	CACert                   []byte
-	EventType                string
-	Propagator               propagation.TextMapPropagator
-	Observe                  func(context.Context, string) (context.Context, func(context.Context, string, error))
-	CommitFailure            func(context.Context, string)
-	RequireCommittedProgress bool
+	Brokers       []string
+	Group         string
+	Topic         string
+	ClientID      string
+	CACert        []byte
+	EventType     string
+	Propagator    propagation.TextMapPropagator
+	Observe       func(context.Context, string) (context.Context, func(context.Context, string, error))
+	CommitFailure func(context.Context, string)
 }
 
 type projection interface {
@@ -173,64 +172,46 @@ func NewWorker(settings Settings, projection projection, logger *slog.Logger) (*
 		RootCAs:    roots,
 	}
 	baseOptions = append(baseOptions, kgo.DialTLSConfig(tlsSettings))
-	consumerOptions = append(consumerOptions, kgo.DialTLSConfig(tlsSettings))
-	if settings.RequireCommittedProgress {
-		consumerOptions = append(
-			consumerOptions,
-			kgo.ConsumeResetOffset(kgo.NoResetOffset()),
-		)
-	} else {
-		consumerOptions = append(
-			consumerOptions,
-			kgo.ConsumeStartOffset(kgo.NewOffset().AtStart()),
-			kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
-		)
-	}
+	consumerOptions = append(
+		consumerOptions,
+		kgo.DialTLSConfig(tlsSettings),
+		kgo.ConsumeResetOffset(kgo.NoResetOffset()),
+	)
 	worker := &Worker{
 		projection: projection,
 		logger:     logger, assigned: assigned,
 		eventType: settings.EventType, propagator: settings.Propagator,
 		observe: settings.Observe, commitFailure: settings.CommitFailure,
 	}
-	if settings.RequireCommittedProgress {
-		worker.preflight = func(ctx context.Context) (consumerClient, error) {
-			inspector, err := kgo.NewClient(baseOptions...)
-			if err != nil {
-				return nil, errors.New(
-					"preflight dashboard registration worker: create Kafka inspector",
-				)
-			}
-			if err := verifyCanonicalProgress(
-				ctx,
-				inspector,
-				settings.Topic,
-				settings.Group,
-			); err != nil {
-				inspector.Close()
-				return nil, err
-			}
-			inspector.Close()
-			consumer, err := kgo.NewClient(consumerOptions...)
-			if err != nil {
-				return nil, errors.New(
-					"preflight dashboard registration worker: create Kafka consumer",
-				)
-			}
-			return franzClient{client: consumer}, nil
+	worker.preflight = func(ctx context.Context) (consumerClient, error) {
+		inspector, err := kgo.NewClient(baseOptions...)
+		if err != nil {
+			return nil, errors.New(
+				"preflight dashboard registration worker: create Kafka inspector",
+			)
 		}
-		return worker, nil
+		if err := verifyCommittedProgress(
+			ctx,
+			inspector,
+			settings.Topic,
+			settings.Group,
+		); err != nil {
+			inspector.Close()
+			return nil, err
+		}
+		inspector.Close()
+		consumer, err := kgo.NewClient(consumerOptions...)
+		if err != nil {
+			return nil, errors.New(
+				"preflight dashboard registration worker: create Kafka consumer",
+			)
+		}
+		return franzClient{client: consumer}, nil
 	}
-	consumer, err := kgo.NewClient(consumerOptions...)
-	if err != nil {
-		return nil, errors.New(
-			"configure dashboard registration worker: create Kafka client",
-		)
-	}
-	worker.client = franzClient{client: consumer}
 	return worker, nil
 }
 
-// Preflight proves canonical progress before constructing a group consumer.
+// Preflight proves committed progress before constructing a group consumer.
 func (worker *Worker) Preflight(ctx context.Context) error {
 	if worker == nil {
 		return errors.New("preflight dashboard registration worker: worker is required")
@@ -256,27 +237,27 @@ type partitionProgress struct {
 	end       int64
 }
 
-func verifyCanonicalProgress(
+func verifyCommittedProgress(
 	ctx context.Context,
 	client requestClient,
 	topic string,
 	group string,
 ) error {
-	first, err := readCanonicalProgress(ctx, client, topic, group)
+	first, err := readCommittedProgress(ctx, client, topic, group)
 	if err != nil {
 		return err
 	}
-	second, err := readCanonicalProgress(ctx, client, topic, group)
+	second, err := readCommittedProgress(ctx, client, topic, group)
 	if err != nil {
 		return err
 	}
-	if !canonicalProgressStable(first, second) {
+	if !committedProgressStable(first, second) {
 		return errors.New("preflight dashboard registration worker: Kafka progress changed")
 	}
 	return nil
 }
 
-func canonicalProgressStable(
+func committedProgressStable(
 	first map[int32]partitionProgress,
 	second map[int32]partitionProgress,
 ) bool {
@@ -293,7 +274,7 @@ func canonicalProgressStable(
 	return true
 }
 
-func readCanonicalProgress(
+func readCommittedProgress(
 	ctx context.Context,
 	client requestClient,
 	topic string,

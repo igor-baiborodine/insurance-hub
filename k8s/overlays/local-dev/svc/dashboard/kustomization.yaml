@@ -20,24 +20,18 @@ configMapGenerator:
       - DEPLOYMENT_ENVIRONMENT=local-dev
       - SERVICE_VERSION=git-7091b35cae12
       - ELASTICSEARCH_URL=http://local-dev-elasticsearch-es-http.local-dev-all.svc:9200
+      - EVENT_WORKERS_ENABLED=true
+      - PROBE_TIMEOUT=30s
+      - KAFKA_BROKERS=local-dev-kafka-kafka-bootstrap:9093
+      - KAFKA_GROUP=dashboard-service
+      - KAFKA_REGISTERED_TOPIC=policy-registered
+      - KAFKA_CA_FILE=/etc/dashboard/kafka/ca.crt
 patches:
   - path: deployment-patch.yaml
     target:
       kind: Deployment
       name: dashboard-api
   - path: network-policy-patch.yaml
-    target:
-      kind: NetworkPolicy
-      name: dashboard-api
-  - path: canonical-config-patch.yaml
-    target:
-      kind: ConfigMap
-      name: dashboard-config
-  - path: canonical-deployment-patch.yaml
-    target:
-      kind: Deployment
-      name: dashboard-api
-  - path: event-enabled-network-policy-patch.yaml
     target:
       kind: NetworkPolicy
       name: dashboard-api

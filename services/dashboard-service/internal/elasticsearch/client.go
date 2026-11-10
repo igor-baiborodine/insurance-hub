@@ -20,10 +20,7 @@ import (
 	"github.com/elastic/go-elasticsearch/v8/esapi"
 )
 
-const (
-	PolicyIndex     = "policy_stats"
-	ProjectionIndex = "policy_stats_issue_290"
-)
+const PolicyIndex = "policy_stats"
 
 const maximumCheckResponseBytes = 1 << 20
 
@@ -109,7 +106,7 @@ func New(settings Config) (*Client, error) {
 }
 
 func dashboardIndex(index string) bool {
-	return index == PolicyIndex || index == ProjectionIndex
+	return index == PolicyIndex
 }
 
 // Check verifies exact-index compatibility without creating or changing cluster state.

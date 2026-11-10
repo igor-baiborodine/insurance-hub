@@ -7,12 +7,10 @@ import json
 import os
 import signal
 from copy import deepcopy
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import dashboard_deployment_checks as checks
-import ownership_transition as transition
 import pytest
 import yaml
 from scripts.go.service import deployment as lifecycle
@@ -493,11 +491,10 @@ def test_verify_runs_rpc_and_access_after_all_http_smokes_fail() -> None:
         process.wait.return_value = 0
     with (
         patch.object(checks, "workload_dependencies"),
-        patch.object(checks, "role_snapshot", return_value={"java": "unchanged"}),
+        patch.object(checks, "role_snapshot", return_value={"ordinary": "unchanged"}),
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
         patch.object(checks.subprocess, "Popen", side_effect=processes),
         patch.object(checks, "_wait_for_port_forward"),
-        patch.object(checks, "event_activation_enabled", return_value=False),
         patch.object(
             checks,
             "_http",
@@ -522,7 +519,7 @@ def test_verify_runs_rpc_and_access_after_all_http_smokes_fail() -> None:
 
 
 @pytest.mark.parametrize("trend_body", [b"{}", b'{"periodSales":[]}'])
-def test_verify_canonical_accepts_empty_and_populated_trend_envelopes(
+def test_verify_accepts_empty_and_populated_trend_envelopes(
     trend_body: bytes,
 ) -> None:
     target = Mock(
@@ -531,19 +528,16 @@ def test_verify_canonical_accepts_empty_and_populated_trend_envelopes(
         namespace="local-dev-all",
         business="local-dev-dashboard-api",
         management="local-dev-dashboard-api-management",
-        processing_mode="canonical",
     )
     processes = [Mock(), Mock(), Mock()]
     for process in processes:
         process.wait.return_value = 0
     with (
         patch.object(checks, "workload_dependencies"),
-        patch.object(checks, "role_snapshot", return_value={"java": "unchanged"}),
+        patch.object(checks, "role_snapshot", return_value={"ordinary": "unchanged"}),
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
         patch.object(checks.subprocess, "Popen", side_effect=processes),
         patch.object(checks, "_wait_for_port_forward"),
-        patch.object(checks, "event_activation_enabled", return_value=True),
-        patch.object(checks, "produce_registration_fixture") as fixture,
         patch.object(
             checks,
             "_http",
@@ -560,7 +554,6 @@ def test_verify_canonical_accepts_empty_and_populated_trend_envelopes(
         checks.verify(target, [])
 
     rpc.assert_called_once_with(19090, "shared-smoke")
-    fixture.assert_not_called()
     access.assert_called_once_with(target)
 
 
@@ -578,11 +571,10 @@ def test_verify_cleans_every_port_forward_when_direct_rpc_stops(failure: BaseExc
         process.wait.return_value = 0
     with (
         patch.object(checks, "workload_dependencies"),
-        patch.object(checks, "role_snapshot", return_value={"java": "unchanged"}),
+        patch.object(checks, "role_snapshot", return_value={"ordinary": "unchanged"}),
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
         patch.object(checks.subprocess, "Popen", side_effect=processes) as popen,
         patch.object(checks, "_wait_for_port_forward"),
-        patch.object(checks, "event_activation_enabled", return_value=False),
         patch.object(
             checks,
             "_http",
@@ -765,15 +757,8 @@ def test_render_requires_the_runtime_config_map_linkage() -> None:
         checks.validate_render("local-dev", yaml.safe_dump_all(items))
 
 
-@pytest.mark.parametrize(
-    ("environment", "mode"),
-    [("local-dev", "canonical"), ("qa", "canonical")],
-)
-def test_event_activation_assets_and_selected_state_are_exact(environment: str, mode: str) -> None:
-    checks.validate_event_activation_assets(environment)
-    checks.validate_canonical_activation_assets(environment)
-    assert checks.event_activation_mode(environment) == mode
-    assert checks.event_activation_enabled(environment)
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+def test_ordinary_worker_configuration_is_rendered_directly(environment: str) -> None:
     items = checks.documents(checks.render(environment))
     config = checks.resource(items, "ConfigMap", f"{environment}-dashboard-config")
     deployment = checks.resource(items, "Deployment", f"{environment}-dashboard-api")
@@ -781,7 +766,9 @@ def test_event_activation_assets_and_selected_state_are_exact(environment: str, 
     container = deployment["spec"]["template"]["spec"]["containers"][0]
 
     assert config["data"]["EVENT_WORKERS_ENABLED"] == "true"
-    assert config["data"]["EVENT_PROCESSING_MODE"] == mode
+    assert config["data"]["ELASTICSEARCH_INDEX"] == "policy_stats"
+    assert config["data"]["KAFKA_GROUP"] == "dashboard-service"
+    assert config["data"]["KAFKA_REGISTERED_TOPIC"] == "policy-registered"
     assert "KAFKA_BROKERS" in config["data"]
     assert (
         any(item.get("name", "").startswith("ELASTICSEARCH_WRITER_") for item in container["env"])
@@ -789,172 +776,6 @@ def test_event_activation_assets_and_selected_state_are_exact(environment: str, 
     )
     assert any(item.get("name") == "kafka-ca" for item in container.get("volumeMounts", []))
     assert checks.kafka_egress(environment) in policy["spec"]["egress"]
-
-
-def test_event_activation_rejects_partial_or_foreign_patch_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    overlay = tmp_path / "k8s/overlays/local-dev/svc/dashboard"
-    overlay.mkdir(parents=True)
-    monkeypatch.setattr(checks, "ROOT", tmp_path)
-
-    (overlay / "kustomization.yaml").write_text(
-        "patches:\n  - path: event-enabled-config-patch.yaml\n", encoding="utf-8"
-    )
-    with pytest.raises(checks.DeploymentError, match="patch selection"):
-        checks.event_activation_enabled("local-dev")
-
-    (overlay / "kustomization.yaml").write_text(
-        "patches:\n  - path: event-enabled-foreign-patch.yaml\n", encoding="utf-8"
-    )
-    with pytest.raises(checks.DeploymentError, match="patch selection"):
-        checks.event_activation_enabled("local-dev")
-
-
-def test_registration_fixture_is_flushed_through_broker_local_pipe() -> None:
-    target = SimpleNamespace(
-        environment="local-dev",
-        data_namespace="local-dev-all",
-        data_json=Mock(
-            return_value={
-                "items": [
-                    {
-                        "metadata": {
-                            "name": "local-dev-kafka-broker-controller-0",
-                            "labels": {"strimzi.io/broker-role": "true"},
-                        },
-                        "status": {"conditions": [{"type": "Ready", "status": "True"}]},
-                    }
-                ]
-            }
-        ),
-        namespace_kubectl=Mock(return_value=""),
-    )
-
-    checks.produce_registration_fixture(target)
-
-    target.data_json.assert_called_once_with(
-        "get", "pods", "-l", "strimzi.io/cluster=local-dev-kafka"
-    )
-    call = target.namespace_kubectl.call_args
-    assert call.args[:6] == (
-        "local-dev-all",
-        "exec",
-        "pod/local-dev-kafka-broker-controller-0",
-        "-c",
-        "kafka",
-        "--",
-    )
-    assert call.args[6:9] == ("bash", "-c", call.args[8])
-    assert "kafka-console-producer.sh" in call.args[8]
-    assert "--producer-property acks=all" in call.args[8]
-    key, payload = call.args[-1].split("|", maxsplit=1)
-    assert key == "SYN-290-KEY-IGNORED"
-    assert json.loads(payload) == checks.REGISTRATION_FIXTURE
-    assert call.kwargs == {"timeout": 30}
-
-
-def test_event_activation_assets_reject_canonical_topic_or_secret() -> None:
-    config, deployment, network = checks.event_activation_assets("local-dev")
-    config["data"]["KAFKA_REGISTERED_TOPIC"] = "policy-registered"
-    with (
-        patch.object(
-            checks,
-            "event_activation_assets",
-            return_value=(config, deployment, network),
-        ),
-        pytest.raises(checks.DeploymentError, match="activation configuration"),
-    ):
-        checks.validate_event_activation_assets("local-dev")
-
-
-def test_canonical_assets_reject_isolated_topic_or_writer() -> None:
-    config, deployment, network = checks.activation_assets(
-        "local-dev", checks.CANONICAL_ACTIVATION_PATCHES
-    )
-    config["data"]["KAFKA_REGISTERED_TOPIC"] = "policy-registered-issue-290"
-    with (
-        patch.object(checks, "activation_assets", return_value=(config, deployment, network)),
-        pytest.raises(checks.DeploymentError, match="canonical activation configuration"),
-    ):
-        checks.validate_canonical_activation_assets("local-dev")
-
-    config, deployment, network = checks.activation_assets(
-        "local-dev", checks.CANONICAL_ACTIVATION_PATCHES
-    )
-    deployment["spec"]["template"]["spec"]["containers"][0]["env"][2]["valueFrom"]["secretKeyRef"][
-        "name"
-    ] += "-issue-290"
-    with (
-        patch.object(checks, "activation_assets", return_value=(config, deployment, network)),
-        pytest.raises(checks.DeploymentError, match="canonical activation"),
-    ):
-        checks.validate_canonical_activation_assets("local-dev")
-
-    config, deployment, network = checks.event_activation_assets("local-dev")
-    deployment["spec"]["template"]["spec"]["containers"][0]["env"][0]["valueFrom"]["secretKeyRef"][
-        "name"
-    ] = "local-dev-dashboard-elasticsearch"
-    with (
-        patch.object(
-            checks,
-            "event_activation_assets",
-            return_value=(config, deployment, network),
-        ),
-        pytest.raises(checks.DeploymentError, match="ELASTICSEARCH_USERNAME"),
-    ):
-        checks.validate_event_activation_assets("local-dev")
-
-
-def test_canonical_rollout_accepts_only_the_exact_isolated_predecessor() -> None:
-    expected = {
-        "EVENT_PROCESSING_MODE": "canonical",
-        "EVENT_WORKERS_ENABLED": "true",
-        "ELASTICSEARCH_INDEX": "policy_stats",
-        "KAFKA_GROUP": "dashboard-service",
-        "KAFKA_REGISTERED_TOPIC": "policy-registered",
-    }
-    isolated = expected | {
-        "EVENT_PROCESSING_MODE": "isolated",
-        "ELASTICSEARCH_INDEX": "policy_stats_issue_290",
-        "KAFKA_GROUP": "dashboard-service-issue-290",
-        "KAFKA_REGISTERED_TOPIC": "policy-registered-issue-290",
-    }
-    assert checks.matching_reader_predecessor_config(isolated, expected)
-    isolated["KAFKA_GROUP"] = "dashboard-service"
-    assert not checks.matching_reader_predecessor_config(isolated, expected)
-
-    expected_env = [
-        {
-            "name": "ELASTICSEARCH_WRITER_USERNAME",
-            "valueFrom": {
-                "secretKeyRef": {
-                    "name": "local-dev-dashboard-elasticsearch-writer",
-                    "key": "username",
-                }
-            },
-        }
-    ]
-    isolated_env = deepcopy(expected_env)
-    isolated_env[0]["valueFrom"]["secretKeyRef"]["name"] += "-issue-290"
-    assert checks.matching_reader_predecessor_environment(isolated_env, expected_env)
-    isolated_env[0]["valueFrom"]["secretKeyRef"]["name"] = "foreign"
-    assert not checks.matching_reader_predecessor_environment(isolated_env, expected_env)
-
-
-def test_isolated_rollout_accepts_only_the_exact_implicit_mode_predecessor() -> None:
-    # given
-    expected = {
-        "EVENT_PROCESSING_MODE": "isolated",
-        "EVENT_WORKERS_ENABLED": "true",
-        "ELASTICSEARCH_INDEX": "policy_stats_issue_290",
-    }
-    implicit = {key: value for key, value in expected.items() if key != "EVENT_PROCESSING_MODE"}
-
-    # when / then
-    assert checks.matching_reader_predecessor_config(implicit, expected)
-    implicit["ELASTICSEARCH_INDEX"] = "foreign"
-    assert not checks.matching_reader_predecessor_config(implicit, expected)
 
 
 @pytest.mark.parametrize(
@@ -1098,89 +919,6 @@ def test_live_state_accepts_api_server_defaulted_probe_fields() -> None:
         container[name]["successThreshold"] = 1
 
     target.live(items, require_deployment=True)
-
-
-def test_reader_predecessor_config_accepts_only_the_missing_trend_zone() -> None:
-    # given
-    expected = checks.resource(rendered_resources(), "ConfigMap", "local-dev-dashboard-config")[
-        "data"
-    ]
-    actual = deepcopy(expected)
-    actual.pop("SALES_TRENDS_TIME_ZONE")
-
-    # when
-    accepted = checks.matching_reader_predecessor_config(actual, expected)
-
-    # then
-    assert accepted
-    actual["FOREIGN_SETTING"] = "true"
-    assert not checks.matching_reader_predecessor_config(actual, expected)
-
-
-def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:
-    # given a reviewed replacement and the exact previously accepted local release.
-    items = rendered_resources()
-    deployment = checks.resource(items, "Deployment", "local-dev-dashboard-api")
-    config = checks.resource(items, "ConfigMap", "local-dev-dashboard-config")
-    desired_image = "insurance-hub-dashboard-api:1.0.0-local.123456789abc"
-    previous_image = "insurance-hub-dashboard-api:1.0.0-local.abcdef123456"
-    deployment["metadata"]["labels"]["app.kubernetes.io/version"] = "git-123456789abc"
-    deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"] = (
-        "git-123456789abc"
-    )
-    deployment["spec"]["template"]["spec"]["containers"][0]["image"] = desired_image
-    config["data"]["SERVICE_VERSION"] = "git-123456789abc"
-    target, actual = target_with_live_resources(items)
-    live_deployment = actual[("deployment", "local-dev-dashboard-api")]
-    live_deployment["metadata"]["labels"]["app.kubernetes.io/version"] = "git-abcdef123456"
-    live_deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"] = (
-        "git-abcdef123456"
-    )
-    live_deployment["spec"]["template"]["spec"]["containers"][0]["image"] = previous_image
-    live_deployment["spec"]["strategy"] = {
-        "type": "RollingUpdate",
-        "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
-    }
-    actual[("configmap", "local-dev-dashboard-config")]["data"]["SERVICE_VERSION"] = (
-        "git-abcdef123456"
-    )
-    live_config = actual[("configmap", "local-dev-dashboard-config")]["data"]
-    for name in (
-        "ELASTICSEARCH_INDEX",
-        "ELASTICSEARCH_TIMEOUT",
-        "ELASTICSEARCH_URL",
-        "EVENT_WORKERS_ENABLED",
-        "SALES_TRENDS_TIME_ZONE",
-    ):
-        live_config.pop(name)
-    live_config["OTEL_EXPORTER_OTLP_TIMEOUT"] = "2s"
-    live_container = live_deployment["spec"]["template"]["spec"]["containers"][0]
-    live_container["name"] = "dashboard-service"
-    live_container["imagePullPolicy"] = "IfNotPresent"
-    live_container["env"] = [
-        item for item in live_container["env"] if item["name"] == "SERVICE_INSTANCE_ID"
-    ]
-    live_policy = actual[("networkpolicy", "local-dev-dashboard-api")]
-    live_policy["spec"].pop("egress")
-    live_policy["spec"]["ingress"] = [
-        {
-            "from": [{"podSelector": {"matchLabels": {checks.BUSINESS_CLIENT_LABEL: "true"}}}],
-            "ports": [
-                {"port": 8080, "protocol": "TCP"},
-                {"port": 9090, "protocol": "TCP"},
-            ],
-        },
-        {
-            "from": [{"podSelector": {"matchLabels": {checks.MANAGEMENT_CLIENT_LABEL: "true"}}}],
-            "ports": [{"port": 8081, "protocol": "TCP"}],
-        },
-    ]
-
-    with patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True):
-        # when / then the declared predecessor is accepted only before apply.
-        target.live(items, require_deployment=False)
-        with pytest.raises(checks.DeploymentError, match="differs from rendered configuration"):
-            target.live(items, require_deployment=True)
 
 
 @pytest.mark.parametrize(
@@ -1347,272 +1085,10 @@ def test_live_rejection_prevents_server_side_apply() -> None:
     apply.assert_not_called()
 
 
-def java_resources(
-    deployment_uid: str = "deployment-uid",
-    service_uid: str = "service-uid",
-    available: int = 1,
-) -> dict[str, dict[str, object]]:
-    labels = {
-        "app.kubernetes.io/name": "dashboard-api-legacy",
-        "app.kubernetes.io/instance": "insurance-hub-dashboard-api-legacy",
-        "app.kubernetes.io/component": "api",
-    }
-    return {
-        "deployment": {
-            "apiVersion": "apps/v1",
-            "kind": "Deployment",
-            "metadata": {
-                "name": "local-dev-dashboard-api-legacy",
-                "namespace": "local-dev-all",
-                "uid": deployment_uid,
-                "labels": labels,
-            },
-            "spec": {"replicas": 1},
-            "status": {"availableReplicas": available, "readyReplicas": available},
-        },
-        "service": {
-            "apiVersion": "v1",
-            "kind": "Service",
-            "metadata": {
-                "name": "local-dev-dashboard-api-legacy",
-                "namespace": "local-dev-all",
-                "uid": service_uid,
-                "labels": labels,
-            },
-            "spec": {
-                "type": "ClusterIP",
-                "selector": {
-                    "app.kubernetes.io/component": "api",
-                    "app.kubernetes.io/managed-by": "kustomize",
-                    "app.kubernetes.io/name": "dashboard-api-legacy",
-                    "app.kubernetes.io/part-of": "insurance-hub",
-                    "environment": "local-dev",
-                },
-            },
-        },
-    }
-
-
-def java_target(resources: dict[str, dict[str, object]]) -> Mock:
-    target = Mock()
-    target.environment = "local-dev"
-    target.namespace = "local-dev-all"
-    target.configuration = {"mode": "direct"}
-    target.rendered.return_value = ("rendered", [], "image")
-    target.json.side_effect = lambda _get, kind, _name, _ignore: resources.get(kind, {})
-    return target
-
-
-def test_java_snapshot_requires_declared_stable_available_resources() -> None:
-    target = java_target(java_resources())
-    with patch.dict(
-        os.environ,
-        {
-            "DEPLOY_JAVA_DEPLOYMENT_UID": "deployment-uid",
-            "DEPLOY_JAVA_SERVICE_UID": "service-uid",
-        },
-        clear=True,
-    ):
-        assert checks.role_snapshot(target) == {
-            "deployment/local-dev-dashboard-api-legacy": "deployment-uid",
-            "service/local-dev-dashboard-api-legacy": "service-uid",
-        }
-
-
-def test_canonical_snapshot_rejects_successor_before_java_quiescence() -> None:
-    # given
-    target = Mock(environment="local-dev", namespace="local-dev-all")
-    target.processing_mode = "canonical"
-    deployment = {
-        "metadata": {
-            "name": "local-dev-dashboard-api-legacy",
-            "namespace": "local-dev-all",
-            "uid": "java-uid",
-        },
-        "spec": {"replicas": 1},
-        "status": {"replicas": 1},
-    }
-    target.json.side_effect = lambda *args: deployment if args[1] == "deployment" else {"items": []}
-
-    # when / then
-    with (
-        patch.object(checks, "canonical_transfer_observation") as observation,
-        pytest.raises(checks.DeploymentError, match="not quiescent"),
-    ):
-        checks.role_snapshot(target)
-    observation.assert_not_called()
-
-    # given
-    deployment["spec"]["replicas"] = 0
-    deployment["status"]["replicas"] = 0
-    unsafe_states = (
-        transition.OwnershipState(0, 0, 0, 1, 1),
-        transition.OwnershipState(0, 0, 0, 0, 1),
-    )
-    progress = transition.ProgressState(stable=True, complete=True, in_range=True)
-
-    for state in unsafe_states:
-        # when / then
-        with (
-            patch.object(checks, "canonical_transfer_observation", return_value=(state, progress)),
-            pytest.raises(checks.DeploymentError),
-        ):
-            checks.role_snapshot(target)
-
-    # when
-    with patch.object(
-        checks,
-        "canonical_transfer_observation",
-        return_value=(transition.OwnershipState(0, 0, 0, 0, 0), progress),
-    ):
-        snapshot = checks.role_snapshot(target)
-
-    # then
-    assert snapshot == {
-        "deployment/local-dev-dashboard-api-legacy": "java-uid",
-        "phase": "exclusive",
-    }
-
-
-def test_canonical_transfer_observation_counts_terminating_go_and_group_member() -> None:
-    # given
-    target = Mock(environment="local-dev", data_namespace="local-dev-all")
-    target.json.side_effect = [
-        {"items": []},
-        {"items": [{"metadata": {"deletionTimestamp": "now"}}]},
-    ]
-    progress = transition.ProgressState(stable=True, complete=True, in_range=True)
-
-    # when
-    with patch.object(
-        checks,
-        "canonical_progress_observation",
-        return_value=({"activeMembers": 1}, progress),
-    ):
-        state, observed_progress = checks.canonical_transfer_observation(target)
-
-    # then
-    assert state == transition.OwnershipState(0, 0, 0, 1, 1)
-    assert observed_progress == progress
-
-
-def test_canonical_kafka_snapshot_observes_group_members_and_progress() -> None:
-    # given
-    target = Mock(
-        environment="local-dev",
-        data_namespace="local-dev-all",
-        configuration={"registrationAdministration": {"kafkaCluster": "local-dev-kafka"}},
-    )
-    target.data_json.return_value = {
-        "items": [
-            {
-                "metadata": {
-                    "name": "local-dev-kafka-0",
-                    "labels": {"strimzi.io/broker-role": "true"},
-                },
-                "status": {
-                    "phase": "Running",
-                    "conditions": [{"type": "Ready", "status": "True"}],
-                },
-            }
-        ]
-    }
-    target.namespace_kubectl.side_effect = [
-        "Topic: policy-registered Partition: 0 Leader: 0 Replicas: 0 Isr: 0\n",
-        "GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID\n"
-        "dashboard-service policy-registered 0 7 9 2 go-member /host client\n",
-    ]
-
-    # when
-    snapshot = checks.canonical_kafka_snapshot(target)
-
-    # then
-    assert snapshot == {"partitions": [0], "offsets": {0: (7, 9)}, "activeMembers": 1}
-
-
-def test_canonical_return_snapshot_requires_observed_quiescence() -> None:
-    # given
-    target = Mock(environment="local-dev", namespace="local-dev-all")
-    deployments = {
-        "local-dev-dashboard-api-legacy": {
-            "metadata": {"name": "local-dev-dashboard-api-legacy", "namespace": "local-dev-all"},
-            "spec": {"replicas": 0},
-            "status": {"replicas": 0},
-        },
-        "local-dev-dashboard-api": {
-            "metadata": {"name": "local-dev-dashboard-api", "namespace": "local-dev-all"},
-            "spec": {"replicas": 0},
-            "status": {"replicas": 0},
-        },
-    }
-    target.json.side_effect = lambda _get, _kind, name: deployments[name]
-    progress = transition.ProgressState(stable=True, complete=True, in_range=True)
-
-    # when
-    with patch.object(
-        checks,
-        "canonical_transfer_observation",
-        return_value=(transition.OwnershipState(0, 0, 0, 0, 0), progress),
-    ):
-        snapshot = checks.canonical_return_snapshot(target)
-
-    # then
-    assert snapshot == {"environment": "local-dev", "phase": "quiescent", "status": "passed"}
-
-    # when / then
-    with (
-        patch.object(
-            checks,
-            "canonical_transfer_observation",
-            return_value=(transition.OwnershipState(0, 0, 0, 1, 0), progress),
-        ),
-        pytest.raises(checks.DeploymentError, match="requires quiescence"),
-    ):
-        checks.canonical_return_snapshot(target)
-
-
-@pytest.mark.parametrize("defect", ["absent", "replaced", "selector", "unavailable"])
-def test_invalid_java_owner_prevents_go_apply(defect: str) -> None:
-    resources = java_resources()
-    expected_deployment_uid = "deployment-uid"
-    if defect == "absent":
-        resources["deployment"] = {}
-    elif defect == "replaced":
-        resources["deployment"]["metadata"]["uid"] = "replacement-uid"
-    elif defect == "selector":
-        resources["service"]["spec"]["selector"].pop("environment")
-    else:
-        resources["deployment"]["status"] = {
-            "availableReplicas": 0,
-            "readyReplicas": 0,
-            "unavailableReplicas": 1,
-        }
-    target = java_target(resources)
-    with (
-        patch.dict(
-            os.environ,
-            {
-                "DEPLOY_JAVA_DEPLOYMENT_UID": expected_deployment_uid,
-                "DEPLOY_JAVA_SERVICE_UID": "service-uid",
-            },
-            clear=True,
-        ),
-        patch.object(checks, "Target", return_value=target),
-        patch.object(checks, "check_render"),
-        patch.object(checks, "secret_and_image"),
-        patch.object(lifecycle, "apply") as apply,
-        pytest.raises(checks.DeploymentError, match="authoritative Java"),
-    ):
-        lifecycle.execute(checks, ["deploy"])
-    apply.assert_not_called()
-
-
-def test_qa_aggregate_requires_go_beside_java() -> None:
-    checks.validate_qa_aggregate(["./dashboard", "./dashboard/legacy", "./product"])
+def test_qa_aggregate_requires_only_go_dashboard() -> None:
+    checks.validate_qa_aggregate(["./dashboard", "./product"])
     with pytest.raises(checks.DeploymentError, match="Go Dashboard"):
         checks.validate_qa_aggregate(["./dashboard/legacy", "./product"])
-    with pytest.raises(checks.DeploymentError, match="Java Dashboard"):
-        checks.validate_qa_aggregate(["./dashboard", "./product"])
 
 
 def test_deployment_adapter_maps_interrupt_to_shell_status(monkeypatch) -> None:
