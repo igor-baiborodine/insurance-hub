@@ -241,8 +241,8 @@ func TestRun_EnabledWorkersStartReadinessAndBoundedShutdown(t *testing.T) {
 		Enabled:         true,
 		Brokers:         []string{"kafka.example:9093"},
 		Group:           "policy-search-service",
-		RegisteredTopic: "registered-230",
-		TerminatedTopic: "terminated-230",
+		RegisteredTopic: "policy-registered-service-test",
+		TerminatedTopic: "policy-terminated-service-test",
 		CAFile:          writeTestCA(t),
 		Writer:          settings.Elasticsearch,
 	}
@@ -308,8 +308,8 @@ func TestRun_EnabledWorkersRejectEmptyKafkaCAFile(t *testing.T) {
 		Enabled:         true,
 		Brokers:         []string{"kafka.example:9093"},
 		Group:           "policy-search-service",
-		RegisteredTopic: "registered-230",
-		TerminatedTopic: "terminated-230",
+		RegisteredTopic: "policy-registered-service-test",
+		TerminatedTopic: "policy-terminated-service-test",
 		CAFile:          emptyCA,
 		Writer:          settings.Elasticsearch,
 	}
@@ -335,8 +335,8 @@ func TestRun_PartialWorkerStartupPreservesFailureAndCleansResources(t *testing.T
 		Enabled:         true,
 		Brokers:         []string{"kafka.example:9093"},
 		Group:           "policy-search-service",
-		RegisteredTopic: "registered-230",
-		TerminatedTopic: "terminated-230",
+		RegisteredTopic: "policy-registered-service-test",
+		TerminatedTopic: "policy-terminated-service-test",
 		CAFile:          writeTestCA(t),
 		Writer:          settings.Elasticsearch,
 	}
