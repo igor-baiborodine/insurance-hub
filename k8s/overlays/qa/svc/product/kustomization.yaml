@@ -3,7 +3,8 @@ kind: Kustomization
 namespace: qa-svc
 namePrefix: qa-
 labels:
-  - includeSelectors: true
+  - includeSelectors: false
+    includeTemplates: true
     pairs:
       environment: qa
 resources:
@@ -25,6 +26,10 @@ patches:
   - path: deployment-patch.yaml
     target:
       kind: Deployment
+      name: product-api
+  - path: network-policy-patch.yaml
+    target:
+      kind: NetworkPolicy
       name: product-api
 replacements:
   - source:

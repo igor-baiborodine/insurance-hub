@@ -158,6 +158,23 @@ def missing_qa_instance(values: Documents) -> None:
     ]
 
 
+def broaden_network_ingress(values: Documents) -> None:
+    policy = find(values["local-go"], "NetworkPolicy", "local-dev-product-api")
+    del policy["spec"]["ingress"][0]["from"][0]["podSelector"]
+
+
+def allow_world_egress(values: Documents) -> None:
+    policy = find(values["qa-go"], "NetworkPolicy", "qa-product-api")
+    policy["spec"]["egress"].append({"to": [{}]})
+
+
+def missing_gateway_product_label(values: Documents) -> None:
+    deployment = find(values["qa-gateway"], "Deployment", "qa-agent-portal-gateway-legacy")
+    del deployment["spec"]["template"]["metadata"]["labels"][
+        "insurance-hub.io/product-business-client"
+    ]
+
+
 def qa_gateway_uses_management_port(values: Documents) -> None:
     config = find_prefix(values["qa-gateway"], "ConfigMap", "qa-gateway-product-route-config-")
     config["data"]["application.yml"] = config["data"]["application.yml"].replace(
@@ -235,6 +252,13 @@ CASES: list[tuple[str, Mutation, str]] = [
     ("unversioned local image tag", unversioned_local_tag, "local-dev image reference is invalid"),
     ("disabled QA telemetry", disabled_qa_telemetry, "qa Product ConfigMap"),
     ("missing QA Pod identity", missing_qa_instance, "PRODUCT_DATABASE_URL"),
+    ("namespace-only Product ingress", broaden_network_ingress, "approved peers and ports"),
+    ("world Product egress", allow_world_egress, "approved peers and ports"),
+    (
+        "missing Product gateway admission label",
+        missing_gateway_product_label,
+        "Product admission label",
+    ),
     ("QA gateway uses management port", qa_gateway_uses_management_port, "expected Product URL"),
     ("multiple local-dev gateway URLs", local_gateway_has_second_url, "expected Product URL"),
     ("gateway subPath mount", gateway_mount_uses_subpath, "without subPath"),

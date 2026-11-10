@@ -1,0 +1,45 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: product-api
+spec:
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-portal-gateway-legacy
+              app.kubernetes.io/instance: insurance-hub-agent-portal-gateway-legacy
+              app.kubernetes.io/component: gateway
+              environment: local-dev
+              insurance-hub.io/product-business-client: "true"
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              cnpg.io/cluster: local-dev-postgres-product
+      ports:
+        - port: 5432
+          protocol: TCP

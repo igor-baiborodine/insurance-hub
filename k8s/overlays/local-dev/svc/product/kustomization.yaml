@@ -3,7 +3,8 @@ kind: Kustomization
 namespace: local-dev-all
 namePrefix: local-dev-
 labels:
-  - includeSelectors: true
+  - includeSelectors: false
+    includeTemplates: true
     pairs:
       environment: local-dev
 resources:
@@ -16,4 +17,8 @@ patches:
   - path: deployment-patch.yaml
     target:
       kind: Deployment
+      name: product-api
+  - path: network-policy-patch.yaml
+    target:
+      kind: NetworkPolicy
       name: product-api

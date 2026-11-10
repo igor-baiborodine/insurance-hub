@@ -209,6 +209,115 @@ def validate_service(
     )
 
 
+def validate_network_policy(
+    policy: dict[str, Any],
+    environment: str,
+    deployment_selector: dict[str, str],
+) -> None:
+    settings = {
+        "local-dev": {
+            "service_namespace": "local-dev-all",
+            "database_namespace": "local-dev-all",
+            "database_cluster": "local-dev-postgres-product",
+            "alloy": False,
+        },
+        "qa": {
+            "service_namespace": "qa-svc",
+            "database_namespace": "qa-data",
+            "database_cluster": "qa-postgres-product",
+            "alloy": True,
+        },
+    }[environment]
+    ingress = [
+        {
+            "from": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {
+                            "kubernetes.io/metadata.name": settings["service_namespace"]
+                        }
+                    },
+                    "podSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "agent-portal-gateway-legacy",
+                            "app.kubernetes.io/instance": (
+                                "insurance-hub-agent-portal-gateway-legacy"
+                            ),
+                            "app.kubernetes.io/component": "gateway",
+                            "environment": environment,
+                            "insurance-hub.io/product-business-client": "true",
+                        }
+                    },
+                }
+            ],
+            "ports": [
+                {"port": 8080, "protocol": "TCP"},
+                {"port": 9090, "protocol": "TCP"},
+            ],
+        }
+    ]
+    egress = [
+        {
+            "to": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": "kube-system"}
+                    },
+                    "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
+                }
+            ],
+            "ports": [
+                {"port": 53, "protocol": "UDP"},
+                {"port": 53, "protocol": "TCP"},
+            ],
+        },
+        {
+            "to": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {
+                            "kubernetes.io/metadata.name": settings["database_namespace"]
+                        }
+                    },
+                    "podSelector": {
+                        "matchLabels": {"cnpg.io/cluster": settings["database_cluster"]}
+                    },
+                }
+            ],
+            "ports": [{"port": 5432, "protocol": "TCP"}],
+        },
+    ]
+    if settings["alloy"]:
+        egress.append(
+            {
+                "to": [
+                    {
+                        "namespaceSelector": {
+                            "matchLabels": {"kubernetes.io/metadata.name": "qa-monitoring"}
+                        },
+                        "podSelector": {
+                            "matchLabels": {
+                                "app.kubernetes.io/name": "alloy",
+                                "app.kubernetes.io/instance": "qa-alloy",
+                            }
+                        },
+                    }
+                ],
+                "ports": [{"port": 4317, "protocol": "TCP"}],
+            }
+        )
+    require(
+        policy.get("spec")
+        == {
+            "podSelector": {"matchLabels": deployment_selector},
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": ingress,
+            "egress": egress,
+        },
+        f"{environment} Product NetworkPolicy must contain only the approved peers and ports",
+    )
+
+
 def validate_probe(
     container: dict[str, Any], name: str, path: str, period: int, failures: int
 ) -> None:
@@ -249,7 +358,7 @@ def validate_go_environment(
     secret_name = settings["secret"]
 
     require_unique(documents, f"{environment} Go render")
-    require(len(documents) == 4, f"{environment} Go render must contain exactly four objects")
+    require(len(documents) == 5, f"{environment} Go render must contain exactly five objects")
     require(
         all(identity(item)[1] == namespace for item in documents),
         f"{environment} namespace transformation is incorrect",
@@ -271,6 +380,7 @@ def validate_go_environment(
     deployment = one(documents, "Deployment", f"{prefix}product-api")
     business = one(documents, "Service", f"{prefix}product-api")
     management = one(documents, "Service", f"{prefix}product-api-management")
+    network_policy = one(documents, "NetworkPolicy", f"{prefix}product-api")
     config = one(
         documents,
         "ConfigMap",
@@ -288,18 +398,21 @@ def validate_go_environment(
     pod_metadata = pod.get("metadata", {})
     pod_spec = pod.get("spec", {})
     pod_labels = pod_metadata.get("labels", {})
-    required_labels = {
+    required_selector_labels = {
         "app.kubernetes.io/name": "product-api",
         "app.kubernetes.io/component": "api",
-        "environment": environment,
     }
     require(
-        all(selector.get(key) == value for key, value in required_labels.items()),
+        all(selector.get(key) == value for key, value in required_selector_labels.items()),
         f"{environment} Deployment selector is incorrect",
     )
     require(
         selected(selector, pod_labels),
         f"{environment} Deployment selector does not select its pod template",
+    )
+    require(
+        pod_labels.get("environment") == environment,
+        f"{environment} Pod environment label is incorrect",
     )
     if environment == "qa":
         require(
@@ -336,6 +449,7 @@ def validate_go_environment(
         [{"name": "management", "port": 8081, "protocol": "TCP", "targetPort": "management"}],
         selector,
     )
+    validate_network_policy(network_policy, environment, selector)
 
     require(
         pod_spec.get("automountServiceAccountToken") is False,
@@ -577,18 +691,26 @@ def validate_gateway_route(documents: list[dict[str, Any]], environment: str) ->
     )
     content = config.get("data", {}).get("application.yml", "")
     product_urls = re.findall(
-        rf"http://{re.escape(prefix)}product-api(?:-legacy)?\.{re.escape(namespace)}\.svc\.cluster\.local:80",
+        rf"http://{re.escape(prefix)}product-api(?:-legacy)?\.{re.escape(namespace)}\.svc\.cluster\.local:80(?![0-9])",
         content,
     )
     selected = [
-        backend for backend, expected_url in expected_urls.items() if expected_url in content
+        backend
+        for backend, expected_url in expected_urls.items()
+        if re.search(re.escape(expected_url) + r"(?![0-9])", content)
     ]
     require(
         len(selected) == 1 and product_urls == [expected_urls[selected[0]]],
         f"{environment} gateway must configure exactly one expected Product URL",
     )
     deployment = one(documents, "Deployment", f"{prefix}agent-portal-gateway-legacy")
-    pod_spec = deployment["spec"]["template"]["spec"]
+    pod = deployment["spec"]["template"]
+    require(
+        pod.get("metadata", {}).get("labels", {}).get("insurance-hub.io/product-business-client")
+        == "true",
+        f"{environment} gateway must carry the Product admission label",
+    )
+    pod_spec = pod["spec"]
     container = one_container(pod_spec, "agent-portal-gateway-legacy", environment)
     environment_values = container.get("env", [])
     require(

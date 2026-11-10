@@ -9,6 +9,7 @@ resources:
   - deployment.yaml
   - service.yaml
   - management-service.yaml
+  - network-policy.yaml
 configMapGenerator:
   - name: product-config
     literals:
