@@ -10,19 +10,19 @@ export INSURANCE_HUB_ROOT
 PYTHON_TOOLING_FILES := $(wildcard scripts/deployment.py scripts/disposable_deployment.py scripts/image_check.py \
 	scripts/elasticsearch_integration.py scripts/policy_search_deployment_checks.py scripts/scaffold_process.py \
 	scripts/event_integration.py \
-	scripts/cutover_administration.py \
+	scripts/administration.py \
 	scripts/fixture_administration.py scripts/fixture_administration_integration.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_elasticsearch_integration.py \
 	scripts/test_event_integration.py \
-	scripts/test_cutover_administration.py \
+	scripts/test_administration.py \
 	scripts/test_fixture_administration.py \
 	scripts/test_scaffold_process.py scripts/test_tooling.py \
 	scripts/tooling_runner.py scripts/test_tooling_runner.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_elasticsearch_integration.py scripts/test_fixture_administration.py \
 	scripts/test_event_integration.py \
-	scripts/test_cutover_administration.py \
+	scripts/test_administration.py \
 	scripts/test_scaffold_process.py \
 	scripts/test_tooling_runner.py)
 
@@ -115,7 +115,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	test-event-integration test-cutover-rehearsal _test-event-integration deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop fixture-setup fixture-verify fixture-retire \
 	event-fixture-setup event-fixture-verify event-fixture-retire \
-	cutover-index-inspect cutover-index-ensure cutover-index-verify canonical-secrets-migrate \
+	administration-inspect administration-setup administration-verify canonical-secrets-migrate \
 	deploy-test-tooling deploy-test \
 	build-qualification-client \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
@@ -188,13 +188,13 @@ event-fixture-setup event-fixture-verify event-fixture-retire: python-runtime-ch
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/fixture_administration.py '$(@:event-fixture-%=event-%)'
 
-cutover-index-inspect cutover-index-ensure cutover-index-verify: python-runtime-check
+administration-inspect administration-setup administration-verify: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/cutover_administration.py '$(@:cutover-index-%=%)'
+		"$(PYTHON)" scripts/administration.py '$(@:administration-%=%)'
 
 canonical-secrets-migrate: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/cutover_administration.py migrate-secrets
+		"$(PYTHON)" scripts/administration.py migrate-secrets
 
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed deployment guards without a cluster
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \

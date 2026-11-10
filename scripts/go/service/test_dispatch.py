@@ -98,7 +98,7 @@ def test_product_supports_every_cataloged_capability() -> None:
     assert paths == ["services/product-service"] * len(capabilities)
 
 
-def test_policy_search_fixture_operations_use_the_existing_dispatch() -> None:
+def test_policy_search_administration_operations_use_the_existing_dispatch() -> None:
     # given
     script_dir = Path(resolve.__file__).resolve().parent
     root = script_dir.parents[2]
@@ -118,9 +118,9 @@ def test_policy_search_fixture_operations_use_the_existing_dispatch() -> None:
             "event-fixture-setup",
             "event-fixture-verify",
             "event-fixture-retire",
-            "cutover-index-inspect",
-            "cutover-index-ensure",
-            "cutover-index-verify",
+            "administration-inspect",
+            "administration-setup",
+            "administration-verify",
             "canonical-secrets-migrate",
         )
     ]

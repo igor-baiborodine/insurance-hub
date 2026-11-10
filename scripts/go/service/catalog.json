@@ -123,9 +123,9 @@
         "event-fixture-setup",
         "event-fixture-verify",
         "event-fixture-retire",
-        "cutover-index-inspect",
-        "cutover-index-ensure",
-        "cutover-index-verify",
+        "administration-inspect",
+        "administration-setup",
+        "administration-verify",
         "canonical-secrets-migrate",
         "deploy-test-tooling",
         "deploy-test"
@@ -149,7 +149,7 @@
           "terminatedTopic": "policy-terminated-issue-230",
           "consumerGroup": "policy-search-service-issue-230"
         },
-        "cutover": {
+        "setup": {
           "owner": "issue-235",
           "index": "policy-views",
           "readerRole": "go_policy_search_cutover_reader",

@@ -1,4 +1,4 @@
-"""Policy Search cutover administration guards; unit cases never contact a cluster."""
+"""Policy Search administration guards; unit cases never contact a cluster."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import base64
 import os
 from unittest.mock import Mock, patch
 
-import cutover_administration as administration
+import administration
 import pytest
 
 
@@ -32,6 +32,15 @@ def canonical_definition() -> dict:
     }
 
 
+def identity_responses(
+    identity: str, privileges: tuple[str, ...], description: str
+) -> list[tuple[int, object]]:
+    return [
+        (200, {identity: administration.role_definition(privileges)}),
+        (200, {identity: administration.user_definition(identity, description)}),
+    ]
+
+
 @pytest.mark.parametrize(
     ("environment", "context", "namespace", "data_namespace"),
     [
@@ -39,7 +48,7 @@ def canonical_definition() -> dict:
         ("qa", "qa-insurance-hub", "qa-svc", "qa-data"),
     ],
 )
-def test_canonical_target_uses_only_ordinary_secret_names(
+def test_target_uses_only_ordinary_secret_names(
     environment: str, context: str, namespace: str, data_namespace: str
 ) -> None:
     with patch.dict(
@@ -66,20 +75,46 @@ def test_canonical_target_uses_only_ordinary_secret_names(
     assert target.kafka_ca_secret == f"{environment}-policy-search-kafka-ca"
 
 
-def test_inspect_accepts_absent_or_exact_empty_index() -> None:
+def test_inspect_accepts_absent_or_exact_populated_index() -> None:
     absent = administration.inspect_index(FakeClient([(404, None)]))
     present = administration.inspect_index(
-        FakeClient([(200, None), (200, canonical_definition()), (200, {"count": 0})])
+        FakeClient([(200, None), (200, canonical_definition()), (200, {"count": 3})])
     )
 
     assert not absent.exists and absent.documents == 0
-    assert present.exists and present.documents == 0
+    assert present.exists and present.documents == 3
     assert absent.mapping_sha256 == present.mapping_sha256
 
 
-def test_ensure_creates_only_absent_canonical_index_and_exact_roles() -> None:
+def test_setup_preserves_populated_index_and_existing_access() -> None:
     client = FakeClient(
         [
+            (200, None),
+            (200, canonical_definition()),
+            (200, {"count": 3}),
+            *identity_responses(administration.READER, ("read", "view_index_metadata"), "reader"),
+            *identity_responses(administration.WRITER, ("index",), "writer"),
+        ]
+    )
+
+    setup = administration.ensure_index_and_access(
+        client,
+        "existing-reader-password-with-32-bytes",
+        "existing-writer-password-with-32-bytes",
+    )
+
+    assert setup.index.documents == 3
+    assert not setup.reader_secret_missing and not setup.writer_secret_missing
+    assert all(method == "GET" for method, _, _ in client.requests[1:])
+
+
+def test_setup_creates_only_missing_index_and_access() -> None:
+    client = FakeClient(
+        [
+            (404, None),
+            (404, None),
+            (404, None),
+            (404, None),
             (404, None),
             (200, {}),
             (200, None),
@@ -92,43 +127,71 @@ def test_ensure_creates_only_absent_canonical_index_and_exact_roles() -> None:
         ]
     )
 
-    state = administration.ensure_index_and_access(client, "reader-password", "writer-password")
+    setup = administration.ensure_index_and_access(client, None, None)
 
-    assert state.exists and state.documents == 0
-    assert client.requests[1] == (
+    assert setup.index.exists and setup.index.documents == 0
+    assert setup.reader_secret_missing and setup.writer_secret_missing
+    assert len(setup.reader_password) >= 32 and len(setup.writer_password) >= 32
+    assert client.requests[5] == (
         "PUT",
         "/policy-views",
         {"mappings": administration.MAPPING},
     )
-    reader_role = client.requests[5][2]
-    writer_role = client.requests[7][2]
-    assert reader_role["indices"][0]["privileges"] == ["read", "view_index_metadata"]
-    assert writer_role["indices"][0]["privileges"] == ["index"]
-    assert all(request[0:2] != ("DELETE", "/policy-views") for request in client.requests)
+    assert all(method != "DELETE" for method, _, _ in client.requests)
 
 
-def test_ensure_rejects_mapping_or_documents_before_identity_mutation() -> None:
-    mapping_drift = FakeClient(
+@pytest.mark.parametrize(
+    "responses,message",
+    [
+        (
+            [
+                (200, None),
+                (
+                    200,
+                    {
+                        administration.INDEX: {
+                            "aliases": {},
+                            "mappings": {"dynamic": True},
+                        }
+                    },
+                ),
+            ],
+            "mapping differs",
+        ),
+        (
+            [
+                (200, None),
+                (200, canonical_definition()),
+                (200, {"count": 1}),
+                (200, {administration.READER: {"cluster": ["all"]}}),
+            ],
+            "reader role differs",
+        ),
+    ],
+)
+def test_setup_rejects_incompatible_state_before_mutation(responses, message: str) -> None:
+    client = FakeClient(responses)
+
+    with pytest.raises(administration.AdministrationError, match=message):
+        administration.ensure_index_and_access(client, "reader-password", "writer-password")
+
+    assert all(method != "PUT" for method, _, _ in client.requests)
+
+
+def test_setup_rejects_existing_user_without_canonical_secret() -> None:
+    client = FakeClient(
         [
             (200, None),
-            (
-                200,
-                {
-                    administration.INDEX: {
-                        "aliases": {},
-                        "mappings": {"dynamic": True},
-                    }
-                },
-            ),
+            (200, canonical_definition()),
+            (200, {"count": 1}),
+            *identity_responses(administration.READER, ("read", "view_index_metadata"), "reader"),
         ]
     )
-    with pytest.raises(administration.AdministrationError, match="mapping differs"):
-        administration.ensure_index_and_access(mapping_drift, "reader", "writer")
 
-    documents = FakeClient([(200, None), (200, canonical_definition()), (200, {"count": 1})])
-    with pytest.raises(administration.AdministrationError, match="complete manifest"):
-        administration.ensure_index_and_access(documents, "reader", "writer")
-    assert not any("_security" in path for _, path, _ in documents.requests)
+    with pytest.raises(administration.AdministrationError, match="reader Secret is missing"):
+        administration.ensure_index_and_access(client, None, "writer-password")
+
+    assert all(method != "PUT" for method, _, _ in client.requests)
 
 
 def test_verify_identity_requires_exact_boundary() -> None:
@@ -164,13 +227,13 @@ def test_verify_identity_requires_exact_boundary() -> None:
     assert client.requests[0][0:2] == ("POST", "/_security/user/_has_privileges")
 
 
-def test_ensure_requires_confirmation_before_target_contact() -> None:
+def test_setup_requires_confirmation_before_target_contact() -> None:
     with (
         patch.dict(os.environ, {}, clear=True),
         patch.object(administration, "Target", return_value=Mock()) as target,
-        pytest.raises(administration.AdministrationError, match="CUTOVER_CONFIRM"),
+        pytest.raises(administration.AdministrationError, match="POLICY_SEARCH_SETUP_CONFIRM"),
     ):
-        administration.execute("ensure")
+        administration.execute("setup")
     target.assert_not_called()
 
 
@@ -210,36 +273,6 @@ def test_migrate_secret_preserves_exact_credentials_without_exposing_data() -> N
         "canonical-elasticsearch-reader",
         force_conflicts=True,
     )
-
-
-def test_migrate_secret_rejects_wrong_identity_before_apply() -> None:
-    target = Mock()
-    target.environment = "qa"
-    target.json.return_value = {
-        "data": {
-            "username": base64.b64encode(b"qualification-reader").decode(),
-            "password": base64.b64encode(b"controlled-password-value-with-32-bytes").decode(),
-        }
-    }
-
-    with (
-        patch.dict(
-            os.environ,
-            {"POLICY_SEARCH_READER_SOURCE_SECRET": "qa-policy-search-cutover-elasticsearch"},
-            clear=True,
-        ),
-        pytest.raises(administration.AdministrationError, match="username differs"),
-    ):
-        administration.migrate_secret(
-            target,
-            "POLICY_SEARCH_READER_SOURCE_SECRET",
-            "qa-policy-search-elasticsearch",
-            ("username", "password"),
-            "canonical-elasticsearch-reader",
-            administration.READER,
-        )
-
-    target.apply_secret.assert_not_called()
 
 
 def test_migrate_requires_confirmation_before_target_contact() -> None:

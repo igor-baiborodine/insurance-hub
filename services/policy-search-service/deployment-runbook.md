@@ -195,21 +195,20 @@ rollout.
 Kubernetes requires each referenced Secret to exist before an enabled worker first consumes an
 event.
 
-Prepare the canonical state only after the handover decision is synchronized. Inspection is
-read-only. Ensure requires its exact confirmation and aborts before role or Secret
-changes when an existing index has mapping/alias drift or documents lacking an accepted complete
-manifest:
+Prepare the service state only after the target decision is synchronized. Inspection is read-only.
+Setup requires its exact confirmation, preserves a compatible populated index and existing
+credentials, creates only missing resources, and rejects mapping, alias, access or trust drift:
 
 ```sh
-make go-svc-cutover-index-inspect SVC_NAME=policy-search
-export CUTOVER_CONFIRM=ensure-policy-views
-make go-svc-cutover-index-ensure SVC_NAME=policy-search
-unset CUTOVER_CONFIRM
-make go-svc-cutover-index-verify SVC_NAME=policy-search
+make go-svc-administration-inspect SVC_NAME=policy-search
+export POLICY_SEARCH_SETUP_CONFIRM=setup-policy-views
+make go-svc-administration-setup SVC_NAME=policy-search
+unset POLICY_SEARCH_SETUP_CONFIRM
+make go-svc-administration-verify SVC_NAME=policy-search
 ```
 
-The ensure operation creates no Kafka topic or group and changes no gateway route. It prepares the
-retained canonical reader/writer and CA Secret identities under the ordinary
+The setup operation creates no Kafka topic or group and changes no gateway route. It prepares the
+reader/writer and CA Secret identities under the ordinary
 `<environment>-policy-search-*` names, while leaving the distinct
 `<environment>-policy-search-qualification-*` identities usable for qualification.
 Do not run it against QA without the separately authorized concrete operation proposal.
@@ -302,7 +301,7 @@ still exported. QA requires its source revision and digest; local-dev requires i
 ```sh
 make go-svc-deploy-status SVC_NAME=policy-search
 make go-svc-deploy-verify SVC_NAME=policy-search
-make go-svc-cutover-index-verify SVC_NAME=policy-search
+make go-svc-administration-verify SVC_NAME=policy-search
 ```
 
 Status and verification check exact live inventory, source/image identity, private exposure,

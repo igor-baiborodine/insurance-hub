@@ -24,7 +24,7 @@ export SVC_NAME
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-smoke \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
 	go-svc-fixture-setup go-svc-fixture-verify go-svc-fixture-retire \
-	go-svc-cutover-index-inspect go-svc-cutover-index-ensure go-svc-cutover-index-verify \
+	go-svc-administration-inspect go-svc-administration-setup go-svc-administration-verify \
 	go-svc-canonical-secrets-migrate \
 	go-svc-deploy-test-flux \
 	go-svc-dispatch-test go-svc-release-select go-svc-release-prepare go-svc-release-test go-svc-release-test-collect
@@ -63,9 +63,9 @@ go-svc-reader-rotate: ## Explicitly rotate and recover the selected service's re
 go-svc-fixture-setup: ## Create the selected service's accepted fixture and least-privilege identity
 go-svc-fixture-verify: ## Verify the selected service's fixture and reader permission boundary
 go-svc-fixture-retire: ## Remove only the selected service's accepted fixture and identity
-go-svc-cutover-index-inspect: ## Inspect the canonical Policy Search index without mutation
-go-svc-cutover-index-ensure: ## Guardedly create the canonical index and cutover identities
-go-svc-cutover-index-verify: ## Verify canonical index and least-privilege cutover identities
+go-svc-administration-inspect: ## Inspect the Policy Search index without mutation
+go-svc-administration-setup: ## Create missing Policy Search resources without changing compatible state
+go-svc-administration-verify: ## Verify the Policy Search index and least-privilege identities
 go-svc-canonical-secrets-migrate: ## Copy accepted Policy Search Secret data to ordinary names
 go-svc-deploy-test-tooling: ## Test selected-service deployment guards and cleanup
 go-svc-deploy-smoke: ## Smoke one service in an owned disposable Kind namespace
@@ -75,8 +75,8 @@ go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
 	go-svc-deploy-test-flux go-svc-fixture-setup go-svc-fixture-verify \
 	go-svc-fixture-retire \
-	go-svc-cutover-index-inspect go-svc-cutover-index-ensure \
-	go-svc-cutover-index-verify go-svc-canonical-secrets-migrate: python-runtime-check
+	go-svc-administration-inspect go-svc-administration-setup \
+	go-svc-administration-verify go-svc-canonical-secrets-migrate: python-runtime-check
 	+@set -eu; \
 		capability='$(@:go-svc-%=%)'; \
 		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) "$$capability")"; \
