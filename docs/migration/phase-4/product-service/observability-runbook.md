@@ -42,7 +42,7 @@ flowchart LR
     Product[Go Product] -->|OTLP gRPC: traces and metrics| Alloy[Grafana Alloy]
     Product -->|JSON stdout| PodLog[Pod log files]
     PodLog --> Alloy
-    Java[Java Product Zipkin] --> Alloy
+    Gateway[Java gateway Zipkin] --> Alloy
     Alloy -->|OTLP| Tempo[Tempo]
     Alloy -->|remote write| Prometheus[Prometheus]
     Alloy -->|Loki write| Loki[Loki]
@@ -68,9 +68,8 @@ observe the bounded delivery counters, and investigate the signal path separatel
 
 ## Configuration and identity
 
-Normal local development, base manifests, and the first instrumented QA image use
-`OTEL_ENABLED=false`. Enabled telemetry requires the internal Alloy OTLP/gRPC endpoint and a fixed
-identity:
+Normal local development and base manifests use `OTEL_ENABLED=false`. The QA overlay enables
+telemetry through the internal Alloy OTLP/gRPC endpoint and requires a fixed identity:
 
 | Setting | Disabled mode | Enabled QA mode |
 | --- | --- | --- |
@@ -88,8 +87,9 @@ it to the API Flux owner as `PRODUCT_SERVICE_VERSION`. The QA overlay maps that 
 revision remain separate release evidence.
 
 The Go SDK emits six application-owned resource values. Alloy adds the cluster, namespace, Pod,
-and container identity. Keep `service.name=product-service` across Go and Java and distinguish
-them with `insurance_hub.service.implementation=go|java`.
+and container identity. The active Product identity is `service.name=product-service` with
+`insurance_hub.service.implementation=go`. Historical Java Product telemetry can remain in backend
+retention with the `java` implementation value, but it does not represent a live workload.
 
 Request metrics allow only `list|get`, `http|grpc`, the eight reviewed outcomes, and their bounded
 HTTP or gRPC status. Completion logs contain constant messages and the reviewed request fields;
@@ -158,11 +158,11 @@ kubectl --context qa-insurance-hub -n flux-system get kustomization qa-svc
 ```
 
 Record the full 40-character source revision. Require ready Flux source and Kustomization
-conditions with the same source/applied revision. Revalidate the #134 handoff: active Go and Java
-Product workloads, restricted reader, internal Services and endpoints, immutable Product image,
-catalog/schema identity, Java gateway routing, and tested Go-only restoration. Revalidate the
-#154 chart and application versions, Helm revisions, storage, existing routes, capacity, and
-rollback points.
+conditions with the same source/applied revision. Require the active Go Product workload,
+restricted reader, internal Services and endpoints, immutable Product image, unchanged
+catalog/schema identity, and Java gateway routing to Go Product. Confirm the retired Java Product
+workload remains absent; do not redeploy it as part of verification. Revalidate the #154 chart and
+application versions, Helm revisions, storage, existing routes, capacity, and rollback points.
 
 Before telemetry is enabled, run the read-only verifier against the exact disabled revision:
 
@@ -179,14 +179,15 @@ port-forwards and closes every child on success or failure. Its JSON output cont
 or raw Secret values.
 
 Stop before applying if the checkout is dirty, the selected revision is not reconciled, chart or
-image identities drift, the Product/Java handoff is unhealthy, clocks are unsynchronized, capacity
-is insufficient, or an existing telemetry route is failing.
+image identities drift, the Go Product workload or Java gateway route is unhealthy, the retired
+Java Product workload is present, clocks are unsynchronized, capacity is insufficient, or an
+existing telemetry route is failing.
 
 ## Staged apply and enablement
 
 Capture sanitized before-state: Git and Flux revisions, Product image ID and Pod UID, Helm release
 revisions and effective versions, configuration checksums, PVC state, readiness, rule/dashboard
-inventory, existing route counters, and representative existing Java/Prometheus/Loki/Tempo
+inventory, existing route counters, and representative Java gateway, Prometheus, Loki, and Tempo
 queries. Never record Secret data or credential-bearing URLs.
 
 Apply each stage separately and retain its evidence before continuing:
@@ -205,9 +206,9 @@ normal scrape ingestion, exact ten-rule inventory, dashboard UID
 preservation. Replace a Grafana Pod and prove the provisioned dashboard returns unchanged.
 
 After Alloy, verify chart `1.13.1`, Alloy `v1.20.1`, the reviewed config checksum and RBAC, ready
-workload, and zero delivery failures/backlog. Recheck Java Zipkin input, Tempo and transitional
-Zipkin output, existing Loki logs, Prometheus remote write, configuration reload, and synthetic
-Product signals. Abort if any existing route regresses.
+workload, and zero delivery failures/backlog. Recheck active Java gateway Zipkin input, Tempo and
+transitional Zipkin output, existing Loki logs, Prometheus remote write, configuration reload, and
+synthetic Product signals. Abort if any existing route regresses.
 
 QA Product enablement is a separate reviewed Git change on canonical `main`. Set the approved
 non-secret configuration in the QA Product overlay, keep the internal Alloy endpoint, and let Flux
@@ -372,8 +373,9 @@ the ceiling from an observed result.
 
 For a Product image or configuration regression, restore `OTEL_ENABLED=false` or the last accepted
 image/configuration through a reviewed Git change on `main`. Let Flux reconcile, then verify
-Product and Java reads, health, endpoints, image/config identity, and telemetry cessation. Manual
-scaling, direct Product apply, and Flux suspension are not durable rollback paths.
+direct and Java-gateway Product reads, health, endpoints, image/config identity, and telemetry
+cessation. Manual scaling, direct Product apply, and Flux suspension are not durable rollback
+paths. Do not restore the retired Java Product workload.
 
 For an Alloy regression, restore the revision captured immediately before the change:
 
@@ -386,7 +388,8 @@ For a Prometheus/Grafana regression, use the equivalent rollback for `qa-prometh
 does not restore separately applied Product rules or dashboard assets; check out their accepted
 repository revision and reapply them with the guarded targets. Follow every live rollback with a
 reviewed repository revert so the next install cannot reapply the failed intent. Do not delete or
-roll back shared Loki, Tempo, Zipkin, databases, PVCs, Java resources, or the Product reader Secret.
+roll back shared Loki, Tempo, Zipkin, databases, PVCs, Java gateway resources, or the Product reader
+Secret.
 
 The read-only verifier owns and closes only the port-forwards it starts. Disposable targets remove
 their containers, networks, temporary files, and controlled evidence on failure. Inspect remaining
@@ -395,8 +398,8 @@ cleanup on a shared workstation.
 
 ## Evidence checklist
 
-Keep sanitized local records under the ignored `ai/artifacts/epic-4.2/issue-135/` directory. For
-each source, disposable, Helm, Flux, and live verification result, record:
+Keep sanitized local records under the active ticket's resolved ignored `ai/artifacts/` directory.
+For each source, disposable, Helm, Flux, and live verification result, record:
 
 - UTC start/end, operator, command, result, and whether the source is local, hosted CI, disposable,
   or shared QA;
@@ -407,8 +410,8 @@ each source, disposable, Helm, Flux, and live verification result, record:
 - sanitized backend queries and results, dashboard UID, all ten alert states, route and delivery
   counters, cardinality inventory, workload totals, latency/resource budgets, fault windows, loss,
   duplicates, and recovery times;
-- Java continuity, unchanged catalog/schema identity, cleanup results, residual blockers, and the
-  acceptance criterion supported by each record.
+- Java gateway continuity, retired Java Product absence, unchanged catalog/schema identity, cleanup
+  results, residual blockers, and the acceptance criterion supported by each record.
 
 Exclude passwords, tokens, Secret YAML, credential-bearing URLs, Product payloads, and arbitrary
 error text. Source validation, hosted release, Flux reconciliation, Helm rollout, and backend
