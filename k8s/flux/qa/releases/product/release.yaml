@@ -206,3 +206,6 @@ spec:
     digest: sha256:faa716e5327f2cc1e206aa46962e4346ee26417cff96852ab4717fa7184bf679
   dependsOn:
   - name: qa-product-init-48195d51a9b0d96f-a1
+  postBuild:
+    substitute:
+      PRODUCT_SERVICE_VERSION: git-62cdb21fac68

@@ -124,6 +124,20 @@ def invalid_qa_tag(values: Documents) -> None:
     )
 
 
+def old_qa_tag(values: Documents) -> None:
+    deployment = find(values["qa-go"], "Deployment", "qa-product-api")
+    deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
+        "ghcr.io/igor-baiborodine/insurance-hub/product-api:1.10.0"
+    )
+
+
+def mismatched_qa_version_label(values: Documents) -> None:
+    deployment = find(values["qa-go"], "Deployment", "qa-product-api")
+    deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"] = (
+        "git-6c4669c81d3a"
+    )
+
+
 def unversioned_local_tag(values: Documents) -> None:
     deployment = find(values["local-go"], "Deployment", "local-dev-product-api")
     deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
@@ -212,6 +226,12 @@ CASES: list[tuple[str, Mutation, str]] = [
     ("stale Java Product desired state", stale_java_product, "stale Java Product objects"),
     ("unreleased QA image tag", unreleased_qa_tag, "qa image reference is invalid"),
     ("invalid QA image tag", invalid_qa_tag, "qa image reference is invalid"),
+    ("old QA image tag", old_qa_tag, "qa image reference is invalid"),
+    (
+        "mismatched QA version label",
+        mismatched_qa_version_label,
+        "Pod version label",
+    ),
     ("unversioned local image tag", unversioned_local_tag, "local-dev image reference is invalid"),
     ("disabled QA telemetry", disabled_qa_telemetry, "qa Product ConfigMap"),
     ("missing QA Pod identity", missing_qa_instance, "PRODUCT_DATABASE_URL"),
@@ -232,7 +252,7 @@ CASES: list[tuple[str, Mutation, str]] = [
 
 
 @pytest.mark.integration
-def test_semantic_qa_release_tag_is_accepted(
+def test_canonical_qa_source_tag_is_accepted(
     rendered_documents: Documents,
     tmp_path: Path,
 ) -> None:
@@ -240,11 +260,11 @@ def test_semantic_qa_release_tag_is_accepted(
     values = active_documents(rendered_documents)
     deployment = find(values["qa-go"], "Deployment", "qa-product-api")
     deployment["spec"]["template"]["spec"]["containers"][0]["image"] = (
-        "ghcr.io/igor-baiborodine/insurance-hub/product-api:1.2.3"
+        "ghcr.io/igor-baiborodine/insurance-hub/product-api:git-6c4669c81d3a"
     )
 
     # when
-    status = check_render.main(write_documents(tmp_path, values, "semantic"))
+    status = check_render.main(write_documents(tmp_path, values, "canonical"))
 
     # then
     assert status == 0

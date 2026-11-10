@@ -87,7 +87,8 @@
             "sharedPath": "./k8s/overlays/qa/svc",
             "branch": "main",
             "initializationTimeout": "6m",
-            "apiTimeout": "5m"
+            "apiTimeout": "5m",
+            "runtimeVersionVariable": "PRODUCT_SERVICE_VERSION"
           }
         }
       }

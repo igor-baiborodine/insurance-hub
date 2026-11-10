@@ -65,6 +65,28 @@ def require(condition: bool, message: str) -> None:
         raise ReleaseSelectionError(message)
 
 
+def source_version(source_commit: str) -> str:
+    require(
+        bool(SHA.fullmatch(source_commit)) and set(source_commit[:12]) != {"0"},
+        "source commit must produce a nonzero canonical runtime version",
+    )
+    return f"git-{source_commit[:12]}"
+
+
+def runtime_version_variable(root: Path, target: dict) -> str | None:
+    variable = target.get("flux", {}).get("runtimeVersionVariable")
+    overlay = checkout_path(root, target["overlay"]) / "kustomization.yaml"
+    placeholders = set(re.findall(r"\$\{([A-Z][A-Z0-9_]{0,63})\}", overlay.read_text()))
+    if variable is None:
+        require(not placeholders, "target overlay has an unresolved release variable")
+        return None
+    require(
+        placeholders == {variable},
+        "target overlay and runtime version substitution must use the same variable",
+    )
+    return variable
+
+
 def release_module(value: str) -> str | None:
     path = PurePosixPath(value)
     if len(path.parts) < 3 or path.parts[0] != "services":
@@ -261,10 +283,11 @@ def service_release(
     source_commit: str,
     image_digest: str,
 ) -> ServiceRelease:
-    require(bool(SHA.fullmatch(source_commit)), "source commit must be a full SHA")
+    source_version(source_commit)
     require(bool(re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest)), "image digest is invalid")
     record = service_record(root, service)
     target = target_record(root, record, target_name)
+    runtime_version_variable(root, target)
     initialization = target.get("initialization")
     require(initialization is not None, "target has no initialization capability")
     policy = record["administration"]
@@ -373,6 +396,11 @@ def release_documents(
     )
     api = owner(flux["apiName"], target["overlay"], flux["apiTimeout"])
     api["spec"]["dependsOn"] = [{"name": init_name}]
+    version_variable = flux.get("runtimeVersionVariable")
+    if version_variable is not None:
+        api["spec"]["postBuild"] = {
+            "substitute": {version_variable: source_version(release.source_commit)}
+        }
     return [source, initialize, api]
 
 

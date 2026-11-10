@@ -174,7 +174,7 @@ EXPECTED_CONFIG = {
     "OTEL_ENABLED": "false",
 }
 
-QA_SERVICE_VERSION = "sha-be510cc"
+QA_SERVICE_VERSION = "${PRODUCT_SERVICE_VERSION}"
 QA_CONFIG = {
     **EXPECTED_CONFIG,
     "OTEL_ENABLED": "true",
@@ -239,7 +239,7 @@ def validate_go_environment(
             "secret": "qa-postgres-product-reader-creds",
             "image": re.compile(
                 r"ghcr\.io/igor-baiborodine/insurance-hub/product-api:"
-                r"1\.[0-9]+\.[0-9]+"
+                r"(?:\$\{PRODUCT_SERVICE_VERSION\}|git-(?!0{12})[0-9a-f]{12})"
             ),
             "pull": "Always",
         },
@@ -421,13 +421,12 @@ def validate_go_environment(
             "valueFrom": {"secretKeyRef": {"name": secret_name, "key": "database-url"}},
         }
     ]
-    if environment == "qa":
-        expected_environment.append(
-            {
-                "name": "SERVICE_INSTANCE_ID",
-                "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
-            }
-        )
+    expected_environment.append(
+        {
+            "name": "SERVICE_INSTANCE_ID",
+            "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
+        }
+    )
     require(
         container.get("env") == expected_environment,
         f"{environment} PRODUCT_DATABASE_URL reader Secret reference is incorrect",
@@ -560,15 +559,8 @@ def validate_gateway_route(documents: list[dict[str, Any]], environment: str) ->
     prefix = f"{environment}-"
     namespace = "qa-svc" if environment == "qa" else "local-dev-all"
     backends = ("product-api-legacy", "product-api") if environment == "qa" else ("product-api",)
-    expected_configs = {
-        backend: (
-            "micronaut:\n"
-            "  http:\n"
-            "    services:\n"
-            "      product-service:\n"
-            "        urls:\n"
-            f"          - http://{prefix}{backend}.{namespace}.svc.cluster.local:80\n"
-        )
+    expected_urls = {
+        backend: f"http://{prefix}{backend}.{namespace}.svc.cluster.local:80"
         for backend in backends
     }
 
@@ -583,13 +575,17 @@ def validate_gateway_route(documents: list[dict[str, Any]], environment: str) ->
         "ConfigMap",
         re.compile(rf"{re.escape(prefix)}gateway-product-route-config-[a-z0-9]{{10}}"),
     )
+    content = config.get("data", {}).get("application.yml", "")
+    product_urls = re.findall(
+        rf"http://{re.escape(prefix)}product-api(?:-legacy)?\.{re.escape(namespace)}\.svc\.cluster\.local:80",
+        content,
+    )
     selected = [
-        backend
-        for backend, expected_config in expected_configs.items()
-        if config.get("data") == {"application.yml": expected_config}
+        backend for backend, expected_url in expected_urls.items() if expected_url in content
     ]
     require(
-        len(selected) == 1, f"{environment} gateway must configure exactly one expected Product URL"
+        len(selected) == 1 and product_urls == [expected_urls[selected[0]]],
+        f"{environment} gateway must configure exactly one expected Product URL",
     )
     deployment = one(documents, "Deployment", f"{prefix}agent-portal-gateway-legacy")
     pod_spec = deployment["spec"]["template"]["spec"]

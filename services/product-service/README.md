@@ -299,8 +299,9 @@ without echoing rejected values.
 
 The application supplies the six approved non-Kubernetes identity fields on trace and metric
 resources and on validated service logs. Alloy adds Kubernetes identity later. QA telemetry and
-its version/Pod UID wiring remain disabled until the separate QA activation step. The provider
-uses parent-based root sampling, a bounded trace batch, and a ten-second cumulative metric reader
+its identity are enabled by the QA overlay: release preparation derives one canonical source
+version for the ConfigMap and workload labels, while the base Deployment supplies the Pod UID. The
+provider uses parent-based root sampling, a bounded trace batch, and a ten-second cumulative metric reader
 with explicit request, database, and pool-wait histogram buckets. Both business listeners now
 emit a bounded server span, an application child span for dispatched use cases, one request counter
 and duration observation, and one safe completion log per routed request. After route selection,

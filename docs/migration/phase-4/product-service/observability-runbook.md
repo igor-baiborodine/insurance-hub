@@ -79,8 +79,13 @@ identity:
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | `2s` default | `2s` |
 | `DEPLOYMENT_ENVIRONMENT` | `development` | `qa` |
 | `SERVICE_NAME` | `product-service` default | `product-service` |
-| `SERVICE_VERSION` | `development` | Immutable `sha-<git-sha>` |
-| `SERVICE_INSTANCE_ID` | Local process identity | Pod UID from the Downward API |
+| `SERVICE_VERSION` | `development` | Immutable `git-<first 12 lowercase source-revision characters>` |
+| `SERVICE_INSTANCE_ID` | Pod UID from the base Deployment; local process identity outside Kubernetes | Pod UID from the Downward API |
+
+Product release preparation derives the QA version from the verified full source commit and gives
+it to the API Flux owner as `PRODUCT_SERVICE_VERSION`. The QA overlay maps that one value to
+`SERVICE_VERSION` and the Deployment and Pod version labels. The image digest and full source
+revision remain separate release evidence.
 
 The Go SDK emits six application-owned resource values. Alloy adds the cluster, namespace, Pod,
 and container identity. Keep `service.name=product-service` across Go and Java and distinguish

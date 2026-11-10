@@ -11,7 +11,7 @@ import yaml
 import release
 
 REPOSITORY = "igor-baiborodine/insurance-hub"
-SOURCE_COMMIT = "a" * 40
+SOURCE_COMMIT = "6c4669c81d3a" + "a" * 28
 IMAGE_DIGEST = "sha256:" + "b" * 64
 NEXT_SOURCE_COMMIT = "c" * 40
 
@@ -81,6 +81,15 @@ def create_service(
             "attempt": 1,
             "waitSeconds": 420,
         }
+        if service == "product":
+            target["flux"]["runtimeVersionVariable"] = "PRODUCT_SERVICE_VERSION"
+            (overlay / "kustomization.yaml").write_text(
+                (overlay / "kustomization.yaml").read_text()
+                + "configMapGenerator:\n"
+                + "  - name: product-config\n"
+                + "    literals:\n"
+                + "      - SERVICE_VERSION=${PRODUCT_SERVICE_VERSION}\n"
+            )
     path = root / "scripts/go/service/catalog.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     catalog = (
@@ -246,7 +255,40 @@ def test_prepare_respects_target_capabilities(
             == f"./k8s/overlays/{environment}/svc/{service}/administration"
         )
         assert initialize["spec"]["postBuild"]["substitute"] == {"MIGRATION_TIMEOUT": "120s"}
+        if service == "product":
+            assert api["spec"]["postBuild"]["substitute"] == {
+                "PRODUCT_SERVICE_VERSION": "git-6c4669c81d3a"
+            }
+        else:
+            assert "postBuild" not in api["spec"]
         assert initialize["spec"]["healthChecks"][0]["namespace"] == environment + "-apps"
+
+
+@pytest.mark.parametrize("source_commit", ["0" * 40, "0" * 12 + "a" * 28])
+def test_product_release_rejects_zero_runtime_version(tmp_path: Path, source_commit: str) -> None:
+    # given
+    create_service(tmp_path, "product", initialization=True)
+
+    # when / then
+    with pytest.raises(release.ReleaseSelectionError, match="canonical runtime version"):
+        release.prepare_release(
+            tmp_path, "product", REPOSITORY, "1.2.3", source_commit, IMAGE_DIGEST
+        )
+
+
+def test_product_release_requires_its_runtime_version_substitution(tmp_path: Path) -> None:
+    # given
+    create_service(tmp_path, "product", initialization=True)
+    catalog_path = tmp_path / "scripts/go/service/catalog.json"
+    catalog = json.loads(catalog_path.read_text())
+    del catalog["services"]["product"]["deploymentTargets"]["qa"]["flux"]["runtimeVersionVariable"]
+    catalog_path.write_text(json.dumps(catalog))
+
+    # when / then
+    with pytest.raises(release.ReleaseSelectionError, match="unresolved release variable"):
+        release.prepare_release(
+            tmp_path, "product", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST
+        )
 
 
 def test_dashboard_release_uses_the_no_initialization_path(tmp_path: Path) -> None:
@@ -295,7 +337,7 @@ def test_prepare_updates_optional_runtime_version_with_source_commit(tmp_path: P
     # then
     rendered = overlay.read_text()
     assert "newTag: 1.2.3" in rendered
-    assert "SERVICE_VERSION=git-aaaaaaaaaaaa" in rendered
+    assert "SERVICE_VERSION=git-6c4669c81d3a" in rendered
 
 
 def test_prepare_retains_prior_release_prerequisites_and_replaces_only_api(

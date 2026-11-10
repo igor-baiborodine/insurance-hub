@@ -208,7 +208,7 @@ cardinality/redaction tests.
 | --- | --- | --- | --- |
 | `service.namespace` | `insurance-hub` | `insurance-hub` | `service_namespace` |
 | `service.name` | `product-service` | `product-service` | `service_name` |
-| `service.version` | Immutable build/image identity such as `sha-<git-sha>` | Actual image tag, currently `1.5.0` | `service_version` |
+| `service.version` | Canonical source identity `git-<first 12 lowercase source-revision characters>` | Actual immutable image tag | `service_version` |
 | `service.instance.id` | Pod UID | Pod UID | `service_instance_id` |
 | `deployment.environment.name` | `qa` | `qa` | `deployment_environment_name` |
 | `insurance_hub.service.implementation` | `go` | `java` | `service_implementation` |
@@ -218,10 +218,12 @@ cardinality/redaction tests.
 | `k8s.container.name` | `product-api` | `product-api-legacy` | `k8s_container_name` |
 
 The Go application emits its six non-Kubernetes values on trace and metric resources and in every
-JSON log. Its QA Deployment supplies `service.version` and the Pod UID through explicit settings
-and the Downward API. Use `deployment.environment.name=test`, a `test-<revision>` version, and a
-generated UUIDv4 instance ID for disposable enabled tests. Normal local telemetry remains disabled;
-local process logs use `development`, with Kubernetes fields omitted.
+JSON log. Release preparation derives QA `service.version` from the verified full source commit and
+supplies it through Flux to the ConfigMap and Deployment/Pod labels. The base Deployment supplies
+the Pod UID through the Downward API. Disposable enabled tests use
+`deployment.environment.name=test`, a canonical `git-<12 lowercase hexadecimal>` version, and an
+ordinary supplied instance such as `test-instance`. Normal local telemetry remains disabled; local
+process logs use `development`, with Kubernetes fields omitted.
 
 Alloy asserts the QA environment and cluster and enriches both receiver paths with the approved
 Kubernetes fields. Route Java Zipkin input through a namespace-scoped Kubernetes-attributes
@@ -231,10 +233,10 @@ from `latest` to its actual immutable image version. Replace the current span at
 `deployment.environment` and `cluster.name`; do not emit old and new keys together.
 
 Do not enable QA telemetry with blank or mutable versions such as `latest`, `unconfigured`, or
-`sha-unpublished`. Do not silently overwrite a conflicting service/version/instance/implementation
-identity. If Java Kubernetes association fails, preserve its existing trace delivery, expose the
-enrichment miss, and fail acceptance rather than inventing `unknown`, a Pod IP, or a constant
-instance ID.
+`sha-unpublished` or an unresolved `${PRODUCT_SERVICE_VERSION}`. Do not silently overwrite a
+conflicting service/version/instance/implementation identity. If Java Kubernetes association fails,
+preserve its existing trace delivery, expose the enrichment miss, and fail acceptance rather than
+inventing `unknown`, a Pod IP, or a constant instance ID.
 
 ### Span names and attributes
 
