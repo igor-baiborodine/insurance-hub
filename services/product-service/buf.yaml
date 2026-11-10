@@ -3,6 +3,8 @@ modules:
   - path: api
 deps:
   - buf.build/bufbuild/protovalidate:50325440f8f24053b047484a6bf60b76
+  - buf.build/googleapis/googleapis:62f35d8aed1149c291d606d958a7ce32
+  - buf.build/grpc-ecosystem/grpc-gateway:4836b6d552304e1bbe47e66a523f0daa
 lint:
   use:
     - STANDARD

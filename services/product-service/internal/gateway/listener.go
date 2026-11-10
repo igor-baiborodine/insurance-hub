@@ -1,4 +1,4 @@
-package producthttp
+package gateway
 
 import (
 	"bufio"

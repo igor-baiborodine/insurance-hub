@@ -8,6 +8,8 @@ package productv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
+	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
+	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -661,7 +663,7 @@ var File_product_v1_product_service_proto protoreflect.FileDescriptor
 const file_product_v1_product_service_proto_rawDesc = "" +
 	"\n" +
 	" product/v1/product_service.proto\x12\n" +
-	"product.v1\x1a\x1bbuf/validate/validate.proto\"\x15\n" +
+	"product.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\x15\n" +
 	"\x13ListProductsRequest\"G\n" +
 	"\x14ListProductsResponse\x12/\n" +
 	"\bproducts\x18\x01 \x03(\v2\x13.product.v1.ProductR\bproducts\"0\n" +
@@ -701,11 +703,11 @@ const file_product_v1_product_service_proto_rawDesc = "" +
 	"\x0fNumericQuestion\"2\n" +
 	"\x06Choice\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x14\n" +
-	"\x05label\x18\x02 \x01(\tR\x05label2\xb0\x01\n" +
-	"\x0eProductService\x12Q\n" +
-	"\fListProducts\x12\x1f.product.v1.ListProductsRequest\x1a .product.v1.ListProductsResponse\x12K\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label2\xe9\x02\n" +
+	"\x0eProductService\x12\xaa\x01\n" +
+	"\fListProducts\x12\x1f.product.v1.ListProductsRequest\x1a .product.v1.ListProductsResponse\"W\x92A9\x12\rList products\x1a(Returns the accepted Product HTTP array.\x82\xd3\xe4\x93\x02\x15b\bproducts\x12\t/products\x12\xa9\x01\n" +
 	"\n" +
-	"GetProduct\x12\x1d.product.v1.GetProductRequest\x1a\x1e.product.v1.GetProductResponseB]Z[github.com/igor-baiborodine/insurance-hub/services/product-service/gen/product/v1;productv1b\x06proto3"
+	"GetProduct\x12\x1d.product.v1.GetProductRequest\x1a\x1e.product.v1.GetProductResponse\"\\\x92A8\x12\vGet product\x1a)Returns one accepted Product HTTP object.\x82\xd3\xe4\x93\x02\x1bb\aproduct\x12\x10/products/{code}B]Z[github.com/igor-baiborodine/insurance-hub/services/product-service/gen/product/v1;productv1b\x06proto3"
 
 var (
 	file_product_v1_product_service_proto_rawDescOnce sync.Once

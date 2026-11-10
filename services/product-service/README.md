@@ -13,8 +13,9 @@
 
 # Product catalog read service
 
-This standalone module is the Go Product pilot. Its executable serves the direct Product HTTP API,
-the generated Product v1 gRPC API, and management health routes from one explicit composition root.
+This standalone module is the Go Product pilot. Its executable serves the Product HTTP API through
+generated gRPC-Gateway handlers, the generated Product v1 gRPC API, and management health routes
+from one explicit composition root.
 It uses one process-owned PostgreSQL pool for catalog reads and dependency-aware readiness. The
 service remains an internal migration candidate; do not route production Product traffic to it.
 
@@ -181,8 +182,8 @@ schema file describes the existing Java-owned table for generation and tests. Th
 executes it at runtime. Use `gen-sql` only when intentionally changing SQL inputs; `check-sql-drift`
 verifies the exact output set, source preservation, and byte-reproducible generation.
 
-The direct HTTP boundary is exercised on a real loopback listener with test-owned callbacks:
-`make -C services/product-service test TEST_PACKAGES=./internal/http`. The `startup` integration
+The generated HTTP gateway boundary is exercised on a real loopback listener with a Product client:
+`make -C services/product-service test TEST_PACKAGES=./internal/gateway`. The `startup` integration
 suite exercises the production composition path, all three listeners, empty-table health,
 dependency loss/recovery, startup failures, and resource cleanup.
 
@@ -409,7 +410,8 @@ credential and identity-propagation matrix; #134 owns internal-only deployed exp
 | Management `GET /livez` / `GET /readyz` | Constant text responses for process liveness and dependency-aware readiness. | Readiness returns constant `503 not ready` during startup, dependency loss, or drain; it never returns a database cause. |
 
 The HTTP contract is implemented by
-[`internal/http/handler.go`](internal/http/handler.go) and its transport-owned DTO mapper. The
+[`internal/gateway/handler.go`](internal/gateway/handler.go), generated HandlerClient registration,
+and its transport-owned DTO mapper. The
 versioned gRPC schema is [`api/product/v1/product_service.proto`](api/product/v1/product_service.proto),
 with generated Go bindings under [`gen/product/v1`](gen/product/v1). Structured logs redact
 credentials, tokens, request/response payloads, and arbitrary error causes. Telemetry is disabled by
@@ -483,14 +485,14 @@ flowchart LR
     end
 
     subgraph Adapters["Inbound and outbound adapters"]
-        HTTP["internal/http<br/>legacy DTO and HTTP errors"]
+        HTTP["internal/gateway<br/>generated HandlerClient, legacy DTO and HTTP errors"]
         GRPC["internal/grpc<br/>protobuf mapping and status"]
         Proto["api/product/v1 + gen/product/v1<br/>versioned wire contract"]
         PG["internal/postgres<br/>Reader, JSONB decoder, pgx"]
         SQLC["internal/postgres/dbgen<br/>generated SELECT queries"]
     end
 
-    HTTP -->|"imports core contracts"| UseCases
+    HTTP -->|"imports"| Proto
     GRPC -->|"imports core contracts"| UseCases
     GRPC -->|"imports"| Proto
     PG -->|"satisfies"| Port
@@ -501,9 +503,9 @@ flowchart LR
     Composition -->|"imports"| HTTP
     Composition -->|"imports"| GRPC
     Composition -->|"imports"| PG
-    Composition -.->|"startup: injects"| HTTP
+    Composition -.->|"startup: injects generated RPC client"| HTTP
     Composition -.->|"startup: injects"| GRPC
-    HTTP -.->|"runtime: calls"| UseCases
+    HTTP -.->|"runtime: calls local gRPC"| GRPC
     GRPC -.->|"runtime: calls"| UseCases
     UseCases -.->|"runtime: dispatches"| PG
     PG -.->|"runtime: SELECT"| DB[("PostgreSQL public.product")]
@@ -520,7 +522,7 @@ The concrete package and file responsibilities are:
 | [`internal/domain/catalog.go`](internal/domain/catalog.go) | Owns transport-independent Product catalog values and exact decimal tokens. |
 | [`internal/application/catalog.go`](internal/application/catalog.go) | Owns `ProductReader`, `ListProducts`, `GetProduct`, and application errors. |
 | [`internal/postgres`](internal/postgres) | Owns runtime pool and administrative database construction, restricted read execution, sqlc use, JSONB decoding, storage error classification, and safe database/pool telemetry. |
-| [`internal/http`](internal/http) | Owns direct URI behavior, legacy-compatible DTO/presence/decimal mapping, JSON responses, and HTTP error mapping. |
+| [`internal/gateway`](internal/gateway) | Registers the generated Product client and owns accepted URI behavior, legacy-compatible DTO/presence/decimal mapping, metadata filtering, JSON responses, and HTTP error mapping. |
 | [`internal/grpc`](internal/grpc) | Owns generated-service registration, validation, domain-to-protobuf mapping, limits, tracing hooks, and status mapping. |
 | [`internal/config`](internal/config) | Parses and validates the bounded runtime settings and holds the database URL in a redacting type. |
 | [`internal/health`](internal/health) | Exposes ServiceKit's liveness/readiness primitives; Product composition supplies its database probe, readiness transitions and management listener. |
@@ -530,20 +532,22 @@ The concrete package and file responsibilities are:
 
 For a get-product request:
 
-1. The HTTP adapter selects a normalized route and starts a server span, or the gRPC boundary
-   starts its registered server span before validating `GetProductRequest`. Each calls the same
-   injected use case through the composition-owned application span wrapper.
+1. The HTTP gateway selects a normalized route, starts its server span, and invokes the generated
+   Product client over the process-owned local gRPC connection. Direct RPC starts at the same gRPC
+   boundary, which validates `GetProductRequest` before calling the composition-owned application
+   span wrapper.
 2. `GetProduct` validates the code and calls its application-owned `ProductReader` port.
 3. Runtime interface dispatch reaches `postgres.Reader`, which uses the sqlc-generated exact
    parameterized lookup and converts the stored JSONB into domain values.
-4. The inbound adapter maps the domain Product to its own legacy HTTP DTO or protobuf message. A
-   missing product or bounded failure maps to that transport's safe contract. The request boundary
-   records a bounded outcome, response status, duration, and correlated completion log.
+4. The gRPC adapter maps the domain Product to protobuf. The HTTP gateway maps that response to the
+   accepted legacy DTO. A missing product or bounded failure maps to the caller transport's safe
+   contract. Each traversed request boundary records its outcome, status, duration, and correlated
+   completion log.
 
 Stored JSONB exists only at the PostgreSQL boundary, Product domain values cross the application
-port, and protobuf messages and legacy HTTP DTOs stay inside their owning adapters. Both transports
-therefore reuse the same use cases without importing one another or moving wire/storage types into
-the core.
+port, protobuf messages cross the local RPC boundary, and legacy HTTP DTOs stay in the gateway.
+Both public transports therefore reuse the same gRPC and application paths without moving
+wire/storage types into the core.
 
 ## Container release and deployment
 

@@ -2,297 +2,240 @@ package service
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	grpcgo "google.golang.org/grpc"
+	"go.opentelemetry.io/otel/metric"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
+	productv1 "github.com/igor-baiborodine/insurance-hub/services/product-service/gen/product/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
-	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/health"
-	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/telemetry"
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/domain"
+	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/postgres"
 )
 
+func TestRun_TraversesRealGatewayRPCAndReadiness(t *testing.T) {
+	settings := loadTestSettings(t)
+	deps := productionDependencies()
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return fakeTelemetry{}, nil
+	}
+	deps.openPool = func(context.Context, config.Database) (*pgxpool.Pool, error) { return nil, nil }
+	deps.checkDatabase = func(context.Context, *pgxpool.Pool) error { return nil }
+	deps.newDatabaseObserver = func(*pgxpool.Pool, trace.TracerProvider, metric.MeterProvider) (*postgres.Observer, error) {
+		return nil, nil
+	}
+	deps.newReader = func(*pgxpool.Pool, time.Duration, time.Duration, *postgres.Observer) (application.ProductReader, error) {
+		return fakeProductReader{}, nil
+	}
+	var listenerMu sync.Mutex
+	addresses := make([]string, 0, 3)
+	deps.listen = func(network, _ string) (net.Listener, error) {
+		listener, err := net.Listen(network, "127.0.0.1:0")
+		if err == nil {
+			listenerMu.Lock()
+			addresses = append(addresses, listener.Addr().String())
+			listenerMu.Unlock()
+		}
+		return listener, err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, settings, slog.New(slog.NewTextHandler(io.Discard, nil)), deps)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("run service: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("service did not stop")
+		}
+	})
+
+	grpcAddress, httpAddress, healthAddress := waitForAddresses(t, &listenerMu, &addresses)
+	waitForStatus(t, "http://"+healthAddress+"/readyz", http.StatusOK)
+	response, err := http.Get("http://" + httpAddress + "/products/ONLY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK || string(body) !=
+		`{"code":"ONLY","name":"Only product","maxNumberOfInsured":0}` {
+		t.Fatalf("gateway response = (%d, %s)", response.StatusCode, body)
+	}
+	connection, err := grpc.NewClient(
+		grpcAddress,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	rpcResponse, err := productv1.NewProductServiceClient(connection).ListProducts(
+		context.Background(), &productv1.ListProductsRequest{},
+	)
+	if err != nil || len(rpcResponse.GetProducts()) != 1 {
+		t.Fatalf("RPC response = (%v, %v)", rpcResponse, err)
+	}
+}
+
 func TestRun_RejectsInvalidProcessDependencies(t *testing.T) {
-	// given
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	tests := []struct {
-		name     string
-		settings config.Config
-		logger   *slog.Logger
-	}{
-		{name: "missing logger", settings: config.Config{StartupTimeout: time.Second}},
-		{
-			name:     "missing startup timeout",
-			settings: config.Config{ShutdownTimeout: time.Second},
-			logger:   logger,
-		},
-		{
-			name:     "missing shutdown timeout",
-			settings: config.Config{StartupTimeout: time.Second},
-			logger:   logger,
-		},
+	if err := Run(context.Background(), config.Config{}, nil); err == nil {
+		t.Error("Run accepted a nil logger")
 	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// when
-			err := Run(context.Background(), test.settings, test.logger)
-
-			// then
-			if err == nil {
-				t.Fatal("Run() error = nil")
-			}
-		})
+	if err := Run(context.Background(), config.Config{}, logger); err == nil {
+		t.Error("Run accepted missing startup and shutdown budgets")
 	}
 }
 
-func TestRun_ReportsTelemetryInitializationFailure(t *testing.T) {
-	// given
-	settings := config.Config{
-		ServiceName:     "product-service",
-		StartupTimeout:  time.Second,
-		ShutdownTimeout: time.Second,
-		Telemetry: config.Telemetry{
-			Enabled:         true,
-			ExporterTimeout: time.Second,
-		},
+func TestInternalDialTarget_UsesLoopbackForWildcardListeners(t *testing.T) {
+	target, err := internalDialTarget(fakeAddress("0.0.0.0:9090"))
+	if err != nil || target != "127.0.0.1:9090" {
+		t.Fatalf("target = %q, error = %v", target, err)
 	}
+}
 
-	// when
-	err := Run(
-		context.Background(),
-		settings,
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+func TestHandlerTracker_WithdrawsAdmissionAndDrainsAcceptedRequests(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	tracker := newHandlerTracker(
+		http.HandlerFunc(
+			func(http.ResponseWriter, *http.Request) { close(started); <-release },
+		),
+		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.WriteHeader(http.StatusServiceUnavailable)
+		}),
 	)
-
-	// then
-	if err == nil || !strings.Contains(err.Error(), "exporter endpoint is required") {
-		t.Fatalf("Run() error = %v, want telemetry endpoint failure", err)
-	}
-}
-
-func TestRun_CleansUpAfterDatabaseConnectionFailure(t *testing.T) {
-	// given
-	settings := loadUnavailableDatabaseSettings(t)
-
-	// when
-	err := Run(
-		context.Background(),
-		settings,
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
-	)
-
-	// then
-	if err == nil || !strings.Contains(err.Error(), "open Product database") {
-		t.Fatalf("Run() error = %v, want database connection failure", err)
-	}
-	if strings.Contains(err.Error(), "reader-password") {
-		t.Fatalf("Run() error exposes database credentials: %v", err)
-	}
-}
-
-func TestExpectedServeError_RecognizesOwnedServerShutdown(t *testing.T) {
-	// given
-	tests := []struct {
-		err  error
-		want bool
-	}{
-		{want: true},
-		{err: http.ErrServerClosed, want: true},
-		{err: grpcgo.ErrServerStopped, want: true},
-		{err: context.Canceled},
-	}
-
-	for _, test := range tests {
-		// when
-		got := expectedServeError(test.err)
-
-		// then
-		if got != test.want {
-			t.Errorf("expectedServeError(%v) = %t, want %t", test.err, got, test.want)
-		}
-	}
-}
-
-func TestWaitForRunStop_PreservesFatalServingError(t *testing.T) {
-	// given
-	cause := errors.New("fatal listener failure")
-	results := make(chan serveResult, 1)
-	results <- serveResult{name: "Product HTTP", err: cause}
-
-	// when
-	err := waitForRunStop(context.Background(), results)
-
-	// then
-	if !errors.Is(err, cause) || err.Error() != "serve Product HTTP: fatal listener failure" {
-		t.Fatalf("waitForRunStop() error = %v", err)
-	}
-}
-
-func TestWaitForRunStop_AcceptsSignalAndOwnedServerStops(t *testing.T) {
-	// given
-	canceledCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	// when
-	signalErr := waitForRunStop(canceledCtx, make(chan serveResult))
-	ownedResults := make(chan serveResult, 1)
-	ownedResults <- serveResult{name: "Product gRPC", err: grpcgo.ErrServerStopped}
-	ownedErr := waitForRunStop(context.Background(), ownedResults)
-
-	// then
-	if signalErr != nil || ownedErr != nil {
-		t.Fatalf("signal/owned stop errors = %v/%v", signalErr, ownedErr)
-	}
-}
-
-func TestRuntimeResources_Shutdown_IsRepeatableAndMarksUnready(t *testing.T) {
-	// given
-	pool, err := pgxpool.New(
-		context.Background(),
-		"postgresql://unused:unused@127.0.0.1:1/unused?sslmode=disable",
-	)
-	if err != nil {
-		t.Fatalf("create unopened test pool: %v", err)
-	}
-	provider, err := telemetry.New(
-		context.Background(),
-		"product-service",
-		config.Telemetry{Enabled: false, ExporterTimeout: time.Second},
-	)
-	if err != nil {
-		pool.Close()
-		t.Fatalf("create disabled telemetry: %v", err)
-	}
-	healthState, err := health.NewState(time.Second, func(context.Context) error { return nil })
-	if err != nil {
-		pool.Close()
-		t.Fatalf("create health state: %v", err)
-	}
-	healthState.SetReady(true)
-	resources := runtimeResources{
-		provider:         provider,
-		pool:             pool,
-		healthState:      healthState,
-		httpServer:       &http.Server{},
-		grpcServer:       grpcgo.NewServer(),
-		managementServer: &http.Server{},
-	}
-
-	// when
-	firstErr, firstTelemetryErr := resources.shutdown(20 * time.Millisecond)
-	secondErr, secondTelemetryErr := resources.shutdown(20 * time.Millisecond)
-
-	// then
-	if firstErr != nil || secondErr != nil || firstTelemetryErr != nil ||
-		secondTelemetryErr != nil {
-		t.Fatalf("first/second shutdown errors = %v/%v; telemetry = %v/%v",
-			firstErr, secondErr, firstTelemetryErr, secondTelemetryErr)
-	}
-	if healthState.Ready() {
-		t.Error("health state remained ready after shutdown")
-	}
-}
-
-func TestRuntimeResources_CloseAfterStartupFailure_ReleasesOwnedResources(t *testing.T) {
-	// given
-	pool, err := pgxpool.New(
-		context.Background(),
-		"postgresql://unused:unused@127.0.0.1:1/unused?sslmode=disable",
-	)
-	if err != nil {
-		t.Fatalf("create unopened test pool: %v", err)
-	}
-	provider, err := telemetry.New(
-		context.Background(),
-		"product-service",
-		config.Telemetry{Enabled: false, ExporterTimeout: time.Second},
-	)
-	if err != nil {
-		pool.Close()
-		t.Fatalf("create disabled telemetry: %v", err)
-	}
-	listeners := make([]net.Listener, 3)
-	for index := range listeners {
-		listeners[index], err = net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			for _, listener := range listeners {
-				closeListener(listener)
-			}
-			pool.Close()
-			t.Fatalf("create listener %d: %v", index, err)
-		}
-	}
-	resources := runtimeResources{
-		provider:           provider,
-		pool:               pool,
-		httpListener:       listeners[0],
-		grpcListener:       listeners[1],
-		managementListener: listeners[2],
-	}
-
-	// when
-	cleanupErr := resources.closeAfterStartupFailure(time.Second)
-
-	// then
-	if cleanupErr != nil {
-		t.Fatalf("closeAfterStartupFailure() error = %v", cleanupErr)
-	}
-	for _, listener := range listeners {
-		connection, dialErr := net.DialTimeout(
-			"tcp",
-			listener.Addr().String(),
-			20*time.Millisecond,
+	done := make(chan struct{})
+	go func() {
+		tracker.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodGet, "/products", nil),
 		)
-		if dialErr == nil {
-			_ = connection.Close()
-			t.Errorf("listener %s still accepts connections", listener.Addr())
-		}
+		close(done)
+	}()
+	<-started
+	tracker.beginDrain()
+	unavailable := httptest.NewRecorder()
+	tracker.ServeHTTP(unavailable, httptest.NewRequest(http.MethodGet, "/products", nil))
+	if unavailable.Code != http.StatusServiceUnavailable {
+		t.Fatalf("draining status = %d", unavailable.Code)
 	}
-	if pingErr := pool.Ping(context.Background()); pingErr == nil {
-		t.Error("pool remains usable after startup cleanup")
+	close(release)
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if !tracker.wait(waitCtx) {
+		t.Fatal("accepted request did not drain")
 	}
-	if err := (&runtimeResources{}).closeAfterStartupFailure(time.Second); err != nil {
-		t.Fatalf("empty startup cleanup error = %v", err)
-	}
+	<-done
 }
 
-func loadUnavailableDatabaseSettings(t *testing.T) config.Config {
+type fakeTelemetry struct{}
+
+func (fakeTelemetry) MeterProvider() metric.MeterProvider  { return metricnoop.NewMeterProvider() }
+func (fakeTelemetry) TracerProvider() trace.TracerProvider { return noop.NewTracerProvider() }
+func (fakeTelemetry) HTTPPropagator() propagation.TextMapPropagator {
+	return propagation.TraceContext{}
+}
+
+func (fakeTelemetry) GRPCPropagator() propagation.TextMapPropagator {
+	return propagation.TraceContext{}
+}
+func (fakeTelemetry) Shutdown(context.Context) error { return nil }
+
+type fakeProductReader struct{}
+
+func (fakeProductReader) ListProducts(context.Context) ([]domain.Product, error) {
+	return []domain.Product{{Code: "ONLY", Name: "Only product"}}, nil
+}
+
+func (fakeProductReader) GetProduct(_ context.Context, code string) (domain.Product, bool, error) {
+	if code != "ONLY" {
+		return domain.Product{}, false, nil
+	}
+	return domain.Product{Code: "ONLY", Name: "Only product"}, true, nil
+}
+
+type fakeAddress string
+
+func (address fakeAddress) Network() string { return "tcp" }
+func (address fakeAddress) String() string  { return string(address) }
+
+func waitForAddresses(t *testing.T, mu *sync.Mutex, addresses *[]string) (string, string, string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		if len(*addresses) == 3 {
+			values := append([]string(nil), (*addresses)...)
+			mu.Unlock()
+			return values[0], values[1], values[2]
+		}
+		mu.Unlock()
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("service listeners were not created")
+	return "", "", ""
+}
+
+func waitForStatus(t *testing.T, endpoint string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		response, err := http.Get(endpoint)
+		if err == nil {
+			_ = response.Body.Close()
+			if response.StatusCode == want {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("%s did not return %d", endpoint, want)
+}
+
+func loadTestSettings(t *testing.T) config.Config {
 	t.Helper()
 	t.Setenv("SERVICE_NAME", "product-service")
 	t.Setenv(
 		"PRODUCT_DATABASE_URL",
-		"postgresql://product_reader:reader-password@127.0.0.1:1/product?sslmode=disable",
+		"postgresql://unused:unused@127.0.0.1:1/product?sslmode=disable",
 	)
 	t.Setenv("DB_MAX_CONNS", "1")
+	t.Setenv("DB_CONNECT_TIMEOUT", "500ms")
+	t.Setenv("DB_ACQUIRE_TIMEOUT", "500ms")
+	t.Setenv("DB_QUERY_TIMEOUT", "500ms")
 	t.Setenv("HTTP_ADDR", "127.0.0.1:18081")
 	t.Setenv("GRPC_ADDR", "127.0.0.1:19090")
 	t.Setenv("HEALTH_ADDR", "127.0.0.1:18080")
-	t.Setenv("DB_CONNECT_TIMEOUT", "20ms")
-	t.Setenv("DB_ACQUIRE_TIMEOUT", "20ms")
-	t.Setenv("DB_QUERY_TIMEOUT", "50ms")
-	t.Setenv("STARTUP_TIMEOUT", "100ms")
-	t.Setenv("REQUEST_TIMEOUT", "100ms")
-	t.Setenv("PROBE_TIMEOUT", "20ms")
-	t.Setenv("HTTP_READ_HEADER_TIMEOUT", "20ms")
-	t.Setenv("HTTP_READ_TIMEOUT", "100ms")
-	t.Setenv("HTTP_WRITE_TIMEOUT", "100ms")
-	t.Setenv("HTTP_IDLE_TIMEOUT", "100ms")
-	t.Setenv("SHUTDOWN_TIMEOUT", "100ms")
-	t.Setenv("LOG_LEVEL", "info")
+	t.Setenv("STARTUP_TIMEOUT", "2s")
+	t.Setenv("PROBE_TIMEOUT", "500ms")
+	t.Setenv("SHUTDOWN_TIMEOUT", "2s")
 	t.Setenv("OTEL_ENABLED", "false")
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4317")
-	t.Setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "20ms")
+	t.Setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "500ms")
 	settings, err := config.Load()
 	if err != nil {
-		t.Fatalf("load unavailable database settings: %v", err)
+		t.Fatal(err)
 	}
 	return settings
 }

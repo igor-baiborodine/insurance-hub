@@ -3,12 +3,32 @@ syntax = "proto3";
 package product.v1;
 
 import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/igor-baiborodine/insurance-hub/services/product-service/gen/product/v1;productv1";
 
 service ProductService {
-  rpc ListProducts(ListProductsRequest) returns (ListProductsResponse);
-  rpc GetProduct(GetProductRequest) returns (GetProductResponse);
+  rpc ListProducts(ListProductsRequest) returns (ListProductsResponse) {
+    option (google.api.http) = {
+      get: "/products"
+      response_body: "products"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List products"
+      description: "Returns the accepted Product HTTP array."
+    };
+  }
+  rpc GetProduct(GetProductRequest) returns (GetProductResponse) {
+    option (google.api.http) = {
+      get: "/products/{code}"
+      response_body: "product"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get product"
+      description: "Returns one accepted Product HTTP object."
+    };
+  }
 }
 
 message ListProductsRequest {}

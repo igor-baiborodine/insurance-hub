@@ -20,8 +20,8 @@ import (
 
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
-	transport "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/http"
-	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
+	gateway "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/gateway"
+	productgrpc "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/grpc"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/postgres"
 )
 
@@ -87,11 +87,16 @@ func TestProductHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	handler, err := transport.NewHandler(
-		logger.New(&logs, settings.ServiceName, settings.LogLevel),
-		transport.Settings{RequestTimeout: settings.RequestTimeout},
-		transport.ListProducts(listProducts.Execute),
-		transport.GetProduct(getProduct.Execute),
+	rpcClient := startGRPCIntegrationServer(
+		t,
+		settings,
+		productgrpc.ListProducts(listProducts.Execute),
+		productgrpc.GetProduct(getProduct.Execute),
+		&logs,
+	)
+	handler, err := gateway.NewHandler(
+		rpcClient,
+		gateway.Settings{RequestTimeout: settings.RequestTimeout},
 	)
 	if err != nil {
 		t.Fatalf("new HTTP handler: %v", err)
@@ -276,7 +281,7 @@ func startHTTPIntegrationServer(
 		IdleTimeout:       settings.HTTPServer.IdleTimeout,
 	}
 	serveResult := make(chan error, 1)
-	go func() { serveResult <- transport.Serve(server, listener) }()
+	go func() { serveResult <- gateway.Serve(server, listener) }()
 	t.Cleanup(func() {
 		_ = server.Close()
 		_ = listener.Close()
