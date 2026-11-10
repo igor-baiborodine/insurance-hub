@@ -1035,10 +1035,10 @@ def verify_setup_rerun(
     with port_forward(cluster) as port:
         admin = ElasticsearchClient(port, "elastic", admin_password)
         before = service_admin.inspect_index(admin)
-        setup = service_admin.ensure_index_and_access(admin, reader_password, writer_password)
+        ensured = service_admin.ensure_index_and_access(admin, reader_password, writer_password)
         after = service_admin.inspect_index(admin)
     require(before.documents >= 2, "populated disposable state is missing")
-    require(setup.index == before and after == before, "setup rerun changed populated state")
+    require(ensured == before and after == before, "setup rerun changed populated state")
 
 
 def main() -> int:

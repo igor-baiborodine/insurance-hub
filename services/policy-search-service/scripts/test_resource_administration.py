@@ -96,14 +96,13 @@ def test_ensure_preserves_populated_index_and_existing_access() -> None:
         ]
     )
 
-    setup = administration.ensure_index_and_access(
+    state = administration.ensure_index_and_access(
         client,
         "existing-reader-password-with-32-bytes",
         "existing-writer-password-with-32-bytes",
     )
 
-    assert setup.index.documents == 3
-    assert not setup.reader_secret_missing and not setup.writer_secret_missing
+    assert state.documents == 3
     assert all(method == "GET" for method, _, _ in client.requests[1:])
 
 
@@ -126,11 +125,13 @@ def test_ensure_creates_only_missing_index_and_access() -> None:
         ]
     )
 
-    setup = administration.ensure_index_and_access(client, None, None)
+    state = administration.ensure_index_and_access(
+        client,
+        "generated-reader-password-with-32-bytes",
+        "generated-writer-password-with-32-bytes",
+    )
 
-    assert setup.index.exists and setup.index.documents == 0
-    assert setup.reader_secret_missing and setup.writer_secret_missing
-    assert len(setup.reader_password) >= 32 and len(setup.writer_password) >= 32
+    assert state.exists and state.documents == 0
     assert client.requests[5] == (
         "PUT",
         "/policy-views",
@@ -188,9 +189,68 @@ def test_ensure_rejects_existing_user_without_canonical_secret() -> None:
     )
 
     with pytest.raises(administration.AdministrationError, match="reader Secret is missing"):
-        administration.ensure_index_and_access(client, None, "writer-password")
+        administration.inspect_index_and_access(client, None, "writer-password")
 
     assert all(method != "PUT" for method, _, _ in client.requests)
+
+
+def test_credential_persistence_recovers_before_access_creation() -> None:
+    class CredentialTarget:
+        reader_secret = "reader-secret"
+        writer_secret = "writer-secret"
+
+        def __init__(self) -> None:
+            self.passwords: dict[str, str] = {}
+            self.fail_writer_once = True
+
+        def apply_secret(self, name: str, data: dict[str, str], component: str) -> None:
+            del component
+            if name == self.writer_secret and self.fail_writer_once:
+                self.fail_writer_once = False
+                raise administration.AdministrationError("simulated Secret apply failure")
+            self.passwords[name] = data["password"]
+
+    absent_boundary = [(404, None)] * 5
+    target = CredentialTarget()
+    interrupted_client = FakeClient(absent_boundary.copy())
+
+    with pytest.raises(administration.AdministrationError, match="simulated Secret apply failure"):
+        administration.persist_missing_credentials(target, interrupted_client, None, None)
+
+    persisted_reader = target.passwords[target.reader_secret]
+    assert target.writer_secret not in target.passwords
+    assert all(method != "PUT" for method, _, _ in interrupted_client.requests)
+
+    reader_password, writer_password = administration.persist_missing_credentials(
+        target,
+        FakeClient(absent_boundary.copy()),
+        persisted_reader,
+        None,
+    )
+    assert reader_password == persisted_reader
+    assert writer_password == target.passwords[target.writer_secret]
+
+    completion_client = FakeClient(
+        [
+            *absent_boundary,
+            (200, {}),
+            (200, None),
+            (200, canonical_definition()),
+            (200, {"count": 0}),
+            (200, {}),
+            (200, {}),
+            (200, {}),
+            (200, {}),
+        ]
+    )
+    state = administration.ensure_index_and_access(
+        completion_client,
+        reader_password,
+        writer_password,
+    )
+
+    assert state.exists and state.documents == 0
+    assert [method for method, _, _ in completion_client.requests].count("PUT") == 5
 
 
 def test_verify_identity_requires_exact_boundary() -> None:

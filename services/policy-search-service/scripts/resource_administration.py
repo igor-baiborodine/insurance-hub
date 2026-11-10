@@ -16,7 +16,7 @@ from typing import Any
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 sys.path.insert(0, str(ROOT))
 
-from administration import (  # noqa: E402
+from administration import (  # noqa: E402, I001
     AdministrationError,
     ElasticsearchClient,
     PortForward,
@@ -58,15 +58,6 @@ class IdentityState:
     role_exists: bool
     user_exists: bool
     password: str | None
-
-
-@dataclass(frozen=True)
-class EnsureState:
-    index: IndexState
-    reader_password: str
-    writer_password: str
-    reader_secret_missing: bool
-    writer_secret_missing: bool
 
 
 class Target:
@@ -286,25 +277,32 @@ def inspect_index(client: ElasticsearchClient) -> IndexState:
     return IndexState(True, count, mapping_digest())
 
 
-def ensure_index_and_access(
+def inspect_index_and_access(
     client: ElasticsearchClient,
     reader_password: str | None,
     writer_password: str | None,
-) -> EnsureState:
+) -> tuple[IndexState, tuple[IdentityState, IdentityState]]:
     state = inspect_index(client)
-    identities = [
+    identities = (
         inspect_identity(
             client, READER, ("read", "view_index_metadata"), reader_password, "reader"
         ),
         inspect_identity(client, WRITER, ("index",), writer_password, "writer"),
-    ]
+    )
+    return state, identities
+
+
+def ensure_index_and_access(
+    client: ElasticsearchClient,
+    reader_password: str,
+    writer_password: str,
+) -> IndexState:
+    state, identities = inspect_index_and_access(client, reader_password, writer_password)
     if not state.exists:
         status, _ = client.request("PUT", f"/{INDEX}", {"mappings": MAPPING})
         require_status(status, {200}, "create canonical index")
         state = inspect_index(client)
-    passwords: list[str] = []
-    for identity in identities:
-        password = identity.password or secrets.token_urlsafe(32)
+    for identity, password in zip(identities, (reader_password, writer_password), strict=True):
         if not identity.role_exists:
             status, _ = client.request(
                 "PUT",
@@ -319,14 +317,30 @@ def ensure_index_and_access(
                 user_definition(identity.identity, identity.description, password),
             )
             require_status(status, {200}, f"create {identity.description} user")
+    return state
+
+
+def persist_missing_credentials(
+    target: Target,
+    client: ElasticsearchClient,
+    reader_password: str | None,
+    writer_password: str | None,
+) -> tuple[str, str]:
+    inspect_index_and_access(client, reader_password, writer_password)
+    passwords: list[str] = []
+    for password, name, identity, component in (
+        (reader_password, target.reader_secret, READER, "elasticsearch-reader"),
+        (writer_password, target.writer_secret, WRITER, "elasticsearch-writer"),
+    ):
+        if password is None:
+            password = secrets.token_urlsafe(32)
+            target.apply_secret(
+                name,
+                {"username": identity, "password": password},
+                component,
+            )
         passwords.append(password)
-    return EnsureState(
-        index=state,
-        reader_password=passwords[0],
-        writer_password=passwords[1],
-        reader_secret_missing=reader_password is None,
-        writer_secret_missing=writer_password is None,
-    )
+    return passwords[0], passwords[1]
 
 
 def role_definition(privileges: tuple[str, ...]) -> dict[str, Any]:
@@ -499,24 +513,13 @@ def execute(operation: str) -> None:
             existing = target.optional_secret_value(target.kafka_ca_secret, "ca.crt")
             require(existing in {None, kafka_ca}, "canonical Kafka CA Secret differs")
             trust.append((target.kafka_ca_secret, kafka_ca, "kafka-trust"))
-            result = ensure_index_and_access(
+            reader_password, writer_password = persist_missing_credentials(
+                target,
                 admin,
                 target.optional_password(target.reader_secret, READER),
                 target.optional_password(target.writer_secret, WRITER),
             )
-            state = result.index
-            if result.reader_secret_missing:
-                target.apply_secret(
-                    target.reader_secret,
-                    {"username": READER, "password": result.reader_password},
-                    "elasticsearch-reader",
-                )
-            if result.writer_secret_missing:
-                target.apply_secret(
-                    target.writer_secret,
-                    {"username": WRITER, "password": result.writer_password},
-                    "elasticsearch-writer",
-                )
+            state = ensure_index_and_access(admin, reader_password, writer_password)
             for name, ca, component in trust:
                 existing = target.optional_secret_value(name, "ca.crt")
                 require(existing in {None, ca}, f"canonical Secret/{name} changed during ensure")
