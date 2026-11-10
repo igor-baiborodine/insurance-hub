@@ -145,8 +145,11 @@ class KubernetesTarget:
 
     def flux_revision(self) -> str:
         namespace = self.config.flux_namespace
-        source = self.json(namespace, "get", "gitrepository", self.config.flux_source)
         reconciler = self.json(namespace, "get", "kustomization", self.config.flux_kustomization)
+        source_name = (
+            reconciler.get("spec", {}).get("sourceRef", {}).get("name") or self.config.flux_source
+        )
+        source = self.json(namespace, "get", "gitrepository", source_name)
         for item in (source, reconciler):
             require(
                 any(

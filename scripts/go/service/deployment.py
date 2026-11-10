@@ -270,8 +270,8 @@ def execute(checks: Any, argv: list[str] | None = None) -> int:
     return 0
 
 
-def release_image(target: Any) -> str:
-    """Resolve the reviewed bundle's image when observing an initialized Flux release."""
+def release_owner(target: Any) -> dict[str, Any]:
+    """Resolve the reviewed bundle's stable API owner."""
     configuration = target.configuration
     flux = configuration["flux"]
     path = checkout_path(ROOT, flux["bundle"])
@@ -285,7 +285,21 @@ def release_image(target: Any) -> str:
         and item.get("metadata", {}).get("name") == flux["apiName"]
     ]
     require(len(apis) == 1, "release bundle must have exactly one API owner")
-    images = apis[0].get("spec", {}).get("images", [])
+    api = apis[0]
+    expected = os.environ.get("DEPLOY_SOURCE_REVISION", "")
+    require(
+        bool(re.fullmatch(r"[0-9a-f]{40}", expected))
+        and api.get("metadata", {}).get("annotations", {}).get("insurance-hub.io/source-revision")
+        == expected,
+        "release bundle source differs from DEPLOY_SOURCE_REVISION",
+    )
+    return api
+
+
+def release_image(target: Any) -> str:
+    """Resolve the reviewed bundle's image when observing an initialized Flux release."""
+    api = release_owner(target)
+    images = api.get("spec", {}).get("images", [])
     require(
         len(images) == 1
         and images[0].get("name") == target.record["localImage"]
@@ -293,14 +307,25 @@ def release_image(target: Any) -> str:
         and bool(re.fullmatch(r"sha256:[0-9a-f]{64}", images[0].get("digest", ""))),
         "release bundle image differs from the selected service",
     )
-    expected = os.environ.get("DEPLOY_SOURCE_REVISION", "")
-    require(
-        bool(re.fullmatch(r"[0-9a-f]{40}", expected))
-        and apis[0]
-        .get("metadata", {})
-        .get("annotations", {})
-        .get("insurance-hub.io/source-revision")
-        == expected,
-        "release bundle source differs from DEPLOY_SOURCE_REVISION",
-    )
     return images[0]["newName"] + "@" + images[0]["digest"]
+
+
+def release_substitutions(target: Any) -> dict[str, str]:
+    """Resolve and validate the stable API owner's Flux substitutions."""
+    api = release_owner(target)
+    substitutions = api.get("spec", {}).get("postBuild", {}).get("substitute", {})
+    require(
+        isinstance(substitutions, dict)
+        and all(
+            isinstance(key, str) and isinstance(value, str) for key, value in substitutions.items()
+        ),
+        "release bundle substitutions are malformed",
+    )
+    variable = target.configuration["flux"].get("runtimeVersionVariable")
+    if variable is not None:
+        expected = os.environ["DEPLOY_SOURCE_REVISION"]
+        require(
+            substitutions.get(variable) == f"git-{expected[:12]}",
+            "release runtime version substitution differs from DEPLOY_SOURCE_REVISION",
+        )
+    return substitutions

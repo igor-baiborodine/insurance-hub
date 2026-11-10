@@ -29,6 +29,7 @@ class TestProductObservabilityVerification:
         # then
         assert "qa-svc" == selected.service_namespace
         assert "qa-product-api" == selected.deployment
+        assert "qa-product-api" == selected.flux_kustomization
         assert "qa-prometheus-kube-prometh-prometheus" == selected.prometheus_service
 
     def test_probe_selection_rejects_cross_service_and_unregistered_defaults(self) -> None:
@@ -138,23 +139,27 @@ class TestProductObservabilityVerification:
     def test_flux_revision_rejects_wrong_source_before_workload(self) -> None:
         # given
         target = verifier.KubernetesTarget(self.assets, "a" * 40)
+        reconciler = {
+            "spec": {"sourceRef": {"kind": "GitRepository", "name": "qa-product-release-stale"}},
+            "status": {
+                "lastAppliedRevision": "sha1:" + "b" * 40,
+                "conditions": [{"type": "Ready", "status": "True"}],
+            },
+        }
         source = {
             "status": {
-                "artifact": {"revision": "main@sha1:" + "b" * 40},
-                "conditions": [{"type": "Ready", "status": "True"}],
-            }
-        }
-        reconciler = {
-            "status": {
-                "lastAppliedRevision": "main@sha1:" + "b" * 40,
+                "artifact": {"revision": "sha1:" + "b" * 40},
                 "conditions": [{"type": "Ready", "status": "True"}],
             }
         }
 
         # when / then
-        with mock.patch.object(target, "json", side_effect=[source, reconciler]):
+        with mock.patch.object(target, "json", side_effect=[reconciler, source]) as kubernetes:
             with pytest.raises(verifier.VerificationError, match="differs from the requested"):
                 target.flux_revision()
+        assert kubernetes.call_args_list[1] == mock.call(
+            "flux-system", "get", "gitrepository", "qa-product-release-stale"
+        )
 
     @pytest.mark.parametrize("mode", ["pre-provision", "enabled"])
     def test_deployment_uses_selected_identity_and_deployment_selector(self, mode: str) -> None:

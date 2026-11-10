@@ -174,24 +174,25 @@ def test_release_image_uses_digest_and_rejects_wrong_source(tmp_path, monkeypatc
     # given
     from scripts.go.service.release import prepare_release
 
-    create_service(tmp_path, "claims", environment="staging", initialization=True)
+    create_service(tmp_path, "product", environment="qa", initialization=True)
     prepare_release(
         tmp_path,
-        "claims",
+        "product",
         "igor-baiborodine/insurance-hub",
         "1.2.3",
         "a" * 40,
         "sha256:" + "b" * 64,
     )
-    record = service_record(tmp_path, "claims")
-    target = SimpleNamespace(
-        record=record, configuration=target_record(tmp_path, record, "staging")
-    )
+    record = service_record(tmp_path, "product")
+    target = SimpleNamespace(record=record, configuration=target_record(tmp_path, record, "qa"))
     monkeypatch.setattr(deployment, "ROOT", tmp_path)
     monkeypatch.setenv("DEPLOY_SOURCE_REVISION", "a" * 40)
 
     # when / then
     assert deployment.release_image(target) == record["registryImage"] + "@sha256:" + "b" * 64
+    assert deployment.release_substitutions(target) == {
+        "PRODUCT_SERVICE_VERSION": "git-aaaaaaaaaaaa"
+    }
     monkeypatch.setenv("DEPLOY_SOURCE_REVISION", "c" * 40)
     with pytest.raises(deployment.DeploymentError, match="source differs"):
         deployment.release_image(target)

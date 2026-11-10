@@ -12,7 +12,7 @@ resources:
 images:
   - name: insurance-hub-product-api
     newName: insurance-hub-product-api
-    newTag: 1.10.0-local.ff52ab5655e3
+    newTag: 1.12.2-local.4c1470549413
 patches:
   - path: deployment-patch.yaml
     target:
