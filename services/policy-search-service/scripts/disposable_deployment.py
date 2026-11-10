@@ -953,6 +953,21 @@ def verify_http_edges(cluster: Cluster) -> None:
             )
 
 
+def projection_advanced(
+    result: object,
+    expected: dict[str, Any],
+    previous_seq_no: int,
+) -> tuple[bool, int]:
+    if not isinstance(result, dict):
+        return False, previous_seq_no
+    seq_no = result.get("_seq_no")
+    if result.get("_source") != expected or not isinstance(seq_no, int):
+        return False, previous_seq_no
+    if seq_no <= previous_seq_no:
+        return False, previous_seq_no
+    return True, seq_no
+
+
 def exercise_event_projection(
     cluster: Cluster,
     admin_password: str,
@@ -974,6 +989,7 @@ def exercise_event_projection(
     )
     with port_forward(cluster) as port:
         admin = ElasticsearchClient(port, "elastic", admin_password)
+        previous_seq_no = -1
         for event_number, (topic, payload, expected) in enumerate(
             (
                 (REGISTERED_TOPIC, registration["value"], registered),
@@ -993,21 +1009,30 @@ def exercise_event_projection(
                 topic,
                 input_text=json.dumps(payload, separators=(",", ":")) + "\n",
             )
-            projected: dict[str, Any] | None = None
+            projected_seq_no = previous_seq_no
 
-            def stored(expected: dict[str, Any] = expected) -> bool:
-                nonlocal projected
+            def stored(
+                expected: dict[str, Any] = expected,
+                after_seq_no: int = previous_seq_no,
+            ) -> bool:
+                nonlocal projected_seq_no
                 try:
                     status, result = admin.request(
                         "GET", f"/{service_admin.INDEX}/_doc/{registration['key']}"
                     )
                 except AdministrationError:
                     return False
-                if status == 200 and isinstance(result, dict):
-                    projected = result.get("_source")
-                return projected == expected
+                if status != 200:
+                    return False
+                advanced, projected_seq_no = projection_advanced(
+                    result,
+                    expected,
+                    after_seq_no,
+                )
+                return advanced
 
             wait_for(cluster, f"deployed event projection {event_number}", stored, seconds=90)
+            previous_seq_no = projected_seq_no
         require(
             registered.get("dateTo") == "2026-12-31" and terminated.get("dateTo") == "2026-06-30",
             "event date transition differs",
@@ -1023,6 +1048,15 @@ def exercise_event_projection(
         require(
             isinstance(result, dict) and result.get("count") == 1,
             "duplicate event created more than one document",
+        )
+        status, result = admin.request("GET", f"/{service_admin.INDEX}/_doc/{registration['key']}")
+        require_status(status, {200}, "recheck projected event document")
+        require(
+            isinstance(result, dict)
+            and result.get("_source") == terminated
+            and isinstance(result.get("_seq_no"), int)
+            and result["_seq_no"] >= previous_seq_no,
+            "final terminated projection differs",
         )
 
 

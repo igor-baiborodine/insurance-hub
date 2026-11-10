@@ -1,6 +1,6 @@
 """Policy Search deployment guards; unit cases never contact a cluster."""
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import os
 import shutil
@@ -14,6 +14,22 @@ from scripts.go.service import deployment as lifecycle
 from scripts.go.service import release as release_owner
 
 import deployment
+
+
+def test_projection_requires_an_advanced_sequence_number() -> None:
+    import disposable_deployment
+
+    expected = {"number": "SYN-230-001", "dateTo": "2026-12-31"}
+
+    advanced, seq_no = disposable_deployment.projection_advanced(
+        {"_source": expected, "_seq_no": 1}, expected, 0
+    )
+    stale, stale_seq_no = disposable_deployment.projection_advanced(
+        {"_source": expected, "_seq_no": 1}, expected, seq_no
+    )
+
+    assert advanced and seq_no == 1
+    assert not stale and stale_seq_no == seq_no
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
