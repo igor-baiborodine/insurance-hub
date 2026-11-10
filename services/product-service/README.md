@@ -13,10 +13,12 @@
 
 # Product catalog read service
 
-This standalone module is the Go Product pilot. Its executable serves the direct Product HTTP API,
-the generated Product v1 gRPC API, and management health routes from one explicit composition root.
+This standalone module is the Go Product service. Its executable serves the Product HTTP API through
+generated gRPC-Gateway handlers, the generated Product v1 gRPC API, and management health routes
+from one explicit composition root.
 It uses one process-owned PostgreSQL pool for catalog reads and dependency-aware readiness. The
-service remains an internal migration candidate; do not route production Product traffic to it.
+existing Java gateway routes Product reads to this internal service; the business and management
+listeners remain private ClusterIP endpoints.
 
 The module path is
 `github.com/igor-baiborodine/insurance-hub/services/product-service`. It resolves with
@@ -165,9 +167,8 @@ contract checks: authenticated PostgreSQL role denials and protected target mark
 plus actual local-dev/QA Kustomize renders and negative release-lifecycle checks. It requires the existing
 managed Python environment, Docker, the already provisioned PostgreSQL image above and `kubectl`.
 It creates and removes isolated containers and temporary render directories; it installs no tools,
-contacts no Kubernetes API and reads no live credentials. These checks do not qualify Flux
-reconciliation or deployed TLS. Java Product is assumed absent; desired state must not recreate it.
-Historical databases remain adoption inputs.
+contacts no Kubernetes API and reads no live credentials. These checks do not prove Flux
+reconciliation or deployed TLS. Historical databases remain adoption inputs.
 
 The reader integration suite uses the same disposable database and QA snapshot:
 
@@ -181,8 +182,8 @@ schema file describes the existing Java-owned table for generation and tests. Th
 executes it at runtime. Use `gen-sql` only when intentionally changing SQL inputs; `check-sql-drift`
 verifies the exact output set, source preservation, and byte-reproducible generation.
 
-The direct HTTP boundary is exercised on a real loopback listener with test-owned callbacks:
-`make -C services/product-service test TEST_PACKAGES=./internal/http`. The `startup` integration
+The generated HTTP gateway boundary is exercised on a real loopback listener with a Product client:
+`make -C services/product-service test TEST_PACKAGES=./internal/gateway`. The `startup` integration
 suite exercises the production composition path, all three listeners, empty-table health,
 dependency loss/recovery, startup failures, and resource cleanup.
 
@@ -261,7 +262,7 @@ parameter is rejected.
 
 | Setting                       | Default           | Constraint                                                                                                              |
 |-------------------------------|-------------------|-------------------------------------------------------------------------------------------------------------------------|
-| `SERVICE_NAME`                | `product-service` | Non-empty, non-blank service identity.                                                                                  |
+| `SERVICE_NAME`                | `product-service` | Fixed Product service identity.                                                                                         |
 | `HTTP_ADDR`                   | `127.0.0.1:8081`  | Business HTTP host and numeric port.                                                                                    |
 | `GRPC_ADDR`                   | `127.0.0.1:9090`  | Business gRPC host and numeric port.                                                                                    |
 | `HEALTH_ADDR`                 | `127.0.0.1:8080`  | Management HTTP host and numeric port; all listener addresses must differ.                                              |
@@ -284,25 +285,24 @@ parameter is rejected.
 | `OTEL_ENABLED`                | `false`           | Boolean; disabled mode requires no collector.                                                                           |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset             | HTTP(S) OTLP/gRPC URL, required only when telemetry is enabled.                                                         |
 | `OTEL_EXPORTER_OTLP_TIMEOUT`  | `2s`              | Positive; no greater than `SHUTDOWN_TIMEOUT`.                                                                           |
-| `DEPLOYMENT_ENVIRONMENT`      | `development`     | Enabled telemetry accepts `test` or a valid release environment such as `qa`, `staging`, `preprod` or `preview-42`; development remains disabled. |
-| `SERVICE_VERSION`             | `development`     | Release environments require `sha-` followed by 7–40 lowercase hexadecimal characters; disposable tests require `test-<revision>`. |
-| `SERVICE_INSTANCE_ID`         | local process ID  | Release environments require a UUID-shaped Pod UID; tests generate a UUIDv4 and reject a supplied instance. |
+| `DEPLOYMENT_ENVIRONMENT`      | `development`     | Explicit non-development value when telemetry is enabled.                                                              |
+| `SERVICE_VERSION`             | `development`     | Outside development, `git-` followed by exactly 12 nonzero lowercase hexadecimal source-revision characters.           |
+| `SERVICE_INSTANCE_ID`         | local process ID  | Explicit ordinary instance value when telemetry is enabled; Kubernetes supplies the Pod UID.                           |
 
 Enabled telemetry fixes `SERVICE_NAME=product-service` and `OTEL_EXPORTER_OTLP_TIMEOUT=2s`.
-Product opts into ServiceKit's [deployment identity policy](../../libs/servicekit/identity/deployment.go)
-both during configuration loading and telemetry construction. Environment names contain 1–63
-lowercase ASCII letters, digits or hyphens, start with a letter, and end with a letter or digit.
-Every valid name other than `development` and `test` uses the release identity rule, whether
-telemetry is enabled or disabled; new release names need no registration. The UUID-shaped instance
-has 36 hexadecimal-and-dash characters in the standard positions, without a version/variant check;
-Kubernetes supplies it through the Pod UID Downward API. Development requires version `development`
-and a `local-` instance. Test versions match `^test-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.
-Invalid identities produce safe setting/reason diagnostics without echoing rejected values.
+Product owns the deployment identity policy used during configuration loading and telemetry
+construction. Name, environment, version and instance contain 1–128 ASCII letters, digits, dots,
+underscores or hyphens. Enabled telemetry rejects development defaults and local instances. Every
+non-development environment requires the same canonical `git-<12 lowercase hexadecimal>` source
+version even when export is disabled; the all-zero revision is invalid. Tests supply an ordinary
+stable instance such as `test-instance`. Invalid identities produce safe setting/reason diagnostics
+without echoing rejected values.
 
 The application supplies the six approved non-Kubernetes identity fields on trace and metric
 resources and on validated service logs. Alloy adds Kubernetes identity later. QA telemetry and
-its version/Pod UID wiring remain disabled until the separate QA activation step. The provider
-uses parent-based root sampling, a bounded trace batch, and a ten-second cumulative metric reader
+its identity are enabled by the QA overlay: release preparation derives one canonical source
+version for the ConfigMap and workload labels, while the base Deployment supplies the Pod UID. The
+provider uses parent-based root sampling, a bounded trace batch, and a ten-second cumulative metric reader
 with explicit request, database, and pool-wait histogram buckets. Both business listeners now
 emit a bounded server span, an application child span for dispatched use cases, one request counter
 and duration observation, and one safe completion log per routed request. After route selection,
@@ -352,7 +352,7 @@ installation requires explicit `make bootstrap-tools`.
 
 | Boundary | Aligned behavior | Intentional Product adaptation |
 | --- | --- | --- |
-| [Config](internal/config/config.go) and [startup](cmd/server/main.go) | ServiceKit value groups, parsing/host predicates and safe diagnostics; opt-in deployment identity validation. | Ordered loading, three listeners, database URL/pool validation and linked timeout budgets; release SHA/Pod UID and generated test UUID identity; enabled exporter timeout stays 2s. |
+| [Config](internal/config/config.go) and [startup](cmd/server/main.go) | ServiceKit value groups, parsing/host predicates and safe diagnostics. | Ordered loading, three listeners, database URL/pool validation, linked timeout budgets and Product-owned fixed-name/canonical-source identity policy; enabled exporter timeout stays 2s. |
 | [Logger](internal/logger/logger.go) | UTC JSON, six-field identity, trace correlation, recursive redaction and completion records independent of diagnostic threshold. | Product completion message and service identity. |
 | [Health](internal/health/health.go) | Bounded dependency probes recheck cancellation and lifecycle readiness after success; withdrawal during a probe returns 503; liveness stays independent. | PostgreSQL read-access probe supplied by composition. |
 | [gRPC](internal/grpc/server.go) | Known methods begin observation before decoding and finish once at the final stats event. All 17 canonical status names remain distinct; invalid codes normalize to UNKNOWN. Pre-handler rejection and send-size failure appear in completion logs and metrics. Unknown methods do not create Product observations or arbitrary method labels. | ListProducts/GetProduct contracts, Product validation/mapping and bounded list/get operation labels. |
@@ -396,10 +396,12 @@ a published library tag or change another consumer's pin.
 
 ## Runtime contracts and boundaries
 
-The two business listeners are intentionally anonymous internal entries for this migration stage.
+The two business listeners are intentionally anonymous internal entries.
 They do not validate JWTs, enforce Product roles, or expose gRPC reflection or HTTP profiling.
-They must not be published directly. Issue #133's isolated gateway/direct tests prove the accepted
-credential and identity-propagation matrix; #134 owns internal-only deployed exposure.
+They must not be published directly. The legacy gateway authenticates the user-facing request and
+calls Product over the private HTTP service. NetworkPolicy admits HTTP 8080 and RPC 9090 only from
+that labeled gateway, denies management 8081 to ordinary Pods, and limits egress to DNS,
+PostgreSQL, and QA Alloy when telemetry is enabled.
 
 | Entry | Successful behavior | Bounded failure behavior |
 | --- | --- | --- |
@@ -410,17 +412,18 @@ credential and identity-propagation matrix; #134 owns internal-only deployed exp
 | Management `GET /livez` / `GET /readyz` | Constant text responses for process liveness and dependency-aware readiness. | Readiness returns constant `503 not ready` during startup, dependency loss, or drain; it never returns a database cause. |
 
 The HTTP contract is implemented by
-[`internal/http/handler.go`](internal/http/handler.go) and its transport-owned DTO mapper. The
+[`internal/gateway/handler.go`](internal/gateway/handler.go), generated HandlerClient registration,
+and its transport-owned DTO mapper. The
 versioned gRPC schema is [`api/product/v1/product_service.proto`](api/product/v1/product_service.proto),
 with generated Go bindings under [`gen/product/v1`](gen/product/v1). Structured logs redact
 credentials, tokens, request/response payloads, and arbitrary error causes. Telemetry is disabled by
-default and requires no collector; #135 owns usable pipeline and delivery qualification.
+default and requires no collector; QA enables OTLP through its release configuration.
 
 The `read-only` suite proves the runtime identity has only the required database connect, schema
 use, and Product table select privileges. Issue #190 owns separate migrator/seeder identities,
 protected target enrollment, and a prerequisite Job; the service never falls back to an owner
-credential and never migrates or seeds during API startup. Java Product is absent from current
-desired state. Earlier differential and cutover evidence remains historical compatibility input.
+credential and never migrates or seeds during API startup. Earlier differential evidence remains
+historical compatibility input.
 
 ### Interim security validation
 
@@ -446,11 +449,11 @@ the hosted Product security workflow has been retired. The
 the broader local checks and evidence are required.
 
 `make product-security-verify` is a separate read-only probe for an explicitly selected, already
-running Go target. The [#134 exposure gate](../../docs/migration/phase-4/product-service/security-baseline.md#go-deployment-exposure-gate-for-issue-134)
-defines its endpoint/context inputs and the rendered/effective resource, read-only role, and
-unchanged Java-routing checks still required in local-dev and QA. Anonymous internal access is an
-interim compatibility constraint; `ClusterIP` does not authenticate in-cluster callers. #135 owns
-telemetry delivery, #136 integrated qualification, and #137 any traffic cutover.
+running Go target. The [deployment runbook](../../docs/migration/phase-4/product-service/deployment-runbook.md)
+defines its endpoint/context inputs and the rendered/effective resource and read-only role checks.
+Anonymous internal access is a compatibility constraint; `ClusterIP` does not authenticate
+in-cluster callers, so the NetworkPolicy and gateway admission label are part of the deployed
+boundary.
 
 ## Product catalog architecture
 
@@ -484,14 +487,14 @@ flowchart LR
     end
 
     subgraph Adapters["Inbound and outbound adapters"]
-        HTTP["internal/http<br/>legacy DTO and HTTP errors"]
+        HTTP["internal/gateway<br/>generated HandlerClient, legacy DTO and HTTP errors"]
         GRPC["internal/grpc<br/>protobuf mapping and status"]
         Proto["api/product/v1 + gen/product/v1<br/>versioned wire contract"]
         PG["internal/postgres<br/>Reader, JSONB decoder, pgx"]
         SQLC["internal/postgres/dbgen<br/>generated SELECT queries"]
     end
 
-    HTTP -->|"imports core contracts"| UseCases
+    HTTP -->|"imports"| Proto
     GRPC -->|"imports core contracts"| UseCases
     GRPC -->|"imports"| Proto
     PG -->|"satisfies"| Port
@@ -502,9 +505,9 @@ flowchart LR
     Composition -->|"imports"| HTTP
     Composition -->|"imports"| GRPC
     Composition -->|"imports"| PG
-    Composition -.->|"startup: injects"| HTTP
+    Composition -.->|"startup: injects generated RPC client"| HTTP
     Composition -.->|"startup: injects"| GRPC
-    HTTP -.->|"runtime: calls"| UseCases
+    HTTP -.->|"runtime: calls local gRPC"| GRPC
     GRPC -.->|"runtime: calls"| UseCases
     UseCases -.->|"runtime: dispatches"| PG
     PG -.->|"runtime: SELECT"| DB[("PostgreSQL public.product")]
@@ -521,7 +524,7 @@ The concrete package and file responsibilities are:
 | [`internal/domain/catalog.go`](internal/domain/catalog.go) | Owns transport-independent Product catalog values and exact decimal tokens. |
 | [`internal/application/catalog.go`](internal/application/catalog.go) | Owns `ProductReader`, `ListProducts`, `GetProduct`, and application errors. |
 | [`internal/postgres`](internal/postgres) | Owns runtime pool and administrative database construction, restricted read execution, sqlc use, JSONB decoding, storage error classification, and safe database/pool telemetry. |
-| [`internal/http`](internal/http) | Owns direct URI behavior, legacy-compatible DTO/presence/decimal mapping, JSON responses, and HTTP error mapping. |
+| [`internal/gateway`](internal/gateway) | Registers the generated Product client and owns accepted URI behavior, legacy-compatible DTO/presence/decimal mapping, metadata filtering, JSON responses, and HTTP error mapping. |
 | [`internal/grpc`](internal/grpc) | Owns generated-service registration, validation, domain-to-protobuf mapping, limits, tracing hooks, and status mapping. |
 | [`internal/config`](internal/config) | Parses and validates the bounded runtime settings and holds the database URL in a redacting type. |
 | [`internal/health`](internal/health) | Exposes ServiceKit's liveness/readiness primitives; Product composition supplies its database probe, readiness transitions and management listener. |
@@ -531,20 +534,22 @@ The concrete package and file responsibilities are:
 
 For a get-product request:
 
-1. The HTTP adapter selects a normalized route and starts a server span, or the gRPC boundary
-   starts its registered server span before validating `GetProductRequest`. Each calls the same
-   injected use case through the composition-owned application span wrapper.
+1. The HTTP gateway selects a normalized route, starts its server span, and invokes the generated
+   Product client over the process-owned local gRPC connection. Direct RPC starts at the same gRPC
+   boundary, which validates `GetProductRequest` before calling the composition-owned application
+   span wrapper.
 2. `GetProduct` validates the code and calls its application-owned `ProductReader` port.
 3. Runtime interface dispatch reaches `postgres.Reader`, which uses the sqlc-generated exact
    parameterized lookup and converts the stored JSONB into domain values.
-4. The inbound adapter maps the domain Product to its own legacy HTTP DTO or protobuf message. A
-   missing product or bounded failure maps to that transport's safe contract. The request boundary
-   records a bounded outcome, response status, duration, and correlated completion log.
+4. The gRPC adapter maps the domain Product to protobuf. The HTTP gateway maps that response to the
+   accepted legacy DTO. A missing product or bounded failure maps to the caller transport's safe
+   contract. Each traversed request boundary records its outcome, status, duration, and correlated
+   completion log.
 
 Stored JSONB exists only at the PostgreSQL boundary, Product domain values cross the application
-port, and protobuf messages and legacy HTTP DTOs stay inside their owning adapters. Both transports
-therefore reuse the same use cases without importing one another or moving wire/storage types into
-the core.
+port, protobuf messages cross the local RPC boundary, and legacy HTTP DTOs stay in the gateway.
+Both public transports therefore reuse the same gRPC and application paths without moving
+wire/storage types into the core.
 
 ## Container release and deployment
 
@@ -558,8 +563,9 @@ Docker context policy, module manifests, and non-test content copied from `cmd`,
 `internal`; documentation, scripts, tests, generator inputs, and local validation configuration do
 not publish an image. The workflow creates the scoped semantic release, builds once, publishes
 semantic and short-SHA image tags, resolves the image digest, and commits the semantic version plus
-an immutable dormant Product source/prerequisite/API tuple. The explicit QA Flux root excludes that
-tuple until a separate reviewed activation change.
+an immutable Product source/prerequisite/API tuple. Release preparation derives
+`git-<12-hex-source>` from the verified full source commit and supplies it to the QA workload labels,
+configuration, logs, and telemetry. The QA Flux root includes the Product release bundle.
 
 **Go Module PR Check** runs Product's focused `check-go-pr` target only when a qualifying
 Product input changes and the complete pull-request diff touches no second supported Go module. It
@@ -580,3 +586,8 @@ bundle. Administration manifests live below `product/base/administration` and ea
 `product/administration` overlay, outside the API's Kustomize resource list. The shared deployment
 engine owns Job ordering and release checks; Product-specific workload and SQL probes remain in
 [`product_deployment_checks.py`](scripts/product_deployment_checks.py).
+PostgreSQL roles and workload Secrets use this module's `resource-inspect`, guarded
+`resource-ensure`, `resource-verify`, `resource-rotate`, and `resource-revoke` targets. Their
+implementation and focused tests are service-local; API startup never invokes them.
+The local-dev and QA API overlays also own the Product NetworkPolicy. Both allow gateway HTTP/RPC,
+DNS, and Product PostgreSQL only; QA additionally allows OTLP to its Alloy instance.

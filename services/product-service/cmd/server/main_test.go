@@ -128,14 +128,9 @@ func TestRunWith_LogsServiceFailureUsingConfiguredIdentity(t *testing.T) {
 	settings := config.Config{
 		ServiceName: "configured-service",
 		LogLevel:    slog.LevelInfo,
-		Telemetry: config.Telemetry{Identity: config.Identity{
-			ServiceNamespace: "insurance-hub",
-			ServiceName:      "configured-service",
-			ServiceVersion:   "development",
-			ServiceInstance:  "local-test",
-			Environment:      "development",
-			Implementation:   "go",
-		}},
+		Telemetry: config.Telemetry{
+			Identity: config.DevelopmentIdentity("configured-service").Identity,
+		},
 	}
 	serviceErr := errors.New("service stopped unexpectedly")
 	var output bytes.Buffer
@@ -163,7 +158,7 @@ func TestRunWith_LogsServiceFailureUsingConfiguredIdentity(t *testing.T) {
 	if entry["service_name"] != settings.ServiceName ||
 		entry["service_namespace"] != "insurance-hub" ||
 		entry["service_version"] != "development" ||
-		entry["service_instance_id"] != "local-test" ||
+		!strings.HasPrefix(entry["service_instance_id"].(string), "local-") ||
 		entry["deployment_environment_name"] != "development" ||
 		entry["service_implementation"] != "go" || entry["level"] != "ERROR" ||
 		entry["msg"] != "service failed" || entry["error"] != "[REDACTED]" {

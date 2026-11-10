@@ -76,6 +76,12 @@ ownership transfer; retain ordinary functional, access and process-lifecycle che
 Historical research and validation scenarios below supply relevant technical cases, not a
 mandatory program to repeat for every service or intermediate release.
 
+**Resource administration follow-up: 10 November 2026.** Use the
+[Go service resource administration guide](go-service-resource-administration.md) for new service
+resource boundaries. It defines the service-local interface, stable names, ownership metadata,
+guarded mutations and effective least-privilege verification established by Dashboard and Policy
+Search. Existing service targets remain valid until an owning ticket explicitly aligns them.
+
 This addendum supersedes the Phase 4 implementation recommendations in the
 [original migration analysis](../../system-overview-and-migration-analysis.md), including its
 [Architecture Pattern Migrations](../../system-overview-and-migration-analysis.md#architecture-pattern-migrations),

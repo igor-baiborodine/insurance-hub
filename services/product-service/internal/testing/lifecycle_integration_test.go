@@ -113,7 +113,7 @@ func TestProductLifecycle(t *testing.T) {
 			assertForcedGRPCResult(t, grpcResult)
 			waitForRuntimeQuery(t, harness, listQueryMarker, false)
 			waitForRuntimeQuery(t, harness, getQueryMarker, false)
-			elapsed := process.assertCleanExit(t, started, harness)
+			elapsed := process.assertFailedExit(t, started, harness)
 			if elapsed < lifecycleGraceBudget-150*time.Millisecond {
 				t.Fatalf(
 					"forced shutdown elapsed = %s, want drain period near %s",
@@ -149,7 +149,7 @@ func startLifecycleProcess(
 	logs := new(bytes.Buffer)
 	command := exec.Command(binary)
 	command.Env = lifecycleEnvironment(os.Environ(), []string{
-		"SERVICE_NAME=product-service-lifecycle-test",
+		"SERVICE_NAME=product-service",
 		"LOG_LEVEL=info",
 		"HTTP_ADDR=" + addresses.http,
 		"GRPC_ADDR=" + addresses.grpc,
@@ -263,16 +263,41 @@ func (process *lifecycleProcess) assertCleanExit(
 	harness *Harness,
 ) time.Duration {
 	t.Helper()
+	elapsed, err := process.waitForExit(t, started, harness)
+	if err != nil {
+		t.Fatalf(
+			"Product executable exit: %v\nlogs:\n%s",
+			err,
+			process.logs.String(),
+		)
+	}
+	return elapsed
+}
+
+func (process *lifecycleProcess) assertFailedExit(
+	t *testing.T,
+	started time.Time,
+	harness *Harness,
+) time.Duration {
+	t.Helper()
+	elapsed, err := process.waitForExit(t, started, harness)
+	if err == nil {
+		t.Fatalf("Product executable exited successfully; logs:\n%s", process.logs.String())
+	}
+	return elapsed
+}
+
+func (process *lifecycleProcess) waitForExit(
+	t *testing.T,
+	started time.Time,
+	harness *Harness,
+) (time.Duration, error) {
+	t.Helper()
+	var exitErr error
 	select {
 	case err := <-process.wait:
 		process.stopped = true
-		if err != nil {
-			t.Fatalf(
-				"Product executable exit: %v\nlogs:\n%s",
-				err,
-				process.logs.String(),
-			)
-		}
+		exitErr = err
 	case <-time.After(lifecycleWaitTimeout):
 		t.Fatalf(
 			"Product executable exceeded shutdown bound\nlogs:\n%s",
@@ -294,7 +319,7 @@ func (process *lifecycleProcess) assertCleanExit(
 	waitForTCPRejection(t, process.addresses.health)
 	waitForReaderConnections(t, harness, 0)
 	assertLifecycleLogsSafe(t, process.logs.String(), harness.RuntimeDatabaseURL())
-	return elapsed
+	return elapsed, exitErr
 }
 
 func (process *lifecycleProcess) cleanup(t *testing.T) {
@@ -319,7 +344,6 @@ func waitForShutdownIntake(t *testing.T, addresses serviceAddresses) {
 	t.Helper()
 	waitForHTTPNotReady(t, addresses.health)
 	waitForTCPRejection(t, addresses.http)
-	waitForTCPRejection(t, addresses.grpc)
 }
 
 func waitForHTTPNotReady(t *testing.T, address string) {

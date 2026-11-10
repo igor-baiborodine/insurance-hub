@@ -117,8 +117,9 @@ The [Product catalog architecture](../services/product-service/README.md#product
 is the committed reference for the composition and handoff lessons delivered in issue 132.
 Its [application](../services/product-service/internal/application/catalog.go) owns `ProductReader`
 and the named list/get use cases; its
-[composition root](../services/product-service/internal/service/service.go) injects the same use
-cases into both transports and owns pool cleanup. The
+[composition root](../services/product-service/internal/service/service.go) injects those use
+cases into the gRPC handler, connects the generated HTTP gateway through a local gRPC channel, and
+owns channel and pool cleanup. The
 [PostgreSQL reader](../services/product-service/internal/postgres/reader.go) satisfies the port
 without an application dependency on PostgreSQL. Read these examples when adapting the pattern;
 ignored ticket artifacts are not required to use this rule.
@@ -132,12 +133,12 @@ ownership, and migration specifications.
 
 [Product's runtime contracts](../services/product-service/README.md#runtime-contracts-and-boundaries) and
 [architecture](../services/product-service/README.md#product-catalog-architecture) illustrate
-direct HTTP and gRPC adapters sharing application use cases. Its
-[HTTP handler](../services/product-service/internal/http/handler.go) preserves a legacy HTTP
-contract independently of the [protobuf schema](../services/product-service/api/product/v1/product_service.proto).
-Its [generator configuration](../services/product-service/buf.gen.yaml) currently generates Go
-protobuf and gRPC code, not an HTTP gateway or OpenAPI description. This is a reference for explicit
-transport separation, not evidence that OpenAPI/gateway generation or validation already exists.
+an HTTP adapter crossing a generated gRPC-Gateway client before reaching the application. Its
+[gateway handler](../services/product-service/internal/gateway/handler.go) preserves the accepted
+HTTP response shapes around the
+[protobuf schema](../services/product-service/api/product/v1/product_service.proto), while its
+[generator configuration](../services/product-service/buf.gen.yaml) produces Go protobuf, gRPC,
+gateway, and OpenAPI output. This is a reference for explicit transport ownership and mapping.
 
 ## Python ownership and validation
 

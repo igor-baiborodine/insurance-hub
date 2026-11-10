@@ -9,7 +9,8 @@ exec "$python" -m pytest -q -p no:cacheprovider \
   scripts/product_baseline/test_compare_http.py \
   scripts/product_baseline/test_fixtures.py \
   scripts/product_security/test_validators.py \
-  scripts/postgres/service/test_reader.py \
+  services/product-service/scripts/test_administration.py \
+  services/product-service/scripts/test_resource_administration.py \
   services/product-service/scripts/test_check_access_results.py \
   services/product-service/scripts/test_deployment_checks.py \
   services/product-service/scripts/test_deployment_operations.py \

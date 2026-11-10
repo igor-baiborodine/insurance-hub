@@ -49,7 +49,7 @@ go-svc-deploy-check: python-runtime-check ## Validate one cataloged Go service's
 # The service Makefile owns resource identity and environment policy. Resolve the
 # catalog capability before invoking it, so unsupported services never reach kubectl.
 go-svc-deploy-preflight: ## Check exact target, ownership, image and resource prerequisites
-go-svc-deploy-status: ## Observe selected Go workload status, Java absence, and exposure
+go-svc-deploy-status: ## Observe selected Go workload status, ownership, and exposure
 go-svc-image-load: ## Load the selected image into its configured Kind target
 go-svc-deploy: ## Apply the selected direct target with bounded rollout
 go-svc-deploy-verify: ## Verify selected Go resources, reader permissions and HTTP/gRPC reads

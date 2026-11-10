@@ -21,6 +21,8 @@ TOOLS_BIN := $(TOOLS_DIR)/bin
 BUF := $(TOOLS_BIN)/buf
 PROTOC_GEN_GO := $(TOOLS_BIN)/protoc-gen-go
 PROTOC_GEN_GO_GRPC := $(TOOLS_BIN)/protoc-gen-go-grpc
+PROTOC_GEN_GRPC_GATEWAY := $(TOOLS_BIN)/protoc-gen-grpc-gateway
+PROTOC_GEN_OPENAPIV2 := $(TOOLS_BIN)/protoc-gen-openapiv2
 GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 SQLC := $(TOOLS_BIN)/sqlc
@@ -29,12 +31,17 @@ PUPPETEER_CONFIG := puppeteer-config.json
 GOLANGCI_CONFIG := .golangci.yml
 PROTO_SCHEMA := api/product/v1/product_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
-GENERATED_PROTO_FILES := gen/product/v1/product_service.pb.go gen/product/v1/product_service_grpc.pb.go
+GENERATED_PROTO_FILES := \
+	gen/product/v1/product_service.pb.go \
+	gen/product/v1/product_service.pb.gw.go \
+	gen/product/v1/product_service_grpc.pb.go \
+	gen/openapiv2/product/v1/product_service.swagger.json
 
 GO_VERSION := 1.27.3
 BUF_VERSION := v1.73.0
 PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
+GRPC_GATEWAY_VERSION := v2.30.0
 GOLANGCI_LINT_VERSION := v2.14.0
 GOVULNCHECK_VERSION := v1.8.0
 SQLC_VERSION := v1.31.1
@@ -50,6 +57,7 @@ PGX_VERSION := v5.11.0
 GOOSE_VERSION := v3.27.0
 TESTCONTAINERS_VERSION := v0.44.0
 SERVICEKIT_VERSION := v1.0.1
+GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 MOBY_GO_ARCHIVE_VERSION := v0.3.0
 MERMAID_CLI_VERSION := 11.14.0
 PUPPETEER_VERSION := 24.43.1
@@ -81,12 +89,19 @@ SECURITY_HARNESS_OUTPUT ?=
 TELEMETRY_ACCEPTANCE_OUTPUT ?=
 DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md \
 	../../docs/migration/phase-4/product-service/deployment-runbook.md \
-	../../docs/migration/phase-4/product-service/established-cutover-runbook.md \
-	../../docs/migration/phase-4/product-service/qualification-runbook.md \
 	../../docs/migration/phase-4/product-service/observability-contract.md \
 	../../docs/migration/phase-4/product-service/observability-runbook.md
-EXTRA_TOOL_PACKAGES := github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
-VERIFY_EXTRA_TOOL_SPECS := sqlc|$(SQLC)|$(SQLC_VERSION)|version
+EXTRA_TOOL_PACKAGES := \
+	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@$(GRPC_GATEWAY_VERSION) \
+	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@$(GRPC_GATEWAY_VERSION) \
+	github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
+VERIFY_EXTRA_TOOL_SPECS := \
+	protoc-gen-grpc-gateway|$(PROTOC_GEN_GRPC_GATEWAY)|Version $(GRPC_GATEWAY_VERSION), commit unknown, built at unknown|--version;\
+	protoc-gen-openapiv2|$(PROTOC_GEN_OPENAPIV2)|Version $(GRPC_GATEWAY_VERSION), commit unknown, built at unknown|--version;\
+	sqlc|$(SQLC)|$(SQLC_VERSION)|version
+PROTO_GENERATION_TOOLS := \
+	buf protoc-gen-go protoc-gen-go-grpc protoc-gen-grpc-gateway protoc-gen-openapiv2
+GENERATED_PROTO_PATTERN := gen/*
 
 COMMON_GO_TOOLING_DIR ?= ../../scripts/go/module
 COMMON_GO_TOOLING_DIR := $(abspath $(COMMON_GO_TOOLING_DIR))
@@ -101,9 +116,11 @@ pilot-test-json: ## Report selected uncached test execution as JSON for framewor
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage \
 	coverage-validate coverage-check test-integration test-telemetry-continuity \
-	build build-security-harness build-security-verifier build-qualification-client build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
+	build build-security-harness build-security-verifier build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
 	deploy-test-flux vulncheck check-servicekit check-candidate-servicekit \
+	resource-inspect resource-ensure resource-verify resource-rotate resource-revoke \
+	resource-test-fast resource-test-integration \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
 	shared-candidate-generated shared-candidate-breaking shared-candidate-integration \
@@ -137,6 +154,27 @@ deploy-test: python-toolchain-check image-build ## Exercise the image and render
 deploy-test-flux: python-toolchain-check image-build ## Exercise Product prerequisites with pinned Flux/CNPG in an owned disposable Kind cluster
 	@PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" $(PYTHON) scripts/flux_deployment_test.py
 
+resource-inspect: ## Inspect Product PostgreSQL resources without mutation
+resource-ensure: ## Ensure Product PostgreSQL roles and workload Secrets
+resource-verify: ## Verify Product resources and effective workload permissions
+resource-rotate: ## Rotate Product PostgreSQL credentials with recovery
+resource-revoke: ## Revoke inactive Product PostgreSQL resources
+resource-inspect resource-ensure resource-verify resource-rotate resource-revoke: python-runtime-check
+	@PYTHONPATH="$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/resource_administration.py '$(@:resource-%=%)'
+
+resource-test-fast: python-toolchain-check ## Exercise Product resource guards with fake adapters
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
+		-m 'not integration and not acceptance' \
+		services/product-service/scripts/test_administration.py \
+		services/product-service/scripts/test_resource_administration.py
+
+resource-test-integration: python-toolchain-check ## Exercise Product permissions in disposable PostgreSQL
+	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
+		-m integration services/product-service/scripts/test_administration.py \
+		services/product-service/scripts/test_resource_administration.py \
+		services/product-service/scripts/test_resource_administration_integration.py
+
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
 	@test -n "$(strip $(SECURITY_HARNESS_OUTPUT))" || { echo "SECURITY_HARNESS_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -race -o "$(SECURITY_HARNESS_OUTPUT)" \
@@ -146,11 +184,6 @@ build-security-verifier: verify-tools ## Build the read-only Product security ve
 	@test -n "$(strip $(SECURITY_VERIFIER_OUTPUT))" || { echo "SECURITY_VERIFIER_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(SECURITY_VERIFIER_OUTPUT)" \
 		./internal/testing/cmd/securityverify
-
-build-qualification-client: verify-tools ## Build the read-only QA Product gRPC client at QUALIFICATION_CLIENT_OUTPUT
-	@test -n "$(strip $(QUALIFICATION_CLIENT_OUTPUT))" || { echo "QUALIFICATION_CLIENT_OUTPUT is required" >&2; exit 1; }
-	GOWORK=off $(GO) build -mod=readonly -o "$(QUALIFICATION_CLIENT_OUTPUT)" \
-		./internal/testing/cmd/qualificationclient
 
 build-lifecycle-client: verify-tools ## Build disposable HTTP/gRPC lifecycle client at LIFECYCLE_CLIENT_OUTPUT
 	@test -n "$(strip $(LIFECYCLE_CLIENT_OUTPUT))" || { echo "LIFECYCLE_CLIENT_OUTPUT is required" >&2; exit 1; }
@@ -198,6 +231,8 @@ update-deps:
 		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
 		go.opentelemetry.io/contrib/propagators/b3@$(OTEL_B3_VERSION) \
 		google.golang.org/grpc@$(GRPC_GO_VERSION) \
+		github.com/grpc-ecosystem/grpc-gateway/v2@$(GRPC_GATEWAY_VERSION) \
+		google.golang.org/genproto/googleapis/api@$(GENPROTO_GOOGLEAPIS_API_VERSION) \
 		google.golang.org/protobuf@$(PROTOBUF_GO_VERSION) \
 		github.com/jackc/pgx/v5@$(PGX_VERSION) \
 		github.com/pressly/goose/v3@$(GOOSE_VERSION) \
@@ -243,11 +278,11 @@ check-administration-design-fast: python-toolchain-check ## Run render-only Q04 
 
 check-administration-design-integration: python-toolchain-check ## Run disposable PostgreSQL Q04 checks; requires cached PostgreSQL image and Docker
 	@$(MAKE) --no-print-directory python-format-check python-lint \
-		PYTHON_FILES=scripts/postgres/service/test_administration_design.py
+		PYTHON_FILES=services/product-service/scripts/test_resource_administration_integration.py
 	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest --collect-only -q \
-		-m integration scripts/postgres/service/test_administration_design.py
+		-m integration services/product-service/scripts/test_resource_administration_integration.py
 	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q \
-		-m integration scripts/postgres/service/test_administration_design.py
+		-m integration services/product-service/scripts/test_resource_administration_integration.py
 
 gen-sql:
 	@test "$$($(SQLC) version)" = "$(SQLC_VERSION)"

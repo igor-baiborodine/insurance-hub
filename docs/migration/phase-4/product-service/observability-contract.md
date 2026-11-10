@@ -208,7 +208,7 @@ cardinality/redaction tests.
 | --- | --- | --- | --- |
 | `service.namespace` | `insurance-hub` | `insurance-hub` | `service_namespace` |
 | `service.name` | `product-service` | `product-service` | `service_name` |
-| `service.version` | Immutable build/image identity such as `sha-<git-sha>` | Actual image tag, currently `1.5.0` | `service_version` |
+| `service.version` | Canonical source identity `git-<first 12 lowercase source-revision characters>` | Actual immutable image tag | `service_version` |
 | `service.instance.id` | Pod UID | Pod UID | `service_instance_id` |
 | `deployment.environment.name` | `qa` | `qa` | `deployment_environment_name` |
 | `insurance_hub.service.implementation` | `go` | `java` | `service_implementation` |
@@ -218,10 +218,12 @@ cardinality/redaction tests.
 | `k8s.container.name` | `product-api` | `product-api-legacy` | `k8s_container_name` |
 
 The Go application emits its six non-Kubernetes values on trace and metric resources and in every
-JSON log. Its QA Deployment supplies `service.version` and the Pod UID through explicit settings
-and the Downward API. Use `deployment.environment.name=test`, a `test-<revision>` version, and a
-generated UUIDv4 instance ID for disposable enabled tests. Normal local telemetry remains disabled;
-local process logs use `development`, with Kubernetes fields omitted.
+JSON log. Release preparation derives QA `service.version` from the verified full source commit and
+supplies it through Flux to the ConfigMap and Deployment/Pod labels. The base Deployment supplies
+the Pod UID through the Downward API. Disposable enabled tests use
+`deployment.environment.name=test`, a canonical `git-<12 lowercase hexadecimal>` version, and an
+ordinary supplied instance such as `test-instance`. Normal local telemetry remains disabled; local
+process logs use `development`, with Kubernetes fields omitted.
 
 Alloy asserts the QA environment and cluster and enriches both receiver paths with the approved
 Kubernetes fields. Route Java Zipkin input through a namespace-scoped Kubernetes-attributes
@@ -231,10 +233,10 @@ from `latest` to its actual immutable image version. Replace the current span at
 `deployment.environment` and `cluster.name`; do not emit old and new keys together.
 
 Do not enable QA telemetry with blank or mutable versions such as `latest`, `unconfigured`, or
-`sha-unpublished`. Do not silently overwrite a conflicting service/version/instance/implementation
-identity. If Java Kubernetes association fails, preserve its existing trace delivery, expose the
-enrichment miss, and fail acceptance rather than inventing `unknown`, a Pod IP, or a constant
-instance ID.
+`sha-unpublished` or an unresolved `${PRODUCT_SERVICE_VERSION}`. Do not silently overwrite a
+conflicting service/version/instance/implementation identity. If Java Kubernetes association fails,
+preserve its existing trace delivery, expose the enrichment miss, and fail acceptance rather than
+inventing `unknown`, a Pod IP, or a constant instance ID.
 
 ### Span names and attributes
 
@@ -981,7 +983,7 @@ enables QA telemetry, revalidate all of the following against current canonical 
 | Product alert rules | `k8s/observability/services/product/alerts.yaml`, its `monitoring.json` contract and behavior fixture, the selected environment file under `k8s/observability/environments/`, generic checks in `k8s/tests/validation.mk`, and scripts in `k8s/scripts/monitoring/` | Maintainer with QA Kubernetes access through `make -C k8s prometheus-rules-apply ENV_NAME=qa SVC_NAME=product`; Prometheus Operator consumes the repository-owned `PrometheusRule` | Source passes generic contract validation, `promtool` syntax/behavior checks, server-side dry-run, exact `insurance-hub-product-service` group and ten alerts, and active rule/alert inspection |
 | Product Grafana dashboard | `k8s/observability/services/product/dashboard.json`, its `monitoring.json` contract and metric fixture, the selected environment file, generic checks in `k8s/tests/validation.mk`, and scripts in `k8s/scripts/monitoring/` | Maintainer with QA Kubernetes access through `make -C k8s grafana-dashboard-apply ENV_NAME=qa SVC_NAME=product`; Grafana's dashboard sidecar consumes the repository-owned `ConfigMap` | Source contract, labeled `ConfigMap`, immutable rendered provider, fetched provisioned dashboard, all 26 Prometheus queries, Loki/Tempo panels, and unrelated-dashboard preservation match |
 | Monitoring CRDs | #154's exact chart `32.0.1` pin in `k8s/Makefile` | Existing `prometheus-operator-crds` Helm release | #154 handoff is accepted; no version drift or CRD mutation beyond that reviewed baseline; release remains deployed |
-| Reader role and Secret | #134's `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=reader` procedure | Maintainer with Kubernetes/CNPG administrative access, outside application startup, Flux, and monitoring Helm | Fresh restricted-login verification and Secret/Pod consistency; no credential material in issue #135 evidence |
+| Reader role and Secret | Product's service-local `resource-*` procedure | Maintainer with Kubernetes/CNPG administrative access, outside application startup, Flux, and monitoring Helm | Fresh restricted-login verification and Secret/Pod consistency; no credential material in issue #135 evidence |
 | Operational procedure | New committed `docs/migration/phase-4/product-service/observability-runbook.md` | Issue #135 implementation and reviewer | Commands, prerequisites, normal apply, verification, failure decisions, rollback, and evidence checklist match delivered targets |
 | Acceptance evidence | Ignored `ai/artifacts/epic-4.2/issue-135/` records | Issue #135 implementer gathers; reviewer audits | UTC time, context, Git/image/Flux/Helm revisions, sanitized commands/results, signal queries, budgets, failure/recovery, and residual blockers are mapped to AC135-01–07 |
 

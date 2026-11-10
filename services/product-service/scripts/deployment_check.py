@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -22,15 +23,14 @@ from scripts.python.process_runner import CommandError, run_command  # noqa: E40
 
 OVERLAYS = {
     "local-go": "k8s/overlays/local-dev/svc/product",
-    "local-legacy": "k8s/overlays/local-dev/svc/product/legacy",
     "qa-go": "k8s/overlays/qa/svc/product",
-    "qa-legacy": "k8s/overlays/qa/svc/product/legacy",
     "qa-aggregate": "k8s/overlays/qa/svc",
     "local-gateway": "k8s/overlays/local-dev/svc/agent-portal-gateway/legacy",
     "qa-gateway": "k8s/overlays/qa/svc/agent-portal-gateway/legacy",
 }
 QA_FLUX_ROOT = REPOSITORY_ROOT / "k8s/flux/qa/kustomization.yaml"
 QA_RELEASE_BUNDLE = "./releases/product/release.yaml"
+SOURCE_REVISION = re.compile(r"[0-9a-f]{40}")
 
 
 class DeploymentCheckError(RuntimeError):
@@ -55,27 +55,69 @@ def render(kubectl: str, source: Path) -> list[dict[str, object]]:
     return documents
 
 
+def validate_release_identity(bundle: Path, qa_documents: list[dict[str, object]]) -> None:
+    documents = [item for item in yaml.safe_load_all(bundle.read_text()) if item is not None]
+    api = [
+        item
+        for item in documents
+        if item.get("kind") == "Kustomization"
+        and item.get("metadata", {}).get("name") == "qa-product-api"
+    ]
+    if len(api) != 1:
+        raise DeploymentCheckError("active QA Product release must contain one API owner")
+    source = (
+        api[0]
+        .get("metadata", {})
+        .get("annotations", {})
+        .get("insurance-hub.io/source-revision", "")
+    )
+    if not SOURCE_REVISION.fullmatch(source) or set(source[:12]) == {"0"}:
+        raise DeploymentCheckError("active QA Product source revision is not canonical")
+    version = f"git-{source[:12]}"
+    substitutions = api[0].get("spec", {}).get("postBuild", {}).get("substitute", {})
+    if substitutions != {"PRODUCT_SERVICE_VERSION": version}:
+        raise DeploymentCheckError("active QA Product runtime version substitution is incorrect")
+
+    rendered = json.dumps(qa_documents, sort_keys=True)
+    if "${PRODUCT_SERVICE_VERSION}" not in rendered:
+        raise DeploymentCheckError("QA Product overlay is missing its runtime version variable")
+    substituted = rendered.replace("${PRODUCT_SERVICE_VERSION}", version)
+    if "${" in substituted:
+        raise DeploymentCheckError("QA Product release contains an unresolved variable")
+    final = json.loads(substituted)
+    deployment = check_render.one(final, "Deployment", "qa-product-api")
+    config = check_render.one(final, "ConfigMap", re.compile(r"qa-product-config-[a-z0-9]{10}"))
+    if (
+        config.get("data", {}).get("SERVICE_VERSION") != version
+        or deployment.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/version")
+        != version
+        or deployment.get("spec", {})
+        .get("template", {})
+        .get("metadata", {})
+        .get("labels", {})
+        .get("app.kubernetes.io/version")
+        != version
+    ):
+        raise DeploymentCheckError("QA Product runtime version surfaces do not agree")
+
+
 def main(_argv: Sequence[str] | None = None) -> int:
     kubectl = os.environ.get("KUBECTL", "kubectl")
     try:
         with tempfile.TemporaryDirectory(prefix="product-deploy-check-") as directory:
             temporary = Path(directory)
             paths: dict[str, Path] = {}
+            rendered: dict[str, list[dict[str, object]]] = {}
             for name, relative in OVERLAYS.items():
                 path = temporary / f"{name}.json"
-                path.write_text(
-                    json.dumps(render(kubectl, REPOSITORY_ROOT / relative)), encoding="utf-8"
-                )
+                rendered[name] = render(kubectl, REPOSITORY_ROOT / relative)
+                path.write_text(json.dumps(rendered[name]), encoding="utf-8")
                 paths[name] = path
             arguments = [
                 "--local-go",
                 str(paths["local-go"]),
-                "--local-legacy",
-                str(paths["local-legacy"]),
                 "--qa-go",
                 str(paths["qa-go"]),
-                "--qa-legacy",
-                str(paths["qa-legacy"]),
                 "--qa-aggregate",
                 str(paths["qa-aggregate"]),
                 "--local-gateway",
@@ -85,11 +127,12 @@ def main(_argv: Sequence[str] | None = None) -> int:
             ]
             flux_root = yaml.safe_load(QA_FLUX_ROOT.read_text(encoding="utf-8"))
             resources = flux_root.get("resources", []) if isinstance(flux_root, dict) else []
-            if QA_RELEASE_BUNDLE in resources:
-                bundle = QA_FLUX_ROOT.parent / QA_RELEASE_BUNDLE
-                if not bundle.is_file():
-                    raise DeploymentCheckError("active QA Product release bundle is missing")
-                arguments.append("--qa-release-active")
+            if QA_RELEASE_BUNDLE not in resources:
+                raise DeploymentCheckError("QA Product release bundle is not active")
+            bundle = QA_FLUX_ROOT.parent / QA_RELEASE_BUNDLE
+            if not bundle.is_file():
+                raise DeploymentCheckError("active QA Product release bundle is missing")
+            validate_release_identity(bundle, rendered["qa-go"])
             if check_render.main(arguments) != 0:
                 return 1
     except (DeploymentCheckError, OSError, TypeError, ValueError) as error:

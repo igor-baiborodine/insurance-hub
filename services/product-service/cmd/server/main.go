@@ -52,7 +52,11 @@ func runWith(
 		)
 		return err
 	}
-	serviceLogger := logger.NewIdentity(output, settings.Identity, settings.LogLevel)
+	serviceLogger := logger.NewIdentity(
+		output,
+		config.Identity{Identity: settings.Identity},
+		settings.LogLevel,
+	)
 	if settings.Enabled {
 		defer telemetry.InstallDiagnostics(serviceLogger)()
 	}

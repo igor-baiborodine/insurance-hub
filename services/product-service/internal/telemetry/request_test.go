@@ -32,8 +32,8 @@ import (
 	productv1 "github.com/igor-baiborodine/insurance-hub/services/product-service/gen/product/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/domain"
+	gateway "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/gateway"
 	productgrpc "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/grpc"
-	producthttp "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/http"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/telemetry"
 )
@@ -132,23 +132,6 @@ func testRequestObserverRealTransportSignals(t *testing.T, level slog.Level) {
 		)
 		return product, err
 	}
-	httpHandler, err := producthttp.NewHandler(requestLogger, producthttp.Settings{
-		RequestTimeout: time.Second, Observer: observer,
-	}, list, get)
-	if err != nil {
-		t.Fatal(err)
-	}
-	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	httpServer := &http.Server{
-		Handler:           httpHandler,
-		ReadHeaderTimeout: time.Second,
-		IdleTimeout:       time.Second,
-	}
-	go func() { _ = producthttp.Serve(httpServer, httpListener) }()
-	t.Cleanup(func() { _ = httpServer.Close() })
 	grpcServer, err := productgrpc.NewServer(
 		requestLogger,
 		traceProvider,
@@ -178,6 +161,23 @@ func testRequestObserverRealTransportSignals(t *testing.T, level slog.Level) {
 	}
 	t.Cleanup(func() { _ = connection.Close() })
 	client := productv1.NewProductServiceClient(connection)
+	httpHandler, err := gateway.NewHandler(client, gateway.Settings{
+		RequestTimeout: time.Second, Observer: observer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := &http.Server{
+		Handler:           httpHandler,
+		ReadHeaderTimeout: time.Second,
+		IdleTimeout:       time.Second,
+	}
+	go func() { _ = gateway.Serve(httpServer, httpListener) }()
+	t.Cleanup(func() { _ = httpServer.Close() })
 
 	httpCases := []struct {
 		method, path string
@@ -287,12 +287,12 @@ func testRequestObserverRealTransportSignals(t *testing.T, level slog.Level) {
 		}
 	}
 	completionDeadline := time.After(time.Second)
-	for strings.Count(logs.String(), "\n") < 18 {
+	for strings.Count(logs.String(), "\n") < 26 {
 		select {
 		case <-logs.written:
 		case <-completionDeadline:
 			t.Fatalf(
-				"completion logs = %d, want 18",
+				"completion logs = %d, want 26",
 				strings.Count(logs.String(), "\n"),
 			)
 		}
@@ -339,16 +339,16 @@ func testRequestObserverRealTransportSignals(t *testing.T, level slog.Level) {
 			}
 		}
 	}
-	if count != 18 || observations != 18 || len(metricNames) != 2 {
+	if count != 26 || observations != 26 || len(metricNames) != 2 {
 		t.Fatalf(
-			"request count=%d duration observations=%d, want 18 each",
+			"request count=%d duration observations=%d, want 26 each",
 			count,
 			observations,
 		)
 	}
 	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
-	if len(lines) != 18 {
-		t.Fatalf("completion logs = %d, want 18: %s", len(lines), logs.String())
+	if len(lines) != 26 {
+		t.Fatalf("completion logs = %d, want 26: %s", len(lines), logs.String())
 	}
 	outcomes := map[string]int{}
 	logSpans := map[string]string{}
@@ -389,9 +389,9 @@ func testRequestObserverRealTransportSignals(t *testing.T, level slog.Level) {
 		logSpans[record["span_id"].(string)] = record["trace_id"].(string)
 	}
 	for outcome, want := range map[string]int{
-		"success": 4, "not_found": 2, "invalid_request": 2,
+		"success": 6, "not_found": 3, "invalid_request": 2,
 		"storage_unavailable": 2, "invalid_data": 2,
-		"cancelled": 2, "deadline_exceeded": 2, "internal_error": 2,
+		"cancelled": 2, "deadline_exceeded": 2, "internal_error": 7,
 	} {
 		if outcomes[outcome] != want {
 			t.Fatalf(
@@ -405,13 +405,13 @@ func testRequestObserverRealTransportSignals(t *testing.T, level slog.Level) {
 		}
 	}
 	spanDeadline := time.Now().Add(time.Second)
-	for len(spans.Ended()) < 34 && time.Now().Before(spanDeadline) {
+	for len(spans.Ended()) < 42 && time.Now().Before(spanDeadline) {
 		time.Sleep(time.Millisecond)
 	}
 	ended := spans.Ended()
-	if len(ended) != 34 {
+	if len(ended) != 42 {
 		t.Fatalf(
-			"ended spans = %d, want 34 (18 server, 16 application): %v",
+			"ended spans = %d, want 42 (26 server, 16 application): %v",
 			len(ended),
 			spanNames(ended),
 		)
@@ -639,16 +639,9 @@ func TestRequestObserver_HTTPWriteFailureIsNotSuccess(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			handler, err := producthttp.NewHandler(log, producthttp.Settings{
+			handler, err := gateway.NewHandler(staticProductClient{}, gateway.Settings{
 				RequestTimeout: time.Second, Observer: observer,
-			},
-				func(context.Context) ([]domain.Product, error) {
-					return []domain.Product{{Code: "CAR"}}, nil
-				},
-				func(context.Context, string) (domain.Product, error) {
-					return domain.Product{}, nil
-				},
-			)
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -764,6 +757,26 @@ type failingHTTPResponseWriter struct {
 	shortWrite bool
 	fullWrite  bool
 	writes     int
+}
+
+type staticProductClient struct{}
+
+func (staticProductClient) ListProducts(
+	context.Context,
+	*productv1.ListProductsRequest,
+	...grpcgo.CallOption,
+) (*productv1.ListProductsResponse, error) {
+	return &productv1.ListProductsResponse{
+		Products: []*productv1.Product{{Code: "CAR"}},
+	}, nil
+}
+
+func (staticProductClient) GetProduct(
+	context.Context,
+	*productv1.GetProductRequest,
+	...grpcgo.CallOption,
+) (*productv1.GetProductResponse, error) {
+	return &productv1.GetProductResponse{Product: &productv1.Product{Code: "CAR"}}, nil
 }
 
 func (writer *failingHTTPResponseWriter) Write(body []byte) (int, error) {

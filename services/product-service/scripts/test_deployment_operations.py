@@ -69,7 +69,7 @@ class DeploymentGuardTests(unittest.TestCase):
                 yaml, items, image = target.rendered()
                 self.assertIn("kind: Deployment", yaml)
                 self.assertEqual(image, values["DEPLOY_IMAGE_REF"])
-                self.assertEqual(len(items), 4)
+                self.assertEqual(len(items), 5)
                 os.environ["DEPLOY_IMAGE_REF"] = (
                     "insurance-hub-product-api:1.10.0-local.000000000000"
                 )
@@ -109,16 +109,26 @@ class DeploymentGuardTests(unittest.TestCase):
             kubernetes.assert_not_called()
 
     def test_snapshot_rejects_unexpected_output_fields(self) -> None:
-        safe = {"rows": 4, "catalog": "a" * 32, "columns": "b" * 32, "tableOwner": "product"}
-        with patch.object(deployment, "role_action", return_value=deployment.json.dumps(safe)):
-            self.assertEqual(deployment.role_snapshot(object()), safe)
+        safe = {
+            "roles": {"roles": [], "memberships": [], "target": {}},
+            "secrets": {},
+            "productTable": True,
+            "product": {
+                "rows": 4,
+                "catalog": "a" * 32,
+                "columns": "b" * 32,
+                "tableOwner": "product",
+            },
+        }
+        with patch.object(deployment, "resource_action", return_value=deployment.json.dumps(safe)):
+            self.assertEqual(deployment.resource_snapshot(object()), safe)
         with patch.object(
             deployment,
-            "role_action",
+            "resource_action",
             return_value=deployment.json.dumps({**safe, "database-url": "synthetic-secret"}),
         ):
-            with self.assertRaisesRegex(deployment.DeploymentError, "unexpected catalog identity"):
-                deployment.role_snapshot(object())
+            with self.assertRaisesRegex(deployment.DeploymentError, "unexpected state"):
+                deployment.resource_snapshot(object())
 
     def test_volume_guard_accepts_kubernetes_default_and_rejects_other_secret(self) -> None:
         desired = [
@@ -284,7 +294,7 @@ class DeploymentGuardTests(unittest.TestCase):
     def test_route_reference_is_exact(self) -> None:
         names = {"qa-product-api", "qa-product-api-management"}
         self.assertFalse(
-            deployment.refers_to_go({"backendRefs": [{"name": "qa-product-api-legacy"}]}, names)
+            deployment.refers_to_go({"backendRefs": [{"name": "qa-product-api-shadow"}]}, names)
         )
         self.assertTrue(
             deployment.refers_to_go(
@@ -390,7 +400,7 @@ class DeploymentGuardTests(unittest.TestCase):
             ],
         )
 
-    def test_gateway_route_requires_serving_mounted_override_and_phase(self) -> None:
+    def test_gateway_route_requires_serving_mounted_override(self) -> None:
         target = deployment.Target.__new__(deployment.Target)
         target.prefix = "qa-"
         target.namespace = "qa-svc"
@@ -399,7 +409,7 @@ class DeploymentGuardTests(unittest.TestCase):
         config = (
             "micronaut:\n  http:\n    services:\n      product-service:\n"
             "        urls:\n"
-            "          - http://qa-product-api-legacy.qa-svc.svc.cluster.local:80\n"
+            "          - http://qa-product-api.qa-svc.svc.cluster.local:80\n"
         )
         spec = {
             "containers": [
@@ -449,7 +459,7 @@ class DeploymentGuardTests(unittest.TestCase):
         }
         target.json = lambda _verb, *args: state[args]
         target.kubectl = lambda *_args, **_kwargs: config
-        self.assertEqual(target.gateway_route("java")["gateway_pods"][0]["uid"], "one")
+        self.assertEqual(target.gateway_route()["gateway_pods"][0]["uid"], "one")
         pod_spec = deepcopy(spec)
         pod_spec["volumes"].append(
             {"name": "kube-api-access-example", "projected": {"sources": []}}
@@ -464,22 +474,26 @@ class DeploymentGuardTests(unittest.TestCase):
         state[("pods", "-l", "app.kubernetes.io/name=agent-portal-gateway-legacy")]["items"][0][
             "spec"
         ] = pod_spec
-        self.assertEqual(target.gateway_route("java")["gateway_pods"][0]["uid"], "one")
+        self.assertEqual(target.gateway_route()["gateway_pods"][0]["uid"], "one")
         pod_spec["volumes"][0]["configMap"]["name"] = "stale-product-route"
         with self.assertRaisesRegex(deployment.DeploymentError, "stale override"):
-            target.gateway_route("java")
+            target.gateway_route()
         pod_spec["volumes"][0]["configMap"]["name"] = config_name
         pod_spec["containers"][0]["volumeMounts"][0]["mountPath"] = "/stale-product-route"
         with self.assertRaisesRegex(deployment.DeploymentError, "stale override"):
-            target.gateway_route("java")
+            target.gateway_route()
         pod_spec["containers"][0]["volumeMounts"][0]["mountPath"] = "/etc/product-route"
-        with self.assertRaisesRegex(deployment.DeploymentError, "wrong phase"):
-            target.gateway_route("go")
+        state[("configmap", config_name)]["data"]["application.yml"] = config.replace(
+            "qa-product-api", "qa-other-product-api"
+        )
+        with self.assertRaisesRegex(deployment.DeploymentError, "does not select the Product API"):
+            target.gateway_route()
+        state[("configmap", config_name)]["data"]["application.yml"] = config
         target.kubectl = lambda *_args, **_kwargs: "wrong mounted bytes"
         with self.assertRaisesRegex(deployment.DeploymentError, "mounted Product override differs"):
-            target.gateway_route("java")
+            target.gateway_route()
 
-    def test_live_rejects_stale_java_and_external_exposure(self) -> None:
+    def test_live_rejects_external_exposure(self) -> None:
         target = deployment.Target.__new__(deployment.Target)
         target.environment = "local-dev"
         target.prefix = "local-dev-"
@@ -527,7 +541,6 @@ class DeploymentGuardTests(unittest.TestCase):
         items = [deployment_doc, *services, config]
         state = {
             ("deployment", "local-dev-product-api", "--ignore-not-found"): {},
-            ("deployment", "local-dev-product-api-legacy", "--ignore-not-found"): {},
             ("service", target.business, "--ignore-not-found"): {
                 "kind": "Service",
                 "metadata": {"labels": {"app.kubernetes.io/instance": "insurance-hub-product-api"}},
@@ -542,7 +555,6 @@ class DeploymentGuardTests(unittest.TestCase):
             ("endpointslices", "-l", "kubernetes.io/service-name=local-dev-product-api"): {
                 "items": []
             },
-            ("service", "local-dev-product-api-legacy", "--ignore-not-found"): {},
             ("configmap", "local-dev-product-config-hash", "--ignore-not-found"): {
                 "kind": "ConfigMap",
                 "data": config["data"],
@@ -564,12 +576,6 @@ class DeploymentGuardTests(unittest.TestCase):
         target.json = lambda *args: state[args[1:]]
         target.routes = lambda: None
         target.live(items, require_deployment=False)
-        state[("deployment", "local-dev-product-api-legacy", "--ignore-not-found")] = {
-            "kind": "Deployment"
-        }
-        with self.assertRaisesRegex(deployment.DeploymentError, "stale Java"):
-            target.live(items, require_deployment=False)
-        state[("deployment", "local-dev-product-api-legacy", "--ignore-not-found")] = {}
         state[("service", target.business, "--ignore-not-found")]["spec"] = {
             **services[0]["spec"],
             "type": "LoadBalancer",

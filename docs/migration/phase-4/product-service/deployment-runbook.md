@@ -11,7 +11,7 @@
   - [Publish and stage the QA release](#publish-and-stage-the-qa-release)
     - [Advance a manifest-only QA source](#advance-a-manifest-only-qa-source)
     - [Retry the same QA release](#retry-the-same-qa-release)
-  - [Activate and verify QA](#activate-and-verify-qa)
+  - [Operate and verify QA](#operate-and-verify-qa)
   - [Abort, stop, and restoration](#abort-stop-and-restoration)
   - [Credential rotation and revocation](#credential-rotation-and-revocation)
   - [Evidence and handoff](#evidence-and-handoff)
@@ -26,22 +26,24 @@ historical schema and fixtures remain compatibility evidence, but no Java worklo
 seeding, fallback, or recovery.
 
 The API starts with the reader Secret only. Database migration and base-catalog seeding run in a
-separate bounded Job before the matching API release. Merging the administration assets or a dormant
-QA release tuple does not authorize a live operation. Local-dev and QA qualification are separate,
+separate bounded Job before the matching API release. Merging the administration assets or a QA
+release change does not authorize a live operation. Local-dev and QA validation are separate,
 sequential operations and require the environment scope stated in the issue #190 delivery plan.
+The service-local interface follows the
+[Go service resource administration guide](../go-service-resource-administration.md).
 
 ## Ownership and release contract
 
 | Resource or action | Owner and boundary |
 | --- | --- |
 | Product database and bootstrap owner | CloudNativePG/platform automation; application tooling does not create or replace the database |
-| Reader, migrator, seeder, target marker, and workload Secrets | `postgres-svc-role-* SVC_NAME=product ROLE_PROFILE=administration`; explicit environment coordinates and administrative cluster access required |
+| Reader, migrator, seeder, target marker, and workload Secrets | Product module `resource-*` targets; explicit environment coordinates and administrative cluster access required |
 | Schema/history | `/product-migrate`; the migrator login may `SET ROLE product`, while the API and seeder cannot |
 | Base catalog | `/product-seed` with the packaged `/usr/share/insurance-hub/product/catalogs/base.json`; insert-only and non-production enrollment required |
 | Initialization Job | Product administration overlay; migration init container then seed container, separate credentials, 300-second deadline, no TTL |
 | API | Stable local/QA Go Product owner; reader Secret only |
 | QA release tuple | **Go Service Release**; immutable Product source, exact image digest, release-specific prerequisite, and stable API dependency |
-| QA activation | Reviewed removal of Product from the shared QA owner and addition of `./releases/product/release.yaml` to `k8s/flux/qa/kustomization.yaml` after prerequisites and explicit live scope |
+| QA release owner | `./releases/product/release.yaml` in `k8s/flux/qa/kustomization.yaml`; exact source, initialization prerequisite, and stable API owner |
 
 Release identity is the SHA-256 of the full source commit, image digest, migration and catalog
 SHA-256 values, target-contract revision, credential revision, and normalized migration timeout.
@@ -88,13 +90,14 @@ make go-svc-deploy-check SVC_NAME=product
 make go-svc-deploy-test-tooling SVC_NAME=product
 make go-svc-release-test
 make go-svc-dispatch-test
-make postgres-svc-role-test
+make -C services/product-service resource-test-fast
+make -C services/product-service resource-test-integration
 make go-svc-deploy-test-flux SVC_NAME=product
 ```
 
 The Flux test creates a uniquely named Kind cluster, installs the pinned checked-in Flux components
 and CloudNativePG 1.27.0, and deletes only that owned cluster. It proves failure gating, old-success
-rejection, retry identity, Job recreation, safe replay, Product resource adoption, unrelated resource
+rejection, retry identity, Job recreation, safe replay, stable Product ownership, unrelated resource
 preservation, and effective restricted-role SQL denial. It must not receive a shared database URL.
 Rendered or fake-controller results do not replace this test and none of these results proves a live
 environment.
@@ -107,7 +110,7 @@ source revision, image, catalog, roles, and unexpected writers after every switc
 
 | Input | local-dev | QA |
 | --- | --- | --- |
-| `DEPLOY_ENV` / `POSTGRES_ROLE_ENV` | `local-dev` | `qa` |
+| `DEPLOY_ENV` / `PRODUCT_RESOURCE_ENV` | `local-dev` | `qa` |
 | Context | `kind-local-dev-insurance-hub` | `qa-insurance-hub` |
 | Service namespace | `local-dev-all` | `qa-svc` |
 | Data namespace | `local-dev-all` | `qa-data` |
@@ -124,30 +127,29 @@ export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
 export DEPLOY_IMAGE_REF='insurance-hub-product-api:<version>-local.<12-hex-source>'
 
-export POSTGRES_ROLE_ENV="$DEPLOY_ENV"
-export POSTGRES_ROLE_CONTEXT="$DEPLOY_CONTEXT"
-export POSTGRES_ROLE_SVC_NS="$DEPLOY_SVC_NS"
-export POSTGRES_ROLE_DATA_NS="$DEPLOY_DATA_NS"
-export POSTGRES_ROLE_CLUSTER=local-dev-postgres-product
-export POSTGRES_ROLE_SECRET=local-dev-postgres-product-reader-creds
-export POSTGRES_ROLE_DB_HOST=local-dev-postgres-product-rw.local-dev-all.svc.cluster.local
+export PRODUCT_RESOURCE_ENV="$DEPLOY_ENV"
+export PRODUCT_RESOURCE_CONTEXT="$DEPLOY_CONTEXT"
+export PRODUCT_RESOURCE_SVC_NS="$DEPLOY_SVC_NS"
+export PRODUCT_RESOURCE_DATA_NS="$DEPLOY_DATA_NS"
+export PRODUCT_RESOURCE_CLUSTER=local-dev-postgres-product
+export PRODUCT_RESOURCE_READER_SECRET=local-dev-postgres-product-reader-creds
+export PRODUCT_RESOURCE_DB_HOST=local-dev-postgres-product-rw.local-dev-all.svc.cluster.local
 ```
 
 Use the QA column for QA. Set `DEPLOY_SOURCE_REVISION` to the full revision actually reported by
 Flux when running QA status/verification. The deployment tool never changes the active context or
 namespace and rejects coordinates that differ from the selected environment.
 
-Before administration, confirm that no Java Product Deployment or Service exists and no unexpected
-writer/session or role membership can interfere. Stop and report a mismatch. Do not scale, fence,
-delete, or repair an unexpected workload automatically.
+Before administration, confirm that no unexpected writer/session or role membership can interfere.
+Stop and report a mismatch. Do not scale, fence, delete, or repair an unexpected workload
+automatically.
 
 ## Provision and verify roles, marker, and Secrets
 
 Inventory and retain a sanitized snapshot before mutation:
 
 ```sh
-make postgres-svc-role-inventory SVC_NAME=product ROLE_PROFILE=administration
-make postgres-svc-role-snapshot SVC_NAME=product ROLE_PROFILE=administration
+make -C services/product-service resource-inspect
 ```
 
 Provisioning creates or reconciles:
@@ -164,9 +166,11 @@ Each credential Secret contains only `database-url` and `ca.crt`. The target Sec
 `target.json` and no credential. The API references only the reader Secret.
 
 ```sh
-make postgres-svc-role-provision SVC_NAME=product ROLE_PROFILE=administration
-make postgres-svc-role-verify SVC_NAME=product ROLE_PROFILE=administration
-make postgres-svc-role-snapshot SVC_NAME=product ROLE_PROFILE=administration
+export PRODUCT_RESOURCE_CONFIRM="ensure-$PRODUCT_RESOURCE_ENV-product-resources"
+make -C services/product-service resource-ensure
+unset PRODUCT_RESOURCE_CONFIRM
+make -C services/product-service resource-verify
+make -C services/product-service resource-inspect
 ```
 
 Verification opens new TLS connections with the actual Secrets. It proves reader access, reader
@@ -175,13 +179,14 @@ denial using SQLSTATE `42501`. A role without its matching Secret, a changed CNP
 that differs from its protected target is a recovery condition; provisioning does not silently
 replace it.
 
-If initial provisioning commits roles but a later workload-Secret write or final contract check
+If initial ensure commits roles but a later workload-Secret write or final contract check
 fails, compensation deletes only Secrets written by that attempt, removes its target-marker row,
 revokes its new membership, removes Product-database grants from its newly created roles, and drops
 those roles. Pre-existing roles, privileges, Secrets, memberships, and marker rows remain unchanged.
 The `product_admin` schema and empty marker table may remain as idempotent platform-owned scaffolding;
 the failed target row does not. Inspect the reported failure before retrying the same provisioning
-command.
+command. `resource-inspect` and `resource-verify` are read-only; the API never runs any of these
+operations during startup.
 
 ## Build and initialize local-dev
 
@@ -207,8 +212,8 @@ The API step must leave the post-initialization catalog/schema identity unchange
 
 ```sh
 make go-svc-deploy SVC_NAME=product
-make go-svc-deploy-status SVC_NAME=product DEPLOY_EXPECTED_GATEWAY_PHASE=go
-make go-svc-deploy-verify SVC_NAME=product DEPLOY_EXPECTED_GATEWAY_PHASE=go
+make go-svc-deploy-status SVC_NAME=product
+make go-svc-deploy-verify SVC_NAME=product
 ```
 
 For a fresh database, expect migration history version 1 and the four base products. For adoption,
@@ -224,10 +229,9 @@ semantic and source tags, resolves the immutable image digest, and prepares the 
 in `scripts/go/service/catalog.json`; its target configuration owns the bundle path, resource names,
 time budgets, target/credential revisions and retry attempt.
 
-For a target with `initialization`, release preparation writes only its source/init/API bundle.
-It does not advance the API overlay's tag while the shared owner is still active. For a target
-without initialization, the same tooling updates the configured overlay's semantic image tag.
-This capability choice is explicit catalog data, not a service-name special case.
+For a target with `initialization`, release preparation writes its source/init/API bundle. For a
+target without initialization, the same tooling updates the configured overlay's semantic image
+tag. This capability choice is explicit catalog data, not a service-name special case.
 
 The shared implementation lives in `scripts/go/service/release.py` and
 `scripts/go/service/deployment.py`. Product's entry point delegates to that lifecycle engine;
@@ -348,25 +352,13 @@ source commit, image digest, assets, revisions, or timeout while calling the res
 same release. A manifest-only advance changes the source commit and release identity; a retry keeps
 those identities fixed and changes only the configured attempt.
 
-## Activate and verify QA
+## Operate and verify QA
 
-Before activation, provision and verify the QA administration profile, record sanitized before
-state, prove Java Product absence, verify the published digest is pullable, and render the full Flux
-and QA desired state. The staged QA Product overlay marks its current resources with Flux prune
-disabled so transfer cannot delete them between owners.
-
-Activation is one reviewed change: remove `./product` from
-`k8s/overlays/qa/svc/kustomization.yaml` and add the release tuple below to
-`k8s/flux/qa/kustomization.yaml`:
-
-```yaml
-resources:
-  - ./flux-system
-  - ./releases/product/release.yaml
-```
-
-After merge, let Flux reconcile. Do not apply the Job or API directly. Observe the exact source,
-prerequisite, and stable API owners:
+Product already uses its release bundle as the QA owner. Before advancing it, provision and verify
+the QA administration profile, record sanitized before state, verify the published digest is
+pullable, and render the complete Flux and QA desired state. Review and publish the generated
+release bundle through the normal Git workflow, then let Flux reconcile; do not apply the Job or
+API directly. Observe the exact source, prerequisite, and stable API owners:
 
 ```sh
 kubectl --context qa-insurance-hub -n flux-system get gitrepository qa-product-release-<id>
@@ -377,20 +369,15 @@ kubectl --context qa-insurance-hub -n qa-svc get job qa-product-init-<id>-a<atte
 
 Require the source revision and applied revisions to match the tuple, the exact Job to complete,
 and `qa-product-api` to report that exact prerequisite in `dependsOn`. Record the Pod image ID and
-digest, role proof, schema/history, accepted catalog identity, gateway reads, and Java absence. Then
-run the guarded QA status and verification commands with the complete QA selection. Direct QA
-deployment, image load, and stop remain forbidden.
-
-After both owners have reconciled and the Product Deployment, Services, and ConfigMap retain their
-UIDs under `qa-product-api`, remove the temporary prune-disabled annotation from the Product overlay
-through a separate reviewed Git change. Reconcile again and confirm the stable owner retains the
-same resource UIDs. Do not combine that cleanup with the initial ownership transfer.
+digest, role proof, schema/history, accepted catalog identity, gateway reads, NetworkPolicy, and
+stable resource UIDs. Then run the guarded QA status and verification commands with the complete QA
+selection. Direct QA deployment, image load, and stop remain forbidden.
 
 ## Abort, stop, and restoration
 
-Abort on target/Cluster UID mismatch, incomplete role/Secret pairs, unexpected writer or Java
-Product resource, schema/history incompatibility, catalog drift, failed Job, image/source mismatch,
-or unavailable release. Retain the failed Job and sanitized observations.
+Abort on target/Cluster UID mismatch, incomplete role/Secret pairs, unexpected writer,
+schema/history incompatibility, catalog drift, failed Job, image/source mismatch, or unavailable
+release. Retain the failed Job and sanitized observations.
 
 For an initialization failure:
 
@@ -413,31 +400,33 @@ or manufacture rollback with direct apply.
 
 ## Credential rotation and revocation
 
-Reader rotation continues to use `ROLE_PROFILE=reader` and a protected unused recovery file. A new
-pod-template credential revision is required so new API Pods open connections with the new Secret.
-Migrator/seeder rotation uses `ROLE_PROFILE=administration`, rotates both elevated identities, and
-must also produce a new release credential revision and prerequisite identity.
+Resource rotation covers the reader, migrator, and seeder together and uses a protected unused
+recovery file. A new pod-template credential revision is required so new API Pods and
+administration Jobs open connections with the new Secrets.
 
 ```sh
-export POSTGRES_ROLE_RECOVERY_FILE='/absolute/private-directory/admin-before-rotation.json'
-make postgres-svc-role-rotate SVC_NAME=product ROLE_PROFILE=administration
-make postgres-svc-role-verify SVC_NAME=product ROLE_PROFILE=administration
+export PRODUCT_RESOURCE_RECOVERY_FILE='/absolute/private-directory/product-before-rotation.json'
+export PRODUCT_RESOURCE_CONFIRM="rotate-$PRODUCT_RESOURCE_ENV-product-resources"
+make -C services/product-service resource-rotate
+unset PRODUCT_RESOURCE_CONFIRM
+make -C services/product-service resource-verify
 ```
 
-Retain the mode-0600 recovery file through successful Job/API qualification, then dispose of it
+Retain the mode-0600 recovery file through successful Job/API validation, then dispose of it
 through the credential owner. Rotation attempts automatic restoration on partial failure; inspect
 the result before retrying.
 
-Administrative revocation is a deliberate decommissioning action. It requires no Product init Jobs
-to exist and exact confirmation:
+Resource revocation is a deliberate decommissioning action. It requires no Product API Deployment
+or initialization Jobs to exist and exact confirmation:
 
 ```sh
-export POSTGRES_ROLE_CONFIRM_REVOKE="product/administration/$POSTGRES_ROLE_ENV"
-make postgres-svc-role-revoke SVC_NAME=product ROLE_PROFILE=administration
+export PRODUCT_RESOURCE_CONFIRM="revoke-$PRODUCT_RESOURCE_ENV-product-resources"
+make -C services/product-service resource-revoke
+unset PRODUCT_RESOURCE_CONFIRM
 ```
 
-It removes migrator/seeder membership, roles, and Secrets while preserving the reader, target marker,
-schema, history, and catalog. It is not routine cleanup after a successful release.
+It removes the three roles, their workload Secrets, and the target-marker row/Secret while
+preserving schema, history, and catalog data. It is not routine cleanup after a successful release.
 
 ## Evidence and handoff
 
@@ -445,7 +434,7 @@ Keep sanitized evidence in the resolved issue #190 artifact directory. Record UT
 namespaces, CNPG name/UID, target-contract and credential revisions, full source revision, image
 reference/digest/ID, migration/catalog hashes, normalized timeout, release ID and attempt, Flux
 source/applied revisions, Job UID/result, API Pod UIDs, role/SQLSTATE proof, schema/history/catalog
-identity, gateway observations, Java absence, commands, outcomes, and cleanup.
+identity, gateway and network-policy observations, commands, outcomes, and cleanup.
 
 Never retain passwords, tokens, credential-bearing URLs, raw Secrets, or full product definitions.
 Separate offline render, fake-adapter, disposable Flux/CNPG, local-dev, and QA evidence. A later

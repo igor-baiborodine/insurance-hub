@@ -78,9 +78,6 @@ PYTHON_SCAFFOLD_TOOLING_FILES := \
 	templates/go-service/scripts/tooling_runner.py \
 	templates/go-service/scripts/test_tooling_runner.py
 PYTHON_PRODUCT_TOOLING_FILES := \
-	scripts/postgres/service/dispatch.py \
-	scripts/postgres/service/test_administration_roles.py \
-	scripts/postgres/service/test_reader.py \
 	scripts/product_baseline/__init__.py \
 	scripts/product_baseline/accept.py \
 	scripts/product_baseline/catalog_roundtrip.py \
@@ -94,17 +91,6 @@ PYTHON_PRODUCT_TOOLING_FILES := \
 	scripts/product_baseline/test_compare_http.py \
 	scripts/product_baseline/test_fixtures.py \
 	scripts/product_baseline/verify.py \
-	scripts/product_qualification/__init__.py \
-	scripts/product_qualification/core.py \
-	scripts/product_qualification/measure.py \
-	scripts/product_qualification/observe.py \
-	scripts/product_qualification/ops.py \
-	scripts/product_qualification/test_core.py \
-	scripts/product_qualification/test_measure.py \
-	scripts/product_qualification/test_ops.py \
-	scripts/product_deployment/__init__.py \
-	scripts/product_deployment/administration.py \
-	scripts/product_deployment/reader.py \
 	scripts/product_security/__init__.py \
 	scripts/product_security/check_cases.py \
 	scripts/product_security/check_java_results.py \
@@ -118,6 +104,7 @@ PYTHON_PRODUCT_TOOLING_FILES := \
 	services/product-service/scripts/check_ci.py \
 	services/product-service/scripts/check_docs.py \
 	services/product-service/scripts/check_render.py \
+	services/product-service/scripts/administration.py \
 	services/product-service/scripts/deployment.py \
 	services/product-service/scripts/product_deployment_checks.py \
 	services/product-service/scripts/deployment_check.py \
@@ -126,13 +113,17 @@ PYTHON_PRODUCT_TOOLING_FILES := \
 	services/product-service/scripts/integration_test.py \
 	services/product-service/scripts/image_check.py \
 	services/product-service/scripts/product_process.py \
+	services/product-service/scripts/resource_administration.py \
 	services/product-service/scripts/shared_phase.py \
 	services/product-service/scripts/telemetry_continuity_test.py \
 	services/product-service/scripts/test_deployment_checks.py \
 	services/product-service/scripts/test_deployment_lifecycle.py \
 	services/product-service/scripts/test_deployment_operations.py \
+	services/product-service/scripts/test_administration.py \
 	services/product-service/scripts/test_product_tooling.py \
-	services/product-service/scripts/test_product_tooling_integration.py
+	services/product-service/scripts/test_product_tooling_integration.py \
+	services/product-service/scripts/test_resource_administration.py \
+	services/product-service/scripts/test_resource_administration_integration.py
 PYTHON_K8S_ADMIN_FILES := \
 	k8s/scripts/admin/__init__.py \
 	k8s/scripts/admin/cluster.py \
@@ -358,12 +349,9 @@ python-product-tooling-test-fast: python-toolchain-check ## Run fast Product too
 		scripts/product_baseline/test_catalog_roundtrip.py \
 		scripts/product_baseline/test_compare_http.py \
 		scripts/product_baseline/test_fixtures.py \
-		scripts/product_qualification/test_core.py \
-		scripts/product_qualification/test_measure.py \
-		scripts/product_qualification/test_ops.py \
 		scripts/product_security/test_validators.py \
-		scripts/postgres/service/test_administration_roles.py \
-		scripts/postgres/service/test_reader.py \
+		services/product-service/scripts/test_administration.py \
+		services/product-service/scripts/test_resource_administration.py \
 		services/product-service/scripts/test_check_access_results.py \
 		services/product-service/scripts/test_deployment_checks.py \
 		services/product-service/scripts/test_deployment_operations.py \

@@ -13,6 +13,8 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
+	grpccodes "google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	kitlogger "github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
@@ -255,6 +257,8 @@ func Classify(err error) string {
 	case errors.Is(err, application.ErrCodeRequired):
 		return "invalid_request"
 	case errors.Is(err, application.ErrProductNotFound):
+		return "not_found"
+	case status.Code(err) == grpccodes.NotFound:
 		return "not_found"
 	case errors.Is(err, application.ErrUnavailable):
 		return "storage_unavailable"

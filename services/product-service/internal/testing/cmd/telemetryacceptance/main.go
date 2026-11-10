@@ -97,7 +97,7 @@ func runServer(arguments []string) (runErr error) {
 	endpointFile := flags.String("endpoint-file", "", "private endpoint record")
 	otelEnabled := flags.Bool("otel-enabled", false, "enable Product telemetry")
 	otlpEndpoint := flags.String("otlp-endpoint", "http://127.0.0.1:4317", "collector endpoint")
-	version := flags.String("version", "sha-135acceptance", "service version")
+	version := flags.String("version", "git-135acce00000", "service version")
 	instance := flags.String(
 		"instance",
 		"13500000-0000-4000-8000-000000000017",
@@ -146,7 +146,11 @@ func runServer(arguments []string) (runErr error) {
 		done <- service.Run(
 			serviceCtx,
 			settings,
-			logger.NewIdentity(os.Stdout, settings.Identity, settings.LogLevel),
+			logger.NewIdentity(
+				os.Stdout,
+				config.Identity{Identity: settings.Identity},
+				settings.LogLevel,
+			),
 		)
 	}()
 	if err := waitReady(selected, done); err != nil {

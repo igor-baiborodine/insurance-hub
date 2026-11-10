@@ -29,9 +29,8 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/administration"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/config"
+	gateway "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/gateway"
 	productgrpc "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/grpc"
-	producthttp "github.com/igor-baiborodine/insurance-hub/services/product-service/internal/http"
-	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/logger"
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/postgres"
 )
 
@@ -577,11 +576,16 @@ func assertSeedTransportParity(
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	handler, err := producthttp.NewHandler(
-		logger.New(&logs, settings.ServiceName, settings.LogLevel),
-		producthttp.Settings{RequestTimeout: settings.RequestTimeout},
-		producthttp.ListProducts(listProducts.Execute),
-		producthttp.GetProduct(getProduct.Execute),
+	grpcClient := startGRPCIntegrationServer(
+		t,
+		settings,
+		productgrpc.ListProducts(listProducts.Execute),
+		productgrpc.GetProduct(getProduct.Execute),
+		&logs,
+	)
+	handler, err := gateway.NewHandler(
+		grpcClient,
+		gateway.Settings{RequestTimeout: settings.RequestTimeout},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -590,13 +594,6 @@ func assertSeedTransportParity(
 		t,
 		settings,
 		handler,
-	)
-	grpcClient := startGRPCIntegrationServer(
-		t,
-		settings,
-		productgrpc.ListProducts(listProducts.Execute),
-		productgrpc.GetProduct(getProduct.Execute),
-		&logs,
 	)
 	httpExpectations := loadQAHTTPExpectations(t, baselineRoot)
 	grpcExpectations := loadQAGRPCExpectations(t, baselineRoot)

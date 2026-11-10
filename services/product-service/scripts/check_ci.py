@@ -236,7 +236,7 @@ def validate_release(workflow: dict) -> None:
         "go test",
         "kubectl",
         "kind create",
-        "postgres-svc-role",
+        "resource-ensure",
         "image-publish",
         "release-finalize",
     )
@@ -893,7 +893,7 @@ def validate_modules(workflow: dict, *, run_execution_cases: bool = False) -> No
         "go-scaffold-check-copy",
         "check-ci",
         "go-svc-",
-        "postgres-svc-role",
+        "resource-ensure",
         "product-baseline",
         "product-security",
         "kubectl",

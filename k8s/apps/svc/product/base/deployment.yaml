@@ -67,6 +67,11 @@ spec:
                 secretKeyRef:
                   name: postgres-product-reader-creds
                   key: database-url
+            - name: SERVICE_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.uid
           volumeMounts:
             - name: postgres-ca
               mountPath: /etc/product-service/postgres

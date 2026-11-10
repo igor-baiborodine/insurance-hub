@@ -36,7 +36,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/product-service/internal/service"
 )
 
-const accessServiceName = "product-access-diagnostics"
+const accessServiceName = "product-service"
 
 func TestProductAccess(t *testing.T) {
 	// given

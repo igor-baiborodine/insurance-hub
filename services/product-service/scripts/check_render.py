@@ -174,7 +174,7 @@ EXPECTED_CONFIG = {
     "OTEL_ENABLED": "false",
 }
 
-QA_SERVICE_VERSION = "sha-be510cc"
+QA_SERVICE_VERSION = "${PRODUCT_SERVICE_VERSION}"
 QA_CONFIG = {
     **EXPECTED_CONFIG,
     "OTEL_ENABLED": "true",
@@ -209,6 +209,115 @@ def validate_service(
     )
 
 
+def validate_network_policy(
+    policy: dict[str, Any],
+    environment: str,
+    deployment_selector: dict[str, str],
+) -> None:
+    settings = {
+        "local-dev": {
+            "service_namespace": "local-dev-all",
+            "database_namespace": "local-dev-all",
+            "database_cluster": "local-dev-postgres-product",
+            "alloy": False,
+        },
+        "qa": {
+            "service_namespace": "qa-svc",
+            "database_namespace": "qa-data",
+            "database_cluster": "qa-postgres-product",
+            "alloy": True,
+        },
+    }[environment]
+    ingress = [
+        {
+            "from": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {
+                            "kubernetes.io/metadata.name": settings["service_namespace"]
+                        }
+                    },
+                    "podSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "agent-portal-gateway-legacy",
+                            "app.kubernetes.io/instance": (
+                                "insurance-hub-agent-portal-gateway-legacy"
+                            ),
+                            "app.kubernetes.io/component": "gateway",
+                            "environment": environment,
+                            "insurance-hub.io/product-business-client": "true",
+                        }
+                    },
+                }
+            ],
+            "ports": [
+                {"port": 8080, "protocol": "TCP"},
+                {"port": 9090, "protocol": "TCP"},
+            ],
+        }
+    ]
+    egress = [
+        {
+            "to": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": "kube-system"}
+                    },
+                    "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
+                }
+            ],
+            "ports": [
+                {"port": 53, "protocol": "UDP"},
+                {"port": 53, "protocol": "TCP"},
+            ],
+        },
+        {
+            "to": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {
+                            "kubernetes.io/metadata.name": settings["database_namespace"]
+                        }
+                    },
+                    "podSelector": {
+                        "matchLabels": {"cnpg.io/cluster": settings["database_cluster"]}
+                    },
+                }
+            ],
+            "ports": [{"port": 5432, "protocol": "TCP"}],
+        },
+    ]
+    if settings["alloy"]:
+        egress.append(
+            {
+                "to": [
+                    {
+                        "namespaceSelector": {
+                            "matchLabels": {"kubernetes.io/metadata.name": "qa-monitoring"}
+                        },
+                        "podSelector": {
+                            "matchLabels": {
+                                "app.kubernetes.io/name": "alloy",
+                                "app.kubernetes.io/instance": "qa-alloy",
+                            }
+                        },
+                    }
+                ],
+                "ports": [{"port": 4317, "protocol": "TCP"}],
+            }
+        )
+    require(
+        policy.get("spec")
+        == {
+            "podSelector": {"matchLabels": deployment_selector},
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": ingress,
+            "egress": egress,
+        },
+        f"{environment} Product NetworkPolicy must contain only the approved peers and ports",
+    )
+
+
 def validate_probe(
     container: dict[str, Any], name: str, path: str, period: int, failures: int
 ) -> None:
@@ -239,7 +348,7 @@ def validate_go_environment(
             "secret": "qa-postgres-product-reader-creds",
             "image": re.compile(
                 r"ghcr\.io/igor-baiborodine/insurance-hub/product-api:"
-                r"1\.[0-9]+\.[0-9]+"
+                r"(?:\$\{PRODUCT_SERVICE_VERSION\}|git-(?!0{12})[0-9a-f]{12})"
             ),
             "pull": "Always",
         },
@@ -249,7 +358,7 @@ def validate_go_environment(
     secret_name = settings["secret"]
 
     require_unique(documents, f"{environment} Go render")
-    require(len(documents) == 4, f"{environment} Go render must contain exactly four objects")
+    require(len(documents) == 5, f"{environment} Go render must contain exactly five objects")
     require(
         all(identity(item)[1] == namespace for item in documents),
         f"{environment} namespace transformation is incorrect",
@@ -271,6 +380,7 @@ def validate_go_environment(
     deployment = one(documents, "Deployment", f"{prefix}product-api")
     business = one(documents, "Service", f"{prefix}product-api")
     management = one(documents, "Service", f"{prefix}product-api-management")
+    network_policy = one(documents, "NetworkPolicy", f"{prefix}product-api")
     config = one(
         documents,
         "ConfigMap",
@@ -288,18 +398,21 @@ def validate_go_environment(
     pod_metadata = pod.get("metadata", {})
     pod_spec = pod.get("spec", {})
     pod_labels = pod_metadata.get("labels", {})
-    required_labels = {
+    required_selector_labels = {
         "app.kubernetes.io/name": "product-api",
         "app.kubernetes.io/component": "api",
-        "environment": environment,
     }
     require(
-        all(selector.get(key) == value for key, value in required_labels.items()),
+        all(selector.get(key) == value for key, value in required_selector_labels.items()),
         f"{environment} Deployment selector is incorrect",
     )
     require(
         selected(selector, pod_labels),
         f"{environment} Deployment selector does not select its pod template",
+    )
+    require(
+        pod_labels.get("environment") == environment,
+        f"{environment} Pod environment label is incorrect",
     )
     if environment == "qa":
         require(
@@ -336,6 +449,7 @@ def validate_go_environment(
         [{"name": "management", "port": 8081, "protocol": "TCP", "targetPort": "management"}],
         selector,
     )
+    validate_network_policy(network_policy, environment, selector)
 
     require(
         pod_spec.get("automountServiceAccountToken") is False,
@@ -421,13 +535,12 @@ def validate_go_environment(
             "valueFrom": {"secretKeyRef": {"name": secret_name, "key": "database-url"}},
         }
     ]
-    if environment == "qa":
-        expected_environment.append(
-            {
-                "name": "SERVICE_INSTANCE_ID",
-                "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
-            }
-        )
+    expected_environment.append(
+        {
+            "name": "SERVICE_INSTANCE_ID",
+            "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
+        }
+    )
     require(
         container.get("env") == expected_environment,
         f"{environment} PRODUCT_DATABASE_URL reader Secret reference is incorrect",
@@ -467,110 +580,15 @@ def validate_go_environment(
     return {identity(document): document for document in documents}
 
 
-def validate_disjoint(
-    go_documents: list[dict[str, Any]], legacy_documents: list[dict[str, Any]], environment: str
-) -> None:
-    prefix = f"{environment}-"
-    go_deployment = one(go_documents, "Deployment", f"{prefix}product-api")
-    go_service = one(go_documents, "Service", f"{prefix}product-api")
-    legacy_deployment = one(legacy_documents, "Deployment", f"{prefix}product-api-legacy")
-    legacy_service = one(legacy_documents, "Service", f"{prefix}product-api-legacy")
-    go_labels = go_deployment["spec"]["template"]["metadata"]["labels"]
-    legacy_labels = legacy_deployment["spec"]["template"]["metadata"]["labels"]
-    go_selector = go_service["spec"]["selector"]
-    legacy_selector = legacy_service["spec"]["selector"]
-    require(
-        not selected(go_selector, legacy_labels),
-        f"{environment} Go Service selector overlaps the Java pod",
-    )
-    require(
-        not selected(legacy_selector, go_labels),
-        f"{environment} Java Service selector overlaps the Go pod",
-    )
-
-
 def contains_qa_go(documents: list[dict[str, Any]]) -> bool:
     names = {identity(document) for document in documents}
     return ("Deployment", "qa-svc", "qa-product-api") in names
 
 
-def validate_qa_java(deployment: dict[str, Any], container_name: str, version: str) -> None:
-    metadata = deployment.get("metadata", {})
-    pod = deployment.get("spec", {}).get("template", {})
-    require(
-        metadata.get("labels", {}).get("app.kubernetes.io/version") == version,
-        f"{container_name} Deployment version label must match its QA image",
-    )
-    require(
-        pod.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/version") == version,
-        f"{container_name} Pod version label must match its QA image",
-    )
-    containers = pod.get("spec", {}).get("containers", [])
-    matches = [container for container in containers if container.get("name") == container_name]
-    require(len(matches) == 1, f"expected exactly one {container_name} container")
-    container = matches[0]
-    require(
-        container.get("image")
-        == f"ghcr.io/igor-baiborodine/insurance-hub/{container_name}:{version}",
-        f"{container_name} image and version label must match",
-    )
-    environment = container.get("env", [])
-    require(
-        len({item.get("name") for item in environment}) == len(environment),
-        f"{container_name} environment must not contain duplicate names",
-    )
-    values = {item.get("name"): item.get("value") for item in environment}
-    require(
-        values.get("TRACING_ZIPKIN_SAMPLER_PROBABILITY") == "1.0",
-        f"{container_name} must bind the QA Zipkin sampler to 1.0",
-    )
-
-
-def validate_qa_java_observability(
-    qa_legacy: list[dict[str, Any]], aggregate: list[dict[str, Any]]
-) -> None:
-    product = one(qa_legacy, "Deployment", "qa-product-api-legacy")
-    validate_qa_java(product, "product-api-legacy", "1.6.0")
-    product_config = one(
-        qa_legacy,
-        "ConfigMap",
-        re.compile(r"qa-product-config-legacy-[a-z0-9]{10}"),
-    )
-    require(
-        product_config.get("data", {}).get("TRACING_ZIPKIN_ENABLED") == "true"
-        and product_config.get("data", {}).get("ZIPKIN_HOST")
-        == "qa-alloy.qa-monitoring.svc.cluster.local",
-        "product-api-legacy must preserve the Alloy Zipkin destination",
-    )
-
-    gateway = one(aggregate, "Deployment", "qa-agent-portal-gateway-legacy")
-    validate_qa_java(gateway, "agent-portal-gateway-legacy", "1.3.0")
-    gateway_container = gateway["spec"]["template"]["spec"]["containers"][0]
-    gateway_values = {
-        item.get("name"): item.get("value") for item in gateway_container.get("env", [])
-    }
-    require(
-        gateway_values.get("TRACING_ZIPKIN_HTTP_URL")
-        == "http://qa-alloy.qa-monitoring.svc.cluster.local:9411",
-        "agent-portal-gateway-legacy must preserve the Alloy Zipkin destination",
-    )
-
-
-def validate_gateway_route(documents: list[dict[str, Any]], environment: str) -> str:
+def validate_gateway_route(documents: list[dict[str, Any]], environment: str) -> None:
     prefix = f"{environment}-"
     namespace = "qa-svc" if environment == "qa" else "local-dev-all"
-    backends = ("product-api-legacy", "product-api") if environment == "qa" else ("product-api",)
-    expected_configs = {
-        backend: (
-            "micronaut:\n"
-            "  http:\n"
-            "    services:\n"
-            "      product-service:\n"
-            "        urls:\n"
-            f"          - http://{prefix}{backend}.{namespace}.svc.cluster.local:80\n"
-        )
-        for backend in backends
-    }
+    expected_url = f"http://{prefix}product-api.{namespace}.svc.cluster.local:80"
 
     require_unique(documents, f"{environment} gateway render")
     require(len(documents) == 3, f"{environment} gateway render must contain three objects")
@@ -583,16 +601,23 @@ def validate_gateway_route(documents: list[dict[str, Any]], environment: str) ->
         "ConfigMap",
         re.compile(rf"{re.escape(prefix)}gateway-product-route-config-[a-z0-9]{{10}}"),
     )
-    selected = [
-        backend
-        for backend, expected_config in expected_configs.items()
-        if config.get("data") == {"application.yml": expected_config}
-    ]
+    content = config.get("data", {}).get("application.yml", "")
+    product_urls = re.findall(
+        re.escape(expected_url) + r"(?![0-9])",
+        content,
+    )
     require(
-        len(selected) == 1, f"{environment} gateway must configure exactly one expected Product URL"
+        product_urls == [expected_url],
+        f"{environment} gateway must configure only the current Product URL",
     )
     deployment = one(documents, "Deployment", f"{prefix}agent-portal-gateway-legacy")
-    pod_spec = deployment["spec"]["template"]["spec"]
+    pod = deployment["spec"]["template"]
+    require(
+        pod.get("metadata", {}).get("labels", {}).get("insurance-hub.io/product-business-client")
+        == "true",
+        f"{environment} gateway must carry the Product admission label",
+    )
+    pod_spec = pod["spec"]
     container = one_container(pod_spec, "agent-portal-gateway-legacy", environment)
     environment_values = container.get("env", [])
     require(
@@ -615,7 +640,6 @@ def validate_gateway_route(documents: list[dict[str, Any]], environment: str) ->
         == [{"name": "product-route-config", "configMap": {"name": config["metadata"]["name"]}}],
         f"{environment} gateway Pod must reference the generated Product ConfigMap name",
     )
-    return selected[0]
 
 
 def one_container(pod_spec: dict[str, Any], name: str, environment: str) -> dict[str, Any]:
@@ -626,55 +650,35 @@ def one_container(pod_spec: dict[str, Any], name: str, environment: str) -> dict
 
 def validate_aggregates(
     qa_go_index: dict[tuple[str, str, str], dict[str, Any]],
-    qa_legacy: list[dict[str, Any]],
     qa_gateway: list[dict[str, Any]],
     aggregate: list[dict[str, Any]],
-    qa_backend: str,
-    qa_release_active: bool,
 ) -> None:
     require_unique(aggregate, "QA aggregate")
     aggregate_index = {identity(document): document for document in aggregate}
-    legacy_identities = {identity(document) for document in qa_legacy}
-    require(
-        not (legacy_identities & set(aggregate_index)),
-        "QA aggregate still contains stale Java Product objects",
-    )
     for gateway_document in qa_gateway:
         gateway_identity = identity(gateway_document)
         require(
             aggregate_index.get(gateway_identity) == gateway_document,
             f"QA aggregate changed gateway object {gateway_identity}",
         )
-    require(qa_backend == "product-api", "QA aggregate must route to Go Product")
-    if qa_release_active:
+    require(
+        not contains_qa_go(aggregate),
+        "QA shared aggregate must not contain Product release objects",
+    )
+    for object_identity in qa_go_index:
         require(
-            not contains_qa_go(aggregate),
-            "QA shared aggregate still contains Go Product after release activation",
+            object_identity not in aggregate_index,
+            f"QA shared aggregate retained Product object {object_identity}",
         )
-        for object_identity in qa_go_index:
-            require(
-                object_identity not in aggregate_index,
-                f"QA shared aggregate retained Go object {object_identity}",
-            )
-    else:
-        require(contains_qa_go(aggregate), "QA aggregate does not contain Go Product")
-        for object_identity, expected in qa_go_index.items():
-            require(
-                aggregate_index.get(object_identity) == expected,
-                f"QA aggregate changed Go object {object_identity}",
-            )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--local-go", required=True, type=Path)
-    parser.add_argument("--local-legacy", required=True, type=Path)
     parser.add_argument("--qa-go", required=True, type=Path)
-    parser.add_argument("--qa-legacy", required=True, type=Path)
     parser.add_argument("--qa-aggregate", required=True, type=Path)
     parser.add_argument("--local-gateway", required=True, type=Path)
     parser.add_argument("--qa-gateway", required=True, type=Path)
-    parser.add_argument("--qa-release-active", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -682,30 +686,23 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parse_args(argv)
     try:
         local_go = load_documents(arguments.local_go)
-        local_legacy = load_documents(arguments.local_legacy)
         qa_go = load_documents(arguments.qa_go)
-        qa_legacy = load_documents(arguments.qa_legacy)
         qa_aggregate = load_documents(arguments.qa_aggregate)
         local_gateway = load_documents(arguments.local_gateway)
         qa_gateway = load_documents(arguments.qa_gateway)
         validate_go_environment(local_go, "local-dev")
         qa_go_index = validate_go_environment(qa_go, "qa")
-        validate_disjoint(local_go, local_legacy, "local-dev")
-        validate_disjoint(qa_go, qa_legacy, "qa")
         validate_gateway_route(local_gateway, "local-dev")
-        qa_backend = validate_gateway_route(qa_gateway, "qa")
+        validate_gateway_route(qa_gateway, "qa")
         validate_aggregates(
             qa_go_index,
-            qa_legacy,
             qa_gateway,
             qa_aggregate,
-            qa_backend,
-            arguments.qa_release_active,
         )
     except ValidationError as error:
         print(f"product-deploy-check: {error}", file=sys.stderr)
         return 1
-    print("product-deploy-check: rendered overlays, Java isolation, and QA ownership passed")
+    print("product-deploy-check: rendered overlays, gateway route, and QA ownership passed")
     return 0
 
 

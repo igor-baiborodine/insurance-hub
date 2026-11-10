@@ -1,4 +1,4 @@
-package producthttp
+package gateway
 
 import (
 	"bytes"
@@ -35,7 +35,7 @@ func TestHandler_RequestTelemetry_RecordsRoutedOutcomesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(
+	handler, err := newCallbackHandler(t,
 		logger.New(io.Discard, "product-service", 0),
 		Settings{RequestTimeout: time.Second, Observer: observer},
 		func(context.Context) ([]domain.Product, error) {
@@ -167,7 +167,10 @@ func TestHandler_RequestTelemetry_ReportsShortResponseWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(log, Settings{RequestTimeout: time.Second, Observer: observer},
+	handler, err := newCallbackHandler(
+		t,
+		log,
+		Settings{RequestTimeout: time.Second, Observer: observer},
 		func(context.Context) ([]domain.Product, error) {
 			return []domain.Product{{Code: "CAR"}}, nil
 		},

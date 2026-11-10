@@ -151,6 +151,12 @@ def target_record(root: Path, record: dict[str, Any], name: str) -> dict[str, An
             )
         checkout_path(root, flux.get("bundle", ""))
         checkout_path(root, flux.get("sharedPath", ""))
+        runtime_version_variable = flux.get("runtimeVersionVariable")
+        if runtime_version_variable is not None:
+            require(
+                bool(re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", runtime_version_variable)),
+                "invalid runtimeVersionVariable",
+            )
     else:
         require(
             bool(re.fullmatch(r"[a-z][a-z0-9-]*", target.get("kindCluster", ""))),

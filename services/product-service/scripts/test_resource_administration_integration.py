@@ -9,9 +9,8 @@ import time
 from contextlib import contextmanager
 
 import pytest
-
-from scripts.postgres.service.test_reader import IMAGE, DisposableProduct, run
-from scripts.product_deployment.reader import safe_probe_sql
+from administration import safe_probe_sql
+from test_administration import IMAGE, DisposableProduct, run
 
 PASSWORD = "q04-disposable-only"
 

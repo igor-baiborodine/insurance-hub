@@ -1,4 +1,4 @@
-package producthttp
+package gateway
 
 import (
 	"bufio"
@@ -32,7 +32,7 @@ type failureCase struct {
 	} `json:"expected"`
 }
 
-func TestDirectProductRouting_MatchesAcceptedBoundaryCases(t *testing.T) {
+func TestGeneratedGatewayRouting_MatchesAcceptedBoundaryCases(t *testing.T) {
 	fixtures := readFailureCases(t)
 	tests := []struct {
 		id       string
@@ -440,7 +440,8 @@ func TestHandler_MapsErrorsSafelyWithoutRetryOrPartialSuccess(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			calls := 0
-			handler, err := NewHandler(
+			handler, err := newCallbackHandler(
+				t,
 				slog.New(
 					slog.NewTextHandler(&logs, nil),
 				),
@@ -507,7 +508,8 @@ func TestHandler_UsesCallerContextAndConfiguredDeadline(t *testing.T) {
 	t.Run(
 		"configured deadline returns safe error while caller remains connected",
 		func(t *testing.T) {
-			handler, err := NewHandler(
+			handler, err := newCallbackHandler(
+				t,
 				slog.New(
 					slog.NewTextHandler(io.Discard, nil),
 				),
@@ -533,107 +535,6 @@ func TestHandler_UsesCallerContextAndConfiguredDeadline(t *testing.T) {
 			}
 		},
 	)
-
-	t.Run("configured deadline during mapping prevents success", func(t *testing.T) {
-		// given
-		product := productWithChoices(t, 100_000)
-		applicationReturnedWithBudget := false
-		handler, err := NewHandler(
-			slog.New(slog.NewTextHandler(io.Discard, nil)),
-			Settings{RequestTimeout: time.Millisecond},
-			func(ctx context.Context) ([]domain.Product, error) {
-				applicationReturnedWithBudget = ctx.Err() == nil
-				return []domain.Product{product}, nil
-			},
-			func(context.Context, string) (domain.Product, error) {
-				return domain.Product{}, nil
-			},
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-		response := httptest.NewRecorder()
-
-		// when
-		handler.ServeHTTP(
-			response,
-			httptest.NewRequest(http.MethodGet, "/products", nil),
-		)
-
-		// then
-		if !applicationReturnedWithBudget {
-			t.Fatal("application did not return before the request deadline")
-		}
-		if response.Code != http.StatusInternalServerError ||
-			response.Body.String() != `{"message":"Internal Server Error"}` {
-			t.Errorf(
-				"mapping deadline response = (%d, %s)",
-				response.Code,
-				response.Body.String(),
-			)
-		}
-	})
-
-	t.Run("configured deadline during serialization prevents success", func(t *testing.T) {
-		// given
-		product := domain.Product{
-			Code:        "LARGE",
-			Description: strings.Repeat("x", 8<<20),
-		}
-		applicationReturnedWithBudget := false
-		handler, err := NewHandler(
-			slog.New(slog.NewTextHandler(io.Discard, nil)),
-			Settings{RequestTimeout: time.Millisecond},
-			func(ctx context.Context) ([]domain.Product, error) {
-				applicationReturnedWithBudget = ctx.Err() == nil
-				return []domain.Product{product}, nil
-			},
-			func(context.Context, string) (domain.Product, error) {
-				return domain.Product{}, nil
-			},
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-		response := httptest.NewRecorder()
-
-		// when
-		handler.ServeHTTP(
-			response,
-			httptest.NewRequest(http.MethodGet, "/products", nil),
-		)
-
-		// then
-		if !applicationReturnedWithBudget {
-			t.Fatal("application did not return before the request deadline")
-		}
-		if response.Code != http.StatusInternalServerError ||
-			response.Body.String() != `{"message":"Internal Server Error"}` {
-			t.Errorf(
-				"serialization deadline response = (%d, body bytes=%d)",
-				response.Code,
-				response.Body.Len(),
-			)
-		}
-	})
-}
-
-func productWithChoices(t *testing.T, count int) domain.Product {
-	t.Helper()
-	choices := make([]domain.Choice, count)
-	for index := range choices {
-		choices[index] = domain.Choice{Code: "C", Label: "Choice"}
-	}
-	question, err := domain.NewQuestion(
-		"CHOICE",
-		1,
-		"Choice",
-		domain.ChoiceQuestion{Choices: choices},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return domain.Product{Code: "LARGE", Questions: []domain.Question{question}}
 }
 
 func TestNewHandler_RejectsInvalidDependencies(t *testing.T) {
@@ -641,30 +542,12 @@ func TestNewHandler_RejectsInvalidDependencies(t *testing.T) {
 	get := GetProduct(func(context.Context, string) (domain.Product, error) {
 		return domain.Product{}, nil
 	})
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	tests := []struct {
-		name string
-		log  *slog.Logger
-		set  Settings
-		list ListProducts
-		get  GetProduct
-	}{
-		{name: "logger", set: Settings{RequestTimeout: time.Second}, list: list, get: get},
-		{name: "timeout", log: logger, list: list, get: get},
-		{name: "list", log: logger, set: Settings{RequestTimeout: time.Second}, get: get},
-		{name: "get", log: logger, set: Settings{RequestTimeout: time.Second}, list: list},
+	validClient := callbackClient{list: list, get: get}
+	if _, err := NewHandler(nil, Settings{RequestTimeout: time.Second}); err == nil {
+		t.Error("NewHandler accepted a nil client")
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if _, err := NewHandler(
-				test.log,
-				test.set,
-				test.list,
-				test.get,
-			); err == nil {
-				t.Error("NewHandler accepted invalid dependencies")
-			}
-		})
+	if _, err := NewHandler(validClient, Settings{}); err == nil {
+		t.Error("NewHandler accepted a missing timeout")
 	}
 }
 
@@ -692,7 +575,7 @@ func (writer *trackingResponseWriter) Write(body []byte) (int, error) {
 
 func newTestHandler(t *testing.T, list ListProducts, get GetProduct) http.Handler {
 	t.Helper()
-	handler, err := NewHandler(
+	handler, err := newCallbackHandler(t,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Settings{RequestTimeout: time.Second},
 		list,
