@@ -53,6 +53,9 @@
       - [issue-266-N01 Dashboard analytics corrections](#issue-266-n01-dashboard-analytics-corrections)
       - [issue-266-N02 Additional Dashboard analytics and delivery capabilities](#issue-266-n02-additional-dashboard-analytics-and-delivery-capabilities)
       - [issue-266-N04 Dashboard recovery and stronger event guarantees](#issue-266-n04-dashboard-recovery-and-stronger-event-guarantees)
+    - [Issue 247 Centralize reusable Go-service repository tooling](#issue-247-centralize-reusable-go-service-repository-tooling)
+      - [issue-247-N01 Docker Bake orchestration](#issue-247-n01-docker-bake-orchestration)
+      - [issue-247-N02 Internal builder and runtime base image](#issue-247-n02-internal-builder-and-runtime-base-image)
     - [Issue 288 Exact Dashboard monetary storage](#issue-288-exact-dashboard-monetary-storage)
       - [issue-288-N01 Exact monetary storage and aggregation semantics](#issue-288-n01-exact-monetary-storage-and-aggregation-semantics)
   - [Ad hoc repository improvements](#ad-hoc-repository-improvements)
@@ -1012,6 +1015,59 @@ history gaps and unsupported guarantees are reported explicitly.
 Policy Search projection, while [issue-215-N11](#issue-215-n11-durable-policy-event-publication)
 owns the optional producer-publication improvement. Reuse or coordinate those scopes if needed;
 this Dashboard entry does not duplicate their delivery commitments or select a producer redesign.
+
+### Issue 247 Centralize reusable Go-service repository tooling
+
+Origin: issue-247 requirements assessment N01 and N02, added after the three-service scope
+reassessment on 2026-11-10. The entries remain separate from issue 247's mandatory generic-script,
+Dockerfile-generation, configuration and compatibility scope.
+
+Source ticket: [issue 247](https://github.com/igor-baiborodine/insurance-hub/issues/247).
+Local assessment: `ai/artifacts/epic-4.4/issue-247/issue-247-requirements.md` (ignored local
+evidence).
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-247-N01](#issue-247-n01-docker-bake-orchestration) | Docker Bake orchestration | Deferred | Unassigned; reconsider for a measured concurrent multi-service build need |
+| [issue-247-N02](#issue-247-n02-internal-builder-and-runtime-base-image) | Internal builder and runtime base image | Deferred | Unassigned; requires publication, provenance, patching and vulnerability ownership |
+
+#### issue-247-N01 Docker Bake orchestration
+
+**Requirement:** Add Docker Bake configuration for concurrent or coordinated multi-service image
+builds while preserving each service's build context, arguments, tags, generated Dockerfile and
+Make-owned checks.
+
+**Why deferred:** Bake coordinates build invocation but does not replace the shared Dockerfile
+renderer or other generic repository tooling required by issue 247. Existing Make owners support
+the current one-service-at-a-time workflow, so another orchestration interface would add complexity
+without a demonstrated delivery benefit.
+
+**Reconsider when:** Concurrent multi-service builds become a measured developer or CI need and
+the existing service-selected Make workflow is a material bottleneck.
+
+**Acceptance evidence:** Representative service and multi-service builds prove that Bake preserves
+contexts, arguments, tags, release identity and owning checks. Measured runtime or maintenance
+benefit justifies the extra interface, and documented Make/Bake ownership prevents divergent build
+paths.
+
+#### issue-247-N02 Internal builder and runtime base image
+
+**Requirement:** Publish and maintain pinned internal builder and runtime base images for common Go
+service image layers when repeated installed tooling or runtime content warrants a shared artifact.
+
+**Why deferred:** A shared base image adds registry publication, provenance, patching,
+vulnerability response and consumer-upgrade ownership. Current commonality can be expressed by the
+required typed Dockerfile renderer without adding this release dependency or erasing
+service-specific build instructions.
+
+**Reconsider when:** Common installed tooling or runtime content becomes substantial and repeated,
+and measurements show that a maintained base image materially improves build time, image size or
+patch management.
+
+**Acceptance evidence:** Published images are pinned and traceable to reviewed source, supported
+service builds consume them without losing release identity or service-specific instructions, and
+measured benefit justifies the dependency. Ownership covers compatibility, vulnerability response,
+patch cadence, retention and consumer upgrades.
 
 ### Issue 288 Exact Dashboard monetary storage
 
