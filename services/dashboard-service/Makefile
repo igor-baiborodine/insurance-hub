@@ -176,6 +176,7 @@ deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Dashboard de
 		scripts/test_deployment.py::test_render_requires_the_application_exporter_timeout_default \
 		scripts/test_deployment.py::test_render_requires_the_accepted_sales_trends_time_zone \
 		scripts/test_deployment.py::test_render_rejects_weakened_target_security \
+		scripts/test_deployment.py::test_qa_aggregate_requires_only_go_dashboard \
 		scripts/test_deployment.py::test_java_edge_identity_requires_the_dedicated_dashboard_marker \
 		scripts/test_deployment.py::test_live_state_rejects_wrong_resource_identity \
 		scripts/test_deployment.py::test_live_state_accepts_the_complete_rendered_contract \

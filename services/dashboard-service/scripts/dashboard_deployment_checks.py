@@ -1877,7 +1877,6 @@ def stop(target: Target, _items: list[dict[str, Any]]) -> None:
 
 def validate_qa_aggregate(resources: Any) -> None:
     require(isinstance(resources, list), "active QA aggregate resources differ")
-    require("./dashboard/legacy" in resources, "QA Java Dashboard overlay is missing")
     require("./dashboard" in resources, "QA Go Dashboard overlay is missing")
 
 

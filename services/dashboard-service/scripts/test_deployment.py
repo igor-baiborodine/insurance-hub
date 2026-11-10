@@ -1085,12 +1085,10 @@ def test_live_rejection_prevents_server_side_apply() -> None:
     apply.assert_not_called()
 
 
-def test_qa_aggregate_requires_go_beside_java() -> None:
-    checks.validate_qa_aggregate(["./dashboard", "./dashboard/legacy", "./product"])
+def test_qa_aggregate_requires_only_go_dashboard() -> None:
+    checks.validate_qa_aggregate(["./dashboard", "./product"])
     with pytest.raises(checks.DeploymentError, match="Go Dashboard"):
         checks.validate_qa_aggregate(["./dashboard/legacy", "./product"])
-    with pytest.raises(checks.DeploymentError, match="Java Dashboard"):
-        checks.validate_qa_aggregate(["./dashboard", "./product"])
 
 
 def test_deployment_adapter_maps_interrupt_to_shell_status(monkeypatch) -> None:
