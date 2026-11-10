@@ -10,7 +10,7 @@ import unittest
 from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deployment_lifecycle  # noqa: E402
@@ -61,7 +61,7 @@ class DeploymentGuardTests(unittest.TestCase):
             "DEPLOY_CONTEXT": "kind-local-dev-insurance-hub",
             "DEPLOY_SVC_NS": "local-dev-all",
             "DEPLOY_DATA_NS": "local-dev-all",
-            "DEPLOY_IMAGE_REF": "insurance-hub-product-api:1.10.0-local.ff52ab5655e3",
+            "DEPLOY_IMAGE_REF": "insurance-hub-product-api:1.12.2-local.4c1470549413",
         }
         with patch.dict(os.environ, values):
             target = deployment.Target()
@@ -71,11 +71,41 @@ class DeploymentGuardTests(unittest.TestCase):
                 self.assertEqual(image, values["DEPLOY_IMAGE_REF"])
                 self.assertEqual(len(items), 5)
                 os.environ["DEPLOY_IMAGE_REF"] = (
-                    "insurance-hub-product-api:1.10.0-local.000000000000"
+                    "insurance-hub-product-api:1.12.2-local.000000000000"
                 )
                 with self.assertRaisesRegex(deployment.DeploymentError, "DEPLOY_IMAGE_REF"):
                     target.rendered()
                 self.assertTrue(all(call.args[0] == "kustomize" for call in kubectl.call_args_list))
+
+    def test_rendered_qa_inventory_applies_release_substitution(self) -> None:
+        image = "ghcr.io/igor-baiborodine/insurance-hub/product-api@sha256:" + "b" * 64
+        values = {
+            "DEPLOY_ENV": "qa",
+            "DEPLOY_CONTEXT": "qa-insurance-hub",
+            "DEPLOY_SVC_NS": "qa-svc",
+            "DEPLOY_DATA_NS": "qa-data",
+            "DEPLOY_IMAGE_REF": image,
+            "DEPLOY_SOURCE_REVISION": "a" * 40,
+        }
+        rendered = deployment.run(
+            ["kubectl", "kustomize", str(deployment.ROOT / "k8s/overlays/qa/svc/product")]
+        )
+        with (
+            patch.dict(os.environ, values),
+            patch.object(deployment.engine, "release_image", return_value=image),
+            patch.object(
+                deployment.engine,
+                "release_substitutions",
+                return_value={"PRODUCT_SERVICE_VERSION": "git-aaaaaaaaaaaa"},
+            ),
+        ):
+            target = deployment.Target()
+            with patch.object(target, "kubectl", return_value=rendered):
+                yaml, items, selected = target.rendered()
+        config = deployment.resource(items, "ConfigMap", "qa-product-config-d7hf5g6hdb")
+        self.assertEqual(selected, image)
+        self.assertEqual(config["data"]["SERVICE_VERSION"], "git-aaaaaaaaaaaa")
+        self.assertNotIn("${PRODUCT_SERVICE_VERSION}", yaml)
 
     def test_target_requires_exact_coordinates_before_kubectl(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
@@ -129,6 +159,14 @@ class DeploymentGuardTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(deployment.DeploymentError, "unexpected state"):
                 deployment.resource_snapshot(object())
+
+    def test_deployment_snapshot_hooks_use_the_resource_snapshot(self) -> None:
+        target = object()
+        snapshot = {"productTable": True}
+        with patch.object(deployment, "resource_snapshot", return_value=snapshot) as inspect:
+            self.assertIs(deployment.administration_snapshot(target), snapshot)
+            self.assertIs(deployment.role_snapshot(target), snapshot)
+        self.assertEqual(inspect.call_args_list, [call(target), call(target)])
 
     def test_volume_guard_accepts_kubernetes_default_and_rejects_other_secret(self) -> None:
         desired = [

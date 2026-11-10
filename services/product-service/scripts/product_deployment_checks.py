@@ -186,6 +186,9 @@ class Target:
 
     def rendered(self) -> tuple[str, list[dict[str, Any]], str]:
         rendered = self.kubectl("kustomize", str(self.overlay))
+        if self.mode == "flux" and "@sha256:" in os.environ.get("DEPLOY_IMAGE_REF", ""):
+            for key, value in engine.release_substitutions(self).items():
+                rendered = rendered.replace(f"${{{key}}}", value)
         items = documents(rendered)
         names = {(item.get("kind"), item.get("metadata", {}).get("name")) for item in items}
         expected = {
@@ -768,6 +771,14 @@ def resource_snapshot(target: Target) -> dict[str, Any]:
         "resource inspection has unexpected state",
     )
     return value
+
+
+def administration_snapshot(target: Target) -> dict[str, Any]:
+    return resource_snapshot(target)
+
+
+def role_snapshot(target: Target) -> dict[str, Any]:
+    return resource_snapshot(target)
 
 
 def record_snapshot(stage: str, value: dict[str, Any]) -> None:

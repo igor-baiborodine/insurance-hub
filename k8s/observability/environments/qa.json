@@ -20,7 +20,7 @@
     "product": {
       "business_service": "qa-product-api",
       "deployment": "qa-product-api",
-      "flux_kustomization": "qa-svc",
+      "flux_kustomization": "qa-product-api",
       "flux_namespace": "flux-system",
       "flux_source": "insurance-hub",
       "loki_service": "qa-loki",
