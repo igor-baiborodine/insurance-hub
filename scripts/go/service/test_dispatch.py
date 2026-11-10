@@ -121,12 +121,11 @@ def test_policy_search_administration_operations_use_the_existing_dispatch() -> 
             "administration-inspect",
             "administration-setup",
             "administration-verify",
-            "canonical-secrets-migrate",
         )
     ]
 
     # then
-    assert paths == ["services/policy-search-service"] * 10
+    assert paths == ["services/policy-search-service"] * 9
 
 
 def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() -> None:

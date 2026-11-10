@@ -126,7 +126,6 @@
         "administration-inspect",
         "administration-setup",
         "administration-verify",
-        "canonical-secrets-migrate",
         "deploy-test-tooling",
         "deploy-test"
       ],

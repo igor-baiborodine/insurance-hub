@@ -115,7 +115,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	test-event-integration test-cutover-rehearsal _test-event-integration deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop fixture-setup fixture-verify fixture-retire \
 	event-fixture-setup event-fixture-verify event-fixture-retire \
-	administration-inspect administration-setup administration-verify canonical-secrets-migrate \
+	administration-inspect administration-setup administration-verify \
 	deploy-test-tooling deploy-test \
 	build-qualification-client \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
@@ -191,10 +191,6 @@ event-fixture-setup event-fixture-verify event-fixture-retire: python-runtime-ch
 administration-inspect administration-setup administration-verify: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/administration.py '$(@:administration-%=%)'
-
-canonical-secrets-migrate: python-runtime-check
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
-		"$(PYTHON)" scripts/administration.py migrate-secrets
 
 deploy-test-tooling: python-toolchain-check ## Exercise fail-closed deployment guards without a cluster
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \

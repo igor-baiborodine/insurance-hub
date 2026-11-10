@@ -45,10 +45,11 @@ shared application indices.
 
 The canonical-state owner is separate. It owns the `policy-views` index with the accepted mapping,
 `go_policy_search_cutover_reader`,
-`go_policy_search_cutover_writer` and their workload trust Secrets. It never copies qualification
-documents, resets offsets, changes the legacy topics/group, deletes canonical state or retires
-Java. If the index appears with documents, aliases or an incompatible mapping, the owner stops for
-an accepted manifest or revised plan before changing identities.
+`go_policy_search_cutover_writer` and their workload trust Secrets. These established native-user
+identifiers remain unchanged so ordinary setup never rotates active credentials implicitly. The
+owner never copies qualification documents, resets offsets, changes topics/group, deletes service
+state or retires Java. It accepts compatible populated state and stops on incompatible mapping,
+aliases or access before mutation.
 
 Business ports are reachable only from the exact legacy agent-portal gateway identity in the
 selected service namespace. No Pod identity is admitted to management port 8081; kubelet probe
@@ -212,30 +213,6 @@ reader/writer and CA Secret identities under the ordinary
 `<environment>-policy-search-*` names, while leaving the distinct
 `<environment>-policy-search-qualification-*` identities usable for qualification.
 Do not run it against QA without the separately authorized concrete operation proposal.
-
-For the one-time issue #236 QA transition, first record and authorize the exact obsolete source
-Secrets through G236-03. Copy their data to the ordinary canonical names before reconciling a
-Deployment that references those names:
-
-```sh
-export POLICY_SEARCH_READER_SOURCE_SECRET=qa-policy-search-cutover-elasticsearch
-export POLICY_SEARCH_WRITER_SOURCE_SECRET=qa-policy-search-cutover-elasticsearch-writer
-export POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET=qa-policy-search-cutover-elasticsearch-ca
-export POLICY_SEARCH_KAFKA_CA_SOURCE_SECRET=qa-policy-search-cutover-kafka-ca
-export SECRET_MIGRATION_CONFIRM=migrate-qa-policy-search-secrets
-make go-svc-canonical-secrets-migrate SVC_NAME=policy-search
-unset POLICY_SEARCH_READER_SOURCE_SECRET POLICY_SEARCH_WRITER_SOURCE_SECRET
-unset POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET POLICY_SEARCH_KAFKA_CA_SOURCE_SECRET
-unset SECRET_MIGRATION_CONFIRM
-```
-
-The migration rejects a source outside the selected environment's obsolete Policy Search Secret
-boundary, unexpected keys, wrong canonical usernames, short passwords, target collisions and any
-post-apply data difference. It copies values in process memory and reports names/results only. For
-local-dev, use the corresponding `local-dev-policy-search-cutover-*` source names, omit
-`POLICY_SEARCH_ELASTICSEARCH_CA_SOURCE_SECRET`, and confirm
-`migrate-local-dev-policy-search-secrets`. This operation does not change the canonical index,
-Elasticsearch roles/users, Kafka topics/group, offsets or a workload reference.
 
 ## Deploy or reconcile the release
 

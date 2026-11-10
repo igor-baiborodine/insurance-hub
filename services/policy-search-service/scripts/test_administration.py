@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import os
 from unittest.mock import Mock, patch
 
@@ -234,52 +233,4 @@ def test_setup_requires_confirmation_before_target_contact() -> None:
         pytest.raises(administration.AdministrationError, match="POLICY_SEARCH_SETUP_CONFIRM"),
     ):
         administration.execute("setup")
-    target.assert_not_called()
-
-
-def test_migrate_secret_preserves_exact_credentials_without_exposing_data() -> None:
-    encoded = {
-        "username": base64.b64encode(administration.READER.encode()).decode(),
-        "password": base64.b64encode(b"controlled-password-value-with-32-bytes").decode(),
-    }
-    target = Mock()
-    target.environment = "qa"
-    target.json.side_effect = [{"data": encoded}, {"data": encoded}]
-
-    with patch.dict(
-        os.environ,
-        {"POLICY_SEARCH_READER_SOURCE_SECRET": "qa-policy-search-cutover-elasticsearch"},
-        clear=True,
-    ):
-        migration = administration.migrate_secret(
-            target,
-            "POLICY_SEARCH_READER_SOURCE_SECRET",
-            "qa-policy-search-elasticsearch",
-            ("username", "password"),
-            "canonical-elasticsearch-reader",
-            administration.READER,
-        )
-
-    assert migration == (
-        "qa-policy-search-cutover-elasticsearch",
-        "qa-policy-search-elasticsearch",
-    )
-    target.apply_secret.assert_called_once_with(
-        "qa-policy-search-elasticsearch",
-        {
-            "username": administration.READER,
-            "password": "controlled-password-value-with-32-bytes",
-        },
-        "canonical-elasticsearch-reader",
-        force_conflicts=True,
-    )
-
-
-def test_migrate_requires_confirmation_before_target_contact() -> None:
-    with (
-        patch.dict(os.environ, {"DEPLOY_ENV": "qa"}, clear=True),
-        patch.object(administration, "Target", return_value=Mock()) as target,
-        pytest.raises(administration.AdministrationError, match="SECRET_MIGRATION_CONFIRM"),
-    ):
-        administration.execute("migrate-secrets")
     target.assert_not_called()
