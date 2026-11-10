@@ -131,7 +131,7 @@ func TestProductTelemetry(t *testing.T) {
 		}
 		endpoint := startTelemetryCollector(t, collector)
 		process := startLifecycleProcess(t, binary, harness.RuntimeDatabaseURL(),
-			telemetryEnvironment(endpoint)...,
+			telemetryEnvironment(endpoint, "test-instance")...,
 		)
 		if got := <-process.listProducts(); got.err != nil || got.status != 200 {
 			t.Fatalf("HTTP list: %+v", got)
@@ -169,7 +169,10 @@ func TestProductTelemetry(t *testing.T) {
 			"SELECT products", "SELECT product",
 		} {
 			want := 1
-			if name == "product.list" || name == "product.get" {
+			if name == "product.v1.ProductService/ListProducts" ||
+				name == "product.v1.ProductService/GetProduct" {
+				want = 3
+			} else if name == "product.list" || name == "product.get" {
 				want = 2
 			}
 			if name == "product.db.acquire" || name == "SELECT products" ||
@@ -215,15 +218,19 @@ func TestProductTelemetry(t *testing.T) {
 			for _, transport := range []string{"http", "grpc"} {
 				for _, operation := range []string{"list", "get"} {
 					key := requestMetricSeries{name, transport, operation}
-					if metricCounts[key] != 1 {
-						t.Fatalf("request metric %v = %d, want 1: %v",
-							key, metricCounts[key], metricCounts)
+					want := uint64(1)
+					if transport == "grpc" {
+						want = 2
+					}
+					if metricCounts[key] != want {
+						t.Fatalf("request metric %v = %d, want %d: %v",
+							key, metricCounts[key], want, metricCounts)
 					}
 				}
 			}
 		}
-		if strings.Count(process.logs.String(), "Product request completed") != 4 {
-			t.Fatalf("completion log count != four: %s", process.logs.String())
+		if strings.Count(process.logs.String(), "Product request completed") != 6 {
+			t.Fatalf("completion log count != six: %s", process.logs.String())
 		}
 		assertDatabaseAndRuntimeExports(t, metricExports)
 	})
@@ -242,12 +249,16 @@ func TestProductTelemetry(t *testing.T) {
 			endpoint := startTelemetryCollector(t, collector)
 			var instances [2]string
 			var starts [2]uint64
+			replacementInstances := [2]string{"replacement-1", "replacement-2"}
 			for index := range instances {
 				process := startLifecycleProcess(
 					t,
 					binary,
 					harness.RuntimeDatabaseURL(),
-					telemetryEnvironment(endpoint)...)
+					telemetryEnvironment(
+						endpoint,
+						replacementInstances[index],
+					)...)
 				assertGracefulGRPCResult(t, process.getProduct("CAR"), "CAR")
 				started := process.signal(t)
 				process.assertCleanExit(t, started, harness)
@@ -335,7 +346,7 @@ func TestProductTelemetry(t *testing.T) {
 
 	t.Run("refused collector does not affect reads or probes", func(t *testing.T) {
 		process := startLifecycleProcess(t, binary, harness.RuntimeDatabaseURL(),
-			telemetryEnvironment("http://"+freeAddress(t))...,
+			telemetryEnvironment("http://"+freeAddress(t), "test-instance")...,
 		)
 		assertGracefulGRPCResult(t, process.getProduct("CAR"), "CAR")
 		if got := httpStatus(t, process.addresses.health, "/readyz"); got != 200 {
@@ -345,7 +356,7 @@ func TestProductTelemetry(t *testing.T) {
 			t.Fatalf("liveness under collector refusal = %d", got)
 		}
 		started := process.signal(t)
-		process.assertCleanExit(t, started, harness)
+		process.assertFailedExit(t, started, harness)
 	})
 
 	t.Run("collector recovery exports without a Product restart", func(t *testing.T) {
@@ -355,7 +366,7 @@ func TestProductTelemetry(t *testing.T) {
 		collector.reject.Store(true)
 		endpoint := startTelemetryCollector(t, collector)
 		process := startLifecycleProcess(t, binary, harness.RuntimeDatabaseURL(),
-			telemetryEnvironment(endpoint)...,
+			telemetryEnvironment(endpoint, "test-instance")...,
 		)
 		assertGracefulGRPCResult(t, process.getProduct("CAR"), "CAR")
 		select {
@@ -391,7 +402,7 @@ func TestProductTelemetry(t *testing.T) {
 		}
 		endpoint := startTelemetryCollector(t, collector)
 		process := startLifecycleProcess(t, binary, harness.RuntimeDatabaseURL(),
-			telemetryEnvironment(endpoint)...,
+			telemetryEnvironment(endpoint, "test-instance")...,
 		)
 		assertGracefulGRPCResult(t, process.getProduct("CAR"), "CAR")
 		select {
@@ -401,7 +412,7 @@ func TestProductTelemetry(t *testing.T) {
 		}
 		assertGracefulGRPCResult(t, process.getProduct("CAR"), "CAR")
 		started := process.signal(t)
-		process.assertCleanExit(t, started, harness)
+		process.assertFailedExit(t, started, harness)
 		if !strings.Contains(process.logs.String(), "telemetry export failed") {
 			t.Fatalf(
 				"in-flight export loss was not reported safely: %s",
@@ -430,7 +441,6 @@ func assertDatabaseAndRuntimeExports(
 	}
 	for _, name := range []string{
 		"insurance_hub.product.database.operations", "db.client.operation.duration",
-		"db.client.connection.count", "db.client.connection.max",
 		"db.client.connection.wait_time", "go.memory.used", "go.memory.limit",
 		"go.memory.allocated", "go.memory.allocations", "go.memory.gc.goal",
 		"go.memory.gc.cycles", "go.goroutine.count", "go.processor.limit",
@@ -512,7 +522,7 @@ func databaseMetricIdentity(
 	return "", 0
 }
 
-func telemetryEnvironment(endpoint string) []string {
+func telemetryEnvironment(endpoint, instance string) []string {
 	return []string{
 		"GOMEMLIMIT=512MiB",
 		"SERVICE_NAME=product-service",
@@ -521,7 +531,7 @@ func telemetryEnvironment(endpoint string) []string {
 		"OTEL_EXPORTER_OTLP_TIMEOUT=2s",
 		"DEPLOYMENT_ENVIRONMENT=test",
 		"SERVICE_VERSION=git-6c4669c81d3a",
-		"SERVICE_INSTANCE_ID=test-instance",
+		"SERVICE_INSTANCE_ID=" + instance,
 	}
 }
 

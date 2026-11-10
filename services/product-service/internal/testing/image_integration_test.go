@@ -97,7 +97,7 @@ func TestProductRuntimeImage(t *testing.T) {
 		ctx,
 		image,
 		testcontainers.WithEnv(map[string]string{
-			"SERVICE_NAME":         "product-service-image-check",
+			"SERVICE_NAME":         "product-service",
 			"HTTP_ADDR":            "0.0.0.0:8080",
 			"GRPC_ADDR":            "0.0.0.0:9090",
 			"HEALTH_ADDR":          "0.0.0.0:8081",
