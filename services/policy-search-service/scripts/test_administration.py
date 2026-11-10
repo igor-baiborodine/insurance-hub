@@ -205,12 +205,6 @@ def test_verify_identity_requires_exact_boundary() -> None:
                 "delete_index": False,
                 "manage": False,
             },
-            "policy-views-issue-229": {
-                "read": False,
-                "view_index_metadata": False,
-                "index": False,
-                "manage": False,
-            },
             "policy-views-other": {
                 "read": False,
                 "view_index_metadata": False,

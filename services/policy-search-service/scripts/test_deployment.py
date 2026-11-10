@@ -152,22 +152,6 @@ def test_target_renders_steady_state_contract() -> None:
     assert config["data"]["KAFKA_GROUP"] == "policy-search-service"
 
 
-def test_echo_predecessor_environment_accepts_only_equivalent_or_query_omitted_entries() -> None:
-    # given
-    expected = [
-        {"name": "ELASTICSEARCH_USERNAME", "value": "reader"},
-        {"name": "ELASTICSEARCH_PASSWORD", "value": "password"},
-        {"name": "SERVICE_INSTANCE_ID", "value": "instance"},
-    ]
-
-    # when / then
-    assert checks.matching_echo_predecessor_environment(list(reversed(expected)), expected)
-    assert checks.matching_echo_predecessor_environment(expected[2:], expected)
-    assert not checks.matching_echo_predecessor_environment(
-        [{"name": "SERVICE_INSTANCE_ID", "value": "changed"}], expected
-    )
-
-
 def test_render_rejects_wrong_elasticsearch_secret_and_egress() -> None:
     items = rendered_items()
     deployment = next(item for item in items if item["kind"] == "Deployment")
@@ -339,7 +323,6 @@ def test_release_preparation_produces_valid_qa_render(tmp_path) -> None:
     for relative in (
         "k8s/apps/svc/policy-search/base",
         "k8s/overlays/qa/svc/policy-search",
-        "services/policy-search-service/internal/administration",
     ):
         shutil.copytree(checks.ROOT / relative, tmp_path / relative)
     release_owner.prepare_release(
@@ -651,58 +634,35 @@ def test_live_state_accepts_declared_predecessor_only_before_rollout() -> None:
             target.live(items, require_deployment=True)
 
 
-def test_live_state_accepts_echo_environment_only_for_declared_predecessor() -> None:
-    # given the accepted Echo environment before query credentials were staged.
+def test_live_state_rejects_obsolete_environment_and_egress_before_rollout() -> None:
     items = rendered_items()
     deployment = next(item for item in items if item["kind"] == "Deployment")
+    policy = next(item for item in items if item["kind"] == "NetworkPolicy")
     actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
-    live_deployment = actual[("deployment", deployment["metadata"]["name"])]
-    container = live_deployment["spec"]["template"]["spec"]["containers"][0]
-    container["env"] = [item for item in container["env"] if item["name"] == "SERVICE_INSTANCE_ID"]
-    previous_image = "insurance-hub-policy-search-api:1.0.0-local.abcdef123456"
-    container["image"] = previous_image
     target = object.__new__(checks.Target)
     target.deployment = deployment["metadata"]["name"]
     target.configuration = {"mode": "direct"}
     target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
-
-    with patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True):
-        # when / then only pre-rollout accepts the exact Echo environment.
-        target.live(items, require_deployment=False)
-        with pytest.raises(checks.DeploymentError, match="Deployment/.+ differs"):
-            target.live(items, require_deployment=True)
-
-        # when / then an unreviewed predecessor variable still fails closed.
-        container["env"].append({"name": "UNREVIEWED", "value": "true"})
-        with pytest.raises(checks.DeploymentError, match="container env differs"):
-            target.live(items, require_deployment=False)
-
-
-def test_live_state_accepts_echo_egress_only_for_declared_predecessor() -> None:
-    # given the accepted Echo deny-all-egress policy before query dependencies were staged.
-    items = rendered_items()
-    policy = next(item for item in items if item["kind"] == "NetworkPolicy")
-    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
-    live_policy = actual[("networkpolicy", policy["metadata"]["name"])]
-    live_policy["spec"].pop("egress")
     previous_image = "insurance-hub-policy-search-api:1.0.0-local.abcdef123456"
-    target = object.__new__(checks.Target)
-    target.deployment = next(item for item in items if item["kind"] == "Deployment")["metadata"][
-        "name"
-    ]
-    target.configuration = {"mode": "direct"}
-    target.json = Mock(side_effect=lambda _, kind, name, _ignore: actual[(kind, name)])
+    container = actual[("deployment", deployment["metadata"]["name"])]["spec"]["template"]["spec"][
+        "containers"
+    ][0]
+    container["image"] = previous_image
+    container["env"] = [item for item in container["env"] if item["name"] == "SERVICE_INSTANCE_ID"]
 
-    with patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True):
-        # when / then only pre-rollout accepts that exact predecessor policy.
+    with (
+        patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True),
+        pytest.raises(checks.DeploymentError, match="container env differs"),
+    ):
         target.live(items, require_deployment=False)
-        with pytest.raises(checks.DeploymentError, match="differs"):
-            target.live(items, require_deployment=True)
 
-        # when / then any additional ingress drift still fails closed.
-        live_policy["spec"]["ingress"] = []
-        with pytest.raises(checks.DeploymentError, match="NetworkPolicy/.+ differs"):
-            target.live(items, require_deployment=False)
+    container["env"] = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+    actual[("networkpolicy", policy["metadata"]["name"])]["spec"].pop("egress")
+    with (
+        patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True),
+        pytest.raises(checks.DeploymentError, match="NetworkPolicy/.+ differs"),
+    ):
+        target.live(items, require_deployment=False)
 
 
 def test_deploy_rejects_foreign_same_name_resource_before_apply() -> None:

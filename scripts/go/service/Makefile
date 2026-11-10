@@ -23,7 +23,6 @@ export SVC_NAME
 	go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-smoke \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
-	go-svc-fixture-setup go-svc-fixture-verify go-svc-fixture-retire \
 	go-svc-administration-inspect go-svc-administration-setup go-svc-administration-verify \
 	go-svc-deploy-test-flux \
 	go-svc-dispatch-test go-svc-release-select go-svc-release-prepare go-svc-release-test go-svc-release-test-collect
@@ -59,9 +58,6 @@ go-svc-stop: ## Stop only the selected direct-target Deployment
 go-svc-reader-ensure: ## Idempotently provision the selected service's guarded reader prerequisites
 go-svc-reader-verify: ## Verify the selected service's reader identity and workload Secrets
 go-svc-reader-rotate: ## Explicitly rotate and recover the selected service's reader credentials
-go-svc-fixture-setup: ## Create the selected service's accepted fixture and least-privilege identity
-go-svc-fixture-verify: ## Verify the selected service's fixture and reader permission boundary
-go-svc-fixture-retire: ## Remove only the selected service's accepted fixture and identity
 go-svc-administration-inspect: ## Inspect the Policy Search index without mutation
 go-svc-administration-setup: ## Create missing Policy Search resources without changing compatible state
 go-svc-administration-verify: ## Verify the Policy Search index and least-privilege identities
@@ -71,8 +67,7 @@ go-svc-deploy-test-flux: ## Exercise one service with pinned Flux/CNPG in an own
 go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-smoke \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
-	go-svc-deploy-test-flux go-svc-fixture-setup go-svc-fixture-verify \
-	go-svc-fixture-retire \
+	go-svc-deploy-test-flux \
 	go-svc-administration-inspect go-svc-administration-setup \
 	go-svc-administration-verify: python-runtime-check
 	+@set -eu; \

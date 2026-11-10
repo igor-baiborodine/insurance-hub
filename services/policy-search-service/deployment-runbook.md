@@ -10,7 +10,6 @@
   - [Verify the selected deployment](#verify-the-selected-deployment)
   - [Diagnostics and stop conditions](#diagnostics-and-stop-conditions)
   - [Rollback and restoration](#rollback-and-restoration)
-  - [Retire service-owned dependency resources](#retire-service-owned-dependency-resources)
   - [Evidence checklist](#evidence-checklist)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -24,30 +23,19 @@ explains the local-dev substitution, including direct deployment without Flux. U
 [observability runbook](observability-runbook.md) for QA monitoring validation, rule/dashboard
 provisioning, Grafana investigation and monitoring rollback. Run commands from the repository root.
 
-The exact fixture, topic, group and confirmation identifiers in this document are source-owned
-runtime coordinates. Some retain historical issue-number suffixes because changing them would
-change deployed state. They are not ticket references and must not be shortened or normalized in
-commands.
+The exact index, topic, group and confirmation identifiers in this document are source-owned
+runtime coordinates and must not be substituted ad hoc.
 
 ## Ownership and exposure
 
-Until the separately reviewed Java retirement change reconciles, Policy Search runs beside the
-zero-replica legacy Java workload. The Go owner creates only
+The Go owner creates only
 `<environment>-policy-search-api`, its business and management Services, ConfigMap and
-NetworkPolicy. The query qualification fixture owner creates only `policy-views-issue-229`, native
-role/user `go_policy_search_reader` and explicitly named `*-policy-search-qualification-*`
-Elasticsearch Secrets. The event fixture owner
-creates only `policy-registered-issue-230`, `policy-terminated-issue-230`,
-`go_policy_search_writer`, its qualification workload Secret and a cert-only qualification Kafka
-CA Secret. Neither owner
-modifies the Java `policy-search-api-legacy` Deployment or Service, creates an Ingress, or accesses
-shared application indices.
-
-The canonical-state owner is separate. It owns the `policy-views` index with the accepted mapping,
+NetworkPolicy. The service administration owner manages the `policy-views` index with the accepted
+mapping,
 `go_policy_search_cutover_reader`,
 `go_policy_search_cutover_writer` and their workload trust Secrets. These established native-user
 identifiers remain unchanged so ordinary setup never rotates active credentials implicitly. The
-owner never copies qualification documents, resets offsets, changes topics/group, deletes service
+owner never copies test documents, resets offsets, changes topics/group, deletes service
 state or retires Java. It accepts compatible populated state and stops on incompatible mapping,
 aliases or access before mutation.
 
@@ -150,49 +138,11 @@ does not match these explicit local-dev coordinates.
 
 ## Provision and verify dependency resources
 
-Provisioning is separate from normal deployment checks and application startup. It reads ECK and
-Strimzi administrative inputs only through their owning Kubernetes resources. Credentials stay in
-process memory and must not appear in commands or evidence.
-
-Create and verify the query fixture on the selected target:
-
-```sh
-export FIXTURE_CONFIRM=setup-policy-views-issue-229
-make go-svc-fixture-setup SVC_NAME=policy-search
-unset FIXTURE_CONFIRM
-make go-svc-fixture-verify SVC_NAME=policy-search
-```
-
-The setup creates the exact mapping, synthetic fixture, reader role/user and workload-owned
-Secrets. Verification uses only the workload identity and proves read access to
-`policy-views-issue-229` while write, index administration, other-index and security administration
-remain denied.
-
-Create and verify the event resources separately:
-
-```sh
-export FIXTURE_CONFIRM=event-setup-policy-views-issue-229
-make go-svc-event-fixture-setup SVC_NAME=policy-search
-unset FIXTURE_CONFIRM
-make go-svc-event-fixture-verify SVC_NAME=policy-search
-```
-
-QA uses `qa-kafka-kafka-bootstrap.qa-data.svc:9093`, three-replica isolated topics and only
-`ca.crt` from `qa-kafka-cluster-ca-cert`. Local-dev uses
-`local-dev-kafka-kafka-bootstrap:9093`, one-replica isolated topics and `ca.crt` from
-`local-dev-kafka-cluster-ca-cert`. The same setup and verification commands resolve the correct
-coordinates from `DEPLOY_ENV`. Verification checks topic ownership, cert-only Kafka trust and the
-writer's exact-index document-write boundary while read, index administration, other-index and
-security privileges remain denied. It does not reset the query fixture or inspect Java topics or
-groups.
-
-These fixture commands own only the isolated qualification coordinates. Run them when explicitly
-qualifying that retained return path; they are not prerequisites for the ordinary canonical
-deployment.
-
-For QA, provision and verify required canonical dependency resources before merging configuration
-that references their workload-owned Secrets. For local-dev, provision them before a direct
-rollout.
+Provisioning is separate from normal deployment checks and application startup. It reads
+administrative inputs only through their owning Kubernetes resources. Credentials stay in process
+memory and must not appear in commands or evidence. For QA, provision and verify required
+dependency resources before merging configuration that references their workload-owned Secrets.
+For local-dev, provision them before a direct rollout.
 Kubernetes requires each referenced Secret to exist before an enabled worker first consumes an
 event.
 
@@ -210,8 +160,7 @@ make go-svc-administration-verify SVC_NAME=policy-search
 
 The setup operation creates no Kafka topic or group and changes no gateway route. It prepares the
 reader/writer and CA Secret identities under the ordinary
-`<environment>-policy-search-*` names, while leaving the distinct
-`<environment>-policy-search-qualification-*` identities usable for qualification.
+`<environment>-policy-search-*` names.
 Do not run it against QA without the separately authorized concrete operation proposal.
 
 ## Deploy or reconcile the release
@@ -240,7 +189,7 @@ Require the GitRepository and Kustomization to be Ready at `DEPLOY_SOURCE_REVISI
 or interrupted reconciliation must be inspected before retrying or starting recovery.
 
 Local-dev does not use Flux. The guarded direct owner renders the selected overlay, verifies the
-current target and Java resource identities, performs a server-side dry run, loads the exact image
+current target resources, performs a server-side dry run, loads the exact image
 into Kind, applies only the Go resources and verifies the rollout:
 
 ```sh
@@ -283,7 +232,7 @@ make go-svc-administration-verify SVC_NAME=policy-search
 
 Status and verification check exact live inventory, source/image identity, private exposure,
 health, reader and writer boundaries, event configuration and a synthetic query through the
-business Service while confirming the Java resource identities remain unchanged.
+business Service.
 
 Deployment verification reaches business and management Services through bounded local
 port-forwards. The disposable smoke retains unlabeled Pod checks for default-deny behavior on ports
@@ -315,12 +264,12 @@ Safe worker messages are `policy event completed`, `malformed policy event skipp
 `policy event projection failed` and `policy event fetch failed`. Do not record payloads,
 queries, policy/customer values, credentials, Secret data or arbitrary raw errors.
 
-Stop when source, image, Pod, dependency, Secret/trust, selector, exposure or Java-owner identity
+Stop when source, image, Pod, dependency, Secret/trust, selector or exposure
 differs from the reviewed state. In QA, also stop on digest or Flux drift. In local-dev, stop when
 the loaded image revision or declared predecessor differs. Loss of Elasticsearch or the exact index
 makes readiness fail while liveness remains process-only. Collector failure may emit only the
 shared rate-limited diagnostic and does not relax worker readiness or dependency trust. Do not
-disable NetworkPolicy, scale Java, reset consumer offsets or substitute a mutable image tag to
+disable NetworkPolicy, reset consumer offsets or substitute a mutable image tag to
 bypass a failure.
 
 ## Rollback and restoration
@@ -328,13 +277,12 @@ bypass a failure.
 Rollback is a reviewed Git change through the same QA overlay and Flux owner. Identify the
 compatible predecessor source, semantic image tag, immutable digest and complete configuration
 before changing Git. The reviewed predecessor must carry its index, identities, workers, topics,
-trust and egress as one source-owned state. Preserve both indices, all topics, group offsets,
-fixtures and documents.
+trust and egress as one source-owned state. Preserve the index, topics, group offsets,
+documents and credentials.
 
 After the rollback revision reconciles, set `DEPLOY_SOURCE_REVISION` and `DEPLOY_IMAGE_DIGEST` to
-that reviewed predecessor and repeat status, deployment verification and applicable fixture
-verification. Confirm the consumers leave `policy-search-service-issue-230`, query and health checks
-pass, and Java identities remain unchanged.
+that reviewed predecessor and repeat status and deployment verification. Confirm query, event and
+health checks pass and the ordinary consumer group retains progress.
 
 Restore the candidate through a second reviewed Git revision. Reset the exported source and digest
 to the restored candidate, wait for exact Flux reconciliation, then repeat all QA verification and
@@ -349,46 +297,6 @@ removal/redeployment check, `make go-svc-stop
 SVC_NAME=policy-search` scales only the local Go Deployment to zero; rerun the guarded deploy and
 verification sequence to restore it. Direct stop is rejected for QA.
 
-## Retire service-owned dependency resources
-
-Retirement requires separate authorization and must occur only after no Pod references the owned
-Secrets and no consumer uses the owned topics or group. Retire event resources first:
-
-```sh
-export FIXTURE_CONFIRM=event-retire-policy-views-issue-229
-make go-svc-event-fixture-retire SVC_NAME=policy-search
-unset FIXTURE_CONFIRM
-```
-
-This removes only the two configured topics, writer role/user and event Secrets. It preserves the
-query index, reader and all Java resources. Retire the query fixture only after the query workload
-no longer uses it:
-
-```sh
-export FIXTURE_CONFIRM=retire-policy-views-issue-229
-make go-svc-fixture-retire SVC_NAME=policy-search
-unset FIXTURE_CONFIRM
-```
-
-This removes only `policy-views-issue-229`, `go_policy_search_reader` and the workload-owned query
-Secrets. Read back the exact resource absence and verify that shared indices, Java resources and
-unrelated Secrets remain unchanged.
-
-The canonical `policy-views` index, topics, group, reader/writer identities and trust Secrets are
-active steady-state resources and are not retired by issue #236. Issue #236 retires only the
-authorized Java desired-state resources in its separate retirement change. The complete legacy
-manifest source trees remain intact.
-
-The QA retirement source change removes only `./policy-search/legacy` from
-`k8s/overlays/qa/svc/kustomization.yaml`. Before merging it, compare the complete QA aggregate
-render with the accepted predecessor and require the removal set to contain only the generated
-legacy ConfigMap, `qa-policy-search-api-legacy` Service and zero-replica Deployment. Flux pruning
-owns their live deletion. Preserve the Go resources, canonical index and documents, topics, group
-and offsets, active credentials and trust, unrelated services, and every file under the legacy
-base and environment overlay directories. Recovery restores the aggregate reference through a
-separately reviewed Git change after current consumer progress is checked; do not patch or recreate
-the Java objects directly.
-
 ## Evidence checklist
 
 Record sanitized evidence in the operation's approved evidence location:
@@ -398,7 +306,7 @@ Record sanitized evidence in the operation's approved evidence location:
   revision, semantic image tag and immutable digest;
 - Deployment generation, ConfigMap identity, Pod UIDs, ready replicas and worker state;
 - query/event resource identities and least-privilege verification results;
-- private reachability, health, query/event outcome and Java-owner continuity;
+- private reachability, health and query/event outcome;
 - rollback predecessor, restored candidate, both reconciliation results and cleanup state; and
 - limitations, failed or blocked checks and the acceptance outcome each record supports.
 

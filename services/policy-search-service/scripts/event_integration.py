@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run event-fixture tests against owned disposable Kafka and Elasticsearch."""
+"""Run focused Go search/event tests against disposable Kafka and Elasticsearch."""
 
 from __future__ import annotations
 
@@ -18,18 +18,10 @@ from scripts.python.process_runner import CommandError
 from scaffold_process import child_environment
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
-REGISTERED_TOPIC = "policy-registered-issue-230"
-TERMINATED_TOPIC = "policy-terminated-issue-230"
-CONSUMER_GROUP = "policy-search-service-issue-230"
-OWNERSHIP = "issue-230-disposable"
-TRANSFER_REGISTERED_TOPIC = "policy-registered-issue-234-transfer"
-TRANSFER_TERMINATED_TOPIC = "policy-terminated-issue-234-transfer"
-TRANSFER_CONSUMER_GROUP = "policy-search-service-issue-234-transfer"
-TRANSFER_OWNERSHIP = "issue-234-transfer"
-CUTOVER_REGISTERED_TOPIC = "policy-registered"
-CUTOVER_TERMINATED_TOPIC = "policy-terminated"
-CUTOVER_CONSUMER_GROUP = "policy-search-service"
-CUTOVER_OWNERSHIP = "issue-235-cutover-rehearsal"
+REGISTERED_TOPIC = "policy-registered"
+TERMINATED_TOPIC = "policy-terminated"
+CONSUMER_GROUP = "policy-search-service"
+OWNERSHIP = "policy-search-disposable"
 
 
 class IntegrationError(ValueError):
@@ -117,7 +109,7 @@ def create_kafka_certificates(
         "subjectAltName=IP:127.0.0.1,DNS:localhost\nextendedKeyUsage=serverAuth\n",
         encoding="utf-8",
     )
-    for arguments in (
+    commands = (
         [
             openssl,
             "req",
@@ -128,7 +120,7 @@ def create_kafka_certificates(
             "-days",
             "1",
             "-subj",
-            "/CN=issue-230-disposable-ca",
+            "/CN=policy-search-disposable-ca",
             "-keyout",
             str(ca_key),
             "-out",
@@ -182,7 +174,8 @@ def create_kafka_certificates(
             "-out",
             str(keystore),
         ],
-    ):
+    )
+    for arguments in commands:
         run(
             arguments,
             cwd=MODULE_ROOT,
@@ -199,48 +192,12 @@ def create_kafka_certificates(
     return ca_certificate
 
 
-def create_java_truststore(
-    root: Path,
-    ca_certificate: Path,
-    environment: dict[str, str],
-) -> Path:
-    truststore = root / "truststore.p12"
-    run(
-        [
-            "keytool",
-            "-importcert",
-            "-noprompt",
-            "-alias",
-            "issue-235-disposable-ca",
-            "-file",
-            str(ca_certificate),
-            "-keystore",
-            str(truststore),
-            "-storetype",
-            "PKCS12",
-            "-storepass",
-            "changeit",
-        ],
-        cwd=MODULE_ROOT,
-        env=environment,
-        timeout_seconds=30,
-        activity="create disposable Java Kafka truststore",
-        capture=True,
-    )
-    truststore.chmod(0o644)
-    return truststore
-
-
 def main() -> int:
     docker = os.environ.get("DOCKER", "")
     go = os.environ.get("GO", "")
     elasticsearch_image = os.environ.get("ELASTICSEARCH_IMAGE", "")
     kafka_image = os.environ.get("KAFKA_IMAGE", "")
-    legacy_policy_search_image = os.environ.get("LEGACY_POLICY_SEARCH_IMAGE", "")
-    legacy_gateway_image = os.environ.get("LEGACY_GATEWAY_IMAGE", "")
-    cutover_setting = os.environ.get("EVENT_CUTOVER_REHEARSAL", "")
     coverage = os.environ.get("EVENT_INTEGRATION_COVERAGE_FILE", "")
-    requested_transfer_report = os.environ.get("EVENT_TRANSFER_REPORT", "")
     elasticsearch_name = f"policy-search-event-elasticsearch-{os.getpid()}"
     kafka_name = f"policy-search-event-kafka-{os.getpid()}"
     owned_containers: list[str] = []
@@ -252,14 +209,6 @@ def main() -> int:
         require(go, "GO is required")
         require(elasticsearch_image, "ELASTICSEARCH_IMAGE is required")
         require(kafka_image, "KAFKA_IMAGE is required")
-        require(
-            cutover_setting in {"0", "1"},
-            "EVENT_CUTOVER_REHEARSAL must be 0 or 1",
-        )
-        cutover_enabled = cutover_setting == "1"
-        if cutover_enabled:
-            require(legacy_policy_search_image, "LEGACY_POLICY_SEARCH_IMAGE is required")
-            require(legacy_gateway_image, "LEGACY_GATEWAY_IMAGE is required")
         require(coverage, "EVENT_INTEGRATION_COVERAGE_FILE is required")
         for name in (
             "POLICY_SEARCH_TEST_ELASTICSEARCH_URL",
@@ -280,26 +229,6 @@ def main() -> int:
         certificate_directory = tempfile.TemporaryDirectory(prefix="policy-search-event-tls-")
         certificate_root = Path(certificate_directory.name)
         ca_certificate = create_kafka_certificates(certificate_root, environment)
-        java_truststore = (
-            create_java_truststore(certificate_root, ca_certificate, environment)
-            if cutover_enabled
-            else certificate_root / "unused-java-truststore.p12"
-        )
-        requested_report = Path(requested_transfer_report) if requested_transfer_report else None
-        transfer_report = (
-            requested_report
-            if cutover_enabled and requested_report is not None
-            else certificate_root / "cutover-transfer-report.json"
-        )
-        fixture_transfer_report = (
-            certificate_root / "fixture-transfer-report.json"
-            if cutover_enabled
-            else requested_report or certificate_root / "transfer-report.json"
-        )
-        require(
-            requested_report is None or requested_report.is_absolute(),
-            "EVENT_TRANSFER_REPORT must be an absolute path when supplied",
-        )
 
         owned_containers.append(elasticsearch_name)
         run(
@@ -333,10 +262,7 @@ def main() -> int:
             activity="resolve disposable event Elasticsearch port",
             capture=True,
         ).strip()
-        require(
-            elasticsearch_port.startswith("127.0.0.1:"),
-            "unexpected Elasticsearch port binding",
-        )
+        require(elasticsearch_port.startswith("127.0.0.1:"), "unexpected Elasticsearch binding")
         elasticsearch_url = f"http://{elasticsearch_port}"
         wait_for_elasticsearch(elasticsearch_url)
 
@@ -400,42 +326,6 @@ def main() -> int:
         wait_for_kafka_port(kafka_port)
         wait_for_kafka_metadata(docker, kafka_name, environment)
 
-        legacy_policy_search_identity = "unused"
-        legacy_gateway_identity = "unused"
-        if cutover_enabled:
-            legacy_policy_search_identity = run(
-                [
-                    docker,
-                    "image",
-                    "inspect",
-                    legacy_policy_search_image,
-                    "--format",
-                    "{{.Id}}",
-                ],
-                cwd=MODULE_ROOT,
-                env=environment,
-                timeout_seconds=30,
-                activity="resolve legacy Policy Search image identity",
-                capture=True,
-            ).strip()
-            legacy_gateway_identity = run(
-                [
-                    docker,
-                    "image",
-                    "inspect",
-                    legacy_gateway_image,
-                    "--format",
-                    "{{.Id}}",
-                ],
-                cwd=MODULE_ROOT,
-                env=environment,
-                timeout_seconds=30,
-                activity="resolve legacy gateway image identity",
-                capture=True,
-            ).strip()
-            require(legacy_policy_search_identity, "legacy Policy Search image identity is empty")
-            require(legacy_gateway_identity, "legacy gateway image identity is empty")
-
         coverage_path = MODULE_ROOT / coverage
         coverage_path.parent.mkdir(parents=True, exist_ok=True)
         coverage_path.unlink(missing_ok=True)
@@ -453,11 +343,7 @@ def main() -> int:
                 f"-coverprofile={coverage}",
                 "-json",
                 "-run",
-                (
-                    "^(TestEventFixture_|TestOwnershipTransfer_|TestCutoverRehearsal_)"
-                    if cutover_enabled
-                    else "^(TestEventFixture_|TestOwnershipTransfer_)"
-                ),
+                "^(TestEventFixture_|TestSearchRuntime_)",
                 "./internal/service",
                 "./internal/testing",
             ],
@@ -472,26 +358,10 @@ def main() -> int:
                 "POLICY_SEARCH_TEST_CONSUMER_GROUP": CONSUMER_GROUP,
                 "POLICY_SEARCH_TEST_EVENT_OWNERSHIP": OWNERSHIP,
                 "POLICY_SEARCH_TEST_KAFKA_CA_FILE": str(ca_certificate),
-                "POLICY_SEARCH_TEST_TRANSFER_REGISTERED_TOPIC": TRANSFER_REGISTERED_TOPIC,
-                "POLICY_SEARCH_TEST_TRANSFER_TERMINATED_TOPIC": TRANSFER_TERMINATED_TOPIC,
-                "POLICY_SEARCH_TEST_TRANSFER_CONSUMER_GROUP": TRANSFER_CONSUMER_GROUP,
-                "POLICY_SEARCH_TEST_TRANSFER_OWNERSHIP": TRANSFER_OWNERSHIP,
-                "POLICY_SEARCH_TEST_TRANSFER_REPORT": str(transfer_report),
-                "POLICY_SEARCH_TEST_TRANSFER_FIXTURE_REPORT": str(fixture_transfer_report),
-                "POLICY_SEARCH_TEST_CUTOVER_REGISTERED_TOPIC": CUTOVER_REGISTERED_TOPIC,
-                "POLICY_SEARCH_TEST_CUTOVER_TERMINATED_TOPIC": CUTOVER_TERMINATED_TOPIC,
-                "POLICY_SEARCH_TEST_CUTOVER_CONSUMER_GROUP": CUTOVER_CONSUMER_GROUP,
-                "POLICY_SEARCH_TEST_CUTOVER_OWNERSHIP": CUTOVER_OWNERSHIP,
-                "POLICY_SEARCH_TEST_DOCKER": docker,
-                "POLICY_SEARCH_TEST_JAVA_TRUSTSTORE": str(java_truststore),
-                "POLICY_SEARCH_TEST_LEGACY_POLICY_SEARCH_IMAGE": legacy_policy_search_image,
-                "POLICY_SEARCH_TEST_LEGACY_POLICY_SEARCH_IDENTITY": legacy_policy_search_identity,
-                "POLICY_SEARCH_TEST_LEGACY_GATEWAY_IMAGE": legacy_gateway_image,
-                "POLICY_SEARCH_TEST_LEGACY_GATEWAY_IDENTITY": legacy_gateway_identity,
             },
             timeout_seconds=600,
             teardown_seconds=20,
-            activity="run policy-search event fixture integration",
+            activity="run policy-search Go operation integration",
             capture=True,
             reveal_failure_output=True,
         )
@@ -499,18 +369,11 @@ def main() -> int:
         expected = {
             "TestEventFixture_OracleDefinesIndependentCases",
             "TestEventFixture_RealKafkaAndElasticsearchResources",
-            "TestOwnershipTransfer_PreservesPopulatedStateAndProgress",
+            "TestSearchRuntime_UsesRealRPCGatewayAndElasticsearch",
         }
-        if cutover_enabled:
-            expected.add("TestCutoverRehearsal_TransfersAndReturnsActualJavaOwnership")
         discovered = passed_tests(output)
-        require(
-            expected <= discovered,
-            f"event fixture suite missed expected tests; passed={sorted(discovered)}",
-        )
+        require(expected <= discovered, f"Go operation suite missed tests: {sorted(discovered)}")
         require(coverage_path.is_file(), "event integration coverage profile was not produced")
-        required_report = transfer_report if cutover_enabled else fixture_transfer_report
-        require(required_report.is_file(), "ownership transfer report was not produced")
     except (IntegrationError, CommandError, OSError) as error:
         print(f"test-event-integration: {error}", file=sys.stderr)
         status = 1
@@ -532,8 +395,7 @@ def main() -> int:
             certificate_directory.cleanup()
     if status:
         return status
-    selected = 4 if cutover_enabled else 3
-    print(f"test-event-integration: selected={selected} cleanup=passed")
+    print("test-event-integration: selected=3 cleanup=passed")
     return 0
 
 

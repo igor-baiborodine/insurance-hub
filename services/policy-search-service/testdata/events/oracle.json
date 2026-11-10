@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "ownership": "issue-230-disposable",
+  "ownership": "policy-search-disposable",
   "resources": {
-    "registeredTopic": "policy-registered-issue-230",
-    "terminatedTopic": "policy-terminated-issue-230",
-    "consumerGroup": "policy-search-service-issue-230",
-    "index": "policy-views-issue-229",
+    "registeredTopic": "policy-registered",
+    "terminatedTopic": "policy-terminated",
+    "consumerGroup": "policy-search-service",
+    "index": "policy-views",
     "syntheticIdPrefix": "SYN-230-"
   },
   "events": {

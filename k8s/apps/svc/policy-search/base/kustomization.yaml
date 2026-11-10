@@ -28,7 +28,7 @@ configMapGenerator:
       - HTTP_MAX_BODY_BYTES=4096
       - GRPC_MAX_RECV_BYTES=1048576
       - GRPC_MAX_SEND_BYTES=8388608
-      - ELASTICSEARCH_INDEX=policy-views-issue-229
+      - ELASTICSEARCH_INDEX=policy-views
       - ELASTICSEARCH_TIMEOUT=5s
       - LOG_LEVEL=info
       - OTEL_ENABLED=false

@@ -117,12 +117,6 @@
         "deploy",
         "deploy-verify",
         "stop",
-        "fixture-setup",
-        "fixture-verify",
-        "fixture-retire",
-        "event-fixture-setup",
-        "event-fixture-verify",
-        "event-fixture-retire",
         "administration-inspect",
         "administration-setup",
         "administration-verify",
@@ -133,21 +127,6 @@
         "qa"
       ],
       "administration": {
-        "assets": {
-          "fixture": "services/policy-search-service/internal/administration/fixture.json"
-        },
-        "index": "policy-views-issue-229",
-        "role": "go_policy_search_reader",
-        "user": "go_policy_search_reader",
-        "events": {
-          "owner": "issue-230",
-          "index": "policy-views-issue-229",
-          "writerRole": "go_policy_search_writer",
-          "writerUser": "go_policy_search_writer",
-          "registeredTopic": "policy-registered-issue-230",
-          "terminatedTopic": "policy-terminated-issue-230",
-          "consumerGroup": "policy-search-service-issue-230"
-        },
         "setup": {
           "owner": "issue-235",
           "index": "policy-views",
@@ -167,20 +146,14 @@
           "namespace": "local-dev-all",
           "dataNamespace": "local-dev-all",
           "overlay": "k8s/overlays/local-dev/svc/policy-search",
-          "fixtureAdministration": {
+          "serviceAdministration": {
             "service": "local-dev-elasticsearch-es-http",
             "adminSecret": "local-dev-elasticsearch-es-elastic-user",
-            "workloadSecret": "local-dev-policy-search-qualification-elasticsearch",
-            "eventWriterSecret": "local-dev-policy-search-qualification-elasticsearch-writer",
             "canonicalReaderSecret": "local-dev-policy-search-elasticsearch",
             "canonicalWriterSecret": "local-dev-policy-search-elasticsearch-writer",
             "canonicalElasticsearchCASecret": "",
             "canonicalKafkaCASecret": "local-dev-policy-search-kafka-ca",
-            "kafkaCluster": "local-dev-kafka",
-            "kafkaBootstrap": "local-dev-kafka-kafka-bootstrap:9093",
-            "kafkaPublicCASecret": "local-dev-kafka-cluster-ca-cert",
-            "kafkaWorkloadCASecret": "local-dev-policy-search-qualification-kafka-ca",
-            "kafkaReplicas": 1
+            "kafkaPublicCASecret": "local-dev-kafka-cluster-ca-cert"
           },
           "kindCluster": "local-dev-insurance-hub"
         },
@@ -190,23 +163,16 @@
           "namespace": "qa-svc",
           "dataNamespace": "qa-data",
           "overlay": "k8s/overlays/qa/svc/policy-search",
-          "fixtureAdministration": {
+          "serviceAdministration": {
             "service": "qa-elasticsearch-es-http",
             "adminSecret": "qa-elasticsearch-es-elastic-user",
-            "workloadSecret": "qa-policy-search-qualification-elasticsearch",
             "publicCASecret": "qa-elasticsearch-es-http-certs-public",
-            "workloadCASecret": "qa-policy-search-qualification-elasticsearch-ca",
             "serverName": "qa-elasticsearch-es-http.qa-data.svc",
-            "eventWriterSecret": "qa-policy-search-qualification-elasticsearch-writer",
             "canonicalReaderSecret": "qa-policy-search-elasticsearch",
             "canonicalWriterSecret": "qa-policy-search-elasticsearch-writer",
             "canonicalElasticsearchCASecret": "qa-policy-search-elasticsearch-ca",
             "canonicalKafkaCASecret": "qa-policy-search-kafka-ca",
-            "kafkaCluster": "qa-kafka",
-            "kafkaBootstrap": "qa-kafka-kafka-bootstrap.qa-data.svc:9093",
-            "kafkaPublicCASecret": "qa-kafka-cluster-ca-cert",
-            "kafkaWorkloadCASecret": "qa-policy-search-qualification-kafka-ca",
-            "kafkaReplicas": 3
+            "kafkaPublicCASecret": "qa-kafka-cluster-ca-cert"
           },
           "flux": {
             "namespace": "flux-system",

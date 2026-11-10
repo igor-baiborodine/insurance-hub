@@ -16,7 +16,7 @@ from typing import Any
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 sys.path.insert(0, str(ROOT))
 
-from fixture_administration import (  # noqa: E402
+from administration_support import (  # noqa: E402
     AdministrationError,
     ElasticsearchClient,
     PortForward,
@@ -25,7 +25,6 @@ from fixture_administration import (  # noqa: E402
     require,
     require_status,
 )
-
 from scripts.go.service.configuration import service_record, target_record  # noqa: E402
 from scripts.python.process_runner import CommandError  # noqa: E402
 
@@ -101,7 +100,7 @@ class Target:
         }
         for name, value in expected.items():
             require(os.environ.get(name, "") == value, f"{name} differs from the catalog")
-        administration = selected.get("fixtureAdministration", {})
+        administration = selected.get("serviceAdministration", {})
         for name in (
             "service",
             "adminSecret",
@@ -411,7 +410,7 @@ def verify_identity(client: ElasticsearchClient, identity: str) -> None:
                 ],
             },
             {
-                "names": ["policy-views-issue-229", "policy-views-other"],
+                "names": ["policy-views-other"],
                 "privileges": ["read", "view_index_metadata", "index", "manage"],
             },
         ],
@@ -433,7 +432,7 @@ def verify_identity(client: ElasticsearchClient, identity: str) -> None:
         "manage": False,
     }
     require(indices.get(INDEX) == expected, "exact-index privileges differ")
-    for other in ("policy-views-issue-229", "policy-views-other"):
+    for other in ("policy-views-other",):
         require(
             indices.get(other)
             == {"read": False, "view_index_metadata": False, "index": False, "manage": False},

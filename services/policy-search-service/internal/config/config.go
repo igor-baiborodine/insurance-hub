@@ -35,7 +35,7 @@ const (
 	defaultMaxHeaderBytes       = 16384
 	defaultMaxBodyBytes         = 4096
 	defaultElasticsearchURL     = "http://127.0.0.1:9200"
-	defaultElasticsearchIndex   = "policy-views-issue-229"
+	defaultElasticsearchIndex   = "policy-views"
 	defaultElasticsearchTimeout = 5 * time.Second
 	defaultKafkaGroup           = "policy-search-service"
 	defaultRegisteredTopic      = "policy-registered"

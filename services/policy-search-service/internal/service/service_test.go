@@ -238,9 +238,13 @@ func TestRun_EnabledWorkersStartReadinessAndBoundedShutdown(t *testing.T) {
 	// given
 	settings := testConfig(t)
 	settings.Events = config.Events{
-		Enabled: true, Brokers: []string{"kafka.example:9093"}, Group: "issue-230",
-		RegisteredTopic: "registered-230", TerminatedTopic: "terminated-230",
-		CAFile: writeTestCA(t), Writer: settings.Elasticsearch,
+		Enabled:         true,
+		Brokers:         []string{"kafka.example:9093"},
+		Group:           "policy-search-service",
+		RegisteredTopic: "registered-230",
+		TerminatedTopic: "terminated-230",
+		CAFile:          writeTestCA(t),
+		Writer:          settings.Elasticsearch,
 	}
 	deps, addresses := testDependencies(&fakeQuery{})
 	projection := &fakeProjectionRuntime{}
@@ -301,9 +305,13 @@ func TestRun_EnabledWorkersRejectEmptyKafkaCAFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings.Events = config.Events{
-		Enabled: true, Brokers: []string{"kafka.example:9093"}, Group: "issue-230",
-		RegisteredTopic: "registered-230", TerminatedTopic: "terminated-230",
-		CAFile: emptyCA, Writer: settings.Elasticsearch,
+		Enabled:         true,
+		Brokers:         []string{"kafka.example:9093"},
+		Group:           "policy-search-service",
+		RegisteredTopic: "registered-230",
+		TerminatedTopic: "terminated-230",
+		CAFile:          emptyCA,
+		Writer:          settings.Elasticsearch,
 	}
 	deps, _ := testDependencies(&fakeQuery{})
 	deps.newProjection = func(config.Elasticsearch, *telemetry.DependencyObserver) (projectionRuntime, error) {
@@ -324,9 +332,13 @@ func TestRun_PartialWorkerStartupPreservesFailureAndCleansResources(t *testing.T
 	// given
 	settings := testConfig(t)
 	settings.Events = config.Events{
-		Enabled: true, Brokers: []string{"kafka.example:9093"}, Group: "issue-230",
-		RegisteredTopic: "registered-230", TerminatedTopic: "terminated-230",
-		CAFile: writeTestCA(t), Writer: settings.Elasticsearch,
+		Enabled:         true,
+		Brokers:         []string{"kafka.example:9093"},
+		Group:           "policy-search-service",
+		RegisteredTopic: "registered-230",
+		TerminatedTopic: "terminated-230",
+		CAFile:          writeTestCA(t),
+		Writer:          settings.Elasticsearch,
 	}
 	deps, _ := testDependencies(&fakeQuery{})
 	projection := &fakeProjectionRuntime{}

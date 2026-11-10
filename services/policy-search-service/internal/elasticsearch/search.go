@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	PolicyIndex   = "policy-views-issue-229"
+	PolicyIndex   = "policy-views"
 	selectedLimit = 100
 )
 

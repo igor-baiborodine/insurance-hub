@@ -112,12 +112,6 @@ def test_policy_search_administration_operations_use_the_existing_dispatch() -> 
             capability,
         )
         for capability in (
-            "fixture-setup",
-            "fixture-verify",
-            "fixture-retire",
-            "event-fixture-setup",
-            "event-fixture-verify",
-            "event-fixture-retire",
             "administration-inspect",
             "administration-setup",
             "administration-verify",
@@ -125,7 +119,7 @@ def test_policy_search_administration_operations_use_the_existing_dispatch() -> 
     ]
 
     # then
-    assert paths == ["services/policy-search-service"] * 9
+    assert paths == ["services/policy-search-service"] * 3
 
 
 def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() -> None:
@@ -167,7 +161,7 @@ def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() 
     assert record["deploymentTargets"]["qa"]["dataNamespace"] == "qa-data"
     assert paths == ["services/dashboard-service"] * len(expected)
     for unsupported in (
-        "fixture-setup",
+        "administration-setup",
         "registration-inspect",
         "deploy-test-flux",
         "initialize",
