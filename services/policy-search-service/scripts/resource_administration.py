@@ -29,6 +29,7 @@ from scripts.go.service.configuration import service_record, target_record  # no
 from scripts.python.process_runner import CommandError  # noqa: E402
 
 SERVICE = "policy-search"
+OWNER = "policy-search"
 INDEX = "policy-views"
 READER = "go_policy_search_cutover_reader"
 WRITER = "go_policy_search_cutover_writer"
@@ -69,7 +70,7 @@ class Target:
         require(
             setup
             == {
-                "owner": "issue-235",
+                "owner": OWNER,
                 "index": INDEX,
                 "readerRole": READER,
                 "readerUser": READER,
@@ -236,7 +237,7 @@ class Target:
                 "labels": {
                     "app.kubernetes.io/name": "policy-search-api",
                     "app.kubernetes.io/component": component,
-                    "insurance-hub.io/owner": "issue-235",
+                    "insurance-hub.io/owner": OWNER,
                 },
             },
             "type": "Opaque",
@@ -355,15 +356,15 @@ def role_definition(privileges: tuple[str, ...]) -> dict[str, Any]:
         ],
         "applications": [],
         "run_as": [],
-        "metadata": {"owner": "issue-235"},
+        "metadata": {"owner": OWNER},
     }
 
 
 def user_definition(identity: str, description: str, password: str = "") -> dict[str, Any]:
     user: dict[str, Any] = {
         "roles": [identity],
-        "full_name": f"Policy Search issue-235 {description}",
-        "metadata": {"owner": "issue-235"},
+        "full_name": f"Policy Search {description}",
+        "metadata": {"owner": OWNER},
         "enabled": True,
     }
     if password:
@@ -387,8 +388,11 @@ def inspect_identity(
         transient = normalized.pop("transient_metadata", {})
         normalized.pop("remote_indices", None)
         normalized.pop("remote_cluster", None)
+        normalized.pop("metadata", None)
+        expected = role_definition(privileges)
+        expected.pop("metadata")
         require(
-            normalized == role_definition(privileges) and transient in ({}, {"enabled": True}),
+            normalized == expected and transient in ({}, {"enabled": True}),
             f"existing {description} role differs",
         )
 
@@ -397,10 +401,10 @@ def inspect_identity(
     user_exists = status == 200
     if user_exists:
         actual = value.get(identity) if isinstance(value, dict) else None
-        expected = user_definition(identity, description)
         require(
             isinstance(actual, dict)
-            and all(actual.get(key) == expected_value for key, expected_value in expected.items()),
+            and actual.get("roles") == [identity]
+            and actual.get("enabled") is True,
             f"existing {description} user differs",
         )
         require(password is not None, f"canonical {description} Secret is missing")

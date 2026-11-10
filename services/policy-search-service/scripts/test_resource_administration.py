@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from unittest.mock import Mock, patch
 
@@ -74,6 +75,23 @@ def test_target_uses_only_ordinary_secret_names(
     assert target.kafka_ca_secret == f"{environment}-policy-search-kafka-ca"
 
 
+def test_new_resource_metadata_is_service_owned() -> None:
+    role = administration.role_definition(("read",))
+    user = administration.user_definition(administration.READER, "reader", "password")
+    target = object.__new__(administration.Target)
+    target.namespace = "service-namespace"
+    target.run = Mock(return_value="")
+
+    target.apply_secret("reader-secret", {"password": "password"}, "reader")
+    secret = json.loads(target.run.call_args.kwargs["input_text"])
+
+    assert role["metadata"] == {"owner": administration.OWNER}
+    assert user["metadata"] == {"owner": administration.OWNER}
+    assert user["full_name"] == "Policy Search reader"
+    assert secret["metadata"]["labels"]["insurance-hub.io/owner"] == administration.OWNER
+    assert "issue-235" not in json.dumps((role, user, secret))
+
+
 def test_inspect_accepts_absent_or_exact_populated_index() -> None:
     absent = administration.inspect_index(FakeClient([(404, None)]))
     present = administration.inspect_index(
@@ -104,6 +122,40 @@ def test_ensure_preserves_populated_index_and_existing_access() -> None:
 
     assert state.documents == 3
     assert all(method == "GET" for method, _, _ in client.requests[1:])
+
+
+def test_inspect_accepts_legacy_descriptive_identity_metadata() -> None:
+    reader_role = administration.role_definition(("read", "view_index_metadata"))
+    reader_role["metadata"] = {"owner": "issue-235"}
+    reader_user = administration.user_definition(administration.READER, "reader")
+    reader_user["full_name"] = "Policy Search issue-235 reader"
+    reader_user["metadata"] = {"owner": "issue-235"}
+    writer_role = administration.role_definition(("index",))
+    writer_role["metadata"] = {"owner": "issue-235"}
+    writer_user = administration.user_definition(administration.WRITER, "writer")
+    writer_user["full_name"] = "Policy Search issue-235 writer"
+    writer_user["metadata"] = {"owner": "issue-235"}
+    client = FakeClient(
+        [
+            (200, None),
+            (200, canonical_definition()),
+            (200, {"count": 3}),
+            (200, {administration.READER: reader_role}),
+            (200, {administration.READER: reader_user}),
+            (200, {administration.WRITER: writer_role}),
+            (200, {administration.WRITER: writer_user}),
+        ]
+    )
+
+    state, identities = administration.inspect_index_and_access(
+        client,
+        "existing-reader-password-with-32-bytes",
+        "existing-writer-password-with-32-bytes",
+    )
+
+    assert state.documents == 3
+    assert all(identity.role_exists and identity.user_exists for identity in identities)
+    assert all(method != "PUT" for method, _, _ in client.requests)
 
 
 def test_ensure_creates_only_missing_index_and_access() -> None:

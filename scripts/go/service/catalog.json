@@ -125,7 +125,7 @@
       ],
       "administration": {
         "setup": {
-          "owner": "issue-235",
+          "owner": "policy-search",
           "index": "policy-views",
           "readerRole": "go_policy_search_cutover_reader",
           "readerUser": "go_policy_search_cutover_reader",
