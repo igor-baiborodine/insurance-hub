@@ -145,6 +145,13 @@ Specifications must state the Kubernetes and application identities separately i
 an ambiguous combined phrase such as “runtime/container `<service>-service`.” The Dashboard
 decision that established this general rule was completed before its corresponding source edits.
 
+**Identity validation follow-up: 10 November 2026.** Apply the
+[common Go service identity and validation contract](go-service-identity-and-validation.md) to all
+existing and future Go services, including the scaffold. It defines the minimal shared behavior
+for versions, development/test configuration, instance IDs and telemetry while retaining small
+service-owned validators and existing Servicekit infrastructure. Track concrete adoption work in
+the owning tickets; the guide does not claim that every service already conforms.
+
 Replace the blanket Wire, Viper, GORM, protoc-gen-validate and olivere/elastic defaults. Defer the
 pricing evaluator, chromedp adoption, unnecessary streaming/history capabilities, Keycloak/Envoy/mesh
 cutovers and weighted traffic-shift mechanism until their evidence exists. Keep explicit HTTP
