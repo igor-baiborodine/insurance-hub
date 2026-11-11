@@ -227,6 +227,7 @@ def test_load_tooling_config_rejects_unsafe_dockerfile_data(
 
 
 def test_load_tooling_config_rejects_duplicate_dockerfile_destination(tmp_path: Path) -> None:
+    # given
     module = configured_module(tmp_path)
     data = version_two_configuration(module)
     data["dockerfile"]["sourceCopies"].append(  # type: ignore[index,union-attr]
@@ -235,6 +236,7 @@ def test_load_tooling_config_rejects_duplicate_dockerfile_destination(tmp_path: 
     path = module / "go-service-tooling.json"
     path.write_text(json.dumps(data), encoding="utf-8")
 
+    # when / then
     with pytest.raises(ToolingConfigError, match="duplicate destinations"):
         load_tooling_config(path, repository_root=tmp_path)
 
