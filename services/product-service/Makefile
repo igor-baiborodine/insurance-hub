@@ -156,10 +156,12 @@ _image-check-existing: dockerfile-check python-runtime-check
 		DOCKER="$(DOCKER)" "$(PYTHON)" scripts/image_check.py
 
 deploy-render: ## Render Product Go overlays without applying them. Usage: make deploy-render [DEPLOY_ENV=local-dev|qa]
-	@KUBECTL="$(KUBECTL)" DEPLOY_ENV="$(DEPLOY_ENV)" ./scripts/render-deployment.sh
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		KUBECTL="$(KUBECTL)" DEPLOY_ENV="$(DEPLOY_ENV)" "$(PYTHON)" scripts/deployment_check.py render
 
 deploy-check: python-runtime-check ## Validate Product Go overlays, Java isolation, and active QA inclusion
-	@KUBECTL="$(KUBECTL)" PYTHON="$(PYTHON)" ./scripts/check-deployment.sh
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		KUBECTL="$(KUBECTL)" "$(PYTHON)" scripts/deployment_check.py check
 
 deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runtime-check ## Guarded Product deployment operation; requires exact DEPLOY_* target coordinates
 	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
@@ -342,12 +344,12 @@ test-integration: python-runtime-check
 		INTEGRATION_SUITE="$(INTEGRATION_SUITE)" \
 		FIXTURE_SET="$(FIXTURE_SET)" \
 		INTEGRATION_COVERAGE_FILE="$(INTEGRATION_COVERAGE_FILE)" \
-		PYTHON="$(PYTHON)" \
-		./scripts/test-integration.sh
+		PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" scripts/integration_test.py
 
 test-telemetry-continuity: python-runtime-check ## Exercise disposable Brave Java ↔ Go HTTP trace continuity
-	@GO="$(GO)" PYTHON="$(PYTHON)" PRODUCT_TOOLING_REPOSITORY_ROOT="$(PRODUCT_REPOSITORY_ROOT)" \
-		./scripts/test-telemetry-continuity.sh
+	@GO="$(GO)" PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/telemetry_continuity_test.py
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \
@@ -423,7 +425,6 @@ bootstrap-ci-tools: python-runtime-check ## Install pinned Kubernetes clients in
 
 check-ci: python-runtime-check ## Validate Go workflow permissions, triggers, syntax, and boundaries
 	@bash -n scripts/bootstrap-ci-tools.sh
-	@sh -n scripts/check-deployment.sh
 	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/go-release-svc.yml \
 		../../.github/workflows/go-pr-mod.yml ../../.github/workflows/go-report-card.yml
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/check_ci.py

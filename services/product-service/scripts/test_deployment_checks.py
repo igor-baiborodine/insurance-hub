@@ -53,6 +53,24 @@ def active_documents(baseline: Documents) -> Documents:
     return copy.deepcopy(baseline)
 
 
+def test_render_action_selects_only_the_requested_overlay(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "qa")
+    monkeypatch.setattr(deployment_check, "render_text", lambda _kubectl, source: str(source))
+
+    # when
+    status = deployment_check.main(["render"])
+
+    # then
+    output = capsys.readouterr().out
+    assert status == 0
+    assert "# Product Go overlay: qa" in output
+    assert deployment_check.OVERLAYS["qa-go"] in output
+    assert deployment_check.OVERLAYS["local-go"] not in output
+
+
 @pytest.fixture(scope="module")
 def rendered_documents() -> Documents:
     module_root = Path(__file__).resolve().parent.parent

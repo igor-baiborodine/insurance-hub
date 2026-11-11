@@ -305,7 +305,6 @@ def validate_release_trigger_examples(patterns: list[str]) -> None:
         "services/product-service/internal/postgres/sql/queries.sql",
         "services/product-service/internal/testing/fixture.go",
         "services/product-service/puppeteer-config.json",
-        "services/product-service/scripts/build-image.sh",
         "services/product-service/scripts/check_ci.py",
         "services/product-service/scripts/test-tooling.sh",
         "services/product-service/sqlc.yaml",
@@ -369,7 +368,7 @@ def validate_trigger_examples(patterns: list[str]) -> None:
         "services/product-service/Makefile",
         "services/product-service/README.md",
         "services/product-service/Dockerfile",
-        "services/product-service/scripts/test-integration.sh",
+        "services/product-service/scripts/integration_test.py",
         "services/claims-service/Makefile",
         "services/claims-service/README.md",
         "services/claims-service/scripts/test-integration.sh",
@@ -590,7 +589,7 @@ def exercise_selection(selector: dict) -> None:
                     )
             else:
                 require(
-                    "Multiple Go modules changed" in completed.stderr,
+                    "Multiple Go service modules changed" in completed.stderr,
                     f"selection case {label!r} did not explain the multi-module failure",
                 )
 
