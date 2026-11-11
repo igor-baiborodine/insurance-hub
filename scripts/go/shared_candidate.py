@@ -29,6 +29,11 @@ from shared_support import (
 
 SIMPLE_PHASES = {"unit", "race", "build", "lint", "vulnerability", "dependency", "format"}
 GO_DIRECTIVE = re.compile(r"^go ([1-9][0-9]*\.[0-9]+(?:\.[0-9]+)?)$", re.MULTILINE)
+COVERAGE_OUTPUTS = (
+    ("INTEGRATION_COVERAGE_FILE", "integration-coverage.txt"),
+    ("ELASTICSEARCH_INTEGRATION_COVERAGE_FILE", "elasticsearch-integration-coverage.txt"),
+    ("EVENT_INTEGRATION_COVERAGE_FILE", "event-integration-coverage.txt"),
+)
 
 
 def _python_executable(root: Path) -> str:
@@ -54,6 +59,12 @@ def _candidate_environment(root: Path, library: Path, alternate: Path) -> dict[s
     if library_version > consumer_version:
         extra["GOTOOLCHAIN"] = f"go{library_value}+auto"
     return environment(**extra)
+
+
+def coverage_arguments(directory: Path) -> list[str]:
+    """Keep candidate-generated coverage outside the verified consumer source tree."""
+    directory.mkdir(parents=True)
+    return [f"{name}={directory / filename}" for name, filename in COVERAGE_OUTPUTS]
 
 
 def _checkout(root: Path, head: str, destination: Path, budget: Budget) -> None:
@@ -282,6 +293,7 @@ def validate(
                 f"PYTHON={env['PYTHON']}",
                 f"TOOLS_BIN={tools}",
                 "FORMAT_SCOPE=all",
+                *coverage_arguments(scratch / "coverage"),
             ]
             if mode == "candidate":
                 candidate = Candidate(checkout, module, expected["head"], budget)
@@ -304,6 +316,7 @@ def validate(
                                     root,
                                     "candidate consumer phase",
                                     child_env,
+                                    reveal_failure_output=True,
                                 ),
                                 end="",
                             )

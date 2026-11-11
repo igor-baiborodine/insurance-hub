@@ -194,6 +194,7 @@ def run_phase(config: ServiceTooling, phase: str) -> None:
                 timeout_seconds=2_100,
                 teardown_seconds=20,
                 activity=f"candidate {config.service} {phase}: {target}",
+                reveal_failure_output=True,
             )
     context_request("end", phase)
 

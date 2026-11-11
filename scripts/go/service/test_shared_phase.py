@@ -44,13 +44,15 @@ def test_run_phase_uses_configured_target_and_returns_owner_receipt(
     config = load_tooling_config(CONFIG_PATH)
     requests: list[tuple[str, str]] = []
     commands: list[list[str]] = []
+    options: list[dict[str, object]] = []
 
     def fake_context_request(operation: str, phase: str) -> dict[str, object]:
         requests.append((operation, phase))
         return {"environment": {}}
 
-    def fake_run(arguments: list[str], **_kwargs: object) -> str:
+    def fake_run(arguments: list[str], **kwargs: object) -> str:
         commands.append(arguments)
+        options.append(kwargs)
         return ""
 
     monkeypatch.setattr(shared_phase, "context_request", fake_context_request)
@@ -65,6 +67,7 @@ def test_run_phase_uses_configured_target_and_returns_owner_receipt(
         ["make", "--no-print-directory", "check-candidate-servicekit"],
         ["make", "--no-print-directory", "check-proto-drift"],
     ]
+    assert options[1]["reveal_failure_output"] is True
 
 
 def test_candidate_image_uses_shared_build_identity_and_owned_check(
