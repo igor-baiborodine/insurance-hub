@@ -133,7 +133,7 @@ func assertResourceIdentity(t *testing.T, attributes []*common.KeyValue) {
 		got[attr.Key] = attr.Value.GetStringValue()
 	}
 	for key, want := range map[string]string{
-		"service.namespace": "insurance-hub", "service.name": "go-service", "service.version": "test-revision",
+		"service.namespace": "insurance-hub", "service.name": "go-service", "service.version": "git-000000000001",
 		"service.instance.id": "test-instance", "deployment.environment.name": "test", "insurance_hub.service.implementation": "go",
 	} {
 		if got[key] != want {

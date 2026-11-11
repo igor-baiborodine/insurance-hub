@@ -24,7 +24,7 @@ creating a real service, then use the same replacement categories consistently.
 |--------------------------------|------------------------------------------------------------------|-------------------------------------------------------------------|
 | Repository directory           | `templates/go-service`                                           | `services/example-copy`                                           |
 | Go module/import prefix        | `github.com/igor-baiborodine/insurance-hub/templates/go-service` | `github.com/igor-baiborodine/insurance-hub/services/example-copy` |
-| Runtime `SERVICE_NAME` default | `go-service`                                                     | `example-copy`                                                    |
+| Fixed runtime `SERVICE_NAME`   | `go-service`                                                     | `example-copy`                                                    |
 | Protobuf package               | `scaffold.v1`                                                    | `examplecopy.v1`                                                  |
 | Schema/generated path          | `scaffold/v1`                                                    | `examplecopy/v1`                                                  |
 | Generated Go package           | `scaffoldv1`                                                     | `examplecopyv1`                                                   |
@@ -230,9 +230,10 @@ test -f gen/openapiv2/examplecopy/v1/example_service.swagger.json
 
 The generated-identity checks inspect the runtime descriptor package, file path, `go_package`,
 gateway registration, Swagger definitions and paths, service name, and full RPC method. Logger and
-configuration tests capture and assert the renamed `example-copy` identity. These checks prevent a
-mutually consistent but stale HTTP client, RPC server or OpenAPI document from hiding an incomplete
-rename.
+configuration tests capture and assert the renamed fixed `example-copy` identity. The copied config
+and telemetry tests also retain canonical non-development version acceptance and representative
+rejections. These checks prevent a mutually consistent but stale HTTP client, RPC server or OpenAPI
+document from hiding an incomplete rename or an older identity policy.
 
 ## 5. Validate the independent module without mutation
 

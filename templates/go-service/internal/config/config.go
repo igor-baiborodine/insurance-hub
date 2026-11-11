@@ -12,6 +12,9 @@ import (
 // DefaultServiceName identifies startup diagnostics until configuration has been validated.
 const DefaultServiceName = "go-service"
 
+const canonicalVersionReason = "must use git- followed by 12 lowercase hexadecimal " +
+	"characters with at least one nonzero character outside development"
+
 const (
 	EnvHTTPAddress        = "HTTP_ADDR"
 	EnvHTTPMaxHeaderBytes = "HTTP_MAX_HEADER_BYTES"
@@ -69,6 +72,12 @@ func load(lookup lookupEnv) (Config, error) {
 	)
 	if err != nil {
 		return Config{}, err
+	}
+	if serviceName != DefaultServiceName {
+		return Config{}, kitconfig.Invalid(
+			kitconfig.EnvServiceName,
+			"must match the service's fixed logical name",
+		)
 	}
 
 	grpcAddress, err := kitconfig.LoadAddress(
@@ -281,6 +290,12 @@ func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity,
 
 // Validate rejects incomplete identity without echoing supplied values.
 func (identity Identity) Validate(enabled bool) error {
+	if identity.ServiceName != DefaultServiceName {
+		return kitconfig.Invalid(
+			kitconfig.EnvServiceName,
+			"must match the service's fixed logical name",
+		)
+	}
 	if identity.ServiceNamespace != "insurance-hub" || identity.Implementation != "go" {
 		return kitconfig.Invalid(
 			"telemetry identity",
@@ -299,6 +314,13 @@ func (identity Identity) Validate(enabled bool) error {
 				"must contain 1 through 128 ASCII letters, digits, dots, underscores or hyphens",
 			)
 		}
+	}
+	if identity.Environment != "development" &&
+		!validCanonicalVersion(identity.ServiceVersion) {
+		return kitconfig.Invalid(
+			kitconfig.EnvServiceVersion,
+			canonicalVersionReason,
+		)
 	}
 	if enabled &&
 		(identity.Environment == "development" || identity.ServiceVersion == "development" || strings.HasPrefix(identity.ServiceInstance, "local-")) {
@@ -323,4 +345,20 @@ func validIdentityValue(value string) bool {
 		}
 	}
 	return true
+}
+
+func validCanonicalVersion(value string) bool {
+	if len(value) != len("git-")+12 || !strings.HasPrefix(value, "git-") {
+		return false
+	}
+	nonzero := false
+	for _, ch := range value[len("git-"):] {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+		if ch != '0' {
+			nonzero = true
+		}
+	}
+	return nonzero
 }
