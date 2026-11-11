@@ -952,7 +952,7 @@ func testConfig(t *testing.T) config.Config {
 		},
 		Telemetry:          config.Telemetry{ExporterTimeout: 200 * time.Millisecond},
 		ServiceName:        "go-service",
-		HTTPAddress:        parse(config.EnvHTTPAddress),
+		HTTPAddress:        parse(kitconfig.EnvHTTPAddress),
 		GRPCAddress:        parse(kitconfig.EnvGRPCAddress),
 		HealthAddress:      parse(kitconfig.EnvHealthAddress),
 		HTTPMaxHeaderBytes: 1024,

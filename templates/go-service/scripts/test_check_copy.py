@@ -107,7 +107,7 @@ def test_created_copy_uses_repository_tooling_without_scaffold_only_surface(
     assert "gen/examplecopy/v1" in copied_tooling
     assert "api/scaffold/v1/example_service.proto" not in copied_tooling
     assert "gen/scaffold/v1" not in copied_tooling
-    assert "github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.0.2" in (
+    assert "github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.1.0" in (
         copy_root / "go.mod"
     ).read_text(encoding="utf-8")
     copied_config = (copy_root / "go-service-tooling.json").read_text(encoding="utf-8")
@@ -167,7 +167,7 @@ def test_copy_rejects_missing_shared_dependency(tmp_path: Path) -> None:
     manifest = copy_root / "go.mod"
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace(
-            "github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.0.2",
+            "github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.1.0",
             "github.com/igor-baiborodine/insurance-hub/libs/servicekit v0.1.0",
         ),
         encoding="utf-8",
