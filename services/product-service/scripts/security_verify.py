@@ -9,9 +9,9 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from scripts.python.process_runner import CommandError, run_command
+from scripts.python.process_runner import CommandError, child_environment, run_command
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 
 class VerificationError(ValueError):
@@ -24,10 +24,11 @@ def require(condition: bool, message: str) -> None:
 
 
 def run(arguments: list[str], *, timeout: float, activity: str) -> str:
+    overrides = {name: os.environ[name] for name in ("KUBECONFIG",) if name in os.environ}
     return run_command(
         arguments,
         cwd=REPOSITORY_ROOT,
-        env=os.environ,
+        env=child_environment(overrides),
         timeout_seconds=timeout,
         teardown_seconds=15,
         activity=activity,

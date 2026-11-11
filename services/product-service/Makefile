@@ -37,7 +37,7 @@ GENERATED_PROTO_FILES := \
 	gen/product/v1/product_service_grpc.pb.go \
 	gen/openapiv2/product/v1/product_service.swagger.json
 
-GO_VERSION := 1.27.3
+GO_VERSION := 1.27.4
 BUF_VERSION := v1.73.0
 PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
@@ -63,8 +63,9 @@ MERMAID_CLI_VERSION := 11.14.0
 PUPPETEER_VERSION := 24.43.1
 POSTGRES_IMAGE := postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
 HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
+HEAD_SHORT := $(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(CURDIR) show -s --format=%cI HEAD 2>/dev/null)
-HEAD_VERSION := git-$(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
+HEAD_VERSION := git-$(HEAD_SHORT)
 IMAGE_NAME ?= insurance-hub-product-api
 SOURCE_REVISION ?= $(HEAD_REVISION)
 SOURCE_CREATED ?= $(HEAD_CREATED)
@@ -73,6 +74,7 @@ SOURCE_VERSION ?= $(HEAD_VERSION)
 IMAGE_TAG ?= $(SOURCE_VERSION)
 IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
 TARGET_PLATFORM ?= linux/amd64
+GO_SERVICE_TOOLING_CONFIG := $(CURDIR)/go-service-tooling.json
 SQL_SCHEMA := internal/postgres/sql/schema.sql
 SQL_QUERIES := internal/postgres/sql/queries.sql
 GENERATED_SQL_FILES := internal/postgres/dbgen/db.go internal/postgres/dbgen/models.go \
@@ -117,6 +119,7 @@ pilot-test-json: ## Report selected uncached test execution as JSON for framewor
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage \
 	coverage-validate coverage-check test-integration test-telemetry-continuity \
 	build build-security-harness build-security-verifier build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
+	dockerfile-generate dockerfile-check _image-check-existing security-verify \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
 	deploy-test-flux vulncheck check-servicekit check-candidate-servicekit \
 	resource-inspect resource-ensure resource-verify resource-rotate resource-revoke \
@@ -129,11 +132,28 @@ pilot-test-json: ## Report selected uncached test execution as JSON for framewor
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
-image-build: python-runtime-check ## Build the pinned linux/amd64 Product runtime image
-	@./scripts/build-image.sh
+dockerfile-generate: python-runtime-check
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" -m scripts.go.service.dockerfile \
+		--config "$(GO_SERVICE_TOOLING_CONFIG)" --repository-root "$(PRODUCT_REPOSITORY_ROOT)" generate
 
-image-check: python-runtime-check image-build ## Build and validate Product image identity, contents, startup, reads, and SIGTERM
-	@./scripts/check-image.sh
+dockerfile-check: python-runtime-check
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" -m scripts.go.service.dockerfile \
+		--config "$(GO_SERVICE_TOOLING_CONFIG)" --repository-root "$(PRODUCT_REPOSITORY_ROOT)" check
+
+image-build: dockerfile-check python-runtime-check ## Build the pinned linux/amd64 Product runtime image
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
+		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" build
+
+image-check: image-build ## Build and validate Product image identity, contents, startup, reads, and SIGTERM
+	@$(MAKE) --no-print-directory _image-check-existing
+
+_image-check-existing: dockerfile-check python-runtime-check
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
+		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" inspect
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		DOCKER="$(DOCKER)" "$(PYTHON)" scripts/image_check.py
 
 deploy-render: ## Render Product Go overlays without applying them. Usage: make deploy-render [DEPLOY_ENV=local-dev|qa]
 	@KUBECTL="$(KUBECTL)" DEPLOY_ENV="$(DEPLOY_ENV)" ./scripts/render-deployment.sh
@@ -142,17 +162,21 @@ deploy-check: python-runtime-check ## Validate Product Go overlays, Java isolati
 	@KUBECTL="$(KUBECTL)" PYTHON="$(PYTHON)" ./scripts/check-deployment.sh
 
 deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runtime-check ## Guarded Product deployment operation; requires exact DEPLOY_* target coordinates
-	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/deployment.py '$@'
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		$(PYTHON) scripts/deployment.py '$@'
 
 deploy-test-tooling: python-toolchain-check ## Exercise guarded Product deployment operations with fake cluster adapters
-	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q scripts/test_deployment_operations.py
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		$(PYTHON) -m pytest -q scripts/test_deployment_operations.py
 
 deploy-test: python-toolchain-check image-build ## Exercise the image and rendered pod in an owned disposable Kind namespace
-	@PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" $(PYTHON) -m pytest -q \
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		IMAGE_REF="$(IMAGE_REF)" $(PYTHON) -m pytest -q \
 		-m integration scripts/test_deployment_lifecycle.py
 
 deploy-test-flux: python-toolchain-check image-build ## Exercise Product prerequisites with pinned Flux/CNPG in an owned disposable Kind cluster
-	@PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(IMAGE_REF)" $(PYTHON) scripts/flux_deployment_test.py
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		IMAGE_REF="$(IMAGE_REF)" $(PYTHON) scripts/flux_deployment_test.py
 
 resource-inspect: ## Inspect Product PostgreSQL resources without mutation
 resource-ensure: ## Ensure Product PostgreSQL roles and workload Secrets
@@ -160,7 +184,7 @@ resource-verify: ## Verify Product resources and effective workload permissions
 resource-rotate: ## Rotate Product PostgreSQL credentials with recovery
 resource-revoke: ## Revoke inactive Product PostgreSQL resources
 resource-inspect resource-ensure resource-verify resource-rotate resource-revoke: python-runtime-check
-	@PYTHONPATH="$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/resource_administration.py '$(@:resource-%=%)'
 
 resource-test-fast: python-toolchain-check ## Exercise Product resource guards with fake adapters
@@ -198,14 +222,16 @@ build-telemetry-acceptance: verify-tools ## Build the disposable Product telemet
 bootstrap-tools: bootstrap-doc-tools
 
 bootstrap-doc-tools: python-runtime-check
-	@NODE="$(NODE)" NPM="$(NPM)" PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/bootstrap_docs.py
+	@NODE="$(NODE)" NPM="$(NPM)" PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" \
+		PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/bootstrap_docs.py
 
 check-docs: python-runtime-check
 	@test "$$($(MMDC) --version 2>/dev/null)" = "$(MERMAID_CLI_VERSION)" || { \
 		echo "check-docs: Mermaid CLI $(MERMAID_CLI_VERSION) is required; run bootstrap-tools" >&2; \
 		exit 1; \
 	}
-	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(PYTHON) scripts/check_docs.py \
+	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" \
+		$(PYTHON) scripts/check_docs.py \
 		--renderer "$(MMDC)" --puppeteer-config "$(PUPPETEER_CONFIG)" $(DOC_FILES)
 
 preview-docs: python-runtime-check
@@ -214,7 +240,8 @@ preview-docs: python-runtime-check
 		exit 1; \
 	}
 	rm -rf "$(TOOLS_DIR)/docs-preview"
-	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" $(PYTHON) scripts/check_docs.py \
+	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" \
+		$(PYTHON) scripts/check_docs.py \
 		--renderer "$(MMDC)" --puppeteer-config "$(PUPPETEER_CONFIG)" \
 		--output-directory "$(TOOLS_DIR)/docs-preview" $(DOC_FILES)
 
@@ -319,7 +346,8 @@ test-integration: python-runtime-check
 		./scripts/test-integration.sh
 
 test-telemetry-continuity: python-runtime-check ## Exercise disposable Brave Java ↔ Go HTTP trace continuity
-	@GO="$(GO)" PYTHON="$(PYTHON)" ./scripts/test-telemetry-continuity.sh
+	@GO="$(GO)" PYTHON="$(PYTHON)" PRODUCT_TOOLING_REPOSITORY_ROOT="$(PRODUCT_REPOSITORY_ROOT)" \
+		./scripts/test-telemetry-continuity.sh
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \
@@ -368,16 +396,23 @@ shared-candidate-image:
 shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image:
 	@phase="$(@:shared-candidate-%=%)"; \
 	if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
-		PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)/scripts/go:$(CURDIR)/scripts" "$(PYTHON)" scripts/shared_phase.py "$$phase"; \
+		PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+			"$(PYTHON)" -m scripts.go.service.shared_phase \
+			--config "$(GO_SERVICE_TOOLING_CONFIG)" "$$phase"; \
 	else case "$$phase" in generated) target=check-proto-drift;; breaking) target=check-proto-breaking;; integration) target=test-integration;; image) target=image-check;; esac; \
 		$(MAKE) --no-print-directory "$$target"; fi
 
 test-tooling: python-toolchain-check verify-tools
+	@$(MAKE) --no-print-directory python-product-tooling-test-fast
 	@MODULE_ROOT="$(CURDIR)" COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
 		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" PYTHON="$(PYTHON)" \
 		COMMON_GO_TOOLING_PYTHON="$(PYTHON)" \
 		PRODUCT_TOOLING_REPOSITORY_ROOT="$(PRODUCT_REPOSITORY_ROOT)" \
 		./scripts/test-tooling.sh
+
+security-verify: python-runtime-check ## Run read-only Product HTTP/gRPC probes against explicit target endpoints
+	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" scripts/security_verify.py
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server

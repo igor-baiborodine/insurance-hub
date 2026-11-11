@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from product_process import ProductCommandError, run
+
+from scripts.go.service.tooling_process import run
+from scripts.python.process_runner import CommandError as ProductCommandError
 
 pytestmark = pytest.mark.integration
 TOOL_NAMES = (
@@ -246,7 +248,7 @@ def test_go_bootstrap_does_not_invoke_non_go_tools(tooling: Tooling) -> None:
         'printf \'go %s\\n\' "$*" >>"$BOOTSTRAP_TRACE"\n'
         'case "${1:-}" in\n'
         "install) exit 0 ;;\n"
-        "env) test \"${2:-}\" = GOVERSION; printf 'go1.27.3\\n' ;;\n"
+        "env) test \"${2:-}\" = GOVERSION; printf 'go1.27.4\\n' ;;\n"
         "*) exit 64 ;;\n"
         "esac\n",
         encoding="utf-8",

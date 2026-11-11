@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import os
 import signal
@@ -12,45 +11,12 @@ import time
 from pathlib import Path
 
 import bootstrap_docs
-import build_image
 import image_check
 import integration_test
 import pytest
-from product_process import CAPTURE_LIMIT, ProductCommandError, run
 
 import check_docs
-
-
-def test_candidate_integration_runs_go_suite_without_retired_java_fixture(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # given
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "scripts/go"))
-    shared_phase = importlib.import_module("shared_phase")
-    requests: list[tuple[str, str]] = []
-    commands: list[list[str]] = []
-
-    def fake_context_request(operation: str, phase: str) -> dict[str, object]:
-        requests.append((operation, phase))
-        return {"environment": {}}
-
-    def fake_run(arguments: list[str], **_kwargs: object) -> str:
-        commands.append(arguments)
-        return ""
-
-    monkeypatch.setattr(shared_phase, "context_request", fake_context_request)
-    monkeypatch.setattr(shared_phase, "run", fake_run)
-
-    # when
-    status = shared_phase.main(["integration"])
-
-    # then
-    assert status == 0
-    assert requests == [("begin", "integration"), ("end", "integration")]
-    assert commands == [
-        ["make", "--no-print-directory", "check-candidate-servicekit"],
-        ["make", "--no-print-directory", "test-integration"],
-    ]
+from scripts.python.process_runner import CommandError as ProductCommandError
 
 
 def configure_doc_paths(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
@@ -229,26 +195,6 @@ def test_bootstrap_docs_reports_partial_install_failure(
     # then
     assert status == 1
     assert "controlled install failure" in capsys.readouterr().err
-
-
-def test_image_build_rejects_missing_identity_before_command(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    # given
-    for name in build_image.REQUIRED:
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(
-        build_image,
-        "command",
-        lambda *_args, **_kwargs: pytest.fail("invalid image identity reached a command"),
-    )
-
-    # when
-    status = build_image.main([])
-
-    # then
-    assert status == 1
-    assert "IMAGE_NAME is required" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("missing", sorted(image_check.PACKAGED_FILES))
@@ -604,115 +550,6 @@ def test_check_docs_bounds_invalid_mermaid_renderer(
         check_docs.main(
             ["--renderer", str(renderer), "--puppeteer-config", str(config), str(document)]
         )
-
-
-def test_product_process_reports_nonzero_without_argument_values(tmp_path: Path) -> None:
-    # when / then
-    with pytest.raises(ProductCommandError, match="controlled command failed with status 7"):
-        run(
-            [sys.executable, "-c", "raise SystemExit(7)", "synthetic-secret-sentinel"],
-            cwd=tmp_path,
-            env=os.environ,
-            timeout_seconds=5,
-            activity="controlled command",
-            capture=False,
-        )
-
-
-def test_product_process_captures_output_larger_than_pipe_capacity(tmp_path: Path) -> None:
-    # given
-    payload = "x" * (1024 * 1024)
-
-    # when
-    output = run(
-        [
-            sys.executable,
-            "-c",
-            "import sys; value = sys.stdin.read(); sys.stdout.write('x' * (1024 * 1024) + value)",
-        ],
-        cwd=tmp_path,
-        env=os.environ,
-        timeout_seconds=5,
-        activity="controlled large capture",
-        input_text="complete",
-        capture=True,
-    )
-
-    # then
-    assert output == payload + "complete"
-
-
-def test_product_process_rejects_output_beyond_capture_limit(tmp_path: Path) -> None:
-    # when / then
-    with pytest.raises(ProductCommandError, match="stdout exceeded.*capture limit"):
-        run(
-            [sys.executable, "-c", f"print('x' * {CAPTURE_LIMIT})"],
-            cwd=tmp_path,
-            env=os.environ,
-            timeout_seconds=5,
-            activity="controlled capture limit",
-            capture=True,
-        )
-
-
-def test_product_process_does_not_wait_for_descendant_capture_eof(tmp_path: Path) -> None:
-    # given
-    descendant_pid = tmp_path / "descendant.pid"
-    command = (
-        "import pathlib, subprocess, sys, time\n"
-        f"pid_file = pathlib.Path({str(descendant_pid)!r})\n"
-        "subprocess.Popen([sys.executable, '-c', "
-        "'import os, pathlib, time; pathlib.Path(os.environ[\"PID_FILE\"]).write_text(str(os.getpid())); time.sleep(60)'"
-        "])\n"
-        "deadline = time.monotonic() + 2\n"
-        "while not pid_file.exists() and time.monotonic() < deadline:\n"
-        "    time.sleep(0.01)\n"
-        "print('leader complete')\n"
-    )
-    environment = {**os.environ, "PID_FILE": str(descendant_pid)}
-
-    # when
-    started = time.monotonic()
-    output = run(
-        [sys.executable, "-c", command],
-        cwd=tmp_path,
-        env=environment,
-        timeout_seconds=5,
-        teardown_seconds=2,
-        activity="controlled inherited capture",
-        capture=True,
-    )
-
-    # then
-    assert output == "leader complete\n"
-    assert time.monotonic() - started < 3
-    wait_for_process_exit(int(descendant_pid.read_text(encoding="utf-8")))
-
-
-def test_product_process_bounds_timeout_and_descendant_cleanup(tmp_path: Path) -> None:
-    # given
-    child = tmp_path / "child.py"
-    child.write_text(
-        "import subprocess, sys, time\n"
-        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-        "time.sleep(60)\n",
-        encoding="utf-8",
-    )
-
-    # when
-    started = time.monotonic()
-    with pytest.raises(ProductCommandError, match="deadline"):
-        run(
-            [sys.executable, str(child)],
-            cwd=tmp_path,
-            env=os.environ,
-            timeout_seconds=0.2,
-            teardown_seconds=2,
-            activity="controlled timeout",
-        )
-
-    # then
-    assert time.monotonic() - started < 3
 
 
 def process_is_running(pid: int) -> bool:

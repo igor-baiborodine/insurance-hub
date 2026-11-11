@@ -21,11 +21,14 @@ from urllib.parse import quote, unquote, urlsplit
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 SERVICE_SCRIPTS = Path(__file__).resolve().parent
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 if str(SERVICE_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SERVICE_SCRIPTS))
 
 import administration as reader  # noqa: E402
-from product_process import run_cli  # noqa: E402
+
+from scripts.go.service.tooling_process import run_cli  # noqa: E402
 
 ROLES = ("go_product_reader", "go_product_migrator", "go_product_seeder")
 CA_MOUNTS = {

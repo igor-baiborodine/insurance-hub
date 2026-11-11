@@ -16,12 +16,13 @@ CONFIG_PATH = REPOSITORY_ROOT / "templates/go-service/go-service-tooling.json"
 POLICY_SEARCH_CONFIG_PATH = (
     REPOSITORY_ROOT / "services/policy-search-service/go-service-tooling.json"
 )
+PRODUCT_CONFIG_PATH = REPOSITORY_ROOT / "services/product-service/go-service-tooling.json"
 
 
 @pytest.mark.parametrize(
     "config_path",
-    (CONFIG_PATH, POLICY_SEARCH_CONFIG_PATH),
-    ids=("scaffold", "policy-search"),
+    (CONFIG_PATH, POLICY_SEARCH_CONFIG_PATH, PRODUCT_CONFIG_PATH),
+    ids=("scaffold", "policy-search", "product"),
 )
 def test_render_is_deterministic_and_matches_checked_output(config_path: Path) -> None:
     # given

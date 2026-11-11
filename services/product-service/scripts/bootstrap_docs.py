@@ -8,7 +8,8 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from product_process import ProductCommandError, run, run_cli
+from scripts.go.service.tooling_process import run, run_cli
+from scripts.python.process_runner import CommandError as ProductCommandError
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 TOOLS_ROOT = MODULE_ROOT / ".tools"

@@ -1,3 +1,18 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Product contract baseline](#product-contract-baseline)
+  - [Successful HTTP observations](#successful-http-observations)
+  - [Data semantics observations](#data-semantics-observations)
+  - [Failure and boundary observations](#failure-and-boundary-observations)
+  - [Consumer expectations](#consumer-expectations)
+  - [Binding field mapping and presence rules](#binding-field-mapping-and-presence-rules)
+  - [Scenario parity decisions](#scenario-parity-decisions)
+  - [Versioned unary gRPC and HTTP boundary](#versioned-unary-grpc-and-http-boundary)
+  - [Historical capture status](#historical-capture-status)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Product contract baseline
 
 This document records Java Product wire observations and current consumer needs for issue #131.
@@ -175,35 +190,9 @@ nested array order, element identity, and safe error category remain comparison-
 These rules define semantics only. #132 chooses protobuf names/numbers, an exact-decimal encoding,
 validation/runtime libraries, generated outputs, and the concrete HTTP adapter implementation.
 
-## Capture and validation
+## Historical capture status
 
-Run the listener and fixture checks with:
-
-```shell
-make product-baseline-test BASELINE_SUITE=happy
-make product-baseline-fixtures-check BASELINE_PART=http
-make product-baseline-test BASELINE_SUITE=data-edges
-make product-baseline-fixtures-check BASELINE_PART=data-edges
-make product-baseline-test BASELINE_SUITE=failures
-make product-baseline-fixtures-check BASELINE_PART=failures
-```
-
-Live capture requires temporary Product, gateway, and Product-database forwards plus a file
-containing a short-lived gateway token. When a Kubernetes database forward resets after one client
-session, provide a second forward for the post-capture identity check:
-
-```shell
-make product-baseline-capture \
-  BASELINE_ENV=local-dev \
-  BASELINE_PART=http \
-  BASELINE_PRODUCT_DB_AFTER_PORT=5493 \
-  BASELINE_GATEWAY_TOKEN_FILE=/path/to/temporary-token
-# Review the new ignored run before acceptance.
-scripts/product-baseline/accept-http.sh \
-  ai/artifacts/epic-4.2/issue-131/http-runs/local-dev-<timestamp>.json
-```
-
-The capture omits volatile `Date` and connection headers, stores content type and length, preserves
-the response body as a raw JSON string with a SHA-256 checksum, and never writes the token. Fixture
-validation rejects missing scenarios, changed body checksums, mismatched catalog/inventory links,
-or bearer values other than the explicit redaction marker.
+The accepted Java HTTP, data-edge, and failure fixtures remain under `legacy/` as the recorded
+migration baseline. Their capture, acceptance, and comparison scripts were retired after Java
+Product retirement. Current compatibility is checked through the Product module's generated
+contract, direct HTTP/gRPC, integration, and image validation owners.

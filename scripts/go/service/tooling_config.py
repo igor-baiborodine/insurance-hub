@@ -419,11 +419,24 @@ def _load_dockerfile(value: object, module_root: Path, image: ImageConfig) -> Do
         require(isinstance(item, dict), f"{field} is invalid")
         require_keys(item, {"source", "destination", "mode"}, field)
         source = docker_absolute_path(item["source"], f"{field}.source")
-        require(source.startswith("/out/"), f"{field}.source must be under /out")
-        require(
-            source in {output.output for output in build_outputs},
-            f"{field}.source is not a configured build output",
-        )
+        if source.startswith("/out/"):
+            require(
+                source in {output.output for output in build_outputs},
+                f"{field}.source is not a configured build output",
+            )
+        elif source.startswith("/src/"):
+            source_relative = source.removeprefix("/src/")
+            module_file(module_root, source_relative, f"{field}.source")
+            require(
+                any(
+                    source_relative == item.source
+                    or source_relative.startswith(f"{item.source.rstrip('/')}/")
+                    for item in source_copies
+                ),
+                f"{field}.source is not included by sourceCopies",
+            )
+        else:
+            raise ToolingConfigError(f"{field}.source must be under /out or /src")
         destination = docker_absolute_path(item["destination"], f"{field}.destination")
         mode = item["mode"]
         require(

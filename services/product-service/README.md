@@ -22,7 +22,7 @@ listeners remain private ClusterIP endpoints.
 
 The module path is
 `github.com/igor-baiborodine/insurance-hub/services/product-service`. It resolves with
-`GOWORK=off` and has no filesystem replacement or dependency on the scaffold module. Go 1.27.3 is
+`GOWORK=off` and has no filesystem replacement or dependency on the scaffold module. Go 1.27.4 is
 required. From the repository root, use its owning Makefile:
 
 ```sh
@@ -233,11 +233,19 @@ own all version pins, SQL generation, integration selection, and service executi
 `test-tooling` suite proves Product formatting, dependency, compatibility, Protobuf/SQL drift, and
 integration-selection and documentation failures without changing its disposable fixture.
 
+[`go-service-tooling.json`](go-service-tooling.json) is the typed authority for Product's shared
+repository tooling. It describes the three build outputs, runtime SQL and catalog assets, image
+identity, ports, entry point, and generic validation phases while keeping Product database,
+deployment, and access assertions in service-local scripts. `dockerfile-generate` updates the
+checked-in [Dockerfile](Dockerfile) from that configuration; `dockerfile-check` detects drift
+without modifying it. New Go services should begin with the scaffold's configuration and keep only
+their service policy in local adapters.
+
 The relevant reproducibility pins are:
 
 | Capability | Pin |
 | --- | --- |
-| Go | 1.27.3 |
+| Go | 1.27.4 |
 | Buf / `protoc-gen-go` / `protoc-gen-go-grpc` | 1.73.0 / 1.36.12 / 1.6.2 |
 | sqlc / pgx | 1.31.1 / 5.11.0 |
 | gRPC Go / protobuf Go / Protovalidate | 1.83.2 / 1.36.12 / 1.4.0 |
@@ -318,7 +326,7 @@ goroutine, and processor signals. The Go memory-limit datapoint is present only 
 memory limit is configured. The database and runtime callbacks stop during the shared shutdown
 budget. Request logs remain local JSON when telemetry is disabled.
 
-The owning mixed-language continuity check requires Go 1.27.3, Java 14, system Maven, the Docker
+The owning mixed-language continuity check requires Go 1.27.4, Java 14, system Maven, the Docker
 CLI, and a running Docker daemon. It exercises disposable Brave Java-to-Go and test-only Go-to-Java
 HTTP paths without changing the production gateway route:
 
@@ -434,22 +442,16 @@ consumes `PRODUCT_DATABASE_URL` but no gateway HMAC signing setting. Auth and th
 their existing HS256 trust configuration and configured 86,400-second token lifetime; this service
 adds no JWT parser, role check, rotation, or revocation behavior.
 
-From the repository root, after `make go-product-bootstrap-tools`, run
-`make product-security-test-tooling` and `make product-security-check` for the accepted access
-fixtures, Java baseline regression, and real gateway → Go → disposable PostgreSQL suite. The
-module's `make -C services/product-service check` runs the direct HTTP/gRPC access matrix as part
-of its full integration gate, enforcing all eighteen accepted case IDs on each transport. The
-security aggregate deliberately leaves that direct suite to the module gate. These checks use
-generated test signing material and a disposable QA catalog, reject an external database URL, and
-clean up listeners, processes, and containers on completion or failure. See the
-[reproduction instructions](../../docs/migration/phase-4/product-service/security-baseline.md#reproduction)
-for prerequisites and safe temporary-token handling. These are change-based local review checks;
-the hosted Product security workflow has been retired. The
+The module's `make -C services/product-service check` runs the direct HTTP/gRPC access matrix as
+part of its full integration gate, enforcing all eighteen accepted case IDs on each transport.
+Use `make -C services/product-service test-tooling` for focused Product tooling behavior. The
+retired Java baseline/security scripts and root targets are historical only and no longer form a
+supported validation path. The
 [contributor validation matrix](../../CONTRIBUTING.md#change-based-local-validation) records when
 the broader local checks and evidence are required.
 
-`make product-security-verify` is a separate read-only probe for an explicitly selected, already
-running Go target. The [deployment runbook](../../docs/migration/phase-4/product-service/deployment-runbook.md)
+`make -C services/product-service security-verify` is a separate read-only probe for an explicitly
+selected, already running Go target. The [deployment runbook](../../docs/migration/phase-4/product-service/deployment-runbook.md)
 defines its endpoint/context inputs and the rendered/effective resource and read-only role checks.
 Anonymous internal access is a compatibility constraint; `ClusterIP` does not authenticate
 in-cluster callers, so the NetworkPolicy and gateway admission label are part of the deployed

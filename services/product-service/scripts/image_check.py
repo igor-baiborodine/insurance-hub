@@ -13,7 +13,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from integration_test import passed_tests
-from product_process import ProductCommandError, run, run_cli
+
+from scripts.go.service.tooling_process import run, run_cli
+from scripts.python.process_runner import CommandError as ProductCommandError
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 MIGRATION_ASSET = "usr/share/insurance-hub/product/migrations/00001_product.sql"

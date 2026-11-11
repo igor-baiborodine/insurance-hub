@@ -80,27 +80,7 @@ PYTHON_SCAFFOLD_TOOLING_FILES := \
 	templates/go-service/scripts/test_check_copy.py \
 	templates/go-service/scripts/test_tooling.py
 PYTHON_PRODUCT_TOOLING_FILES := \
-	scripts/product_baseline/__init__.py \
-	scripts/product_baseline/accept.py \
-	scripts/product_baseline/catalog_roundtrip.py \
-	scripts/product_baseline/capture.py \
-	scripts/product_baseline/capture_inventory.py \
-	scripts/product_baseline/compare_http.py \
-	scripts/product_baseline/fixtures.py \
-	scripts/product_baseline/preflight.py \
-	scripts/product_baseline/replay.py \
-	scripts/product_baseline/test_catalog_roundtrip.py \
-	scripts/product_baseline/test_compare_http.py \
-	scripts/product_baseline/test_fixtures.py \
-	scripts/product_baseline/verify.py \
-	scripts/product_security/__init__.py \
-	scripts/product_security/check_cases.py \
-	scripts/product_security/check_java_results.py \
-	scripts/product_security/security_test.py \
-	scripts/product_security/test_validators.py \
-	scripts/product_security/verify.py \
 	services/product-service/scripts/check_access_results.py \
-	services/product-service/scripts/build_image.py \
 	services/product-service/scripts/bootstrap_docs.py \
 	services/product-service/scripts/test_check_access_results.py \
 	services/product-service/scripts/check_ci.py \
@@ -114,9 +94,8 @@ PYTHON_PRODUCT_TOOLING_FILES := \
 	services/product-service/scripts/flux_deployment_test.py \
 	services/product-service/scripts/integration_test.py \
 	services/product-service/scripts/image_check.py \
-	services/product-service/scripts/product_process.py \
 	services/product-service/scripts/resource_administration.py \
-	services/product-service/scripts/shared_phase.py \
+	services/product-service/scripts/security_verify.py \
 	services/product-service/scripts/telemetry_continuity_test.py \
 	services/product-service/scripts/test_deployment_checks.py \
 	services/product-service/scripts/test_deployment_lifecycle.py \
@@ -351,10 +330,6 @@ python-product-tooling-lint: python-lint ## Lint Product Python tooling
 python-product-tooling-test-fast: python-toolchain-check ## Run fast Product tooling tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
 		-m 'not integration and not acceptance' \
-		scripts/product_baseline/test_catalog_roundtrip.py \
-		scripts/product_baseline/test_compare_http.py \
-		scripts/product_baseline/test_fixtures.py \
-		scripts/product_security/test_validators.py \
 		services/product-service/scripts/test_administration.py \
 		services/product-service/scripts/test_resource_administration.py \
 		services/product-service/scripts/test_check_access_results.py \

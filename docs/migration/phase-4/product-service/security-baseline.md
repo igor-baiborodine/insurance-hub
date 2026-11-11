@@ -8,7 +8,7 @@
   - [Final Java-compatible mapping for Issue-133](#final-java-compatible-mapping-for-issue-133)
   - [Isolated application evidence for Issue-133](#isolated-application-evidence-for-issue-133)
   - [Go deployment exposure gate for Issue-134](#go-deployment-exposure-gate-for-issue-134)
-  - [Reproduction](#reproduction)
+  - [Current validation](#current-validation)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -164,7 +164,8 @@ errors remained generic. This does not establish collector delivery, which belon
 
 ## Go deployment exposure gate for Issue-134
 
-The separate `product-security-verify` target checks an **already running** Go Product target. It
+The separate `make -C services/product-service security-verify` target checks an **already running**
+Go Product target. It
 requires explicit Kubernetes context, namespace, environment, and three reachable endpoints; it
 has no default cluster target. It reads the accepted `access/<environment>.json` observations as
 response oracles and sends anonymous `GET /products`, `GET /products/TRI`, generated Product v1
@@ -187,7 +188,7 @@ PRODUCT_SECURITY_EXPECTED_ENV=local-dev \
 PRODUCT_SECURITY_HTTP_ENDPOINT=http://127.0.0.1:<http-port> \
 PRODUCT_SECURITY_GRPC_ENDPOINT=127.0.0.1:<grpc-port> \
 PRODUCT_SECURITY_HEALTH_ENDPOINT=http://127.0.0.1:<management-port> \
-make product-security-verify
+make -C services/product-service security-verify
 ```
 
 Use `qa-insurance-hub`, `qa-svc`, and `qa` for QA after stopping local-dev forwards and switching
@@ -230,67 +231,20 @@ then-current Java Product routing evidence in both environments. Current reruns 
 gateway-to-Go routing and retired Java Product absence. The final coordinates and rerun procedure
 are in the [deployment runbook](deployment-runbook.md#acceptance-evidence-and-handoff).
 
-## Reproduction
+## Current validation
 
-For the isolated #133 proof, use Java 14, system Maven, Go 1.27.3, a working Docker daemon,
-`jq`, Python 3, `timeout`, and `setsid`. Bootstrap the Product module's pinned tools explicitly;
-that step needs Go module/tool and Maven package access on a fresh machine. Leave
-`PRODUCT_DATABASE_URL` unset. From the repository root:
+The combined Java Product baseline and security scripts were retired with the Java Product service.
+Their accepted fixtures, observations, and manifests remain historical migration evidence under
+`legacy/`; they are not current commands.
 
-```shell
-make go-product-bootstrap-tools
-make product-security-test-tooling
-make product-security-check
-make -C services/product-service check
-```
-
-`product-security-check` validates the accepted access fixtures, runs the Java Product/gateway
-access regression, and runs the real gateway → Go → disposable PostgreSQL matrix. The Product
-module's full `check` owns the direct Go HTTP/gRPC access suite and exact case-ID assertion, so the
-security aggregate does not run that suite twice. The hosted Product security workflow has been
-retired; run these checks locally when gateway/Product access behavior, access fixtures, or their
-tooling changes, following the
-[contributor validation matrix](../../../../CONTRIBUTING.md#change-based-local-validation).
-Historical hosted results remain historical evidence and do not establish a current local pass.
-The test script enforces a bounded token-clock drift, Java execution timeout, and exact case/report
-selection. It uses generated test signing material, a disposable QA catalog and restricted reader,
-and private temporary files; success or failure stops the Java/Go processes, listeners, and
-PostgreSQL container. It rejects external database settings and does not rewrite accepted fixtures,
-deployed credentials, or gateway routing.
-
-For the earlier #131 Java baseline alone, the narrower commands remain:
+Use the Product module owners for current source validation:
 
 ```shell
-make product-baseline-test BASELINE_SUITE=access
-make product-baseline-fixtures-check BASELINE_PART=access
+make -C services/product-service test-tooling
+make -C services/product-service check-go-pr FORMAT_SCOPE=all
 ```
 
-Live baseline capture requires Java Product, gateway, and Product-database forwards plus a temporary
-file holding a short-lived token issued by the existing Auth flow. It records valid, absent,
-malformed, and invalid-signature cases only. Before each environment, confirm the intended
-Kubernetes context/namespace and UTC host/node clocks; the capture rejects more than five minutes
-of target/host clock difference. Store the temporary token outside the repository with mode `0600`
-(`umask 077` before creating it), check its expiry, pass only its path, and use a cleanup trap with
-`shred -u` for the original file after the run or on failure. The capture shreds its temporary
-authorization-header files; the caller remains responsible
-for removing the original token file. Generate negative claim variants only in isolated tests;
-do not change deployed keys, token policy, or users for validation.
-
-```shell
-make product-baseline-capture \
-  BASELINE_ENV=local-dev \
-  BASELINE_PART=access \
-  BASELINE_PRODUCT_DB_AFTER_PORT=5493 \
-  BASELINE_GATEWAY_TOKEN_FILE=/path/to/temporary-token
-# Review the ignored run, then:
-scripts/product-baseline/accept-access.sh \
-  ai/artifacts/epic-4.2/issue-131/access-runs/local-dev-<timestamp>.json
-```
-
-Repeat against QA only after stopping local-dev, starting QA, and passing the environment preflight.
-After resuming a paused QA VM, synchronize each node clock from its RTC before capture. The capture
-never copies the token into a fixture. Issue #134 delivered the Go deployment and live exposure/role
-evidence; #135 owns telemetry delivery; #136 owns differential, consumer, load, failure, and
-rollback qualification; #137 alone owns any routing cutover. Anonymous internal Go access and
-shared HS256 trust remain explicit interim limitations, not evidence of workload authentication or
-revocation.
+For an explicitly selected already-running Go target, use the guarded read-only
+`make -C services/product-service security-verify` interface described above. It still requires all
+target coordinates and reachable loopback endpoints and does not authorize a deployment or shared
+environment mutation.

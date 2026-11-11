@@ -10,9 +10,13 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from product_process import ProductCommandError, run, run_cli
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from check_access_results import main as check_access_results
+from check_access_results import main as check_access_results  # noqa: E402
+from scripts.go.service.tooling_process import run, run_cli  # noqa: E402
+from scripts.python.process_runner import CommandError as ProductCommandError  # noqa: E402
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 PATTERNS = {

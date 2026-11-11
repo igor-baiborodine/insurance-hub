@@ -155,9 +155,8 @@ not run topology, tooling-fixture, copy, release, deployment, image, database-ro
 security checks.
 
 Product's selected-module validation owns the direct HTTP/gRPC access matrix and disposable
-PostgreSQL integration suite. Accepted access fixtures, Java access regression, and the combined
-gateway-to-Go suite remain locally owned through `make product-security-test-tooling` and
-`make product-security-check`; the hosted Product security workflow has been retired. The
+PostgreSQL integration suite. The retired Java access and combined gateway-to-Go scripts remain
+historical evidence only; current Product tooling checks are service-local. The
 [change-based local validation matrix](../../../CONTRIBUTING.md#change-based-local-validation)
 records when those and the other auxiliary checks are required and which evidence to retain.
 

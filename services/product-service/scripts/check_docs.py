@@ -16,7 +16,8 @@ import urllib.parse
 from collections.abc import Sequence
 from pathlib import Path
 
-from product_process import ProductCommandError, run, run_cli
+from scripts.go.service.tooling_process import run, run_cli
+from scripts.python.process_runner import CommandError as ProductCommandError
 
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 MERMAID_PATTERN = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
