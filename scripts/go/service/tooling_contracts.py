@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import http.client
 import json
 import re
+import socket
+import ssl
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -15,11 +20,22 @@ from scripts.go.service.tooling_config import (
     ToolingConfigError,
 )
 from scripts.go.service.tooling_process import run
+from scripts.go.service.tooling_resources import OwnedProcess
 from scripts.python.process_runner import child_environment
 
 RESOURCE_NAME = re.compile(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?")
 RESOURCE_REFERENCE = re.compile(r"(?:deployment|pod|service)/[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?")
 OWNER_TOKEN = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+MAX_RESPONSE_BYTES = 64 * 1024
+
+
+class AdministrationError(RuntimeError):
+    """A guarded administration transport violated its runtime contract."""
+
+
+def require_administration(condition: object, message: str) -> None:
+    if not condition:
+        raise AdministrationError(message)
 
 
 def module_file(module_root: Path, relative: str) -> Path:
@@ -111,6 +127,166 @@ class PortForwardSpec:
             self.resource,
             f"{self.local_port}:{self.remote_port}",
         )
+
+
+class ForwardedHTTPSConnection(http.client.HTTPSConnection):
+    """Keep TLS server-name verification while connecting through loopback."""
+
+    def __init__(
+        self,
+        server_name: str,
+        forwarded_port: int,
+        context: ssl.SSLContext,
+        timeout: float,
+    ) -> None:
+        super().__init__(server_name, 443, context=context, timeout=timeout)
+        self.forwarded_port = forwarded_port
+
+    def connect(self) -> None:
+        plain = socket.create_connection(("127.0.0.1", self.forwarded_port), self.timeout)
+        try:
+            self.sock = self._context.wrap_socket(plain, server_hostname=self.host)
+        except BaseException:
+            plain.close()
+            raise
+
+
+class JSONAdministrationClient:
+    """Bounded loopback JSON client with optional verified TLS and basic authentication."""
+
+    def __init__(
+        self,
+        port: int,
+        username: str,
+        password: str,
+        *,
+        server_name: str = "",
+        ca_certificate: bytes = b"",
+    ) -> None:
+        if not isinstance(port, int) or not 1 <= port <= 65535:
+            raise AdministrationError("administration port is invalid")
+        self.port = port
+        self.username = username
+        self.password = password
+        self.server_name = server_name
+        self.context: ssl.SSLContext | None = None
+        if server_name:
+            require_administration(bool(ca_certificate), "public CA is required")
+            self.context = ssl.create_default_context(cadata=ca_certificate.decode("utf-8"))
+            self.context.minimum_version = ssl.TLSVersion.TLSv1_2
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, object] | bytes | None = None,
+    ) -> tuple[int, object]:
+        payload: bytes | None
+        content_type = "application/json"
+        if isinstance(body, dict):
+            payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
+        else:
+            payload = body
+            if isinstance(body, bytes):
+                content_type = "application/x-ndjson"
+        headers: dict[str, str] = {}
+        if self.username or self.password:
+            credential = base64.b64encode(f"{self.username}:{self.password}".encode()).decode(
+                "ascii"
+            )
+            headers["Authorization"] = f"Basic {credential}"
+        if payload is not None:
+            headers["Content-Type"] = content_type
+        connection: http.client.HTTPConnection
+        if self.context is None:
+            connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        else:
+            connection = ForwardedHTTPSConnection(
+                self.server_name, self.port, self.context, timeout=10
+            )
+        try:
+            connection.request(method, path, body=payload, headers=headers)
+            response = connection.getresponse()
+            data = response.read(MAX_RESPONSE_BYTES + 1)
+            require_administration(
+                len(data) <= MAX_RESPONSE_BYTES,
+                "administration response exceeded limit",
+            )
+            if not data:
+                decoded: object = None
+            else:
+                try:
+                    decoded = json.loads(data)
+                except json.JSONDecodeError:
+                    decoded = None
+            return response.status, decoded
+        except (OSError, http.client.HTTPException, ssl.SSLError) as error:
+            raise AdministrationError("administration request failed") from error
+        finally:
+            connection.close()
+
+
+class OwnedPortForward:
+    """Start and clean one context-bound port forward through the shared process owner."""
+
+    def __init__(
+        self,
+        spec: PortForwardSpec,
+        *,
+        cwd: Path,
+        env: Mapping[str, str],
+        startup_seconds: float,
+        teardown_seconds: float = 5,
+        kubectl: str = "kubectl",
+    ) -> None:
+        if startup_seconds <= 0:
+            raise ValueError("a positive port-forward startup deadline is required")
+        self.spec = spec
+        self.cwd = cwd
+        self.env = env
+        self.startup_seconds = startup_seconds
+        self.teardown_seconds = teardown_seconds
+        self.kubectl = kubectl
+        self.owned: OwnedProcess | None = None
+
+    def __enter__(self) -> int:
+        owned = OwnedProcess.start(
+            self.spec.arguments(kubectl=self.kubectl),
+            cwd=self.cwd,
+            env=self.env,
+            teardown_seconds=self.teardown_seconds,
+        )
+        self.owned = owned
+        deadline = time.monotonic() + self.startup_seconds
+        stable_since = time.monotonic()
+        try:
+            while time.monotonic() < deadline:
+                if owned.process.poll() is not None:
+                    raise AdministrationError(
+                        "port-forward stopped early: " + owned.diagnostics().strip()
+                    )
+                if time.monotonic() - stable_since >= 1:
+                    return self.spec.local_port
+                time.sleep(0.1)
+            raise AdministrationError("port-forward did not become ready")
+        except BaseException:
+            owned.close()
+            raise
+
+    def __exit__(self, *_: object) -> None:
+        if self.owned is not None:
+            self.owned.close()
+
+
+def loopback_port() -> int:
+    """Reserve and return one currently available loopback TCP port."""
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def require_status(status: int, accepted: set[int], activity: str) -> None:
+    require_administration(status in accepted, f"{activity} returned HTTP {status}")
 
 
 def required_secret(name: str, source: Mapping[str, str]) -> str:

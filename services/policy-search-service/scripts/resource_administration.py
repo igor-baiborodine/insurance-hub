@@ -16,17 +16,26 @@ from typing import Any
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 sys.path.insert(0, str(ROOT))
 
-from administration import (  # noqa: E402, I001
+from scripts.go.service.configuration import service_record, target_record  # noqa: E402
+from scripts.go.service.tooling_config import (  # noqa: E402
+    load_tooling_config,
+    validate_catalog_identity,
+)
+from scripts.go.service.tooling_contracts import (  # noqa: E402
     AdministrationError,
-    ElasticsearchClient,
-    PortForward,
-    client_for,
-    command,
-    require,
+    OwnedPortForward,
+    PortForwardSpec,
+    loopback_port,
     require_status,
 )
-from scripts.go.service.configuration import service_record, target_record  # noqa: E402
-from scripts.python.process_runner import CommandError  # noqa: E402
+from scripts.go.service.tooling_contracts import (  # noqa: E402
+    JSONAdministrationClient as ElasticsearchClient,
+)
+from scripts.go.service.tooling_contracts import (  # noqa: E402
+    require_administration as require,
+)
+from scripts.go.service.tooling_process import run  # noqa: E402
+from scripts.python.process_runner import CommandError, child_environment  # noqa: E402
 
 SERVICE = "policy-search"
 OWNER = "policy-search"
@@ -42,6 +51,27 @@ MAPPING = {
         "dateTo": {"type": "date", "format": "strict_date"},
     },
 }
+
+
+def safe_environment() -> dict[str, str]:
+    overrides = {"KUBECONFIG": os.environ["KUBECONFIG"]} if "KUBECONFIG" in os.environ else None
+    return child_environment(
+        overrides,
+        preferred_executables=(os.environ.get("KUBECTL", "kubectl"),),
+    )
+
+
+def command(arguments: list[str], *, input_text: str | None = None, timeout: int = 30) -> str:
+    return run(
+        arguments,
+        cwd=ROOT,
+        env=safe_environment(),
+        input_text=input_text,
+        timeout_seconds=timeout,
+        teardown_seconds=10,
+        activity="Policy Search administration",
+        capture=True,
+    )
 
 
 @dataclass(frozen=True)
@@ -66,6 +96,16 @@ class Target:
 
     def __init__(self) -> None:
         record = service_record(ROOT, SERVICE)
+        tooling = load_tooling_config(
+            ROOT / "services/policy-search-service/go-service-tooling.json"
+        )
+        validate_catalog_identity(tooling, SERVICE, record)
+        require(tooling.contracts is not None, "tooling contracts are missing")
+        require(
+            set(tooling.contracts.administration.transports) == {"https", "kubectl", "stdin"},
+            "administration transport contract differs",
+        )
+        self.port_forward_seconds = tooling.contracts.deployment.port_forward_seconds
         setup = record.get("administration", {}).get("setup", {})
         require(
             setup
@@ -254,6 +294,47 @@ class Target:
             "-",
             input_text=json.dumps(secret),
         )
+
+
+class PortForward(OwnedPortForward):
+    """Bind Policy Search target data to the generic owned port-forward lifecycle."""
+
+    def __init__(self, target: Target) -> None:
+        port = loopback_port()
+        super().__init__(
+            PortForwardSpec(
+                context=target.context,
+                namespace=target.data_namespace,
+                resource=f"service/{target.elasticsearch_service}",
+                local_port=port,
+                remote_port=9200,
+            ),
+            cwd=ROOT,
+            env=safe_environment(),
+            startup_seconds=target.port_forward_seconds,
+            teardown_seconds=5,
+            kubectl=target.kubectl,
+        )
+
+
+def client_for(
+    target: Target,
+    username: str,
+    password: str,
+    port: int,
+) -> ElasticsearchClient:
+    ca_certificate = (
+        target.secret_value(target.data_namespace, target.public_ca_secret, "ca.crt")
+        if target.public_ca_secret
+        else b""
+    )
+    return ElasticsearchClient(
+        port,
+        username,
+        password,
+        server_name=target.server_name,
+        ca_certificate=ca_certificate,
+    )
 
 
 def mapping_digest() -> str:

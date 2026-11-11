@@ -114,3 +114,58 @@ def test_secret_transport_uses_standard_input_and_redaction(
     assert calls[0]["input_text"] == "private-value\n"
     assert calls[0]["sensitive_values"] == ("private-value",)
     assert "private-value" not in calls[0]["env"].values()  # type: ignore[union-attr]
+
+
+def test_owned_port_forward_reports_early_exit_and_closes_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    class Process:
+        @staticmethod
+        def poll() -> int:
+            return 1
+
+    class Owned:
+        process = Process()
+        closed = False
+
+        @staticmethod
+        def diagnostics() -> str:
+            return "controlled failure"
+
+        def close(self) -> None:
+            self.closed = True
+
+    owned = Owned()
+    monkeypatch.setattr(
+        tooling_contracts.OwnedProcess,
+        "start",
+        lambda *_args, **_options: owned,
+    )
+    forward = tooling_contracts.OwnedPortForward(
+        tooling_contracts.PortForwardSpec(
+            context="kind-local-dev",
+            namespace="local-dev-all",
+            resource="service/example-api",
+            local_port=18080,
+            remote_port=8080,
+        ),
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        startup_seconds=1,
+    )
+
+    # when / then
+    with pytest.raises(
+        tooling_contracts.AdministrationError,
+        match="port-forward stopped early: controlled failure",
+    ):
+        forward.__enter__()
+    assert owned.closed
+
+
+def test_json_administration_client_rejects_invalid_port() -> None:
+    # when / then
+    with pytest.raises(tooling_contracts.AdministrationError, match="port is invalid"):
+        tooling_contracts.JSONAdministrationClient(0, "reader", "controlled")

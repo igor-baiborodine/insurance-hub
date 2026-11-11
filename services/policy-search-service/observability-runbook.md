@@ -78,7 +78,7 @@ or Pod names into metric labels or Loki index labels. Grafana variables are limi
 
 ## Source and disposable validation
 
-Prerequisites are the repository-pinned Python environment, Go 1.27.3, Docker, Helm, kubectl and
+Prerequisites are the repository-pinned Python environment, Go 1.27.4, Docker, Helm, kubectl and
 the pinned backend images. Validate all registered assets and shared collection policy:
 
 ```sh

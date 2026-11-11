@@ -5,7 +5,6 @@
   "image": {
     "name": "insurance-hub-go-service-api",
     "title": "Insurance Hub Go Service API",
-    "localTagPrefix": "1.0.0-local.",
     "entrypoint": [
       "/go-service"
     ],

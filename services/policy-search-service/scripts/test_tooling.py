@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -11,8 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-
-from scaffold_process import CommandError, child_environment, run_command
+from scripts.python.process_runner import CommandError, child_environment, run_command
 
 pytestmark = pytest.mark.integration
 TOOL_NAMES = (
@@ -94,7 +94,8 @@ def tooling(tmp_path_factory: pytest.TempPathFactory) -> Tooling:
 
 
 def new_fixture(tooling: Tooling, name: str) -> Path:
-    fixture = tooling.temporary_root / name
+    fixture = tooling.temporary_root / name / "services/policy-search-service"
+    fixture.parent.mkdir(parents=True)
     shutil.copytree(tooling.base_fixture, fixture, symlinks=True)
     return fixture
 
@@ -167,6 +168,12 @@ def run_target(
 
 
 def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]:
+    if case == "dockerfile-config":
+        path = fixture / "go-service-tooling.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["dockerfile"]["instruction"] = "RUN controlled"  # type: ignore[index]
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        return "dockerfile-generate", "unknown keys: instruction", ()
     if case == "format-new-file":
         (fixture / "tooling_format_defect.go").write_text(
             "package tooling\nfunc formatDefect( ){}\n", encoding="utf-8"
@@ -305,6 +312,7 @@ def test_non_race_test_target_passes_without_mutation(tooling: Tooling) -> None:
 @pytest.mark.parametrize(
     "case",
     [
+        "dockerfile-config",
         "format-new-file",
         "lint-only",
         "test",

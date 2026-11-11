@@ -13,11 +13,19 @@ from scripts.go.service.tooling_config import load_tooling_config
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 CONFIG_PATH = REPOSITORY_ROOT / "templates/go-service/go-service-tooling.json"
+POLICY_SEARCH_CONFIG_PATH = (
+    REPOSITORY_ROOT / "services/policy-search-service/go-service-tooling.json"
+)
 
 
-def test_render_is_deterministic_and_matches_scaffold() -> None:
+@pytest.mark.parametrize(
+    "config_path",
+    (CONFIG_PATH, POLICY_SEARCH_CONFIG_PATH),
+    ids=("scaffold", "policy-search"),
+)
+def test_render_is_deterministic_and_matches_checked_output(config_path: Path) -> None:
     # given
-    config = load_tooling_config(CONFIG_PATH)
+    config = load_tooling_config(config_path)
 
     # when
     first = dockerfile.render(config)

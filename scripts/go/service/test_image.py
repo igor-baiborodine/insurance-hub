@@ -56,14 +56,39 @@ def test_build_image_uses_validated_identity(monkeypatch: pytest.MonkeyPatch) ->
     assert build[-1] == str(config.module_root)
 
 
-def test_build_image_rejects_wrong_local_tag_before_docker(
+def test_build_image_accepts_explicit_discoverability_tag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # given
     config = load_tooling_config(CONFIG_PATH)
     environment = source_environment()
-    environment["IMAGE_TAG"] = "wrong"
-    environment["IMAGE_REF"] = f"{environment['IMAGE_NAME']}:wrong"
+    environment["IMAGE_TAG"] = "issue-247-pr2-aaaaaaaaaaaa"
+    environment["IMAGE_REF"] = f"{environment['IMAGE_NAME']}:{environment['IMAGE_TAG']}"
+
+    def fake_run(arguments: list[str], **_kwargs: object) -> str:
+        if arguments[:3] == ["git", "rev-parse", "--verify"]:
+            return environment["SOURCE_REVISION"] + "\n"
+        if arguments[:3] == ["git", "show", "-s"]:
+            return environment["SOURCE_CREATED"] + "\n"
+        return ""
+
+    monkeypatch.setattr(image, "run", fake_run)
+
+    # when
+    values = image.validate_build_identity(config, environment)
+
+    # then
+    assert values["IMAGE_TAG"] == "issue-247-pr2-aaaaaaaaaaaa"
+
+
+def test_build_image_rejects_invalid_tag_before_docker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    config = load_tooling_config(CONFIG_PATH)
+    environment = source_environment()
+    environment["IMAGE_TAG"] = "wrong/tag"
+    environment["IMAGE_REF"] = f"{environment['IMAGE_NAME']}:wrong/tag"
     commands: list[list[str]] = []
 
     def fake_run(arguments: list[str], **_kwargs: object) -> str:

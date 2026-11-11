@@ -11,6 +11,21 @@ import pytest
 import resource_administration as administration
 
 
+def test_safe_environment_preserves_kubeconfig_and_filters_unrelated_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    monkeypatch.setenv("KUBECONFIG", "/controlled/kubeconfig")
+    monkeypatch.setenv("POLICY_SEARCH_SECRET_SENTINEL", "must-not-reach-child")
+
+    # when
+    environment = administration.safe_environment()
+
+    # then
+    assert environment["KUBECONFIG"] == "/controlled/kubeconfig"
+    assert "POLICY_SEARCH_SECRET_SENTINEL" not in environment
+
+
 class FakeClient:
     def __init__(self, responses: list[tuple[int, object]]) -> None:
         self.responses = responses
