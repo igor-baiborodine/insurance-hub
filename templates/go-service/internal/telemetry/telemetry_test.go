@@ -59,38 +59,61 @@ func TestNew_RejectsScaffoldIdentityAndExporterSettings(t *testing.T) {
 		ExporterEndpoint: mustURL("http://127.0.0.1:4317"),
 	}
 	for _, test := range []struct {
-		name        string
-		mutate      func(*config.Telemetry)
-		serviceName string
+		name          string
+		mutate        func(*config.Telemetry)
+		serviceName   string
+		rejectedValue string
 	}{
-		{"missing service", func(*config.Telemetry) {}, ""},
-		{"service mismatch", func(*config.Telemetry) {}, "other"},
-		{"foreign service", func(s *config.Telemetry) { s.Identity.ServiceName = "other" }, "other"},
-		{"missing endpoint", func(s *config.Telemetry) { s.ExporterEndpoint = nil }, "go-service"},
-		{"development identity", func(s *config.Telemetry) {
-			s.Identity = config.DevelopmentIdentity("go-service").Identity
-		}, "go-service"},
-		{"wrong namespace", func(s *config.Telemetry) { s.Identity.ServiceNamespace = "other" }, "go-service"},
-		{"wrong implementation", func(s *config.Telemetry) { s.Identity.Implementation = "java" }, "go-service"},
-		{"noncanonical version", func(s *config.Telemetry) { s.Identity.ServiceVersion = "sha-123456789abc" }, "go-service"},
-		{"invalid instance", func(s *config.Telemetry) { s.Identity.ServiceInstance = "private-marker\n" }, "go-service"},
-		{"zero exporter timeout", func(s *config.Telemetry) { s.ExporterTimeout = 0 }, "go-service"},
+		{"missing service", func(*config.Telemetry) {}, "", ""},
+		{"service mismatch", func(*config.Telemetry) {}, "mismatched-service-marker", "mismatched-service-marker"},
+		{"foreign service", func(s *config.Telemetry) {
+			s.Identity.ServiceName = "foreign-service-marker"
+		}, "foreign-service-marker", "foreign-service-marker"},
+		{"missing endpoint", func(s *config.Telemetry) { s.ExporterEndpoint = nil }, "go-service", ""},
+		{"development environment", func(s *config.Telemetry) {
+			s.Identity.Environment = "development"
+		}, "go-service", "development"},
+		{"development version", func(s *config.Telemetry) {
+			s.Identity.ServiceVersion = "development"
+		}, "go-service", "development"},
+		{"local instance", func(s *config.Telemetry) {
+			s.Identity.ServiceInstance = "local-private-marker"
+		}, "go-service", "local-private-marker"},
+		{"wrong namespace", func(s *config.Telemetry) {
+			s.Identity.ServiceNamespace = "private-namespace-marker"
+		}, "go-service", "private-namespace-marker"},
+		{"wrong implementation", func(s *config.Telemetry) {
+			s.Identity.Implementation = "private-implementation-marker"
+		}, "go-service", "private-implementation-marker"},
+		{"noncanonical version", func(s *config.Telemetry) {
+			s.Identity.ServiceVersion = "sha-private-marker"
+		}, "go-service", "sha-private-marker"},
+		{"zero version", func(s *config.Telemetry) {
+			s.Identity.ServiceVersion = "git-000000000000"
+		}, "go-service", "git-000000000000"},
+		{"invalid instance", func(s *config.Telemetry) {
+			s.Identity.ServiceInstance = "private-marker\n"
+		}, "go-service", "private-marker"},
+		{"zero exporter timeout", func(s *config.Telemetry) { s.ExporterTimeout = 0 }, "go-service", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			// given
 			settings := valid
 			test.mutate(&settings)
+
 			// when
 			_, err := New(
 				context.Background(),
 				test.serviceName,
 				settings,
 			)
+
 			// then
 			if err == nil {
 				t.Fatal("invalid settings accepted")
 			}
-			if strings.Contains(err.Error(), "private-marker") {
+			if test.rejectedValue != "" &&
+				strings.Contains(err.Error(), test.rejectedValue) {
 				t.Fatalf("configuration value disclosed: %v", err)
 			}
 		})
