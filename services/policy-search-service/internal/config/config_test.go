@@ -186,13 +186,13 @@ func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) 
 	}{
 		{
 			"header bound",
-			map[string]string{EnvHTTPMaxHeaderBytes: "1023"},
-			EnvHTTPMaxHeaderBytes,
+			map[string]string{kitconfig.EnvHTTPMaxHeaderBytes: "1023"},
+			kitconfig.EnvHTTPMaxHeaderBytes,
 		},
 		{
 			"body bound",
-			map[string]string{EnvHTTPMaxBodyBytes: "1048577"},
-			EnvHTTPMaxBodyBytes,
+			map[string]string{kitconfig.EnvHTTPMaxBodyBytes: "1048577"},
+			kitconfig.EnvHTTPMaxBodyBytes,
 		},
 		{
 			"header after read",
@@ -216,12 +216,12 @@ func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) 
 		},
 		{
 			"HTTP and gRPC collide",
-			map[string]string{EnvHTTPAddress: "127.0.0.1:9090"},
+			map[string]string{kitconfig.EnvHTTPAddress: "127.0.0.1:9090"},
 			kitconfig.EnvGRPCAddress,
 		},
 		{
 			"HTTP and health collide",
-			map[string]string{EnvHTTPAddress: "127.0.0.1:8081"},
+			map[string]string{kitconfig.EnvHTTPAddress: "127.0.0.1:8081"},
 			kitconfig.EnvHealthAddress,
 		},
 	}
@@ -241,7 +241,7 @@ func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) 
 	}
 	// given
 	values := map[string]string{
-		EnvHTTPAddress:             "127.0.0.1:0",
+		kitconfig.EnvHTTPAddress:   "127.0.0.1:0",
 		kitconfig.EnvGRPCAddress:   "127.0.0.1:0",
 		kitconfig.EnvHealthAddress: "127.0.0.1:0",
 	}
