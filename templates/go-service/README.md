@@ -236,6 +236,9 @@ valid.
 
 Repository maintainers own this reference. A copied service owns its code and dependencies and
 adopts later scaffold fixes through normal review; copies do not update automatically.
+Its ordinary initial implementation must add the relevant deployment inputs. Kubernetes workloads
+inject Pod `metadata.uid` as `SERVICE_INSTANCE_ID` and propagate the canonical source version as
+`SERVICE_VERSION`; this source scaffold does not own a generic workload manifest.
 
 ## Runtime configuration
 
@@ -245,7 +248,7 @@ do not repeat its supplied value.
 
 | Setting | Default | Validation |
 | --- | --- | --- |
-| `SERVICE_NAME` | `go-service` | 1–128 ASCII letters, digits, dots, underscores or hyphens; change when copying. |
+| `SERVICE_NAME` | `go-service` | Must equal the service's fixed logical name; the copy flow replaces that name. |
 | `HTTP_ADDR` | `127.0.0.1:8080` | Valid host and numeric port; port `0` is available for tests. |
 | `GRPC_ADDR` | `127.0.0.1:9090` | Valid host and numeric port; port `0` is available for tests. |
 | `HEALTH_ADDR` | `127.0.0.1:8081` | Valid host and numeric port; port `0` is available for tests. Nonzero listener addresses must be pairwise distinct. |
@@ -260,18 +263,21 @@ do not repeat its supplied value.
 | `PROBE_TIMEOUT` | `2s` | Positive duration bounding initial gateway connection and readiness checks. |
 | `GRPC_MAX_RECV_BYTES` | `1048576` | Integer from 1 through 16777216; server receive and gateway-client send limit. |
 | `GRPC_MAX_SEND_BYTES` | `8388608` | Integer from 1 through 67108864; server send and gateway-client receive limit. |
-| `DEPLOYMENT_ENVIRONMENT` | `development` when disabled | Explicit non-development value required when telemetry is enabled. |
-| `SERVICE_VERSION` | `development` when disabled | Explicit non-development revision required when telemetry is enabled. |
-| `SERVICE_INSTANCE_ID` | `local-<pid>` when disabled | Explicit instance identity without the `local-` prefix required when telemetry is enabled. |
+| `DEPLOYMENT_ENVIRONMENT` | `development` when disabled | General identity string; an explicit non-development value is required when telemetry is enabled. |
+| `SERVICE_VERSION` | `development` when disabled | General identity string in `development`; otherwise exactly `git-` plus 12 lowercase hexadecimal characters with at least one nonzero suffix character, even when telemetry is disabled. |
+| `SERVICE_INSTANCE_ID` | `local-<pid>` when disabled | General identity string; enabled telemetry requires an explicit value without the `local-` prefix. Kubernetes injects Pod `metadata.uid`. |
 | `SHUTDOWN_TIMEOUT` | `10s` | Positive duration at least `REQUEST_TIMEOUT + OTEL_EXPORTER_OTLP_TIMEOUT`. |
 | `OTEL_ENABLED` | `false` | Boolean. Disabled mode creates no exporter and needs no collector. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Required when telemetry is enabled. An `http` or `https` OTLP/gRPC URL with host and numeric port; credentials, query, fragment and HTTP path are rejected. |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | `2s` | Positive duration reserved at the end of `SHUTDOWN_TIMEOUT`. |
 
 Identity values use 1–128 ASCII letters, digits, dots, underscores or hyphens. The namespace
-`insurance-hub` and implementation `go` are fixed. Enabled telemetry requires explicit environment,
-version and instance values; each deployed instance should receive its unique platform identity.
-Product's QA-only revision/Pod-UID policy is not imposed on this reusable template.
+`insurance-hub`, implementation `go` and generated logical service name are fixed. `development` is
+the only environment exempt from canonical-version validation. Enabled telemetry requires explicit
+non-development environment/version/instance values and rejects the `local-` instance prefix.
+Kubernetes deployments use the Downward API to inject Pod `metadata.uid`; the existing release
+process derives the matching canonical version from verified full source. See the common
+[Go service identity contract](../../docs/migration/phase-4/go-service-identity-and-validation.md).
 
 Logs are JSON with UTC timestamps and `service_namespace`, `service_name`, `service_version`,
 `service_instance_id`, `deployment_environment_name`, and `service_implementation`. Valid logging
@@ -380,7 +386,7 @@ must define their own contracts, persistence, authorization, exposure and deploy
 | Foundation | Product reference | Scaffold adaptation |
 | --- | --- | --- |
 | Go and shared libraries/tools | `go.mod`, `Makefile` | Exact matching shared pins; independent manifests and tool caches. |
-| Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; general environment/version/instance validation instead of Product QA release rules. Existing loopback ports preserved. |
+| Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; generated fixed name, canonical non-development version, safe identity strings and Pod UID deployment input. Existing loopback ports preserved. |
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
 | Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed Echo operation, bounded transport signals and configurable HTTP/gRPC limits. |
