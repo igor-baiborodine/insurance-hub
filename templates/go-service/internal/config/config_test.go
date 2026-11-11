@@ -70,6 +70,45 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 }
 
+func TestLoad_ServiceNamePolicy(t *testing.T) {
+	t.Run("explicit fixed name accepted", func(t *testing.T) {
+		// given
+		lookup := mapLookup(map[string]string{kitconfig.EnvServiceName: DefaultServiceName})
+
+		// when
+		got, err := load(lookup)
+		// then
+		if err != nil {
+			t.Fatalf("load fixed service name: %v", err)
+		}
+		if got.ServiceName != DefaultServiceName {
+			t.Errorf("ServiceName = %q, want %q", got.ServiceName, DefaultServiceName)
+		}
+	})
+
+	t.Run("foreign name rejected safely", func(t *testing.T) {
+		// given
+		const foreignName = "foreign-service"
+		lookup := mapLookup(map[string]string{kitconfig.EnvServiceName: foreignName})
+
+		// when
+		_, err := load(lookup)
+
+		// then
+		if err == nil {
+			t.Fatal("foreign service name accepted")
+		}
+		setting, reason := kitconfig.ErrorDetails(err)
+		if setting != kitconfig.EnvServiceName ||
+			reason != "must match the service's fixed logical name" {
+			t.Errorf("safe details = (%q, %q)", setting, reason)
+		}
+		if strings.Contains(err.Error(), foreignName) {
+			t.Errorf("error exposes foreign service name: %q", err)
+		}
+	})
+}
+
 func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) {
 	// given
 	tests := []struct {
@@ -187,7 +226,7 @@ func TestLoad_ValidOverrides(t *testing.T) {
 		kitconfig.EnvDeploymentEnvironment:    "test",
 		kitconfig.EnvServiceVersion:           "test-revision",
 		kitconfig.EnvServiceInstanceID:        "test-instance",
-		kitconfig.EnvServiceName:              "copy-service",
+		kitconfig.EnvServiceName:              DefaultServiceName,
 		kitconfig.EnvGRPCAddress:              "[::1]:0",
 		kitconfig.EnvHealthAddress:            "localhost:0",
 		kitconfig.EnvLogLevel:                 "DEBUG+2",
@@ -204,7 +243,7 @@ func TestLoad_ValidOverrides(t *testing.T) {
 		t.Fatalf("load overrides: %v", err)
 	}
 
-	if got.ServiceName != "copy-service" || got.GRPCAddress.String() != "[::1]:0" ||
+	if got.ServiceName != DefaultServiceName || got.GRPCAddress.String() != "[::1]:0" ||
 		got.HealthAddress.String() != "localhost:0" {
 		t.Errorf("unexpected identity or addresses: %+v", got)
 	}

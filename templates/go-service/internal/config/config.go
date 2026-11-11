@@ -70,6 +70,12 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	if serviceName != DefaultServiceName {
+		return Config{}, kitconfig.Invalid(
+			kitconfig.EnvServiceName,
+			"must match the service's fixed logical name",
+		)
+	}
 
 	grpcAddress, err := kitconfig.LoadAddress(
 		lookup, kitconfig.EnvGRPCAddress, kitconfig.DefaultGRPCAddress,
