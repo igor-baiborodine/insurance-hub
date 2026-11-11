@@ -12,8 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from scripts.go.service.tooling_process import run, run_cli
-from scripts.python.process_runner import CommandError
-from service_process import child_environment
+from scripts.python.process_runner import CommandError, child_environment
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 TEST_USERNAME = "elastic"

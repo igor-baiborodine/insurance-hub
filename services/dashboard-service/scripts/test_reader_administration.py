@@ -329,7 +329,7 @@ def test_qa_ca_ensure_rejects_foreign_secret_before_apply() -> None:
 def test_command_failure_does_not_surface_captured_secret_material() -> None:
     error = CommandError("failed", stdout="secret-value", stderr="secret-value")
     with (
-        patch.object(administration, "run_command", side_effect=error),
+        patch.object(administration.shared, "run", side_effect=error),
         pytest.raises(administration.AdministrationError) as captured,
     ):
         administration.command(["kubectl", "apply", "-f", "-"], input_text="secret-value")

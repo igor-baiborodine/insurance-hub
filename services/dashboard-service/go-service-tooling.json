@@ -1,11 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "service": "dashboard",
   "modulePath": "services/dashboard-service",
   "image": {
     "name": "insurance-hub-dashboard-api",
     "title": "Insurance Hub Dashboard API",
-    "localTagPrefix": "1.0.0-local.",
     "entrypoint": [
       "/dashboard-service"
     ],
@@ -40,9 +39,80 @@
         "check-proto-breaking"
       ],
       "integration": [
-        "test-integration"
+        "test-integration",
+        "test-event-integration"
       ]
     },
     "imageCheckTarget": "_image-check-existing"
+  },
+  "dockerfile": {
+    "sourceCopies": [
+      {
+        "source": "cmd",
+        "destination": "./cmd"
+      },
+      {
+        "source": "gen",
+        "destination": "./gen"
+      },
+      {
+        "source": "internal",
+        "destination": "./internal"
+      }
+    ],
+    "buildOutputs": [
+      {
+        "package": "./cmd/server",
+        "output": "/out/dashboard-service",
+        "destination": "/dashboard-service",
+        "mode": "0555"
+      }
+    ],
+    "runtimeCopies": [],
+    "ports": [
+      8080,
+      8081,
+      9090
+    ]
+  },
+  "contracts": {
+    "runner": {
+      "target": "test-tooling",
+      "suitePath": "scripts/test_tooling.py",
+      "timeoutSeconds": 3600
+    },
+    "gateway": {
+      "generatedPath": "gen/openapiv2/dashboard/v1/dashboard_service.swagger.json",
+      "contractPath": "testdata/http-contract.json"
+    },
+    "dependencies": [
+      {
+        "name": "elasticsearch",
+        "kind": "elasticsearch",
+        "image": "docker.elastic.co/elasticsearch/elasticsearch:8.19.6@sha256:bfb2108076735fbfc5dcd5d49f12f5aa93fab9759034c55f7da3b4345606c903",
+        "ports": [
+          9200
+        ]
+      },
+      {
+        "name": "kafka",
+        "kind": "kafka",
+        "image": "apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f",
+        "ports": [
+          9092
+        ]
+      }
+    ],
+    "deployment": {
+      "portForwardSeconds": 30
+    },
+    "administration": {
+      "transports": [
+        "https",
+        "kubectl",
+        "stdin"
+      ],
+      "secretEnvironment": []
+    }
   }
 }

@@ -4,144 +4,27 @@
 from __future__ import annotations
 
 import base64
-import http.client
 import json
 import os
-import re
-import secrets
-import signal
-import socket
-import ssl
-import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 sys.path.insert(0, str(ROOT))
 
+import administration as shared  # noqa: E402
 from scripts.go.service.configuration import service_record, target_record  # noqa: E402
-from scripts.python.process_runner import CommandError, run_command  # noqa: E402
+from scripts.python.process_runner import CommandError  # noqa: E402
 
 SERVICE = "dashboard"
 INDEX = "policy_stats"
 IDENTITY = "go_dashboard_total_sales_reader"
 OWNER = "issue-287"
-MAX_RESPONSE_BYTES = 64 * 1024
-PASSWORD_BYTES = 48
-
-
-class AdministrationError(RuntimeError):
-    """The selected target or reader state differs from the accepted contract."""
-
-
-def require(condition: object, message: str) -> None:
-    if not condition:
-        raise AdministrationError(message)
-
-
-def safe_environment() -> dict[str, str]:
-    allowed = ("HOME", "KUBECONFIG", "PATH", "SSL_CERT_DIR", "SSL_CERT_FILE", "TMPDIR")
-    return {name: os.environ[name] for name in allowed if name in os.environ}
-
-
-def command(arguments: list[str], *, input_text: str | None = None, timeout: int = 30) -> str:
-    try:
-        result = run_command(
-            arguments,
-            cwd=ROOT,
-            env=safe_environment(),
-            input_text=input_text,
-            timeout_seconds=timeout,
-            teardown_seconds=10,
-            activity="Dashboard reader administration",
-        )
-    except CommandError as error:
-        raise AdministrationError(
-            f"command failed: {arguments[0]}; inspect the selected target safely"
-        ) from error
-    return result.stdout
-
-
-class ForwardedHTTPSConnection(http.client.HTTPSConnection):
-    def __init__(
-        self,
-        server_name: str,
-        forwarded_port: int,
-        context: ssl.SSLContext,
-        timeout: float,
-    ) -> None:
-        super().__init__(server_name, 443, context=context, timeout=timeout)
-        self.forwarded_port = forwarded_port
-
-    def connect(self) -> None:
-        plain = socket.create_connection(("127.0.0.1", self.forwarded_port), self.timeout)
-        try:
-            self.sock = self._context.wrap_socket(plain, server_hostname=self.host)
-        except BaseException:
-            plain.close()
-            raise
-
-
-class ElasticsearchClient:
-    def __init__(
-        self,
-        port: int,
-        username: str,
-        password: str,
-        *,
-        server_name: str = "",
-        ca_certificate: bytes = b"",
-    ) -> None:
-        self.port = port
-        self.username = username
-        self.password = password
-        self.server_name = server_name
-        self.context: ssl.SSLContext | None = None
-        if server_name:
-            require(bool(ca_certificate), "QA public CA is required")
-            try:
-                self.context = ssl.create_default_context(cadata=ca_certificate.decode("utf-8"))
-            except (UnicodeDecodeError, ssl.SSLError) as error:
-                raise AdministrationError("QA public CA is malformed") from error
-            self.context.minimum_version = ssl.TLSVersion.TLSv1_2
-
-    def request(
-        self,
-        method: str,
-        path: str,
-        body: dict[str, Any] | None = None,
-    ) -> tuple[int, Any]:
-        payload = None if body is None else json.dumps(body, separators=(",", ":")).encode()
-        credential = base64.b64encode(f"{self.username}:{self.password}".encode()).decode("ascii")
-        headers = {"Authorization": f"Basic {credential}"}
-        if payload is not None:
-            headers["Content-Type"] = "application/json"
-        connection: http.client.HTTPConnection
-        if self.context is None:
-            connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
-        else:
-            connection = ForwardedHTTPSConnection(
-                self.server_name, self.port, self.context, timeout=10
-            )
-        try:
-            connection.request(method, path, body=payload, headers=headers)
-            response = connection.getresponse()
-            data = response.read(MAX_RESPONSE_BYTES + 1)
-            require(len(data) <= MAX_RESPONSE_BYTES, "Elasticsearch response exceeded limit")
-            if not data:
-                decoded: Any = None
-            else:
-                try:
-                    decoded = json.loads(data)
-                except json.JSONDecodeError:
-                    decoded = None
-            return response.status, decoded
-        except (OSError, http.client.HTTPException, ssl.SSLError) as error:
-            raise AdministrationError("Elasticsearch request failed") from error
-        finally:
-            connection.close()
+AdministrationError = shared.AdministrationError
+ElasticsearchClient = shared.ElasticsearchClient
+require = shared.require
+command = shared.command
 
 
 class Target:
@@ -195,31 +78,8 @@ class Target:
         self.server_name = reader["serverName"]
         self.kubectl = os.environ.get("KUBECTL", "kubectl")
 
-    def run(
-        self,
-        *arguments: str,
-        namespace: str | None = None,
-        input_text: str | None = None,
-    ) -> str:
-        return command(
-            [
-                self.kubectl,
-                "--context",
-                self.context,
-                "--namespace",
-                namespace or self.namespace,
-                *arguments,
-            ],
-            input_text=input_text,
-        )
-
-    def json(self, *arguments: str, namespace: str | None = None) -> dict[str, Any]:
-        try:
-            value = json.loads(self.run(*arguments, "-o", "json", namespace=namespace) or "{}")
-        except json.JSONDecodeError as error:
-            raise AdministrationError("kubectl returned malformed JSON") from error
-        require(isinstance(value, dict), "kubectl returned unexpected JSON")
-        return value
+    run = shared.Target.run
+    json = shared.Target.json
 
     def verify_boundary(self) -> None:
         current = command([self.kubectl, "config", "current-context"]).strip()
@@ -364,78 +224,15 @@ class Target:
         require(workload_ca == ca_certificate, "Dashboard Elasticsearch CA differs from ECK")
 
 
-class PortForward:
-    def __init__(self, target: Target) -> None:
-        self.target = target
-        self.port = free_port()
-        self.process: subprocess.Popen[bytes] | None = None
-
-    def __enter__(self) -> int:
-        self.process = subprocess.Popen(
-            [
-                self.target.kubectl,
-                "--context",
-                self.target.context,
-                "--namespace",
-                self.target.data_namespace,
-                "port-forward",
-                f"service/{self.target.elasticsearch_service}",
-                f"{self.port}:9200",
-            ],
-            env=safe_environment(),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        try:
-            deadline = time.monotonic() + 10
-            stable_since = time.monotonic()
-            while time.monotonic() < deadline:
-                if self.process.poll() is not None:
-                    raise AdministrationError("Elasticsearch port-forward stopped early")
-                if time.monotonic() - stable_since >= 1:
-                    return self.port
-                time.sleep(0.1)
-            raise AdministrationError("Elasticsearch port-forward did not become ready")
-        except BaseException:
-            self._stop()
-            raise
-
-    def __exit__(self, *_: object) -> None:
-        self._stop()
-
-    def _stop(self) -> None:
-        if self.process is None or self.process.poll() is not None:
-            return
-        os.killpg(self.process.pid, signal.SIGTERM)
-        try:
-            self.process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(self.process.pid, signal.SIGKILL)
-            self.process.wait(timeout=5)
-
-
-def free_port() -> int:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
+PortForward = shared.PortForward
 
 
 def require_status(status: int, accepted: set[int], action: str) -> None:
     require(status in accepted, f"{action} returned unexpected status {status}")
 
 
-def require_password(password: str) -> None:
-    require(
-        bool(re.fullmatch(r"[A-Za-z0-9_-]{64}", password)),
-        "Dashboard reader password does not match the accepted encoding",
-    )
-
-
-def new_password() -> str:
-    password = secrets.token_urlsafe(PASSWORD_BYTES)
-    require_password(password)
-    return password
+require_password = shared.require_password
+new_password = shared.new_password
 
 
 def accepted_role() -> dict[str, Any]:
@@ -575,13 +372,7 @@ def client_for(
     port: int,
     ca_certificate: bytes,
 ) -> ElasticsearchClient:
-    return ElasticsearchClient(
-        port,
-        username,
-        password,
-        server_name=target.server_name,
-        ca_certificate=ca_certificate,
-    )
+    return shared.client_for(target, username, password, port, ca_certificate)
 
 
 def verify_reader(
