@@ -16,6 +16,8 @@ const (
 	EnvGRPCAddress = "GRPC_ADDR"
 	// EnvHealthAddress names the management HTTP listener setting.
 	EnvHealthAddress = "HEALTH_ADDR"
+	// EnvHTTPAddress names the business HTTP listener setting.
+	EnvHTTPAddress = "HTTP_ADDR"
 	// EnvGRPCMaxReceiveBytes names the gRPC receive limit setting.
 	EnvGRPCMaxReceiveBytes = "GRPC_MAX_RECV_BYTES"
 	// EnvGRPCMaxSendBytes names the gRPC send limit setting.
@@ -28,6 +30,10 @@ const (
 	EnvHTTPWriteTimeout = "HTTP_WRITE_TIMEOUT"
 	// EnvHTTPIdleTimeout names the business HTTP idle timeout setting.
 	EnvHTTPIdleTimeout = "HTTP_IDLE_TIMEOUT"
+	// EnvHTTPMaxHeaderBytes names the business HTTP maximum-header-size setting.
+	EnvHTTPMaxHeaderBytes = "HTTP_MAX_HEADER_BYTES"
+	// EnvHTTPMaxBodyBytes names the business HTTP maximum-request-body-size setting.
+	EnvHTTPMaxBodyBytes = "HTTP_MAX_BODY_BYTES"
 
 	// EnvServiceName names the service identity setting.
 	EnvServiceName = "SERVICE_NAME"
