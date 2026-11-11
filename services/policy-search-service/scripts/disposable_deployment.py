@@ -7,7 +7,6 @@ import base64
 import json
 import os
 import secrets
-import socket
 import subprocess
 import sys
 import tempfile
@@ -15,14 +14,23 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import policy_search_deployment_checks as deployment_checks
 import resource_administration as service_admin
 import yaml
-from administration import AdministrationError, ElasticsearchClient, require_status
+from scripts.go.service.tooling_contracts import (
+    AdministrationError,
+    OwnedPortForward,
+    PortForwardSpec,
+    loopback_port,
+    require_status,
+)
+from scripts.go.service.tooling_contracts import (
+    JSONAdministrationClient as ElasticsearchClient,
+)
+from scripts.python.process_runner import child_environment
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 MODULE = ROOT / "services/policy-search-service"
@@ -358,51 +366,30 @@ def elasticsearch_resources(cluster: Cluster, image: str, admin_password: str) -
     )
 
 
-@contextmanager
 def port_forward(
     cluster: Cluster,
     service: str = "local-dev-elasticsearch-es-http",
     remote_port: int = 9200,
 ):
-    port = 0
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        port = int(listener.getsockname()[1])
-    process = subprocess.Popen(
-        [
-            "kubectl",
-            "--context",
-            CONTEXT,
-            "--namespace",
-            cluster.namespace,
-            "port-forward",
-            f"service/{service}",
-            f"{port}:{remote_port}",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
+    port = loopback_port()
+    environment = child_environment(
+        {"KUBECONFIG": os.environ["KUBECONFIG"]} if "KUBECONFIG" in os.environ else None,
+        preferred_executables=("kubectl",),
     )
-    try:
-        deadline = time.monotonic() + 5
-        stable_since = time.monotonic()
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                raise CheckFailed(f"{service} port-forward stopped early")
-            if time.monotonic() - stable_since >= 1:
-                break
-            time.sleep(0.1)
-        else:
-            raise CheckFailed(f"{service} port-forward did not become ready")
-        yield port
-    finally:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+    return OwnedPortForward(
+        PortForwardSpec(
+            context=CONTEXT,
+            namespace=cluster.namespace,
+            resource=f"service/{service}",
+            local_port=port,
+            remote_port=remote_port,
+        ),
+        cwd=ROOT,
+        env=environment,
+        startup_seconds=5,
+        teardown_seconds=5,
+        kubectl="kubectl",
+    )
 
 
 def setup_elasticsearch(

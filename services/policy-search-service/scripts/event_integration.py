@@ -13,9 +13,7 @@ from pathlib import Path
 
 from elasticsearch_integration import wait_for_elasticsearch
 from scripts.go.service.tooling_process import run, run_cli
-from scripts.python.process_runner import CommandError
-
-from scaffold_process import child_environment
+from scripts.python.process_runner import CommandError, child_environment
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 REGISTERED_TOPIC = "policy-registered"

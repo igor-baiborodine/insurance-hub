@@ -7,22 +7,20 @@ DEPLOY_ENV ?=
 INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
+TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
 PYTHON_TOOLING_FILES := $(wildcard scripts/deployment.py scripts/disposable_deployment.py scripts/image_check.py \
-	scripts/elasticsearch_integration.py scripts/policy_search_deployment_checks.py scripts/scaffold_process.py \
+	scripts/elasticsearch_integration.py scripts/policy_search_deployment_checks.py \
 	scripts/event_integration.py \
-	scripts/administration.py scripts/resource_administration.py \
+	scripts/resource_administration.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_elasticsearch_integration.py \
 	scripts/test_event_integration.py \
 	scripts/test_resource_administration.py \
-	scripts/test_scaffold_process.py scripts/test_tooling.py \
-	scripts/tooling_runner.py scripts/test_tooling_runner.py)
+	scripts/test_tooling.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_elasticsearch_integration.py \
 	scripts/test_event_integration.py \
-	scripts/test_resource_administration.py \
-	scripts/test_scaffold_process.py \
-	scripts/test_tooling_runner.py)
+	scripts/test_resource_administration.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -106,7 +104,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
-	image-build image-check _image-check-existing test-integration test-elasticsearch-integration \
+	dockerfile-generate dockerfile-check image-build image-check _image-check-existing test-integration test-elasticsearch-integration \
 	test-event-integration deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop \
 	resource-inspect resource-ensure resource-verify \
@@ -118,14 +116,24 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
-image-build: python-runtime-check ## Build the pinned linux/amd64 Policy Search runtime image
+dockerfile-generate: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" -m scripts.go.service.dockerfile \
+		--config "$(GO_SERVICE_TOOLING_CONFIG)" --repository-root "$(TOOLING_REPOSITORY_ROOT)" generate
+
+dockerfile-check: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" -m scripts.go.service.dockerfile \
+		--config "$(GO_SERVICE_TOOLING_CONFIG)" --repository-root "$(TOOLING_REPOSITORY_ROOT)" check
+
+image-build: dockerfile-check python-runtime-check ## Build the pinned linux/amd64 Policy Search runtime image
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" build
 
 image-check: image-build ## Build and validate image identity, search, dependency lifecycle, and shutdown
 	@$(MAKE) --no-print-directory _image-check-existing
 
-_image-check-existing: python-runtime-check
+_image-check-existing: dockerfile-check python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		DOCKER="$(DOCKER)" "$(PYTHON)" -m scripts.go.service.image \
 		--config "$(GO_SERVICE_TOOLING_CONFIG)" inspect
@@ -233,7 +241,7 @@ update-deps:
 	GOWORK=off $(GO) mod tidy
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
-check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration \
+check-go-pr: verify-tools dockerfile-check format-check format-proto-check lint lint-proto coverage-check test-integration \
 	test-elasticsearch-integration test-event-integration build \
 	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
 
@@ -297,7 +305,9 @@ test-tooling: verify-tools python-toolchain-check
 		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" \
 		GO="$(GO)" UV="$(UV)" \
 		COMMON_GO_TOOLING_PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" ./scripts/tooling_runner.py
+		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" \
+		-m scripts.go.service.tooling_runner --config "$(GO_SERVICE_TOOLING_CONFIG)" \
+		--repository-root "$(TOOLING_REPOSITORY_ROOT)" --tooling-root "$(INSURANCE_HUB_ROOT)" suite
 	@$(MAKE) --no-print-directory test-coverage-tooling
 
 run:

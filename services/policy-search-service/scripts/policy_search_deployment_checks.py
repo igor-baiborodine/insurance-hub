@@ -6,12 +6,11 @@ from __future__ import annotations
 import json
 import os
 import re
-import socket
-import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +22,11 @@ sys.path.insert(0, str(ROOT))
 from scripts.go.service.configuration import service_record, target_record  # noqa: E402
 from scripts.go.service.deployment import (  # noqa: E402
     DeploymentError as SharedDeploymentError,
+)
+from scripts.go.service.tooling_contracts import (  # noqa: E402
+    OwnedPortForward,
+    PortForwardSpec,
+    loopback_port,
 )
 from scripts.python.process_runner import CommandError, run_command  # noqa: E402
 
@@ -901,12 +905,6 @@ def check_requested_route(target: Target) -> None:
         )
 
 
-def _free_port() -> int:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
-
-
 def _http(url: str, body: bytes | None = None) -> tuple[int, bytes]:
     headers = {"Content-Type": "application/json"} if body is not None else {}
     try:
@@ -935,38 +933,28 @@ def validate_deployed_search(status: int, body: bytes) -> None:
 
 def verify(target: Target, items: list[dict[str, Any]]) -> None:
     target.live(items, require_deployment=True)
-    http_port, management_port = _free_port(), _free_port()
-    process = subprocess.Popen(
-        [
-            target.kubectl_binary,
-            "--context",
-            target.context,
-            "--namespace",
-            target.namespace,
-            "port-forward",
-            f"service/{target.business}",
-            f"{http_port}:80",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    management = subprocess.Popen(
-        [
-            target.kubectl_binary,
-            "--context",
-            target.context,
-            "--namespace",
-            target.namespace,
-            "port-forward",
-            f"service/{target.management}",
-            f"{management_port}:8081",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    try:
+    http_port, management_port = loopback_port(), loopback_port()
+    with ExitStack() as forwards:
+        for service, local_port, remote_port in (
+            (target.business, http_port, 80),
+            (target.management, management_port, 8081),
+        ):
+            forwards.enter_context(
+                OwnedPortForward(
+                    PortForwardSpec(
+                        context=target.context,
+                        namespace=target.namespace,
+                        resource=f"service/{service}",
+                        local_port=local_port,
+                        remote_port=remote_port,
+                    ),
+                    cwd=ROOT,
+                    env=safe_environment(),
+                    startup_seconds=20,
+                    teardown_seconds=5,
+                    kubectl=target.kubectl_binary,
+                )
+            )
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             try:
@@ -978,14 +966,6 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             raise DeploymentError("deployed readiness was not reachable")
         status, body = _http(f"http://127.0.0.1:{http_port}/policies?q=Synthetic%20Person")
         validate_deployed_search(status, body)
-    finally:
-        for child in (process, management):
-            child.terminate()
-            try:
-                child.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait(timeout=5)
 
 
 def stop(target: Target, _items: list[dict[str, Any]]) -> None:
