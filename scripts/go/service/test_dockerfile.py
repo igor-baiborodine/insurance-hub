@@ -13,11 +13,14 @@ from scripts.go.service.tooling_config import load_tooling_config
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 CONFIG_PATH = REPOSITORY_ROOT / "templates/go-service/go-service-tooling.json"
+CURRENT_DOCKERFILE_CONFIG_PATH = (
+    REPOSITORY_ROOT / "services/policy-search-service/go-service-tooling.json"
+)
 
 
-def test_render_is_deterministic_and_matches_scaffold() -> None:
+def test_render_is_deterministic_and_matches_current_service() -> None:
     # given
-    config = load_tooling_config(CONFIG_PATH)
+    config = load_tooling_config(CURRENT_DOCKERFILE_CONFIG_PATH)
 
     # when
     first = dockerfile.render(config)

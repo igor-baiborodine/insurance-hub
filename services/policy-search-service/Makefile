@@ -43,7 +43,7 @@ GENERATED_PROTO_FILES := \
 	gen/policysearch/v1/policy_search_service_grpc.pb.go \
 	gen/openapiv2/policysearch/v1/policy_search_service.swagger.json
 
-GO_VERSION := 1.27.3
+GO_VERSION := 1.27.4
 BUF_VERSION := v1.73.0
 PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
