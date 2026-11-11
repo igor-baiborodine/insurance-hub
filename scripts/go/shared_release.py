@@ -26,7 +26,7 @@ from shared_support import (
     require,
 )
 
-BUILDER = "docker.io/library/golang:1.27.3-alpine3.23@sha256:0208a74017e3ce41f779876f3c6e9ad5d4030904e8ac6e91b9c5d7711c48362a"
+BUILDER = "docker.io/library/golang:1.27.4-alpine3.23@sha256:146e3b9c7c1e2ec3d3f5348c8a686151a75e1976e50efac9fc022ebe446a9a82"
 VERSION = re.compile(r"v1\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 API_VERSION = "2026-03-10"
 
@@ -147,7 +147,7 @@ def public_verify(root: Path, version: str, sha: str, source_digest: str) -> Non
         consumer = scratch / "consumer"
         consumer.mkdir()
         (consumer / "go.mod").write_text(
-            f"module example.com/servicekit-release-check\n\ngo 1.27.3\n\nrequire {MODULE} {version}\n"
+            f"module example.com/servicekit-release-check\n\ngo 1.27.4\n\nrequire {MODULE} {version}\n"
         )
         (consumer / "main.go").write_text(
             "package main\nimport (\n"

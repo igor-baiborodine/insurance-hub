@@ -26,7 +26,7 @@ def fixture_tree(root: Path, active_count: int = 0) -> dict:
     for module in inventory["modules"]:
         path = root / module["directory"]
         path.mkdir(parents=True, exist_ok=True)
-        (path / "go.mod").write_text(f"module {module['modulePath']}\n\ngo 1.27.3\n")
+        (path / "go.mod").write_text(f"module {module['modulePath']}\n\ngo 1.27.4\n")
         (path / "go.sum").touch()
         (path / "main.go").write_text("package fixture\n")
         (path / "Makefile").write_text(
@@ -142,6 +142,30 @@ def test_ci_changed_consumer_with_library_readme_relies_on_module_gate(tmp_path:
     # then
     assert result["obligations"] == []
     assert result["changed"] == ["templates/go-service"]
+
+
+def test_ci_shared_change_can_accompany_one_changed_service(tmp_path: Path) -> None:
+    # given
+    fixture_tree(tmp_path / "base", 2)
+    fixture_tree(tmp_path / "head", 2)
+
+    # when
+    result = registration.plan_trees(
+        tmp_path / "base",
+        tmp_path / "head",
+        [DIRECTORY + "/go.mod", "templates/go-service/go.mod"],
+        "a" * 40,
+        "b" * 40,
+        "a" * 40,
+        "ci",
+    )
+
+    # then
+    assert result["changed"] == [DIRECTORY, "templates/go-service"]
+    assert {item["module"] for item in result["obligations"]} == {
+        DIRECTORY,
+        "services/product-service",
+    }
 
 
 def test_ci_ignores_nonqualifying_second_service_tooling_path(tmp_path: Path) -> None:
@@ -277,12 +301,13 @@ def test_import_without_requirement_is_not_hidden(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "paths",
     [
-        [DIRECTORY + "/health/doc.go", "templates/go-service/main.go"],
         ["services/product-service/old.go", "templates/go-service/new.go"],
         ["libs/unregistered/go.mod"],
     ],
 )
-def test_complete_diff_rejects_mixed_or_unknown_ownership(tmp_path: Path, paths: list[str]) -> None:
+def test_complete_diff_rejects_multiple_services_or_unknown_ownership(
+    tmp_path: Path, paths: list[str]
+) -> None:
     fixture_tree(tmp_path / "base")
     fixture_tree(tmp_path / "head")
     with pytest.raises(SharedError):
@@ -539,6 +564,10 @@ def test_git_planner_uses_verified_revisions_and_both_rename_endpoints(tmp_path:
     assert planned["changed"] == [DIRECTORY]
     assert {r["module"] for r in planned["obligations"]} == {DIRECTORY}
     git("mv", DIRECTORY + "/main.go", "templates/go-service/moved.go")
+    (tmp_path / "services/product-service/main.go").write_text(
+        "package fixture\n// second changed service\n"
+    )
+    git("add", ".")
     git("commit", "-qm", "cross module rename")
-    with pytest.raises(SharedError, match="multiple Go modules"):
+    with pytest.raises(SharedError, match="multiple Go service modules"):
         registration.plan(tmp_path, candidate, git("rev-parse", "HEAD"))

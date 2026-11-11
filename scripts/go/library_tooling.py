@@ -79,7 +79,7 @@ def verify(root: Path, go: str, tools: Path, budget: Budget) -> None:
 
     for name in ("golangci-lint", "govulncheck"):
         require((tools / name).is_file(), "missing library tools; run bootstrap-go-tools")
-    version = os.environ.get("GO_VERSION", "1.27.3")
+    version = os.environ.get("GO_VERSION", "1.27.4")
     require(
         budget.run([go, "env", "GOVERSION"], root, "verify Go").strip() == "go" + version,
         "Go toolchain pin mismatch",

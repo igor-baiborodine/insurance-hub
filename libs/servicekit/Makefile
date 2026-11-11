@@ -4,7 +4,7 @@ SERVICEKIT_ROOT := $(abspath ../..)
 include $(SERVICEKIT_ROOT)/scripts/python/toolchain.mk
 
 GO ?= go
-GO_VERSION := 1.27.3
+GO_VERSION := 1.27.4
 GOLANGCI_LINT_VERSION := v2.14.0
 GOVULNCHECK_VERSION := v1.8.0
 OTEL_VERSION := v1.46.0

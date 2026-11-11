@@ -158,7 +158,7 @@ or propagator.
 ## Owning commands
 
 Run from this directory or use `make -C libs/servicekit` from the repository root. Prerequisites
-are Go 1.27.3, managed CPython 3.14.8, GCC for race tests, and access to public Go/tool/vulnerability
+are Go 1.27.4, managed CPython 3.14.8, GCC for race tests, and access to public Go/tool/vulnerability
 services unless cached. Prepare Python through the root `python-toolchain-setup` target first.
 
 ```sh

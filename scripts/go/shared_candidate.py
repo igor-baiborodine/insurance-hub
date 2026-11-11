@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import socket
 import socketserver
@@ -27,11 +28,32 @@ from shared_support import (
 )
 
 SIMPLE_PHASES = {"unit", "race", "build", "lint", "vulnerability", "dependency", "format"}
+GO_DIRECTIVE = re.compile(r"^go ([1-9][0-9]*\.[0-9]+(?:\.[0-9]+)?)$", re.MULTILINE)
 
 
 def _python_executable(root: Path) -> str:
     """Return an absolute interpreter path without resolving a virtual-environment symlink."""
     return str(Path(os.environ.get("PYTHON", root / ".venv/bin/python")).absolute())
+
+
+def _go_directive(path: Path) -> tuple[str, tuple[int, int, int]]:
+    matches = GO_DIRECTIVE.findall(path.read_text())
+    require(len(matches) == 1, "module must declare exactly one supported Go version")
+    value = matches[0]
+    parts = tuple(int(part) for part in value.split("."))
+    return value, (*parts, *(0 for _ in range(3 - len(parts))))
+
+
+def _candidate_environment(root: Path, library: Path, alternate: Path) -> dict[str, str]:
+    _, consumer_version = _go_directive(root / "go.mod")
+    library_value, library_version = _go_directive(library / "go.mod")
+    extra = {
+        "GOWORK": "off",
+        "GOFLAGS": f"-mod=readonly -modfile={alternate}",
+    }
+    if library_version > consumer_version:
+        extra["GOTOOLCHAIN"] = f"go{library_value}+auto"
+    return environment(**extra)
 
 
 def _checkout(root: Path, head: str, destination: Path, budget: Budget) -> None:
@@ -103,7 +125,7 @@ class Candidate:
         normal_guard(self.root, "go", budget)
         self.alternate.write_bytes((self.root / "go.mod").read_bytes())
         (self.root / "candidate.sum").write_bytes((self.root / "go.sum").read_bytes())
-        env = environment(GOWORK="off", GOFLAGS=f"-mod=readonly -modfile={self.alternate}")
+        env = _candidate_environment(self.root, self.library, self.alternate)
         budget.run(
             [
                 "go",

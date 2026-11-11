@@ -495,6 +495,19 @@ def topology_errors(root: Path, inventory: dict[str, Any]) -> tuple[list[str], l
             errors.append(
                 f"module identity mismatch at {mod_file}: inventory={module['modulePath']}, actual={actual}"
             )
+        manifest_go = metadata.get("Go", "")
+        expected_go = f"Go {manifest_go}" if manifest_go else ""
+        declared_go = [
+            item
+            for item in module["prerequisites"]
+            if re.fullmatch(r"Go [0-9]+\.[0-9]+(?:\.[0-9]+)?", item)
+        ]
+        if not expected_go or declared_go != [expected_go]:
+            errors.append(
+                f"Go prerequisite mismatch at {mod_file}: "
+                f"manifest={expected_go or 'missing'}, "
+                f"inventory={','.join(declared_go) or 'missing'}"
+            )
         replacements = {
             (item["modulePath"], item["replacementPath"]) for item in module["localReplacements"]
         }

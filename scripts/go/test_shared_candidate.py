@@ -17,6 +17,7 @@ import shared_candidate as candidate
 from shared_support import DIRECTORY, MODULE, Budget, SharedError
 
 ROOT = Path(__file__).resolve().parents[2]
+OFFLINE_GO_DIRECTIVE = "1.23"
 
 
 class GoEnvironment:
@@ -44,6 +45,37 @@ def test_python_executable_preserves_virtual_environment_entry_point(
     selected = candidate._python_executable(tmp_path)
     # then
     assert selected == str(virtual_python)
+
+
+@pytest.mark.parametrize(
+    ("consumer_version", "library_version", "expected"),
+    [
+        ("1.27.3", "1.27.4", "go1.27.4+auto"),
+        ("1.27.4", "1.27.4", None),
+        ("1.28", "1.27.4", None),
+    ],
+)
+def test_candidate_environment_selects_only_a_newer_library_toolchain(
+    tmp_path: Path,
+    monkeypatch,
+    consumer_version: str,
+    library_version: str,
+    expected: str | None,
+) -> None:
+    # given
+    monkeypatch.delenv("GOTOOLCHAIN", raising=False)
+    consumer = tmp_path / "consumer"
+    library = tmp_path / "library"
+    consumer.mkdir()
+    library.mkdir()
+    (consumer / "go.mod").write_text(f"module example.com/consumer\n\ngo {consumer_version}\n")
+    (library / "go.mod").write_text(f"module example.com/library\n\ngo {library_version}\n")
+
+    # when
+    result = candidate._candidate_environment(consumer, library, consumer / "candidate.mod")
+
+    # then
+    assert result.get("GOTOOLCHAIN") == expected
 
 
 @pytest.mark.parametrize(
@@ -126,13 +158,13 @@ def test_real_go_candidate_uses_changed_source_and_preserves_original_manifests(
     monkeypatch.setenv("GOSUMDB", "off")
     library = tmp_path / DIRECTORY
     library.mkdir(parents=True)
-    (library / "go.mod").write_text(f"module {MODULE}\n\ngo 1.27.3\n")
+    (library / "go.mod").write_text(f"module {MODULE}\n\ngo {OFFLINE_GO_DIRECTIVE}\n")
     (library / "go.sum").touch()
     (library / "value.go").write_text('package servicekit\nconst Revision = "candidate"\n')
     consumer = tmp_path / "consumer"
     consumer.mkdir()
     (consumer / "go.mod").write_text(
-        f"module example.com/consumer\n\ngo 1.27.3\nrequire {MODULE} v0.1.0\n"
+        f"module example.com/consumer\n\ngo {OFFLINE_GO_DIRECTIVE}\nrequire {MODULE} v0.1.0\n"
     )
     (consumer / "go.sum").touch()
     (consumer / "value_test.go").write_text(
@@ -157,13 +189,13 @@ def test_real_go_candidate_uses_changed_source_and_preserves_original_manifests(
 def committed_fixture(root: Path, body: str) -> str:
     library = root / DIRECTORY
     library.mkdir(parents=True)
-    (library / "go.mod").write_text(f"module {MODULE}\n\ngo 1.27.3\n")
+    (library / "go.mod").write_text(f"module {MODULE}\n\ngo {OFFLINE_GO_DIRECTIVE}\n")
     (library / "go.sum").touch()
     (library / "value.go").write_text('package servicekit\nconst Revision = "candidate"\n')
     consumer = root / "consumer"
     consumer.mkdir()
     (consumer / "go.mod").write_text(
-        f"module example.com/consumer\n\ngo 1.27.3\nrequire {MODULE} v0.1.0\n"
+        f"module example.com/consumer\n\ngo {OFFLINE_GO_DIRECTIVE}\nrequire {MODULE} v0.1.0\n"
     )
     (consumer / "go.sum").touch()
     (consumer / "value_test.go").write_text(
@@ -261,7 +293,9 @@ def test_controller_phases_receive_exact_git_image_identity(
     sha = committed_fixture(root, command)
     if mode == "normal":
         # A standalone offline consumer needs no published module to exercise this boundary.
-        (root / "consumer/go.mod").write_text("module example.com/consumer\n\ngo 1.27.3\n")
+        (root / "consumer/go.mod").write_text(
+            f"module example.com/consumer\n\ngo {OFFLINE_GO_DIRECTIVE}\n"
+        )
         (root / "consumer/value_test.go").write_text("package consumer\n")
         subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True, timeout=10)
         subprocess.run(

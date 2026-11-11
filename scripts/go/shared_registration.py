@@ -389,7 +389,11 @@ def plan_trees(
             for path in paths
         )
     }
-    require(len(changed) <= 1, "multiple Go modules changed; split the PR")
+    changed_services = changed - {DIRECTORY}
+    require(
+        len(changed_services) <= 1,
+        "multiple Go service modules changed; split the PR",
+    )
     for path in paths:
         classified = select_pr_module.classify_module(path)
         require(not classified or classified in roots, "unknown module ownership")
