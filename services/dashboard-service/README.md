@@ -21,7 +21,7 @@ Go service workflow.
 
 The standalone module is
 `github.com/igor-baiborodine/insurance-hub/services/dashboard-service`. It resolves the published
-Servicekit `v1.0.2` dependency without a workspace, local replacement or import from another
+Servicekit `v1.1.0` dependency without a workspace, local replacement or import from another
 service.
 
 ## Capabilities and request path
