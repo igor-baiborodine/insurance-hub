@@ -128,6 +128,23 @@ def test_sensitive_value_is_rejected_outside_stdin(tmp_path: Path, channel: str)
         )
 
 
+def test_logged_command_streams_output_and_preserves_failure(tmp_path: Path) -> None:
+    # given
+    log = tmp_path / "command.log"
+
+    # when / then
+    with pytest.raises(process_runner.CommandError, match="status 7"):
+        process_runner.run_command(
+            [sys.executable, "-c", "print('controlled output'); raise SystemExit(7)"],
+            cwd=tmp_path,
+            env={"PATH": os.environ.get("PATH", "")},
+            timeout_seconds=5,
+            activity="controlled logged failure",
+            log_path=log,
+        )
+    assert log.read_text(encoding="utf-8") == "controlled output\n"
+
+
 def test_timeout_terminates_and_reaps_owned_process_group(tmp_path: Path) -> None:
     # given
     child_pid = tmp_path / "child.pid"

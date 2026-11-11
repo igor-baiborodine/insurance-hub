@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 
 import pytest
-import shared_phase
 
 import check_copy
 
@@ -104,6 +103,9 @@ def test_created_copy_uses_repository_tooling_without_scaffold_only_surface(
     assert not (copy_root / "scripts" / "test_check_copy.py").exists()
     assert not (copy_root / "scripts" / "check_foundations.py").exists()
     assert not (copy_root / "scripts" / "test_check_foundations.py").exists()
+    assert not (copy_root / "scripts" / "scaffold_process.py").exists()
+    assert not (copy_root / "scripts" / "shared_phase.py").exists()
+    assert not (copy_root / "scripts" / "tooling_runner.py").exists()
     copied_tooling = (copy_root / "scripts" / "test_tooling.py").read_text(encoding="utf-8")
     assert "api/examplecopy/v1/example_service.proto" in copied_tooling
     assert "gen/examplecopy/v1" in copied_tooling
@@ -112,6 +114,13 @@ def test_created_copy_uses_repository_tooling_without_scaffold_only_surface(
     assert "github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.0.1" in (
         copy_root / "go.mod"
     ).read_text(encoding="utf-8")
+    copied_config = (copy_root / "go-service-tooling.json").read_text(encoding="utf-8")
+    copied_dockerfile = (copy_root / "Dockerfile").read_text(encoding="utf-8")
+    assert '"modulePath": "services/example-copy"' in copied_config
+    assert '"service": "example-copy"' in copied_config
+    assert 'ENTRYPOINT ["/example-copy"]' in copied_dockerfile
+    assert "go-service" not in copied_config
+    assert 'ENTRYPOINT ["/go-service"]' not in copied_dockerfile
 
 
 def test_copy_rejects_missing_shared_dependency(tmp_path: Path) -> None:
@@ -226,7 +235,7 @@ def test_run_copy_make_propagates_failed_child(
     monkeypatch.setattr(check_copy, "run_command", fail)
 
     # when / then
-    with pytest.raises(check_copy.CommandError, match="controlled child failure"):
+    with pytest.raises(check_copy.CopyError, match="controlled child failure"):
         check_copy.run_copy_make(
             config,
             tmp_path,
@@ -304,7 +313,7 @@ def test_documented_copy_removes_complete_check_copy_target(tmp_path: Path) -> N
     assert "check-copy" not in result
     assert "check-foundations" not in result
     assert '"$(PYTHON)" ./scripts/check_copy.py' not in result
-    assert '"$(PYTHON)" ./scripts/tooling_runner.py' in result
+    assert "scripts.go.service.tooling_runner" in result
 
 
 @pytest.mark.parametrize(
@@ -329,81 +338,3 @@ def test_main_maps_interruption_statuses(
 
     # then
     assert status == expected
-
-
-def test_candidate_phase_uses_issued_environment_and_receipts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # given
-    calls: list[tuple[str, str]] = []
-    captured: dict[str, object] = {}
-
-    def request(operation: str, phase: str) -> dict:
-        calls.append((operation, phase))
-        return {"environment": {"GOFLAGS": "-mod=readonly -modfile=/issued/candidate.mod"}}
-
-    def run(_arguments: list[str], **options: object) -> None:
-        captured.update(options)
-
-    monkeypatch.setattr(shared_phase, "context_request", request)
-    monkeypatch.setattr(shared_phase, "run_command", run)
-
-    # when
-    status = shared_phase.main(["copy"])
-
-    # then
-    assert status == 0
-    assert calls == [("begin", "copy"), ("end", "copy")]
-    environment = captured["env"]
-    assert environment["GOFLAGS"] == "-mod=readonly -modfile=/issued/candidate.mod"
-    assert environment["SERVICEKIT_CANDIDATE_LIBRARY"] == str(
-        Path.cwd().parents[1] / "libs" / "servicekit"
-    )
-
-
-def test_candidate_phase_does_not_receipt_failed_child(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # given
-    calls: list[tuple[str, str]] = []
-
-    def request(operation: str, phase: str) -> dict:
-        calls.append((operation, phase))
-        return {"environment": {}}
-
-    def fail(_arguments: list[str], **_options: object) -> None:
-        raise RuntimeError("owned child failed")
-
-    monkeypatch.setattr(shared_phase, "context_request", request)
-    monkeypatch.setattr(shared_phase, "run_command", fail)
-
-    # when
-    status = shared_phase.main(["generated"])
-
-    # then
-    assert status == 1
-    assert calls == [("begin", "generated")]
-
-
-def test_candidate_phase_maps_termination_and_withholds_receipt(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # given
-    calls: list[tuple[str, str]] = []
-
-    def request(operation: str, phase: str) -> dict:
-        calls.append((operation, phase))
-        return {"environment": {}}
-
-    def terminate(_arguments: list[str], **_options: object) -> None:
-        shared_phase._terminate(15, None)
-
-    monkeypatch.setattr(shared_phase, "context_request", request)
-    monkeypatch.setattr(shared_phase, "run_command", terminate)
-
-    # when
-    status = shared_phase.main(["breaking"])
-
-    # then
-    assert status == 143
-    assert calls == [("begin", "breaking")]

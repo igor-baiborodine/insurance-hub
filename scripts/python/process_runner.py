@@ -131,6 +131,60 @@ def terminate_process_group(process: subprocess.Popen[str], teardown_seconds: fl
     return _wait_for_process_group(process, deadline)
 
 
+def _run_logged_command(
+    arguments: Sequence[str],
+    *,
+    cwd: str | os.PathLike[str],
+    env: Mapping[str, str],
+    timeout_seconds: float,
+    activity: str,
+    log_path: Path,
+    heartbeat_seconds: float,
+    teardown_seconds: float,
+) -> subprocess.CompletedProcess[str]:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    deadline = started + timeout_seconds
+    heartbeat = started + heartbeat_seconds
+    print(f"{activity}: started", file=sys.stderr)
+    with log_path.open("w", encoding="utf-8") as output:
+        process = subprocess.Popen(
+            list(arguments),
+            cwd=cwd,
+            env=dict(env),
+            text=True,
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            while process.poll() is None:
+                now = time.monotonic()
+                if now >= deadline:
+                    raise CommandError(
+                        f"{activity} exceeded its {timeout_seconds:g}-second deadline"
+                    )
+                if now >= heartbeat:
+                    print(f"{activity}: still running after {now - started:.0f}s", file=sys.stderr)
+                    heartbeat = now + heartbeat_seconds
+                time.sleep(min(0.1, deadline - now))
+        except BaseException:
+            terminate_process_group(process, teardown_seconds)
+            raise
+        if _process_group_exists(process) and not terminate_process_group(
+            process, teardown_seconds
+        ):
+            raise CommandError(
+                f"{activity} cleanup exceeded its {teardown_seconds:g}-second deadline"
+            )
+    result = subprocess.CompletedProcess(list(arguments), process.returncode, "", "")
+    if result.returncode != 0:
+        raise CommandError(f"{activity} failed with status {result.returncode}")
+    print(f"{activity}: completed in {time.monotonic() - started:.1f}s", file=sys.stderr)
+    return result
+
+
 def run_command(
     arguments: Sequence[str],
     *,
@@ -140,6 +194,7 @@ def run_command(
     activity: str,
     input_text: str | None = None,
     sensitive_values: Sequence[str] = (),
+    log_path: Path | None = None,
     heartbeat_seconds: float = 30,
     teardown_seconds: float = 5,
 ) -> subprocess.CompletedProcess[str]:
@@ -156,6 +211,19 @@ def run_command(
         raise ValueError("command arguments must not contain sensitive values")
     if any(value in item for value in sensitive_values for item in env.values()):
         raise ValueError("command environment must not contain sensitive values")
+    if log_path is not None:
+        if input_text is not None or sensitive_values:
+            raise ValueError("logged commands cannot accept sensitive input")
+        return _run_logged_command(
+            arguments,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=timeout_seconds,
+            activity=activity,
+            log_path=log_path,
+            heartbeat_seconds=heartbeat_seconds,
+            teardown_seconds=teardown_seconds,
+        )
     started = time.monotonic()
     deadline = started + timeout_seconds
     heartbeat = started + heartbeat_seconds

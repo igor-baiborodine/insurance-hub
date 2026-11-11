@@ -19,7 +19,10 @@ def configured_module(tmp_path: Path) -> Path:
     module.mkdir(parents=True)
     (module / "Makefile").write_text("help:\n\t@true\n", encoding="utf-8")
     (module / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
-    (module / "cmd").mkdir()
+    (module / "cmd/server").mkdir(parents=True)
+    (module / "gen").mkdir()
+    (module / "scripts").mkdir()
+    (module / "scripts/test_tooling.py").write_text("", encoding="utf-8")
     return module
 
 
@@ -55,8 +58,25 @@ def version_two_configuration(module: Path) -> dict[str, object]:
     (module / "contract.json").write_text('{"paths": {}}\n', encoding="utf-8")
     value = configuration()
     value["schemaVersion"] = 2
+    value["dockerfile"] = {
+        "sourceCopies": [{"source": "cmd", "destination": "cmd"}],
+        "buildOutputs": [
+            {
+                "package": "./cmd/server",
+                "output": "/out/example-service",
+                "destination": "/example-service",
+                "mode": "0555",
+            }
+        ],
+        "runtimeCopies": [],
+        "ports": [8080, 8081, 9090],
+    }
     value["contracts"] = {
-        "runner": {"target": "test-tooling", "timeoutSeconds": 300},
+        "runner": {
+            "target": "test-tooling",
+            "suitePath": "scripts/test_tooling.py",
+            "timeoutSeconds": 300,
+        },
         "gateway": {
             "generatedPath": "generated.json",
             "contractPath": "contract.json",
@@ -108,6 +128,9 @@ def test_load_version_two_contracts(tmp_path: Path) -> None:
     assert config.schema_version == 2
     assert config.contracts is not None
     assert config.contracts.runner.target == "test-tooling"
+    assert config.contracts.runner.suite_path == "scripts/test_tooling.py"
+    assert config.dockerfile is not None
+    assert config.dockerfile.build_outputs[0].destination == "/example-service"
     assert config.contracts.dependencies[0].ports == (9200,)
     assert config.contracts.administration.secret_environment == ("ADMIN_PASSWORD",)
 
@@ -160,6 +183,59 @@ def test_load_tooling_config_rejects_unknown_instruction(tmp_path: Path) -> None
 
     # when / then
     with pytest.raises(ToolingConfigError, match="unknown keys: command"):
+        load_tooling_config(path, repository_root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    (
+        (
+            lambda data: data["dockerfile"]["sourceCopies"][0].update({"source": "../outside"}),
+            "must be relative",
+        ),
+        (
+            lambda data: data["dockerfile"]["buildOutputs"][0].update({"mode": "u+s"}),
+            "mode is invalid",
+        ),
+        (
+            lambda data: data["dockerfile"].update({"ports": [8080, 8080]}),
+            "ports contains duplicates",
+        ),
+        (
+            lambda data: data["dockerfile"].update({"buildOutputs": []}),
+            "buildOutputs must be a non-empty list",
+        ),
+        (
+            lambda data: data["dockerfile"].update({"RUN": "arbitrary"}),
+            "unknown keys: RUN",
+        ),
+    ),
+)
+def test_load_tooling_config_rejects_unsafe_dockerfile_data(
+    tmp_path: Path, mutate: object, message: str
+) -> None:
+    # given
+    module = configured_module(tmp_path)
+    data = version_two_configuration(module)
+    mutate(data)  # type: ignore[operator]
+    path = module / "go-service-tooling.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    # when / then
+    with pytest.raises(ToolingConfigError, match=message):
+        load_tooling_config(path, repository_root=tmp_path)
+
+
+def test_load_tooling_config_rejects_duplicate_dockerfile_destination(tmp_path: Path) -> None:
+    module = configured_module(tmp_path)
+    data = version_two_configuration(module)
+    data["dockerfile"]["sourceCopies"].append(  # type: ignore[index,union-attr]
+        {"source": "gen", "destination": "cmd"}
+    )
+    path = module / "go-service-tooling.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ToolingConfigError, match="duplicate destinations"):
         load_tooling_config(path, repository_root=tmp_path)
 
 

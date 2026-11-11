@@ -7,7 +7,15 @@ from pathlib import Path
 import pytest
 
 from scripts.go.service.tooling_config import RunnerConfig, ToolingConfigError
-from scripts.go.service.tooling_runner import execute_target
+from scripts.go.service.tooling_runner import execute_target, run_suite, suite_arguments
+
+
+def runner(target: str = "test-tooling") -> RunnerConfig:
+    return RunnerConfig(
+        target=target,
+        suite_path="scripts/test_tooling.py",
+        timeout_seconds=45,
+    )
 
 
 def test_execute_target_uses_bounded_module_owned_make_command(tmp_path: Path) -> None:
@@ -24,7 +32,7 @@ def test_execute_target_uses_bounded_module_owned_make_command(tmp_path: Path) -
     # when
     execute_target(
         module,
-        RunnerConfig(target="test-tooling", timeout_seconds=45),
+        runner(),
         environment={"GOTOOLCHAIN": "local"},
         make="/tools/make",
         executor=fake_executor,
@@ -53,7 +61,7 @@ def test_execute_target_rejects_missing_makefile_before_executor(tmp_path: Path)
     with pytest.raises(ToolingConfigError, match="does not own a Makefile"):
         execute_target(
             tmp_path,
-            RunnerConfig(target="test-tooling", timeout_seconds=45),
+            runner(),
             executor=fake_executor,
         )
     assert calls == 0
@@ -73,7 +81,37 @@ def test_execute_target_rejects_unvalidated_runner_before_executor(tmp_path: Pat
     with pytest.raises(ToolingConfigError, match="target is invalid"):
         execute_target(
             tmp_path,
-            RunnerConfig(target="unsafe target", timeout_seconds=45),
+            runner("unsafe target"),
             executor=fake_executor,
         )
     assert calls == 0
+
+
+def test_suite_arguments_select_only_declared_integration_file(tmp_path: Path) -> None:
+    module = tmp_path / "module"
+    suite = module / "scripts/test_tooling.py"
+    suite.parent.mkdir(parents=True)
+    suite.write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+
+    arguments = suite_arguments(module, tmp_path, runner())
+
+    assert arguments[-1] == str(suite)
+    assert arguments[arguments.index("-m") + 1] == "integration"
+
+
+def test_run_suite_maps_termination_signal(tmp_path: Path) -> None:
+    module = tmp_path / "module"
+    suite = module / "scripts/test_tooling.py"
+    suite.parent.mkdir(parents=True)
+    suite.write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+
+    def interrupt(_arguments: object) -> int:
+        import os
+        import signal
+
+        os.kill(os.getpid(), signal.SIGTERM)
+        return 0
+
+    assert run_suite(module, tmp_path, runner(), pytest_main=interrupt) == 143

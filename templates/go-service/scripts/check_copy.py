@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from scaffold_process import CommandError, child_environment, run_command
+from scripts.python.process_runner import CommandError, child_environment, run_command
 
 WORKFLOW_SECONDS = 2_400
 TEARDOWN_SECONDS = 15
@@ -40,7 +40,7 @@ GENERATED_OUTPUTS = (
 )
 STALE_IDENTITY = re.compile(
     r"github\.com/igor-baiborodine/insurance-hub/templates/go-service|"
-    r"templates/go-service|go-service|scaffold\.v1|scaffold_v1|scaffoldv1|scaffold/v1"
+    r"templates/go-service|scaffold\.v1|scaffold_v1|scaffoldv1|scaffold/v1"
 )
 
 
@@ -137,6 +137,7 @@ def replace_identities(copy_root: Path) -> None:
         content = path.read_text(encoding="utf-8")
         for source, replacement in IDENTITY_REPLACEMENTS:
             content = content.replace(source, replacement)
+        content = content.replace("example-copy-tooling.json", "go-service-tooling.json")
         path.write_text(content, encoding="utf-8")
 
 
@@ -196,7 +197,6 @@ def remove_scaffold_only_surface(copy_root: Path) -> None:
         "scripts/test_check_copy.py",
         "scripts/check_foundations.py",
         "scripts/test_check_foundations.py",
-        "scripts/shared_phase.py",
     ):
         (copy_root / relative).unlink()
     readme = copy_root / "README.md"
@@ -247,6 +247,15 @@ def validate_copy_surface(copy_root: Path) -> None:
         not (copy_root / "scripts" / "check_copy.py").exists(),
         "copied service retained check_copy.py",
     )
+    for relative in (
+        "scripts/scaffold_process.py",
+        "scripts/shared_phase.py",
+        "scripts/tooling_runner.py",
+    ):
+        require(
+            not (copy_root / relative).exists(),
+            f"copied service retained generic tooling implementation {relative}",
+        )
     for relative in (".python-version", "pyproject.toml", "uv.lock"):
         require(not (copy_root / relative).exists(), f"copied service retained {relative}")
     require(not (copy_root / ".venv").exists(), "copied service unexpectedly contains .venv")
@@ -356,25 +365,33 @@ def run_copy_make(
         require(config.candidate_library is not None, "candidate library is required")
         child_env["GOFLAGS"] = f"-mod=readonly -modfile={copy_root / 'candidate.mod'}"
         child_env["SERVICEKIT_CANDIDATE_LIBRARY"] = str(config.candidate_library)
-    run_command(
-        [
-            *config.make_arguments,
-            "--no-print-directory",
-            "-C",
-            str(copy_root),
-            target,
-            *variables,
-            f"GO={config.go}",
-            f"UV={config.uv}",
-            f"INSURANCE_HUB_ROOT={config.repository_root}",
-        ],
-        cwd=copy_root,
-        env=child_env,
-        timeout_seconds=min(maximum_seconds, remaining),
-        teardown_seconds=TEARDOWN_SECONDS,
-        activity=activity,
-        log_path=log_path,
-    )
+    owned_log = log_path or copy_root / ".tools/check-copy-logs" / f"{target}.log"
+    try:
+        run_command(
+            [
+                *config.make_arguments,
+                "--no-print-directory",
+                "-C",
+                str(copy_root),
+                target,
+                *variables,
+                f"GO={config.go}",
+                f"UV={config.uv}",
+                f"INSURANCE_HUB_ROOT={config.repository_root}",
+                f"TOOLING_REPOSITORY_ROOT={copy_root.parents[1]}",
+            ],
+            cwd=copy_root,
+            env=child_env,
+            timeout_seconds=min(maximum_seconds, remaining),
+            teardown_seconds=TEARDOWN_SECONDS,
+            activity=activity,
+            log_path=owned_log,
+        )
+    except CommandError as error:
+        if log_path is not None:
+            raise
+        diagnostic = owned_log.read_text(encoding="utf-8")[-8_000:] if owned_log.exists() else ""
+        raise CopyError(f"{error}\n{diagnostic}") from error
 
 
 def execute(config: Configuration) -> None:

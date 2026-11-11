@@ -185,6 +185,13 @@ def inspect_image_contract(
         and not (image_config.get("Cmd") or []),
         "image entrypoint differs from config",
     )
+    if config.dockerfile is not None:
+        expected_ports = {f"{port}/tcp" for port in config.dockerfile.ports}
+        exposed_ports = image_config.get("ExposedPorts") or {}
+        require(
+            isinstance(exposed_ports, dict) and set(exposed_ports) == expected_ports,
+            "image exposed ports differ from config",
+        )
     expected_labels = {
         "org.opencontainers.image.created": identity["SOURCE_CREATED"],
         "org.opencontainers.image.source": identity["SOURCE_REPOSITORY"],

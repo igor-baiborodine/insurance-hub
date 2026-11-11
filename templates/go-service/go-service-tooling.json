@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 2,
+  "service": "go-service",
+  "modulePath": "templates/go-service",
+  "image": {
+    "name": "insurance-hub-go-service-api",
+    "title": "Insurance Hub Go Service API",
+    "localTagPrefix": "1.0.0-local.",
+    "entrypoint": [
+      "/go-service"
+    ],
+    "user": "65532:65532",
+    "platform": "linux/amd64",
+    "lifecycle": {
+      "containerPort": 8081,
+      "path": "/livez",
+      "expectedBody": "live\n",
+      "environment": {
+        "HTTP_ADDR": "0.0.0.0:8080",
+        "GRPC_ADDR": "0.0.0.0:9090",
+        "HEALTH_ADDR": "0.0.0.0:8081"
+      },
+      "stopSeconds": 10
+    }
+  },
+  "candidate": {
+    "copyPaths": [
+      "cmd",
+      "gen",
+      "internal"
+    ],
+    "excludePaths": [],
+    "phaseTargets": {
+      "generated": [
+        "check-proto-drift"
+      ],
+      "breaking": [
+        "check-proto-breaking"
+      ],
+      "integration": [
+        "test"
+      ],
+      "copy": [
+        "check-copy"
+      ]
+    },
+    "imageCheckTarget": "_image-check-existing"
+  },
+  "dockerfile": {
+    "sourceCopies": [
+      {
+        "source": "cmd",
+        "destination": "./cmd"
+      },
+      {
+        "source": "gen",
+        "destination": "./gen"
+      },
+      {
+        "source": "internal",
+        "destination": "./internal"
+      }
+    ],
+    "buildOutputs": [
+      {
+        "package": "./cmd/server",
+        "output": "/out/go-service",
+        "destination": "/go-service",
+        "mode": "0555"
+      }
+    ],
+    "runtimeCopies": [],
+    "ports": [
+      8080,
+      8081,
+      9090
+    ]
+  },
+  "contracts": {
+    "runner": {
+      "target": "test-tooling",
+      "suitePath": "scripts/test_tooling.py",
+      "timeoutSeconds": 3600
+    },
+    "gateway": {
+      "generatedPath": "gen/openapiv2/scaffold/v1/example_service.swagger.json",
+      "contractPath": "testdata/http-contract.json"
+    },
+    "dependencies": [],
+    "deployment": {
+      "portForwardSeconds": 30
+    },
+    "administration": {
+      "transports": [],
+      "secretEnvironment": []
+    }
+  }
+}

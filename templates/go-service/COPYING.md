@@ -135,7 +135,7 @@ awk '
   !skipping { print }
 ' Makefile > Makefile.copy
 mv Makefile.copy Makefile
-rm scripts/check_copy.py scripts/test_check_copy.py scripts/check_foundations.py scripts/test_check_foundations.py scripts/shared_phase.py
+rm scripts/check_copy.py scripts/test_check_copy.py scripts/check_foundations.py scripts/test_check_foundations.py
 
 sed -i \
   -e '/check-foundations/d' \

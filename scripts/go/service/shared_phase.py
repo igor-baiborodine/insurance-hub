@@ -201,7 +201,7 @@ def run_phase(config: ServiceTooling, phase: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
-    parser.add_argument("phase", choices=("generated", "breaking", "integration", "image"))
+    parser.add_argument("phase", choices=("generated", "breaking", "integration", "copy", "image"))
     arguments = parser.parse_args(argv)
     try:
         config = load_tooling_config(arguments.config)

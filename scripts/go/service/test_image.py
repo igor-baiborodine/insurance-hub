@@ -107,3 +107,32 @@ def test_inspect_image_contract_rejects_wrong_entrypoint(monkeypatch: pytest.Mon
     # when / then
     with pytest.raises(image.ImageError, match="entrypoint"):
         image.inspect_image_contract(config, environment)
+
+
+def test_inspect_image_contract_rejects_wrong_configured_ports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = load_tooling_config(REPOSITORY_ROOT / "templates/go-service/go-service-tooling.json")
+    environment = source_environment()
+    environment["IMAGE_REF"] = "insurance-hub-go-service-api:fixture"
+    record = {
+        "Os": "linux",
+        "Architecture": "amd64",
+        "Config": {
+            "User": config.image.user,
+            "Entrypoint": list(config.image.entrypoint),
+            "Cmd": None,
+            "ExposedPorts": {"8080/tcp": {}},
+            "Labels": {
+                "org.opencontainers.image.created": environment["SOURCE_CREATED"],
+                "org.opencontainers.image.source": environment["SOURCE_REPOSITORY"],
+                "org.opencontainers.image.revision": environment["SOURCE_REVISION"],
+                "org.opencontainers.image.title": config.image.title,
+                "org.opencontainers.image.version": environment["SOURCE_VERSION"],
+            },
+        },
+    }
+    monkeypatch.setattr(image, "run", lambda *_args, **_kwargs: json.dumps([record]))
+
+    with pytest.raises(image.ImageError, match="exposed ports"):
+        image.inspect_image_contract(config, environment)

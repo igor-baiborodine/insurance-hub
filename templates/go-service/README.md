@@ -98,6 +98,8 @@ require `bootstrap-tools` to have been run explicitly.
 | `make verify-tools`         | Exact Go/tool versions, golangci-lint schema and formatter order, module/import prefix, 100-column settings, readonly loading, all-test lint scope, and vet-equivalent coverage.                                                                                           | All seven pinned binaries already installed; no installation.                                                                                                                      |
 | `make python-toolchain-check` | Exact CPython, pytest, Ruff, and root locked-environment identity without installing or changing packages. | uv 0.13.1 and the provisioned repository environment, or a verified `PYTHON` override containing the root-locked tools. |
 | `make python-check`         | Ruff format/lint plus fast lifecycle and copy-decision pytest coverage for scaffold-owned Python. | Passing `python-toolchain-check`; no Go tools or network mutation. |
+| `make dockerfile-check` | Exact generated Dockerfile bytes against the validated service configuration and repository-owned fixed template. | Managed Python; no container runtime or mutation. |
+| `make image-check` | Builds the generated Dockerfile from committed source identity, then verifies OCI labels, platform, nonroot user, entrypoint, exposed ports, liveness, and graceful shutdown. | Docker Buildx and access to the pinned builder and runtime images unless cached. |
 | `make format-check`         | The same ordered formatter pipeline and selected handwritten files as `format`, reported without rewriting them.                                                                                                                                                           | Verified tools; file selection below.                                                                                                                                              |
 | `make check-deps`           | Reproduces `update-deps` in a temporary standalone module and compares `go.mod` and `go.sum`.                                                                                                                                                                              | Go proxy/checksum access unless cached.                                                                                                                                            |
 | `make format-proto-check`   | Buf formatting for the one owned schema.                                                                                                                                                                                                                                   | Verified tools.                                                                                                                                                                    |
@@ -114,13 +116,13 @@ require `bootstrap-tools` to have been run explicitly.
 | `make test-tooling`         | Pytest-managed Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation. Child commands have 20-minute phase deadlines inside a 60-minute suite deadline, 30-second activity heartbeats, and bounded process-group cleanup. | Verified Python and Go tools; temporary storage and the network/cache prerequisites of nested checks. |
 | `make check-copy`           | Source-scaffold proof that creates a Git-free `services/example-copy`, regenerates all four renamed outputs, rejects stale gateway/Swagger identity, runs copied HTTP→RPC/direct-RPC/health acceptance and the complete checks, compares inventories, and cleans up. The workflow has a 40-minute overall deadline, bounded phase deadlines, 30-second activity heartbeats, and a 15-second teardown budget. | Verified repository tools, temporary storage, and all public network endpoints listed above. The target is removed from produced service copies. |
 
-The `test-tooling` runner handles SIGINT and SIGTERM, unwinds the active child process group, and
+The shared `test-tooling` runner handles SIGINT and SIGTERM, unwinds the active child process group, and
 returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make reports an interrupted
 `test-tooling` recipe with its own nonzero Make status after the runner exits; it does not preserve
 the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
-Database/broker integration, mock generation, migrations, containers, deployment, workspace
+Database/broker integration, mock generation, migrations, deployment, workspace
 validation, and live infrastructure are not applicable to this standalone scaffold. It has no such
 dependencies or placeholder targets.
 
@@ -148,6 +150,7 @@ make update-proto-deps
 make gen-proto
 make update-deps
 make format FORMAT_SCOPE=all
+make dockerfile-generate
 ```
 
 Run normal non-mutating validation after tools are installed:
