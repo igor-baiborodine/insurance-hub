@@ -24,6 +24,7 @@ from scripts.go.service.deployment import (  # noqa: E402
     DeploymentError as SharedDeploymentError,
 )
 from scripts.go.service.tooling_contracts import (  # noqa: E402
+    AdministrationError,
     OwnedPortForward,
     PortForwardSpec,
     loopback_port,
@@ -939,22 +940,25 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             (target.business, http_port, 80),
             (target.management, management_port, 8081),
         ):
-            forwards.enter_context(
-                OwnedPortForward(
-                    PortForwardSpec(
-                        context=target.context,
-                        namespace=target.namespace,
-                        resource=f"service/{service}",
-                        local_port=local_port,
-                        remote_port=remote_port,
-                    ),
-                    cwd=ROOT,
-                    env=safe_environment(),
-                    startup_seconds=20,
-                    teardown_seconds=5,
-                    kubectl=target.kubectl_binary,
+            try:
+                forwards.enter_context(
+                    OwnedPortForward(
+                        PortForwardSpec(
+                            context=target.context,
+                            namespace=target.namespace,
+                            resource=f"service/{service}",
+                            local_port=local_port,
+                            remote_port=remote_port,
+                        ),
+                        cwd=ROOT,
+                        env=safe_environment(),
+                        startup_seconds=20,
+                        teardown_seconds=5,
+                        kubectl=target.kubectl_binary,
+                    )
                 )
-            )
+            except AdministrationError as error:
+                raise DeploymentError(str(error)) from error
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             try:

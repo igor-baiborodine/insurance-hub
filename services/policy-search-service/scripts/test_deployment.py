@@ -12,6 +12,7 @@ import policy_search_deployment_checks as checks
 import pytest
 from scripts.go.service import deployment as lifecycle
 from scripts.go.service import release as release_owner
+from scripts.go.service import tooling_contracts
 
 import deployment
 
@@ -722,3 +723,30 @@ def test_cli_preserves_interrupt_status() -> None:
 
         with patch.object(deployment, "main", interrupted):
             assert deployment.cli([]) == expected
+
+
+def test_cli_maps_port_forward_startup_failure(capsys: pytest.CaptureFixture[str]) -> None:
+    # given
+    target = Mock()
+    target.business = "policy-search-api"
+    target.management = "policy-search-management"
+    target.context = "kind-local-dev-insurance-hub"
+    target.namespace = "local-dev-all"
+    target.kubectl_binary = "kubectl"
+    owned = Mock()
+    owned.process.poll.return_value = 1
+    owned.diagnostics.return_value = "controlled failure"
+
+    # when
+    with (
+        patch.object(tooling_contracts.OwnedProcess, "start", return_value=owned),
+        patch.object(deployment, "main", side_effect=lambda _argv: checks.verify(target, [])),
+    ):
+        status = deployment.cli([])
+
+    # then
+    assert status == 1
+    owned.close.assert_called_once_with()
+    assert capsys.readouterr().err == (
+        "policy-search-deployment: port-forward stopped early: controlled failure\n"
+    )
