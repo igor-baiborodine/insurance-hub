@@ -7,7 +7,7 @@ require (
 	buf.build/go/protovalidate v1.4.0
 	github.com/elastic/go-elasticsearch/v8 v8.19.7
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0
-	github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.0.2
+	github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.1.0
 	github.com/twmb/franz-go v1.22.2
 	github.com/twmb/franz-go/pkg/kmsg v1.15.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.71.0
