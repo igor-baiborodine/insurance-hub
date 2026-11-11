@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from scaffold_process import CommandError, child_environment, run_command
+from scripts.python.process_runner import CommandError, child_environment, run_command
 
 WORKFLOW_SECONDS = 2_400
 TEARDOWN_SECONDS = 15
@@ -42,6 +42,7 @@ STALE_IDENTITY = re.compile(
     r"github\.com/igor-baiborodine/insurance-hub/templates/go-service|"
     r"templates/go-service|go-service|scaffold\.v1|scaffold_v1|scaffoldv1|scaffold/v1"
 )
+ALLOWED_GENERIC_IDENTITY = "go-service-tooling.json"
 
 
 class CopyError(RuntimeError):
@@ -70,6 +71,11 @@ class Configuration:
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise CopyError(message)
+
+
+def contains_stale_identity(content: str) -> bool:
+    """Detect active scaffold identity while allowing the generic tooling filename."""
+    return bool(STALE_IDENTITY.search(content.replace(ALLOWED_GENERIC_IDENTITY, "")))
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -137,6 +143,7 @@ def replace_identities(copy_root: Path) -> None:
         content = path.read_text(encoding="utf-8")
         for source, replacement in IDENTITY_REPLACEMENTS:
             content = content.replace(source, replacement)
+        content = content.replace("example-copy-tooling.json", "go-service-tooling.json")
         path.write_text(content, encoding="utf-8")
 
 
@@ -153,9 +160,7 @@ def rewrite_readme(content: str) -> str:
     lines = [
         line
         for line in content.splitlines()
-        if "check-foundations" not in line
-        and "`make check-copy`" not in line
-        and line.strip() != "make check-copy"
+        if "`make check-copy`" not in line and line.strip() != "make check-copy"
     ]
     start = next(index for index, line in enumerate(lines) if line == "### Root scaffold delegates")
     end = next(
@@ -185,18 +190,12 @@ def remove_scaffold_only_surface(copy_root: Path) -> None:
     )
     require(count == 1, "source scaffold candidate phase block is missing")
     makefile.write_text(
-        remove_make_target(
-            remove_make_target(content, "check-copy"),
-            "check-foundations",
-        ),
+        remove_make_target(content, "check-copy"),
         encoding="utf-8",
     )
     for relative in (
         "scripts/check_copy.py",
         "scripts/test_check_copy.py",
-        "scripts/check_foundations.py",
-        "scripts/test_check_foundations.py",
-        "scripts/shared_phase.py",
     ):
         (copy_root / relative).unlink()
     readme = copy_root / "README.md"
@@ -236,7 +235,7 @@ def validate_copy_surface(copy_root: Path) -> None:
         if any(part in IGNORED_DIRECTORIES for part in relative.parts):
             continue
         require(
-            not STALE_IDENTITY.search(path.read_text(encoding="utf-8")),
+            not contains_stale_identity(path.read_text(encoding="utf-8")),
             f"stale active scaffold identity found in {relative}",
         )
     makefile = (copy_root / "Makefile").read_text(encoding="utf-8")
@@ -247,6 +246,15 @@ def validate_copy_surface(copy_root: Path) -> None:
         not (copy_root / "scripts" / "check_copy.py").exists(),
         "copied service retained check_copy.py",
     )
+    for relative in (
+        "scripts/scaffold_process.py",
+        "scripts/shared_phase.py",
+        "scripts/tooling_runner.py",
+    ):
+        require(
+            not (copy_root / relative).exists(),
+            f"copied service retained generic tooling implementation {relative}",
+        )
     for relative in (".python-version", "pyproject.toml", "uv.lock"):
         require(not (copy_root / relative).exists(), f"copied service retained {relative}")
     require(not (copy_root / ".venv").exists(), "copied service unexpectedly contains .venv")
@@ -259,9 +267,7 @@ def validate_copy_surface(copy_root: Path) -> None:
         "copied Makefile does not use repository Go tooling",
     )
     require(
-        "check-copy" not in makefile
-        and "check-foundations" not in makefile
-        and "`make check-copy`" not in readme,
+        "check-copy" not in makefile and "`make check-copy`" not in readme,
         "copied service retained scaffold-only copy interface",
     )
     require("make go-scaffold-" not in readme, "copied README claims scaffold-only coverage")
@@ -320,7 +326,7 @@ def validate_generated_output(copy_root: Path) -> None:
     require(generated == list(GENERATED_OUTPUTS), f"generated output path set differs: {generated}")
     for relative in GENERATED_OUTPUTS:
         require(
-            not STALE_IDENTITY.search((copy_root / relative).read_text(encoding="utf-8")),
+            not contains_stale_identity((copy_root / relative).read_text(encoding="utf-8")),
             f"stale active scaffold identity found in {relative}",
         )
 
@@ -356,25 +362,33 @@ def run_copy_make(
         require(config.candidate_library is not None, "candidate library is required")
         child_env["GOFLAGS"] = f"-mod=readonly -modfile={copy_root / 'candidate.mod'}"
         child_env["SERVICEKIT_CANDIDATE_LIBRARY"] = str(config.candidate_library)
-    run_command(
-        [
-            *config.make_arguments,
-            "--no-print-directory",
-            "-C",
-            str(copy_root),
-            target,
-            *variables,
-            f"GO={config.go}",
-            f"UV={config.uv}",
-            f"INSURANCE_HUB_ROOT={config.repository_root}",
-        ],
-        cwd=copy_root,
-        env=child_env,
-        timeout_seconds=min(maximum_seconds, remaining),
-        teardown_seconds=TEARDOWN_SECONDS,
-        activity=activity,
-        log_path=log_path,
-    )
+    owned_log = log_path or copy_root / ".tools/check-copy-logs" / f"{target}.log"
+    try:
+        run_command(
+            [
+                *config.make_arguments,
+                "--no-print-directory",
+                "-C",
+                str(copy_root),
+                target,
+                *variables,
+                f"GO={config.go}",
+                f"UV={config.uv}",
+                f"INSURANCE_HUB_ROOT={config.repository_root}",
+                f"TOOLING_REPOSITORY_ROOT={copy_root.parents[1]}",
+            ],
+            cwd=copy_root,
+            env=child_env,
+            timeout_seconds=min(maximum_seconds, remaining),
+            teardown_seconds=TEARDOWN_SECONDS,
+            activity=activity,
+            log_path=owned_log,
+        )
+    except CommandError as error:
+        if log_path is not None:
+            raise
+        diagnostic = owned_log.read_text(encoding="utf-8")[-8_000:] if owned_log.exists() else ""
+        raise CopyError(f"{error}\n{diagnostic}") from error
 
 
 def execute(config: Configuration) -> None:

@@ -50,14 +50,22 @@ PYTHON_SHARED_TOOLING_FILES := \
 	scripts/go/test_topology.py \
 	scripts/go/module/module_tooling.py \
 	scripts/go/module/test_module_tooling.py \
+	scripts/go/service/dockerfile.py \
 	scripts/go/service/image.py \
 	scripts/go/service/shared_phase.py \
+	scripts/go/service/tooling_contracts.py \
 	scripts/go/service/tooling_config.py \
 	scripts/go/service/tooling_process.py \
+	scripts/go/service/tooling_resources.py \
+	scripts/go/service/tooling_runner.py \
+	scripts/go/service/test_dockerfile.py \
 	scripts/go/service/test_image.py \
 	scripts/go/service/test_shared_phase.py \
+	scripts/go/service/test_tooling_contracts.py \
 	scripts/go/service/test_tooling_config.py \
 	scripts/go/service/test_tooling_process.py \
+	scripts/go/service/test_tooling_resources.py \
+	scripts/go/service/test_tooling_runner.py \
 	scripts/go/service/release.py \
 	scripts/go/service/configuration.py \
 	scripts/go/service/deployment.py \
@@ -67,16 +75,10 @@ PYTHON_SHARED_TOOLING_FILES := \
 	scripts/go/service/test_release.py
 PYTHON_SCAFFOLD_TOOLING_FILES := \
 	templates/go-service/scripts/check_copy.py \
-	templates/go-service/scripts/check_foundations.py \
 	templates/go-service/scripts/check_gateway_contract.py \
 	templates/go-service/scripts/test_check_gateway_contract.py \
-	templates/go-service/scripts/test_check_foundations.py \
-	templates/go-service/scripts/scaffold_process.py \
 	templates/go-service/scripts/test_check_copy.py \
-	templates/go-service/scripts/test_scaffold_process.py \
-	templates/go-service/scripts/test_tooling.py \
-	templates/go-service/scripts/tooling_runner.py \
-	templates/go-service/scripts/test_tooling_runner.py
+	templates/go-service/scripts/test_tooling.py
 PYTHON_PRODUCT_TOOLING_FILES := \
 	scripts/product_baseline/__init__.py \
 	scripts/product_baseline/accept.py \
@@ -311,13 +313,16 @@ python-shared-tooling-test-fast: python-toolchain-check ## Run fast shared repos
 		scripts/go/test_topology.py scripts/go/module/test_module_tooling.py \
 		scripts/go/service/test_dispatch.py scripts/go/service/test_release.py \
 		scripts/go/service/test_deployment.py scripts/go/service/test_image.py \
+		scripts/go/service/test_dockerfile.py \
 		scripts/go/service/test_shared_phase.py scripts/go/service/test_tooling_config.py \
-		scripts/go/service/test_tooling_process.py
+		scripts/go/service/test_tooling_contracts.py scripts/go/service/test_tooling_process.py \
+		scripts/go/service/test_tooling_resources.py scripts/go/service/test_tooling_runner.py
 
 python-shared-tooling-test-integration: python-toolchain-check ## Run disposable shared tooling integration tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
 		-m integration ai/framework/tests/test_check_upstream_sync.py \
-		scripts/go/test_report_card.py scripts/go/module/test_module_tooling.py scripts/go/test_shared_*.py
+		scripts/go/test_report_card.py scripts/go/module/test_module_tooling.py scripts/go/test_shared_*.py \
+		scripts/go/service/test_tooling_resources.py
 
 python-shared-tooling-check: python-shared-tooling-format-check python-shared-tooling-lint \
 	python-shared-tooling-test-fast ## Run non-mutating shared Python tooling checks
@@ -330,9 +335,9 @@ python-scaffold-tooling-lint: python-lint ## Lint Go scaffold Python tooling
 
 python-scaffold-tooling-test-fast: python-toolchain-check ## Run fast Go scaffold Python tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)/templates/go-service" && \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
-		-m 'not integration and not acceptance' scripts/test_check_copy.py scripts/test_check_foundations.py \
-		scripts/test_scaffold_process.py scripts/test_tooling_runner.py
+		PYTHONPATH="$(PYTHON_REPOSITORY_ROOT)" PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
+		-m 'not integration and not acceptance' scripts/test_check_copy.py \
+		scripts/test_check_gateway_contract.py
 
 python-scaffold-tooling-check: python-scaffold-tooling-format-check \
 	python-scaffold-tooling-lint python-scaffold-tooling-test-fast ## Check Go scaffold Python tooling

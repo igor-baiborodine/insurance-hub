@@ -1,5 +1,7 @@
 """Disposable integration tests for Go scaffold validation targets."""
 
+# ruff: noqa: I001
+
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from scaffold_process import CommandError, child_environment, run_command
+from scripts.python.process_runner import CommandError, child_environment, run_command
 
 pytestmark = pytest.mark.integration
 TOOL_NAMES = (
@@ -85,7 +87,8 @@ def tooling(tmp_path_factory: pytest.TempPathFactory) -> Tooling:
 
 
 def new_fixture(tooling: Tooling, name: str) -> Path:
-    fixture = tooling.temporary_root / name
+    fixture = tooling.temporary_root / name / "templates/go-service"
+    fixture.parent.mkdir(parents=True)
     shutil.copytree(tooling.base_fixture, fixture, symlinks=True)
     return fixture
 

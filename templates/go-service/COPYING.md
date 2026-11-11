@@ -113,18 +113,21 @@ rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
 rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
   'go-service' . |
   xargs -0 -r sed -i 's|go-service|example-copy|g'
+rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' \
+  'example-copy-tooling.json' . |
+  xargs -0 -r sed -i 's|example-copy-tooling.json|go-service-tooling.json|g'
 
 sed -i 's/^# Go service scaffold$/# Example copy service/' README.md
 ```
 
-The source scaffold's `check-copy` and `check-foundations` targets support source maintenance, but are not service-owned
-validation capabilities. Remove those targets and scripts from the copy, and replace the scaffold-only
-root-delegate and CI sections with the copied module's actual onboarding boundary:
+The source scaffold's `check-copy` target supports source maintenance, but is not a service-owned
+validation capability. Remove that target and its scripts from the copy, and replace the
+scaffold-only root-delegate and CI sections with the copied module's actual onboarding boundary:
 
 ```sh
-sed -i 's/ check-copy//g; s/ check-foundations//g' Makefile
+sed -i 's/ check-copy//g' Makefile
 awk '
-  /^(check-copy|check-foundations):/ { skipping = 1; next }
+  /^check-copy:/ { skipping = 1; next }
   skipping && /^\t/ { next }
   { skipping = 0; print }
 ' Makefile > Makefile.copy
@@ -135,10 +138,9 @@ awk '
   !skipping { print }
 ' Makefile > Makefile.copy
 mv Makefile.copy Makefile
-rm scripts/check_copy.py scripts/test_check_copy.py scripts/check_foundations.py scripts/test_check_foundations.py scripts/shared_phase.py
+rm scripts/check_copy.py scripts/test_check_copy.py
 
 sed -i \
-  -e '/check-foundations/d' \
   -e '/^| `make check-copy`/d' \
   -e '/^make check-copy$/d' \
   README.md

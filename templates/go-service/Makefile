@@ -1,16 +1,16 @@
 .DEFAULT_GOAL := help
 
 GO ?= go
+DOCKER ?= docker
 INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
-PYTHON_TOOLING_FILES := $(wildcard scripts/check_foundations.py scripts/test_check_foundations.py scripts/check_copy.py scripts/scaffold_process.py scripts/shared_phase.py \
+TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
+PYTHON_TOOLING_FILES := $(wildcard scripts/check_copy.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
-	scripts/test_check_copy.py scripts/test_scaffold_process.py scripts/test_tooling.py \
-	scripts/tooling_runner.py scripts/test_tooling_runner.py)
-PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_foundations.py scripts/test_check_gateway_contract.py \
-	scripts/test_check_copy.py scripts/test_scaffold_process.py \
-	scripts/test_tooling_runner.py)
+	scripts/test_check_copy.py scripts/test_tooling.py)
+PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
+	scripts/test_check_copy.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -52,6 +52,19 @@ X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.0.1
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 TEST_PACKAGES ?= ./...
+HEAD_REVISION := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --verify HEAD 2>/dev/null)
+HEAD_SHORT := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --short=12 HEAD 2>/dev/null)
+HEAD_CREATED := $(shell git -C $(INSURANCE_HUB_ROOT) show -s --format=%cI HEAD 2>/dev/null)
+HEAD_VERSION := git-$(HEAD_SHORT)
+IMAGE_NAME ?= insurance-hub-go-service-api
+SOURCE_REVISION ?= $(HEAD_REVISION)
+SOURCE_CREATED ?= $(HEAD_CREATED)
+SOURCE_REPOSITORY ?= https://github.com/igor-baiborodine/insurance-hub
+SOURCE_VERSION ?= $(HEAD_VERSION)
+IMAGE_TAG ?= 1.0.0-local.$(HEAD_SHORT)
+IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
+TARGET_PLATFORM ?= linux/amd64
+GO_SERVICE_TOOLING_CONFIG := $(CURDIR)/go-service-tooling.json
 
 EXTRA_TOOL_PACKAGES := \
 	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@$(GRPC_GATEWAY_VERSION) \
@@ -71,10 +84,34 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
-	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-copy check-foundations check-servicekit check-candidate-servicekit run \
+	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-copy check-servicekit check-candidate-servicekit run \
+	dockerfile-generate dockerfile-check image-build image-check _image-check-existing \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
-	shared-candidate-generated shared-candidate-breaking shared-candidate-copy
+	shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-copy shared-candidate-image
+
+export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
+
+dockerfile-generate: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" -m scripts.go.service.dockerfile \
+		--config "$(GO_SERVICE_TOOLING_CONFIG)" --repository-root "$(TOOLING_REPOSITORY_ROOT)" generate
+
+dockerfile-check: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" -m scripts.go.service.dockerfile \
+		--config "$(GO_SERVICE_TOOLING_CONFIG)" --repository-root "$(TOOLING_REPOSITORY_ROOT)" check
+
+image-build: dockerfile-check python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
+		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" build
+
+image-check: image-build
+	@$(MAKE) --no-print-directory _image-check-existing
+
+_image-check-existing: dockerfile-check python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
+		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" check
 
 python-tooling-format-check: python-toolchain-check
 	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \
@@ -92,7 +129,7 @@ python-tooling-lint-fix: python-toolchain-check
 		--config "$(PYTHON_REPOSITORY_ROOT)/pyproject.toml" -- $(PYTHON_TOOLING_FILES)
 
 python-tooling-test-fast: python-toolchain-check
-	@cd "$(CURDIR)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
+	@cd "$(CURDIR)" && PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
 		-c "$(PYTHON_REPOSITORY_ROOT)/pyproject.toml" --rootdir "$(CURDIR)" \
 		-m 'not integration and not acceptance' $(PYTHON_FAST_TEST_FILES)
 
@@ -119,8 +156,8 @@ update-deps:
 	GOWORK=off $(GO) get github.com/igor-baiborodine/insurance-hub/libs/servicekit@$(SERVICEKIT_VERSION)
 	GOWORK=off $(GO) mod tidy
 
-check-go-pr: verify-tools format-check format-proto-check lint lint-proto test-race build \
-	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-foundations check-servicekit
+check-go-pr: verify-tools dockerfile-check format-check format-proto-check lint lint-proto test-race build \
+	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
 
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
@@ -166,12 +203,14 @@ shared-candidate-format shared-candidate-lint shared-candidate-race shared-candi
 
 shared-candidate-generated:
 shared-candidate-breaking:
+shared-candidate-integration:
 shared-candidate-copy:
-shared-candidate-generated shared-candidate-breaking shared-candidate-copy:
+shared-candidate-image:
+shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-copy shared-candidate-image:
 	@phase="$(@:shared-candidate-%=%)"; \
 	if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
-		PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go:$(CURDIR)/scripts" "$(PYTHON)" scripts/shared_phase.py "$$phase"; \
-	else case "$$phase" in generated) target=check-proto-drift;; breaking) target=check-proto-breaking;; copy) target=check-copy;; esac; \
+		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m scripts.go.service.shared_phase --config "$(GO_SERVICE_TOOLING_CONFIG)" "$$phase"; \
+	else case "$$phase" in generated) target=check-proto-drift;; breaking) target=check-proto-breaking;; integration) target=test;; copy) target=check-copy;; image) target=image-check;; esac; \
 		$(MAKE) --no-print-directory "$$target"; fi
 # END SOURCE-SCAFFOLD CANDIDATE PHASES
 
@@ -181,7 +220,9 @@ test-tooling: verify-tools python-toolchain-check
 		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" \
 		GO="$(GO)" UV="$(UV)" \
 		COMMON_GO_TOOLING_PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" ./scripts/tooling_runner.py
+		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" \
+		-m scripts.go.service.tooling_runner --config "$(GO_SERVICE_TOOLING_CONFIG)" \
+		--repository-root "$(TOOLING_REPOSITORY_ROOT)" --tooling-root "$(INSURANCE_HUB_ROOT)" suite
 	@$(MAKE) --no-print-directory test-coverage-tooling
 
 check-copy: verify-tools python-toolchain-check
@@ -189,14 +230,10 @@ check-copy: verify-tools python-toolchain-check
 		COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
 		COMMON_GO_TOOLING_PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
 		GO="$(GO)" MAKE_COMMAND="$(MAKE)" UV="$(UV)" PYTHONDONTWRITEBYTECODE=1 \
-		"$(PYTHON)" ./scripts/check_copy.py
+		PYTHONPATH="$(INSURANCE_HUB_ROOT)" "$(PYTHON)" ./scripts/check_copy.py
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
-
-check-foundations: python-runtime-check ## Reject common version drift against Product (source template only)
-	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_foundations.py \
-		--scaffold "$(CURDIR)" --reference "$(INSURANCE_HUB_ROOT)/services/product-service"
 
 .PHONY: help
 help: ## Show the explicit setup and validation entry points without installing tools
