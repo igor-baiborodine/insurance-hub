@@ -21,11 +21,13 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
-from product_process import run_cli
-
-from product_deployment_checks import Target, forwards
-
 ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from product_deployment_checks import Target, forwards  # noqa: E402
+from scripts.go.service.tooling_process import run_cli  # noqa: E402
+
 CONTEXT = "kind-local-dev-insurance-hub"
 KIND_CLUSTER = "local-dev-insurance-hub"
 FIXTURE = ROOT / "legacy/product-service/src/test/resources/product-read-baseline/catalog/qa.json"

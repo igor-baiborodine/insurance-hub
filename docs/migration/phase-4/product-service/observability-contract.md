@@ -1151,8 +1151,8 @@ Only #137 changes existing gateway traffic.
 - [Java gateway](../../../../legacy/agent-portal-gateway/src/main/resources/application.yml) and
   [Java Product configuration](../../../../legacy/product-service/src/main/resources/application.yml):
   inspect effective propagation and limit changes to required compatibility/test consumers.
-- Existing validation entry points include `make -C services/product-service check`,
-  `make -C services/product-service test-tooling`, and `make product-security-check`, selected
+- Existing validation entry points include `make -C services/product-service check` and
+  `make -C services/product-service test-tooling`, selected
   according to changed code and their documented prerequisites. Add missing telemetry/asset/live
   verification through owning Makefiles; do not present proposed targets as existing commands.
 - [Alloy trace verification](../../../../k8s/tests/infra/verify-alloy-traces/verify-alloy-traces.md)

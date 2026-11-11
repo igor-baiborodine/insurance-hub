@@ -105,12 +105,10 @@ Run source validation before any shared-environment operation:
 ```sh
 make -C services/product-service check-go-pr FORMAT_SCOPE=all
 make go-svc-image-check SVC_NAME=product
-make product-security-test-tooling
-make product-security-check
+make -C services/product-service test-tooling
 make go-svc-deploy-check SVC_NAME=product
 make go-svc-deploy-test-tooling SVC_NAME=product
 make check-observability
-make -C services/product-service check-docs
 ```
 
 The disabled telemetry suite starts a listener at the configured exporter endpoint and launches

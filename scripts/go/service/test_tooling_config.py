@@ -20,6 +20,7 @@ def configured_module(tmp_path: Path) -> Path:
     (module / "Makefile").write_text("help:\n\t@true\n", encoding="utf-8")
     (module / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
     (module / "cmd/server").mkdir(parents=True)
+    (module / "cmd/server/runtime.json").write_text("{}\n", encoding="utf-8")
     (module / "gen").mkdir()
     (module / "scripts").mkdir()
     (module / "scripts/test_tooling.py").write_text("", encoding="utf-8")
@@ -69,7 +70,13 @@ def version_two_configuration(module: Path) -> dict[str, object]:
                 "mode": "0555",
             }
         ],
-        "runtimeCopies": [],
+        "runtimeCopies": [
+            {
+                "source": "/src/cmd/server/runtime.json",
+                "destination": "/usr/share/example/runtime.json",
+                "mode": "0444",
+            }
+        ],
         "ports": [8080, 8081, 9090],
     }
     value["contracts"] = {
@@ -131,6 +138,7 @@ def test_load_version_two_contracts(tmp_path: Path) -> None:
     assert config.contracts.runner.suite_path == "scripts/test_tooling.py"
     assert config.dockerfile is not None
     assert config.dockerfile.build_outputs[0].destination == "/example-service"
+    assert config.dockerfile.runtime_copies[0].source == "/src/cmd/server/runtime.json"
     assert config.contracts.dependencies[0].ports == (9200,)
     assert config.contracts.administration.secret_environment == ("ADMIN_PASSWORD",)
 
@@ -221,6 +229,12 @@ def test_load_tooling_config_rejects_unknown_instruction(tmp_path: Path) -> None
         (
             lambda data: data["dockerfile"].update({"RUN": "arbitrary"}),
             "unknown keys: RUN",
+        ),
+        (
+            lambda data: data["dockerfile"]["runtimeCopies"][0].update(
+                {"source": "/src/cmd/server/missing.json"}
+            ),
+            "source is missing",
         ),
     ),
 )

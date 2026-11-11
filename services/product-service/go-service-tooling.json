@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 2,
+  "service": "product",
+  "modulePath": "services/product-service",
+  "image": {
+    "name": "insurance-hub-product-api",
+    "title": "Insurance Hub Product API",
+    "entrypoint": [
+      "/product-service"
+    ],
+    "user": "65532:65532",
+    "platform": "linux/amd64",
+    "lifecycle": null
+  },
+  "candidate": {
+    "copyPaths": [
+      "cmd",
+      "gen",
+      "internal"
+    ],
+    "excludePaths": [
+      "internal/testing/"
+    ],
+    "phaseTargets": {
+      "generated": [
+        "check-proto-drift",
+        "check-sql-drift"
+      ],
+      "breaking": [
+        "check-proto-breaking"
+      ],
+      "integration": [
+        "test-integration"
+      ]
+    },
+    "imageCheckTarget": "_image-check-existing"
+  },
+  "dockerfile": {
+    "sourceCopies": [
+      {
+        "source": "cmd",
+        "destination": "./cmd"
+      },
+      {
+        "source": "gen",
+        "destination": "./gen"
+      },
+      {
+        "source": "internal",
+        "destination": "./internal"
+      }
+    ],
+    "buildOutputs": [
+      {
+        "package": "./cmd/server",
+        "output": "/out/product-service",
+        "destination": "/product-service",
+        "mode": "0555"
+      },
+      {
+        "package": "./cmd/migrate",
+        "output": "/out/product-migrate",
+        "destination": "/product-migrate",
+        "mode": "0555"
+      },
+      {
+        "package": "./cmd/seed",
+        "output": "/out/product-seed",
+        "destination": "/product-seed",
+        "mode": "0555"
+      }
+    ],
+    "runtimeCopies": [
+      {
+        "source": "/src/internal/administration/migrations/00001_product.sql",
+        "destination": "/usr/share/insurance-hub/product/migrations/00001_product.sql",
+        "mode": "0444"
+      },
+      {
+        "source": "/src/internal/administration/seeds/base.json",
+        "destination": "/usr/share/insurance-hub/product/catalogs/base.json",
+        "mode": "0444"
+      }
+    ],
+    "ports": [
+      8080,
+      8081,
+      9090
+    ]
+  },
+  "contracts": {
+    "runner": {
+      "target": "test-tooling",
+      "suitePath": "scripts/test_product_tooling.py",
+      "timeoutSeconds": 3600
+    },
+    "gateway": {
+      "generatedPath": "gen/openapiv2/product/v1/product_service.swagger.json",
+      "contractPath": "testdata/contract-baseline/api/product/v1/product_service.proto"
+    },
+    "dependencies": [
+      {
+        "name": "postgres",
+        "kind": "postgres",
+        "image": "postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193",
+        "ports": [
+          5432
+        ]
+      }
+    ],
+    "deployment": {
+      "portForwardSeconds": 30
+    },
+    "administration": {
+      "transports": [
+        "https",
+        "kubectl",
+        "stdin"
+      ],
+      "secretEnvironment": []
+    }
+  }
+}

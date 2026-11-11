@@ -172,7 +172,7 @@ func TestProductSeed(t *testing.T) {
 				first, replay, firstErr, replayErr,
 			)
 		}
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t, ctx, database.admin, `SELECT count(*)::text FROM public.product`,
 		); got != "5" {
 			t.Fatalf("supplemental seed row count = %s, want 5", got)
@@ -191,13 +191,13 @@ func TestProductSeed(t *testing.T) {
 			}
 		}
 		before := []string{
-			adoptionScalar(
+			queryScalar(
 				t,
 				ctx,
 				database.admin,
 				`SELECT definition::text FROM public.product WHERE code='CAR'`,
 			),
-			adoptionScalar(
+			queryScalar(
 				t,
 				ctx,
 				database.admin,
@@ -216,13 +216,13 @@ func TestProductSeed(t *testing.T) {
 			t.Fatalf("partial seed result = %+v, error = %v", result, seedErr)
 		}
 		after := []string{
-			adoptionScalar(
+			queryScalar(
 				t,
 				ctx,
 				database.admin,
 				`SELECT definition::text FROM public.product WHERE code='CAR'`,
 			),
-			adoptionScalar(
+			queryScalar(
 				t,
 				ctx,
 				database.admin,
@@ -232,7 +232,7 @@ func TestProductSeed(t *testing.T) {
 		if !reflect.DeepEqual(before, after) {
 			t.Fatalf("existing rows changed: %v -> %v", before, after)
 		}
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			database.admin,
@@ -317,7 +317,7 @@ func TestProductSeed(t *testing.T) {
 		); err != nil {
 			t.Fatal(err)
 		}
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			database.admin,
@@ -365,7 +365,7 @@ func TestProductSeed(t *testing.T) {
 		if seedErr == nil {
 			t.Fatal("disabled target was seeded")
 		}
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			database.admin,
@@ -493,7 +493,7 @@ func assertSeedStorage(
 	fixture CatalogFixture,
 ) {
 	t.Helper()
-	gotIdentity := adoptionScalar(
+	gotIdentity := queryScalar(
 		t,
 		ctx,
 		admin,

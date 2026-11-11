@@ -31,6 +31,8 @@ def run(
     teardown_seconds: float = 5,
     capture: bool = False,
     reveal_failure_output: bool = False,
+    log_path: Path | None = None,
+    expected_failure: bool = False,
 ) -> str:
     """Run one owned command and optionally return its captured standard output."""
     try:
@@ -42,16 +44,21 @@ def run(
             activity=activity,
             input_text=input_text,
             sensitive_values=sensitive_values,
+            log_path=log_path,
             heartbeat_seconds=heartbeat_seconds,
             teardown_seconds=teardown_seconds,
         )
     except CommandError as error:
+        if expected_failure:
+            return ""
         if reveal_failure_output:
             if error.stdout:
                 print(error.stdout, end="")
             if error.stderr:
                 print(error.stderr, end="", file=sys.stderr)
         raise
+    if expected_failure:
+        raise CommandError(f"{activity} unexpectedly succeeded")
     if capture:
         return result.stdout
     if result.stdout:
@@ -74,7 +81,7 @@ def run_cli(main: Callable[[], int], *, name: str) -> int:
         return main()
     except ToolingSignal as error:
         label = "interrupted" if error.signum == signal.SIGINT else "terminated"
-        print(f"{name}: {label}", file=sys.stderr)
+        print(f"{name}: {label} by {signal.Signals(error.signum).name}", file=sys.stderr)
         return 128 + error.signum
     finally:
         for signum, handler in previous.items():

@@ -16,14 +16,14 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from product_process import run_cli
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 from scripts.go.service import deployment as engine  # noqa: E402
 from scripts.go.service.configuration import service_record, target_record  # noqa: E402
+from scripts.go.service.tooling_process import run_cli  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[3]
 IDENTITY = "product-api"
 LOCAL_IMAGE = re.compile(r"insurance-hub-product-api:1\.[0-9]+\.[0-9]+-local\.([0-9a-f]{12})")
 
@@ -805,7 +805,12 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
         environment.pop("PRODUCT_DATABASE_URL", None)
         try:
             result = subprocess.run(
-                ["make", "product-security-verify"],
+                [
+                    "make",
+                    "-C",
+                    "services/product-service",
+                    "security-verify",
+                ],
                 cwd=ROOT,
                 env=environment,
                 capture_output=True,

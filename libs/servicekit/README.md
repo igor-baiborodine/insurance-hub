@@ -275,8 +275,6 @@ that consumer's own PR and reruns its full gate. The release workflow never move
 active consumers completed compatibility validation against the current API; adopting v1.0.0 in
 each consumer remains separate module-scoped work after publication.
 
-Root validation owners are `go-shared-test`, `go-shared-test-integration`, `go-shared-check-ci`,
-`go-topology-check`, `go-topology-test` and the existing Python shared-tooling suites. The additive
-workflow syntax check uses Product's existing pinned Actionlint 1.7.7 binary; prepare it through
-`make -C services/product-service bootstrap-ci-tools` when absent. Future releases repeat the
+Root validation owners are `go-shared-test`, `go-shared-test-integration`, `go-topology-check`,
+`go-topology-test` and the existing Python shared-tooling suites. Future releases repeat the
 applicable hosted release and normal consumer/image qualification gates.

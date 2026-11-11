@@ -178,7 +178,7 @@ def test_ci_ignores_nonqualifying_second_service_tooling_path(tmp_path: Path) ->
         tmp_path / "base",
         tmp_path / "head",
         [
-            "services/product-service/scripts/check_ci.py",
+            "services/product-service/scripts/local_check.py",
             "templates/go-service/main.go",
         ],
         "a" * 40,

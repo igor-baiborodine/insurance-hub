@@ -13,7 +13,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from integration_test import passed_tests
-from product_process import ProductCommandError, run, run_cli
+
+from scripts.go.service.tooling_process import run, run_cli
+from scripts.python.process_runner import CommandError as ProductCommandError
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 MIGRATION_ASSET = "usr/share/insurance-hub/product/migrations/00001_product.sql"
@@ -220,12 +222,11 @@ def main(_argv: Sequence[str] | None = None) -> int:
                 "missing configuration diagnostic was not redacted",
             )
             environment = dict(os.environ, PRODUCT_TEST_IMAGE=image, GOWORK="off")
+            result = temporary / "image-tests.json"
+            output = ""
             try:
-                run(
+                output = run(
                     [
-                        "bash",
-                        str(MODULE_ROOT / "scripts/stream-test-log.sh"),
-                        str(temporary / "image-tests.json"),
                         "go",
                         "test",
                         "-mod=readonly",
@@ -243,12 +244,17 @@ def main(_argv: Sequence[str] | None = None) -> int:
                     timeout_seconds=480,
                     teardown_seconds=15,
                     activity="validate Product runtime image",
+                    capture=True,
                 )
+            except ProductCommandError as error:
+                output = error.stdout
+                if error.stderr:
+                    print(error.stderr, end="", file=sys.stderr)
+                raise
             finally:
-                result = temporary / "image-tests.json"
-                if result.is_file():
-                    sys.stdout.write(result.read_text(encoding="utf-8"))
-            validate_image_tests(temporary / "image-tests.json")
+                result.write_text(output, encoding="utf-8")
+                sys.stdout.write(output)
+            validate_image_tests(result)
     except (
         ImageCheckError,
         ProductCommandError,

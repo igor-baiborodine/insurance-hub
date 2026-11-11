@@ -90,8 +90,7 @@ remain unchanged. `FORMAT_SCOPE=all` covers every eligible handwritten Go file i
 The scaffold and Product `./...` scopes cover all their current packages. Product coverage includes
 `cmd/server`, the test-owned HTTP boundary, generated Product v1 bindings, sqlc-generated queries,
 the bounded PostgreSQL reader, contract tests, the authoritative QA fixture loader, and the tagged
-PostgreSQL harness/reader suites invoked by `test-integration`. Product `check-docs` also validates
-the service README and versioned Product migration handoff, including a real Mermaid render.
+PostgreSQL harness/reader suites invoked by `test-integration`.
 
 The service and scaffold include the root-owned `scripts/go/module/common.mk`. The shared scripts implement
 tool verification, formatting, dependency reproduction, and exact generated-output drift checks;
@@ -155,9 +154,8 @@ not run topology, tooling-fixture, copy, release, deployment, image, database-ro
 security checks.
 
 Product's selected-module validation owns the direct HTTP/gRPC access matrix and disposable
-PostgreSQL integration suite. Accepted access fixtures, Java access regression, and the combined
-gateway-to-Go suite remain locally owned through `make product-security-test-tooling` and
-`make product-security-check`; the hosted Product security workflow has been retired. The
+PostgreSQL integration suite. The retired Java access and combined gateway-to-Go scripts remain
+historical evidence only; current Product tooling checks are service-local. The
 [change-based local validation matrix](../../../CONTRIBUTING.md#change-based-local-validation)
 records when those and the other auxiliary checks are required and which evidence to retain.
 

@@ -1,3 +1,18 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Product data and environment baseline](#product-data-and-environment-baseline)
+  - [Capture status](#capture-status)
+  - [Historical capture status](#historical-capture-status)
+  - [Accepted catalog snapshots](#accepted-catalog-snapshots)
+  - [Effective local-dev inventory](#effective-local-dev-inventory)
+  - [Effective QA inventory](#effective-qa-inventory)
+  - [Schema and writer comparison](#schema-and-writer-comparison)
+  - [Candidate Go runtime role](#candidate-go-runtime-role)
+  - [Final shared-data decision](#final-shared-data-decision)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Product data and environment baseline
 
 This document records the effective Product environment, PostgreSQL schema, runtime ownership,
@@ -27,42 +42,12 @@ Deployment and its generated ConfigMap differed. The checked-in Flux `2.8.5` con
 references. Existing Hibernate/DataLoader startup behavior created `public.product` and seeded the
 four missing rows. The subsequent QA preflight and inventory fixture check passed.
 
-## Reproduction
+## Historical capture status
 
-Run from the repository root with exactly one approved environment active. Start a Product-only
-port-forward in another terminal, using the environment's context, namespace, and service:
-
-```shell
-kubectl --context=kind-local-dev-insurance-hub --namespace=local-dev-all \
-  port-forward service/local-dev-postgres-product-rw 5492:5432
-make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=inventory
-make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=inventory
-make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=catalog
-# Review the new path printed by capture before accepting it.
-scripts/product-baseline/accept-catalog.sh \
-  ai/artifacts/epic-4.2/issue-131/catalog-runs/local-dev-<timestamp>.json
-make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=catalog
-BASELINE_ENV=local-dev scripts/product-baseline/test-catalog-roundtrip.sh
-```
-
-For QA, replace the context, namespace, service, and environment with `qa-insurance-hub`, `qa-data`,
-`qa-postgres-product-rw`, and `qa`. Capture runs the environment preflight first and fails before
-writing a fixture if workloads, endpoints, the database identity, `public.product`, or read access
-cannot be verified. Run the fixture check without `BASELINE_ENV` only after both records exist.
-
-The capture uses the environment's existing Product database identity in a read-only session. It
-records Secret names and keys but never writes Secret values to disk or output. Stored JSON product
-definitions remain owned by Step 4 and are deliberately excluded from inventory records.
-`capturedAt` comes from the target PostgreSQL server in the same metadata query so the record is
-internally ordered with environment events even when the operator host clock is not synchronized.
-
-Catalog capture writes a new ignored run file and never updates the accepted fixture directly.
-Acceptance is a separate explicit command after review. The database query runs in one
-repeatable-read, read-only transaction and records its transaction snapshot, schema checksum,
-catalog checksum, ordered codes, and per-row checksums. Each `definition::text` value is stored as
-a JSON string, avoiding a typed or floating-point conversion while metadata is assembled. The
-round-trip check loads that raw representation into disposable PostgreSQL 16.4 and compares the
-stored JSONB text checksum for every row.
+The accepted inventory, catalog, and permission fixtures remain under `legacy/` as migration
+evidence. Their Java capture, acceptance, comparison, and replay scripts were retired after Java
+Product retirement. Current Product PostgreSQL behavior is validated through the service-local
+`resource-test-fast`, `resource-test-integration`, and affected module checks.
 
 ## Accepted catalog snapshots
 
@@ -191,12 +176,8 @@ failed with SQLSTATE `42501` (`insufficient_privilege`). Row count, ordered data
 checksum, absence of the probe table, and absence of the probe column matched before and after all
 attempts.
 
-Run the proof and validate its fixture from the repository root:
-
-```shell
-make product-baseline-test BASELINE_SUITE=db-permissions
-make product-baseline-fixtures-check BASELINE_PART=db-permissions
-```
+The original Java proof and its accepted fixture remain historical evidence. Current Product role
+behavior uses the service-local `resource-test-fast` and `resource-test-integration` owners.
 
 This proof defines the candidate role and demonstrates PostgreSQL enforcement in isolation. It does
 not install or change local-dev or QA grants. #134 must create a separate environment credential,

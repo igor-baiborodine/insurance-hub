@@ -12,7 +12,7 @@
     - [Security sources](#security-sources)
     - [Consumers](#consumers)
   - [Scenario register](#scenario-register)
-  - [Reproduction status](#reproduction-status)
+  - [Historical baseline status](#historical-baseline-status)
   - [Toolchain, refresh, and reset](#toolchain-refresh-and-reset)
   - [Acceptance evidence](#acceptance-evidence)
   - [Downstream handoff](#downstream-handoff)
@@ -86,16 +86,13 @@ From the repository root, bootstrap the pinned Product tools and use the owning 
 
 ```shell
 make go-product-bootstrap-tools
-make product-security-test-tooling
-make product-security-check
+make -C services/product-service test-tooling
 make -C services/product-service check
 ```
 
-The security aggregate owns accepted access fixtures, Java baseline access regression, and the
-combined gateway/Go test. The Product module's full `check` owns the direct Go HTTP/gRPC matrix, so
-the two local gates do not execute it twice. The [security reproduction and token-handling guide](security-baseline.md#reproduction)
-records prerequisites, disposable cleanup, and safe live-token handling. The separate
-[`product-security-verify` handoff](security-baseline.md#go-deployment-exposure-gate-for-issue-134)
+The retired Java baseline/security scripts remain historical evidence. The Product module's full
+`check` owns the direct Go HTTP/gRPC matrix. The separate
+[`security-verify` handoff](security-baseline.md#go-deployment-exposure-gate-for-issue-134)
 probes only an explicitly selected, already running target. Current regression runs combine it with
 effective exposure, database-grant, retired Java Product absence, and Java gateway-to-Go routing
 checks in local-dev and QA.
@@ -114,8 +111,7 @@ checks in local-dev and QA.
 | `legacy/product-service/src/test/resources/product-read-baseline/` | Stored-row, request, raw-response, inventory, and synthetic fixtures readable without Java DTO deserialization. | Accepted local-dev/QA captures plus isolated data, failure, access, and database-permission fixtures present. |
 | `legacy/product-service/src/test/java/…` | Product/PostgreSQL listener, fixture, edge, failure, and permission tests. | Disposable listener/PostgreSQL happy paths, raw-JSONB edges, lookup/decode/dependency failures, SQL-null constraints, and shared-database override guard implemented. |
 | `legacy/agent-portal-gateway/src/test/…` | Gateway listener, retry/fallback, and access tests against the shared corpus. | Real-listener failure and complete controlled access/propagation matrices implemented. |
-| `scripts/product-baseline/` and the root `Makefile` | Capture, fixture checking, isolated replay, live verification, and aggregate validation. | Capture, fixture, smoke, happy, data-edge, failure, access, permission, comparator, environment replay, live verification, and aggregate entry points are implemented. |
-| `scripts/product-security/` and its root Make targets | #133 combined security gate, controlled failures, and read-only deployed-target verifier. | Isolated gateway/Go proof and verifier passed locally; later local regression and deployed-target evidence remain change-based responsibilities. |
+| Retired Product baseline and security tooling | Historical Java capture, comparison, and security evidence only. | Scripts and root Make targets were removed after Java Product retirement; fixtures and manifests remain under `legacy/`. |
 
 Ticket plans, execution records, step summaries, and Git snapshots stay in the ignored
 `ai/artifacts/epic-4.2/issue-131/` directory. They are evidence records rather than reusable
@@ -235,99 +231,13 @@ response framing, JSON object-key order, and top-level product-list order. Decim
 presence, status, subtype, scalar values, and nested-array order remain comparison-sensitive; safe
 pilot server-error bodies intentionally omit the internal exception text preserved in Java fixtures.
 
-## Reproduction status
+## Historical baseline status
 
-Run baseline commands from the repository root. The current implemented entry points are:
-
-```shell
-make help
-make product-baseline-test BASELINE_SUITE=smoke
-make product-baseline-test BASELINE_SUITE=happy
-make product-baseline-test BASELINE_SUITE=data-edges
-make product-baseline-test BASELINE_SUITE=failures
-make product-baseline-test BASELINE_SUITE=access
-make product-baseline-test BASELINE_SUITE=db-permissions
-make product-baseline-test BASELINE_SUITE=comparator
-make product-baseline-test BASELINE_SUITE=all
-make product-baseline-preflight BASELINE_ENV=local-dev
-make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=inventory
-make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=inventory
-make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=catalog
-make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=catalog
-BASELINE_ENV=local-dev scripts/product-baseline/test-catalog-roundtrip.sh
-make product-baseline-capture BASELINE_ENV=local-dev BASELINE_PART=http \
-  BASELINE_GATEWAY_TOKEN_FILE=/path/to/temporary-token
-make product-baseline-fixtures-check BASELINE_ENV=local-dev BASELINE_PART=http
-make product-baseline-fixtures-check BASELINE_PART=data-edges
-make product-baseline-fixtures-check BASELINE_PART=failures
-make product-baseline-fixtures-check BASELINE_PART=access
-make product-baseline-fixtures-check BASELINE_PART=db-permissions
-make product-baseline-replay BASELINE_FIXTURE_SET=local-dev
-make product-baseline-replay BASELINE_FIXTURE_SET=qa
-make product-baseline-check
-make product-baseline-verify BASELINE_ENV=local-dev \
-  BASELINE_PRODUCT_DB_TRANSPORT=kubectl-exec \
-  BASELINE_GATEWAY_TOKEN_FILE=/path/to/temporary-token
-```
-
-The smoke suite requires Java 14, system Maven, Docker Engine, and dependency resolution access on
-the first run. It compiles the Product API and the Product/gateway test classpaths, starts Product
-with a disposable `postgres:16.4-alpine` Testcontainer, exercises its real HTTP listener, and then
-stops both resources. It also starts a real gateway listener against an isolated loopback Product
-endpoint and checks authenticated success plus rejection without a bearer token. The gateway has
-no downstream auth-service client; the test generates JWT trust material at runtime and never
-stores or prints the token or signing secret.
-
-The Product test base rejects attempts to override its datasource, PostgreSQL, Hibernate DDL, or
-test-environment isolation properties. Invalid suite names, missing configuration, the Pricing
-database port, and invalid fixture-set names fail before any data operation. All registered suites
-are implemented. Inventory, catalog, successful HTTP, data-edge, failure, access, and
-database-permission fixture checking are implemented. Each live capture creates a new
-ignored run that must be reviewed and explicitly accepted. HTTP capture verifies the catalog
-identity before and after all ten requests, retains raw response bodies, and records only a
-redacted authorization marker.
-Replay loads each accepted environment catalog into a fresh disposable PostgreSQL container,
-exercises a real Product listener, and routes the accepted direct responses through a real isolated
-gateway listener. The comparator preserves decimal tokens and field presence, treats nested-array
-order as binding, and permits only object-key order, top-level product order, and omitted volatile
-headers. Its controlled tests prove precision, presence, subtype, nested-order, status, and missing
-scenario drift. `product-baseline-check` runs every fixture check and affected Java suite, both
-environment replays, and the comparator without contacting a live cluster. Live verification is a
-separate read-only operation: it preflights the explicit environment, rejects schema/catalog
-identity drift, compares all ten Product/gateway observations, and confirms identity again without
-rewriting accepted fixtures. The default database transport uses the application identity through
-an explicit local port-forward. `BASELINE_PRODUCT_DB_TRANSPORT=kubectl-exec` is an opt-in fallback
-for a stale Kubernetes forwarding namespace; it runs the same read-only identity SQL through the
-active CloudNativePG primary's local socket and does not read the application password. Python 3 is
-required for the token-preserving comparator.
-
-Access capture is implemented
-for valid, absent, malformed, and invalid-signature credentials; controlled expiry, missing-subject,
-not-before, issuer, audience, role, and propagation cases remain isolated by design. See
-[`security-baseline.md`](security-baseline.md) for the observed permission matrix and #133 mapping.
-
-Local-dev preflight is read-only. It verifies the exact Kubernetes context, Product and gateway
-workloads/services/endpoints, access to the Product database Secret, Docker/Java/Maven/psql
-availability, and the `product.public.product` identity plus catalog read access. It defaults to
-`127.0.0.1:5492`, which remains overrideable through `BASELINE_PRODUCT_DB_HOST` and
-`BASELINE_PRODUCT_DB_PORT`. The preflight does not create a port-forward. Start the existing broad
-forward or a targeted Product forward in another terminal before running it, for example:
-
-```shell
-kubectl --context=kind-local-dev-insurance-hub --namespace=local-dev-all \
-  port-forward service/local-dev-postgres-product-rw 5492:5432
-```
-
-Local-dev and QA cannot run concurrently on the maintainer's laptop. Step 2 preflights local-dev
-only. QA preflight runs later, after local-dev is stopped and QA is started for its first capture.
-Every result records its environment and revisions so comparisons can use accepted captures from
-separate runs; no workflow may require both environments to be live at once.
-
-Live capture must be read-only and must record its explicit Kubernetes context, namespace, target,
-and revision. Empty catalogs, malformed rows, dependency failures, access negatives requiring
-controlled credentials, and permission-denial attempts run only in disposable resources. Capture
-output is written to a new run location and reviewed/sanitized before it can become an accepted
-fixture; verification never rewrites its own expectation.
+The accepted Product baseline fixtures and their manifests remain in `legacy/` as migration evidence.
+The Java capture, replay, comparison, security, and live-verification scripts were retired after the
+Java Product service retirement and are no longer supported commands. Current Product validation is
+owned by `services/product-service`, including its focused tooling, PostgreSQL, image, deployment,
+and direct HTTP/gRPC checks. Do not use historical fixture metadata as an executable workflow.
 
 ## Toolchain, refresh, and reset
 
@@ -376,7 +286,7 @@ step records under `ai/artifacts/epic-4.2/issue-131/`.
 | AC131-05 — Current permission evidence | satisfied | [Observed access matrix](security-baseline.md#observed-access-matrix), local-dev/QA access fixtures, and isolated access cases | Live valid/absent/malformed/bad-signature reads and the full isolated claim/propagation matrix passed. |
 | AC131-06 — Java-compatible security | satisfied | [Final entry and hop mapping](security-baseline.md#final-java-compatible-mapping-for-issue-133) | Gateway authentication, anonymous backend/direct access, absent identity propagation, transport, trust, and #133 positive/negative cases are explicit. |
 | AC131-07 — Shared data topology | satisfied | [Final shared-data decision](data-baseline.md#final-shared-data-decision) and [candidate role proof](data-baseline.md#candidate-go-runtime-role) | Isolated restricted-role reads passed; catalog and schema writes failed with PostgreSQL `42501`; #134 subsequently completed the deployed reader proof. |
-| AC131-08 — Repeatable capture and replay | satisfied | Reproduction commands above, [manifest tooling index](../../../../legacy/product-service/src/test/resources/product-read-baseline/manifest.json), and `scripts/product-baseline/` | Comparator, both environment replays, all fixture checks, and the complete offline aggregate passed. |
+| AC131-08 — Repeatable capture and replay | satisfied historically | [Manifest tooling index](../../../../legacy/product-service/src/test/resources/product-read-baseline/manifest.json) and retained fixtures | The retired baseline tooling passed before Java Product retirement; the retained records are historical evidence, not a current executable workflow. |
 | AC131-09 — Safe baseline collection | satisfied | [Data capture boundary](data-baseline.md#capture-status), [security reproduction](security-baseline.md#reproduction), and live verifier | Before/after identities matched in both live environments; mutation cases stayed disposable; credential and secret scans found no reusable secret. |
 | AC131-10 — Evidence-backed handoff | satisfied | This index and the downstream ownership table below | All manifest scenarios are captured, documented, or validated; no required failed, blocked, registered, or unexecuted check remains. |
 

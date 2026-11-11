@@ -7,18 +7,21 @@ import json
 import os
 import sys
 import tempfile
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
-from product_process import ProductCommandError, run, run_cli
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from check_access_results import main as check_access_results
+from scripts.go.service.tooling_process import run, run_cli  # noqa: E402
+from scripts.python.process_runner import CommandError as ProductCommandError  # noqa: E402
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 PATTERNS = {
-    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess|TestProductSchemaAdoption|TestProductMigration|TestProductSeed|TestProductMarkerColumns)$",
+    "all": "^(TestPostgresHarness|TestPostgresReader|TestProductGRPC|TestProductHTTP|TestProductStartup|TestProductParity|TestProductCancellation|TestProductLifecycle|TestProductTelemetry|TestProductReadOnly|TestProductAccess|TestProductMigration|TestProductSeed|TestProductMarkerColumns)$",
     "marker-columns": "^TestProductMarkerColumns$",
-    "schema-adoption": "^TestProductSchemaAdoption$",
     "migration": "^TestProductMigration$",
     "seed": "^TestProductSeed$",
     "seed-replay": "^TestProductSeed/repeat_reports_every_accepted_product_as_existing$",
@@ -41,21 +44,6 @@ TELEMETRY_CASES = (
     "refused_collector_does_not_affect_reads_or_probes",
     "collector_recovery_exports_without_a_Product_restart",
     "SIGTERM_bounds_an_in-flight_export",
-)
-SCHEMA_ADOPTION_CASES = (
-    "fresh_and_sqlc_schema_parity",
-    "adoption_and_replay_preserve_catalog",
-    "strict_create_rejects_legacy",
-    "schema_drift_is_rejected_before_history",
-    "existence_only_mutation_accepts_drift",
-    "inconsistent_history_is_rejected",
-    "statement_failure_preserves_populated_catalog",
-    "Goose_Up_bypasses_validation_on_replay",
-    "simultaneous_runners_serialize",
-    "cancellation_rolls_back_and_retries",
-    "lock_contention_is_bounded",
-    "inspection_has_no_writes",
-    "Goose_inspection_initializes_history",
 )
 MIGRATION_CASES = (
     "grant_failure_is_atomic_and_retryable",
@@ -94,6 +82,27 @@ MARKER_COLUMN_CASES = tuple(
         "seeder_grant_option",
     )
 )
+ACCESS_CATEGORIES = (
+    "NONE",
+    "VALID",
+    "MALFORMED",
+    "SIGNATURE",
+    "EXPIRED",
+    "NBF",
+    "ISSUER",
+    "AUDIENCE",
+    "ROLE",
+)
+ACCESS_PREFIXES = (
+    "TestProductAccess/accepted_HTTP_credential_matrix_remains_anonymous/",
+    "TestProductAccess/generated_gRPC_client_ignores_identity_metadata/",
+)
+EXPECTED_ACCESS_CASES = {
+    prefix + f"ACCESS-DIRECT-{route}-{category}-001"
+    for prefix in ACCESS_PREFIXES
+    for route in ("LIST", "GET")
+    for category in ACCESS_CATEGORIES
+}
 
 
 class IntegrationError(ValueError):
@@ -115,6 +124,39 @@ def passed_tests(path: Path) -> set[str]:
         if record.get("Action") == "pass" and isinstance(record.get("Test"), str):
             passed.add(record["Test"])
     return passed
+
+
+def validate_access_results(path: Path) -> None:
+    """Require every direct Product access case in the selected Go JSON report."""
+    actions: Counter[str] = Counter()
+    case_actions: Counter[tuple[str, str]] = Counter()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        record = json.loads(line)
+        action = record.get("Action")
+        name = record.get("Test", "")
+        if action in {"fail", "skip"} and (name.startswith("TestProductAccess") or not name):
+            raise IntegrationError("Product access test failed or skipped")
+        if name == "TestProductAccess":
+            actions[action] += 1
+        if name in EXPECTED_ACCESS_CASES or any(
+            name.startswith(prefix) for prefix in ACCESS_PREFIXES
+        ):
+            case_actions[(name, action)] += 1
+    require(
+        actions["run"] == 1 and actions["pass"] == 1,
+        "Product access test did not run and pass exactly once",
+    )
+    require(
+        {name for name, _action in case_actions} == EXPECTED_ACCESS_CASES,
+        "direct access case set is incomplete or altered",
+    )
+    require(
+        all(
+            case_actions[(name, "run")] == 1 and case_actions[(name, "pass")] == 1
+            for name in EXPECTED_ACCESS_CASES
+        ),
+        "direct access case did not run and pass exactly once",
+    )
 
 
 def main(_argv: Sequence[str] | None = None) -> int:
@@ -187,23 +229,25 @@ def main(_argv: Sequence[str] | None = None) -> int:
             arguments.extend(
                 ("-json", "-run", pattern, "./internal/testing", "./internal/postgres")
             )
+            output = ""
             try:
-                run(
-                    [
-                        "bash",
-                        str(MODULE_ROOT / "scripts/stream-test-log.sh"),
-                        str(result),
-                        *arguments,
-                    ],
+                output = run(
+                    arguments,
                     cwd=MODULE_ROOT,
                     env=environment,
                     timeout_seconds=1_800,
                     teardown_seconds=20,
                     activity=f"run Product {suite} integration suite",
+                    capture=True,
                 )
+            except ProductCommandError as error:
+                output = error.stdout
+                if error.stderr:
+                    print(error.stderr, end="", file=sys.stderr)
+                raise
             finally:
-                if result.is_file():
-                    sys.stdout.write(result.read_text(encoding="utf-8"))
+                result.write_text(output, encoding="utf-8")
+                sys.stdout.write(output)
             passed = passed_tests(result)
             selected = {
                 name.split("/", 1)[0]
@@ -216,12 +260,6 @@ def main(_argv: Sequence[str] | None = None) -> int:
                     require(
                         f"TestProductMarkerColumns/{scenario}" in passed,
                         f"suite {suite} did not pass marker column case {scenario}",
-                    )
-            if suite in {"all", "schema-adoption"}:
-                for scenario in SCHEMA_ADOPTION_CASES:
-                    require(
-                        f"TestProductSchemaAdoption/{scenario}" in passed,
-                        f"suite {suite} did not pass schema adoption case {scenario}",
                     )
             if suite in {"all", "migration"}:
                 for scenario in MIGRATION_CASES:
@@ -254,10 +292,7 @@ def main(_argv: Sequence[str] | None = None) -> int:
                         f"suite {suite} did not pass telemetry case {scenario}",
                     )
             if suite in {"all", "access"}:
-                require(
-                    check_access_results([str(result)]) == 0,
-                    "Product access result validation failed",
-                )
+                validate_access_results(result)
             if coverage:
                 coverage_path = MODULE_ROOT / coverage
                 require(

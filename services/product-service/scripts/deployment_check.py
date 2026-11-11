@@ -37,22 +37,46 @@ class DeploymentCheckError(RuntimeError):
     """The offline Product deployment gate could not be completed."""
 
 
-def render(kubectl: str, source: Path) -> list[dict[str, object]]:
+def render_text(kubectl: str, source: Path) -> str:
     try:
-        result = run_command(
+        return run_command(
             [kubectl, "kustomize", str(source)],
             cwd=REPOSITORY_ROOT,
             env=os.environ,
             timeout_seconds=60,
             teardown_seconds=5,
             activity=f"render {source.relative_to(REPOSITORY_ROOT)}",
-        )
-        documents = [item for item in yaml.safe_load_all(result.stdout) if item is not None]
-    except (CommandError, OSError, yaml.YAMLError) as error:
+        ).stdout
+    except (CommandError, OSError) as error:
         raise DeploymentCheckError(f"could not render {source.name}: {error}") from error
+
+
+def render(kubectl: str, source: Path) -> list[dict[str, object]]:
+    try:
+        documents = [item for item in yaml.safe_load_all(render_text(kubectl, source)) if item]
+    except yaml.YAMLError as error:
+        raise DeploymentCheckError(f"could not parse rendered overlay {source.name}") from error
     if not documents or not all(isinstance(item, dict) for item in documents):
         raise DeploymentCheckError(f"rendered resources are missing or malformed: {source}")
     return documents
+
+
+def render_selected(kubectl: str, environment: str) -> None:
+    selections = {
+        "local-dev": REPOSITORY_ROOT / OVERLAYS["local-go"],
+        "qa": REPOSITORY_ROOT / OVERLAYS["qa-go"],
+    }
+    if environment:
+        if environment not in selections:
+            raise DeploymentCheckError("DEPLOY_ENV must be empty, local-dev, or qa")
+        requested = ((environment, selections[environment]),)
+    else:
+        requested = tuple(selections.items())
+    for index, (name, source) in enumerate(requested):
+        if index:
+            print("---")
+        print(f"# Product Go overlay: {name}")
+        print(render_text(kubectl, source).rstrip())
 
 
 def validate_release_identity(bundle: Path, qa_documents: list[dict[str, object]]) -> None:
@@ -101,9 +125,16 @@ def validate_release_identity(bundle: Path, qa_documents: list[dict[str, object]
         raise DeploymentCheckError("QA Product runtime version surfaces do not agree")
 
 
-def main(_argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     kubectl = os.environ.get("KUBECTL", "kubectl")
+    arguments = list(argv if argv is not None else sys.argv[1:])
+    action = arguments[0] if arguments else "check"
     try:
+        if len(arguments) > 1 or action not in {"check", "render"}:
+            raise DeploymentCheckError("expected action check or render")
+        if action == "render":
+            render_selected(kubectl, os.environ.get("DEPLOY_ENV", ""))
+            return 0
         with tempfile.TemporaryDirectory(prefix="product-deploy-check-") as directory:
             temporary = Path(directory)
             paths: dict[str, Path] = {}

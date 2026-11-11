@@ -40,17 +40,33 @@ def render(config: ServiceTooling, *, template_path: Path = TEMPLATE_PATH) -> st
         f"    -ldflags='-s -w -buildid=' -o {item.output} {item.package}"
         for item in dockerfile.build_outputs
     )
+    runtime_assets = [item for item in dockerfile.runtime_copies if item.source.startswith("/src/")]
+    runtime_asset_commands = ""
+    if runtime_assets:
+        installs = " && \\\n    ".join(
+            f"install -D -m {item.mode} {item.source} /runtime-root{item.destination}"
+            for item in runtime_assets
+        )
+        runtime_asset_commands = f"\n\nRUN {installs}"
     runtime_items = [
         (item.output, item.destination, item.mode) for item in dockerfile.build_outputs
-    ] + [(item.source, item.destination, item.mode) for item in dockerfile.runtime_copies]
-    runtime_copies = "\n".join(
+    ] + [
+        (item.source, item.destination, item.mode)
+        for item in dockerfile.runtime_copies
+        if item.source.startswith("/out/")
+    ]
+    runtime_copy_lines = [
         f"COPY --from=build{f' --chmod={mode}' if mode else ''} {source} {destination}"
         for source, destination, mode in runtime_items
-    )
+    ]
+    if runtime_assets:
+        runtime_copy_lines.append("COPY --from=build /runtime-root/ /")
+    runtime_copies = "\n".join(runtime_copy_lines)
     try:
         return template.substitute(
             source_copies=source_copies,
             build_commands=build_commands,
+            runtime_asset_commands=runtime_asset_commands,
             title=json.dumps(config.image.title),
             runtime_copies=runtime_copies,
             user=config.image.user,

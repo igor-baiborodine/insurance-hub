@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import json
 import os
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -53,14 +52,27 @@ def active_documents(baseline: Documents) -> Documents:
     return copy.deepcopy(baseline)
 
 
+def test_render_action_selects_only_the_requested_overlay(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "qa")
+    monkeypatch.setattr(deployment_check, "render_text", lambda _kubectl, source: str(source))
+
+    # when
+    status = deployment_check.main(["render"])
+
+    # then
+    output = capsys.readouterr().out
+    assert status == 0
+    assert "# Product Go overlay: qa" in output
+    assert deployment_check.OVERLAYS["qa-go"] in output
+    assert deployment_check.OVERLAYS["local-go"] not in output
+
+
 @pytest.fixture(scope="module")
 def rendered_documents() -> Documents:
-    module_root = Path(__file__).resolve().parent.parent
-    kubectl = os.environ.get("KUBECTL") or shutil.which("kubectl")
-    if kubectl is None:
-        bundled = module_root / ".tools/bin/kubectl"
-        assert bundled.is_file(), f"missing Product kubectl prerequisite: {bundled}"
-        kubectl = str(bundled)
+    kubectl = os.environ.get("KUBECTL", "kubectl")
     return {
         name: deployment_check.render(kubectl, deployment_check.REPOSITORY_ROOT / source)
         for name, source in deployment_check.OVERLAYS.items()

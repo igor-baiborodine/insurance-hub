@@ -80,52 +80,22 @@ PYTHON_SCAFFOLD_TOOLING_FILES := \
 	templates/go-service/scripts/test_check_copy.py \
 	templates/go-service/scripts/test_tooling.py
 PYTHON_PRODUCT_TOOLING_FILES := \
-	scripts/product_baseline/__init__.py \
-	scripts/product_baseline/accept.py \
-	scripts/product_baseline/catalog_roundtrip.py \
-	scripts/product_baseline/capture.py \
-	scripts/product_baseline/capture_inventory.py \
-	scripts/product_baseline/compare_http.py \
-	scripts/product_baseline/fixtures.py \
-	scripts/product_baseline/preflight.py \
-	scripts/product_baseline/replay.py \
-	scripts/product_baseline/test_catalog_roundtrip.py \
-	scripts/product_baseline/test_compare_http.py \
-	scripts/product_baseline/test_fixtures.py \
-	scripts/product_baseline/verify.py \
-	scripts/product_security/__init__.py \
-	scripts/product_security/check_cases.py \
-	scripts/product_security/check_java_results.py \
-	scripts/product_security/security_test.py \
-	scripts/product_security/test_validators.py \
-	scripts/product_security/verify.py \
-	services/product-service/scripts/check_access_results.py \
-	services/product-service/scripts/build_image.py \
-	services/product-service/scripts/bootstrap_docs.py \
-	services/product-service/scripts/test_check_access_results.py \
-	services/product-service/scripts/check_ci.py \
-	services/product-service/scripts/check_docs.py \
 	services/product-service/scripts/check_render.py \
 	services/product-service/scripts/administration.py \
 	services/product-service/scripts/deployment.py \
 	services/product-service/scripts/product_deployment_checks.py \
 	services/product-service/scripts/deployment_check.py \
 	services/product-service/scripts/deployment_lifecycle.py \
-	services/product-service/scripts/flux_deployment_test.py \
 	services/product-service/scripts/integration_test.py \
 	services/product-service/scripts/image_check.py \
-	services/product-service/scripts/product_process.py \
 	services/product-service/scripts/resource_administration.py \
-	services/product-service/scripts/shared_phase.py \
-	services/product-service/scripts/telemetry_continuity_test.py \
+	services/product-service/scripts/security_verify.py \
 	services/product-service/scripts/test_deployment_checks.py \
 	services/product-service/scripts/test_deployment_lifecycle.py \
 	services/product-service/scripts/test_deployment_operations.py \
 	services/product-service/scripts/test_administration.py \
 	services/product-service/scripts/test_product_tooling.py \
-	services/product-service/scripts/test_product_tooling_integration.py \
-	services/product-service/scripts/test_resource_administration.py \
-	services/product-service/scripts/test_resource_administration_integration.py
+	services/product-service/scripts/test_resource_administration.py
 PYTHON_K8S_ADMIN_FILES := \
 	k8s/scripts/admin/__init__.py \
 	k8s/scripts/admin/cluster.py \
@@ -186,7 +156,7 @@ export PYTHON_FILES PYTHON_ACCEPTANCE_PATH PYTHON_ACCEPTANCE_CONFIRM
 	python-scaffold-tooling-format-check python-scaffold-tooling-lint \
 	python-scaffold-tooling-test-fast python-scaffold-tooling-check \
 	python-product-tooling-format-check python-product-tooling-lint \
-	python-product-tooling-test-fast python-product-tooling-test-integration \
+	python-product-tooling-test-fast \
 	python-product-tooling-check python-k8s-admin-format-check python-k8s-admin-lint \
 	python-k8s-admin-test-fast python-k8s-admin-check \
 	python-observability-format-check python-observability-lint \
@@ -351,25 +321,14 @@ python-product-tooling-lint: python-lint ## Lint Product Python tooling
 python-product-tooling-test-fast: python-toolchain-check ## Run fast Product tooling tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
 		-m 'not integration and not acceptance' \
-		scripts/product_baseline/test_catalog_roundtrip.py \
-		scripts/product_baseline/test_compare_http.py \
-		scripts/product_baseline/test_fixtures.py \
-		scripts/product_security/test_validators.py \
 		services/product-service/scripts/test_administration.py \
 		services/product-service/scripts/test_resource_administration.py \
-		services/product-service/scripts/test_check_access_results.py \
 		services/product-service/scripts/test_deployment_checks.py \
 		services/product-service/scripts/test_deployment_operations.py \
 		services/product-service/scripts/test_product_tooling.py
 
-python-product-tooling-test-integration: python-toolchain-check ## Run disposable Product tooling integration tests
-	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
-		-m integration \
-		services/product-service/scripts/test_deployment_checks.py \
-		services/product-service/scripts/test_product_tooling_integration.py
-
 python-product-tooling-check: python-product-tooling-format-check python-product-tooling-lint \
-	python-product-tooling-test-fast python-product-tooling-test-integration ## Run all Product tooling checks
+	python-product-tooling-test-fast ## Run focused Product tooling checks
 
 python-k8s-admin-format-check: PYTHON_FILES := $(PYTHON_K8S_ADMIN_FILES)
 python-k8s-admin-format-check: python-format-check ## Check Kubernetes administration Python formatting

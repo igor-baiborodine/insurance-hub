@@ -846,7 +846,6 @@ def ci_check(root: Path, inventory: dict[str, Any]) -> None:
             "make go-scaffold-test-tooling",
             "make go-product-test-tooling",
             "make go-scaffold-check-copy",
-            "make -C services/product-service check-ci",
             "make go-svc-",
             "make resource-",
             "make product-baseline-",
