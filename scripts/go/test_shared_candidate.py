@@ -99,6 +99,22 @@ def test_candidate_environment_selects_only_a_newer_library_toolchain(
     assert result.get("GOTOOLCHAIN") == expected
 
 
+def test_candidate_coverage_outputs_are_owned_outside_source(tmp_path: Path) -> None:
+    # given
+    output = tmp_path / "scratch/coverage"
+
+    # when
+    arguments = candidate.coverage_arguments(output)
+
+    # then
+    assert output.is_dir()
+    assert arguments == [
+        f"INTEGRATION_COVERAGE_FILE={output / 'integration-coverage.txt'}",
+        f"ELASTICSEARCH_INTEGRATION_COVERAGE_FILE={output / 'elasticsearch-integration-coverage.txt'}",
+        f"EVENT_INTEGRATION_COVERAGE_FILE={output / 'event-integration-coverage.txt'}",
+    ]
+
+
 @pytest.mark.parametrize(
     "settings",
     [
