@@ -290,6 +290,12 @@ func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity,
 
 // Validate rejects incomplete identity without echoing supplied values.
 func (identity Identity) Validate(enabled bool) error {
+	if identity.ServiceName != DefaultServiceName {
+		return kitconfig.Invalid(
+			kitconfig.EnvServiceName,
+			"must match the service's fixed logical name",
+		)
+	}
 	if identity.ServiceNamespace != "insurance-hub" || identity.Implementation != "go" {
 		return kitconfig.Invalid(
 			"telemetry identity",

@@ -65,6 +65,7 @@ func TestNew_RejectsScaffoldIdentityAndExporterSettings(t *testing.T) {
 	}{
 		{"missing service", func(*config.Telemetry) {}, ""},
 		{"service mismatch", func(*config.Telemetry) {}, "other"},
+		{"foreign service", func(s *config.Telemetry) { s.Identity.ServiceName = "other" }, "other"},
 		{"missing endpoint", func(s *config.Telemetry) { s.ExporterEndpoint = nil }, "go-service"},
 		{"development identity", func(s *config.Telemetry) {
 			s.Identity = config.DevelopmentIdentity("go-service").Identity
