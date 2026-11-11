@@ -71,18 +71,30 @@ def is_go_pr_qualifying_module_path(path_value: str) -> bool:
 
 
 def selection_outputs(paths: list[str], merge_base: str) -> dict[str, str]:
-    modules = sorted(
+    shared_modules = sorted(
         {
             module
             for path in paths
             if (module := classify_module(path))
-            and (
-                is_validation_relevant_module_path(path)
-                if module.startswith("libs/")
-                else is_go_pr_qualifying_module_path(path)
-            )
+            and module.startswith("libs/")
+            and is_validation_relevant_module_path(path)
         }
     )
+    service_modules = sorted(
+        {
+            module
+            for path in paths
+            if (module := classify_module(path))
+            and not module.startswith("libs/")
+            and is_go_pr_qualifying_module_path(path)
+        }
+    )
+    if len(service_modules) > 1:
+        raise SelectionError(
+            f"Multiple Go service modules changed; split the pull request: "
+            f"{' '.join(service_modules)}"
+        )
+    modules = service_modules or shared_modules
     if not modules:
         return {"module_dir": ""}
     if len(modules) > 1:

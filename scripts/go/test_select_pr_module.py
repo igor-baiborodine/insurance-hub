@@ -23,6 +23,17 @@ import select_pr_module
             {"module_dir": "templates/go-service"},
         ),
         (
+            ["libs/servicekit/go.mod", "templates/go-service/go.mod"],
+            {"module_dir": "templates/go-service"},
+        ),
+        (
+            [
+                "libs/servicekit/health/health.go",
+                "services/product-service/internal/app.go",
+            ],
+            {"module_dir": "services/product-service"},
+        ),
+        (
             [
                 "services/product-service/scripts/check_ci.py",
                 "templates/go-service/cmd/server/main.go",
@@ -47,15 +58,18 @@ def test_selection_preserves_zero_or_single_module_boundary(
         assert result["validation_target"] == "check-go-pr"
 
 
-def test_multiple_modules_are_rejected() -> None:
+def test_multiple_service_modules_are_rejected() -> None:
     # given
     paths = [
         "templates/go-service/main.go",
         "services/product-service/internal/app.go",
+        "libs/servicekit/health/health.go",
     ]
 
     # when / then
-    with pytest.raises(select_pr_module.SelectionError, match="Multiple Go modules changed"):
+    with pytest.raises(
+        select_pr_module.SelectionError, match="Multiple Go service modules changed"
+    ):
         select_pr_module.selection_outputs(paths, "a" * 40)
 
 
