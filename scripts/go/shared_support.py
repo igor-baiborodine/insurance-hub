@@ -102,6 +102,7 @@ class Budget:
         activity: str,
         env: dict[str, str] | None = None,
         limit: float | None = None,
+        reveal_failure_output: bool = False,
     ) -> str:
         remaining = self.deadline - time.monotonic()
         require(remaining > 0, f"{activity}: overall deadline exceeded")
@@ -111,8 +112,15 @@ class Budget:
             cwd=cwd,
             activity=activity,
             env=env or environment(),
+            check=not reveal_failure_output,
             timeout_seconds=min(remaining, limit or remaining),
         )
+        if result.returncode != 0:
+            if result.stdout:
+                print(result.stdout, end="")
+            if result.stderr:
+                print(result.stderr, end="", file=sys.stderr)
+            raise topology.TopologyError(f"{activity} failed with status {result.returncode}")
         print(f"{activity}: complete", file=sys.stderr)
         return result.stdout
 

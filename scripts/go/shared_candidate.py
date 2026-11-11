@@ -304,6 +304,7 @@ def validate(
                                     root,
                                     "candidate consumer phase",
                                     child_env,
+                                    reveal_failure_output=True,
                                 ),
                                 end="",
                             )

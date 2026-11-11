@@ -14,6 +14,7 @@ import pytest
 
 import library_tooling
 import shared_candidate as candidate
+import topology
 from shared_support import DIRECTORY, MODULE, Budget, SharedError
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +29,26 @@ class GoEnvironment:
         if arguments[1] == "env":
             return json.dumps({"GOWORK": self.work, "GOFLAGS": self.flags})
         return json.dumps({"Replace": self.replacements})
+
+
+def test_budget_reveals_owned_failure_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # when / then
+    with pytest.raises(topology.TopologyError, match="fixture failed with status 7"):
+        Budget(10).run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; print('candidate stdout'); print('candidate stderr', file=sys.stderr); sys.exit(7)",
+            ],
+            tmp_path,
+            "fixture",
+            reveal_failure_output=True,
+        )
+    captured = capsys.readouterr()
+    assert "candidate stdout" in captured.out
+    assert "candidate stderr" in captured.err
 
 
 def test_python_executable_preserves_virtual_environment_entry_point(
