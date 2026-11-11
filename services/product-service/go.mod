@@ -6,7 +6,7 @@ require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.12-20260825204119-511051f7f437.1
 	buf.build/go/protovalidate v1.4.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0
-	github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.0.2
+	github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.1.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/moby/moby/api v1.55.0
 	github.com/pressly/goose/v3 v3.27.0

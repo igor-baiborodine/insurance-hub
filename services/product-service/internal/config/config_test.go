@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 )
 
 const testDatabaseURL = "postgresql://product_reader:reader-password@127.0.0.1:5432/product"
@@ -69,7 +71,7 @@ func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 	// given
 	values := map[string]string{
 		serviceNameSetting:           "product-service",
-		httpAddressSetting:           "[::1]:8081",
+		kitconfig.EnvHTTPAddress:     "[::1]:8081",
 		grpcAddressSetting:           "[::1]:9090",
 		healthAddressSetting:         "[::1]:8080",
 		databaseURLSetting:           "postgres://reader:secret@db.internal:5433/catalog?sslmode=require",
@@ -213,7 +215,11 @@ func TestLoad_RejectsInvalidSettings(t *testing.T) {
 	}{
 		{name: "empty service name", setting: serviceNameSetting, value: ""},
 		{name: "blank service name", setting: serviceNameSetting, value: "   "},
-		{name: "malformed HTTP address", setting: httpAddressSetting, value: "localhost"},
+		{
+			name:    "malformed HTTP address",
+			setting: kitconfig.EnvHTTPAddress,
+			value:   "localhost",
+		},
 		{
 			name:    "malformed gRPC address",
 			setting: grpcAddressSetting,

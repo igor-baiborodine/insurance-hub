@@ -20,7 +20,6 @@ const DefaultServiceName = "product-service"
 
 const (
 	serviceNameSetting           = kitconfig.EnvServiceName
-	httpAddressSetting           = "HTTP_ADDR"
 	grpcAddressSetting           = kitconfig.EnvGRPCAddress
 	healthAddressSetting         = kitconfig.EnvHealthAddress
 	databaseURLSetting           = "PRODUCT_DATABASE_URL"
@@ -131,7 +130,11 @@ func load(lookup lookupEnv) (Config, error) {
 		return Config{}, invalid(serviceNameSetting, "must not be blank")
 	}
 
-	httpAddress, err := loadAddress(lookup, httpAddressSetting, "127.0.0.1:8080")
+	httpAddress, err := loadAddress(
+		lookup,
+		kitconfig.EnvHTTPAddress,
+		kitconfig.DefaultHTTPAddress,
+	)
 	if err != nil {
 		return Config{}, err
 	}
@@ -305,7 +308,7 @@ func validateDistinctAddresses(httpAddress, grpcAddress, healthAddress Address) 
 		name    string
 		address Address
 	}{
-		{name: httpAddressSetting, address: httpAddress},
+		{name: kitconfig.EnvHTTPAddress, address: httpAddress},
 		{name: grpcAddressSetting, address: grpcAddress},
 		{name: healthAddressSetting, address: healthAddress},
 	} {

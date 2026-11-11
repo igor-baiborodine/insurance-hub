@@ -311,7 +311,7 @@ after partial startup or process shutdown.
 Product and the [Go scaffold](../../templates/go-service/README.md) consume the public
 [ServiceKit module](../../libs/servicekit/README.md) for shared configuration, identity, logging,
 health and telemetry mechanics. Product pins
-`github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.0.2` in [go.mod](go.mod), with
+`github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.1.0` in [go.mod](go.mod), with
 checksums in [go.sum](go.sum) and the matching `SERVICEKIT_VERSION` in [Makefile](Makefile).
 Normal builds resolve that published version with `GOWORK=off`, without a local replacement or
 a sibling checkout. Library versions are independent of Product image versions.
@@ -360,7 +360,7 @@ telemetry or change deployed traffic.
 
 For a later upgrade rollback, restore the previously validated Product pin, matching checksums,
 Make pin and any affected adapter/configuration changes together, then rerun those checks.
-`v1.0.2` is the current Product pin; `v1.0.1` remains the previously validated consumer pin.
+`v1.1.0` is the current Product pin; `v1.0.2` remains the previously validated consumer pin.
 `v0.2.0` lacks the final runtime-metric export fix and is not a pin-only rollback target for the
 adopted Product code. Reversing the first adoption instead requires restoring Product's
 pre-extraction implementations and removing its active-consumer registration together. Do not move
@@ -495,7 +495,7 @@ The concrete package and file responsibilities are:
 | [`internal/config`](internal/config) | Parses and validates the bounded runtime settings and holds the database URL in a redacting type. |
 | [`internal/health`](internal/health) | Exposes ServiceKit's liveness/readiness primitives; Product composition supplies its database probe, readiness transitions and management listener. |
 | [`internal/logger`](internal/logger) / [`internal/telemetry`](internal/telemetry) | Adapt ServiceKit logging/providers to Product identity, propagation, histogram views and runtime scope; retain Product request classification/accounting and completion behavior. |
-| [`libs/servicekit`](../../libs/servicekit/README.md) at `v1.0.2` | Owns reusable config/identity helpers, structured redaction and trace correlation, health primitives, OTLP provider lifecycle, runtime metrics and SDK diagnostics. Product composition owns installation and cleanup. |
+| [`libs/servicekit`](../../libs/servicekit/README.md) at `v1.1.0` | Owns reusable config/identity helpers, structured redaction and trace correlation, health primitives, OTLP provider lifecycle, runtime metrics and SDK diagnostics. Product composition owns installation and cleanup. |
 | [`api/product/v1`](api/product/v1) / [`gen/product/v1`](gen/product/v1) | Own the versioned protobuf source and generated Go boundary. |
 
 For a get-product request:
