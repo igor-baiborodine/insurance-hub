@@ -40,8 +40,9 @@ GENERATED_OUTPUTS = (
 )
 STALE_IDENTITY = re.compile(
     r"github\.com/igor-baiborodine/insurance-hub/templates/go-service|"
-    r"templates/go-service|scaffold\.v1|scaffold_v1|scaffoldv1|scaffold/v1"
+    r"templates/go-service|go-service|scaffold\.v1|scaffold_v1|scaffoldv1|scaffold/v1"
 )
+ALLOWED_GENERIC_IDENTITY = "go-service-tooling.json"
 
 
 class CopyError(RuntimeError):
@@ -70,6 +71,11 @@ class Configuration:
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise CopyError(message)
+
+
+def contains_stale_identity(content: str) -> bool:
+    """Detect active scaffold identity while allowing the generic tooling filename."""
+    return bool(STALE_IDENTITY.search(content.replace(ALLOWED_GENERIC_IDENTITY, "")))
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -229,7 +235,7 @@ def validate_copy_surface(copy_root: Path) -> None:
         if any(part in IGNORED_DIRECTORIES for part in relative.parts):
             continue
         require(
-            not STALE_IDENTITY.search(path.read_text(encoding="utf-8")),
+            not contains_stale_identity(path.read_text(encoding="utf-8")),
             f"stale active scaffold identity found in {relative}",
         )
     makefile = (copy_root / "Makefile").read_text(encoding="utf-8")
@@ -320,7 +326,7 @@ def validate_generated_output(copy_root: Path) -> None:
     require(generated == list(GENERATED_OUTPUTS), f"generated output path set differs: {generated}")
     for relative in GENERATED_OUTPUTS:
         require(
-            not STALE_IDENTITY.search((copy_root / relative).read_text(encoding="utf-8")),
+            not contains_stale_identity((copy_root / relative).read_text(encoding="utf-8")),
             f"stale active scaffold identity found in {relative}",
         )
 

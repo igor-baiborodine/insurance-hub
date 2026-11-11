@@ -119,6 +119,38 @@ def test_created_copy_uses_repository_tooling_without_scaffold_only_surface(
     assert 'ENTRYPOINT ["/go-service"]' not in copied_dockerfile
 
 
+@pytest.mark.parametrize(
+    "stale_identity",
+    (
+        'ENTRYPOINT ["/go-service"]',
+        '"image": "insurance-hub-go-service-api"',
+    ),
+)
+def test_copy_surface_rejects_bare_scaffold_identity(
+    tmp_path: Path,
+    stale_identity: str,
+) -> None:
+    # given
+    module_root = Path(check_copy.__file__).resolve().parent.parent
+    config = check_copy.Configuration(
+        module_root=module_root,
+        repository_root=module_root.parents[1],
+        common_tooling_dir=module_root.parents[1] / "scripts" / "go" / "module",
+        make_arguments=("make",),
+        selected_python=Path(__file__).absolute(),
+        go="go",
+        uv="uv",
+    )
+    copy_root = check_copy.create_copy(config, tmp_path)
+    check_copy.validate_copy_surface(copy_root)
+    mutation = copy_root / "stale-identity.txt"
+    mutation.write_text(stale_identity, encoding="utf-8")
+
+    # when / then
+    with pytest.raises(check_copy.CopyError, match="stale active scaffold identity"):
+        check_copy.validate_copy_surface(copy_root)
+
+
 def test_copy_rejects_missing_shared_dependency(tmp_path: Path) -> None:
     # given
     module_root = Path(check_copy.__file__).resolve().parent.parent
