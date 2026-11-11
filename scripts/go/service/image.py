@@ -34,6 +34,7 @@ REQUIRED_IDENTITY = (
     "SOURCE_REVISION",
     "SOURCE_VERSION",
 )
+IMAGE_TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
 
 
 class ImageError(ValueError):
@@ -95,8 +96,7 @@ def validate_build_identity(
     require(values["SOURCE_CREATED"] == created, "SOURCE_CREATED must match the commit time")
     version = f"git-{revision[:12]}"
     require(values["SOURCE_VERSION"] == version, f"SOURCE_VERSION must be {version}")
-    image_tag = f"{config.image.local_tag_prefix}{revision[:12]}"
-    require(values["IMAGE_TAG"] == image_tag, f"IMAGE_TAG must be {image_tag}")
+    require(bool(IMAGE_TAG.fullmatch(values["IMAGE_TAG"])), "IMAGE_TAG is invalid")
     require(values["IMAGE_NAME"] == config.image.name, "IMAGE_NAME differs from service config")
     require(
         values["IMAGE_REF"] == f"{values['IMAGE_NAME']}:{values['IMAGE_TAG']}",
