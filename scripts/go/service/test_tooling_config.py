@@ -58,6 +58,7 @@ def version_two_configuration(module: Path) -> dict[str, object]:
     (module / "contract.json").write_text('{"paths": {}}\n', encoding="utf-8")
     value = configuration()
     value["schemaVersion"] = 2
+    del value["image"]["localTagPrefix"]  # type: ignore[index]
     value["dockerfile"] = {
         "sourceCopies": [{"source": "cmd", "destination": "cmd"}],
         "buildOutputs": [
@@ -110,7 +111,6 @@ def test_load_tooling_config_binds_owned_module(tmp_path: Path) -> None:
     # then
     assert config.module_root == module
     assert config.image.name == "example-api"
-    assert config.image.local_tag_prefix == "1.0.0-local."
     assert config.candidate.phase_targets["integration"] == ("test-integration",)
     assert config.contracts is None
 
@@ -133,6 +133,19 @@ def test_load_version_two_contracts(tmp_path: Path) -> None:
     assert config.dockerfile.build_outputs[0].destination == "/example-service"
     assert config.contracts.dependencies[0].ports == (9200,)
     assert config.contracts.administration.secret_environment == ("ADMIN_PASSWORD",)
+
+
+def test_load_version_two_rejects_legacy_image_tag_prefix(tmp_path: Path) -> None:
+    # given
+    module = configured_module(tmp_path)
+    data = version_two_configuration(module)
+    data["image"]["localTagPrefix"] = "1.0.0-local."  # type: ignore[index]
+    path = module / "go-service-tooling.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    # when / then
+    with pytest.raises(ToolingConfigError, match="unknown keys: localTagPrefix"):
+        load_tooling_config(path, repository_root=tmp_path)
 
 
 @pytest.mark.parametrize(

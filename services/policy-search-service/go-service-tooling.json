@@ -5,7 +5,6 @@
   "image": {
     "name": "insurance-hub-policy-search-api",
     "title": "Insurance Hub Policy Search API",
-    "localTagPrefix": "1.0.0-local.",
     "entrypoint": [
       "/policy-search-service"
     ],

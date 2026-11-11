@@ -34,7 +34,6 @@ class LifecycleConfig:
 class ImageConfig:
     name: str
     title: str
-    local_tag_prefix: str
     entrypoint: tuple[str, ...]
     user: str
     platform: str
@@ -194,16 +193,14 @@ def string_list(value: object, field: str, *, allow_empty: bool = False) -> tupl
     return result
 
 
-def _load_image(value: object) -> ImageConfig:
+def _load_image(value: object, schema_version: int) -> ImageConfig:
     require(isinstance(value, dict), "image configuration is missing")
-    require_keys(
-        value,
-        {"name", "title", "localTagPrefix", "entrypoint", "user", "platform", "lifecycle"},
-        "image",
-    )
+    expected_keys = {"name", "title", "entrypoint", "user", "platform", "lifecycle"}
+    if schema_version == 1:
+        expected_keys.add("localTagPrefix")
+    require_keys(value, expected_keys, "image")
     name = value["name"]
     title = value["title"]
-    local_tag_prefix = value["localTagPrefix"]
     user = value["user"]
     platform = value["platform"]
     entrypoint = value["entrypoint"]
@@ -217,11 +214,13 @@ def _load_image(value: object) -> ImageConfig:
         and all(character.isprintable() for character in title),
         "image.title is invalid",
     )
-    require(
-        isinstance(local_tag_prefix, str)
-        and bool(re.fullmatch(r"[a-z0-9][a-z0-9.-]*\.", local_tag_prefix)),
-        "image.localTagPrefix is invalid",
-    )
+    if schema_version == 1:
+        local_tag_prefix = value["localTagPrefix"]
+        require(
+            isinstance(local_tag_prefix, str)
+            and bool(re.fullmatch(r"[a-z0-9][a-z0-9.-]*\.", local_tag_prefix)),
+            "image.localTagPrefix is invalid",
+        )
     require(
         isinstance(user, str) and bool(re.fullmatch(r"[0-9]+:[0-9]+", user)),
         "image.user is invalid",
@@ -281,7 +280,6 @@ def _load_image(value: object) -> ImageConfig:
     return ImageConfig(
         name=name,
         title=title,
-        local_tag_prefix=local_tag_prefix,
         entrypoint=tuple(entrypoint),
         user=user,
         platform=platform,
@@ -607,7 +605,7 @@ def load_tooling_config(path: Path, *, repository_root: Path = REPOSITORY_ROOT) 
     if schema_version == 1:
         require((module_root / "Dockerfile").is_file(), "declared module does not own a Dockerfile")
 
-    image = _load_image(value["image"])
+    image = _load_image(value["image"], schema_version)
     candidate = _load_candidate(value["candidate"], module_root)
     dockerfile = (
         _load_dockerfile(value["dockerfile"], module_root, image) if schema_version == 2 else None
