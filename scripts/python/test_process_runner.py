@@ -12,6 +12,27 @@ import pytest
 import process_runner
 
 
+def test_child_environment_allows_only_declared_inputs_and_preferred_tools(tmp_path: Path) -> None:
+    # given
+    executable = tmp_path / "bin/tool"
+    executable.parent.mkdir()
+    executable.touch()
+
+    # when
+    environment = process_runner.child_environment(
+        {"CGO_ENABLED": "0"},
+        preferred_executables=(str(executable),),
+        source={"PATH": "/usr/bin", "SECRET_TOKEN": "must-not-pass", "HOME": "/fixture"},
+    )
+
+    # then
+    assert environment == {
+        "CGO_ENABLED": "0",
+        "HOME": "/fixture",
+        "PATH": f"{executable.parent}:/usr/bin",
+    }
+
+
 def test_nonpositive_heartbeat_is_rejected_before_process_start(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="positive work, heartbeat, and teardown"):
         process_runner.run_command(
@@ -54,6 +75,57 @@ def test_failure_retains_captured_output_for_the_owning_caller(tmp_path: Path) -
         )
     assert raised.value.stdout == "test detail\n"
     assert raised.value.stderr == "diagnostic\n"
+
+
+def test_sensitive_stdin_is_redacted_from_failure_output(tmp_path: Path) -> None:
+    # given
+    secret = "synthetic-sensitive-value"
+
+    # when / then
+    with pytest.raises(process_runner.CommandError, match="status 9") as raised:
+        process_runner.run_command(
+            [
+                sys.executable,
+                "-c",
+                "import sys; value=sys.stdin.read(); print(value); print(value, file=sys.stderr); sys.exit(9)",
+            ],
+            cwd=tmp_path,
+            env={"PATH": os.environ.get("PATH", "")},
+            timeout_seconds=5,
+            activity="controlled secret failure",
+            input_text=secret,
+            sensitive_values=(secret,),
+        )
+    assert secret not in raised.value.stdout
+    assert secret not in raised.value.stderr
+    assert raised.value.stdout.strip() == "[REDACTED]"
+    assert raised.value.stderr.strip() == "[REDACTED]"
+
+
+@pytest.mark.parametrize("channel", ("argument", "environment", "activity"))
+def test_sensitive_value_is_rejected_outside_stdin(tmp_path: Path, channel: str) -> None:
+    # given
+    secret = "synthetic-sensitive-value"
+    arguments = [sys.executable, "-c", "raise SystemExit('must not run')"]
+    environment = {"PATH": os.environ.get("PATH", "")}
+    activity = "controlled secret validation"
+    if channel == "argument":
+        arguments.append(secret)
+    elif channel == "environment":
+        environment["SECRET"] = secret
+    else:
+        activity = f"controlled {secret} validation"
+
+    # when / then
+    with pytest.raises(ValueError, match="must not contain sensitive values"):
+        process_runner.run_command(
+            arguments,
+            cwd=tmp_path,
+            env=environment,
+            timeout_seconds=5,
+            activity=activity,
+            sensitive_values=(secret,),
+        )
 
 
 def test_timeout_terminates_and_reaps_owned_process_group(tmp_path: Path) -> None:

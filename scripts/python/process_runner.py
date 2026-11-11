@@ -8,6 +8,38 @@ import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
+from pathlib import Path
+
+PASSTHROUGH_ENVIRONMENT = (
+    "CC",
+    "CGO_ENABLED",
+    "CXX",
+    "GOCACHE",
+    "GOMODCACHE",
+    "GONOPROXY",
+    "GONOSUMDB",
+    "GOPATH",
+    "GOPRIVATE",
+    "GOPROXY",
+    "GOSUMDB",
+    "GOTOOLCHAIN",
+    "HOME",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "LANG",
+    "LC_ALL",
+    "NO_PROXY",
+    "PATH",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TERM",
+    "TMPDIR",
+    "UV_CACHE_DIR",
+    "UV_PYTHON_INSTALL_DIR",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+)
 
 
 class CommandError(RuntimeError):
@@ -17,6 +49,37 @@ class CommandError(RuntimeError):
         super().__init__(message)
         self.stdout = stdout
         self.stderr = stderr
+
+
+def child_environment(
+    overrides: Mapping[str, str] | None = None,
+    *,
+    preferred_executables: Sequence[str] = (),
+    source: Mapping[str, str] = os.environ,
+) -> dict[str, str]:
+    """Build an allowlisted child environment with explicit executable precedence."""
+    environment = {name: source[name] for name in PASSTHROUGH_ENVIRONMENT if name in source}
+    if overrides:
+        if not all(
+            isinstance(key, str) and key and isinstance(value, str)
+            for key, value in overrides.items()
+        ):
+            raise ValueError("environment overrides must contain non-empty string names and values")
+        environment.update(overrides)
+    for executable in reversed(preferred_executables):
+        path = Path(executable)
+        if path.name == executable:
+            continue
+        directory = str(path.resolve().parent)
+        current = environment.get("PATH", "")
+        environment["PATH"] = f"{directory}{os.pathsep}{current}" if current else directory
+    return environment
+
+
+def _redact(value: str, sensitive_values: Sequence[str]) -> str:
+    for sensitive in sensitive_values:
+        value = value.replace(sensitive, "[REDACTED]")
+    return value
 
 
 def _process_group_exists(process: subprocess.Popen[str]) -> bool:
@@ -76,6 +139,7 @@ def run_command(
     timeout_seconds: float,
     activity: str,
     input_text: str | None = None,
+    sensitive_values: Sequence[str] = (),
     heartbeat_seconds: float = 30,
     teardown_seconds: float = 5,
 ) -> subprocess.CompletedProcess[str]:
@@ -84,6 +148,14 @@ def run_command(
         raise ValueError(
             "command and positive work, heartbeat, and teardown deadlines are required"
         )
+    if any(not isinstance(value, str) or not value for value in sensitive_values):
+        raise ValueError("sensitive values must be non-empty strings")
+    if any(value in activity for value in sensitive_values):
+        raise ValueError("activity must not contain sensitive values")
+    if any(value in argument for value in sensitive_values for argument in arguments):
+        raise ValueError("command arguments must not contain sensitive values")
+    if any(value in item for value in sensitive_values for item in env.values()):
+        raise ValueError("command environment must not contain sensitive values")
     started = time.monotonic()
     deadline = started + timeout_seconds
     heartbeat = started + heartbeat_seconds
@@ -120,6 +192,8 @@ def run_command(
         raise
     if _process_group_exists(process) and not terminate_process_group(process, teardown_seconds):
         raise CommandError(f"{activity} cleanup exceeded its {teardown_seconds:g}-second deadline")
+    stdout = _redact(stdout, sensitive_values)
+    stderr = _redact(stderr, sensitive_values)
     result = subprocess.CompletedProcess(list(arguments), process.returncode, stdout, stderr)
     if result.returncode != 0:
         raise CommandError(

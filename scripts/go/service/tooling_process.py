@@ -26,6 +26,7 @@ def run(
     timeout_seconds: float,
     activity: str,
     input_text: str | None = None,
+    sensitive_values: Sequence[str] = (),
     heartbeat_seconds: float = 30,
     teardown_seconds: float = 5,
     capture: bool = False,
@@ -40,6 +41,7 @@ def run(
             timeout_seconds=timeout_seconds,
             activity=activity,
             input_text=input_text,
+            sensitive_values=sensitive_values,
             heartbeat_seconds=heartbeat_seconds,
             teardown_seconds=teardown_seconds,
         )
