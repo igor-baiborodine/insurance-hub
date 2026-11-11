@@ -35,7 +35,7 @@ import select_pr_module
         ),
         (
             [
-                "services/product-service/scripts/check_ci.py",
+                "services/product-service/scripts/local_check.py",
                 "templates/go-service/cmd/server/main.go",
             ],
             {"module_dir": "templates/go-service"},
@@ -140,7 +140,7 @@ def test_go_pr_qualifying_paths_match_explicit_workflow_categories(path: str) ->
         "templates/go-service/README.md",
         "templates/go-service/scripts/check_copy.py",
         "services/product-service/Dockerfile",
-        "services/product-service/scripts/check_ci.py",
+        "services/product-service/scripts/local_check.py",
         "legacy/product-service/internal/incorrect.go",
         "services/group/claims-service/internal/incorrect.go",
         "libs/servicekit/health/health.go",

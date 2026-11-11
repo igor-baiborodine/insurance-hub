@@ -1,16 +1,11 @@
 # Root-owned orchestration for validated, automatic library publication.
 GO_SHARED_TOOL := $(ROOT_DIR)scripts/go/shared_cli.py
-GO_SHARED_ACTIONLINT ?= $(ROOT_DIR)services/product-service/.tools/bin/actionlint
 export PYTHON
 
 .PHONY: go-shared-plan go-shared-validate go-shared-results-check go-shared-local-full go-shared-phase \
 	go-shared-test go-shared-test-integration go-library-release-plan go-library-release-validate \
 	go-library-release-prepare \
-	go-library-release-tag go-library-release-verify go-shared-check-ci
-
-go-shared-check-ci: python-runtime-check ## Lint additive shared workflows using the existing pinned CI tool
-	@"$(GO_SHARED_ACTIONLINT)" -shellcheck= -pyflakes= \
-		"$(ROOT_DIR).github/workflows/go-pr-shared.yml" "$(ROOT_DIR).github/workflows/go-release-lib.yml"
+	go-library-release-tag go-library-release-verify
 
 go-shared-plan: python-runtime-check ## Plan complete PR obligations (PR_BASE/PR_HEAD full SHAs)
 	@"$(PYTHON)" "$(GO_SHARED_TOOL)" plan

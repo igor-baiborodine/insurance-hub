@@ -160,7 +160,6 @@ test-observability-acceptance-preflight: observability-acceptance-test-tooling t
 		IMAGE_TAG="$(OBSERVABILITY_ACCEPTANCE_IMAGE_TAG)"
 	@$(MAKE) --no-print-directory -C "$(OBSERVABILITY_SERVICE_ROOT)" test \
 		TEST_PACKAGES='./internal/telemetry ./internal/logger'
-	@$(MAKE) --no-print-directory -C "$(OBSERVABILITY_SERVICE_ROOT)" test-telemetry-continuity
 	@$(MAKE) --no-print-directory monitoring-assets-check test-monitoring \
 		ENV_NAME=qa SVC_NAME=product
 

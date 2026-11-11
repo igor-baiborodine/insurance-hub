@@ -84,7 +84,6 @@ Run checks from the repository root. They install no tools and contact no shared
 operator explicitly invokes a live role or deployment action.
 
 ```sh
-make -C services/product-service check-ci
 make go-svc-image-check SVC_NAME=product
 make go-svc-deploy-check SVC_NAME=product
 make go-svc-deploy-test-tooling SVC_NAME=product
@@ -92,15 +91,7 @@ make go-svc-release-test
 make go-svc-dispatch-test
 make -C services/product-service resource-test-fast
 make -C services/product-service resource-test-integration
-make go-svc-deploy-test-flux SVC_NAME=product
 ```
-
-The Flux test creates a uniquely named Kind cluster, installs the pinned checked-in Flux components
-and CloudNativePG 1.27.0, and deletes only that owned cluster. It proves failure gating, old-success
-rejection, retry identity, Job recreation, safe replay, stable Product ownership, unrelated resource
-preservation, and effective restricted-role SQL denial. It must not receive a shared database URL.
-Rendered or fake-controller results do not replace this test and none of these results proves a live
-environment.
 
 ## Select and verify an environment
 

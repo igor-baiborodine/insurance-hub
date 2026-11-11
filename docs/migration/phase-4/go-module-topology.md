@@ -90,8 +90,7 @@ remain unchanged. `FORMAT_SCOPE=all` covers every eligible handwritten Go file i
 The scaffold and Product `./...` scopes cover all their current packages. Product coverage includes
 `cmd/server`, the test-owned HTTP boundary, generated Product v1 bindings, sqlc-generated queries,
 the bounded PostgreSQL reader, contract tests, the authoritative QA fixture loader, and the tagged
-PostgreSQL harness/reader suites invoked by `test-integration`. Product `check-docs` also validates
-the service README and versioned Product migration handoff, including a real Mermaid render.
+PostgreSQL harness/reader suites invoked by `test-integration`.
 
 The service and scaffold include the root-owned `scripts/go/module/common.mk`. The shared scripts implement
 tool verification, formatting, dependency reproduction, and exact generated-output drift checks;

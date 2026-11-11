@@ -2,10 +2,7 @@
 
 GO ?= go
 DOCKER ?= docker
-NODE ?= node
-NPM ?= npm
 KUBECTL ?= kubectl
-JQ ?= jq
 DEPLOY_ENV ?=
 
 PRODUCT_SERVICE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -26,8 +23,6 @@ PROTOC_GEN_OPENAPIV2 := $(TOOLS_BIN)/protoc-gen-openapiv2
 GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 SQLC := $(TOOLS_BIN)/sqlc
-MMDC := $(TOOLS_BIN)/mmdc
-PUPPETEER_CONFIG := puppeteer-config.json
 GOLANGCI_CONFIG := .golangci.yml
 PROTO_SCHEMA := api/product/v1/product_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
@@ -59,8 +54,6 @@ TESTCONTAINERS_VERSION := v0.44.0
 SERVICEKIT_VERSION := v1.0.1
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 MOBY_GO_ARCHIVE_VERSION := v0.3.0
-MERMAID_CLI_VERSION := 11.14.0
-PUPPETEER_VERSION := 24.43.1
 POSTGRES_IMAGE := postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
 HEAD_REVISION := $(shell git -C $(CURDIR) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(CURDIR) rev-parse --short=12 HEAD 2>/dev/null)
@@ -89,10 +82,6 @@ INTEGRATION_SUITE ?= all
 FIXTURE_SET ?= qa
 SECURITY_HARNESS_OUTPUT ?=
 TELEMETRY_ACCEPTANCE_OUTPUT ?=
-DOC_FILES ?= README.md ../../docs/migration/phase-4/product-service/README.md \
-	../../docs/migration/phase-4/product-service/deployment-runbook.md \
-	../../docs/migration/phase-4/product-service/observability-contract.md \
-	../../docs/migration/phase-4/product-service/observability-runbook.md
 EXTRA_TOOL_PACKAGES := \
 	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@$(GRPC_GATEWAY_VERSION) \
 	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@$(GRPC_GATEWAY_VERSION) \
@@ -117,18 +106,17 @@ pilot-test-json: ## Report selected uncached test execution as JSON for framewor
 .PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift gen-sql check-sql-drift lint test test-race coverage \
-	coverage-validate coverage-check test-integration test-telemetry-continuity \
+	coverage-validate coverage-check test-integration \
 	build build-security-harness build-security-verifier build-lifecycle-client build-telemetry-acceptance image-build image-check deploy-render deploy-check \
 	dockerfile-generate dockerfile-check _image-check-existing security-verify \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-test \
-	deploy-test-flux vulncheck check-servicekit check-candidate-servicekit \
+	vulncheck check-servicekit check-candidate-servicekit \
 	resource-inspect resource-ensure resource-verify resource-rotate resource-revoke \
 	resource-test-fast resource-test-integration \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
 	shared-candidate-generated shared-candidate-breaking shared-candidate-integration \
-	shared-candidate-image \
-	bootstrap-doc-tools check-docs preview-docs check-go-pr check test-tooling run
+	shared-candidate-image check-go-pr check test-tooling run
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
@@ -176,10 +164,6 @@ deploy-test: python-toolchain-check image-build ## Exercise the image and render
 		IMAGE_REF="$(IMAGE_REF)" $(PYTHON) -m pytest -q \
 		-m integration scripts/test_deployment_lifecycle.py
 
-deploy-test-flux: python-toolchain-check image-build ## Exercise Product prerequisites with pinned Flux/CNPG in an owned disposable Kind cluster
-	@PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
-		IMAGE_REF="$(IMAGE_REF)" $(PYTHON) scripts/flux_deployment_test.py
-
 resource-inspect: ## Inspect Product PostgreSQL resources without mutation
 resource-ensure: ## Ensure Product PostgreSQL roles and workload Secrets
 resource-verify: ## Verify Product resources and effective workload permissions
@@ -198,8 +182,7 @@ resource-test-fast: python-toolchain-check ## Exercise Product resource guards w
 resource-test-integration: python-toolchain-check ## Exercise Product permissions in disposable PostgreSQL
 	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
 		-m integration services/product-service/scripts/test_administration.py \
-		services/product-service/scripts/test_resource_administration.py \
-		services/product-service/scripts/test_resource_administration_integration.py
+		services/product-service/scripts/test_resource_administration.py
 
 build-security-harness: verify-tools ## Build the disposable Product security helper at SECURITY_HARNESS_OUTPUT
 	@test -n "$(strip $(SECURITY_HARNESS_OUTPUT))" || { echo "SECURITY_HARNESS_OUTPUT is required" >&2; exit 1; }
@@ -220,32 +203,6 @@ build-telemetry-acceptance: verify-tools ## Build the disposable Product telemet
 	@test -n "$(strip $(TELEMETRY_ACCEPTANCE_OUTPUT))" || { echo "TELEMETRY_ACCEPTANCE_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(TELEMETRY_ACCEPTANCE_OUTPUT)" \
 		./internal/testing/cmd/telemetryacceptance
-
-bootstrap-tools: bootstrap-doc-tools
-
-bootstrap-doc-tools: python-runtime-check
-	@NODE="$(NODE)" NPM="$(NPM)" PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" \
-		PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/bootstrap_docs.py
-
-check-docs: python-runtime-check
-	@test "$$($(MMDC) --version 2>/dev/null)" = "$(MERMAID_CLI_VERSION)" || { \
-		echo "check-docs: Mermaid CLI $(MERMAID_CLI_VERSION) is required; run bootstrap-tools" >&2; \
-		exit 1; \
-	}
-	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" \
-		$(PYTHON) scripts/check_docs.py \
-		--renderer "$(MMDC)" --puppeteer-config "$(PUPPETEER_CONFIG)" $(DOC_FILES)
-
-preview-docs: python-runtime-check
-	@test "$$($(MMDC) --version 2>/dev/null)" = "$(MERMAID_CLI_VERSION)" || { \
-		echo "preview-docs: Mermaid CLI $(MERMAID_CLI_VERSION) is required; run bootstrap-tools" >&2; \
-		exit 1; \
-	}
-	rm -rf "$(TOOLS_DIR)/docs-preview"
-	@PUPPETEER_CACHE_DIR="$(TOOLS_DIR)/puppeteer" PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT)" \
-		$(PYTHON) scripts/check_docs.py \
-		--renderer "$(MMDC)" --puppeteer-config "$(PUPPETEER_CONFIG)" \
-		--output-directory "$(TOOLS_DIR)/docs-preview" $(DOC_FILES)
 
 update-deps:
 	GOWORK=off $(GO) get \
@@ -272,17 +229,6 @@ update-deps:
 	GOWORK=off $(GO) get github.com/igor-baiborodine/insurance-hub/libs/servicekit@$(SERVICEKIT_VERSION)
 	GOWORK=off $(GO) mod tidy
 
-.PHONY: update-goose-dependency check-schema-adoption
-update-goose-dependency: verify-tools ## Resolve the pinned Goose library for the disposable adoption experiment
-	GOWORK=off $(GO) get github.com/pressly/goose/v3@$(GOOSE_VERSION)
-	GOWORK=off $(GO) mod tidy
-
-check-schema-adoption: verify-tools ## Lint, scan, and run the tagged disposable Q03 prototype; requires Docker
-	GOWORK=off $(GOLANGCI_LINT) run --config "$(GOLANGCI_CONFIG)" --build-tags=integration \
-		internal/testing/schema_adoption_integration_test.go internal/testing/harness.go internal/testing/fixture.go
-	GOWORK=off GOFLAGS=-mod=readonly $(GOVULNCHECK) -tags=integration -test ./internal/testing
-	$(MAKE) test-integration INTEGRATION_SUITE=schema-adoption
-
 .PHONY: build-migrator build-seeder
 build-migrator: verify-tools ## Build standalone Product migrator; requires MIGRATOR_OUTPUT
 	@test -n "$(strip $(MIGRATOR_OUTPUT))" || { echo "MIGRATOR_OUTPUT is required" >&2; exit 1; }
@@ -291,27 +237,6 @@ build-migrator: verify-tools ## Build standalone Product migrator; requires MIGR
 build-seeder: verify-tools ## Build standalone Product seeder; requires SEEDER_OUTPUT
 	@test -n "$(strip $(SEEDER_OUTPUT))" || { echo "SEEDER_OUTPUT is required" >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(SEEDER_OUTPUT)" ./cmd/seed
-
-.PHONY: check-administration-design check-administration-design-fast \
-	check-administration-design-integration
-check-administration-design: check-administration-design-fast \
-	check-administration-design-integration ## Run all Q04 design checks
-
-check-administration-design-fast: python-toolchain-check ## Run render-only Q04 checks
-	@$(MAKE) --no-print-directory python-format-check python-lint \
-		PYTHON_FILES=services/product-service/scripts/test_administration_release.py
-	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest --collect-only -q \
-		-m "not integration" services/product-service/scripts/test_administration_release.py
-	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" $(PYTHON) -m pytest -q \
-		-m "not integration" services/product-service/scripts/test_administration_release.py
-
-check-administration-design-integration: python-toolchain-check ## Run disposable PostgreSQL Q04 checks; requires cached PostgreSQL image and Docker
-	@$(MAKE) --no-print-directory python-format-check python-lint \
-		PYTHON_FILES=services/product-service/scripts/test_resource_administration_integration.py
-	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest --collect-only -q \
-		-m integration services/product-service/scripts/test_resource_administration_integration.py
-	@cd "$(PRODUCT_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q \
-		-m integration services/product-service/scripts/test_resource_administration_integration.py
 
 gen-sql:
 	@test "$$($(SQLC) version)" = "$(SQLC_VERSION)"
@@ -347,10 +272,6 @@ test-integration: python-runtime-check
 		PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" scripts/integration_test.py
 
-test-telemetry-continuity: python-runtime-check ## Exercise disposable Brave Java ↔ Go HTTP trace continuity
-	@GO="$(GO)" PYTHONPATH="$(PRODUCT_REPOSITORY_ROOT):$(CURDIR)/scripts" \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/telemetry_continuity_test.py
-
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools format-check format-proto-check lint lint-proto coverage-check test-integration build \
 	check-deps check-proto-drift check-sql-drift check-proto-breaking vulncheck check-servicekit
@@ -367,7 +288,7 @@ check-candidate-servicekit:
 	@test "$$(GOWORK=off $(GO) list -m -f '{{.Replace.Dir}}' github.com/igor-baiborodine/insurance-hub/libs/servicekit)" = "$$SERVICEKIT_CANDIDATE_LIBRARY" || { echo 'check-candidate-servicekit: wrong library source selected' >&2; exit 1; }
 	@echo 'check-candidate-servicekit: selected verified candidate directory'
 
-check: check-go-pr check-docs
+check: check-go-pr
 
 shared-fast-build:
 	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
@@ -405,7 +326,6 @@ shared-candidate-generated shared-candidate-breaking shared-candidate-integratio
 		$(MAKE) --no-print-directory "$$target"; fi
 
 test-tooling: python-toolchain-check verify-tools
-	@$(MAKE) --no-print-directory python-product-tooling-test-fast
 	@MODULE_ROOT="$(CURDIR)" COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
 		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" PYTHON="$(PYTHON)" \
 		COMMON_GO_TOOLING_PYTHON="$(PYTHON)" \
@@ -418,16 +338,6 @@ security-verify: python-runtime-check ## Run read-only Product HTTP/gRPC probes 
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
-
-.PHONY: bootstrap-ci-tools check-ci
-bootstrap-ci-tools: python-runtime-check ## Install pinned Kubernetes clients in module-local .tools
-	@bash scripts/bootstrap-ci-tools.sh
-
-check-ci: python-runtime-check ## Validate Go workflow permissions, triggers, syntax, and boundaries
-	@bash -n scripts/bootstrap-ci-tools.sh
-	@.tools/bin/actionlint -shellcheck= -pyflakes= ../../.github/workflows/go-release-svc.yml \
-		../../.github/workflows/go-pr-mod.yml ../../.github/workflows/go-report-card.yml
-	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/check_ci.py
 
 .PHONY: help
 help: ## Show explicit setup and validation entry points without installing tools

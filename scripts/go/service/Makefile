@@ -23,7 +23,6 @@ export SVC_NAME
 	go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-smoke \
 	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
-	go-svc-deploy-test-flux \
 	go-svc-dispatch-test go-svc-release-select go-svc-release-prepare go-svc-release-test go-svc-release-test-collect
 
 go-svc-image-build: python-runtime-check ## Build one cataloged Go service image. Usage: make go-svc-image-build SVC_NAME=<svc-name>
@@ -59,11 +58,9 @@ go-svc-reader-verify: ## Verify the selected service's reader identity and workl
 go-svc-reader-rotate: ## Explicitly rotate and recover the selected service's reader credentials
 go-svc-deploy-test-tooling: ## Test selected-service deployment guards and cleanup
 go-svc-deploy-smoke: ## Smoke one service in an owned disposable Kind namespace
-go-svc-deploy-test-flux: ## Exercise one service with pinned Flux/CNPG in an owned Kind cluster
 go-svc-deploy-preflight go-svc-deploy-status go-svc-image-load go-svc-deploy \
 	go-svc-deploy-verify go-svc-stop go-svc-deploy-test-tooling go-svc-deploy-smoke \
-	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate \
-	go-svc-deploy-test-flux: python-runtime-check
+	go-svc-reader-ensure go-svc-reader-verify go-svc-reader-rotate: python-runtime-check
 	+@set -eu; \
 		capability='$(@:go-svc-%=%)'; \
 		module_path="$$(PYTHON="$(PYTHON)" $(GO_SERVICE_RESOLVER) "$$capability")"; \

@@ -27,8 +27,7 @@
         "deploy-verify",
         "stop",
         "deploy-test-tooling",
-        "deploy-test",
-        "deploy-test-flux"
+        "deploy-test"
       ],
       "releaseTargets": [
         "qa"

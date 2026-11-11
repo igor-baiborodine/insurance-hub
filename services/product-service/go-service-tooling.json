@@ -91,7 +91,7 @@
   "contracts": {
     "runner": {
       "target": "test-tooling",
-      "suitePath": "scripts/test_product_tooling_integration.py",
+      "suitePath": "scripts/test_product_tooling.py",
       "timeoutSeconds": 3600
     },
     "gateway": {

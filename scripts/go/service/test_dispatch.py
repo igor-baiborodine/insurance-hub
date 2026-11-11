@@ -150,7 +150,7 @@ def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() 
     for unsupported in (
         "resource-ensure",
         "registration-inspect",
-        "deploy-test-flux",
+        "deploy-test",
         "initialize",
     ):
         with pytest.raises(resolve.DispatchError, match="does not support capability"):

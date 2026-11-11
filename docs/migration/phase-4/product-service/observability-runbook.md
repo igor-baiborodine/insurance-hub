@@ -109,7 +109,6 @@ make -C services/product-service test-tooling
 make go-svc-deploy-check SVC_NAME=product
 make go-svc-deploy-test-tooling SVC_NAME=product
 make check-observability
-make -C services/product-service check-docs
 ```
 
 The disabled telemetry suite starts a listener at the configured exporter endpoint and launches

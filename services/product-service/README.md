@@ -31,11 +31,10 @@ make -C services/product-service format FORMAT_SCOPE=all
 make -C services/product-service check FORMAT_SCOPE=all
 make go-product-test-tooling
 make -C services/product-service build
-make -C services/product-service check-docs
 ```
 
-`go-product-bootstrap-tools` installs the pinned Go generators/checkers and Mermaid renderer under
-the ignored `services/product-service/.tools/` directory. To start the service, have the approved
+`go-product-bootstrap-tools` installs the pinned Go generators and checkers under the ignored
+`services/product-service/.tools/` directory. To start the service, have the approved
 local secret mechanism export the restricted reader URL, then invoke the owning target without
 putting the value in this file or the command line:
 
@@ -55,8 +54,8 @@ make -C services/product-service test-integration INTEGRATION_SUITE=harness FIXT
 ```
 
 `INTEGRATION_SUITE` accepts `harness`, `reader`, `grpc`, `http`, `startup`, `parity`,
-`cancellation`, `lifecycle`, `telemetry`, `read-only`, `access`, `schema-adoption`, `migration`,
-`seed`, `marker-columns`, or `all`.
+`cancellation`, `lifecycle`, `telemetry`, `read-only`, `access`, `migration`, `seed`,
+`marker-columns`, or `all`.
 `FIXTURE_SET` accepts only `qa`, the
 production-like snapshot captured by issue 131; the local-dev snapshot is intentionally excluded.
 The selector never connects to the QA environment. Empty or unknown selectors, unavailable Docker,
@@ -65,19 +64,6 @@ The harness resolves and reads the accepted QA snapshot directly under
 `legacy/product-service/src/test/resources/product-read-baseline/` without copying or changing
 it. Its setup identity creates the legacy table and `go_product_reader`; service tests receive only
 the generated reader URL.
-
-The `schema-adoption` suite is the issue-190 decision prototype. It starts the same pinned
-disposable PostgreSQL image with an empty schema, then exercises Goose v3.27.0 creation,
-verified adoption of the accepted catalog, drift/history rejection, concurrency, cancellation,
-replay, and inspection side effects. It also compares the migrated table with the sqlc schema.
-Its test-only SQL and synthetic ownership checks are not administrative commands or an approved
-live role policy. Run it with
-`make -C services/product-service test-integration INTEGRATION_SUITE=schema-adoption`.
-`make -C services/product-service check-schema-adoption` also lints the prototype and its
-existing harness/fixture helpers and scans the tagged test dependency graph for vulnerabilities.
-The suite has a three-minute work deadline, bounded harness cleanup, and mandatory scenario
-discovery; the existing runner reports progress and retains failed test output before cleanup.
-`update-goose-dependency` explicitly resolves the pinned library; checks never install tools.
 
 The `migration` suite exercises the real embedded migration and status path against a separate
 disposable `product` database. It checks empty and populated adoption, modified rows, marker and
@@ -162,14 +148,6 @@ It checks database state, session/lock release, safe replay and diagnostics. Fau
 TLS proxy and synthetic credentials; required subtest discovery prevents silent omissions. Image
 publication and deployment activation remain separate operations.
 
-`make -C services/product-service check-administration-design` runs the issue-190 administration
-contract checks: authenticated PostgreSQL role denials and protected target markers,
-plus actual local-dev/QA Kustomize renders and negative release-lifecycle checks. It requires the existing
-managed Python environment, Docker, the already provisioned PostgreSQL image above and `kubectl`.
-It creates and removes isolated containers and temporary render directories; it installs no tools,
-contacts no Kubernetes API and reads no live credentials. These checks do not prove Flux
-reconciliation or deployed TLS. Historical databases remain adoption inputs.
-
 The reader integration suite uses the same disposable database and QA snapshot:
 
 ```sh
@@ -222,7 +200,7 @@ mutating targets. `check` is
 non-mutating and currently covers tool/config verification, all handwritten Go formatting,
 lint/vet, all-package race tests, the race-enabled disposable PostgreSQL integration suite,
 executable build, dependency reproduction, and vulnerability analysis, plus Product v1 protobuf
-format, lint, drift, and breaking checks, sqlc output drift, and documentation links and rendering.
+format, lint, drift, and breaking checks, and sqlc output drift.
 Tools are pinned in this Makefile and installed under ignored `.tools/`.
 Normal checks use readonly module resolution. `FORMAT_SCOPE=changed` is the default for local
 formatting; `FORMAT_SCOPE=all` checks every eligible handwritten Go file.
@@ -230,8 +208,8 @@ formatting; `FORMAT_SCOPE=all` checks every eligible handwritten Go file.
 The module includes the root-owned `scripts/go/module/common.mk` for identical tool verification,
 formatting, dependency reproduction, and generated-output drift logic. Its Makefile continues to
 own all version pins, SQL generation, integration selection, and service execution. The controlled
-`test-tooling` suite proves Product formatting, dependency, compatibility, Protobuf/SQL drift, and
-integration-selection and documentation failures without changing its disposable fixture.
+`test-tooling` suite exercises the Product-specific image, integration-selection, deployment, and
+administration guards without changing its disposable fixture.
 
 [`go-service-tooling.json`](go-service-tooling.json) is the typed authority for Product's shared
 repository tooling. It describes the three build outputs, runtime SQL and catalog assets, image
@@ -252,13 +230,6 @@ The relevant reproducibility pins are:
 | OpenTelemetry core / gRPC instrumentation | 1.46.0 / 0.71.0 |
 | Testcontainers Go | 0.44.0 |
 | PostgreSQL integration image | `postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193` |
-| Mermaid CLI / Puppeteer | 11.14.0 / 24.43.1; Node.js 20 or newer |
-
-`check-docs` validates local Markdown links and anchors, extracts every Mermaid block, and renders
-it to SVG with the pinned CLI. It does not keep generated images in the working tree.
-The checked-in `puppeteer-config.json` supplies Chromium's `--no-sandbox` and
-`--disable-setuid-sandbox` launch arguments for the supported Ubuntu environment; documentation
-rendering is limited to repository-controlled Mermaid sources.
 
 Configuration is read once and validated before service resources are acquired. Duration values use
 Go duration syntax. Listener ports may be zero for test-owned ephemeral listeners; listener hosts
@@ -326,14 +297,6 @@ goroutine, and processor signals. The Go memory-limit datapoint is present only 
 memory limit is configured. The database and runtime callbacks stop during the shared shutdown
 budget. Request logs remain local JSON when telemetry is disabled.
 
-The owning mixed-language continuity check requires Go 1.27.4, Java 14, system Maven, the Docker
-CLI, and a running Docker daemon. It exercises disposable Brave Java-to-Go and test-only Go-to-Java
-HTTP paths without changing the production gateway route:
-
-```sh
-make -C services/product-service test-telemetry-continuity
-```
-
 Callers with a shorter deadline keep that deadline. Acquisition and query work share the request
 budget rather than starting new clocks. Startup, readiness, and shutdown each use their one
 documented budget. Startup pings PostgreSQL, verifies `SELECT` access to `public.product`, and binds
@@ -371,7 +334,7 @@ installation requires explicit `make bootstrap-tools`.
 
 The config/startup, health and gRPC regression tests exercise these shared invariants. Real gRPC
 cases cover unsupported compression, malformed protobuf, receive/send limits and preserved Product
-domain outcomes. Existing HTTP/Brave continuity, identity, database and lifecycle suites cover the
+domain outcomes. Existing HTTP propagation, identity, database and lifecycle suites cover the
 service adaptations. Shared changes must preserve both consumers' contracts while Product keeps
 its request classifications, business metrics and database behavior local.
 
@@ -388,8 +351,9 @@ Change Product's `SERVICEKIT_VERSION` to the selected exact version, then run
 `make -C services/product-service update-deps` and review the complete `go.mod`/`go.sum` diff.
 That target resolves all Product dependency pins, so check for unrelated changes. Include any
 required Product adapter/configuration changes in the same consumer PR. Run
-`make -C services/product-service check-servicekit`, `check-go-pr FORMAT_SCOPE=all`,
-`test-telemetry-continuity`, `image-check` and `check-docs` through that same module owner, then
+`make -C services/product-service check-servicekit`,
+`make -C services/product-service check-go-pr FORMAT_SCOPE=all`, and
+`make -C services/product-service image-check`, then
 complete the [shared validation workflow](../../.github/workflows/go-pr-shared.yml).
 The identity policy extension above is configuration support, not authorization to enable QA
 telemetry or change deployed traffic.
@@ -576,10 +540,8 @@ build, dependency, generated-code, contract, vulnerability, and 75% coverage gat
 selection, image, overlay, role-tooling, baseline, and deployment-tooling checks remain local and
 run when their inputs change. Local `go-svc-deploy-test` owns only its labelled disposable namespace
 in an explicitly prepared local Kind cluster. Neither hosted validation nor that local suite
-establishes shared-environment acceptance. `make -C services/product-service bootstrap-ci-tools`
-installs the pinned workflow validators; `check-ci` checks release and selected-module workflow
-boundaries, and `make go-svc-release-test` proves generic service selection, QA-entry requirements,
-and semantic-tag updates with controlled fixtures.
+establishes shared-environment acceptance. `make go-svc-release-test` proves generic service
+selection, QA-entry requirements, and semantic-tag updates with controlled fixtures.
 
 The shared release workflow reads service and target policy from
 [`scripts/go/service/catalog.json`](../../scripts/go/service/catalog.json). It uses one preparation

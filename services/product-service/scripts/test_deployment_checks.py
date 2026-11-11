@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import json
 import os
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -73,12 +72,7 @@ def test_render_action_selects_only_the_requested_overlay(
 
 @pytest.fixture(scope="module")
 def rendered_documents() -> Documents:
-    module_root = Path(__file__).resolve().parent.parent
-    kubectl = os.environ.get("KUBECTL") or shutil.which("kubectl")
-    if kubectl is None:
-        bundled = module_root / ".tools/bin/kubectl"
-        assert bundled.is_file(), f"missing Product kubectl prerequisite: {bundled}"
-        kubectl = str(bundled)
+    kubectl = os.environ.get("KUBECTL", "kubectl")
     return {
         name: deployment_check.render(kubectl, deployment_check.REPOSITORY_ROOT / source)
         for name, source in deployment_check.OVERLAYS.items()
