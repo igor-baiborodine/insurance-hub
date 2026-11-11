@@ -18,8 +18,7 @@ REPOSITORY_ROOT = Path(
 ).resolve()
 sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from scripts.python.process_runner import CommandError, run_command  # noqa: E402
-from service_process import child_environment  # noqa: E402
+from scripts.python.process_runner import CommandError, child_environment, run_command  # noqa: E402
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 ADMIN_USERNAME = "elastic"

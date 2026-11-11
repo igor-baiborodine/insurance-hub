@@ -121,7 +121,7 @@ Elasticsearch index; liveness remains independent of Elasticsearch and an option
 
 ## Development commands
 
-Prerequisites are Go 1.27.3, managed CPython 3.14.8, uv 0.13.1, GNU Make 4.3 or newer, Git and a C
+Prerequisites are Go 1.27.4, managed CPython 3.14.8, uv 0.13.1, GNU Make 4.3 or newer, Git and a C
 compiler for race tests. All operations use this module's Makefile. `GO`, `PYTHON` and `UV` may
 select verified executables.
 

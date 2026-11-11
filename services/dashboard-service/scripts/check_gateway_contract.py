@@ -4,10 +4,16 @@
 from __future__ import annotations
 
 import argparse
-import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
+sys.path.insert(0, str(ROOT))
+
+from scripts.go.service.tooling_config import ToolingConfigError  # noqa: E402
+from scripts.go.service.tooling_contracts import load_json_object  # noqa: E402
 
 
 class ContractError(ValueError):
@@ -21,10 +27,13 @@ def require(condition: bool, message: str) -> None:
 
 def load_object(path: Path, label: str) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        value = load_json_object(path.parent, path.name)
+    except ToolingConfigError as error:
+        if "must contain a JSON object" in str(error):
+            raise ContractError(f"{label} must be a JSON object") from error
         raise ContractError(f"{label} cannot be read as JSON: {path}: {error}") from error
-    require(isinstance(value, dict), f"{label} must be a JSON object")
+    except (OSError, UnicodeError) as error:
+        raise ContractError(f"{label} cannot be read as JSON: {path}: {error}") from error
     return value
 
 

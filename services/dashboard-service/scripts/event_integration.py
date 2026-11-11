@@ -12,9 +12,9 @@ import time
 import urllib.request
 from pathlib import Path
 
+from scripts.go.service.tooling_contracts import loopback_port
 from scripts.go.service.tooling_process import run, run_cli
-from scripts.python.process_runner import CommandError
-from service_process import child_environment
+from scripts.python.process_runner import CommandError, child_environment
 
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 REGISTERED_TOPIC = "policy-registered"
@@ -39,12 +39,6 @@ class IntegrationError(ValueError):
 def require(condition: object, message: str) -> None:
     if not condition:
         raise IntegrationError(message)
-
-
-def loopback_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
 
 
 def wait_for_kafka_port(port: int, deadline_seconds: float = 120) -> None:

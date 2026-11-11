@@ -15,7 +15,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -23,6 +22,11 @@ import administration as admin
 import dashboard_deployment_checks as checks
 import registration_administration as registration_admin
 import yaml
+from scripts.go.service.tooling_contracts import (
+    OwnedPortForward,
+    PortForwardSpec,
+    loopback_port,
+)
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 sys.path.insert(0, str(ROOT))
@@ -30,7 +34,6 @@ sys.path.insert(0, str(ROOT))
 from scripts.python.process_runner import (  # noqa: E402
     CommandError,
     run_command,
-    terminate_process_group,
 )
 
 CONTEXT = "kind-local-dev-insurance-hub"
@@ -964,38 +967,22 @@ def setup_kafka(cluster: Cluster, image: str) -> bytes:
     return certificates["ca.crt"]
 
 
-@contextmanager
 def forwarded_service(cluster: Cluster, service: str, remote_port: int):
-    port = free_port()
-    process = subprocess.Popen(
-        [
-            "kubectl",
-            "--context",
-            CONTEXT,
-            "--namespace",
-            cluster.namespace,
-            "port-forward",
-            f"service/{service}",
-            f"{port}:{remote_port}",
-        ],
+    port = loopback_port()
+    return OwnedPortForward(
+        PortForwardSpec(
+            context=CONTEXT,
+            namespace=cluster.namespace,
+            resource=f"service/{service}",
+            local_port=port,
+            remote_port=remote_port,
+        ),
         cwd=ROOT,
         env=safe_environment(),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
+        startup_seconds=20,
+        teardown_seconds=10,
+        kubectl="kubectl",
     )
-    try:
-        wait_for(
-            f"{service} port-forward",
-            lambda: process.poll() is None and socket_connectable(port),
-            20,
-        )
-        yield port
-    finally:
-        require(
-            terminate_process_group(process, 10),
-            f"{service} port-forward cleanup exceeded its deadline",
-        )
 
 
 def socket_connectable(port: int) -> bool:
@@ -1466,9 +1453,7 @@ def verify_runtime_identity(
 
 
 def free_port() -> int:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
+    return loopback_port()
 
 
 def require_go_test_passed(output: str, test_name: str) -> None:
@@ -1484,29 +1469,9 @@ def require_go_test_passed(output: str, test_name: str) -> None:
 
 
 def direct_rpc(cluster: Cluster) -> None:
-    port = free_port()
-    process = subprocess.Popen(
-        [
-            "kubectl",
-            "--context",
-            CONTEXT,
-            "--namespace",
-            cluster.namespace,
-            "port-forward",
-            "service/local-dev-dashboard-api",
-            f"{port}:9090",
-        ],
-        cwd=ROOT,
-        env=safe_environment(),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    try:
+    with forwarded_service(cluster, "local-dev-dashboard-api", 9090) as port:
 
         def reachable() -> bool:
-            if process.poll() is not None:
-                raise CheckFailed("direct-RPC port-forward exited early")
             try:
                 with socket.create_connection(("127.0.0.1", port), timeout=0.2):
                     return True
@@ -1535,11 +1500,6 @@ def direct_rpc(cluster: Cluster) -> None:
         )
         require_go_test_passed(output, test_name)
         print("PASS deployed direct RPC", flush=True)
-    finally:
-        require(
-            terminate_process_group(process, 10),
-            "direct-RPC port-forward cleanup exceeded its deadline",
-        )
 
 
 def produce_qualification_event(

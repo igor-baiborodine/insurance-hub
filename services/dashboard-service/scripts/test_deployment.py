@@ -8,7 +8,7 @@ import os
 import signal
 from copy import deepcopy
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import dashboard_deployment_checks as checks
 import pytest
@@ -363,14 +363,12 @@ def test_verify_runs_rpc_and_access_after_all_http_smokes_fail() -> None:
         business="local-dev-dashboard-api",
         management="local-dev-dashboard-api-management",
     )
-    processes = [Mock(), Mock(), Mock()]
-    for process in processes:
-        process.wait.return_value = 0
+    forwards = [MagicMock(), MagicMock(), MagicMock()]
     with (
         patch.object(checks, "workload_dependencies"),
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
-        patch.object(checks.subprocess, "Popen", side_effect=processes),
-        patch.object(checks, "_wait_for_port_forward"),
+        patch.object(checks, "OwnedPortForward", side_effect=forwards),
+        patch.object(checks, "_wait_for_port"),
         patch.object(
             checks,
             "_http",
@@ -406,14 +404,12 @@ def test_verify_accepts_empty_and_populated_trend_envelopes(
         business="local-dev-dashboard-api",
         management="local-dev-dashboard-api-management",
     )
-    processes = [Mock(), Mock(), Mock()]
-    for process in processes:
-        process.wait.return_value = 0
+    forwards = [MagicMock(), MagicMock(), MagicMock()]
     with (
         patch.object(checks, "workload_dependencies"),
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
-        patch.object(checks.subprocess, "Popen", side_effect=processes),
-        patch.object(checks, "_wait_for_port_forward"),
+        patch.object(checks, "OwnedPortForward", side_effect=forwards),
+        patch.object(checks, "_wait_for_port"),
         patch.object(
             checks,
             "_http",
@@ -443,14 +439,12 @@ def test_verify_cleans_every_port_forward_when_direct_rpc_stops(failure: BaseExc
         business="local-dev-dashboard-api",
         management="local-dev-dashboard-api-management",
     )
-    processes = [Mock(), Mock(), Mock()]
-    for process in processes:
-        process.wait.return_value = 0
+    forwards = [MagicMock(), MagicMock(), MagicMock()]
     with (
         patch.object(checks, "workload_dependencies"),
         patch.object(checks, "_free_port", side_effect=[18080, 18081, 19090]),
-        patch.object(checks.subprocess, "Popen", side_effect=processes) as popen,
-        patch.object(checks, "_wait_for_port_forward"),
+        patch.object(checks, "OwnedPortForward", side_effect=forwards) as owner,
+        patch.object(checks, "_wait_for_port"),
         patch.object(
             checks,
             "_http",
@@ -468,14 +462,12 @@ def test_verify_cleans_every_port_forward_when_direct_rpc_stops(failure: BaseExc
     ):
         checks.verify(target, [])
 
-    assert popen.call_count == 3
-    assert popen.call_args_list[2].args[0][-2:] == [
-        "service/local-dev-dashboard-api",
-        "19090:9090",
-    ]
-    for process in processes:
-        process.terminate.assert_called_once_with()
-        process.wait.assert_called_once_with(timeout=5)
+    assert owner.call_count == 3
+    assert owner.call_args_list[2].args[0].resource == "service/local-dev-dashboard-api"
+    assert owner.call_args_list[2].args[0].local_port == 19090
+    assert owner.call_args_list[2].args[0].remote_port == 9090
+    for forward in forwards:
+        forward.__exit__.assert_called_once()
 
 
 def test_access_qualification_cleans_owned_resources_after_probe_failure() -> None:

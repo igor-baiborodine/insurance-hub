@@ -9,11 +9,11 @@ import json
 import os
 import re
 import socket
-import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,11 @@ sys.path.insert(0, str(ROOT))
 from scripts.go.service.configuration import service_record, target_record  # noqa: E402
 from scripts.go.service.deployment import (  # noqa: E402
     DeploymentError as SharedDeploymentError,
+)
+from scripts.go.service.tooling_contracts import (  # noqa: E402
+    OwnedPortForward,
+    PortForwardSpec,
+    loopback_port,
 )
 from scripts.python.process_runner import CommandError, run_command  # noqa: E402
 
@@ -1032,9 +1037,7 @@ def check_requested_route(target: Target) -> None:
 
 
 def _free_port() -> int:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
+    return loopback_port()
 
 
 def _http(url: str, body: bytes | None = None) -> tuple[int, bytes]:
@@ -1397,10 +1400,9 @@ def verify_shared_http_operation(
     require(status == 200 and valid_shape, f"deployed {path} response differs")
 
 
-def _wait_for_port_forward(process: subprocess.Popen[bytes], port: int, name: str) -> None:
+def _wait_for_port(port: int, name: str) -> None:
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
-        require(process.poll() is None, f"{name} port-forward exited early")
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.2):
                 return
@@ -1413,56 +1415,30 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
     workload_dependencies(target)
     target.live(items, require_deployment=True)
     http_port, management_port, grpc_port = _free_port(), _free_port(), _free_port()
-    processes = [
-        subprocess.Popen(
-            [
-                target.kubectl_binary,
-                "--context",
-                target.context,
-                "--namespace",
-                target.namespace,
-                "port-forward",
-                f"service/{target.business}",
-                f"{http_port}:80",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        ),
-        subprocess.Popen(
-            [
-                target.kubectl_binary,
-                "--context",
-                target.context,
-                "--namespace",
-                target.namespace,
-                "port-forward",
-                f"service/{target.management}",
-                f"{management_port}:8081",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        ),
-        subprocess.Popen(
-            [
-                target.kubectl_binary,
-                "--context",
-                target.context,
-                "--namespace",
-                target.namespace,
-                "port-forward",
-                f"service/{target.business}",
-                f"{grpc_port}:9090",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        ),
-    ]
     failures: list[str] = []
-    try:
-        _wait_for_port_forward(processes[2], grpc_port, "direct-RPC")
+    with ExitStack() as forwards:
+        for service, local_port, remote_port in (
+            (target.business, http_port, 80),
+            (target.management, management_port, 8081),
+            (target.business, grpc_port, 9090),
+        ):
+            forwards.enter_context(
+                OwnedPortForward(
+                    PortForwardSpec(
+                        context=target.context,
+                        namespace=target.namespace,
+                        resource=f"service/{service}",
+                        local_port=local_port,
+                        remote_port=remote_port,
+                    ),
+                    cwd=ROOT,
+                    env=safe_environment(),
+                    startup_seconds=20,
+                    teardown_seconds=5,
+                    kubectl=target.kubectl_binary,
+                )
+            )
+        _wait_for_port(grpc_port, "direct-RPC")
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             try:
@@ -1525,14 +1501,6 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             )
         except Exception as error:
             failures.append(f"direct RPC: {error}")
-    finally:
-        for child in processes:
-            child.terminate()
-            try:
-                child.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait(timeout=5)
     try:
         run_access_qualification(target)
     except Exception as error:

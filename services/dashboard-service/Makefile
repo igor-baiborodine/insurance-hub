@@ -7,19 +7,18 @@ DEPLOY_ENV ?=
 INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
+TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
 PYTHON_TOOLING_FILES := $(wildcard scripts/administration.py \
 	scripts/dashboard_deployment_checks.py scripts/deployment.py \
 	scripts/registration_administration.py scripts/reader_administration.py \
 	scripts/test_registration_administration.py scripts/test_reader_administration.py \
-	scripts/disposable_deployment.py scripts/image_check.py scripts/service_process.py \
-	scripts/test_image_check.py \
+	scripts/disposable_deployment.py scripts/image_check.py scripts/test_image_check.py \
 	scripts/elasticsearch_integration.py scripts/test_elasticsearch_integration.py \
 	scripts/event_integration.py scripts/test_event_integration.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_deployment.py scripts/test_disposable_deployment.py \
 	scripts/test_disposable_command.py \
-	scripts/test_service_process.py scripts/test_tooling.py \
-	scripts/tooling_runner.py scripts/test_tooling_runner.py)
+	scripts/test_tooling.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_elasticsearch_integration.py \
 	scripts/test_event_integration.py \
@@ -28,9 +27,7 @@ PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_disposable_deployment.py \
 	scripts/test_registration_administration.py \
 	scripts/test_reader_administration.py \
-	scripts/test_disposable_command.py \
-	scripts/test_service_process.py \
-	scripts/test_tooling_runner.py)
+	scripts/test_disposable_command.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -53,7 +50,7 @@ GENERATED_PROTO_FILES := \
 	gen/dashboard/v1/dashboard_service_grpc.pb.go \
 	gen/openapiv2/dashboard/v1/dashboard_service.swagger.json
 
-GO_VERSION := 1.27.3
+GO_VERSION := 1.27.4
 BUF_VERSION := v1.73.0
 PROTOC_GEN_GO_VERSION := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
@@ -119,7 +116,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling test-integration test-elasticsearch-integration test-event-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
-	image-build image-check _image-check-existing deploy-render deploy-check \
+	dockerfile-generate dockerfile-check image-build image-check _image-check-existing deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop \
 	reader-ensure reader-verify reader-rotate registration-inspect registration-ensure \
 	registration-verify \
@@ -131,14 +128,24 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
-image-build: python-runtime-check ## Build the pinned linux/amd64 Dashboard runtime image
+dockerfile-generate: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" -m scripts.go.service.dockerfile \
+		--config "$(GO_SERVICE_TOOLING_CONFIG)" --repository-root "$(TOOLING_REPOSITORY_ROOT)" generate
+
+dockerfile-check: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" -m scripts.go.service.dockerfile \
+		--config "$(GO_SERVICE_TOOLING_CONFIG)" --repository-root "$(TOOLING_REPOSITORY_ROOT)" check
+
+image-build: dockerfile-check python-runtime-check ## Build the pinned linux/amd64 Dashboard runtime image
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" build
 
 image-check: image-build ## Build and validate Dashboard image identity, sales, health and shutdown
 	@$(MAKE) --no-print-directory _image-check-existing
 
-_image-check-existing: python-runtime-check
+_image-check-existing: dockerfile-check python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
 		DOCKER="$(DOCKER)" "$(PYTHON)" -m scripts.go.service.image \
 		--config "$(GO_SERVICE_TOOLING_CONFIG)" inspect
@@ -340,7 +347,8 @@ test-tooling: verify-tools python-toolchain-check
 		MAKE_COMMAND="$(MAKE)" TOOLS_BIN="$(TOOLS_BIN)" \
 		GO="$(GO)" UV="$(UV)" \
 		COMMON_GO_TOOLING_PYTHON="$(COMMON_GO_TOOLING_PYTHON)" \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" ./scripts/tooling_runner.py
+		TOOLING_REPOSITORY_ROOT="$(TOOLING_REPOSITORY_ROOT)" \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" ./scripts/test-tooling.sh
 	@$(MAKE) --no-print-directory test-coverage-tooling
 
 
