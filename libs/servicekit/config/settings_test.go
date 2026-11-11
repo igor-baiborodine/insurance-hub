@@ -44,6 +44,37 @@ func TestDefaults_RetainsIndependentConsumerBaseline(t *testing.T) {
 	}
 }
 
+func TestHTTPConstants_RetainConsumerContract(t *testing.T) {
+	// given
+	want := struct {
+		address        string
+		maxHeaderBytes string
+		maxBodyBytes   string
+		defaultHeader  int
+		defaultBody    int
+	}{"HTTP_ADDR", "HTTP_MAX_HEADER_BYTES", "HTTP_MAX_BODY_BYTES", 16384, 4096}
+
+	// when
+	got := struct {
+		address        string
+		maxHeaderBytes string
+		maxBodyBytes   string
+		defaultHeader  int
+		defaultBody    int
+	}{
+		config.EnvHTTPAddress,
+		config.EnvHTTPMaxHeaderBytes,
+		config.EnvHTTPMaxBodyBytes,
+		config.DefaultHTTPMaxHeaderBytes,
+		config.DefaultHTTPMaxBodyBytes,
+	}
+
+	// then
+	if got != want {
+		t.Fatalf("HTTP constants = %+v, want %+v", got, want)
+	}
+}
+
 func TestValidateRuntime_RejectsNonpositiveDurations(t *testing.T) {
 	// given
 	for _, test := range []struct {

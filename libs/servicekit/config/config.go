@@ -12,6 +12,10 @@ import (
 const (
 	// DefaultHTTPAddress reserves the business HTTP port; it does not create an API.
 	DefaultHTTPAddress = "127.0.0.1:8080"
+	// DefaultHTTPMaxHeaderBytes is the shared business HTTP maximum-header-size default.
+	DefaultHTTPMaxHeaderBytes = 16384
+	// DefaultHTTPMaxBodyBytes is the shared business HTTP maximum-request-body-size default.
+	DefaultHTTPMaxBodyBytes = 4096
 	// DefaultHealthAddress is the management HTTP listener default.
 	DefaultHealthAddress = "127.0.0.1:8081"
 	// DefaultGRPCAddress is the business gRPC listener default.
