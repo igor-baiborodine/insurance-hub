@@ -14,7 +14,7 @@ RUN GOWORK=off go mod download
 
 ${source_copies}
 
-${build_commands}
+${build_commands}${runtime_asset_commands}
 
 FROM $${RUNTIME_IMAGE}
 
