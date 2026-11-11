@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import stat
 from dataclasses import replace
 from pathlib import Path
 
@@ -66,3 +67,25 @@ def test_generate_does_not_replace_output_when_render_fails(
 
     # then
     assert output.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize(("existing_mode", "expected_mode"), ((None, 0o644), (0o640, 0o640)))
+def test_generate_uses_source_file_permissions(
+    tmp_path: Path,
+    existing_mode: int | None,
+    expected_mode: int,
+) -> None:
+    # given
+    source = load_tooling_config(CONFIG_PATH)
+    config = replace(source, module_root=tmp_path)
+    output = tmp_path / "Dockerfile"
+    if existing_mode is not None:
+        output.write_text("stale\n", encoding="utf-8")
+        output.chmod(existing_mode)
+
+    # when
+    dockerfile.generate(config)
+
+    # then
+    assert stat.S_IMODE(output.stat().st_mode) == expected_mode
+    assert output.read_text(encoding="utf-8") == dockerfile.render(config)

@@ -7,6 +7,7 @@ import argparse
 import difflib
 import json
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -64,11 +65,13 @@ def generate(config: ServiceTooling) -> None:
     """Atomically replace the module Dockerfile after a complete successful render."""
     output = config.module_root / "Dockerfile"
     content = render(config)
+    output_mode = stat.S_IMODE(output.stat().st_mode) if output.exists() else 0o644
     descriptor, temporary = tempfile.mkstemp(prefix=".Dockerfile.", dir=config.module_root)
     temporary_path = Path(temporary)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
             stream.write(content)
+        temporary_path.chmod(output_mode)
         temporary_path.replace(output)
     except BaseException:
         temporary_path.unlink(missing_ok=True)
