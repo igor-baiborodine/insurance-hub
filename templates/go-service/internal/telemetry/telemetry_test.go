@@ -71,6 +71,7 @@ func TestNew_RejectsScaffoldIdentityAndExporterSettings(t *testing.T) {
 		}, "go-service"},
 		{"wrong namespace", func(s *config.Telemetry) { s.Identity.ServiceNamespace = "other" }, "go-service"},
 		{"wrong implementation", func(s *config.Telemetry) { s.Identity.Implementation = "java" }, "go-service"},
+		{"noncanonical version", func(s *config.Telemetry) { s.Identity.ServiceVersion = "sha-123456789abc" }, "go-service"},
 		{"invalid instance", func(s *config.Telemetry) { s.Identity.ServiceInstance = "private-marker\n" }, "go-service"},
 		{"zero exporter timeout", func(s *config.Telemetry) { s.ExporterTimeout = 0 }, "go-service"},
 	} {
@@ -99,7 +100,7 @@ func enabledIdentity() identity.Identity {
 	return identity.Identity{
 		ServiceNamespace: "insurance-hub",
 		ServiceName:      "go-service",
-		ServiceVersion:   "test-revision",
+		ServiceVersion:   "git-000000000001",
 		ServiceInstance:  "test-instance",
 		Environment:      "test",
 		Implementation:   "go",

@@ -200,6 +200,83 @@ func TestDevelopmentIdentity_PreservesScaffoldDefaults(t *testing.T) {
 	}
 }
 
+func TestLoad_NonDevelopmentVersionPolicy(t *testing.T) {
+	t.Run("canonical test identity accepted", func(t *testing.T) {
+		// given
+		lookup := mapLookup(map[string]string{
+			kitconfig.EnvDeploymentEnvironment: "test",
+			kitconfig.EnvServiceVersion:        "git-000000000001",
+			kitconfig.EnvServiceInstanceID:     "test-instance",
+		})
+
+		// when
+		got, err := load(lookup)
+		// then
+		if err != nil {
+			t.Fatalf("load canonical test identity: %v", err)
+		}
+		if got.Identity.Environment != "test" ||
+			got.Identity.ServiceVersion != "git-000000000001" ||
+			got.Identity.ServiceInstance != "test-instance" {
+			t.Errorf("unexpected test identity: %+v", got.Identity)
+		}
+	})
+
+	t.Run("development environment is exempt", func(t *testing.T) {
+		// given
+		lookup := mapLookup(map[string]string{
+			kitconfig.EnvDeploymentEnvironment: "development",
+			kitconfig.EnvServiceVersion:        "local-revision",
+			kitconfig.EnvServiceInstanceID:     "synthetic-instance",
+		})
+
+		// when
+		_, err := load(lookup)
+		// then
+		if err != nil {
+			t.Fatalf("development version override rejected: %v", err)
+		}
+	})
+
+	for _, test := range []struct{ name, version, reason string }{
+		{"old prefix", "sha-123456789abc", canonicalVersionReason},
+		{"short suffix", "git-123456789ab", canonicalVersionReason},
+		{"long suffix", "git-123456789abcd", canonicalVersionReason},
+		{"uppercase hex", "git-ABCDEF123456", canonicalVersionReason},
+		{"nonhex suffix", "git-123456789abg", canonicalVersionReason},
+		{
+			"padded version",
+			" git-123456789abc",
+			"must contain 1 through 128 ASCII letters, digits, dots, underscores or hyphens",
+		},
+		{"zero version", "git-000000000000", canonicalVersionReason},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			lookup := mapLookup(map[string]string{
+				kitconfig.EnvDeploymentEnvironment: "test",
+				kitconfig.EnvServiceVersion:        test.version,
+				kitconfig.EnvServiceInstanceID:     "test-instance",
+			})
+
+			// when
+			_, err := load(lookup)
+
+			// then
+			if err == nil {
+				t.Fatal("invalid non-development version accepted")
+			}
+			setting, reason := kitconfig.ErrorDetails(err)
+			if setting != kitconfig.EnvServiceVersion || reason != test.reason {
+				t.Errorf("safe details = (%q, %q)", setting, reason)
+			}
+			if strings.Contains(err.Error(), test.version) {
+				t.Errorf("error exposes rejected version: %q", err)
+			}
+		})
+	}
+}
+
 func TestLoad_GRPCFailurePreservesFirstErrorOrder(t *testing.T) {
 	// given
 	values := map[string]string{
@@ -224,7 +301,7 @@ func TestLoad_ValidOverrides(t *testing.T) {
 	// given
 	values := map[string]string{
 		kitconfig.EnvDeploymentEnvironment:    "test",
-		kitconfig.EnvServiceVersion:           "test-revision",
+		kitconfig.EnvServiceVersion:           "git-000000000001",
 		kitconfig.EnvServiceInstanceID:        "test-instance",
 		kitconfig.EnvServiceName:              DefaultServiceName,
 		kitconfig.EnvGRPCAddress:              "[::1]:0",
@@ -433,7 +510,7 @@ func TestLoad_RuntimeBoundsAndIdentity(t *testing.T) {
 		kitconfig.EnvOTELEnabled:              "true",
 		kitconfig.EnvOTELExporterOTLPEndpoint: "http://127.0.0.1:4317",
 		kitconfig.EnvDeploymentEnvironment:    "staging",
-		kitconfig.EnvServiceVersion:           "sha-1234567",
+		kitconfig.EnvServiceVersion:           "git-123456789abc",
 		kitconfig.EnvServiceInstanceID:        "instance-123",
 		kitconfig.EnvRequestTimeout:           "3s",
 		kitconfig.EnvProbeTimeout:             "250ms",
