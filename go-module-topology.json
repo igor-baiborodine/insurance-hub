@@ -99,7 +99,7 @@
       ],
       "packageScope": "all Dashboard packages under ./..., the server executable, owned Dashboard v1 Echo contract and generated gateway/Swagger output, independent HTTP contract, real-listener lifecycle checks and module dependency metadata",
       "prerequisites": [
-        "Go 1.27.3",
+        "Go 1.27.4",
         "managed CPython 3.14.8",
         "pinned Dashboard Go tools installed by make -C services/dashboard-service bootstrap-go-tools",
         "GCC for race-enabled tests",
