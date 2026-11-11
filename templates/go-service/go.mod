@@ -6,7 +6,7 @@ require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.12-20260825204119-511051f7f437.1
 	buf.build/go/protovalidate v1.4.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0
-	github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.0.2
+	github.com/igor-baiborodine/insurance-hub/libs/servicekit v1.1.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.71.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0
 	go.opentelemetry.io/otel v1.46.0
