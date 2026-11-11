@@ -26,7 +26,7 @@ def fixture_tree(root: Path, active_count: int = 0) -> dict:
     for module in inventory["modules"]:
         path = root / module["directory"]
         path.mkdir(parents=True, exist_ok=True)
-        (path / "go.mod").write_text(f"module {module['modulePath']}\n\ngo 1.27.3\n")
+        (path / "go.mod").write_text(f"module {module['modulePath']}\n\ngo 1.27.4\n")
         (path / "go.sum").touch()
         (path / "main.go").write_text("package fixture\n")
         (path / "Makefile").write_text(

@@ -151,7 +151,7 @@ def module_record(
         "validationTarget": "check-go-pr",
         "validationVariables": [],
         "packageScope": "fixture ./...",
-        "prerequisites": [],
+        "prerequisites": ["Go 1.23"],
         "consumers": consumers or [module_path],
         "localReplacements": [],
         "ciWorkflow": ".github/workflows/test.yml",
@@ -397,6 +397,7 @@ def test_approved_workspace_fails_closed_at_public_make_targets(
         ("missing-module", "missing inventory module manifest"),
         ("missing-sum", "missing inventory module checksum"),
         ("identity", "module identity mismatch"),
+        ("stale-go-version", "Go prerequisite mismatch"),
         ("missing-target", "missing validation target"),
         ("unexpected", "unlisted developer-local manifest"),
         ("workspace", "unlisted developer-local manifest: go.work"),
@@ -416,6 +417,11 @@ def test_topology_reports_controlled_manifest_failures(
         (module / "go.sum").unlink()
     elif case == "identity":
         (module / "go.mod").write_text("module example.test/wrong\n\ngo 1.23\n", encoding="utf-8")
+    elif case == "stale-go-version":
+        value["modules"][0]["prerequisites"] = ["Go 1.27.4"]
+        (module / "go.mod").write_text(
+            f"module {value['modules'][0]['modulePath']}\n\ngo 1.27.3\n", encoding="utf-8"
+        )
     elif case == "missing-target":
         (module / "Makefile").write_text("other:\n\t@true\n", encoding="utf-8")
     elif case == "unexpected":

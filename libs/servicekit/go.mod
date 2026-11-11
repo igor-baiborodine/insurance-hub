@@ -1,6 +1,6 @@
 module github.com/igor-baiborodine/insurance-hub/libs/servicekit
 
-go 1.27.3
+go 1.27.4
 
 require (
 	go.opentelemetry.io/otel v1.46.0

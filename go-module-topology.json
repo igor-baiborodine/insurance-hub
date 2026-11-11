@@ -17,7 +17,7 @@
       ],
       "packageScope": "all Go packages under ./..., the server executable, owned Protobuf schema and generated output, and module dependency metadata",
       "prerequisites": [
-        "Go 1.27.3",
+        "Go 1.27.4",
         "pinned scaffold Go tools installed by make -C templates/go-service bootstrap-go-tools",
         "GCC for race-enabled tests",
         "public module, schema, tool, and vulnerability services unless cached"
@@ -71,7 +71,7 @@
       ],
       "packageScope": "all Policy Search packages under ./..., the server executable, owned Protobuf schema and generated gateway/Swagger output, independent HTTP contract, real-listener integration checks, runtime image and module dependency metadata",
       "prerequisites": [
-        "Go 1.27.3",
+        "Go 1.27.4",
         "managed CPython 3.14.8",
         "pinned Policy Search Go tools installed by make -C services/policy-search-service bootstrap-go-tools",
         "GCC for race-enabled tests",
@@ -127,7 +127,7 @@
       ],
       "packageScope": "config, identity, logger, telemetry and health public runtime packages; no server, business model, generated contract or persistence",
       "prerequisites": [
-        "Go 1.27.3",
+        "Go 1.27.4",
         "managed CPython 3.14.8",
         "pinned library tools via make -C libs/servicekit bootstrap-go-tools",
         "GCC for race tests",

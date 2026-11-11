@@ -126,13 +126,13 @@ def test_real_go_candidate_uses_changed_source_and_preserves_original_manifests(
     monkeypatch.setenv("GOSUMDB", "off")
     library = tmp_path / DIRECTORY
     library.mkdir(parents=True)
-    (library / "go.mod").write_text(f"module {MODULE}\n\ngo 1.27.3\n")
+    (library / "go.mod").write_text(f"module {MODULE}\n\ngo 1.27.4\n")
     (library / "go.sum").touch()
     (library / "value.go").write_text('package servicekit\nconst Revision = "candidate"\n')
     consumer = tmp_path / "consumer"
     consumer.mkdir()
     (consumer / "go.mod").write_text(
-        f"module example.com/consumer\n\ngo 1.27.3\nrequire {MODULE} v0.1.0\n"
+        f"module example.com/consumer\n\ngo 1.27.4\nrequire {MODULE} v0.1.0\n"
     )
     (consumer / "go.sum").touch()
     (consumer / "value_test.go").write_text(
@@ -157,13 +157,13 @@ def test_real_go_candidate_uses_changed_source_and_preserves_original_manifests(
 def committed_fixture(root: Path, body: str) -> str:
     library = root / DIRECTORY
     library.mkdir(parents=True)
-    (library / "go.mod").write_text(f"module {MODULE}\n\ngo 1.27.3\n")
+    (library / "go.mod").write_text(f"module {MODULE}\n\ngo 1.27.4\n")
     (library / "go.sum").touch()
     (library / "value.go").write_text('package servicekit\nconst Revision = "candidate"\n')
     consumer = root / "consumer"
     consumer.mkdir()
     (consumer / "go.mod").write_text(
-        f"module example.com/consumer\n\ngo 1.27.3\nrequire {MODULE} v0.1.0\n"
+        f"module example.com/consumer\n\ngo 1.27.4\nrequire {MODULE} v0.1.0\n"
     )
     (consumer / "go.sum").touch()
     (consumer / "value_test.go").write_text(
@@ -261,7 +261,7 @@ def test_controller_phases_receive_exact_git_image_identity(
     sha = committed_fixture(root, command)
     if mode == "normal":
         # A standalone offline consumer needs no published module to exercise this boundary.
-        (root / "consumer/go.mod").write_text("module example.com/consumer\n\ngo 1.27.3\n")
+        (root / "consumer/go.mod").write_text("module example.com/consumer\n\ngo 1.27.4\n")
         (root / "consumer/value_test.go").write_text("package consumer\n")
         subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True, timeout=10)
         subprocess.run(
