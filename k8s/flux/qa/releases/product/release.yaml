@@ -294,15 +294,74 @@ spec:
     name: qa-product-init-189233ecc5d880e0-a1
     namespace: qa-svc
 ---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: qa-product-release-adc9cba655f2bab9
+  namespace: flux-system
+  annotations:
+    insurance-hub.io/release-identity: adc9cba655f2bab9767c8f084c947ff4a1e0fb41bd6dd821d78745c8113e5192
+    insurance-hub.io/source-revision: 118ddd78ad9dc12ee6eb6f2deed23753771b222d
+    insurance-hub.io/image-digest: sha256:9f07e04352aa0379695de50e0daa22353217aa750168686f11a7662be9925cc6
+    insurance-hub.io/asset-hashes: '{"catalog": "a42eca3c26ebd504c6ce3cf3eb037698e575592ef564e64b3c262da0b8d449b4",
+      "migration": "5328b42ef8bfb59ee48cb146f84506b86cb322ccca7da3307b1b5e56e2ff23f4"}'
+    insurance-hub.io/target-revision: '1'
+    insurance-hub.io/credential-revision: '1'
+    insurance-hub.io/migration-timeout: 120s
+spec:
+  interval: 5m
+  url: https://github.com/igor-baiborodine/insurance-hub
+  ref:
+    commit: 118ddd78ad9dc12ee6eb6f2deed23753771b222d
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: qa-product-init-adc9cba655f2bab9-a1
+  namespace: flux-system
+  annotations:
+    insurance-hub.io/release-identity: adc9cba655f2bab9767c8f084c947ff4a1e0fb41bd6dd821d78745c8113e5192
+    insurance-hub.io/source-revision: 118ddd78ad9dc12ee6eb6f2deed23753771b222d
+    insurance-hub.io/image-digest: sha256:9f07e04352aa0379695de50e0daa22353217aa750168686f11a7662be9925cc6
+    insurance-hub.io/asset-hashes: '{"catalog": "a42eca3c26ebd504c6ce3cf3eb037698e575592ef564e64b3c262da0b8d449b4",
+      "migration": "5328b42ef8bfb59ee48cb146f84506b86cb322ccca7da3307b1b5e56e2ff23f4"}'
+    insurance-hub.io/target-revision: '1'
+    insurance-hub.io/credential-revision: '1'
+    insurance-hub.io/migration-timeout: 120s
+spec:
+  interval: 5m
+  timeout: 6m
+  prune: true
+  wait: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: qa-product-release-adc9cba655f2bab9
+  path: ./k8s/overlays/qa/svc/product/administration
+  images:
+  - name: insurance-hub-product-api
+    newName: ghcr.io/igor-baiborodine/insurance-hub/product-api
+    digest: sha256:9f07e04352aa0379695de50e0daa22353217aa750168686f11a7662be9925cc6
+  retryInterval: 1m
+  nameSuffix: -adc9cba655f2bab9-a1
+  postBuild:
+    substitute:
+      MIGRATION_TIMEOUT: 120s
+  healthChecks:
+  - apiVersion: batch/v1
+    kind: Job
+    name: qa-product-init-adc9cba655f2bab9-a1
+    namespace: qa-svc
+---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
   name: qa-product-api
   namespace: flux-system
   annotations:
-    insurance-hub.io/release-identity: 189233ecc5d880e05f8b73a7d83c4be3ad07a9e97608e67ec99387d2f68cdfd3
-    insurance-hub.io/source-revision: 25e0c73d7e9203b80e1622939fe88373eebf5ee4
-    insurance-hub.io/image-digest: sha256:6afef95ff5d4fef2c648c0171ef82bc46c5eebcb7bae40b9b3c8ff0e3d89a31a
+    insurance-hub.io/release-identity: adc9cba655f2bab9767c8f084c947ff4a1e0fb41bd6dd821d78745c8113e5192
+    insurance-hub.io/source-revision: 118ddd78ad9dc12ee6eb6f2deed23753771b222d
+    insurance-hub.io/image-digest: sha256:9f07e04352aa0379695de50e0daa22353217aa750168686f11a7662be9925cc6
     insurance-hub.io/asset-hashes: '{"catalog": "a42eca3c26ebd504c6ce3cf3eb037698e575592ef564e64b3c262da0b8d449b4",
       "migration": "5328b42ef8bfb59ee48cb146f84506b86cb322ccca7da3307b1b5e56e2ff23f4"}'
     insurance-hub.io/target-revision: '1'
@@ -316,14 +375,14 @@ spec:
   force: false
   sourceRef:
     kind: GitRepository
-    name: qa-product-release-189233ecc5d880e0
+    name: qa-product-release-adc9cba655f2bab9
   path: ./k8s/overlays/qa/svc/product
   images:
   - name: insurance-hub-product-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/product-api
-    digest: sha256:6afef95ff5d4fef2c648c0171ef82bc46c5eebcb7bae40b9b3c8ff0e3d89a31a
+    digest: sha256:9f07e04352aa0379695de50e0daa22353217aa750168686f11a7662be9925cc6
   dependsOn:
-  - name: qa-product-init-189233ecc5d880e0-a1
+  - name: qa-product-init-adc9cba655f2bab9-a1
   postBuild:
     substitute:
-      PRODUCT_SERVICE_VERSION: git-25e0c73d7e92
+      PRODUCT_SERVICE_VERSION: git-118ddd78ad9d
