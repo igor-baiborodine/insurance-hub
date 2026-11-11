@@ -243,6 +243,12 @@ concurrency does not cancel an in-progress release. Tag creation is create-if-ab
 SHA readback; a collision fails, while the same source may resume verification. A corrected source
 uses a new version.
 
+Candidate integration coverage is written to controller-owned disposable storage rather than a
+consumer source tree. The candidate receipt therefore keeps strict source-manifest verification
+while allowing coverage-producing integration tests to run. When a candidate owner fails, the
+controller exposes its diagnostic output while preserving the nonzero result, teardown and cleanup
+requirements.
+
 The serial baseline on GitHub-hosted `ubuntu-24.04` runners was captured on 2026-10-30 with the
 library and two active consumers. Release `v0.2.2` took 12 minutes 26 seconds, including 10 minutes
 49 seconds for validation; release `v1.0.0` took 13 minutes 27 seconds, including 11 minutes
@@ -271,9 +277,9 @@ reviewed major release with migration notes naming old/new versions, affected se
 consumers, before/after behavior, required checks and a previously working rollback target with
 reversal limits. Consumers explicitly pin and verify exact versions; automatic upgrades are
 unsupported. Rollback restores the previous pin and necessary source/configuration changes in
-that consumer's own PR and reruns its full gate. The release workflow never moves a tag. Both
-active consumers completed compatibility validation against the current API; adopting v1.0.0 in
-each consumer remains separate module-scoped work after publication.
+that consumer's own PR and reruns its full gate. The release workflow never moves a tag. All four
+active consumers completed compatibility validation against the current API. Each consumer remains
+independently pinned and upgrades through a separate module-scoped PR after publication.
 
 Root validation owners are `go-shared-test`, `go-shared-test-integration`, `go-topology-check`,
 `go-topology-test` and the existing Python shared-tooling suites. Future releases repeat the
