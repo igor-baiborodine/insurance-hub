@@ -21,7 +21,6 @@ def test_remove_make_target_removes_phony_name_and_recipe() -> None:
 
     # then
     assert "check-copy" not in result
-    assert "check-foundations" not in result
     assert "\n: verify-tools\n" not in result
     assert "run:\n\t@run" in result
 
@@ -38,7 +37,6 @@ def test_rewrite_readme_replaces_scaffold_only_delegate_section() -> None:
 
     # then
     assert "check-copy" not in result
-    assert "check-foundations" not in result
     assert "### Repository onboarding" in result
     assert "old root text" not in result
     assert result.endswith("## Create a repository-owned service\n\nkept\n")
@@ -101,8 +99,6 @@ def test_created_copy_uses_repository_tooling_without_scaffold_only_surface(
     assert not (copy_root / "pyproject.toml").exists()
     assert not (copy_root / "uv.lock").exists()
     assert not (copy_root / "scripts" / "test_check_copy.py").exists()
-    assert not (copy_root / "scripts" / "check_foundations.py").exists()
-    assert not (copy_root / "scripts" / "test_check_foundations.py").exists()
     assert not (copy_root / "scripts" / "scaffold_process.py").exists()
     assert not (copy_root / "scripts" / "shared_phase.py").exists()
     assert not (copy_root / "scripts" / "tooling_runner.py").exists()
@@ -292,7 +288,7 @@ def test_documented_copy_removes_complete_check_copy_target(tmp_path: Path) -> N
     # given
     module_root = Path(check_copy.__file__).resolve().parent.parent
     copying = (module_root / "COPYING.md").read_text(encoding="utf-8")
-    start = copying.index("sed -i 's/ check-copy//g; s/ check-foundations//g' Makefile")
+    start = copying.index("sed -i 's/ check-copy//g' Makefile")
     end = copying.index("\nrm scripts/check_copy.py", start)
     documented_commands = copying[start:end]
     makefile = tmp_path / "Makefile"
@@ -311,7 +307,6 @@ def test_documented_copy_removes_complete_check_copy_target(tmp_path: Path) -> N
     # then
     result = makefile.read_text(encoding="utf-8")
     assert "check-copy" not in result
-    assert "check-foundations" not in result
     assert '"$(PYTHON)" ./scripts/check_copy.py' not in result
     assert "scripts.go.service.tooling_runner" in result
 

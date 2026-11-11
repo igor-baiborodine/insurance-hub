@@ -75,10 +75,8 @@ PYTHON_SHARED_TOOLING_FILES := \
 	scripts/go/service/test_release.py
 PYTHON_SCAFFOLD_TOOLING_FILES := \
 	templates/go-service/scripts/check_copy.py \
-	templates/go-service/scripts/check_foundations.py \
 	templates/go-service/scripts/check_gateway_contract.py \
 	templates/go-service/scripts/test_check_gateway_contract.py \
-	templates/go-service/scripts/test_check_foundations.py \
 	templates/go-service/scripts/test_check_copy.py \
 	templates/go-service/scripts/test_tooling.py
 PYTHON_PRODUCT_TOOLING_FILES := \
@@ -338,7 +336,7 @@ python-scaffold-tooling-lint: python-lint ## Lint Go scaffold Python tooling
 python-scaffold-tooling-test-fast: python-toolchain-check ## Run fast Go scaffold Python tests
 	@cd "$(PYTHON_REPOSITORY_ROOT)/templates/go-service" && \
 		PYTHONPATH="$(PYTHON_REPOSITORY_ROOT)" PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
-		-m 'not integration and not acceptance' scripts/test_check_copy.py scripts/test_check_foundations.py \
+		-m 'not integration and not acceptance' scripts/test_check_copy.py \
 		scripts/test_check_gateway_contract.py
 
 python-scaffold-tooling-check: python-scaffold-tooling-format-check \

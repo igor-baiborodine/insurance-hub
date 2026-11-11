@@ -6,10 +6,10 @@ INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
-PYTHON_TOOLING_FILES := $(wildcard scripts/check_foundations.py scripts/test_check_foundations.py scripts/check_copy.py \
+PYTHON_TOOLING_FILES := $(wildcard scripts/check_copy.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
 	scripts/test_check_copy.py scripts/test_tooling.py)
-PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_foundations.py scripts/test_check_gateway_contract.py \
+PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_check_copy.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
@@ -84,7 +84,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
-	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-copy check-foundations check-servicekit check-candidate-servicekit run \
+	test-coverage-tooling build vulncheck check-go-pr check test-tooling check-copy check-servicekit check-candidate-servicekit run \
 	dockerfile-generate dockerfile-check image-build image-check _image-check-existing \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
@@ -157,7 +157,7 @@ update-deps:
 	GOWORK=off $(GO) mod tidy
 
 check-go-pr: verify-tools dockerfile-check format-check format-proto-check lint lint-proto test-race build \
-	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-foundations check-servicekit
+	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
 
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
@@ -234,10 +234,6 @@ check-copy: verify-tools python-toolchain-check
 
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
-
-check-foundations: python-runtime-check ## Reject common version drift against Product (source template only)
-	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_foundations.py \
-		--scaffold "$(CURDIR)" --reference "$(INSURANCE_HUB_ROOT)/services/product-service"
 
 .PHONY: help
 help: ## Show the explicit setup and validation entry points without installing tools
