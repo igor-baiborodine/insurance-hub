@@ -54,7 +54,7 @@ func TestProductMarkerColumns(t *testing.T) {
 			} {
 				t.Run(scenario.name, func(t *testing.T) {
 					// given
-					adoptionExec(
+					execSQL(
 						t,
 						ctx,
 						database.admin,
@@ -68,7 +68,7 @@ func TestProductMarkerColumns(t *testing.T) {
 						); err != nil {
 							t.Fatal(err)
 						}
-						adoptionExec(
+						execSQL(
 							t,
 							ctx,
 							database.admin,
@@ -84,14 +84,14 @@ func TestProductMarkerColumns(t *testing.T) {
 					)
 					grant := scenario.privilege + " (seed_allowed) ON product_admin.target_identity"
 					role := pgx.Identifier{scenario.role}.Sanitize()
-					adoptionExec(
+					execSQL(
 						t,
 						ctx,
 						database.admin,
 						"GRANT "+grant+" TO "+role+scenario.option,
 					)
 					t.Cleanup(func() {
-						adoptionExec(
+						execSQL(
 							t,
 							ctx,
 							database.admin,
@@ -199,31 +199,31 @@ func assertMarkerColumnDenied(t *testing.T, ctx context.Context, db *sql.DB, rol
 
 func markerProtectedState(t *testing.T, ctx context.Context, db *sql.DB) string {
 	t.Helper()
-	state := adoptionScalar(t, ctx, db, `SELECT json_build_array(
+	state := queryScalar(t, ctx, db, `SELECT json_build_array(
  (SELECT row(oid,relowner,relacl)::text FROM pg_class WHERE oid='product_admin.target_identity'::regclass),
  (SELECT row(singleton,environment,instance_id,cluster_uid,seed_allowed)::text FROM product_admin.target_identity),
  (SELECT string_agg(row(attnum,attacl)::text,',' ORDER BY attnum) FROM pg_attribute WHERE attrelid='product_admin.target_identity'::regclass),
  to_regclass('public.product'),to_regclass('public.goose_db_version'))::text`)
-	if adoptionScalar(
+	if queryScalar(
 		t,
 		ctx,
 		db,
 		`SELECT (to_regclass('public.product') IS NOT NULL)::text`,
 	) == "true" {
-		state += adoptionScalar(
+		state += queryScalar(
 			t,
 			ctx,
 			db,
 			`SELECT coalesce(string_agg(code||':'||definition::text,',' ORDER BY code),'') FROM public.product`,
 		)
 	}
-	if adoptionScalar(
+	if queryScalar(
 		t,
 		ctx,
 		db,
 		`SELECT (to_regclass('public.goose_db_version') IS NOT NULL)::text`,
 	) == "true" {
-		state += adoptionScalar(
+		state += queryScalar(
 			t,
 			ctx,
 			db,

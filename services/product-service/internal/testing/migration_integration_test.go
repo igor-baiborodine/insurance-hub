@@ -159,14 +159,14 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 	productFingerprint := func(t *testing.T) []string {
 		t.Helper()
 		return []string{
-			adoptionScalar(t, ctx, productAdmin, adoptionSchemaQuery),
-			adoptionScalar(
+			queryScalar(t, ctx, productAdmin, productSchemaQuery),
+			queryScalar(
 				t,
 				ctx,
 				productAdmin,
 				`SELECT md5(string_agg(code||':'||md5(definition::text),',' ORDER BY code)) FROM public.product`,
 			),
-			adoptionScalar(
+			queryScalar(
 				t,
 				ctx,
 				productAdmin,
@@ -185,7 +185,7 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		if err != nil || state != "uninitialized" {
 			t.Fatalf("unexpected initial status %q: %v", state, err)
 		}
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			productAdmin,
@@ -203,11 +203,11 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 			t.Fatalf("reader cannot inspect fresh table: %v", err)
 		}
 		assertProductReaderDenied(t, ctx, reader)
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			productAdmin,
-			adoptionSchemaQuery,
+			productSchemaQuery,
 		); got != fixture.SchemaIdentity.Value {
 			t.Fatal("migration differs from accepted Product schema")
 		}
@@ -232,11 +232,11 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		if _, err := productAdmin.ExecContext(ctx, string(schema)); err != nil {
 			t.Fatal(err)
 		}
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			productAdmin,
-			adoptionSchemaQuery,
+			productSchemaQuery,
 		); got != fixture.SchemaIdentity.Value {
 			t.Fatal("migration and sqlc schema differ")
 		}
@@ -279,7 +279,7 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		if after := productFingerprint(t); !reflect.DeepEqual(before, after) {
 			t.Fatalf("adoption changed Product: %v -> %v", before, after)
 		}
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			productAdmin,
@@ -308,7 +308,7 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 					t.Fatal(err)
 				}
 			}
-			adoptionExec(t, ctx, productAdmin, scenario.prepare)
+			execSQL(t, ctx, productAdmin, scenario.prepare)
 			before := productFingerprint(t)
 
 			// when
@@ -336,7 +336,7 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 			}
 			assertProductReaderDenied(t, ctx, reader)
 			if scenario.name == "ordinary indexes and constraint names are compatible" &&
-				adoptionScalar(t, ctx, productAdmin, `SELECT (to_regclass('public.catalog_code_lookup') IS NOT NULL)::text`) != "true" {
+				queryScalar(t, ctx, productAdmin, `SELECT (to_regclass('public.catalog_code_lookup') IS NOT NULL)::text`) != "true" {
 				t.Fatal("migration removed the additional index")
 			}
 		})
@@ -360,7 +360,7 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		}
 
 		// then
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			productAdmin,
@@ -397,7 +397,7 @@ environment text NOT NULL, instance_id uuid NOT NULL, cluster_uid text NOT NULL,
 		}
 
 		// then
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			productAdmin,
@@ -430,7 +430,7 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		}
 
 		// then
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			productAdmin,
@@ -438,7 +438,7 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		); got != "0" {
 			t.Fatalf("failed migration stamped history: %s", got)
 		}
-		if got := adoptionScalar(t, ctx, productAdmin,
+		if got := queryScalar(t, ctx, productAdmin,
 			`SELECT (to_regclass('public.product') IS NULL)::text`); got != "true" {
 			t.Fatal("failed Product DDL was retained")
 		}
@@ -511,7 +511,7 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 				// given
 				reset(t)
 				legacy(t)
-				adoptionExec(t, ctx, productAdmin, scenario.alter)
+				execSQL(t, ctx, productAdmin, scenario.alter)
 				before := productFingerprint(t)
 
 				// when
@@ -521,7 +521,7 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 				if err == nil {
 					t.Fatal("incompatible schema was accepted")
 				}
-				if got := adoptionScalar(
+				if got := queryScalar(
 					t,
 					ctx,
 					productAdmin,
@@ -556,7 +556,7 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		}
 
 		// then
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			productAdmin,
@@ -592,20 +592,20 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		if err := administration.Migrate(ctx, migrator, target); err != nil {
 			t.Fatal(err)
 		}
-		adoptionExec(
+		execSQL(
 			t,
 			ctx,
 			productAdmin,
 			`REVOKE SELECT ON public.product FROM go_product_reader`,
 		)
-		adoptionExec(
+		execSQL(
 			t,
 			ctx,
 			productAdmin,
 			`UPDATE product_admin.target_identity SET seed_allowed=true`,
 		)
 		t.Cleanup(func() {
-			adoptionExec(
+			execSQL(
 				t,
 				ctx,
 				productAdmin,
@@ -623,7 +623,7 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		if err == nil {
 			t.Fatal("missing seed role did not fail grant setup")
 		}
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			productAdmin,
@@ -631,7 +631,7 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		); got != "false" {
 			t.Fatal("failed grant transaction retained a partial reader grant")
 		}
-		if got := adoptionScalar(
+		if got := queryScalar(
 			t,
 			ctx,
 			productAdmin,
@@ -639,7 +639,7 @@ WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION product_admin.reject_product_creat
 		); got != "0,1" {
 			t.Fatal("grant failure changed migration history")
 		}
-		adoptionExec(
+		execSQL(
 			t,
 			ctx,
 			productAdmin,
