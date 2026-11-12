@@ -19,31 +19,12 @@ import (
 const DefaultServiceName = "product-service"
 
 const (
-	serviceNameSetting           = kitconfig.EnvServiceName
-	grpcAddressSetting           = kitconfig.EnvGRPCAddress
-	healthAddressSetting         = kitconfig.EnvHealthAddress
-	databaseURLSetting           = "PRODUCT_DATABASE_URL"
-	databaseMaxConnsSetting      = "DB_MAX_CONNS"
-	databaseConnectSetting       = "DB_CONNECT_TIMEOUT"
-	databaseAcquireSetting       = "DB_ACQUIRE_TIMEOUT"
-	databaseQuerySetting         = "DB_QUERY_TIMEOUT"
-	startupTimeoutSetting        = "STARTUP_TIMEOUT"
-	requestTimeoutSetting        = kitconfig.EnvRequestTimeout
-	probeTimeoutSetting          = kitconfig.EnvProbeTimeout
-	httpReadHeaderTimeoutSetting = kitconfig.EnvHTTPReadHeaderTimeout
-	httpReadTimeoutSetting       = kitconfig.EnvHTTPReadTimeout
-	httpWriteTimeoutSetting      = kitconfig.EnvHTTPWriteTimeout
-	httpIdleTimeoutSetting       = kitconfig.EnvHTTPIdleTimeout
-	grpcMaxReceiveBytesSetting   = kitconfig.EnvGRPCMaxReceiveBytes
-	grpcMaxSendBytesSetting      = kitconfig.EnvGRPCMaxSendBytes
-	shutdownTimeoutSetting       = kitconfig.EnvShutdownTimeout
-	logLevelSetting              = kitconfig.EnvLogLevel
-	otelEnabledSetting           = kitconfig.EnvOTELEnabled
-	otelEndpointSetting          = kitconfig.EnvOTELExporterOTLPEndpoint
-	otelTimeoutSetting           = kitconfig.EnvOTELExporterOTLPTimeout
-	environmentSetting           = kitconfig.EnvDeploymentEnvironment
-	serviceVersionSetting        = kitconfig.EnvServiceVersion
-	serviceInstanceSetting       = kitconfig.EnvServiceInstanceID
+	databaseURLSetting      = "PRODUCT_DATABASE_URL"
+	databaseMaxConnsSetting = "DB_MAX_CONNS"
+	databaseConnectSetting  = "DB_CONNECT_TIMEOUT"
+	databaseAcquireSetting  = "DB_ACQUIRE_TIMEOUT"
+	databaseQuerySetting    = "DB_QUERY_TIMEOUT"
+	startupTimeoutSetting   = "STARTUP_TIMEOUT"
 )
 
 // Config contains the immutable settings parsed and validated during process startup.
@@ -122,12 +103,12 @@ func Load() (Config, error) {
 type lookupEnv = kitconfig.Lookup
 
 func load(lookup lookupEnv) (Config, error) {
-	serviceName, err := valueOrDefault(lookup, serviceNameSetting, DefaultServiceName)
+	serviceName, err := valueOrDefault(lookup, kitconfig.EnvServiceName, DefaultServiceName)
 	if err != nil {
 		return Config{}, err
 	}
 	if strings.TrimSpace(serviceName) == "" {
-		return Config{}, invalid(serviceNameSetting, "must not be blank")
+		return Config{}, invalid(kitconfig.EnvServiceName, "must not be blank")
 	}
 
 	httpAddress, err := loadAddress(
@@ -138,11 +119,19 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	grpcAddress, err := loadAddress(lookup, grpcAddressSetting, "127.0.0.1:9090")
+	grpcAddress, err := loadAddress(
+		lookup,
+		kitconfig.EnvGRPCAddress,
+		kitconfig.DefaultGRPCAddress,
+	)
 	if err != nil {
 		return Config{}, err
 	}
-	healthAddress, err := loadAddress(lookup, healthAddressSetting, "127.0.0.1:8081")
+	healthAddress, err := loadAddress(
+		lookup,
+		kitconfig.EnvHealthAddress,
+		kitconfig.DefaultHealthAddress,
+	)
 	if err != nil {
 		return Config{}, err
 	}
@@ -192,11 +181,11 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	requestTimeout, err := loadPositiveDuration(lookup, requestTimeoutSetting, "8s")
+	requestTimeout, err := loadPositiveDuration(lookup, kitconfig.EnvRequestTimeout, "8s")
 	if err != nil {
 		return Config{}, err
 	}
-	probeTimeout, err := loadPositiveDuration(lookup, probeTimeoutSetting, "2s")
+	probeTimeout, err := loadPositiveDuration(lookup, kitconfig.EnvProbeTimeout, "2s")
 	if err != nil {
 		return Config{}, err
 	}
@@ -211,7 +200,7 @@ func load(lookup lookupEnv) (Config, error) {
 		return Config{}, err
 	}
 
-	shutdownTimeout, err := loadPositiveDuration(lookup, shutdownTimeoutSetting, "10s")
+	shutdownTimeout, err := loadPositiveDuration(lookup, kitconfig.EnvShutdownTimeout, "10s")
 	if err != nil {
 		return Config{}, err
 	}
@@ -309,8 +298,8 @@ func validateDistinctAddresses(httpAddress, grpcAddress, healthAddress Address) 
 		address Address
 	}{
 		{name: kitconfig.EnvHTTPAddress, address: httpAddress},
-		{name: grpcAddressSetting, address: grpcAddress},
-		{name: healthAddressSetting, address: healthAddress},
+		{name: kitconfig.EnvGRPCAddress, address: grpcAddress},
+		{name: kitconfig.EnvHealthAddress, address: healthAddress},
 	} {
 		address := candidate.address.String()
 		if other, exists := addresses[address]; exists {
@@ -386,33 +375,33 @@ func parsePositiveDuration(name, value string) (time.Duration, error) {
 }
 
 func loadLogLevel(lookup lookupEnv) (slog.Level, error) {
-	value, err := valueOrDefault(lookup, logLevelSetting, "info")
+	value, err := valueOrDefault(lookup, kitconfig.EnvLogLevel, "info")
 	if err != nil {
 		return 0, err
 	}
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(value)); err != nil {
-		return 0, invalid(logLevelSetting, "must be a supported slog level")
+		return 0, invalid(kitconfig.EnvLogLevel, "must be a supported slog level")
 	}
 	return level, nil
 }
 
 func loadTelemetry(lookup lookupEnv, serviceName string) (Telemetry, error) {
-	enabledValue, err := valueOrDefault(lookup, otelEnabledSetting, "false")
+	enabledValue, err := valueOrDefault(lookup, kitconfig.EnvOTELEnabled, "false")
 	if err != nil {
 		return Telemetry{}, err
 	}
 	enabled, err := strconv.ParseBool(enabledValue)
 	if err != nil {
-		return Telemetry{}, invalid(otelEnabledSetting, "must be a boolean")
+		return Telemetry{}, invalid(kitconfig.EnvOTELEnabled, "must be a boolean")
 	}
-	timeout, err := loadPositiveDuration(lookup, otelTimeoutSetting, "2s")
+	timeout, err := loadPositiveDuration(lookup, kitconfig.EnvOTELExporterOTLPTimeout, "2s")
 	if err != nil {
 		return Telemetry{}, err
 	}
 	if enabled && timeout != 2*time.Second {
 		return Telemetry{}, invalid(
-			otelTimeoutSetting,
+			kitconfig.EnvOTELExporterOTLPTimeout,
 			"must be 2s when telemetry is enabled",
 		)
 	}
@@ -442,9 +431,9 @@ func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity,
 		name  string
 		value *string
 	}{
-		{environmentSetting, &identity.Environment},
-		{serviceVersionSetting, &identity.ServiceVersion},
-		{serviceInstanceSetting, &identity.ServiceInstance},
+		{kitconfig.EnvDeploymentEnvironment, &identity.Environment},
+		{kitconfig.EnvServiceVersion, &identity.ServiceVersion},
+		{kitconfig.EnvServiceInstanceID, &identity.ServiceInstance},
 	}
 	for _, field := range fields {
 		fallback := *field.value
@@ -473,15 +462,15 @@ func (identity Identity) Validate(enabled bool) error {
 	}
 	if identity.ServiceName != DefaultServiceName {
 		return kitconfig.Invalid(
-			serviceNameSetting,
+			kitconfig.EnvServiceName,
 			"must identify the Product service",
 		)
 	}
 	for _, field := range []struct{ name, value string }{
-		{serviceNameSetting, identity.ServiceName},
-		{environmentSetting, identity.Environment},
-		{serviceVersionSetting, identity.ServiceVersion},
-		{serviceInstanceSetting, identity.ServiceInstance},
+		{kitconfig.EnvServiceName, identity.ServiceName},
+		{kitconfig.EnvDeploymentEnvironment, identity.Environment},
+		{kitconfig.EnvServiceVersion, identity.ServiceVersion},
+		{kitconfig.EnvServiceInstanceID, identity.ServiceInstance},
 	} {
 		if !validIdentityValue(field.value) {
 			return kitconfig.Invalid(
@@ -499,7 +488,7 @@ func (identity Identity) Validate(enabled bool) error {
 	}
 	if identity.Environment != "development" && !validSourceVersion(identity.ServiceVersion) {
 		return kitconfig.Invalid(
-			serviceVersionSetting,
+			kitconfig.EnvServiceVersion,
 			"must be git- followed by 12 nonzero lowercase source revision characters",
 		)
 	}
@@ -537,11 +526,11 @@ func validIdentityValue(value string) bool {
 }
 
 func parseOptionalEndpoint(lookup lookupEnv, enabled bool) (*url.URL, error) {
-	value, exists := lookup(otelEndpointSetting)
+	value, exists := lookup(kitconfig.EnvOTELExporterOTLPEndpoint)
 	if !exists || value == "" {
 		if enabled {
 			return nil, invalid(
-				otelEndpointSetting,
+				kitconfig.EnvOTELExporterOTLPEndpoint,
 				"is required when telemetry is enabled",
 			)
 		}
@@ -551,27 +540,36 @@ func parseOptionalEndpoint(lookup lookupEnv, enabled bool) (*url.URL, error) {
 	endpoint, err := url.Parse(value)
 	if err != nil || endpoint.Opaque != "" || endpoint.User != nil || endpoint.RawQuery != "" ||
 		endpoint.Fragment != "" {
-		return nil, invalid(otelEndpointSetting, "must be an HTTP or HTTPS OTLP/gRPC URL")
+		return nil, invalid(
+			kitconfig.EnvOTELExporterOTLPEndpoint,
+			"must be an HTTP or HTTPS OTLP/gRPC URL",
+		)
 	}
 	if endpoint.Scheme != "http" && endpoint.Scheme != "https" {
-		return nil, invalid(otelEndpointSetting, "must use the http or https scheme")
+		return nil, invalid(
+			kitconfig.EnvOTELExporterOTLPEndpoint,
+			"must use the http or https scheme",
+		)
 	}
 	if endpoint.Path != "" && endpoint.Path != "/" {
-		return nil, invalid(otelEndpointSetting, "must not include an OTLP/HTTP path")
+		return nil, invalid(
+			kitconfig.EnvOTELExporterOTLPEndpoint,
+			"must not include an OTLP/HTTP path",
+		)
 	}
 
 	host := endpoint.Hostname()
 	port := endpoint.Port()
 	if !kitconfig.ValidHost(host) || port == "" {
 		return nil, invalid(
-			otelEndpointSetting,
+			kitconfig.EnvOTELExporterOTLPEndpoint,
 			"must include a valid host and numeric port",
 		)
 	}
 	portNumber, err := strconv.ParseUint(port, 10, 16)
 	if err != nil || portNumber == 0 {
 		return nil, invalid(
-			otelEndpointSetting,
+			kitconfig.EnvOTELExporterOTLPEndpoint,
 			"must include a valid host and numeric port",
 		)
 	}
@@ -603,11 +601,11 @@ func validateTimeoutRelationships(timeouts timeoutRelationships) error {
 	}{
 		{databaseConnectSetting, timeouts.databaseConnect, startupTimeoutSetting, timeouts.startup},
 		{databaseAcquireSetting, timeouts.databaseAcquire, databaseQuerySetting, timeouts.databaseQuery},
-		{databaseQuerySetting, timeouts.databaseQuery, requestTimeoutSetting, timeouts.request},
-		{probeTimeoutSetting, timeouts.probe, databaseQuerySetting, timeouts.databaseQuery},
-		{httpReadHeaderTimeoutSetting, timeouts.httpReadHeader, httpReadTimeoutSetting, timeouts.httpRead},
-		{requestTimeoutSetting, timeouts.request, httpWriteTimeoutSetting, timeouts.httpWrite},
-		{otelTimeoutSetting, timeouts.otelExporter, shutdownTimeoutSetting, timeouts.shutdown},
+		{databaseQuerySetting, timeouts.databaseQuery, kitconfig.EnvRequestTimeout, timeouts.request},
+		{kitconfig.EnvProbeTimeout, timeouts.probe, databaseQuerySetting, timeouts.databaseQuery},
+		{kitconfig.EnvHTTPReadHeaderTimeout, timeouts.httpReadHeader, kitconfig.EnvHTTPReadTimeout, timeouts.httpRead},
+		{kitconfig.EnvRequestTimeout, timeouts.request, kitconfig.EnvHTTPWriteTimeout, timeouts.httpWrite},
+		{kitconfig.EnvOTELExporterOTLPTimeout, timeouts.otelExporter, kitconfig.EnvShutdownTimeout, timeouts.shutdown},
 	} {
 		if relationship.value > relationship.maximum {
 			return invalid(relationship.setting, "must not exceed "+relationship.bound)
