@@ -49,6 +49,14 @@ func TestLoad_Defaults(t *testing.T) {
 	}) {
 		t.Errorf("unexpected HTTP defaults: %#v", settings.HTTPServer)
 	}
+	if settings.HTTPMaxHeaderBytes != kitconfig.DefaultHTTPMaxHeaderBytes ||
+		settings.HTTPMaxBodyBytes != kitconfig.DefaultHTTPMaxBodyBytes {
+		t.Errorf(
+			"unexpected HTTP size defaults: header=%d body=%d",
+			settings.HTTPMaxHeaderBytes,
+			settings.HTTPMaxBodyBytes,
+		)
+	}
 	if settings.GRPC != (GRPC{MaxReceiveBytes: 1048576, MaxSendBytes: 8388608}) {
 		t.Errorf("unexpected gRPC defaults: %#v", settings.GRPC)
 	}
@@ -86,6 +94,8 @@ func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 		kitconfig.EnvHTTPReadTimeout:          "12s",
 		kitconfig.EnvHTTPWriteTimeout:         "12s",
 		kitconfig.EnvHTTPIdleTimeout:          "45s",
+		kitconfig.EnvHTTPMaxHeaderBytes:       "32768",
+		kitconfig.EnvHTTPMaxBodyBytes:         "8192",
 		kitconfig.EnvGRPCMaxReceiveBytes:      "2097152",
 		kitconfig.EnvGRPCMaxSendBytes:         "16777216",
 		kitconfig.EnvShutdownTimeout:          "12s",
@@ -127,6 +137,13 @@ func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 		settings.WriteTimeout != 12*time.Second ||
 		settings.IdleTimeout != 45*time.Second {
 		t.Errorf("unexpected HTTP overrides: %#v", settings.HTTPServer)
+	}
+	if settings.HTTPMaxHeaderBytes != 32768 || settings.HTTPMaxBodyBytes != 8192 {
+		t.Errorf(
+			"unexpected HTTP size overrides: header=%d body=%d",
+			settings.HTTPMaxHeaderBytes,
+			settings.HTTPMaxBodyBytes,
+		)
 	}
 	if settings.MaxReceiveBytes != 2097152 || settings.MaxSendBytes != 16777216 {
 		t.Errorf("unexpected gRPC overrides: %#v", settings.GRPC)
@@ -252,6 +269,16 @@ func TestLoad_RejectsInvalidSettings(t *testing.T) {
 		{name: "zero read timeout", setting: kitconfig.EnvHTTPReadTimeout, value: "0s"},
 		{name: "zero write timeout", setting: kitconfig.EnvHTTPWriteTimeout, value: "0s"},
 		{name: "zero idle timeout", setting: kitconfig.EnvHTTPIdleTimeout, value: "0s"},
+		{
+			name:    "undersized header maximum",
+			setting: kitconfig.EnvHTTPMaxHeaderBytes,
+			value:   "1023",
+		},
+		{
+			name:    "oversized body maximum",
+			setting: kitconfig.EnvHTTPMaxBodyBytes,
+			value:   "1048577",
+		},
 		{
 			name:    "zero receive maximum",
 			setting: kitconfig.EnvGRPCMaxReceiveBytes,
