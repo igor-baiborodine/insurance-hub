@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -126,7 +127,7 @@ def test_render_rejects_dependencies_incomplete_inventory_and_placeholder_versio
     rendered = checks.render("local-dev")
     with pytest.raises(checks.DeploymentError, match="runtime version"):
         checks.validate_render(
-            "local-dev", rendered.replace("git-0a56b0ea8af1", "git-000000000000")
+            "local-dev", re.sub(r"git-[0-9a-f]{12}", "git-000000000000", rendered)
         )
 
 

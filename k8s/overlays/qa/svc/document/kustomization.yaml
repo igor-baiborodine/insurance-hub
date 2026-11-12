@@ -20,7 +20,7 @@ configMapGenerator:
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
       - DEPLOYMENT_ENVIRONMENT=qa
-      - SERVICE_VERSION=git-0a56b0ea8af1
+      - SERVICE_VERSION=git-2f0bc5dd8bb7
 patches:
   - path: deployment-patch.yaml
     target:

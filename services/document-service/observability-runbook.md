@@ -42,5 +42,10 @@ Do not query or retain request bodies, Echo messages, document identifiers, arbi
 credentials or business data. A healthy process with missing signals means delivery remains
 unverified. Identity conflicts, dropped-series counters, exporter failures or absent container logs
 are stop conditions; preserve sanitized timestamps and identities, inspect Alloy delivery, and fix
-reviewed source rather than weakening filters. Current local-dev and QA observations remain pending
-until the Step-5 acceptance procedure records them.
+reviewed source rather than weakening filters.
+
+The Step-4 local candidate emitted a structured startup record with namespace `insurance-hub`,
+service `document-service`, implementation `go`, version `git-2f0bc5dd8bb7`, the configured
+candidate instance and `local-dev` environment. Telemetry was disabled, so no exporter or delivery
+claim applies. Current ordinary local-dev and QA delivery observations remain pending until the
+Step-5 acceptance procedure records them.

@@ -3,6 +3,7 @@
 
 - [Document foundation deployment runbook](#document-foundation-deployment-runbook)
   - [Source and candidate checks](#source-and-candidate-checks)
+  - [Qualified foundation candidate](#qualified-foundation-candidate)
   - [Local development](#local-development)
   - [QA release and verification](#qa-release-and-verification)
 
@@ -34,6 +35,19 @@ The disposable smoke creates and removes one labeled namespace in the configured
 cluster. It loads the exact source-derived image, checks health and the temporary Echo through a
 Kubernetes API port-forward, and proves an untrusted Pod cannot reach management. It does not
 create a cluster, business data, credentials or backend resources.
+
+## Qualified foundation candidate
+
+The foundation candidate from source
+`2f0bc5dd8bb7db84f382ad443a7d630f42d4e715` was built as
+`insurance-hub-document-api:1.0.0-local.2f0bc5dd8bb7` with OCI version
+`git-2f0bc5dd8bb7` and local image ID
+`sha256:0c0705b885678fae50374751242d390b1686f66c1d24ebc5b5f57ae0fcf64058`.
+The registered image check passed its non-root runtime, identity, liveness and bounded termination
+contract. The disposable smoke passed rollout, Pod/config identity, health, temporary Echo and
+untrusted-Pod denial in `kind-local-dev-insurance-hub`, then removed its owned namespace. This is
+candidate qualification; the ordinary `local-dev-all` and Flux-owned QA observations remain the
+Step-5 acceptance boundary.
 
 ## Local development
 
