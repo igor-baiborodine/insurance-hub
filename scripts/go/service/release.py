@@ -227,6 +227,32 @@ def overlay_tag(
     return path, "".join(lines)
 
 
+def activated_kustomization(root: Path, flux: dict) -> tuple[Path, str] | None:
+    path_value = flux.get("activationKustomization")
+    resource = flux.get("activationResource")
+    if path_value is None and resource is None:
+        return None
+    require(
+        isinstance(path_value, str) and isinstance(resource, str),
+        "release activation configuration is incomplete",
+    )
+    path = checkout_path(root, path_value)
+    require(path.is_file(), "release activation Kustomization is missing")
+    value = yaml.safe_load(path.read_text())
+    require(
+        isinstance(value, dict)
+        and value.get("kind") == "Kustomization"
+        and isinstance(value.get("resources"), list)
+        and all(isinstance(item, str) for item in value["resources"]),
+        "release activation Kustomization is invalid",
+    )
+    resources = value["resources"]
+    if resource not in resources:
+        resources.append(resource)
+        resources.sort()
+    return path, yaml.safe_dump(value, sort_keys=False)
+
+
 def normalized_timeout(value: str, policy: dict) -> str:
     if value.startswith("+"):
         value = value[1:]
@@ -573,6 +599,14 @@ def prepare_release(
         require(target["mode"] == "flux", "release target must be Flux owned")
         if target.get("initialization") is None:
             path, content = overlay_tag(root, record, target, version, source_commit)
+            activation = activated_kustomization(root, target.get("flux", {}))
+            if activation is not None:
+                activation_path, activation_content = activation
+                require(
+                    activation_path not in planned,
+                    "release activation paths overlap selected targets",
+                )
+                planned[activation_path] = activation_content
         else:
             release = service_release(root, service, name, source_commit, image_digest)
             path = checkout_path(root, target["flux"]["bundle"])

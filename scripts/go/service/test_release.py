@@ -317,6 +317,66 @@ def test_dashboard_release_uses_the_no_initialization_path(tmp_path: Path) -> No
     assert "newTag: 1.2.3" in overlay.read_text()
 
 
+def test_document_release_updates_identity_and_activates_shared_qa_owner(tmp_path: Path) -> None:
+    # given
+    create_service(tmp_path, "document", initialization=False)
+    catalog_path = tmp_path / "scripts/go/service/catalog.json"
+    catalog = json.loads(catalog_path.read_text())
+    flux = catalog["services"]["document"]["deploymentTargets"]["qa"]["flux"]
+    flux["activationKustomization"] = "k8s/overlays/qa/svc/kustomization.yaml"
+    flux["activationResource"] = "./document"
+    catalog_path.write_text(json.dumps(catalog))
+    parent = tmp_path / "k8s/overlays/qa/svc/kustomization.yaml"
+    parent.parent.mkdir(parents=True, exist_ok=True)
+    parent.write_text(
+        "apiVersion: kustomize.config.k8s.io/v1beta1\n"
+        "kind: Kustomization\n"
+        "resources:\n"
+        "  - ./document/legacy\n"
+        "  - ./product\n"
+    )
+    overlay = tmp_path / "k8s/overlays/qa/svc/document/kustomization.yaml"
+    overlay.write_text(
+        overlay.read_text()
+        + "configMapGenerator:\n"
+        + "  - name: document-config\n"
+        + "    literals:\n"
+        + "      - SERVICE_VERSION=git-111111111111\n"
+    )
+
+    # when
+    paths = release.prepare_release(
+        tmp_path, "document", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST
+    )
+
+    # then
+    assert paths == [parent, overlay]
+    assert "newTag: 1.2.3" in overlay.read_text()
+    assert f"SERVICE_VERSION=git-{SOURCE_COMMIT[:12]}" in overlay.read_text()
+    assert yaml.safe_load(parent.read_text())["resources"] == [
+        "./document",
+        "./document/legacy",
+        "./product",
+    ]
+
+
+def test_document_release_rejects_incomplete_activation_configuration(tmp_path: Path) -> None:
+    # given
+    create_service(tmp_path, "document", initialization=False)
+    catalog_path = tmp_path / "scripts/go/service/catalog.json"
+    catalog = json.loads(catalog_path.read_text())
+    catalog["services"]["document"]["deploymentTargets"]["qa"]["flux"][
+        "activationKustomization"
+    ] = "k8s/overlays/qa/svc/kustomization.yaml"
+    catalog_path.write_text(json.dumps(catalog))
+
+    # when / then
+    with pytest.raises(release.ConfigurationError, match="configured together"):
+        release.prepare_release(
+            tmp_path, "document", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST
+        )
+
+
 def test_prepare_updates_optional_runtime_version_with_source_commit(tmp_path: Path) -> None:
     # given
     create_service(tmp_path, "policy-search")

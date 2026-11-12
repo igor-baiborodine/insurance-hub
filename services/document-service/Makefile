@@ -2,13 +2,17 @@
 
 GO ?= go
 DOCKER ?= docker
+KUBECTL ?= kubectl
+DEPLOY_ENV ?=
 INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
 PYTHON_TOOLING_FILES := $(wildcard scripts/check_copy.py \
 	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
-	scripts/test_check_copy.py scripts/test_tooling.py)
+	scripts/test_check_copy.py scripts/document_deployment_checks.py scripts/deployment.py \
+	scripts/disposable_deployment.py scripts/test_deployment.py \
+	scripts/test_disposable_deployment.py scripts/test_tooling.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
 	scripts/test_check_copy.py)
 
@@ -88,6 +92,8 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling test-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
 	dockerfile-generate dockerfile-check image-build image-check _image-check-existing \
+	deploy-render deploy-check deploy-preflight deploy-status image-load deploy deploy-verify stop \
+	deploy-test-tooling deploy-smoke \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
 	shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-copy shared-candidate-image
@@ -114,6 +120,29 @@ image-check: image-build
 _image-check-existing: dockerfile-check python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" check
+
+deploy-render: python-runtime-check ## Render one Document overlay without applying it
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/document_deployment_checks.py render
+
+deploy-check: python-runtime-check ## Validate ordinary Document overlays and safeguards
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/document_deployment_checks.py check
+
+deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" scripts/deployment.py '$@'
+
+deploy-test-tooling: python-toolchain-check ## Exercise fail-closed Document deployment guards
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		KUBECTL="$(KUBECTL)" "$(PYTHON)" -m pytest -q -m 'not integration' \
+		scripts/test_deployment.py scripts/test_disposable_deployment.py
+
+deploy-smoke: python-toolchain-check image-check ## Smoke Document in an owned disposable namespace
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		IMAGE_REF="$(IMAGE_REF)" QUALIFICATION_SOURCE_REVISION="$(SOURCE_REVISION)" \
+		KUBECTL="$(KUBECTL)" "$(PYTHON)" -m pytest -q -m integration \
+		scripts/test_disposable_deployment.py
 
 python-tooling-format-check: python-toolchain-check
 	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \

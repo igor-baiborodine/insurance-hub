@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-api-management
+  labels:
+    app.kubernetes.io/name: document-api
+    app.kubernetes.io/component: management
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: document-api
+    app.kubernetes.io/component: api
+  ports:
+    - name: management
+      port: 8081
+      protocol: TCP
+      targetPort: management

@@ -200,8 +200,50 @@
       ],
       "capabilities": [
         "image-build",
-        "image-check"
-      ]
+        "image-check",
+        "deploy-render",
+        "deploy-check",
+        "deploy-preflight",
+        "deploy-status",
+        "image-load",
+        "deploy",
+        "deploy-verify",
+        "stop",
+        "deploy-test-tooling",
+        "deploy-smoke"
+      ],
+      "releaseTargets": [
+        "qa"
+      ],
+      "deploymentTargets": {
+        "local-dev": {
+          "mode": "direct",
+          "context": "kind-local-dev-insurance-hub",
+          "namespace": "local-dev-all",
+          "dataNamespace": "local-dev-all",
+          "overlay": "k8s/overlays/local-dev/svc/document",
+          "kindCluster": "local-dev-insurance-hub"
+        },
+        "qa": {
+          "mode": "flux",
+          "context": "qa-insurance-hub",
+          "namespace": "qa-svc",
+          "dataNamespace": "qa-svc",
+          "overlay": "k8s/overlays/qa/svc/document",
+          "flux": {
+            "namespace": "flux-system",
+            "sourcePrefix": "qa-document-release",
+            "apiName": "qa-document-api",
+            "bundle": "k8s/flux/qa/releases/document/release.yaml",
+            "sharedSource": "insurance-hub",
+            "sharedOwner": "qa-svc",
+            "sharedPath": "./k8s/overlays/qa/svc",
+            "branch": "main",
+            "activationKustomization": "k8s/overlays/qa/svc/kustomization.yaml",
+            "activationResource": "./document"
+          }
+        }
+      }
     },
     "dashboard": {
       "repositoryRoot": "services",

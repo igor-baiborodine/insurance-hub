@@ -13,6 +13,7 @@
   - [Example RPC and HTTP gateway](#example-rpc-and-http-gateway)
   - [Architecture and ownership](#architecture-and-ownership)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
+  - [Deployment and operation](#deployment-and-operation)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -369,3 +370,9 @@ server spans, passes protobuf validation and calls the injected function with th
 HTTP and gRPC record separate bounded completion signals. Shutdown withdraws readiness and drains
 accepted HTTP work before connection and gRPC teardown, then closes management and telemetry within
 the shared deadline.
+
+## Deployment and operation
+
+Use the [deployment runbook](deployment-runbook.md) for candidate, local-dev and Flux-owned QA
+commands. Use the [observability runbook](observability-runbook.md) for safe foundation signal
+checks. Both keep the Go foundation private and preserve the separate Java Document workload.

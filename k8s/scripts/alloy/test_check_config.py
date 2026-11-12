@@ -54,6 +54,7 @@ def test_source_policy_registers_each_active_go_service_log_stream() -> None:
     alloy_check.validate_service_log_registrations(config)
     alloy_check.validate_service_log_deployments(config, service_deployments())
     assert 'service_json_logs "dashboard"' in config
+    assert 'service_json_logs "document"' in config
     assert 'service_json_logs "product"' in config
     assert 'service_json_logs "policy_search"' in config
 
