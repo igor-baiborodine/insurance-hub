@@ -732,7 +732,9 @@ def verify_untrusted_access_denied(target: Target) -> None:
                 "pod",
                 name,
                 "--ignore-not-found",
-                "--wait=false",
+                "--wait=true",
+                "--timeout=30s",
+                timeout=40,
             )
 
 

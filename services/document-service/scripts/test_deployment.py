@@ -188,8 +188,10 @@ def test_untrusted_access_probe_requires_network_timeout_and_cleans_up() -> None
         "pod",
         "document-untrusted-probe",
         "--ignore-not-found",
-        "--wait=false",
+        "--wait=true",
+        "--timeout=30s",
     )
+    assert target.kubectl.call_args_list[-1].kwargs == {"timeout": 40}
 
 
 def test_untrusted_access_probe_never_deletes_preexisting_pod() -> None:
