@@ -118,6 +118,21 @@ def test_dashboard_service_selects_standard_business_service_coverage() -> None:
     assert result["coverage_flag"] == "dashboard-service"
 
 
+def test_document_service_selects_standard_business_service_coverage() -> None:
+    # when
+    result = select_pr_module.selection_outputs(
+        ["services/document-service/internal/service/echo.go"],
+        "a" * 40,
+    )
+
+    # then
+    assert result["coverage_files"].split(",") == [
+        "services/document-service/coverage.txt",
+        "services/document-service/integration-coverage.txt",
+    ]
+    assert result["coverage_flag"] == "document-service"
+
+
 @pytest.mark.parametrize(
     "path",
     [

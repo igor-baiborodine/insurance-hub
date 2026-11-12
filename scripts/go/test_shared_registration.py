@@ -333,6 +333,7 @@ def test_root_tooling_conservatively_selects_all_modules(tmp_path: Path) -> None
         "services/product-service",
         "services/policy-search-service",
         "services/dashboard-service",
+        "services/document-service",
     }
 
 
