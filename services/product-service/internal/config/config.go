@@ -30,12 +30,14 @@ const (
 // Config contains the immutable settings parsed and validated during process startup.
 type Config struct {
 	kitconfig.Runtime
-	ServiceName    string
-	HTTPAddress    Address
-	GRPCAddress    Address
-	HealthAddress  Address
-	Database       Database
-	StartupTimeout time.Duration
+	ServiceName        string
+	HTTPAddress        Address
+	GRPCAddress        Address
+	HealthAddress      Address
+	HTTPMaxHeaderBytes int
+	HTTPMaxBodyBytes   int
+	Database           Database
+	StartupTimeout     time.Duration
 	kitconfig.HTTPServer
 	kitconfig.GRPC
 	kitconfig.Telemetry
@@ -194,6 +196,26 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	httpMaxHeaderBytes, err := kitconfig.LoadBoundedInt(
+		lookup,
+		kitconfig.EnvHTTPMaxHeaderBytes,
+		strconv.Itoa(kitconfig.DefaultHTTPMaxHeaderBytes),
+		1024,
+		1048576,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	httpMaxBodyBytes, err := kitconfig.LoadBoundedInt(
+		lookup,
+		kitconfig.EnvHTTPMaxBodyBytes,
+		strconv.Itoa(kitconfig.DefaultHTTPMaxBodyBytes),
+		1024,
+		1048576,
+	)
+	if err != nil {
+		return Config{}, err
+	}
 
 	grpc, err := kitconfig.LoadGRPC(lookup)
 	if err != nil {
@@ -236,11 +258,13 @@ func load(lookup lookupEnv) (Config, error) {
 	}
 
 	return Config{
-		ServiceName:    serviceName,
-		HTTPAddress:    httpAddress,
-		GRPCAddress:    grpcAddress,
-		HealthAddress:  healthAddress,
-		StartupTimeout: startupTimeout,
+		ServiceName:        serviceName,
+		HTTPAddress:        httpAddress,
+		GRPCAddress:        grpcAddress,
+		HealthAddress:      healthAddress,
+		HTTPMaxHeaderBytes: httpMaxHeaderBytes,
+		HTTPMaxBodyBytes:   httpMaxBodyBytes,
+		StartupTimeout:     startupTimeout,
 		Runtime: kitconfig.Runtime{
 			RequestTimeout:  requestTimeout,
 			ProbeTimeout:    probeTimeout,
