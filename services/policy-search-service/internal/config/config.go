@@ -15,9 +15,6 @@ import (
 const DefaultServiceName = "policy-search-service"
 
 const (
-	EnvHTTPAddress              = "HTTP_ADDR"
-	EnvHTTPMaxHeaderBytes       = "HTTP_MAX_HEADER_BYTES"
-	EnvHTTPMaxBodyBytes         = "HTTP_MAX_BODY_BYTES"
 	EnvElasticsearchURL         = "ELASTICSEARCH_URL"
 	EnvElasticsearchIndex       = "ELASTICSEARCH_INDEX"
 	EnvElasticsearchUsername    = "ELASTICSEARCH_USERNAME"
@@ -32,8 +29,6 @@ const (
 	EnvKafkaCAFile              = "KAFKA_CA_FILE"
 	EnvWriterUsername           = "ELASTICSEARCH_WRITER_USERNAME"
 	EnvWriterPassword           = "ELASTICSEARCH_WRITER_PASSWORD"
-	defaultMaxHeaderBytes       = 16384
-	defaultMaxBodyBytes         = 4096
 	defaultElasticsearchURL     = "http://127.0.0.1:9200"
 	defaultElasticsearchIndex   = "policy-views"
 	defaultElasticsearchTimeout = 5 * time.Second
@@ -123,7 +118,7 @@ func load(lookup lookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	httpAddress, err := kitconfig.LoadAddress(
-		lookup, EnvHTTPAddress, kitconfig.DefaultHTTPAddress,
+		lookup, kitconfig.EnvHTTPAddress, kitconfig.DefaultHTTPAddress,
 	)
 	if err != nil {
 		return Config{}, err
@@ -210,13 +205,21 @@ func load(lookup lookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	maxHeaderBytes, err := kitconfig.LoadBoundedInt(
-		lookup, EnvHTTPMaxHeaderBytes, strconv.Itoa(defaultMaxHeaderBytes), 1024, 1048576,
+		lookup,
+		kitconfig.EnvHTTPMaxHeaderBytes,
+		strconv.Itoa(kitconfig.DefaultHTTPMaxHeaderBytes),
+		1024,
+		1048576,
 	)
 	if err != nil {
 		return Config{}, err
 	}
 	maxBodyBytes, err := kitconfig.LoadBoundedInt(
-		lookup, EnvHTTPMaxBodyBytes, strconv.Itoa(defaultMaxBodyBytes), 1024, 1048576,
+		lookup,
+		kitconfig.EnvHTTPMaxBodyBytes,
+		strconv.Itoa(kitconfig.DefaultHTTPMaxBodyBytes),
+		1024,
+		1048576,
 	)
 	if err != nil {
 		return Config{}, err
@@ -275,7 +278,7 @@ func load(lookup lookupEnv) (Config, error) {
 		name    string
 		address Address
 	}{
-		{EnvHTTPAddress, httpAddress},
+		{kitconfig.EnvHTTPAddress, httpAddress},
 		{kitconfig.EnvGRPCAddress, grpcAddress},
 		{kitconfig.EnvHealthAddress, healthAddress},
 	}
