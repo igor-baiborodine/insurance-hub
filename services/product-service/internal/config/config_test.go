@@ -70,32 +70,32 @@ func TestLoad_Defaults(t *testing.T) {
 func TestLoad_AcceptsTypedOverrides(t *testing.T) {
 	// given
 	values := map[string]string{
-		serviceNameSetting:           "product-service",
-		kitconfig.EnvHTTPAddress:     "[::1]:8081",
-		grpcAddressSetting:           "[::1]:9090",
-		healthAddressSetting:         "[::1]:8080",
-		databaseURLSetting:           "postgres://reader:secret@db.internal:5433/catalog?sslmode=require",
-		databaseMaxConnsSetting:      "16",
-		databaseConnectSetting:       "4s",
-		databaseAcquireSetting:       "3s",
-		databaseQuerySetting:         "6s",
-		startupTimeoutSetting:        "12s",
-		requestTimeoutSetting:        "9s",
-		probeTimeoutSetting:          "3s",
-		httpReadHeaderTimeoutSetting: "6s",
-		httpReadTimeoutSetting:       "12s",
-		httpWriteTimeoutSetting:      "12s",
-		httpIdleTimeoutSetting:       "45s",
-		grpcMaxReceiveBytesSetting:   "2097152",
-		grpcMaxSendBytesSetting:      "16777216",
-		shutdownTimeoutSetting:       "12s",
-		logLevelSetting:              "debug",
-		otelEnabledSetting:           "true",
-		otelEndpointSetting:          "https://collector.internal:4317",
-		otelTimeoutSetting:           "2s",
-		environmentSetting:           "test",
-		serviceVersionSetting:        "git-6c4669c81d3a",
-		serviceInstanceSetting:       "test-instance",
+		kitconfig.EnvServiceName:              "product-service",
+		kitconfig.EnvHTTPAddress:              "[::1]:8081",
+		kitconfig.EnvGRPCAddress:              "[::1]:9090",
+		kitconfig.EnvHealthAddress:            "[::1]:8080",
+		databaseURLSetting:                    "postgres://reader:secret@db.internal:5433/catalog?sslmode=require",
+		databaseMaxConnsSetting:               "16",
+		databaseConnectSetting:                "4s",
+		databaseAcquireSetting:                "3s",
+		databaseQuerySetting:                  "6s",
+		startupTimeoutSetting:                 "12s",
+		kitconfig.EnvRequestTimeout:           "9s",
+		kitconfig.EnvProbeTimeout:             "3s",
+		kitconfig.EnvHTTPReadHeaderTimeout:    "6s",
+		kitconfig.EnvHTTPReadTimeout:          "12s",
+		kitconfig.EnvHTTPWriteTimeout:         "12s",
+		kitconfig.EnvHTTPIdleTimeout:          "45s",
+		kitconfig.EnvGRPCMaxReceiveBytes:      "2097152",
+		kitconfig.EnvGRPCMaxSendBytes:         "16777216",
+		kitconfig.EnvShutdownTimeout:          "12s",
+		kitconfig.EnvLogLevel:                 "debug",
+		kitconfig.EnvOTELEnabled:              "true",
+		kitconfig.EnvOTELExporterOTLPEndpoint: "https://collector.internal:4317",
+		kitconfig.EnvOTELExporterOTLPTimeout:  "2s",
+		kitconfig.EnvDeploymentEnvironment:    "test",
+		kitconfig.EnvServiceVersion:           "git-6c4669c81d3a",
+		kitconfig.EnvServiceInstanceID:        "test-instance",
 	}
 
 	// when
@@ -213,8 +213,8 @@ func TestLoad_RejectsInvalidSettings(t *testing.T) {
 		setting string
 		value   string
 	}{
-		{name: "empty service name", setting: serviceNameSetting, value: ""},
-		{name: "blank service name", setting: serviceNameSetting, value: "   "},
+		{name: "empty service name", setting: kitconfig.EnvServiceName, value: ""},
+		{name: "blank service name", setting: kitconfig.EnvServiceName, value: "   "},
 		{
 			name:    "malformed HTTP address",
 			setting: kitconfig.EnvHTTPAddress,
@@ -222,12 +222,12 @@ func TestLoad_RejectsInvalidSettings(t *testing.T) {
 		},
 		{
 			name:    "malformed gRPC address",
-			setting: grpcAddressSetting,
+			setting: kitconfig.EnvGRPCAddress,
 			value:   "localhost:port",
 		},
 		{
 			name:    "malformed management address",
-			setting: healthAddressSetting,
+			setting: kitconfig.EnvHealthAddress,
 			value:   ":8080",
 		},
 		{
@@ -242,32 +242,44 @@ func TestLoad_RejectsInvalidSettings(t *testing.T) {
 		{name: "negative acquire timeout", setting: databaseAcquireSetting, value: "-1s"},
 		{name: "malformed query timeout", setting: databaseQuerySetting, value: "soon"},
 		{name: "zero startup timeout", setting: startupTimeoutSetting, value: "0"},
-		{name: "zero request timeout", setting: requestTimeoutSetting, value: "0s"},
-		{name: "zero probe timeout", setting: probeTimeoutSetting, value: "-1ns"},
-		{name: "zero header timeout", setting: httpReadHeaderTimeoutSetting, value: "0s"},
-		{name: "zero read timeout", setting: httpReadTimeoutSetting, value: "0s"},
-		{name: "zero write timeout", setting: httpWriteTimeoutSetting, value: "0s"},
-		{name: "zero idle timeout", setting: httpIdleTimeoutSetting, value: "0s"},
-		{name: "zero receive maximum", setting: grpcMaxReceiveBytesSetting, value: "0"},
+		{name: "zero request timeout", setting: kitconfig.EnvRequestTimeout, value: "0s"},
+		{name: "zero probe timeout", setting: kitconfig.EnvProbeTimeout, value: "-1ns"},
+		{
+			name:    "zero header timeout",
+			setting: kitconfig.EnvHTTPReadHeaderTimeout,
+			value:   "0s",
+		},
+		{name: "zero read timeout", setting: kitconfig.EnvHTTPReadTimeout, value: "0s"},
+		{name: "zero write timeout", setting: kitconfig.EnvHTTPWriteTimeout, value: "0s"},
+		{name: "zero idle timeout", setting: kitconfig.EnvHTTPIdleTimeout, value: "0s"},
+		{
+			name:    "zero receive maximum",
+			setting: kitconfig.EnvGRPCMaxReceiveBytes,
+			value:   "0",
+		},
 		{
 			name:    "excessive receive maximum",
-			setting: grpcMaxReceiveBytesSetting,
+			setting: kitconfig.EnvGRPCMaxReceiveBytes,
 			value:   "16777217",
 		},
-		{name: "zero send maximum", setting: grpcMaxSendBytesSetting, value: "0"},
+		{name: "zero send maximum", setting: kitconfig.EnvGRPCMaxSendBytes, value: "0"},
 		{
 			name:    "excessive send maximum",
-			setting: grpcMaxSendBytesSetting,
+			setting: kitconfig.EnvGRPCMaxSendBytes,
 			value:   "67108865",
 		},
-		{name: "zero shutdown timeout", setting: shutdownTimeoutSetting, value: "0s"},
-		{name: "unsupported log level", setting: logLevelSetting, value: "verbose"},
+		{name: "zero shutdown timeout", setting: kitconfig.EnvShutdownTimeout, value: "0s"},
+		{name: "unsupported log level", setting: kitconfig.EnvLogLevel, value: "verbose"},
 		{
 			name:    "malformed telemetry switch",
-			setting: otelEnabledSetting,
+			setting: kitconfig.EnvOTELEnabled,
 			value:   "sometimes",
 		},
-		{name: "zero exporter timeout", setting: otelTimeoutSetting, value: "0s"},
+		{
+			name:    "zero exporter timeout",
+			setting: kitconfig.EnvOTELExporterOTLPTimeout,
+			value:   "0s",
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -295,12 +307,12 @@ func TestLoad_RejectsDuplicateListenerAddresses(t *testing.T) {
 	}{
 		{
 			name:    "gRPC duplicates HTTP",
-			setting: grpcAddressSetting,
+			setting: kitconfig.EnvGRPCAddress,
 			value:   "127.0.0.1:8080",
 		},
 		{
 			name:    "management duplicates HTTP",
-			setting: healthAddressSetting,
+			setting: kitconfig.EnvHealthAddress,
 			value:   "127.0.0.1:8080",
 		},
 	}
@@ -345,23 +357,23 @@ func TestLoad_RejectsInvalidTimeoutRelationships(t *testing.T) {
 		},
 		{
 			name:    "probe exceeds query",
-			setting: probeTimeoutSetting,
-			values:  map[string]string{probeTimeoutSetting: "6s"},
+			setting: kitconfig.EnvProbeTimeout,
+			values:  map[string]string{kitconfig.EnvProbeTimeout: "6s"},
 		},
 		{
 			name:    "header exceeds read",
-			setting: httpReadHeaderTimeoutSetting,
-			values:  map[string]string{httpReadHeaderTimeoutSetting: "11s"},
+			setting: kitconfig.EnvHTTPReadHeaderTimeout,
+			values:  map[string]string{kitconfig.EnvHTTPReadHeaderTimeout: "11s"},
 		},
 		{
 			name:    "request exceeds write",
-			setting: requestTimeoutSetting,
-			values:  map[string]string{requestTimeoutSetting: "11s"},
+			setting: kitconfig.EnvRequestTimeout,
+			values:  map[string]string{kitconfig.EnvRequestTimeout: "11s"},
 		},
 		{
 			name:    "exporter exceeds shutdown",
-			setting: otelTimeoutSetting,
-			values:  map[string]string{otelTimeoutSetting: "11s"},
+			setting: kitconfig.EnvOTELExporterOTLPTimeout,
+			values:  map[string]string{kitconfig.EnvOTELExporterOTLPTimeout: "11s"},
 		},
 	}
 
@@ -381,8 +393,8 @@ func TestLoad_RejectsInvalidTimeoutRelationships(t *testing.T) {
 func TestLoad_AllowsDisabledTelemetryWithoutEndpoint(t *testing.T) {
 	// given
 	values := map[string]string{
-		databaseURLSetting: testDatabaseURL,
-		otelEnabledSetting: "false",
+		databaseURLSetting:       testDatabaseURL,
+		kitconfig.EnvOTELEnabled: "false",
 	}
 
 	// when
@@ -402,34 +414,34 @@ func TestLoad_AllowsDisabledTelemetryWithoutEndpoint(t *testing.T) {
 func TestLoad_RequiresEndpointForEnabledTelemetry(t *testing.T) {
 	// given
 	values := map[string]string{
-		databaseURLSetting: testDatabaseURL,
-		otelEnabledSetting: "true",
+		databaseURLSetting:       testDatabaseURL,
+		kitconfig.EnvOTELEnabled: "true",
 	}
 
 	// when
 	_, err := load(mapLookup(values))
 
 	// then
-	assertSettingError(t, err, otelEndpointSetting)
+	assertSettingError(t, err, kitconfig.EnvOTELExporterOTLPEndpoint)
 }
 
 func TestLoad_AcceptsExplicitQAAndTestIdentity(t *testing.T) {
 	// given
 	qaValues := map[string]string{
-		databaseURLSetting:     testDatabaseURL,
-		otelEnabledSetting:     "true",
-		otelEndpointSetting:    "http://collector.internal:4317",
-		environmentSetting:     "qa",
-		serviceVersionSetting:  "git-6c4669c81d3a",
-		serviceInstanceSetting: "123e4567-e89b-42d3-a456-426614174000",
+		databaseURLSetting:                    testDatabaseURL,
+		kitconfig.EnvOTELEnabled:              "true",
+		kitconfig.EnvOTELExporterOTLPEndpoint: "http://collector.internal:4317",
+		kitconfig.EnvDeploymentEnvironment:    "qa",
+		kitconfig.EnvServiceVersion:           "git-6c4669c81d3a",
+		kitconfig.EnvServiceInstanceID:        "123e4567-e89b-42d3-a456-426614174000",
 	}
 	testValues := map[string]string{
-		databaseURLSetting:     testDatabaseURL,
-		otelEnabledSetting:     "true",
-		otelEndpointSetting:    "http://127.0.0.1:4317",
-		environmentSetting:     "test",
-		serviceVersionSetting:  "git-6c4669c81d3a",
-		serviceInstanceSetting: "test-instance",
+		databaseURLSetting:                    testDatabaseURL,
+		kitconfig.EnvOTELEnabled:              "true",
+		kitconfig.EnvOTELExporterOTLPEndpoint: "http://127.0.0.1:4317",
+		kitconfig.EnvDeploymentEnvironment:    "test",
+		kitconfig.EnvServiceVersion:           "git-6c4669c81d3a",
+		kitconfig.EnvServiceInstanceID:        "test-instance",
 	}
 
 	// when
@@ -440,9 +452,9 @@ func TestLoad_AcceptsExplicitQAAndTestIdentity(t *testing.T) {
 	if qaErr != nil || testErr != nil {
 		t.Fatalf("load identities: qa=%v test=%v", qaErr, testErr)
 	}
-	if qa.Identity.ServiceInstance != qaValues[serviceInstanceSetting] ||
+	if qa.Identity.ServiceInstance != qaValues[kitconfig.EnvServiceInstanceID] ||
 		qa.Identity.Environment != "qa" ||
-		qa.Identity.ServiceVersion != qaValues[serviceVersionSetting] {
+		qa.Identity.ServiceVersion != qaValues[kitconfig.EnvServiceVersion] {
 		t.Errorf("unexpected QA identity: %#v", qa.Identity)
 	}
 	if testSettings.Identity.ServiceInstance != "test-instance" ||
@@ -455,16 +467,16 @@ func TestLoad_AcceptsExplicitQAAndTestIdentity(t *testing.T) {
 func TestLoad_ReleaseEnvironmentsUseProductIdentityPolicy(t *testing.T) {
 	// given
 	base := map[string]string{
-		databaseURLSetting:     testDatabaseURL,
-		otelEnabledSetting:     "true",
-		otelEndpointSetting:    "http://collector.internal:4317",
-		serviceVersionSetting:  "git-6c4669c81d3a",
-		serviceInstanceSetting: "123e4567-e89b-42d3-a456-426614174000",
+		databaseURLSetting:                    testDatabaseURL,
+		kitconfig.EnvOTELEnabled:              "true",
+		kitconfig.EnvOTELExporterOTLPEndpoint: "http://collector.internal:4317",
+		kitconfig.EnvServiceVersion:           "git-6c4669c81d3a",
+		kitconfig.EnvServiceInstanceID:        "123e4567-e89b-42d3-a456-426614174000",
 	}
 	for _, environment := range []string{"staging", "preprod", "preview-42"} {
 		t.Run(environment, func(t *testing.T) {
 			values := mapLookupValues(base)
-			values[environmentSetting] = environment
+			values[kitconfig.EnvDeploymentEnvironment] = environment
 			// when
 			settings, err := load(mapLookup(values))
 			// then
@@ -481,14 +493,14 @@ func TestLoad_ReleaseEnvironmentsUseProductIdentityPolicy(t *testing.T) {
 	for _, scenario := range []struct {
 		name, setting, value, want string
 	}{
-		{"malformed environment", environmentSetting, "preview/42", environmentSetting},
-		{"mutable version", serviceVersionSetting, "latest", serviceVersionSetting},
-		{"local instance", serviceInstanceSetting, "local-123", "telemetry identity"},
-		{"wrong enabled service", serviceNameSetting, "other-service", serviceNameSetting},
+		{"malformed environment", kitconfig.EnvDeploymentEnvironment, "preview/42", kitconfig.EnvDeploymentEnvironment},
+		{"mutable version", kitconfig.EnvServiceVersion, "latest", kitconfig.EnvServiceVersion},
+		{"local instance", kitconfig.EnvServiceInstanceID, "local-123", "telemetry identity"},
+		{"wrong enabled service", kitconfig.EnvServiceName, "other-service", kitconfig.EnvServiceName},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			values := mapLookupValues(base)
-			values[environmentSetting] = "preview-42"
+			values[kitconfig.EnvDeploymentEnvironment] = "preview-42"
 			values[scenario.setting] = scenario.value
 			// when
 			_, err := load(mapLookup(values))
@@ -513,12 +525,12 @@ func TestLoad_RejectsNonCanonicalSourceVersionsWhenExportIsDisabled(t *testing.T
 	for _, version := range []string{"sha-6c4669c81d3a", "git-000000000000", "git-6C4669C81D3A"} {
 		t.Run(version, func(t *testing.T) {
 			_, err := load(mapLookup(map[string]string{
-				databaseURLSetting:     testDatabaseURL,
-				environmentSetting:     "qa",
-				serviceVersionSetting:  version,
-				serviceInstanceSetting: "test-instance",
+				databaseURLSetting:                 testDatabaseURL,
+				kitconfig.EnvDeploymentEnvironment: "qa",
+				kitconfig.EnvServiceVersion:        version,
+				kitconfig.EnvServiceInstanceID:     "test-instance",
 			}))
-			assertSettingError(t, err, serviceVersionSetting)
+			assertSettingError(t, err, kitconfig.EnvServiceVersion)
 		})
 	}
 }
@@ -532,49 +544,49 @@ func TestLoad_RejectsInvalidEnabledIdentityWithoutEchoingValues(t *testing.T) {
 		value   string
 		want    string
 	}{
-		{name: "missing environment", want: environmentSetting},
+		{name: "missing environment", want: kitconfig.EnvDeploymentEnvironment},
 		{
 			name:    "mutable QA version",
-			setting: serviceVersionSetting,
+			setting: kitconfig.EnvServiceVersion,
 			value:   "latest",
-			want:    serviceVersionSetting,
+			want:    kitconfig.EnvServiceVersion,
 		},
-		{name: "missing QA Pod UID", want: serviceInstanceSetting},
+		{name: "missing QA Pod UID", want: kitconfig.EnvServiceInstanceID},
 		{
 			name:    "invalid QA instance",
-			setting: serviceInstanceSetting,
+			setting: kitconfig.EnvServiceInstanceID,
 			value:   privateMarker,
-			want:    serviceInstanceSetting,
+			want:    kitconfig.EnvServiceInstanceID,
 		},
 		{
 			name:    "wrong logical name",
-			setting: serviceNameSetting,
+			setting: kitconfig.EnvServiceName,
 			value:   "other-service",
-			want:    serviceNameSetting,
+			want:    kitconfig.EnvServiceName,
 		},
 		{
 			name:    "non-contract exporter timeout",
-			setting: otelTimeoutSetting,
+			setting: kitconfig.EnvOTELExporterOTLPTimeout,
 			value:   "3s",
-			want:    otelTimeoutSetting,
+			want:    kitconfig.EnvOTELExporterOTLPTimeout,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// given
 			values := map[string]string{
-				databaseURLSetting:     testDatabaseURL,
-				otelEnabledSetting:     "true",
-				otelEndpointSetting:    "http://collector.internal:4317",
-				environmentSetting:     "qa",
-				serviceVersionSetting:  "git-6c4669c81d3a",
-				serviceInstanceSetting: "123e4567-e89b-42d3-a456-426614174000",
+				databaseURLSetting:                    testDatabaseURL,
+				kitconfig.EnvOTELEnabled:              "true",
+				kitconfig.EnvOTELExporterOTLPEndpoint: "http://collector.internal:4317",
+				kitconfig.EnvDeploymentEnvironment:    "qa",
+				kitconfig.EnvServiceVersion:           "git-6c4669c81d3a",
+				kitconfig.EnvServiceInstanceID:        "123e4567-e89b-42d3-a456-426614174000",
 			}
 			switch test.name {
 			case "missing environment":
-				delete(values, environmentSetting)
+				delete(values, kitconfig.EnvDeploymentEnvironment)
 			case "missing QA Pod UID":
-				delete(values, serviceInstanceSetting)
+				delete(values, kitconfig.EnvServiceInstanceID)
 			default:
 				values[test.setting] = test.value
 			}
@@ -629,16 +641,16 @@ func TestLoad_RejectsInvalidTelemetryEndpointWithoutValue(t *testing.T) {
 	// given
 	const privateMarker = "private-token-marker"
 	values := map[string]string{
-		databaseURLSetting:  testDatabaseURL,
-		otelEnabledSetting:  "true",
-		otelEndpointSetting: "http://user:" + privateMarker + "@127.0.0.1:4317",
+		databaseURLSetting:                    testDatabaseURL,
+		kitconfig.EnvOTELEnabled:              "true",
+		kitconfig.EnvOTELExporterOTLPEndpoint: "http://user:" + privateMarker + "@127.0.0.1:4317",
 	}
 
 	// when
 	_, err := load(mapLookup(values))
 
 	// then
-	assertSettingError(t, err, otelEndpointSetting)
+	assertSettingError(t, err, kitconfig.EnvOTELExporterOTLPEndpoint)
 	if strings.Contains(err.Error(), privateMarker) {
 		t.Errorf("configuration error exposed secret: %v", err)
 	}
@@ -663,8 +675,8 @@ func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
 	_, validation := load(
 		mapLookup(
 			map[string]string{
-				databaseURLSetting:    testDatabaseURL,
-				requestTimeoutSetting: "0s",
+				databaseURLSetting:          testDatabaseURL,
+				kitconfig.EnvRequestTimeout: "0s",
 			},
 		),
 	)
@@ -672,10 +684,10 @@ func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
 		t.Fatal("invalid duration accepted")
 	}
 	_, identityValidation := load(mapLookup(map[string]string{
-		databaseURLSetting:  testDatabaseURL,
-		otelEnabledSetting:  "true",
-		otelEndpointSetting: "http://collector.internal:4317",
-		environmentSetting:  "Preview/42",
+		databaseURLSetting:                    testDatabaseURL,
+		kitconfig.EnvOTELEnabled:              "true",
+		kitconfig.EnvOTELExporterOTLPEndpoint: "http://collector.internal:4317",
+		kitconfig.EnvDeploymentEnvironment:    "Preview/42",
 	}))
 	if identityValidation == nil {
 		t.Fatal("invalid deployment environment accepted")
