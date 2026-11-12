@@ -8,25 +8,28 @@
     - [Go file selection](#go-file-selection)
     - [Setup and normal validation](#setup-and-normal-validation)
     - [Repository onboarding](#repository-onboarding)
-  - [Create a repository-owned service](#create-a-repository-owned-service)
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
   - [Example RPC and HTTP gateway](#example-rpc-and-http-gateway)
-  - [Reusable baseline and ownership](#reusable-baseline-and-ownership)
+  - [Architecture and ownership](#architecture-and-ownership)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 # Document service
 
-This standalone module is the reference structure for new Insurance Hub Go services. Its module
-identity is `github.com/igor-baiborodine/insurance-hub/services/document-service`. Run every command in
-this document from `services/document-service/` with workspace mode disabled. The module has no root
-workspace, filesystem replacements, legacy dependencies, database, broker, or collector.
+This standalone module is the private Go Document foundation. It runs beside the authoritative Java
+Document service and does not own business traffic, storage, rendering, database, object-store or
+event behavior. Issue #362 replaces the temporary `ExampleService/Echo` contract with Document
+lookup; #363 adds registration and rendering. Java authority and legacy resources remain intact.
 
-The scaffold provides a versioned Echo contract through direct gRPC and a generated HTTP gateway,
-generated Go and Swagger 2.0 artifacts, typed configuration, safe structured logging, optional
-trace and metric export, dependency-aware health, and bounded signal-driven shutdown.
+The module identity is
+`github.com/igor-baiborodine/insurance-hub/services/document-service`. It resolves published
+Servicekit `v1.1.0` with `GOWORK=off` and no filesystem replacement or private service import. The
+foundation provides direct gRPC Echo, a generated HTTP gateway and Swagger 2.0 contract, typed
+configuration, safe structured logging, optional trace and metric export, three owned listeners,
+dependency-aware health and bounded signal-driven shutdown. Default local startup needs no
+business credentials, future dependencies or telemetry collector.
 
 ## Prerequisites
 
@@ -45,8 +48,8 @@ All Go and tooling operations use this module's Makefile. Bare `make` displays h
 Tool installation, dependency maintenance, formatting, linting, tests, builds, vulnerability
 analysis, and execution set `GOWORK=off`; normal validation uses readonly module resolution and
 never depends on a root workspace or filesystem replacement. `GO` may override the Go executable,
-and `UV` may override uv. `test-tooling` and `check-copy` preserve both selections across nested
-Make boundaries; they also prefer the selected Go executable's directory when child tools invoke
+and `UV` may override uv. `test-tooling` preserves both selections across nested Make boundaries;
+it also prefers the selected Go executable's directory when child tools invoke
 `go` by name.
 
 `bootstrap-tools` verifies or provisions the repository's ignored `.venv/` from the root
@@ -94,7 +97,7 @@ require `bootstrap-tools` to have been run explicitly.
 |-----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `make verify-tools`         | Exact Go/tool versions, golangci-lint schema and formatter order, module/import prefix, 100-column settings, readonly loading, all-test lint scope, and vet-equivalent coverage.                                                                                           | All seven pinned binaries already installed; no installation.                                                                                                                      |
 | `make python-toolchain-check` | Exact CPython, pytest, Ruff, and root locked-environment identity without installing or changing packages. | uv 0.13.1 and the provisioned repository environment, or a verified `PYTHON` override containing the root-locked tools. |
-| `make python-check`         | Ruff format/lint plus fast lifecycle and copy-decision pytest coverage for scaffold-owned Python. | Passing `python-toolchain-check`; no Go tools or network mutation. |
+| `make python-check`         | Ruff format/lint plus the focused generated-gateway contract tests for Document-owned Python. | Passing `python-toolchain-check`; no Go tools or network mutation. |
 | `make dockerfile-check` | Exact generated Dockerfile bytes against the validated service configuration and repository-owned fixed template. | Managed Python; no container runtime or mutation. |
 | `make image-check` | Builds the generated Dockerfile from committed source identity, then verifies OCI labels, platform, nonroot user, entrypoint, exposed ports, liveness, and graceful shutdown. | Docker Buildx and access to the pinned builder and runtime images unless cached. |
 | `make format-check`         | The same ordered formatter pipeline and selected handwritten files as `format`, reported without rewriting them.                                                                                                                                                           | Verified tools; file selection below.                                                                                                                                              |
@@ -119,7 +122,7 @@ the runner's numeric status. The runner disables pytest temporary-path retention
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
 Database/broker integration, mock generation, migrations, deployment, workspace
-validation, and live infrastructure are not applicable to this standalone scaffold. It has no such
+validation, and live infrastructure are not applicable to this foundation. It has no such
 dependencies or placeholder targets.
 
 ### Go file selection
@@ -158,26 +161,10 @@ make test-tooling
 
 ### Repository onboarding
 
-The scaffold-only `go-scaffold-*` root delegates do not cover this copied module.
-When installed as an immediate `services/*-service` directory, the generic Go PR
-workflow selects its qualifying inputs. Complete the inventory and ownership onboarding
-documented in ../../docs/migration/phase-4/go-module-topology.md.
-
-## Create a repository-owned service
-
-Follow [COPYING.md](COPYING.md) to produce a renamed service without importing this scaffold's
-runtime packages or relying on a workspace or filesystem replacement. The procedure updates module,
-runtime, schema, generated-code, and documentation identities together and regenerates protobuf
-bindings rather than editing them. It also removes the source-scaffold-only `check-copy` target,
-module, and tests and replaces root-delegate/CI claims with the copied module's actual onboarding
-status. Keep the generated service in this repository so its shared tooling references remain
-valid.
-
-Repository maintainers own this reference. A copied service owns its code and dependencies and
-adopts later scaffold fixes through normal review; copies do not update automatically.
-Its ordinary initial implementation must add the relevant deployment inputs. Kubernetes workloads
-inject Pod `metadata.uid` as `SERVICE_INSTANCE_ID` and propagate the canonical source version as
-`SERVICE_VERSION`; this source scaffold does not own a generic workload manifest.
+The generic Go PR workflow selects qualifying inputs under this immediate `services/*-service`
+module. Root topology, active Servicekit-consumer and service-dispatch registration are completed
+separately so each owner can validate the final Document identity. See the
+[module topology guide](../../docs/migration/phase-4/go-module-topology.md).
 
 ## Runtime configuration
 
@@ -187,7 +174,7 @@ do not repeat its supplied value.
 
 | Setting | Default | Validation |
 | --- | --- | --- |
-| `SERVICE_NAME` | `document-service` | Must equal the service's fixed logical name; the copy flow replaces that name. |
+| `SERVICE_NAME` | `document-service` | Must equal the service's fixed logical name. |
 | `HTTP_ADDR` | `127.0.0.1:8080` | Valid host and numeric port; port `0` is available for tests. |
 | `GRPC_ADDR` | `127.0.0.1:9090` | Valid host and numeric port; port `0` is available for tests. |
 | `HEALTH_ADDR` | `127.0.0.1:8081` | Valid host and numeric port; port `0` is available for tests. Nonzero listener addresses must be pairwise distinct. |
@@ -216,7 +203,7 @@ the only environment exempt from canonical-version validation. Enabled telemetry
 non-development environment/version/instance values and rejects the `local-` instance prefix.
 Kubernetes deployments use the Downward API to inject Pod `metadata.uid`; the existing release
 process derives the matching canonical version from verified full source. See the common
-[Go service identity contract](../../docs/migration/phase-4/document-service-identity-and-validation.md).
+[Go service identity contract](../../docs/migration/phase-4/go-service-identity-and-validation.md).
 
 Logs are JSON with UTC timestamps and `service_namespace`, `service_name`, `service_version`,
 `service_instance_id`, `deployment_environment_name`, and `service_implementation`. Valid logging
@@ -249,8 +236,8 @@ the HTTP server, gRPC client and gRPC server trace. Service identity stays on th
 
 The service lifecycle owns provider shutdown within the overall shutdown budget.
 `Config` embeds the shared `Runtime`, `GRPC`, `HTTPServer`, and `Telemetry` setting groups. The local identity
-type embeds `servicekit/identity.Identity` and adds scaffold validation. Loading uses the shared
-environment keys and `LoadGRPC` at the scaffold's existing lookup position, then applies local
+type embeds `servicekit/identity.Identity` and adds Document validation. Loading uses the shared
+environment keys and `LoadGRPC`, then applies local
 identity, listener and shutdown-budget rules. The development identity uses the shared constructor.
 Embedding does not load environment variables or automatically validate settings. The telemetry
 provider embeds the shared provider and uses its promoted methods directly.
@@ -314,15 +301,16 @@ The transports log neither request/response bodies nor underlying failure detail
 forwarding, `Grpc-Timeout` and `Grpc-Metadata-*` headers are stripped; application metadata and
 upstream response metadata have empty allowlists. `REQUEST_TIMEOUT` begins at HTTP admission and
 the configured HTTP/gRPC limits remain independent. Reflection, CORS, profiling, authentication,
-debug endpoints and production exposure are not enabled by this scaffold.
+debug endpoints and production exposure are not enabled by this foundation.
 
-## Reusable baseline and ownership
+## Architecture and ownership
 
-Product is the reference for operational foundations, not a runtime dependency. Both modules own
-independent runtime code and use the repository's shared non-runtime Go Make tooling. New copies
-must define their own contracts, persistence, authorization, exposure and deployment requirements.
+Product is a source reference for operational foundations, not a runtime dependency. Document owns
+its independent runtime code and uses the repository's shared non-runtime Go Make tooling. The
+temporary Echo path proves transport, configuration, health, lifecycle and signal composition; it
+does not claim Document lookup or document-generation parity.
 
-| Foundation | Product reference | Scaffold adaptation |
+| Foundation | Product reference | Document adaptation |
 | --- | --- | --- |
 | Go and shared libraries/tools | `go.mod`, `Makefile` | Exact matching shared pins; independent manifests and tool caches. |
 | Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; generated fixed name, canonical non-development version, safe identity strings and Pod UID deployment input. Existing loopback ports preserved. |
@@ -333,9 +321,8 @@ must define their own contracts, persistence, authorization, exposure and deploy
 | Business architecture | Product application-owned catalog ports and injected adapters | Echo remains a small injected function. Add domain/application/repository packages when a real migration requires them. |
 
 
-Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
-fixes with behavior tests, update intentional differences explicitly, and run the renamed copy
-proof. Existing services adopt later fixes through their own reviewed changes.
+Review this adaptation map when Product or Servicekit changes an operational foundation. Document
+adopts compatible fixes through its own reviewed changes and behavior tests.
 
 ### Package map and request walkthrough
 
@@ -345,7 +332,7 @@ proof. Existing services adopt later fixes through their own reviewed changes.
 | `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated Echo registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
-| `internal/config` | Compose shared setting groups, load the environment and apply scaffold identity and cross-setting policy. |
+| `internal/config` | Compose shared setting groups, load the environment and apply Document identity and cross-setting policy. |
 | `internal/logger`, `internal/telemetry` | Completion-log and Echo signal contracts; shared provider construction with local policy and metric views. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/document/v1`, `gen/document/v1`, `gen/openapiv2/document/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |

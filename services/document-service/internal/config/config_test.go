@@ -185,15 +185,15 @@ func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) 
 	}
 }
 
-func TestDevelopmentIdentity_PreservesScaffoldDefaults(t *testing.T) {
+func TestDevelopmentIdentity_PreservesDocumentDefaults(t *testing.T) {
 	// given
-	serviceName := "copy-service"
+	serviceName := DefaultServiceName
 
 	// when
 	got := DevelopmentIdentity(serviceName)
 
 	// then
-	if got.ServiceNamespace != "insurance-hub" || got.ServiceName != serviceName ||
+	if got.ServiceNamespace != "insurance-hub" || got.ServiceName != "document-service" ||
 		got.ServiceVersion != "development" || got.Environment != "development" ||
 		got.Implementation != "go" || got.ServiceInstance != fmt.Sprintf("local-%d", os.Getpid()) {
 		t.Errorf("development identity = %+v", got.Identity)

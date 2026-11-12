@@ -1,4 +1,4 @@
-// Package telemetry owns scaffold request signals and composes shared provider mechanics.
+// Package telemetry owns Document request signals and composes shared provider mechanics.
 package telemetry
 
 import (
@@ -28,7 +28,7 @@ var requestBuckets = []float64{
 	10,
 }
 
-// Provider retains the scaffold's gRPC-facing interface while the library owns SDK resources.
+// Provider retains Document's gRPC-facing interface while the library owns SDK resources.
 type Provider struct{ *kittelemetry.Provider }
 
 func New(ctx context.Context, serviceName string, settings config.Telemetry) (*Provider, error) {

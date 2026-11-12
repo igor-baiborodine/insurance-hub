@@ -32,10 +32,10 @@ type Config struct {
 // Address uses the shared TCP address parser and preserves ephemeral ports.
 type Address = kitconfig.Address
 
-// GRPC is the shared message-size group; the scaffold owns its permitted ranges.
+// GRPC is the shared message-size group; Document owns its permitted ranges.
 type GRPC = kitconfig.GRPC
 
-// Identity adds scaffold validation policy to the shared resource and log fields.
+// Identity adds Document validation policy to the shared resource and log fields.
 type Identity struct{ kitidentity.Identity }
 
 // Telemetry is the shared exporter settings group. Identity policy stays in this package.

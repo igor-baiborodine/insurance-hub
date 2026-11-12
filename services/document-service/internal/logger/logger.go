@@ -1,4 +1,4 @@
-// Package logger retains the scaffold's completion-log contract over shared logging mechanics.
+// Package logger retains Document's completion-log contract over shared logging mechanics.
 package logger
 
 import (
