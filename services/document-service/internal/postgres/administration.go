@@ -27,6 +27,10 @@ func openAdministrationDatabase(
 	if err != nil {
 		return nil, errors.New("invalid PostgreSQL connection configuration")
 	}
+	tunneled, err := configureMigrationTunnel(config)
+	if err != nil {
+		return nil, err
+	}
 	config.ConnectTimeout = administrationConnectionBudget
 	statements := []string{assumeOwnerQuery, administrationSettingsQuery}
 
@@ -42,7 +46,11 @@ func openAdministrationDatabase(
 		}),
 	)
 	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(0)
+	if tunneled {
+		db.SetMaxIdleConns(2)
+	} else {
+		db.SetMaxIdleConns(0)
+	}
 	dialCtx, cancel := context.WithTimeout(ctx, administrationConnectionBudget)
 	defer cancel()
 	if err := db.PingContext(dialCtx); err != nil {
@@ -56,4 +64,23 @@ func openAdministrationDatabase(
 		return nil, errors.New("connect to enrolled Document database failed")
 	}
 	return db, nil
+}
+
+func configureMigrationTunnel(config *pgx.ConnConfig) (bool, error) {
+	hostAddress, tunneled := config.RuntimeParams["hostaddr"]
+	if !tunneled {
+		return false, nil
+	}
+	if hostAddress != "127.0.0.1" {
+		return false, errors.New("invalid PostgreSQL tunnel configuration")
+	}
+	delete(config.RuntimeParams, "hostaddr")
+	enrolledHost := config.Host
+	config.LookupFunc = func(_ context.Context, host string) ([]string, error) {
+		if host != enrolledHost {
+			return nil, errors.New("PostgreSQL tunnel hostname differs from enrollment")
+		}
+		return []string{hostAddress}, nil
+	}
+	return true, nil
 }

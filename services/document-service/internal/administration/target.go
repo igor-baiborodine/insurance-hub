@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -160,10 +161,19 @@ func (t Target) validateCredential(
 		return errors.New("database port differs from CNPG enrollment")
 	}
 	query := parsed.Query()
-	if len(query) != 2 || query.Get("sslmode") != "verify-full" ||
+	if query.Get("sslmode") != "verify-full" ||
 		query.Get("sslrootcert") != caPath || len(query["sslmode"]) != 1 ||
 		len(query["sslrootcert"]) != 1 {
 		return errors.New("database URL must use the selected CA and TLS verify-full")
+	}
+	if len(query) == 2 {
+		return nil
+	}
+	port, portError := strconv.Atoi(query.Get("port"))
+	if len(query) != 4 || query.Get("hostaddr") != "127.0.0.1" ||
+		len(query["hostaddr"]) != 1 || len(query["port"]) != 1 || portError != nil ||
+		port < 1024 || port > 65535 {
+		return errors.New("database tunnel must use loopback and a bounded unprivileged port")
 	}
 	return nil
 }
