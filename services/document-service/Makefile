@@ -65,6 +65,7 @@ SERVER_OUTPUT ?= $(CURDIR)/.tools/document-server
 RESOURCE_TEST_ARGS ?=
 POSTGRES_IMAGE ?= postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
 MINIO_IMAGE ?= cgr.dev/chainguard/minio@sha256:7ad2a5efd83f0ca1b8e00af9f7ec7fc3ff977c38ed29b942b0c47460ad2f8f3e
+MINIO_CLIENT_IMAGE ?= cgr.dev/chainguard/minio-client@sha256:2e433473835685d7daf6a266dbbf44fc9d5479b24cb351b7d170492f4fe971d4
 TEST_PACKAGES ?= ./...
 COVERAGE_EXCLUDE_PATHS := gen
 INTEGRATION_COVERAGE_FILE ?=
@@ -132,6 +133,7 @@ _image-check-existing: dockerfile-check python-runtime-check build-migrator
 		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" inspect
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
 		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" MINIO_IMAGE="$(MINIO_IMAGE)" \
+		MINIO_CLIENT_IMAGE="$(MINIO_CLIENT_IMAGE)" \
 		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" SERVER_IMAGE="$(IMAGE_REF)" DOCKER="$(DOCKER)" \
 		SOURCE_VERSION="$(SOURCE_VERSION)" "$(PYTHON)" -m pytest -q -m integration \
 		scripts/test_administration_integration.py -k lookup_traverses_real_rpc_postgres_and_minio
@@ -237,6 +239,7 @@ test-integration: python-toolchain-check build-migrator build-integration-server
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
 		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" MINIO_IMAGE="$(MINIO_IMAGE)" \
+		MINIO_CLIENT_IMAGE="$(MINIO_CLIENT_IMAGE)" \
 		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" SERVER_OUTPUT="$(SERVER_OUTPUT)" DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_administration_integration.py \
 		-k lookup_traverses_real_rpc_postgres_and_minio

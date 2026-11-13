@@ -29,6 +29,10 @@ MINIO_IMAGE = os.environ.get(
     "MINIO_IMAGE",
     "cgr.dev/chainguard/minio@sha256:7ad2a5efd83f0ca1b8e00af9f7ec7fc3ff977c38ed29b942b0c47460ad2f8f3e",
 )
+MINIO_CLIENT_IMAGE = os.environ.get(
+    "MINIO_CLIENT_IMAGE",
+    "cgr.dev/chainguard/minio-client@sha256:2e433473835685d7daf6a266dbbf44fc9d5479b24cb351b7d170492f4fe971d4",
+)
 
 
 def run(args, text=None, *, failure=False, environment=None):
@@ -96,6 +100,52 @@ def loopback_port():
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         return listener.getsockname()[1]
+
+
+class ContainerizedMinioCommands(resources.Commands):
+    """Run the fixture client from a pinned image without a host mc dependency."""
+
+    def run(self, args, text=None, env=None, *, missing=(), timeout_cap=30):
+        if args[0] != os.environ.get("MC", "mc"):
+            return super().run(args, text, env, missing=missing, timeout_cap=timeout_cap)
+        mounts = set()
+        for value in args[1:]:
+            path = Path(value)
+            if not path.is_absolute():
+                continue
+            source = path if path.is_dir() else path.parent
+            mounts.add(source)
+        mount_args = []
+        for source in sorted(mounts):
+            mount_args.extend(("--mount", f"type=bind,src={source},dst={source}"))
+        return super().run(
+            [
+                DOCKER,
+                "run",
+                "--pull=missing",
+                "--rm",
+                "--interactive",
+                "--network",
+                "host",
+                "--user",
+                f"{os.getuid()}:{os.getgid()}",
+                *mount_args,
+                MINIO_CLIENT_IMAGE,
+                *args[1:],
+            ],
+            text,
+            env,
+            missing=missing,
+            timeout_cap=timeout_cap,
+        )
+
+
+def minio_ready(minio):
+    try:
+        minio.mc("ready", "document")
+    except resources.ResourceError:
+        return False
+    return True
 
 
 @contextmanager
@@ -699,17 +749,8 @@ def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
                 }
             ),
         )
-        minio = resources.Minio(resources.Commands(), config, endpoint)
-        wait_for(
-            lambda: (
-                subprocess.run(
-                    ["mc", "--config-dir", str(config_dir), "ready", "document"],
-                    capture_output=True,
-                    timeout=5,
-                ).returncode
-                == 0
-            )
-        )
+        minio = resources.Minio(ContainerizedMinioCommands(), config, endpoint)
+        wait_for(lambda: minio_ready(minio))
         minio.ensure(minio.inspect(), "a" * 64)
         fixture = private(tmp_path / "lookup.pdf", "%PDF-OBJECT-362")
         minio.mc("cp", str(fixture), "document/policies/2026/02/SYN-362.pdf")
