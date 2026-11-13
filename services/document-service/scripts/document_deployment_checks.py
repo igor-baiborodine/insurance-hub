@@ -53,6 +53,7 @@ FORBIDDEN_TEXT = (
     "admin-target",
 )
 ROLLOUT_TIMEOUT_SECONDS = {"local-dev": 180, "qa": 600}
+NETWORK_POLICY_CONVERGENCE_SECONDS = 4
 
 
 class DeploymentError(RuntimeError):
@@ -1011,11 +1012,13 @@ def verify_qualification_access(target: Target) -> None:
             f"--labels={QUALIFICATION_CLIENT_LABEL}=true",
             "--command",
             "--",
-            "curl",
-            "--fail",
-            "--silent",
-            "--max-time",
-            "5",
+            "/bin/sh",
+            "-ec",
+            (
+                f"sleep {NETWORK_POLICY_CONVERGENCE_SECONDS}\n"
+                'exec curl --fail --silent --max-time 5 "$1"'
+            ),
+            name,
             f"http://{target.business}:80/documents/SYN-362",
         )
         created = True
