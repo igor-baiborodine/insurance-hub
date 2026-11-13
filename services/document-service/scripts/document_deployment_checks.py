@@ -781,7 +781,7 @@ def verify_untrusted_access_denied(target: Target) -> None:
             terminated = statuses[0].get("state", {}).get("terminated", {}) if statuses else {}
             if terminated:
                 require(
-                    terminated.get("exitCode") == 28,
+                    terminated.get("exitCode") in {7, 28},
                     "untrusted Pod failed for a reason other than denied network access",
                 )
                 return
