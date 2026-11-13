@@ -47,7 +47,7 @@ def run(args, text=None, *, failure=False, environment=None):
 
 
 @contextmanager
-def container(image, args, mounts=(), environment=None):
+def container(image, args, mounts=(), environment=None, *, auto_remove=True):
     name = "document-362-" + uuid.uuid4().hex[:12]
     try:
         run(
@@ -55,7 +55,7 @@ def container(image, args, mounts=(), environment=None):
                 DOCKER,
                 "run",
                 "--pull=missing",
-                "--rm",
+                *(["--rm"] if auto_remove else []),
                 "-d",
                 "--name",
                 name,
@@ -235,7 +235,7 @@ def lookup_server(environment, root):
     for name in sorted(runtime_names):
         value = container_environment[name]
         mounts.extend(("--env", name if name in sensitive_names else f"{name}={value}"))
-    with container(image, [], mounts, container_environment) as name:
+    with container(image, [], mounts, container_environment, auto_remove=False) as name:
         try:
             yield name
         finally:
