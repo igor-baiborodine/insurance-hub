@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
@@ -22,9 +23,12 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
 
 	documentv1 "github.com/igor-baiborodine/insurance-hub/services/document-service/gen/document/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/document-service/internal/grpc"
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/objectstore"
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/postgres"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/telemetry"
 )
 
@@ -63,16 +67,23 @@ type gatewayConnection interface {
 	Close() error
 }
 
+type managedDependency interface {
+	Check(context.Context) error
+	Close()
+}
+
 type dependencies struct {
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
+	newDatabase    func(context.Context, config.Database, int, int) (application.MetadataReader, managedDependency, error)
+	newObjectStore func(config.ObjectStore, int) (application.ContentReader, managedDependency, error)
+	newLookup      func(application.MetadataReader, application.ContentReader, int, int) (*application.FindDocuments, error)
+	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.FindDocumentsExecutor) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
-	newGateway     func(documentv1.ExampleServiceClient, gateway.Settings) (http.Handler, error)
+	newGateway     func(documentv1.DocumentServiceClient, gateway.Settings) (http.Handler, error)
 	newUnavailable func(gateway.Settings) (http.Handler, error)
 	newBusiness    func(http.Handler, config.Config) httpServer
 	newManagement  func(*health.State) httpServer
-	echo           transport.Echo
 }
 
 func productionDependencies() dependencies {
@@ -81,8 +92,11 @@ func productionDependencies() dependencies {
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
-		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, echo transport.Echo) (grpcServer, error) {
-			return transport.NewServer(logger, tracer, propagator, settings, echo)
+		newDatabase:    newDatabaseDependency,
+		newObjectStore: newObjectStoreDependency,
+		newLookup:      application.NewFindDocuments,
+		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, find transport.FindDocumentsExecutor) (grpcServer, error) {
+			return transport.NewServer(logger, tracer, propagator, settings, find)
 		},
 		newConnection:  newGatewayConnection,
 		newGateway:     gateway.NewHandler,
@@ -98,8 +112,58 @@ func productionDependencies() dependencies {
 			}
 		},
 		newManagement: func(state *health.State) httpServer { return health.NewManagementServer(state) },
-		echo:          transport.IdentityEcho,
 	}
+}
+
+type databaseDependency struct{ pool *pgxpool.Pool }
+
+func (dependency *databaseDependency) Check(ctx context.Context) error {
+	return postgres.CheckReadAccess(ctx, dependency.pool)
+}
+
+func (dependency *databaseDependency) Close() { dependency.pool.Close() }
+
+func newDatabaseDependency(
+	ctx context.Context,
+	settings config.Database,
+	maximumDocumentBytes int,
+	maximumResponseBytes int,
+) (application.MetadataReader, managedDependency, error) {
+	pool, err := postgres.OpenPool(ctx, settings)
+	if err != nil {
+		return nil, nil, err
+	}
+	reader, err := postgres.NewReader(
+		pool,
+		settings.AcquireTimeout,
+		settings.QueryTimeout,
+		maximumDocumentBytes,
+		maximumResponseBytes,
+	)
+	if err != nil {
+		pool.Close()
+		return nil, nil, err
+	}
+	return reader, &databaseDependency{pool: pool}, nil
+}
+
+type objectStoreDependency struct{ reader *objectstore.Reader }
+
+func (dependency *objectStoreDependency) Check(ctx context.Context) error {
+	return dependency.reader.CheckReadAccess(ctx)
+}
+
+func (dependency *objectStoreDependency) Close() { dependency.reader.Close() }
+
+func newObjectStoreDependency(
+	settings config.ObjectStore,
+	maximumDocumentBytes int,
+) (application.ContentReader, managedDependency, error) {
+	reader, err := objectstore.NewReader(settings, maximumDocumentBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	return reader, &objectStoreDependency{reader: reader}, nil
 }
 
 func newGatewayConnection(
@@ -131,6 +195,8 @@ func newGatewayConnection(
 type runningService struct {
 	state              *health.State
 	provider           telemetryProvider
+	database           managedDependency
+	objectStore        managedDependency
 	grpcServer         grpcServer
 	grpcListener       net.Listener
 	connection         gatewayConnection
@@ -154,9 +220,14 @@ func run(
 		settings.ExporterTimeout >= settings.ShutdownTimeout {
 		return errors.New("run service: shutdown budgets must be positive and reserved")
 	}
+	if settings.StartupTimeout <= 0 {
+		return errors.New("run service: startup timeout must be positive")
+	}
+	startupCtx, cancelStartup := context.WithTimeout(ctx, settings.StartupTimeout)
+	defer cancelStartup()
 
 	runtime := &runningService{}
-	provider, err := deps.newTelemetry(ctx, settings.ServiceName, settings.Telemetry)
+	provider, err := deps.newTelemetry(startupCtx, settings.ServiceName, settings.Telemetry)
 	if err != nil {
 		return fmt.Errorf("run service: %w", err)
 	}
@@ -167,19 +238,66 @@ func run(
 			runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 		)
 	}
+	metadataReader, database, err := deps.newDatabase(
+		startupCtx,
+		settings.Database,
+		settings.MaximumDocumentBytes,
+		settings.MaximumResponseBytes,
+	)
+	if err != nil {
+		return fail(fmt.Errorf("run service: initialize Document database: %w", err))
+	}
+	runtime.database = database
+	if err := runtime.database.Check(startupCtx); err != nil {
+		return fail(fmt.Errorf("run service: verify Document database: %w", err))
+	}
+	contentReader, objectStore, err := deps.newObjectStore(
+		settings.ObjectStore,
+		settings.MaximumDocumentBytes,
+	)
+	if err != nil {
+		return fail(fmt.Errorf("run service: initialize Document object storage: %w", err))
+	}
+	runtime.objectStore = objectStore
+	if err := runtime.objectStore.Check(startupCtx); err != nil {
+		return fail(fmt.Errorf("run service: verify Document object storage: %w", err))
+	}
 	observer, err := telemetry.NewRequestObserver(logger, provider.MeterProvider())
 	if err != nil {
 		return fail(err)
 	}
+	dependencyObserver, err := telemetry.NewDependencyObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+	)
+	if err != nil {
+		return fail(err)
+	}
+	lookupObserver, err := telemetry.NewLookupObserver(logger, provider.MeterProvider())
+	if err != nil {
+		return fail(err)
+	}
+	find, err := deps.newLookup(
+		newObservedMetadataReader(metadataReader, dependencyObserver),
+		newObservedContentReader(contentReader, dependencyObserver),
+		settings.MaximumResponseBytes,
+		settings.MaximumConcurrentLookups,
+	)
+	if err != nil {
+		return fail(fmt.Errorf("run service: initialize document lookup: %w", err))
+	}
 	runtime.grpcServer, err = deps.newGRPCServer(
 		logger, provider.TracerProvider(), provider.GRPCPropagator(),
 		transport.Settings{
-			RequestTimeout:  settings.RequestTimeout,
-			MaxReceiveBytes: settings.MaxReceiveBytes,
-			MaxSendBytes:    settings.MaxSendBytes,
-			Observer:        observer,
-			MeterProvider:   provider.MeterProvider(),
-		}, deps.echo,
+			RequestTimeout:       settings.RequestTimeout,
+			MaxReceiveBytes:      settings.MaxReceiveBytes,
+			MaxSendBytes:         settings.MaxSendBytes,
+			MaximumResponseBytes: settings.MaximumResponseBytes,
+			Observer:             observer,
+			LookupObserver:       lookupObserver,
+			MeterProvider:        provider.MeterProvider(),
+		}, find,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize gRPC transport: %w", err))
@@ -213,32 +331,41 @@ func run(
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
 	}
-	readyContext, cancelReady := context.WithTimeout(ctx, settings.ProbeTimeout)
+	readyContext, cancelReady := context.WithTimeout(startupCtx, settings.ProbeTimeout)
 	err = waitForConnection(readyContext, runtime.connection)
+	if err == nil {
+		err = runtime.database.Check(readyContext)
+	}
+	if err == nil {
+		err = runtime.objectStore.Check(readyContext)
+	}
 	cancelReady()
 	if err != nil {
 		return fail(fmt.Errorf("run service: gateway connection not ready: %w", err))
 	}
-	state, err := health.NewState(settings.ProbeTimeout, func(context.Context) error {
+	state, err := health.NewState(settings.ProbeTimeout, func(probeCtx context.Context) error {
 		if runtime.connection.GetState() != connectivity.Ready {
 			return errors.New("gateway connection is not ready")
 		}
-		return nil
+		if err := runtime.database.Check(probeCtx); err != nil {
+			return err
+		}
+		return runtime.objectStore.Check(probeCtx)
 	})
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
 	}
 	runtime.state = state
 	gatewaySettings := gateway.Settings{
-		RequestTimeout: settings.RequestTimeout,
-		MaxBodyBytes:   settings.HTTPMaxBodyBytes,
-		TracerProvider: provider.TracerProvider(),
-		MeterProvider:  provider.MeterProvider(),
-		Propagator:     provider.HTTPPropagator(),
-		Observer:       observer,
+		RequestTimeout:       settings.RequestTimeout,
+		MaximumResponseBytes: settings.HTTPMaxResponseBytes,
+		TracerProvider:       provider.TracerProvider(),
+		MeterProvider:        provider.MeterProvider(),
+		Propagator:           provider.HTTPPropagator(),
+		Observer:             observer,
 	}
 	handler, err := deps.newGateway(
-		documentv1.NewExampleServiceClient(runtime.connection),
+		documentv1.NewDocumentServiceClient(runtime.connection),
 		gatewaySettings,
 	)
 	if err != nil {
@@ -424,6 +551,12 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 		); err != nil {
 			shutdownErrors = append(shutdownErrors, err)
 		}
+	}
+	if runtime.objectStore != nil {
+		runtime.objectStore.Close()
+	}
+	if runtime.database != nil {
+		runtime.database.Close()
 	}
 	if runtime.provider != nil {
 		if err := runtime.provider.Shutdown(overall); err != nil {

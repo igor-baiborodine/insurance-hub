@@ -33,22 +33,20 @@ from scripts.python.process_runner import CommandError, run_command  # noqa: E40
 
 SERVICE = "document"
 EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
+QUALIFICATION_CLIENT_LABEL = "insurance-hub.io/document-qualification-client"
 PROBE_IMAGE = (
     "docker.io/curlimages/curl:8.16.0@"
     "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
 )
 FORBIDDEN_TEXT = (
-    "secretkeyref",
     "persistentvolumeclaim",
-    "postgres",
-    "database",
     "elasticsearch",
     "kafka",
-    "minio",
-    "bucket",
     "jsreport",
     "renderer",
     "insecure_skip_verify",
+    "migrator-creds",
+    "admin-target",
 )
 ROLLOUT_TIMEOUT_SECONDS = {"local-dev": 180, "qa": 600}
 
@@ -128,10 +126,31 @@ def render(environment: str) -> str:
     return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(ROOT / target["overlay"])])
 
 
-def expected_egress(environment: str) -> list[dict[str, Any]]:
-    if environment == "local-dev":
-        return []
+def expected_ingress(environment: str) -> list[dict[str, Any]]:
+    namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
     return [
+        {
+            "from": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": namespace}
+                    },
+                    "podSelector": {"matchLabels": {QUALIFICATION_CLIENT_LABEL: "true"}},
+                }
+            ],
+            "ports": [
+                {"port": 8080, "protocol": "TCP"},
+                {"port": 9090, "protocol": "TCP"},
+            ],
+        }
+    ]
+
+
+def expected_egress(environment: str) -> list[dict[str, Any]]:
+    service_namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
+    data_namespace = "local-dev-all" if environment == "local-dev" else "qa-data"
+    minio_namespace = f"{environment}-minio-document"
+    result = [
         {
             "to": [
                 {
@@ -150,19 +169,47 @@ def expected_egress(environment: str) -> list[dict[str, Any]]:
             "to": [
                 {
                     "namespaceSelector": {
-                        "matchLabels": {"kubernetes.io/metadata.name": "qa-monitoring"}
+                        "matchLabels": {"kubernetes.io/metadata.name": data_namespace}
                     },
                     "podSelector": {
-                        "matchLabels": {
-                            "app.kubernetes.io/name": "alloy",
-                            "app.kubernetes.io/instance": "qa-alloy",
-                        }
+                        "matchLabels": {"cnpg.io/cluster": f"{environment}-postgres-document"}
                     },
                 }
             ],
-            "ports": [{"port": 4317, "protocol": "TCP"}],
+            "ports": [{"port": 5432, "protocol": "TCP"}],
+        },
+        {
+            "to": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": minio_namespace}
+                    }
+                }
+            ],
+            "ports": [{"port": 9000, "protocol": "TCP"}],
         },
     ]
+    if environment == "qa":
+        result.append(
+            {
+                "to": [
+                    {
+                        "namespaceSelector": {
+                            "matchLabels": {"kubernetes.io/metadata.name": "qa-monitoring"}
+                        },
+                        "podSelector": {
+                            "matchLabels": {
+                                "app.kubernetes.io/name": "alloy",
+                                "app.kubernetes.io/instance": "qa-alloy",
+                            }
+                        },
+                    }
+                ],
+                "ports": [{"port": 4317, "protocol": "TCP"}],
+            }
+        )
+    require(bool(service_namespace), "service namespace is unresolved")
+    return result
 
 
 def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
@@ -172,12 +219,12 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     items = documents(text)
     require(bool(items), "render produced no resources")
     require({item.get("kind") for item in items} == EXPECTED_KINDS, "resource kinds differ")
-    require(len(items) == 4, "Document resource inventory differs")
+    require(len(items) == 5, "Document resource inventory differs")
     prefix = f"{environment}-"
     expected_names = {
         "ConfigMap": {prefix + "document-config"},
         "Deployment": {prefix + "document-api"},
-        "Service": {prefix + "document-api-management"},
+        "Service": {prefix + "document-api", prefix + "document-api-management"},
         "NetworkPolicy": {prefix + "document-api"},
     }
     for kind, names in expected_names.items():
@@ -208,7 +255,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "HTTP_ADDR": "0.0.0.0:8080",
         "GRPC_ADDR": "0.0.0.0:9090",
         "HEALTH_ADDR": "0.0.0.0:8081",
-        "REQUEST_TIMEOUT": "8s",
+        "REQUEST_TIMEOUT": "4s",
         "PROBE_TIMEOUT": "2s",
         "SHUTDOWN_TIMEOUT": "10s",
         "OTEL_EXPORTER_OTLP_TIMEOUT": "2s",
@@ -217,9 +264,20 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "HTTP_WRITE_TIMEOUT": "10s",
         "HTTP_IDLE_TIMEOUT": "30s",
         "HTTP_MAX_HEADER_BYTES": "16384",
-        "HTTP_MAX_BODY_BYTES": "4096",
-        "GRPC_MAX_RECV_BYTES": "1048576",
-        "GRPC_MAX_SEND_BYTES": "8388608",
+        "HTTP_MAX_BODY_BYTES": "1048576",
+        "GRPC_MAX_RECV_BYTES": "25165824",
+        "GRPC_MAX_SEND_BYTES": "25165824",
+        "DB_MAX_CONNS": "4",
+        "DB_CONNECT_TIMEOUT": "3s",
+        "DB_ACQUIRE_TIMEOUT": "1s",
+        "DB_QUERY_TIMEOUT": "2s",
+        "STARTUP_TIMEOUT": "10s",
+        "MINIO_BUCKET": "policies",
+        "MINIO_FETCH_TIMEOUT": "3s",
+        "DOCUMENT_MAX_BYTES": "8388608",
+        "DOCUMENT_RESPONSE_MAX_BYTES": "16777216",
+        "HTTP_RESPONSE_MAX_BYTES": "25165824",
+        "DOCUMENT_MAX_CONCURRENT_LOOKUPS": "2",
         "LOG_LEVEL": "info",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
         "SERVICE_VERSION": data.get("SERVICE_VERSION"),
@@ -228,6 +286,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         expected_config["OTEL_EXPORTER_OTLP_ENDPOINT"] = (
             "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
         )
+        expected_config["MINIO_CA_FILE"] = "/etc/document-service/minio/ca.crt"
     require(data == expected_config, "runtime configuration differs")
     version = data.get("SERVICE_VERSION", "")
     require(
@@ -272,7 +331,25 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "fsGroup": 65532,
             "seccompProfile": {"type": "RuntimeDefault"},
         }
-        and not pod.get("volumes")
+        and pod.get("volumes")
+        == [
+            {
+                "name": "postgres-ca",
+                "secret": {
+                    "secretName": prefix + "postgres-document-reader-creds",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 420,
+                },
+            },
+            {
+                "name": "minio-ca",
+                "secret": {
+                    "secretName": prefix + "minio-document-reader-creds",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 420,
+                },
+            },
+        ]
         and not pod.get("initContainers")
         and pod.get("serviceAccountName") in (None, "default"),
         "Pod security or data boundary differs",
@@ -303,16 +380,64 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "requests": {"cpu": "100m", "memory": "64Mi"},
             "limits": {"cpu": "300m", "memory": "256Mi"},
         }
-        and not container.get("volumeMounts"),
+        and container.get("volumeMounts")
+        == [
+            {
+                "name": "postgres-ca",
+                "mountPath": "/etc/document-service/postgres",
+                "readOnly": True,
+            },
+            {
+                "name": "minio-ca",
+                "mountPath": "/etc/document-service/minio",
+                "readOnly": True,
+            },
+        ],
         "container security or resources differ",
     )
     require(
         container.get("env")
         == [
             {
+                "name": "DOCUMENT_DATABASE_URL",
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": prefix + "postgres-document-reader-creds",
+                        "key": "database-url",
+                    }
+                },
+            },
+            {
+                "name": "MINIO_ENDPOINT",
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": prefix + "minio-document-reader-creds",
+                        "key": "endpoint",
+                    }
+                },
+            },
+            {
+                "name": "MINIO_ACCESS_KEY",
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": prefix + "minio-document-reader-creds",
+                        "key": "access-key",
+                    }
+                },
+            },
+            {
+                "name": "MINIO_SECRET_KEY",
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": prefix + "minio-document-reader-creds",
+                        "key": "secret-key",
+                    }
+                },
+            },
+            {
                 "name": "SERVICE_INSTANCE_ID",
                 "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
-            }
+            },
         ]
         and container.get("envFrom") == [{"configMapRef": {"name": prefix + "document-config"}}],
         "runtime identity or configuration linkage differs",
@@ -339,9 +464,17 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             f"{name} differs",
         )
 
+    business = resource(items, "Service", prefix + "document-api")
     management = resource(items, "Service", prefix + "document-api-management")
     require(
-        management.get("spec", {}).get("type") == "ClusterIP"
+        business.get("spec", {}).get("type") == "ClusterIP"
+        and business.get("spec", {}).get("selector") == selector
+        and business.get("spec", {}).get("ports")
+        == [
+            {"name": "http", "port": 80, "protocol": "TCP", "targetPort": "http"},
+            {"name": "grpc", "port": 9090, "protocol": "TCP", "targetPort": "grpc"},
+        ]
+        and management.get("spec", {}).get("type") == "ClusterIP"
         and management.get("spec", {}).get("selector") == selector
         and management.get("spec", {}).get("ports")
         == [{"name": "management", "port": 8081, "protocol": "TCP", "targetPort": "management"}],
@@ -351,7 +484,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(
         policy.get("spec", {}).get("podSelector", {}).get("matchLabels") == selector
         and policy.get("spec", {}).get("policyTypes") == ["Ingress", "Egress"]
-        and policy.get("spec", {}).get("ingress", []) == []
+        and policy.get("spec", {}).get("ingress", []) == expected_ingress(environment)
         and policy.get("spec", {}).get("egress", []) == expected_egress(environment),
         "NetworkPolicy differs",
     )
@@ -378,6 +511,7 @@ class Target:
         self.namespace = expected["DEPLOY_SVC_NS"]
         self.data_namespace = expected["DEPLOY_DATA_NS"]
         self.deployment = f"{self.environment}-document-api"
+        self.business = f"{self.environment}-document-api"
         self.management = f"{self.environment}-document-api-management"
         self.kubectl_binary = os.environ.get("KUBECTL", "kubectl")
 
@@ -722,7 +856,7 @@ def check_requested_route(target: Target) -> None:
             ]
         ).lower()
         require(
-            target.deployment not in listing and target.management not in listing,
+            target.business not in listing and target.management not in listing,
             "public route references Go Document",
         )
 
@@ -751,8 +885,7 @@ def _wait_for_port(port: int, name: str) -> None:
     raise DeploymentError(f"{name} port-forward did not become ready")
 
 
-def verify_untrusted_access_denied(target: Target) -> None:
-    name = "document-untrusted-probe"
+def verify_untrusted_endpoint_denied(target: Target, name: str, url: str) -> None:
     require(
         not target.json("get", "pod", name, "--ignore-not-found"),
         f"unowned Pod/{name} already exists",
@@ -771,7 +904,7 @@ def verify_untrusted_access_denied(target: Target) -> None:
             "--fail",
             "--max-time",
             "3",
-            f"http://{target.management}:8081/livez",
+            url,
         )
         created = True
         deadline = time.monotonic() + 45
@@ -800,17 +933,89 @@ def verify_untrusted_access_denied(target: Target) -> None:
             )
 
 
+def verify_untrusted_access_denied(target: Target) -> None:
+    for name, url in (
+        ("document-untrusted-http", f"http://{target.business}:80/documents/SYN-362"),
+        ("document-untrusted-rpc", f"http://{target.business}:9090"),
+        ("document-untrusted-management", f"http://{target.management}:8081/livez"),
+    ):
+        verify_untrusted_endpoint_denied(target, name, url)
+
+
+def verify_qualification_access(target: Target) -> None:
+    name = "document-qualified-http"
+    require(
+        not target.json("get", "pod", name, "--ignore-not-found"),
+        f"unowned Pod/{name} already exists",
+    )
+    created = False
+    try:
+        target.kubectl(
+            "run",
+            name,
+            "--restart=Never",
+            f"--image={PROBE_IMAGE}",
+            f"--labels={QUALIFICATION_CLIENT_LABEL}=true",
+            "--command",
+            "--",
+            "curl",
+            "--fail",
+            "--silent",
+            "--max-time",
+            "5",
+            f"http://{target.business}:80/documents/SYN-362",
+        )
+        created = True
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            pod = target.json("get", "pod", name)
+            statuses = pod.get("status", {}).get("containerStatuses", [])
+            terminated = statuses[0].get("state", {}).get("terminated", {}) if statuses else {}
+            if terminated:
+                require(
+                    terminated.get("exitCode") == 0, "qualified Pod could not reach Document HTTP"
+                )
+                payload = json.loads(target.kubectl("logs", name))
+                contents = sorted(
+                    item.get("content")
+                    for item in payload.get("documents", [])
+                    if isinstance(item, dict)
+                )
+                require(
+                    contents == sorted(["JVBERi0zNjI=", "JVBERi0zNjI=", "JVBERi1PQkpFQ1QtMzYy"]),
+                    "qualified Pod Document lookup differs",
+                )
+                return
+            time.sleep(1)
+        raise DeploymentError("qualified Pod access probe exceeded 45 seconds")
+    finally:
+        if created:
+            target.kubectl(
+                "delete",
+                "pod",
+                name,
+                "--ignore-not-found",
+                "--wait=true",
+                "--timeout=30s",
+                timeout=40,
+            )
+
+
 def verify(target: Target, items: list[dict[str, Any]]) -> None:
     target.live(items, require_deployment=True)
-    http_port, management_port = loopback_port(), loopback_port()
+    http_port, management_port, grpc_port = loopback_port(), loopback_port(), loopback_port()
     with ExitStack() as forwards:
-        for local_port, remote_port in ((http_port, 8080), (management_port, 8081)):
+        for service, local_port, remote_port in (
+            (target.business, http_port, 80),
+            (target.management, management_port, 8081),
+            (target.business, grpc_port, 9090),
+        ):
             forwards.enter_context(
                 OwnedPortForward(
                     PortForwardSpec(
                         context=target.context,
                         namespace=target.namespace,
-                        resource=f"deployment/{target.deployment}",
+                        resource=f"service/{service}",
                         local_port=local_port,
                         remote_port=remote_port,
                     ),
@@ -821,18 +1026,28 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                     kubectl=target.kubectl_binary,
                 )
             )
-        _wait_for_port(http_port, "Echo HTTP")
+        _wait_for_port(http_port, "Document HTTP")
         _wait_for_port(management_port, "management")
+        _wait_for_port(grpc_port, "Document RPC")
         require(
             _http(f"http://127.0.0.1:{management_port}/livez") == (200, b"live\n")
             and _http(f"http://127.0.0.1:{management_port}/readyz") == (200, b"ready\n"),
             "deployed management health differs",
         )
-        status, body = _http(
-            f"http://127.0.0.1:{http_port}/v1/example/echo",
-            b'{"message":"foundation"}',
+        status, body = _http(f"http://127.0.0.1:{http_port}/documents/SYN-362")
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError as error:
+            raise DeploymentError("Document lookup response is malformed") from error
+        contents = sorted(
+            item.get("content") for item in payload.get("documents", []) if isinstance(item, dict)
         )
-        require(status == 200 and json.loads(body) == {"message": "foundation"}, "Echo differs")
+        require(
+            status == 200
+            and contents == sorted(["JVBERi0zNjI=", "JVBERi0zNjI=", "JVBERi1PQkpFQ1QtMzYy"]),
+            "Document lookup differs",
+        )
+    verify_qualification_access(target)
     verify_untrusted_access_denied(target)
 
 
@@ -872,6 +1087,33 @@ def validate_legacy_identity(environment: str) -> None:
     )
 
 
+def validate_ordinary_gateway_route(environment: str) -> None:
+    gateway = yaml.safe_load(
+        (ROOT / "k8s/apps/svc/agent-portal-gateway/base/legacy/deployment.yaml").read_text()
+    )
+    labels = gateway.get("spec", {}).get("template", {}).get("metadata", {}).get("labels", {})
+    require(
+        QUALIFICATION_CLIENT_LABEL not in labels,
+        "ordinary Java gateway has Document qualification access",
+    )
+    configuration = yaml.safe_load(
+        (
+            ROOT / f"legacy/agent-portal-gateway/src/main/resources/application-{environment}.yml"
+        ).read_text()
+    )
+    urls = (
+        configuration.get("micronaut", {})
+        .get("http", {})
+        .get("services", {})
+        .get("document-service", {})
+        .get("urls")
+    )
+    require(
+        urls == [f"http://{environment}-document-api-legacy:80"],
+        "ordinary Java gateway Document destination differs",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     require(
@@ -891,6 +1133,7 @@ def main(argv: list[str] | None = None) -> int:
         validate_qa_aggregate(qa_root.get("resources"))
         for environment in ("local-dev", "qa"):
             validate_legacy_identity(environment)
+            validate_ordinary_gateway_route(environment)
         print("document-deployment-check: local-dev/QA renders and legacy separation passed")
     return 0
 

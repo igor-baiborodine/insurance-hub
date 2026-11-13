@@ -12,17 +12,21 @@ resources:
 images:
   - name: insurance-hub-document-api
     newName: insurance-hub-document-api
-    newTag: 1.0.0-local.2f0bc5dd8bb7
+    newTag: 1.0.0-local.f50eeb5bd8f6
 configMapGenerator:
   - name: document-config
     behavior: merge
     literals:
       - DEPLOYMENT_ENVIRONMENT=local-dev
-      - SERVICE_VERSION=git-2f0bc5dd8bb7
+      - SERVICE_VERSION=git-f50eeb5bd8f6
 patches:
   - path: deployment-patch.yaml
     target:
       kind: Deployment
+      name: document-api
+  - path: network-policy-patch.yaml
+    target:
+      kind: NetworkPolicy
       name: document-api
 replacements:
   - source:

@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package document.v1;
+
+option go_package = "github.com/igor-baiborodine/insurance-hub/services/document-service/gen/document/v1;documentv1";
+
+service DocumentService {
+  rpc FindDocuments(FindDocumentsRequest) returns (FindDocumentsResponse);
+}
+
+message FindDocumentsRequest {
+  string policy_number = 1;
+}
+
+message FindDocumentsResponse {
+  repeated Document documents = 1;
+}
+
+message Document {
+  string policy_number = 1;
+  bytes content = 2;
+}

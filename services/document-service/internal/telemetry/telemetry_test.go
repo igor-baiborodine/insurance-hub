@@ -16,11 +16,15 @@ import (
 )
 
 func TestNew_DisabledProviderAndW3CPropagation(t *testing.T) {
+	// given
 	settings := config.Telemetry{
 		Identity:        config.DevelopmentIdentity("document-service").Identity,
 		ExporterTimeout: time.Second,
 	}
+
+	// when
 	provider, err := New(context.Background(), "document-service", settings)
+	// then
 	if err != nil {
 		t.Fatal(err)
 	}

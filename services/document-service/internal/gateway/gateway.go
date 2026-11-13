@@ -1,14 +1,13 @@
-// Package gateway owns the strict public HTTP-to-gRPC boundary.
+// Package gateway owns the strict HTTP-to-gRPC Document lookup boundary.
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
-	"mime"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -28,28 +27,30 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/telemetry"
 )
 
-const echoRoute = "POST /v1/example/echo"
+const (
+	documentPath  = "/documents/"
+	documentRoute = "GET /documents/{policyNumber}"
+)
 
 type Settings struct {
-	RequestTimeout time.Duration
-	MaxBodyBytes   int
-	TracerProvider trace.TracerProvider
-	MeterProvider  metric.MeterProvider
-	Propagator     propagation.TextMapPropagator
-	Observer       *telemetry.RequestObserver
+	RequestTimeout       time.Duration
+	MaximumResponseBytes int
+	TracerProvider       trace.TracerProvider
+	MeterProvider        metric.MeterProvider
+	Propagator           propagation.TextMapPropagator
+	Observer             *telemetry.RequestObserver
 }
 
-// NewHandler registers the generated client while retaining a strict HTTP contract.
-func NewHandler(client documentv1.ExampleServiceClient, settings Settings) (http.Handler, error) {
+// NewHandler registers the generated client while retaining the accepted private HTTP contract.
+func NewHandler(client documentv1.DocumentServiceClient, settings Settings) (http.Handler, error) {
 	if client == nil || !validSettings(settings) {
-		return nil, errors.New("create gateway: all dependencies and limits are required")
-	}
-	marshaler := &runtime.JSONPb{
-		MarshalOptions:   protojson.MarshalOptions{},
-		UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: false},
+		return nil, errors.New("create gateway: dependencies and limits are required")
 	}
 	mux := runtime.NewServeMux(
-		runtime.WithMarshalerOption(runtime.MIMEWildcard, marshaler),
+		runtime.WithMarshalerOption(
+			runtime.MIMEWildcard,
+			newDocumentMarshaler(settings.MaximumResponseBytes),
+		),
 		runtime.WithIncomingHeaderMatcher(denyHeader),
 		runtime.WithOutgoingHeaderMatcher(denyHeader),
 		runtime.WithOutgoingTrailerMatcher(denyHeader),
@@ -57,15 +58,14 @@ func NewHandler(client documentv1.ExampleServiceClient, settings Settings) (http
 		runtime.WithDisableHTTPMethodOverride(),
 		runtime.WithDisablePathLengthFallback(),
 	)
-	if err := documentv1.RegisterExampleServiceHandlerClient(
-		context.Background(),
-		mux,
-		client,
+	decodedClient := &pathClient{DocumentServiceClient: client}
+	if err := documentv1.RegisterDocumentServiceHandlerClient(
+		context.Background(), mux, decodedClient,
 	); err != nil {
 		return nil, errors.New("create gateway: register generated handler")
 	}
 	handler := &Handler{mux: mux, settings: settings}
-	handler.echo = handler.instrument(echoRoute, http.HandlerFunc(handler.serveEcho))
+	handler.lookup = handler.instrument(documentRoute, http.HandlerFunc(handler.serveLookup))
 	handler.unmatched = handler.instrument(
 		"unmatched",
 		http.HandlerFunc(handler.serveUnmatched),
@@ -73,11 +73,11 @@ func NewHandler(client documentv1.ExampleServiceClient, settings Settings) (http
 	return handler, nil
 }
 
-// NewUnavailableHandler creates the instrumented fixed-envelope response used after drain starts.
+// NewUnavailableHandler creates the fixed-envelope response used after drain starts.
 func NewUnavailableHandler(settings Settings) (http.Handler, error) {
 	if !validSettings(settings) {
 		return nil, errors.New(
-			"create unavailable gateway handler: all dependencies and limits are required",
+			"create unavailable gateway handler: dependencies are required",
 		)
 	}
 	handler := &Handler{settings: settings}
@@ -95,27 +95,47 @@ func NewUnavailableHandler(settings Settings) (http.Handler, error) {
 }
 
 func validSettings(settings Settings) bool {
-	return settings.RequestTimeout > 0 && settings.MaxBodyBytes > 0 &&
-		settings.TracerProvider != nil && settings.MeterProvider != nil &&
-		settings.Propagator != nil && settings.Observer != nil
+	return settings.RequestTimeout > 0 && settings.MaximumResponseBytes > 0 &&
+		settings.TracerProvider != nil &&
+		settings.MeterProvider != nil && settings.Propagator != nil && settings.Observer != nil
 }
 
 type Handler struct {
 	mux       http.Handler
 	settings  Settings
-	echo      http.Handler
+	lookup    http.Handler
 	unmatched http.Handler
 }
 
-type requestFacts struct {
-	originalPath string
-	hadQuery     bool
+type (
+	requestFacts struct {
+		rawPath  string
+		rawQuery string
+	}
+	factsKey         struct{}
+	decodedPolicyKey struct{}
+)
+
+type pathClient struct {
+	documentv1.DocumentServiceClient
 }
 
-type factsKey struct{}
+func (client *pathClient) FindDocuments(
+	ctx context.Context,
+	request *documentv1.FindDocumentsRequest,
+	options ...grpc.CallOption,
+) (*documentv1.FindDocumentsResponse, error) {
+	if policyNumber, ok := ctx.Value(decodedPolicyKey{}).(string); ok {
+		request = &documentv1.FindDocumentsRequest{PolicyNumber: policyNumber}
+	}
+	return client.DocumentServiceClient.FindDocuments(ctx, request, options...)
+}
 
 func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	facts := requestFacts{originalPath: request.URL.Path, hadQuery: request.URL.RawQuery != ""}
+	facts := requestFacts{
+		rawPath:  request.URL.EscapedPath(),
+		rawQuery: request.URL.RawQuery,
+	}
 	request = sanitizeRequest(
 		request.WithContext(context.WithValue(request.Context(), factsKey{}, facts)),
 	)
@@ -125,8 +145,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	)
 	defer cancel()
 	request = request.WithContext(requestCtx)
-	if facts.originalPath == "/v1/example/echo" && request.Method == http.MethodPost {
-		handler.echo.ServeHTTP(writer, request)
+	if request.Method == http.MethodGet && strings.HasPrefix(facts.rawPath, documentPath) {
+		handler.lookup.ServeHTTP(writer, request)
 		return
 	}
 	request.URL.Path = "/unmatched"
@@ -141,8 +161,7 @@ func (handler *Handler) instrument(route string, next http.Handler) http.Handler
 		observation.FinishHTTP(request.Context(), captured.status)
 	})
 	return otelhttp.NewHandler(
-		observed,
-		route,
+		observed, route,
 		otelhttp.WithTracerProvider(handler.settings.TracerProvider),
 		otelhttp.WithMeterProvider(handler.settings.MeterProvider),
 		otelhttp.WithPropagators(handler.settings.Propagator),
@@ -150,61 +169,45 @@ func (handler *Handler) instrument(route string, next http.Handler) http.Handler
 	)
 }
 
-func (handler *Handler) serveEcho(writer http.ResponseWriter, request *http.Request) {
-	if facts, _ := request.Context().Value(factsKey{}).(requestFacts); facts.hadQuery {
+func (handler *Handler) serveLookup(writer http.ResponseWriter, request *http.Request) {
+	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
+	rawPolicyNumber := strings.TrimPrefix(facts.rawPath, documentPath)
+	if facts.rawQuery != "" {
 		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
 		return
 	}
-	if !acceptsJSON(request.Header.Get("Accept")) {
-		writeError(
-			writer,
-			http.StatusNotAcceptable,
-			codes.InvalidArgument,
-			"not acceptable",
-		)
+	if rawPolicyNumber == "" || strings.Contains(rawPolicyNumber, "/") {
+		writeError(writer, http.StatusNotFound, codes.NotFound, "not found")
 		return
 	}
-	if !isJSON(request.Header.Get("Content-Type")) {
-		writeError(
-			writer,
-			http.StatusUnsupportedMediaType,
-			codes.InvalidArgument,
-			"unsupported media type",
-		)
-		return
-	}
-	body, tooLarge, err := readBounded(request.Body, handler.settings.MaxBodyBytes)
+	policyNumber, err := url.PathUnescape(rawPolicyNumber)
 	if err != nil {
-		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
-		return
-	}
-	if tooLarge {
-		writeError(
-			writer,
-			http.StatusRequestEntityTooLarge,
-			codes.ResourceExhausted,
-			"request body too large",
-		)
-		return
-	}
-	if !validRequestJSON(body) {
 		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
 		return
 	}
-	request.Body = io.NopCloser(bytes.NewReader(body))
+	if strings.Contains(policyNumber, "/") {
+		writeError(writer, http.StatusNotFound, codes.NotFound, "not found")
+		return
+	}
+	request = request.WithContext(context.WithValue(
+		request.Context(), decodedPolicyKey{}, policyNumber,
+	))
 	handler.mux.ServeHTTP(writer, request)
 }
 
 func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http.Request) {
 	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
-	if facts.originalPath == "/v1/example/echo" {
-		writeError(
-			writer,
-			http.StatusMethodNotAllowed,
-			codes.Unimplemented,
-			"method not allowed",
-		)
-		return
+	if facts.rawPath == "/documents" || strings.HasPrefix(facts.rawPath, documentPath) {
+		if request.Method != http.MethodGet {
+			writer.Header().Set("Allow", http.MethodGet)
+			writeError(
+				writer,
+				http.StatusMethodNotAllowed,
+				codes.Unimplemented,
+				"method not allowed",
+			)
+			return
+		}
 	}
 	writeError(writer, http.StatusNotFound, codes.NotFound, "not found")
 }
@@ -228,7 +231,7 @@ func sanitizeRequest(request *http.Request) *http.Request {
 
 func denyHeader(string) (string, bool) { return "", false }
 
-// ClearApplicationMetadata removes gateway-created application metadata before otelgrpc injects trace context.
+// ClearApplicationMetadata removes gateway-created metadata before trace injection.
 func ClearApplicationMetadata(
 	ctx context.Context,
 	method string,
@@ -262,10 +265,10 @@ func safeGatewayError(
 		writeError(writer, 499, code, "request canceled")
 	case codes.DeadlineExceeded:
 		writeError(writer, http.StatusGatewayTimeout, code, "deadline exceeded")
+	case codes.ResourceExhausted:
+		writeError(writer, http.StatusTooManyRequests, code, "response limit exceeded")
 	case codes.Unavailable:
 		writeError(writer, http.StatusServiceUnavailable, code, "service unavailable")
-	case codes.ResourceExhausted:
-		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
 	default:
 		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
 	}
@@ -276,72 +279,77 @@ func writeError(writer http.ResponseWriter, httpStatus int, code codes.Code, mes
 	writer.WriteHeader(httpStatus)
 	_, _ = io.WriteString(
 		writer,
-		`{"code":`+jsonNumber(int32(code))+`,"message":"`+message+`","details":[]}`,
+		`{"code":`+strconv.FormatInt(
+			int64(code),
+			10,
+		)+`,"message":"`+message+`","details":[]}`,
 	)
 }
 
-func jsonNumber(value int32) string { return strconv.FormatInt(int64(value), 10) }
-
-func readBounded(body io.ReadCloser, maximum int) ([]byte, bool, error) {
-	defer func() { _ = body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(body, int64(maximum)+1))
-	return data, len(data) > maximum, err
+type documentMarshaler struct {
+	*runtime.JSONPb
+	maximumResponseBytes int
 }
 
-func validRequestJSON(data []byte) bool {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	token, err := decoder.Token()
-	if err != nil || token != json.Delim('{') {
-		return false
+func newDocumentMarshaler(maximumResponseBytes int) *documentMarshaler {
+	return &documentMarshaler{
+		JSONPb: &runtime.JSONPb{
+			MarshalOptions:   protojson.MarshalOptions{EmitDefaultValues: true},
+			UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: true},
+		},
+		maximumResponseBytes: maximumResponseBytes,
 	}
-	seen := false
-	for decoder.More() {
-		name, err := decoder.Token()
-		if err != nil || name != "message" || seen {
-			return false
-		}
-		seen = true
-		var value any
-		if err := decoder.Decode(&value); err != nil {
-			return false
-		}
-		if value != nil {
-			if _, ok := value.(string); !ok {
-				return false
-			}
-		}
-	}
-	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
-		return false
-	}
-	_, err = decoder.Token()
-	return errors.Is(err, io.EOF)
 }
 
-func isJSON(value string) bool {
-	mediaType, parameters, err := mime.ParseMediaType(value)
-	if err != nil || mediaType != "application/json" {
-		return false
+func (marshaler *documentMarshaler) Marshal(value any) ([]byte, error) {
+	response, ok := value.(*documentv1.FindDocumentsResponse)
+	if !ok {
+		return marshaler.JSONPb.Marshal(value)
 	}
-	if len(parameters) == 0 {
-		return true
+	type httpDocument struct {
+		PolicyNumber string `json:"policyNumber"`
+		Content      []byte `json:"content"`
 	}
-	return len(parameters) == 1 && strings.EqualFold(parameters["charset"], "utf-8")
-}
-
-func acceptsJSON(value string) bool {
-	if value == "" {
-		return true
-	}
-	for item := range strings.SplitSeq(value, ",") {
-		mediaType, parameters, err := mime.ParseMediaType(strings.TrimSpace(item))
-		if err == nil && len(parameters) == 0 &&
-			(mediaType == "application/json" || mediaType == "*/*") {
-			return true
+	httpResponse := struct {
+		Documents []httpDocument `json:"documents"`
+	}{Documents: make([]httpDocument, len(response.GetDocuments()))}
+	for index, document := range response.GetDocuments() {
+		if document == nil {
+			return nil, errors.New("marshal document lookup: missing document")
+		}
+		content := document.GetContent()
+		if content == nil {
+			content = []byte{}
+		}
+		httpResponse.Documents[index] = httpDocument{
+			PolicyNumber: document.GetPolicyNumber(),
+			Content:      content,
 		}
 	}
-	return false
+	encoded, err := json.Marshal(httpResponse)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) > marshaler.maximumResponseBytes {
+		return nil, status.Error(codes.ResourceExhausted, "response limit exceeded")
+	}
+	return encoded, nil
 }
+
+func (marshaler *documentMarshaler) NewEncoder(writer io.Writer) runtime.Encoder {
+	return encoderFunc(func(value any) error {
+		data, err := marshaler.Marshal(value)
+		if err != nil {
+			return err
+		}
+		_, err = writer.Write(data)
+		return err
+	})
+}
+
+type encoderFunc func(any) error
+
+func (encoder encoderFunc) Encode(value any) error { return encoder(value) }
 
 type statusWriter struct {
 	http.ResponseWriter
@@ -356,4 +364,11 @@ func (writer *statusWriter) WriteHeader(status int) {
 	writer.wrote = true
 	writer.status = status
 	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *statusWriter) Write(body []byte) (int, error) {
+	if !writer.wrote {
+		writer.WriteHeader(http.StatusOK)
+	}
+	return writer.ResponseWriter.Write(body)
 }

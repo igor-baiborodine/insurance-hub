@@ -3,6 +3,19 @@ kind: NetworkPolicy
 metadata:
   name: document-api
 spec:
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: qa-svc
+          podSelector:
+            matchLabels:
+              insurance-hub.io/document-qualification-client: "true"
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
   egress:
     - to:
         - namespaceSelector:
@@ -15,6 +28,23 @@ spec:
         - port: 53
           protocol: UDP
         - port: 53
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: qa-data
+          podSelector:
+            matchLabels:
+              cnpg.io/cluster: qa-postgres-document
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: qa-minio-document
+      ports:
+        - port: 9000
           protocol: TCP
     - to:
         - namespaceSelector:

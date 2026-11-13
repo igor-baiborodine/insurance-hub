@@ -1,9 +1,11 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 	kitidentity "github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
@@ -15,18 +17,48 @@ const DefaultServiceName = "document-service"
 const canonicalVersionReason = "must use git- followed by 12 lowercase hexadecimal " +
 	"characters with at least one nonzero character outside development"
 
+const (
+	databaseURLSetting             = "DOCUMENT_DATABASE_URL"
+	databaseMaxConnsSetting        = "DB_MAX_CONNS"
+	databaseConnectTimeoutSetting  = "DB_CONNECT_TIMEOUT"
+	databaseAcquireTimeoutSetting  = "DB_ACQUIRE_TIMEOUT"
+	databaseQueryTimeoutSetting    = "DB_QUERY_TIMEOUT"
+	startupTimeoutSetting          = "STARTUP_TIMEOUT"
+	objectEndpointSetting          = "MINIO_ENDPOINT"
+	objectAccessKeySetting         = "MINIO_ACCESS_KEY"
+	objectSecretKeySetting         = "MINIO_SECRET_KEY"
+	objectCAFileSetting            = "MINIO_CA_FILE"
+	objectBucketSetting            = "MINIO_BUCKET"
+	objectFetchTimeoutSetting      = "MINIO_FETCH_TIMEOUT"
+	maximumDocumentBytesSetting    = "DOCUMENT_MAX_BYTES"
+	maximumResponseBytesSetting    = "DOCUMENT_RESPONSE_MAX_BYTES"
+	maximumHTTPResponseSetting     = "HTTP_RESPONSE_MAX_BYTES"
+	maximumConcurrentLookupSetting = "DOCUMENT_MAX_CONCURRENT_LOOKUPS"
+	defaultGRPCBytes               = 24 * 1024 * 1024
+	defaultMaximumDocumentBytes    = 8 * 1024 * 1024
+	defaultMaximumResponseBytes    = 16 * 1024 * 1024
+	defaultMaximumHTTPResponse     = 24 * 1024 * 1024
+)
+
 // Config contains settings parsed and validated once during process startup.
 type Config struct {
 	kitconfig.Runtime
 	kitconfig.GRPC
 	kitconfig.HTTPServer
 	kitconfig.Telemetry
-	ServiceName        string
-	HTTPAddress        Address
-	GRPCAddress        Address
-	HealthAddress      Address
-	HTTPMaxHeaderBytes int
-	HTTPMaxBodyBytes   int
+	ServiceName              string
+	HTTPAddress              Address
+	GRPCAddress              Address
+	HealthAddress            Address
+	HTTPMaxHeaderBytes       int
+	HTTPMaxBodyBytes         int
+	HTTPMaxResponseBytes     int
+	Database                 Database
+	ObjectStore              ObjectStore
+	StartupTimeout           time.Duration
+	MaximumDocumentBytes     int
+	MaximumResponseBytes     int
+	MaximumConcurrentLookups int
 }
 
 // Address uses the shared TCP address parser and preserves ephemeral ports.
@@ -40,6 +72,43 @@ type Identity struct{ kitidentity.Identity }
 
 // Telemetry is the shared exporter settings group. Identity policy stays in this package.
 type Telemetry = kitconfig.Telemetry
+
+// Secret retains a credential without exposing it through ordinary formatting.
+type Secret struct{ value string }
+
+// Value returns the credential only to the object-store adapter.
+func (secret Secret) Value() string { return secret.value }
+
+func (Secret) String() string   { return "[REDACTED]" }
+func (Secret) GoString() string { return "[REDACTED]" }
+
+// DatabaseURL retains the restricted reader URL without exposing credentials.
+type DatabaseURL struct{ value string }
+
+// Value returns the URL only to the PostgreSQL adapter.
+func (databaseURL DatabaseURL) Value() string { return databaseURL.value }
+
+func (DatabaseURL) String() string   { return "[REDACTED]" }
+func (DatabaseURL) GoString() string { return "[REDACTED]" }
+
+// Database contains the reader connection, pool and deadline settings.
+type Database struct {
+	URL            DatabaseURL
+	MaxConnections int32
+	ConnectTimeout time.Duration
+	AcquireTimeout time.Duration
+	QueryTimeout   time.Duration
+}
+
+// ObjectStore contains the read-only policies bucket connection and fetch bound.
+type ObjectStore struct {
+	Endpoint     *url.URL
+	AccessKey    Secret
+	SecretKey    Secret
+	CAFile       string
+	Bucket       string
+	FetchTimeout time.Duration
+}
 
 // DevelopmentIdentity labels local startup diagnostics before configuration is validated.
 func DevelopmentIdentity(serviceName string) Identity {
@@ -146,7 +215,7 @@ func load(lookup lookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	requestTimeout, err := kitconfig.LoadPositiveDuration(
-		lookup, kitconfig.EnvRequestTimeout, runtimeDefaults.RequestTimeout.String(),
+		lookup, kitconfig.EnvRequestTimeout, "4s",
 	)
 	if err != nil {
 		return Config{}, err
@@ -157,10 +226,27 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	grpc, err := kitconfig.LoadGRPC(lookup)
+	grpcReceiveBytes, err := kitconfig.LoadBoundedInt(
+		lookup,
+		kitconfig.EnvGRPCMaxReceiveBytes,
+		strconv.Itoa(defaultGRPCBytes),
+		1,
+		defaultGRPCBytes,
+	)
 	if err != nil {
 		return Config{}, err
 	}
+	grpcSendBytes, err := kitconfig.LoadBoundedInt(
+		lookup,
+		kitconfig.EnvGRPCMaxSendBytes,
+		strconv.Itoa(defaultGRPCBytes),
+		1,
+		defaultGRPCBytes,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	grpc := kitconfig.GRPC{MaxReceiveBytes: grpcReceiveBytes, MaxSendBytes: grpcSendBytes}
 	httpServer, err := kitconfig.LoadHTTPServer(lookup)
 	if err != nil {
 		return Config{}, err
@@ -181,6 +267,45 @@ func load(lookup lookupEnv) (Config, error) {
 		strconv.Itoa(kitconfig.DefaultHTTPMaxBodyBytes),
 		1024,
 		1048576,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	database, err := loadDatabase(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	objectStore, err := loadObjectStore(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	startupTimeout, err := kitconfig.LoadPositiveDuration(lookup, startupTimeoutSetting, "10s")
+	if err != nil {
+		return Config{}, err
+	}
+	maximumDocumentBytes, err := kitconfig.LoadBoundedInt(
+		lookup, maximumDocumentBytesSetting, strconv.Itoa(defaultMaximumDocumentBytes), 1,
+		defaultMaximumDocumentBytes,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	maximumResponseBytes, err := kitconfig.LoadBoundedInt(
+		lookup, maximumResponseBytesSetting, strconv.Itoa(defaultMaximumResponseBytes),
+		maximumDocumentBytes, defaultMaximumResponseBytes,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	maximumHTTPResponseBytes, err := kitconfig.LoadBoundedInt(
+		lookup, maximumHTTPResponseSetting, strconv.Itoa(defaultMaximumHTTPResponse),
+		maximumResponseBytes, defaultMaximumHTTPResponse,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	maximumConcurrentLookups, err := kitconfig.LoadBoundedInt(
+		lookup, maximumConcurrentLookupSetting, "2", 1, 32,
 	)
 	if err != nil {
 		return Config{}, err
@@ -248,17 +373,135 @@ func load(lookup lookupEnv) (Config, error) {
 	}
 
 	return Config{
-		Runtime:            runtime,
-		GRPC:               grpc,
-		HTTPServer:         httpServer,
-		ServiceName:        serviceName,
-		HTTPAddress:        httpAddress,
-		GRPCAddress:        grpcAddress,
-		HealthAddress:      healthAddress,
-		HTTPMaxHeaderBytes: maxHeaderBytes,
-		HTTPMaxBodyBytes:   maxBodyBytes,
-		Telemetry:          telemetry,
+		Runtime:                  runtime,
+		GRPC:                     grpc,
+		HTTPServer:               httpServer,
+		ServiceName:              serviceName,
+		HTTPAddress:              httpAddress,
+		GRPCAddress:              grpcAddress,
+		HealthAddress:            healthAddress,
+		HTTPMaxHeaderBytes:       maxHeaderBytes,
+		HTTPMaxBodyBytes:         maxBodyBytes,
+		HTTPMaxResponseBytes:     maximumHTTPResponseBytes,
+		Database:                 database,
+		ObjectStore:              objectStore,
+		StartupTimeout:           startupTimeout,
+		MaximumDocumentBytes:     maximumDocumentBytes,
+		MaximumResponseBytes:     maximumResponseBytes,
+		MaximumConcurrentLookups: maximumConcurrentLookups,
+		Telemetry:                telemetry,
 	}, nil
+}
+
+func loadDatabase(lookup lookupEnv) (Database, error) {
+	databaseURL, err := required(lookup, databaseURLSetting)
+	if err != nil {
+		return Database{}, err
+	}
+	parsed, parseErr := url.Parse(databaseURL)
+	if parseErr != nil || parsed.Scheme != "postgres" && parsed.Scheme != "postgresql" ||
+		parsed.Hostname() == "" || parsed.Path == "" || parsed.Path == "/" || parsed.Fragment != "" {
+		return Database{}, kitconfig.Invalid(
+			databaseURLSetting,
+			"must be a PostgreSQL URL with a database",
+		)
+	}
+	maxConnections, err := kitconfig.LoadBoundedInt(lookup, databaseMaxConnsSetting, "4", 1, 16)
+	if err != nil {
+		return Database{}, err
+	}
+	connectTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup, databaseConnectTimeoutSetting, "3s",
+	)
+	if err != nil {
+		return Database{}, err
+	}
+	acquireTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup, databaseAcquireTimeoutSetting, "1s",
+	)
+	if err != nil {
+		return Database{}, err
+	}
+	queryTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup,
+		databaseQueryTimeoutSetting,
+		"2s",
+	)
+	if err != nil {
+		return Database{}, err
+	}
+	return Database{
+		URL:            DatabaseURL{value: databaseURL},
+		MaxConnections: int32(maxConnections),
+		ConnectTimeout: connectTimeout,
+		AcquireTimeout: acquireTimeout,
+		QueryTimeout:   queryTimeout,
+	}, nil
+}
+
+func loadObjectStore(lookup lookupEnv) (ObjectStore, error) {
+	endpointValue, err := required(lookup, objectEndpointSetting)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	endpoint, parseErr := url.Parse(endpointValue)
+	if parseErr != nil || endpoint.Opaque != "" || endpoint.User != nil ||
+		endpoint.RawQuery != "" ||
+		endpoint.Fragment != "" ||
+		endpoint.Hostname() == "" ||
+		(endpoint.Scheme != "http" && endpoint.Scheme != "https") ||
+		(endpoint.Path != "" && endpoint.Path != "/") {
+		return ObjectStore{}, kitconfig.Invalid(
+			objectEndpointSetting,
+			"must be an HTTP or HTTPS origin URL",
+		)
+	}
+	endpoint.Path = ""
+	accessKey, err := required(lookup, objectAccessKeySetting)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	secretKey, err := required(lookup, objectSecretKeySetting)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	caFile, _ := lookup(objectCAFileSetting)
+	if endpoint.Scheme == "https" && strings.TrimSpace(caFile) == "" {
+		return ObjectStore{}, kitconfig.Invalid(
+			objectCAFileSetting,
+			"is required for HTTPS object storage",
+		)
+	}
+	bucket, err := kitconfig.ValueOrDefault(lookup, objectBucketSetting, "policies")
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	if bucket != "policies" {
+		return ObjectStore{}, kitconfig.Invalid(
+			objectBucketSetting,
+			"must match the fixed policies bucket",
+		)
+	}
+	fetchTimeout, err := kitconfig.LoadPositiveDuration(lookup, objectFetchTimeoutSetting, "3s")
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	return ObjectStore{
+		Endpoint:     endpoint,
+		AccessKey:    Secret{value: accessKey},
+		SecretKey:    Secret{value: secretKey},
+		CAFile:       caFile,
+		Bucket:       bucket,
+		FetchTimeout: fetchTimeout,
+	}, nil
+}
+
+func required(lookup lookupEnv, name string) (string, error) {
+	value, exists := lookup(name)
+	if !exists || value == "" {
+		return "", kitconfig.Invalid(name, "is required")
+	}
+	return value, nil
 }
 
 func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity, error) {

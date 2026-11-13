@@ -21,6 +21,7 @@ configMapGenerator:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
       - DEPLOYMENT_ENVIRONMENT=qa
       - SERVICE_VERSION=git-6f41be359478
+      - MINIO_CA_FILE=/etc/document-service/minio/ca.crt
 patches:
   - path: deployment-patch.yaml
     target:

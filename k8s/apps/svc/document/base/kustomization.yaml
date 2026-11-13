@@ -8,6 +8,7 @@ labels:
       app.kubernetes.io/managed-by: kustomize
 resources:
   - deployment.yaml
+  - service.yaml
   - management-service.yaml
   - network-policy.yaml
 generatorOptions:
@@ -19,7 +20,7 @@ configMapGenerator:
       - HTTP_ADDR=0.0.0.0:8080
       - GRPC_ADDR=0.0.0.0:9090
       - HEALTH_ADDR=0.0.0.0:8081
-      - REQUEST_TIMEOUT=8s
+      - REQUEST_TIMEOUT=4s
       - PROBE_TIMEOUT=2s
       - SHUTDOWN_TIMEOUT=10s
       - OTEL_EXPORTER_OTLP_TIMEOUT=2s
@@ -28,9 +29,20 @@ configMapGenerator:
       - HTTP_WRITE_TIMEOUT=10s
       - HTTP_IDLE_TIMEOUT=30s
       - HTTP_MAX_HEADER_BYTES=16384
-      - HTTP_MAX_BODY_BYTES=4096
-      - GRPC_MAX_RECV_BYTES=1048576
-      - GRPC_MAX_SEND_BYTES=8388608
+      - HTTP_MAX_BODY_BYTES=1048576
+      - GRPC_MAX_RECV_BYTES=25165824
+      - GRPC_MAX_SEND_BYTES=25165824
+      - DB_MAX_CONNS=4
+      - DB_CONNECT_TIMEOUT=3s
+      - DB_ACQUIRE_TIMEOUT=1s
+      - DB_QUERY_TIMEOUT=2s
+      - STARTUP_TIMEOUT=10s
+      - MINIO_BUCKET=policies
+      - MINIO_FETCH_TIMEOUT=3s
+      - DOCUMENT_MAX_BYTES=8388608
+      - DOCUMENT_RESPONSE_MAX_BYTES=16777216
+      - HTTP_RESPONSE_MAX_BYTES=25165824
+      - DOCUMENT_MAX_CONCURRENT_LOOKUPS=2
       - LOG_LEVEL=info
       - OTEL_ENABLED=false
       - DEPLOYMENT_ENVIRONMENT=unconfigured

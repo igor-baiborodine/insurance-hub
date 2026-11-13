@@ -4,7 +4,46 @@ metadata:
   name: document-api
 spec:
   template:
+    metadata:
+      annotations:
+        insurance-hub.io/document-reader-credential-revision: "1"
     spec:
       containers:
         - name: document-api
           imagePullPolicy: Never
+          env:
+            - name: DOCUMENT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-postgres-document-reader-creds
+                  key: database-url
+            - name: MINIO_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-minio-document-reader-creds
+                  key: endpoint
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-minio-document-reader-creds
+                  key: access-key
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-minio-document-reader-creds
+                  key: secret-key
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: local-dev-postgres-document-reader-creds
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 420
+        - name: minio-ca
+          secret:
+            secretName: local-dev-minio-document-reader-creds
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 420

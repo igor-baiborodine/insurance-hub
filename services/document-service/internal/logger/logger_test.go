@@ -12,15 +12,15 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
-	kitlogger "github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/logger"
 )
 
 func TestNew_WritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
 	// given
 	var output bytes.Buffer
-	log := kitlogger.New(&output, "document-service", slog.LevelInfo)
+	log := logger.New(&output, "document-service", slog.LevelInfo)
 
 	// when
 	log.DebugContext(context.Background(), "filtered")
@@ -54,7 +54,7 @@ func TestNew_AddsTraceCorrelationFromContext(t *testing.T) {
 	var output bytes.Buffer
 
 	// when
-	kitlogger.New(&output, "document-service", slog.LevelInfo).InfoContext(ctx, "correlated")
+	logger.New(&output, "document-service", slog.LevelInfo).InfoContext(ctx, "correlated")
 
 	// then
 	entries := decodeEntries(t, output.String())
@@ -70,7 +70,7 @@ func TestNew_RedactsSensitiveAttributesAtEveryLevel(t *testing.T) {
 	// given
 	const privateMarker = "private-marker"
 	var output bytes.Buffer
-	log := kitlogger.New(&output, "document-service", slog.LevelDebug).With(
+	log := logger.New(&output, "document-service", slog.LevelDebug).With(
 		slog.String("accessToken", privateMarker),
 	)
 	levels := []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}
@@ -114,7 +114,7 @@ func TestNew_RedactsSensitiveKeysInsideAnyValues(t *testing.T) {
 		Safe        string           `json:"safe"`
 	}
 	var output bytes.Buffer
-	log := kitlogger.New(&output, "document-service", slog.LevelInfo).With(
+	log := logger.New(&output, "document-service", slog.LevelInfo).With(
 		slog.Any("bound_details", map[string]any{
 			"credential": privateMarker,
 			"safe":       "bound-safe",
@@ -221,7 +221,11 @@ func TestNewIdentity_RedactsErrorsAndUsesUTC(t *testing.T) {
 		Environment:      "staging",
 		Implementation:   "go",
 	}
-	log := kitlogger.NewIdentity(&output, serviceIdentity, slog.LevelError)
+	log := logger.NewIdentity(
+		&output,
+		config.Identity{Identity: serviceIdentity},
+		slog.LevelError,
+	)
 	// when
 	logger.LogCompletion(
 		context.Background(),

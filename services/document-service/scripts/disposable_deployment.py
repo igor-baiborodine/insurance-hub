@@ -8,7 +8,9 @@ import os
 import re
 import secrets
 import sys
+import tempfile
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,9 @@ ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 import document_deployment_checks as checks  # noqa: E402
+import resource_administration as administration  # noqa: E402
 from scripts.go.service.configuration import service_record, target_record  # noqa: E402
+from scripts.go.service.tooling_contracts import OwnedPortForward, PortForwardSpec, loopback_port  # noqa: E402
 from scripts.python.process_runner import CommandError  # noqa: E402
 
 
@@ -57,7 +61,269 @@ def prepared_resources(
     checks.resource(items, "ConfigMap", "local-dev-document-config")["data"]["SERVICE_VERSION"] = (
         version
     )
+    policy = checks.resource(items, "NetworkPolicy", "local-dev-document-api")
+    for direction in ("ingress", "egress"):
+        for rule in policy.get("spec", {}).get(direction, []):
+            for peer in rule.get("from", []) + rule.get("to", []):
+                selector = peer.get("namespaceSelector", {}).get("matchLabels", {})
+                if "kubernetes.io/metadata.name" in selector:
+                    selector["kubernetes.io/metadata.name"] = namespace
     return items
+
+
+POSTGRES_PASSWORD = "synthetic-postgres-admin-362"
+READER_PASSWORD = "synthetic-postgres-reader-362"
+MINIO_ADMIN_PASSWORD = "synthetic-minio-admin-lookup-362"
+MINIO_READER_PASSWORD = "synthetic-minio-reader-lookup-362"
+
+
+def dependency_resources(namespace: str) -> list[dict[str, Any]]:
+    postgres_image = os.environ.get("POSTGRES_IMAGE", "postgres:17.10-alpine")
+    minio_image = os.environ.get(
+        "MINIO_IMAGE",
+        "cgr.dev/chainguard/minio@sha256:7ad2a5efd83f0ca1b8e00af9f7ec7fc3ff977c38ed29b942b0c47460ad2f8f3e",
+    )
+    metadata = lambda name: {"name": name, "namespace": namespace}  # noqa: E731
+    return [
+        {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": metadata("local-dev-postgres-document-reader-creds"),
+            "stringData": {
+                "database-url": (
+                    "postgresql://go_document_reader:"
+                    + READER_PASSWORD
+                    + "@document-smoke-postgres:5432/document?sslmode=disable"
+                ),
+                "password": READER_PASSWORD,
+                "ca.crt": "",
+            },
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": metadata("local-dev-minio-document-reader-creds"),
+            "stringData": {
+                "access-key": administration.USER,
+                "secret-key": MINIO_READER_PASSWORD,
+                "endpoint": "http://document-smoke-minio:9000",
+                "ca.crt": "",
+            },
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": metadata("document-smoke-postgres"),
+            "spec": {
+                "replicas": 1,
+                "selector": {"matchLabels": {"app": "document-smoke-postgres"}},
+                "template": {
+                    "metadata": {
+                        "labels": {
+                            "app": "document-smoke-postgres",
+                            "cnpg.io/cluster": "local-dev-postgres-document",
+                        }
+                    },
+                    "spec": {
+                        "containers": [
+                            {
+                                "name": "postgres",
+                                "image": postgres_image,
+                                "imagePullPolicy": "IfNotPresent",
+                                "env": [
+                                    {"name": "POSTGRES_DB", "value": "document"},
+                                    {"name": "POSTGRES_PASSWORD", "value": POSTGRES_PASSWORD},
+                                ],
+                                "ports": [{"name": "postgres", "containerPort": 5432}],
+                                "readinessProbe": {
+                                    "exec": {
+                                        "command": [
+                                            "pg_isready",
+                                            "-h",
+                                            "127.0.0.1",
+                                            "-U",
+                                            "postgres",
+                                            "-d",
+                                            "document",
+                                        ]
+                                    },
+                                    "periodSeconds": 2,
+                                    "timeoutSeconds": 2,
+                                },
+                            }
+                        ]
+                    },
+                },
+            },
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": metadata("document-smoke-postgres"),
+            "spec": {
+                "selector": {"app": "document-smoke-postgres"},
+                "ports": [{"name": "postgres", "port": 5432, "targetPort": "postgres"}],
+            },
+        },
+        {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": metadata("document-smoke-minio"),
+            "spec": {
+                "replicas": 1,
+                "selector": {"matchLabels": {"app": "document-smoke-minio"}},
+                "template": {
+                    "metadata": {"labels": {"app": "document-smoke-minio"}},
+                    "spec": {
+                        "securityContext": {"fsGroup": 65532},
+                        "containers": [
+                            {
+                                "name": "minio",
+                                "image": minio_image,
+                                "imagePullPolicy": "IfNotPresent",
+                                "command": ["minio"],
+                                "args": ["server", "/data", "--address", ":9000"],
+                                "env": [
+                                    {"name": "MINIO_ROOT_USER", "value": "fixture-admin"},
+                                    {
+                                        "name": "MINIO_ROOT_PASSWORD",
+                                        "value": MINIO_ADMIN_PASSWORD,
+                                    },
+                                ],
+                                "ports": [{"name": "minio", "containerPort": 9000}],
+                                "volumeMounts": [{"name": "data", "mountPath": "/data"}],
+                            }
+                        ],
+                        "volumes": [{"name": "data", "emptyDir": {}}],
+                    },
+                },
+            },
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": metadata("document-smoke-minio"),
+            "spec": {
+                "selector": {"app": "document-smoke-minio"},
+                "ports": [{"name": "minio", "port": 9000, "targetPort": "minio"}],
+            },
+        },
+    ]
+
+
+def initialize_postgres(context: str, namespace: str) -> None:
+    sql = f"""
+CREATE ROLE document NOLOGIN;
+CREATE ROLE go_document_reader LOGIN PASSWORD '{READER_PASSWORD}' NOINHERIT;
+GRANT CREATE ON SCHEMA public TO document;
+SET ROLE document;
+CREATE SEQUENCE public.hibernate_sequence AS bigint;
+CREATE TABLE public.policy_document(id bigint PRIMARY KEY, bytes bytea, policy_number varchar(255));
+INSERT INTO public.policy_document(id,bytes,policy_number) VALUES
+  (1,decode('255044462d333632','hex'),'SYN-362'),
+  (2,convert_to('2026/02/SYN-362.pdf','UTF8'),'SYN-362'),
+  (3,convert_to('2026/02/missing.pdf','UTF8'),'SYN-362'),
+  (4,''::bytea,'SYN-362'),
+  (5,decode('255044462d333632','hex'),'SYN-362');
+RESET ROLE;
+GRANT CONNECT ON DATABASE document TO go_document_reader;
+GRANT USAGE ON SCHEMA public TO go_document_reader;
+GRANT SELECT ON public.policy_document TO go_document_reader;
+"""
+    kubectl(
+        context,
+        namespace,
+        "exec",
+        "deployment/document-smoke-postgres",
+        "-i",
+        "--",
+        "psql",
+        "-X",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-U",
+        "postgres",
+        "-d",
+        "document",
+        input_text=sql,
+    )
+
+
+def initialize_minio(context: str, namespace: str) -> None:
+    port = loopback_port()
+    with ExitStack() as stack:
+        stack.enter_context(
+            OwnedPortForward(
+                PortForwardSpec(
+                    context=context,
+                    namespace=namespace,
+                    resource="service/document-smoke-minio",
+                    local_port=port,
+                    remote_port=9000,
+                ),
+                cwd=ROOT,
+                env=checks.safe_environment(),
+                startup_seconds=20,
+                teardown_seconds=5,
+                kubectl=os.environ.get("KUBECTL", "kubectl"),
+            )
+        )
+        with tempfile.TemporaryDirectory(prefix="document-smoke-mc-") as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "version": "10",
+                        "aliases": {
+                            "document": {
+                                "url": f"http://127.0.0.1:{port}",
+                                "accessKey": "fixture-admin",
+                                "secretKey": MINIO_ADMIN_PASSWORD,
+                                "api": "S3v4",
+                                "path": "auto",
+                            }
+                        },
+                    }
+                )
+            )
+            config.chmod(0o600)
+            prefix = ["mc", "--config-dir", str(root)]
+            checks.run([*prefix, "ready", "document"], timeout=30)
+            checks.run([*prefix, "mb", "--ignore-existing", "document/policies"])
+            policy = root / "policy.json"
+            policy.write_text(json.dumps(administration.POLICY))
+            checks.run(
+                [
+                    *prefix,
+                    "admin",
+                    "policy",
+                    "create",
+                    "document",
+                    administration.POLICY_NAME,
+                    str(policy),
+                ]
+            )
+            checks.run(
+                [*prefix, "admin", "user", "add", "document"],
+                input_text=f"{administration.USER}\n{MINIO_READER_PASSWORD}\n",
+            )
+            checks.run(
+                [
+                    *prefix,
+                    "admin",
+                    "policy",
+                    "attach",
+                    "document",
+                    administration.POLICY_NAME,
+                    "--user",
+                    administration.USER,
+                ]
+            )
+            fixture = root / "fixture.pdf"
+            fixture.write_bytes(b"%PDF-OBJECT-362")
+            checks.run([*prefix, "cp", str(fixture), "document/policies/2026/02/SYN-362.pdf"])
 
 
 def kubectl(
@@ -130,6 +396,30 @@ def main() -> int:
             "--field-manager=insurance-hub-document-smoke",
             "-f",
             "-",
+            input_text=yaml.safe_dump_all(
+                dependency_resources(namespace), explicit_start=True, sort_keys=False
+            ),
+        )
+        for dependency in ("document-smoke-postgres", "document-smoke-minio"):
+            kubectl(
+                context,
+                namespace,
+                "rollout",
+                "status",
+                f"deployment/{dependency}",
+                "--timeout=180s",
+                timeout=210,
+            )
+        initialize_postgres(context, namespace)
+        initialize_minio(context, namespace)
+        kubectl(
+            context,
+            namespace,
+            "apply",
+            "--server-side",
+            "--field-manager=insurance-hub-document-smoke",
+            "-f",
+            "-",
             input_text=yaml.safe_dump_all(items, explicit_start=True, sort_keys=False),
         )
         kubectl(
@@ -142,9 +432,12 @@ def main() -> int:
             timeout=210,
         )
         target = object.__new__(checks.Target)
+        target.environment = "local-dev"
         target.context = context
         target.namespace = namespace
+        target.data_namespace = namespace
         target.deployment = "local-dev-document-api"
+        target.business = "local-dev-document-api"
         target.management = "local-dev-document-api-management"
         target.kubectl_binary = os.environ.get("KUBECTL", "kubectl")
         target.configuration = {"mode": "direct"}
@@ -152,7 +445,7 @@ def main() -> int:
             kubectl(context, namespace, *args, "-o", "json") or "{}"
         )
         checks.verify(target, items)
-        print("document-disposable: Echo, health and denied Pod access passed")
+        print("document-disposable: lookup, dependencies, health and denied Pod access passed")
         return 0
     finally:
         if created:

@@ -9,10 +9,10 @@ import (
 	"syscall"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
-	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 	kittelemetry "github.com/igor-baiborodine/insurance-hub/libs/servicekit/telemetry"
 
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/logger"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/service"
 )
 
@@ -41,7 +41,7 @@ func runWith(
 ) error {
 	bootstrapLogger := logger.NewIdentity(
 		output,
-		config.DevelopmentIdentity(config.DefaultServiceName).Identity,
+		config.DevelopmentIdentity(config.DefaultServiceName),
 		slog.LevelInfo,
 	)
 	settings, err := loadConfig()
@@ -56,7 +56,11 @@ func runWith(
 		)
 		return err
 	}
-	serviceLogger := logger.NewIdentity(output, settings.Identity, settings.LogLevel)
+	serviceLogger := logger.NewIdentity(
+		output,
+		config.Identity{Identity: settings.Identity},
+		settings.LogLevel,
+	)
 	if settings.Enabled {
 		defer kittelemetry.InstallDiagnostics(serviceLogger)()
 	}

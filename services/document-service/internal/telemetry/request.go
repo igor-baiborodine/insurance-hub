@@ -14,7 +14,9 @@ import (
 	servicelogger "github.com/igor-baiborodine/insurance-hub/services/document-service/internal/logger"
 )
 
-// RequestObserver records only the fixed Echo operation and bounded transport outcomes.
+const OperationFindDocuments = "find_documents"
+
+// RequestObserver records only fixed Document operations and bounded transport outcomes.
 type RequestObserver struct {
 	logger   *slog.Logger
 	requests metric.Int64Counter
@@ -32,14 +34,14 @@ func NewRequestObserver(
 	}
 	meter := provider.Meter("insurance-hub/service")
 	requests, err := meter.Int64Counter(
-		"insurance_hub.service.requests",
+		"insurance_hub.document.requests",
 		metric.WithUnit("{request}"),
 	)
 	if err != nil {
 		return nil, errors.New("create request counter")
 	}
 	duration, err := meter.Float64Histogram(
-		"insurance_hub.service.request.duration",
+		"insurance_hub.document.request.duration",
 		metric.WithUnit("s"),
 	)
 	if err != nil {
@@ -57,23 +59,30 @@ type Request struct {
 	route     string
 }
 
-func (observer *RequestObserver) StartGRPC(ctx context.Context) *Request {
+func (observer *RequestObserver) StartGRPC(ctx context.Context, operation string) *Request {
 	return &Request{
 		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),
-		transport: "grpc", operation: "echo",
+		transport: "grpc", operation: boundedOperation(operation),
 	}
 }
 
 // StartHTTP begins a bounded HTTP transport observation after trace extraction.
 func (observer *RequestObserver) StartHTTP(ctx context.Context, route string) *Request {
 	operation := "unknown"
-	if route == "POST /v1/example/echo" {
-		operation = "echo"
+	if route == "GET /documents/{policyNumber}" {
+		operation = OperationFindDocuments
 	}
 	return &Request{
 		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),
 		transport: "http", operation: operation, route: route,
 	}
+}
+
+func boundedOperation(operation string) string {
+	if operation == OperationFindDocuments {
+		return operation
+	}
+	return "unknown"
 }
 
 // Finish runs at the transport End event, including decoding and response-size failures.
@@ -98,9 +107,9 @@ func (request *Request) Finish(ctx context.Context, status string) {
 	}
 	elapsed := time.Since(request.started)
 	attrs := []attribute.KeyValue{
-		attribute.String("insurance_hub.service.operation", request.operation),
-		attribute.String("insurance_hub.service.transport", request.transport),
-		attribute.String("insurance_hub.service.outcome", outcome),
+		attribute.String("insurance_hub.document.operation", request.operation),
+		attribute.String("insurance_hub.document.transport", request.transport),
+		attribute.String("insurance_hub.document.outcome", outcome),
 		attribute.String("rpc.response.status_code", status),
 	}
 	request.span.SetAttributes(attrs...)
@@ -140,10 +149,10 @@ func (request *Request) FinishHTTP(ctx context.Context, status int) {
 	}
 	elapsed := time.Since(request.started)
 	attrs := []attribute.KeyValue{
-		attribute.String("insurance_hub.service.operation", request.operation),
-		attribute.String("insurance_hub.service.transport", request.transport),
-		attribute.String("insurance_hub.service.route", request.route),
-		attribute.String("insurance_hub.service.outcome", outcome),
+		attribute.String("insurance_hub.document.operation", request.operation),
+		attribute.String("insurance_hub.document.transport", request.transport),
+		attribute.String("insurance_hub.document.route", request.route),
+		attribute.String("insurance_hub.document.outcome", outcome),
 		attribute.Int("http.response.status_code", status),
 	}
 	request.span.SetAttributes(attrs...)

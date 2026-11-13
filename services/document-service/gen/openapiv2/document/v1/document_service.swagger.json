@@ -1,12 +1,12 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "document/v1/example_service.proto",
+    "title": "document/v1/document_service.proto",
     "version": "version not set"
   },
   "tags": [
     {
-      "name": "ExampleService"
+      "name": "DocumentService"
     }
   ],
   "consumes": [
@@ -16,23 +16,28 @@
     "application/json"
   ],
   "paths": {
-    "/v1/example/echo": {
-      "post": {
-        "operationId": "ExampleService_Echo",
+    "/documents/{policyNumber}": {
+      "get": {
+        "operationId": "DocumentService_FindDocuments",
         "responses": {
           "200": {
-            "description": "The unchanged Echo message.",
+            "description": "All retrievable documents for the exact policy number.",
             "schema": {
-              "$ref": "#/definitions/v1EchoResponse"
+              "$ref": "#/definitions/v1FindDocumentsResponse"
             },
             "examples": {
               "application/json": {
-                "message": "hello"
+                "documents": [
+                  {
+                    "policyNumber": "SYN-362",
+                    "content": "JVBERi0zNjI="
+                  }
+                ]
               }
             }
           },
           "400": {
-            "description": "The request is invalid.",
+            "description": "The path is malformed.",
             "schema": {
               "$ref": "#/definitions/rpcStatus"
             },
@@ -44,41 +49,15 @@
               }
             }
           },
-          "406": {
-            "description": "The requested response media type is not available.",
-            "schema": {
-              "$ref": "#/definitions/rpcStatus"
-            },
-            "examples": {
-              "application/json": {
-                "code": 3,
-                "message": "not acceptable",
-                "details": []
-              }
-            }
-          },
-          "413": {
-            "description": "The request body is too large.",
+          "429": {
+            "description": "The response budget or lookup concurrency limit was exceeded.",
             "schema": {
               "$ref": "#/definitions/rpcStatus"
             },
             "examples": {
               "application/json": {
                 "code": 8,
-                "message": "request body too large",
-                "details": []
-              }
-            }
-          },
-          "415": {
-            "description": "The request media type is not supported.",
-            "schema": {
-              "$ref": "#/definitions/rpcStatus"
-            },
-            "examples": {
-              "application/json": {
-                "code": 3,
-                "message": "unsupported media type",
+                "message": "response limit exceeded",
                 "details": []
               }
             }
@@ -110,7 +89,7 @@
             }
           },
           "503": {
-            "description": "The RPC service is unavailable.",
+            "description": "A required dependency is unavailable.",
             "schema": {
               "$ref": "#/definitions/rpcStatus"
             },
@@ -123,7 +102,7 @@
             }
           },
           "504": {
-            "description": "The RPC deadline was exceeded.",
+            "description": "The request deadline was exceeded.",
             "schema": {
               "$ref": "#/definitions/rpcStatus"
             },
@@ -138,19 +117,14 @@
         },
         "parameters": [
           {
-            "name": "body",
-            "in": "body",
+            "name": "policyNumber",
+            "in": "path",
             "required": true,
-            "schema": {
-              "$ref": "#/definitions/v1EchoRequest"
-            }
+            "type": "string"
           }
         ],
         "tags": [
-          "ExampleService"
-        ],
-        "consumes": [
-          "application/json"
+          "DocumentService"
         ],
         "produces": [
           "application/json"
@@ -187,19 +161,27 @@
         }
       }
     },
-    "v1EchoRequest": {
+    "v1Document": {
       "type": "object",
       "properties": {
-        "message": {
+        "policyNumber": {
           "type": "string"
+        },
+        "content": {
+          "type": "string",
+          "format": "byte"
         }
       }
     },
-    "v1EchoResponse": {
+    "v1FindDocumentsResponse": {
       "type": "object",
       "properties": {
-        "message": {
-          "type": "string"
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Document"
+          }
         }
       }
     }

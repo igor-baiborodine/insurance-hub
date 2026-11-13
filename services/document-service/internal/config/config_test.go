@@ -41,15 +41,15 @@ func TestLoad_Defaults(t *testing.T) {
 	if got.ShutdownTimeout != 10*time.Second {
 		t.Errorf("ShutdownTimeout = %v, want 10s", got.ShutdownTimeout)
 	}
-	if got.RequestTimeout != 8*time.Second || got.ProbeTimeout != 2*time.Second {
+	if got.RequestTimeout != 4*time.Second || got.ProbeTimeout != 2*time.Second {
 		t.Errorf(
-			"runtime timeouts = (%v, %v), want (8s, 2s)",
+			"runtime timeouts = (%v, %v), want (4s, 2s)",
 			got.RequestTimeout,
 			got.ProbeTimeout,
 		)
 	}
-	if got.MaxReceiveBytes != 1048576 || got.MaxSendBytes != 8388608 {
-		t.Errorf("gRPC limits = %+v, want 1048576 receive and 8388608 send", got.GRPC)
+	if got.MaxReceiveBytes != defaultGRPCBytes || got.MaxSendBytes != defaultGRPCBytes {
+		t.Errorf("gRPC limits = %+v, want 24 MiB send and receive", got.GRPC)
 	}
 	if got.HTTPMaxHeaderBytes != 16384 || got.HTTPMaxBodyBytes != 4096 ||
 		got.ReadHeaderTimeout != 5*time.Second || got.ReadTimeout != 10*time.Second ||
@@ -143,7 +143,7 @@ func TestLoad_RejectsHTTPBoundsRelationshipsAndListenerCollisions(t *testing.T) 
 		},
 		{
 			"shutdown omits exporter reserve",
-			map[string]string{kitconfig.EnvShutdownTimeout: "9s"},
+			map[string]string{kitconfig.EnvShutdownTimeout: "5s"},
 			kitconfig.EnvShutdownTimeout,
 		},
 		{
@@ -280,7 +280,7 @@ func TestLoad_NonDevelopmentVersionPolicy(t *testing.T) {
 func TestLoad_GRPCFailurePreservesFirstErrorOrder(t *testing.T) {
 	// given
 	values := map[string]string{
-		kitconfig.EnvGRPCMaxReceiveBytes: "16777217",
+		kitconfig.EnvGRPCMaxReceiveBytes: "25165825",
 		kitconfig.EnvGRPCMaxSendBytes:    "0",
 	}
 
@@ -498,8 +498,17 @@ func TestLoad_AllowsEmptyEndpointWhenTelemetryIsDisabled(t *testing.T) {
 }
 
 func mapLookup(values map[string]string) lookupEnv {
+	merged := map[string]string{
+		databaseURLSetting:     "postgres://reader:synthetic@127.0.0.1:5432/document?sslmode=disable",
+		objectEndpointSetting:  "http://127.0.0.1:9000",
+		objectAccessKeySetting: "synthetic-access",
+		objectSecretKeySetting: "synthetic-secret",
+	}
+	for name, value := range values {
+		merged[name] = value
+	}
 	return func(name string) (string, bool) {
-		value, exists := values[name]
+		value, exists := merged[name]
 		return value, exists
 	}
 }
@@ -526,7 +535,7 @@ func TestLoad_RuntimeBoundsAndIdentity(t *testing.T) {
 		{"control character", kitconfig.EnvServiceInstanceID, "private-marker\n"},
 		{"zero request timeout", kitconfig.EnvRequestTimeout, "0s"},
 		{"negative probe timeout", kitconfig.EnvProbeTimeout, "-1s"},
-		{"oversized receive limit", kitconfig.EnvGRPCMaxReceiveBytes, "16777217"},
+		{"oversized receive limit", kitconfig.EnvGRPCMaxReceiveBytes, "25165825"},
 		{"zero send limit", kitconfig.EnvGRPCMaxSendBytes, "0"},
 		{"export exceeds shutdown", kitconfig.EnvShutdownTimeout, "1s"},
 	}

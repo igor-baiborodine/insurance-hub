@@ -37,6 +37,7 @@ def test_main_rejects_foreign_target_before_command(
 
 
 def test_prepared_resources_rejects_mismatched_source() -> None:
+    # when / then
     with pytest.raises(disposable_deployment.DisposableError, match="source identity"):
         disposable_deployment.prepared_resources(
             "",
@@ -47,14 +48,19 @@ def test_prepared_resources_rejects_mismatched_source() -> None:
 
 
 def test_prepared_resources_rewrites_only_owned_identity() -> None:
+    # given
     rendered = checks.render("local-dev")
     source = "a" * 40
+
+    # when
     items = disposable_deployment.prepared_resources(
         rendered,
         "document-smoke-12345678",
         "insurance-hub-document-api:1.0.0-local.aaaaaaaaaaaa",
         source,
     )
+
+    # then
     assert {item["metadata"]["namespace"] for item in items} == {"document-smoke-12345678"}
     deployment = checks.resource(items, "Deployment", "local-dev-document-api")
     assert deployment["metadata"]["labels"]["app.kubernetes.io/version"] == "git-aaaaaaaaaaaa"
@@ -62,6 +68,9 @@ def test_prepared_resources_rewrites_only_owned_identity() -> None:
 
 @pytest.mark.integration
 def test_document_disposable_deployment() -> None:
+    # given
     assert os.environ.get("IMAGE_REF")
     assert os.environ.get("QUALIFICATION_SOURCE_REVISION")
+
+    # when / then
     assert disposable_deployment.main() == 0
