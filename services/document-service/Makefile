@@ -310,11 +310,11 @@ help: ## Show the explicit setup and validation entry points without installing 
 .PHONY: build-migrator build-integration-server migration resource-inspect resource-ensure resource-verify \
 	resource-test-fast resource-test-integration check-migration-schema
 
-build-migrator: verify-tools ## Build explicit administrative executable outside the API image
+build-migrator: ## Build explicit administrative executable outside the API image
 	@test -n "$(strip $(MIGRATOR_OUTPUT))" || { echo 'MIGRATOR_OUTPUT is required' >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(MIGRATOR_OUTPUT)" ./cmd/migrate
 
-build-integration-server: verify-tools ## Build the API only for owned disposable dependency smoke
+build-integration-server: ## Build the API only for owned disposable dependency smoke
 	@test -n "$(strip $(SERVER_OUTPUT))" || { echo 'SERVER_OUTPUT is required' >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(SERVER_OUTPUT)" ./cmd/server
 
