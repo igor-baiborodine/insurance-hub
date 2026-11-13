@@ -12,9 +12,9 @@ from unittest.mock import Mock, patch
 
 import document_deployment_checks as checks
 import pytest
-from scripts.go.service import deployment as lifecycle
 
 import deployment
+from scripts.go.service import deployment as lifecycle
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -238,7 +238,29 @@ def test_preflight_accepts_declared_previous_document_identity() -> None:
     use_previous_identity(actual, previous_image)
 
     # when / then
-    with patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True):
+    with (
+        patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True),
+        patch.object(checks, "predecessor_resources", return_value={}),
+    ):
+        target.live(items, require_deployment=False)
+
+
+def test_preflight_accepts_source_verified_previous_configuration() -> None:
+    # given
+    items = rendered_resources()
+    previous = deepcopy(items)
+    previous_config = next(item for item in previous if item["kind"] == "ConfigMap")
+    previous_config["data"]["REQUEST_TIMEOUT"] = "8s"
+    target, actual = target_with_live_resources(previous)
+    previous_image = "insurance-hub-document-api:1.0.0-local.abcdef123456"
+    use_previous_identity(actual, previous_image)
+    indexed = {(str(item["kind"]), str(item["metadata"]["name"])): item for item in previous}
+
+    # when / then
+    with (
+        patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True),
+        patch.object(checks, "predecessor_resources", return_value=indexed),
+    ):
         target.live(items, require_deployment=False)
 
 
