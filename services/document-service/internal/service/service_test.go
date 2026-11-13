@@ -50,6 +50,7 @@ func TestRun_ComposesHTTPToActualRPCAndTracksDependencyReadiness(t *testing.T) {
 		context.Context,
 		config.Database,
 		int,
+		int,
 	) (application.MetadataReader, managedDependency, error) {
 		return metadataReaderFunc(func(
 			_ context.Context,

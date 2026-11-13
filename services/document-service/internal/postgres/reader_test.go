@@ -43,6 +43,7 @@ func (connection *fakeReaderConnection) Release() { connection.released = true }
 type fakeRows struct {
 	rows    [][]any
 	index   int
+	scans   int
 	scanErr error
 	err     error
 }
@@ -64,6 +65,7 @@ func (rows *fakeRows) Next() bool {
 }
 
 func (rows *fakeRows) Scan(dest ...any) error {
+	rows.scans++
 	if rows.scanErr != nil {
 		return rows.scanErr
 	}
@@ -83,16 +85,24 @@ func TestPoolAndReaderRejectInvalidDependencies(t *testing.T) {
 		t.Fatal("missing readiness pool accepted")
 	}
 	for _, test := range []struct {
-		acquire time.Duration
-		query   time.Duration
-		maximum int
+		acquire         time.Duration
+		query           time.Duration
+		documentMaximum int
+		responseMaximum int
 	}{
-		{time.Second, time.Second, 1},
-		{0, time.Second, 1},
-		{time.Second, 0, 1},
-		{time.Second, time.Second, 0},
+		{time.Second, time.Second, 1, 2},
+		{0, time.Second, 1, 2},
+		{time.Second, 0, 1, 2},
+		{time.Second, time.Second, 0, 2},
+		{time.Second, time.Second, 1, 0},
 	} {
-		if _, err := NewReader(nil, test.acquire, test.query, test.maximum); err == nil {
+		if _, err := NewReader(
+			nil,
+			test.acquire,
+			test.query,
+			test.documentMaximum,
+			test.responseMaximum,
+		); err == nil {
 			t.Fatal("invalid reader settings accepted")
 		}
 	}
@@ -133,6 +143,7 @@ func TestReaderFindByPolicyNumberMapsRowsAndFailures(t *testing.T) {
 		time.Second,
 		time.Second,
 		8,
+		16,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +165,7 @@ func TestReaderFindByPolicyNumberMapsRowsAndFailures(t *testing.T) {
 		{"oversize", fakeReaderPool{connection: &fakeReaderConnection{rows: &fakeRows{rows: [][]any{{"SYN-362", []byte(nil), 9, false}}}}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			reader, err := newReader(test.pool, time.Second, time.Second, 8)
+			reader, err := newReader(test.pool, time.Second, time.Second, 8, 16)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -165,5 +176,31 @@ func TestReaderFindByPolicyNumberMapsRowsAndFailures(t *testing.T) {
 				t.Fatal("reader failure accepted")
 			}
 		})
+	}
+}
+
+func TestReaderFindByPolicyNumberStopsAtAggregateStoredByteLimit(t *testing.T) {
+	rows := &fakeRows{rows: [][]any{
+		{"SYN-362", []byte("12345"), 5, false},
+		{"SYN-362", []byte("67890"), 5, false},
+		{"SYN-362", []byte("later"), 5, false},
+	}}
+	reader, err := newReader(
+		fakeReaderPool{connection: &fakeReaderConnection{rows: rows}},
+		time.Second,
+		time.Second,
+		8,
+		8,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = reader.FindByPolicyNumber(context.Background(), "SYN-362")
+	if !errors.Is(err, application.ErrResponseLimit) {
+		t.Fatalf("error = %v", err)
+	}
+	if rows.scans != 2 {
+		t.Fatalf("scanned rows = %d, want 2", rows.scans)
 	}
 }

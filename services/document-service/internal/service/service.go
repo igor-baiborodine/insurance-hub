@@ -75,7 +75,7 @@ type managedDependency interface {
 type dependencies struct {
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newDatabase    func(context.Context, config.Database, int) (application.MetadataReader, managedDependency, error)
+	newDatabase    func(context.Context, config.Database, int, int) (application.MetadataReader, managedDependency, error)
 	newObjectStore func(config.ObjectStore, int) (application.ContentReader, managedDependency, error)
 	newLookup      func(application.MetadataReader, application.ContentReader, int, int) (*application.FindDocuments, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.FindDocumentsExecutor) (grpcServer, error)
@@ -127,6 +127,7 @@ func newDatabaseDependency(
 	ctx context.Context,
 	settings config.Database,
 	maximumDocumentBytes int,
+	maximumResponseBytes int,
 ) (application.MetadataReader, managedDependency, error) {
 	pool, err := postgres.OpenPool(ctx, settings)
 	if err != nil {
@@ -137,6 +138,7 @@ func newDatabaseDependency(
 		settings.AcquireTimeout,
 		settings.QueryTimeout,
 		maximumDocumentBytes,
+		maximumResponseBytes,
 	)
 	if err != nil {
 		pool.Close()
@@ -240,6 +242,7 @@ func run(
 		startupCtx,
 		settings.Database,
 		settings.MaximumDocumentBytes,
+		settings.MaximumResponseBytes,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize Document database: %w", err))

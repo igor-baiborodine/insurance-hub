@@ -27,6 +27,7 @@ type Reader struct {
 	acquireTimeout       time.Duration
 	queryTimeout         time.Duration
 	maximumDocumentBytes int
+	maximumResponseBytes int
 }
 
 type readerPool interface {
@@ -52,11 +53,13 @@ func NewReader(
 	acquireTimeout time.Duration,
 	queryTimeout time.Duration,
 	maximumDocumentBytes int,
+	maximumResponseBytes int,
 ) (*Reader, error) {
 	if pool == nil {
 		return nil, errors.New("create PostgreSQL reader: pool is required")
 	}
-	if acquireTimeout <= 0 || queryTimeout <= 0 || maximumDocumentBytes <= 0 {
+	if acquireTimeout <= 0 || queryTimeout <= 0 || maximumDocumentBytes <= 0 ||
+		maximumResponseBytes <= 0 {
 		return nil, errors.New("create PostgreSQL reader: limits must be positive")
 	}
 	return newReader(
@@ -64,6 +67,7 @@ func NewReader(
 		acquireTimeout,
 		queryTimeout,
 		maximumDocumentBytes,
+		maximumResponseBytes,
 	)
 }
 
@@ -72,16 +76,18 @@ func newReader(
 	acquireTimeout time.Duration,
 	queryTimeout time.Duration,
 	maximumDocumentBytes int,
+	maximumResponseBytes int,
 ) (*Reader, error) {
 	if pool == nil {
 		return nil, errors.New("create PostgreSQL reader: pool is required")
 	}
-	if acquireTimeout <= 0 || queryTimeout <= 0 || maximumDocumentBytes <= 0 {
+	if acquireTimeout <= 0 || queryTimeout <= 0 || maximumDocumentBytes <= 0 ||
+		maximumResponseBytes <= 0 {
 		return nil, errors.New("create PostgreSQL reader: limits must be positive")
 	}
 	return &Reader{
 		pool: pool, acquireTimeout: acquireTimeout, queryTimeout: queryTimeout,
-		maximumDocumentBytes: maximumDocumentBytes,
+		maximumDocumentBytes: maximumDocumentBytes, maximumResponseBytes: maximumResponseBytes,
 	}, nil
 }
 
@@ -114,6 +120,7 @@ func (reader *Reader) FindByPolicyNumber(
 	defer rows.Close()
 
 	documents := make([]domain.StoredDocument, 0)
+	totalStoredBytes := 0
 	for rows.Next() {
 		var (
 			rowPolicyNumber string
@@ -131,6 +138,12 @@ func (reader *Reader) FindByPolicyNumber(
 		}
 		if !storedNull && storedSize > reader.maximumDocumentBytes {
 			return nil, application.ErrResponseLimit
+		}
+		if !storedNull && storedSize > reader.maximumResponseBytes-totalStoredBytes {
+			return nil, application.ErrResponseLimit
+		}
+		if !storedNull {
+			totalStoredBytes += storedSize
 		}
 		documents = append(documents, domain.StoredDocument{
 			PolicyNumber: rowPolicyNumber,
