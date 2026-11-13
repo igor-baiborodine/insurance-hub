@@ -18,6 +18,7 @@ ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 import document_deployment_checks as checks  # noqa: E402
+from scripts.go.service.configuration import service_record, target_record  # noqa: E402
 from scripts.python.process_runner import CommandError  # noqa: E402
 
 
@@ -80,11 +81,28 @@ def wait_for_namespace_absence(context: str, namespace: str) -> None:
     raise DisposableError("disposable namespace cleanup exceeded 90 seconds")
 
 
+def qualification_target() -> tuple[str, str]:
+    record = service_record(ROOT, "document")
+    target = target_record(ROOT, record, "local-dev")
+    require(target["mode"] == "direct", "qualification target must use direct ownership")
+    context = target["context"]
+    cluster = target.get("kindCluster")
+    require(isinstance(cluster, str) and bool(cluster), "qualification Kind cluster is missing")
+    require(
+        os.environ.get("QUALIFICATION_CONTEXT", context) == context,
+        "qualification context differs from the catalog",
+    )
+    require(
+        os.environ.get("QUALIFICATION_KIND_CLUSTER", cluster) == cluster,
+        "qualification Kind cluster differs from the catalog",
+    )
+    return context, cluster
+
+
 def main() -> int:
     image = os.environ.get("IMAGE_REF", "")
     source_revision = os.environ.get("QUALIFICATION_SOURCE_REVISION", "")
-    context = os.environ.get("QUALIFICATION_CONTEXT", "kind-local-dev-insurance-hub")
-    cluster = os.environ.get("QUALIFICATION_KIND_CLUSTER", "local-dev-insurance-hub")
+    context, cluster = qualification_target()
     namespace = "document-smoke-" + secrets.token_hex(4)
     rendered = checks.render("local-dev")
     items = prepared_resources(rendered, namespace, image, source_revision)
