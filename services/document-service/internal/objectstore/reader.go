@@ -147,6 +147,9 @@ func (reader *Reader) Read(
 	defer func() { _ = object.Close() }()
 	info, err := object.Stat()
 	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return []byte{}, true, nil
+		}
 		if contextErr := ctx.Err(); contextErr != nil {
 			return nil, false, contextErr
 		}

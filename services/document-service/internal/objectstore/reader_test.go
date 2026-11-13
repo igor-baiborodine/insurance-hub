@@ -2,8 +2,19 @@ package objectstore
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
+	"fmt"
+	"io"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -165,4 +176,112 @@ func TestReader_Read_PreservesInlineAndOmitsEmptyStoredBytes(t *testing.T) {
 	if emptyErr != nil || emptyPresent {
 		t.Fatalf("empty present = %t, error = %v", emptyPresent, emptyErr)
 	}
+}
+
+func TestReader_Read_PreservesZeroByteObjectAndRejectsOversize(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Query().Has("location") {
+			writer.Header().Set("Content-Type", "application/xml")
+			_, _ = io.WriteString(
+				writer,
+				`<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">us-east-1</LocationConstraint>`,
+			)
+			return
+		}
+		var content []byte
+		switch request.URL.Path {
+		case "/policies/2026/02/zero.pdf":
+			content = []byte{}
+		case "/policies/2026/02/oversize.pdf":
+			content = []byte("12345")
+		default:
+			http.NotFound(writer, request)
+			return
+		}
+		writer.Header().Set("Content-Length", fmt.Sprint(len(content)))
+		writer.Header().Set("ETag", `"synthetic"`)
+		writer.Header().Set("Last-Modified", "Wed, 21 Oct 2015 07:28:00 GMT")
+		if request.Method == http.MethodGet {
+			_, _ = writer.Write(content)
+		}
+	}))
+	defer server.Close()
+	endpoint, _ := url.Parse(server.URL)
+	reader, err := NewReader(config.ObjectStore{
+		Endpoint: endpoint, Bucket: "policies", FetchTimeout: time.Second,
+	}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	content, present, err := reader.Read(
+		context.Background(),
+		[]byte("2026/02/zero.pdf"),
+	)
+	if err != nil || !present || content == nil || len(content) != 0 {
+		t.Fatalf("zero-byte object = (%v, %t, %v)", content, present, err)
+	}
+	if _, _, err := reader.Read(
+		context.Background(),
+		[]byte("2026/02/oversize.pdf"),
+	); !errors.Is(err, application.ErrResponseLimit) {
+		t.Fatalf("oversize error = %v", err)
+	}
+}
+
+func TestReader_Read_OmitsObjectWhenConfiguredTrustIsWrong(t *testing.T) {
+	target := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("wrong trust reached object server")
+	}))
+	defer target.Close()
+	caFile := filepath.Join(t.TempDir(), "wrong-ca.crt")
+	certificate := newWrongAuthority(t)
+	if err := os.WriteFile(caFile, certificate, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, _ := url.Parse(target.URL)
+	reader, err := NewReader(config.ObjectStore{
+		Endpoint: endpoint, Bucket: "policies", CAFile: caFile, FetchTimeout: time.Second,
+	}, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	content, present, err := reader.Read(
+		context.Background(),
+		[]byte("2026/02/untrusted.pdf"),
+	)
+	if err != nil || present || content != nil {
+		t.Fatalf("wrong-trust object = (%v, %t, %v)", content, present, err)
+	}
+}
+
+func newWrongAuthority(t *testing.T) []byte {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(362),
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	encoded, err := x509.CreateCertificate(
+		rand.Reader,
+		template,
+		template,
+		&key.PublicKey,
+		key,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: encoded})
 }
