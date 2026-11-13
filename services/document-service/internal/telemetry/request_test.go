@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewRequestObserver_RequiresLoggerAndProvider(t *testing.T) {
+	// given
 	provider := metricnoop.NewMeterProvider()
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 	for _, test := range []struct {
@@ -23,6 +24,7 @@ func TestNewRequestObserver_RequiresLoggerAndProvider(t *testing.T) {
 		{name: "missing provider", logger: logger},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// when / then
 			if _, err := NewRequestObserver(test.logger, test.provider); err == nil {
 				t.Fatal("missing observer dependency accepted")
 			}
@@ -31,6 +33,7 @@ func TestNewRequestObserver_RequiresLoggerAndProvider(t *testing.T) {
 }
 
 func TestRequestObserver_RecordsBoundedTransportOutcomes(t *testing.T) {
+	// given
 	var output bytes.Buffer
 	observer, err := NewRequestObserver(
 		slog.New(slog.NewJSONHandler(&output, nil)),
@@ -61,6 +64,7 @@ func TestRequestObserver_RecordsBoundedTransportOutcomes(t *testing.T) {
 		{status: "INTERNAL", normalized: "INTERNAL", outcome: "internal_error", level: "ERROR"},
 		{status: "private-status-marker", normalized: "UNKNOWN", outcome: "internal_error", level: "ERROR"},
 	} {
+		// when
 		observer.StartGRPC(ctx, OperationFindDocuments).Finish(ctx, test.status)
 		expected = append(expected, expectedRecord{
 			transport: "grpc", operation: "find_documents", outcome: test.outcome,
@@ -78,6 +82,7 @@ func TestRequestObserver_RecordsBoundedTransportOutcomes(t *testing.T) {
 		{status: 504, outcome: "deadline_exceeded", level: "WARN"},
 		{status: 500, outcome: "internal_error", level: "ERROR"},
 	} {
+		// when
 		observer.StartHTTP(ctx, "GET /documents/{policyNumber}").
 			FinishHTTP(ctx, test.status)
 		expected = append(expected, expectedRecord{
@@ -85,12 +90,15 @@ func TestRequestObserver_RecordsBoundedTransportOutcomes(t *testing.T) {
 			status: float64(test.status), level: test.level,
 		})
 	}
+
+	// when
 	observer.StartHTTP(ctx, "private-route-marker").FinishHTTP(ctx, 404)
 	expected = append(expected, expectedRecord{
 		transport: "http", operation: "unknown", outcome: "invalid_request",
 		status: float64(404), level: "INFO",
 	})
 
+	// then
 	decoder := json.NewDecoder(&output)
 	for index, want := range expected {
 		var record map[string]any

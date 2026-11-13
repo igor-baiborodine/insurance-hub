@@ -116,6 +116,7 @@ func TestHandler_PreservesEmptyCollectionAndSafeFailures(t *testing.T) {
 }
 
 func TestHandler_RejectsOversizedJSONResponse(t *testing.T) {
+	// given
 	client := &fakeClient{find: func(
 		context.Context,
 		*documentv1.FindDocumentsRequest,
@@ -128,11 +129,13 @@ func TestHandler_RejectsOversizedJSONResponse(t *testing.T) {
 	handler := newTestHandlerWithResponseLimit(t, client, 32)
 	response := httptest.NewRecorder()
 
+	// when
 	handler.ServeHTTP(
 		response,
 		httptest.NewRequest(http.MethodGet, "/documents/SYN-362", nil),
 	)
 
+	// then
 	if response.Code != http.StatusTooManyRequests ||
 		strings.TrimSpace(response.Body.String()) !=
 			`{"code":8,"message":"response limit exceeded","details":[]}` {
@@ -179,6 +182,7 @@ func TestHandler_RejectsUnsupportedRoutesAndDecodedSlash(t *testing.T) {
 }
 
 func newTestHandler(t *testing.T, client documentv1.DocumentServiceClient) http.Handler {
+	t.Helper()
 	return newTestHandlerWithResponseLimit(t, client, 1024*1024)
 }
 

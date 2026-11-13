@@ -295,7 +295,10 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
 
 
 def test_non_race_test_target_passes_without_mutation(tooling: Tooling) -> None:
+    # given
     fixture = new_fixture(tooling, "test-baseline")
+
+    # when / then
     run_target(tooling, fixture, "test-baseline", "test")
 
 

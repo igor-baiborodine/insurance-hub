@@ -97,6 +97,7 @@ func (client *fakeMinioClient) ListObjects(
 }
 
 func TestReader_RejectsInvalidSettingsAndLimitsInlineContent(t *testing.T) {
+	// when / then
 	if _, err := NewReader(config.ObjectStore{}, 1); err == nil {
 		t.Fatal("invalid object-store settings accepted")
 	}
@@ -117,15 +118,23 @@ func TestReader_RejectsInvalidSettingsAndLimitsInlineContent(t *testing.T) {
 }
 
 func TestReader_ConstructsAndChecksBoundedObjectFailures(t *testing.T) {
+	// given
 	httpEndpoint, _ := url.Parse("http://127.0.0.1:9000")
+
+	// when
 	reader, err := NewReader(config.ObjectStore{
 		Endpoint: httpEndpoint, Bucket: "policies", FetchTimeout: time.Second,
 	}, 1024)
+	// then
 	if err != nil {
 		t.Fatal(err)
 	}
 	reader.Close()
+
+	// given
 	httpsEndpoint, _ := url.Parse("https://minio.example")
+
+	// when / then
 	if _, err := NewReader(config.ObjectStore{
 		Endpoint: httpsEndpoint, Bucket: "policies", FetchTimeout: time.Second,
 	}, 1024); err == nil {
@@ -136,24 +145,34 @@ func TestReader_ConstructsAndChecksBoundedObjectFailures(t *testing.T) {
 	reader = &Reader{
 		client: fake, bucket: "policies", maximumBytes: 1024, fetchTimeout: time.Second,
 	}
+
+	// when / then
 	if err := reader.CheckReadAccess(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	fake.items = []minio.ObjectInfo{{Err: errors.New("private")}}
+
+	// when / then
 	if err := reader.CheckReadAccess(context.Background()); err == nil {
 		t.Fatal("object-store readiness failure accepted")
 	}
 	fake.items = nil
 	fake.getErr = errors.New("missing")
+
+	// when
 	content, present, err := reader.Read(
 		context.Background(),
 		[]byte("2026/02/SYN-362.pdf"),
 	)
+
+	// then
 	if err != nil || present || content != nil {
 		t.Fatalf("missing object = (%q, %t, %v)", content, present, err)
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
+
+	// when / then
 	if _, _, err := reader.Read(
 		cancelled,
 		[]byte("2026/02/SYN-362.pdf"),
@@ -183,6 +202,7 @@ func TestReader_Read_PreservesInlineAndOmitsEmptyStoredBytes(t *testing.T) {
 }
 
 func TestReader_Read_PreservesZeroByteObjectAndRejectsOversize(t *testing.T) {
+	// given
 	server := httptest.NewServer(
 		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			if request.URL.Query().Has("location") {
@@ -221,13 +241,18 @@ func TestReader_Read_PreservesZeroByteObjectAndRejectsOversize(t *testing.T) {
 	}
 	defer reader.Close()
 
+	// when
 	content, present, err := reader.Read(
 		context.Background(),
 		[]byte("2026/02/zero.pdf"),
 	)
+
+	// then
 	if err != nil || !present || content == nil || len(content) != 0 {
 		t.Fatalf("zero-byte object = (%v, %t, %v)", content, present, err)
 	}
+
+	// when / then
 	if _, _, err := reader.Read(
 		context.Background(),
 		[]byte("2026/02/oversize.pdf"),
@@ -237,6 +262,7 @@ func TestReader_Read_PreservesZeroByteObjectAndRejectsOversize(t *testing.T) {
 }
 
 func TestReader_Read_OmitsObjectWhenConfiguredTrustIsWrong(t *testing.T) {
+	// given
 	target := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("wrong trust reached object server")
 	}))
@@ -255,10 +281,13 @@ func TestReader_Read_OmitsObjectWhenConfiguredTrustIsWrong(t *testing.T) {
 	}
 	defer reader.Close()
 
+	// when
 	content, present, err := reader.Read(
 		context.Background(),
 		[]byte("2026/02/untrusted.pdf"),
 	)
+
+	// then
 	if err != nil || present || content != nil {
 		t.Fatalf("wrong-trust object = (%v, %t, %v)", content, present, err)
 	}

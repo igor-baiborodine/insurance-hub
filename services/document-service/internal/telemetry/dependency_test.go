@@ -14,7 +14,8 @@ import (
 )
 
 func TestDependencyObserver_RecordsOnlyBoundedOutcomes(t *testing.T) {
-	for _, test := range []struct {
+	// given
+	tests := []struct {
 		name       string
 		dependency string
 		result     string
@@ -22,12 +23,38 @@ func TestDependencyObserver_RecordsOnlyBoundedOutcomes(t *testing.T) {
 		want       string
 	}{
 		{"postgres success", DependencyPostgreSQL, DependencyResultSuccess, nil, "success"},
-		{"object fetch failed", DependencyObjectStore, DependencyResultFetchFailed, nil, "fetch_failed"},
-		{"cancelled", DependencyPostgreSQL, DependencyResultSuccess, context.Canceled, "cancelled"},
-		{"deadline", DependencyObjectStore, DependencyResultSuccess, context.DeadlineExceeded, "deadline_exceeded"},
-		{"safe error", "private-dependency", DependencyResultSuccess, errors.New("private-error"), "error"},
-	} {
+		{
+			"object fetch failed",
+			DependencyObjectStore,
+			DependencyResultFetchFailed,
+			nil,
+			"fetch_failed",
+		},
+		{
+			"cancelled",
+			DependencyPostgreSQL,
+			DependencyResultSuccess,
+			context.Canceled,
+			"cancelled",
+		},
+		{
+			"deadline",
+			DependencyObjectStore,
+			DependencyResultSuccess,
+			context.DeadlineExceeded,
+			"deadline_exceeded",
+		},
+		{
+			"safe error",
+			"private-dependency",
+			DependencyResultSuccess,
+			errors.New("private-error"),
+			"error",
+		},
+	}
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			var output bytes.Buffer
 			observer, err := NewDependencyObserver(
 				slog.New(slog.NewJSONHandler(&output, nil)),
@@ -38,7 +65,11 @@ func TestDependencyObserver_RecordsOnlyBoundedOutcomes(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx, request := observer.Start(context.Background(), test.dependency)
+
+			// when
 			request.Finish(ctx, test.result, test.err)
+
+			// then
 			if !bytes.Contains(output.Bytes(), []byte(`"outcome":"`+test.want+`"`)) {
 				t.Fatalf("log = %s", output.Bytes())
 			}
@@ -51,9 +82,12 @@ func TestDependencyObserver_RecordsOnlyBoundedOutcomes(t *testing.T) {
 }
 
 func TestObservers_RequireDependenciesAndRecordLookupOutcomes(t *testing.T) {
+	// given
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 	meter := metricnoop.NewMeterProvider()
 	tracer := tracenoop.NewTracerProvider()
+
+	// when / then
 	if _, err := NewDependencyObserver(nil, meter, tracer); err == nil {
 		t.Fatal("missing dependency observer logger accepted")
 	}
@@ -69,11 +103,13 @@ func TestObservers_RequireDependenciesAndRecordLookupOutcomes(t *testing.T) {
 	if _, err := NewLookupObserver(logger, nil); err == nil {
 		t.Fatal("missing lookup meter accepted")
 	}
+
+	// given
 	observer, err := NewLookupObserver(logger, meter)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []struct {
+	tests := []struct {
 		omitted int
 		err     error
 	}{
@@ -84,7 +120,9 @@ func TestObservers_RequireDependenciesAndRecordLookupOutcomes(t *testing.T) {
 		{0, application.ErrResponseLimit},
 		{0, application.ErrUnavailable},
 		{0, errors.New("unexpected")},
-	} {
+	}
+	for _, test := range tests {
+		// when / then
 		observer.Record(context.Background(), 1, test.omitted, test.err)
 	}
 }

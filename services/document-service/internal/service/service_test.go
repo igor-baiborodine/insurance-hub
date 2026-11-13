@@ -204,7 +204,8 @@ func (function contentReaderFunc) Read(
 	return function(ctx, stored)
 }
 
-func TestObservedContentReaderRecordsOnlyObjectFetches(t *testing.T) {
+func TestObservedContentReader_RecordsOnlyObjectFetches(t *testing.T) {
+	// given
 	var output bytes.Buffer
 	observer, err := telemetry.NewDependencyObserver(
 		slog.New(slog.NewJSONHandler(&output, nil)),
@@ -223,6 +224,8 @@ func TestObservedContentReaderRecordsOnlyObjectFetches(t *testing.T) {
 		}),
 		observer,
 	)
+
+	// when
 	if _, present, readErr := reader.Read(
 		context.Background(),
 		[]byte("inline"),
@@ -230,15 +233,21 @@ func TestObservedContentReaderRecordsOnlyObjectFetches(t *testing.T) {
 		!present {
 		t.Fatalf("inline read = (%t, %v)", present, readErr)
 	}
+
+	// then
 	if output.Len() != 0 {
 		t.Fatalf("inline dependency signal = %s", output.Bytes())
 	}
+
+	// when
 	if _, present, readErr := reader.Read(
 		context.Background(),
 		[]byte("2026/02/missing.pdf"),
 	); readErr != nil || present {
 		t.Fatalf("object read = (%t, %v)", present, readErr)
 	}
+
+	// then
 	if !bytes.Contains(output.Bytes(), []byte(`"dependency":"object_store"`)) ||
 		!bytes.Contains(output.Bytes(), []byte(`"outcome":"fetch_failed"`)) ||
 		bytes.Contains(output.Bytes(), []byte("missing.pdf")) {

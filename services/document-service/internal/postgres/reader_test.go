@@ -77,14 +77,17 @@ func (rows *fakeRows) Scan(dest ...any) error {
 	return nil
 }
 
-func TestPoolAndReaderRejectInvalidDependencies(t *testing.T) {
+func TestPoolAndReader_RejectInvalidDependencies(t *testing.T) {
+	// when / then
 	if _, err := OpenPool(context.Background(), config.Database{}); err == nil {
 		t.Fatal("invalid pool settings accepted")
 	}
 	if err := CheckReadAccess(context.Background(), nil); err == nil {
 		t.Fatal("missing readiness pool accepted")
 	}
-	for _, test := range []struct {
+
+	// given
+	tests := []struct {
 		acquire         time.Duration
 		query           time.Duration
 		documentMaximum int
@@ -95,28 +98,42 @@ func TestPoolAndReaderRejectInvalidDependencies(t *testing.T) {
 		{time.Second, 0, 1, 2},
 		{time.Second, time.Second, 0, 2},
 		{time.Second, time.Second, 1, 0},
-	} {
-		if _, err := NewReader(
+	}
+	for _, test := range tests {
+		// when
+		_, err := NewReader(
 			nil,
 			test.acquire,
 			test.query,
 			test.documentMaximum,
 			test.responseMaximum,
-		); err == nil {
+		)
+
+		// then
+		if err == nil {
 			t.Fatal("invalid reader settings accepted")
 		}
 	}
 }
 
-func TestReaderErrorClassificationPreservesSafeCauses(t *testing.T) {
+func TestReaderErrorClassification_PreservesSafeCauses(t *testing.T) {
+	// given
 	cause := errors.New("private-password")
+
+	// when
 	failure := classifyContext("read", context.Background(), cause)
+
+	// then
 	if !errors.Is(failure, application.ErrUnavailable) || !errors.Is(failure, cause) ||
 		strings.Contains(failure.Error(), "private-password") {
 		t.Fatalf("failure = %v", failure)
 	}
+
+	// given
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
+
+	// when / then
 	if failure = classifyContext(
 		"read",
 		cancelled,
@@ -127,6 +144,8 @@ func TestReaderErrorClassificationPreservesSafeCauses(t *testing.T) {
 	) {
 		t.Fatalf("cancelled failure = %v", failure)
 	}
+
+	// when / then
 	if !errors.Is(
 		classifyContext("read", context.Background(), context.DeadlineExceeded),
 		context.DeadlineExceeded,
@@ -135,7 +154,8 @@ func TestReaderErrorClassificationPreservesSafeCauses(t *testing.T) {
 	}
 }
 
-func TestReaderFindByPolicyNumberMapsRowsAndFailures(t *testing.T) {
+func TestReader_FindByPolicyNumber_MapsRowsAndFailures(t *testing.T) {
+	// given
 	rows := &fakeRows{rows: [][]any{{"SYN-362", []byte("pdf"), 3, false}}}
 	connection := &fakeReaderConnection{rows: rows}
 	reader, err := newReader(
@@ -148,38 +168,81 @@ func TestReaderFindByPolicyNumberMapsRowsAndFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// when
 	documents, err := reader.FindByPolicyNumber(context.Background(), "SYN-362")
+
+	// then
 	if err != nil || len(documents) != 1 || string(documents[0].Bytes) != "pdf" ||
 		!connection.released {
 		t.Fatalf("documents = (%v, %v), released = %t", documents, err, connection.released)
 	}
 
-	for _, test := range []struct {
+	// given
+	tests := []struct {
 		name string
 		pool readerPool
 	}{
 		{"acquire", fakeReaderPool{err: errors.New("private")}},
-		{"query", fakeReaderPool{connection: &fakeReaderConnection{queryErr: errors.New("private")}}},
-		{"scan", fakeReaderPool{connection: &fakeReaderConnection{rows: &fakeRows{rows: [][]any{{}}, scanErr: errors.New("private")}}}},
-		{"iterate", fakeReaderPool{connection: &fakeReaderConnection{rows: &fakeRows{err: errors.New("private")}}}},
-		{"oversize", fakeReaderPool{connection: &fakeReaderConnection{rows: &fakeRows{rows: [][]any{{"SYN-362", []byte(nil), 9, false}}}}}},
-	} {
+		{
+			"query",
+			fakeReaderPool{
+				connection: &fakeReaderConnection{queryErr: errors.New("private")},
+			},
+		},
+		{
+			"scan",
+			fakeReaderPool{
+				connection: &fakeReaderConnection{
+					rows: &fakeRows{
+						rows:    [][]any{{}},
+						scanErr: errors.New("private"),
+					},
+				},
+			},
+		},
+		{
+			"iterate",
+			fakeReaderPool{
+				connection: &fakeReaderConnection{
+					rows: &fakeRows{err: errors.New("private")},
+				},
+			},
+		},
+		{
+			"oversize",
+			fakeReaderPool{
+				connection: &fakeReaderConnection{
+					rows: &fakeRows{
+						rows: [][]any{{"SYN-362", []byte(nil), 9, false}},
+					},
+				},
+			},
+		},
+	}
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			reader, err := newReader(test.pool, time.Second, time.Second, 8, 16)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := reader.FindByPolicyNumber(
+
+			// when
+			_, err = reader.FindByPolicyNumber(
 				context.Background(),
 				"SYN-362",
-			); err == nil {
+			)
+
+			// then
+			if err == nil {
 				t.Fatal("reader failure accepted")
 			}
 		})
 	}
 }
 
-func TestReaderFindByPolicyNumberStopsAtAggregateStoredByteLimit(t *testing.T) {
+func TestReader_FindByPolicyNumber_StopsAtAggregateStoredByteLimit(t *testing.T) {
+	// given
 	rows := &fakeRows{rows: [][]any{
 		{"SYN-362", []byte("12345"), 5, false},
 		{"SYN-362", []byte("67890"), 5, false},
@@ -196,7 +259,10 @@ func TestReaderFindByPolicyNumberStopsAtAggregateStoredByteLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// when
 	_, err = reader.FindByPolicyNumber(context.Background(), "SYN-362")
+
+	// then
 	if !errors.Is(err, application.ErrResponseLimit) {
 		t.Fatalf("error = %v", err)
 	}

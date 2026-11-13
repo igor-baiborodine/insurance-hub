@@ -155,6 +155,7 @@ def stop_lookup_container(name):
 
 
 def test_stop_lookup_container_uses_bounded_graceful_stop(monkeypatch):
+    # given
     commands = []
 
     def controlled_run(args, *unused_args, **unused_kwargs):
@@ -162,7 +163,11 @@ def test_stop_lookup_container_uses_bounded_graceful_stop(monkeypatch):
         return "0" if args[1:3] == ["inspect", "--format"] else ""
 
     monkeypatch.setattr(sys.modules[__name__], "run", controlled_run)
+
+    # when
     stop_lookup_container("document-image-362")
+
+    # then
     assert commands == [
         [DOCKER, "stop", "--time", "10", "document-image-362"],
         [
@@ -442,7 +447,8 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
     )
     # when
     assert migrate() == "version=1"
-    # then: exact independent legacy schema, empty table is valid, no JVM required.
+    # then
+    # Exact independent legacy schema; an empty table is valid and no JVM is required.
     assert (
         admin(
             "SELECT string_agg(column_name||':'||data_type||':'||is_nullable,',' ORDER BY ordinal_position) FROM information_schema.columns WHERE table_schema='public' AND table_name='policy_document';"
@@ -563,7 +569,8 @@ def test_rejects_unsafe_schema_sequence_and_bounded_contention(postgres):
     admin(
         "SET ROLE document; CREATE TABLE public.policy_document(id bigint PRIMARY KEY,bytes bytea,policy_number varchar(255)); CREATE SEQUENCE public.hibernate_sequence AS bigint; INSERT INTO public.policy_document VALUES(5,'\\x','SYN-362');"
     )
-    # when / then: sequence behind existing rows rejects without history creation or repair.
+    # when / then
+    # A sequence behind existing rows rejects without history creation or repair.
     migrate(failure=True)
     assert admin("SELECT to_regclass('public.goose_db_version') IS NULL;") == "t"
     assert admin("SELECT last_value||':'||is_called FROM public.hibernate_sequence;") == "1:false"
@@ -617,7 +624,8 @@ def test_rejects_unsafe_schema_sequence_and_bounded_contention(postgres):
 
 
 def test_minio_reader_preserves_credentials_and_denies_writes(tmp_path, monkeypatch):
-    # given: isolated real server, root config is private; secrets never enter CLI argv.
+    # given
+    # The real server is isolated, root config is private, and secrets never enter CLI argv.
     password = "synthetic-minio-admin-362"
     mounts = [
         "--tmpfs",
@@ -734,6 +742,7 @@ def test_minio_reader_preserves_credentials_and_denies_writes(tmp_path, monkeypa
 
 
 def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
+    # given
     admin, migrate, _target, root, pg_name = postgres
     assert migrate() == "version=1"
     pg_port = json.loads(run([DOCKER, "inspect", pg_name]))[0]["NetworkSettings"]["Ports"][
@@ -813,10 +822,16 @@ def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
             wait_for(
                 lambda: urlopen(f"http://127.0.0.1:{health_port}/readyz", timeout=1).status == 200
             )
+
+            # when
             with urlopen(f"http://127.0.0.1:{http_port}/documents/SYN-362", timeout=5) as response:
                 payload = json.load(response)
+
+            # then
             contents = sorted(item["content"] for item in payload["documents"])
             assert contents == sorted(["JVBERi0zNjI=", "JVBERi0zNjI=", "JVBERi1PQkpFQ1QtMzYy"])
+
+            # when / then
             with urlopen(f"http://127.0.0.1:{http_port}/documents/ABSENT", timeout=5) as response:
                 assert json.load(response) == {"documents": []}
             if server_container is not None:
@@ -838,6 +853,7 @@ def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
 
 
 def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, monkeypatch):
+    # given
     # Kubernetes Secret storage is a fake boundary; databases, authentication and IAM are real.
     # This exercises the actual ensure engine without touching a cluster or customer storage.
     admin, _migrate, target, root, pg_name = postgres
@@ -953,15 +969,21 @@ def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, 
         admin(
             "REVOKE document FROM go_document_migrator; DROP OWNED BY go_document_migrator; DROP ROLE go_document_migrator;"
         )
+
+        # when
         resources.execute_action("ensure", manager, minio)
         snapshot = dict(stored)
         resources.execute_action("ensure", manager, minio)
+
+        # then
         assert stored == snapshot
         assert len(writes) == 1  # only the absent MinIO credential was created
         with manager.connection("go_document_migrator", "a" * 64, ca) as execute:
             assert execute("SET ROLE document; SELECT current_user;") == "document"
         # Unrecoverable external credentials are rejected before any new writes.
         saved = stored.pop(manager.secret_name("reader"))
+
+        # when / then
         with pytest.raises(resources.ResourceError, match="without recoverable Secret"):
             resources.execute_action("ensure", manager, minio)
         stored[manager.secret_name("reader")] = saved

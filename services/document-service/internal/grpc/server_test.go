@@ -25,6 +25,7 @@ import (
 )
 
 func TestNewServer_UsesGeneratedValidationAndInstrumentedRPC(t *testing.T) {
+	// given
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	meter := metricnoop.NewMeterProvider()
 	observer, err := telemetry.NewRequestObserver(logger, meter)
@@ -67,6 +68,8 @@ func TestNewServer_UsesGeneratedValidationAndInstrumentedRPC(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = connection.Close() })
 	client := documentv1.NewDocumentServiceClient(connection)
+
+	// when / then
 	if _, err := client.FindDocuments(
 		context.Background(),
 		&documentv1.FindDocumentsRequest{},
@@ -75,10 +78,14 @@ func TestNewServer_UsesGeneratedValidationAndInstrumentedRPC(t *testing.T) {
 	) != codes.InvalidArgument {
 		t.Fatalf("invalid status = %v", status.Code(err))
 	}
+
+	// when
 	response, err := client.FindDocuments(
 		context.Background(),
 		&documentv1.FindDocumentsRequest{PolicyNumber: "SYN-362"},
 	)
+
+	// then
 	if err != nil || string(response.GetDocuments()[0].GetContent()) != "safe" {
 		t.Fatalf("response = (%v, %v)", response, err)
 	}
