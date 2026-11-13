@@ -2,12 +2,16 @@ package postgres
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/config"
 )
+
+//go:embed sql/check_read_access.sql
+var checkReadAccessSQL string
 
 // OpenPool constructs and verifies the bounded process-owned Document reader pool.
 func OpenPool(ctx context.Context, settings config.Database) (*pgxpool.Pool, error) {
@@ -42,7 +46,7 @@ func CheckReadAccess(ctx context.Context, pool *pgxpool.Pool) error {
 	var available bool
 	if err := pool.QueryRow(
 		ctx,
-		"SELECT EXISTS (SELECT 1 FROM public.policy_document)",
+		checkReadAccessSQL,
 	).Scan(&available); err != nil {
 		return classifyContext("verify Document read access", ctx, err)
 	}

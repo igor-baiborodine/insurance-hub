@@ -328,7 +328,7 @@ dependency; Document owns its domain, storage mapping and generated contract.
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
 | Gateway, request observation and limits | Dashboard `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC lookup, fixed operation, safe errors and bounded transport signals. |
 | Health and lifecycle | Dashboard `internal/service/service.go` | PostgreSQL/MinIO-aware readiness, three listener ownership, HTTP-first drain and ordered cleanup. |
-| PostgreSQL | Product `internal/postgres` and migration owners | Parameterized Document reader, explicit schema administration and Document-owned SQL. |
+| PostgreSQL | Product `internal/postgres` and migration owners | Parameterized Document reader, explicit schema administration and Document-owned SQL files. Product's generated sqlc `:many` method buffers its complete result, so Document retains a pgx row stream to enforce its aggregate byte budget before allocation. `check-migration-schema` compares the real migrated schema with the exact Document inspector rather than a sqlc input. |
 | Business architecture | Dashboard application ports and injected adapters | Document lookup owns duplicate, inline/key, omission and response-budget behavior. |
 
 
@@ -342,7 +342,7 @@ adopts compatible fixes through its own reviewed changes and behavior tests.
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
 | `internal/domain`, `internal/application` | Wire-independent Document values, lookup orchestration, concurrency and aggregate budgets. |
-| `internal/postgres`, `internal/objectstore` | Bounded metadata reads and compatible inline/MinIO content resolution. |
+| `internal/postgres`, `internal/objectstore` | Bounded metadata reads from owned SQL inputs and compatible inline/MinIO content resolution. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated lookup registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Document identity and cross-setting policy. |

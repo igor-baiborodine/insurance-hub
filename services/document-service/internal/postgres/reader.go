@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"time"
@@ -13,13 +14,8 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/domain"
 )
 
-const findDocumentsSQL = `
-SELECT policy_number,
-       CASE WHEN bytes IS NULL OR octet_length(bytes) <= $2 THEN bytes END,
-       COALESCE(octet_length(bytes), 0),
-       bytes IS NULL
-FROM public.policy_document
-WHERE policy_number = $1`
+//go:embed sql/find_documents.sql
+var findDocumentsSQL string
 
 // Reader implements the application metadata port over the process-owned pool.
 type Reader struct {
