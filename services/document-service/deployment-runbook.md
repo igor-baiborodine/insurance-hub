@@ -67,23 +67,23 @@ make go-svc-deploy SVC_NAME=document
 make go-svc-deploy-verify SVC_NAME=document
 ```
 
-`deploy`, `image-load` and `stop` reject QA. Local stop scales only
-`local-dev-document-api` to zero. Confirm that bounded state with the exact selected context and
-namespace:
+`deploy`, `image-load` and `stop` reject QA. The bounded stop owner scales only
+`local-dev-document-api` to zero and waits up to 90 seconds for the Deployment to report no running
+replicas:
 
 ```sh
 make go-svc-stop SVC_NAME=document
-kubectl --context "$DEPLOY_CONTEXT" --namespace "$DEPLOY_SVC_NS" \
-  get deployment/local-dev-document-api -o 'jsonpath={.spec.replicas}{"\n"}'
 ```
 
-The readback must print `0`. `go-svc-deploy-status` deliberately rejects this stopped state because
-it verifies the ordinary ready workload and configuration; that failure does not mean the bounded
-stop failed. Recover only the Go foundation with the same accepted image and guarded owner:
+`go-svc-deploy-status` deliberately rejects this stopped state because it verifies the ordinary
+ready workload and configuration; that failure does not mean the bounded stop failed. Recover only
+the Go foundation with the same accepted image and the standard guarded sequence:
 
 ```sh
 make go-svc-deploy-preflight SVC_NAME=document
+make go-svc-image-load SVC_NAME=document
 make go-svc-deploy SVC_NAME=document
+make go-svc-deploy-status SVC_NAME=document
 make go-svc-deploy-verify SVC_NAME=document
 ```
 
