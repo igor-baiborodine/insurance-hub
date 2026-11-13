@@ -22,7 +22,7 @@ func TestDependencyObserver_RecordsOnlyBoundedOutcomes(t *testing.T) {
 		want       string
 	}{
 		{"postgres success", DependencyPostgreSQL, DependencyResultSuccess, nil, "success"},
-		{"object omitted", DependencyObjectStore, DependencyResultOmitted, nil, "omitted"},
+		{"object fetch failed", DependencyObjectStore, DependencyResultFetchFailed, nil, "fetch_failed"},
 		{"cancelled", DependencyPostgreSQL, DependencyResultSuccess, context.Canceled, "cancelled"},
 		{"deadline", DependencyObjectStore, DependencyResultSuccess, context.DeadlineExceeded, "deadline_exceeded"},
 		{"safe error", "private-dependency", DependencyResultSuccess, errors.New("private-error"), "error"},

@@ -5,6 +5,7 @@ import (
 
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/domain"
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/objectstore"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/telemetry"
 )
 
@@ -46,11 +47,14 @@ func (reader *observedContentReader) Read(
 	ctx context.Context,
 	stored []byte,
 ) ([]byte, bool, error) {
+	if !objectstore.IsObjectKey(stored) {
+		return reader.reader.Read(ctx, stored)
+	}
 	dependencyCtx, observation := reader.observer.Start(ctx, telemetry.DependencyObjectStore)
 	content, present, err := reader.reader.Read(dependencyCtx, stored)
 	result := telemetry.DependencyResultSuccess
 	if !present && err == nil {
-		result = telemetry.DependencyResultOmitted
+		result = telemetry.DependencyResultFetchFailed
 	}
 	observation.Finish(dependencyCtx, result, err)
 	return content, present, err

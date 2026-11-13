@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -20,6 +23,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/domain"
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/telemetry"
 )
 
 func TestRun_ComposesHTTPToActualRPCAndTracksDependencyReadiness(t *testing.T) {
@@ -198,6 +202,44 @@ func (function contentReaderFunc) Read(
 	stored []byte,
 ) ([]byte, bool, error) {
 	return function(ctx, stored)
+}
+
+func TestObservedContentReaderRecordsOnlyObjectFetches(t *testing.T) {
+	var output bytes.Buffer
+	observer, err := telemetry.NewDependencyObserver(
+		slog.New(slog.NewJSONHandler(&output, nil)),
+		metricnoop.NewMeterProvider(),
+		tracenoop.NewTracerProvider(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := newObservedContentReader(
+		contentReaderFunc(func(_ context.Context, stored []byte) ([]byte, bool, error) {
+			if string(stored) == "inline" {
+				return stored, true, nil
+			}
+			return nil, false, nil
+		}),
+		observer,
+	)
+	if _, present, readErr := reader.Read(context.Background(), []byte("inline")); readErr != nil || !present {
+		t.Fatalf("inline read = (%t, %v)", present, readErr)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("inline dependency signal = %s", output.Bytes())
+	}
+	if _, present, readErr := reader.Read(
+		context.Background(),
+		[]byte("2026/02/missing.pdf"),
+	); readErr != nil || present {
+		t.Fatalf("object read = (%t, %v)", present, readErr)
+	}
+	if !bytes.Contains(output.Bytes(), []byte(`"dependency":"object_store"`)) ||
+		!bytes.Contains(output.Bytes(), []byte(`"outcome":"fetch_failed"`)) ||
+		bytes.Contains(output.Bytes(), []byte("missing.pdf")) {
+		t.Fatalf("object dependency signal = %s", output.Bytes())
+	}
 }
 
 type fakeManagedDependency struct {

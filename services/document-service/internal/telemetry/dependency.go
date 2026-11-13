@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	DependencyPostgreSQL    = "postgresql"
-	DependencyObjectStore   = "object_store"
-	DependencyResultSuccess = "success"
-	DependencyResultOmitted = "omitted"
+	DependencyPostgreSQL        = "postgresql"
+	DependencyObjectStore       = "object_store"
+	DependencyResultSuccess     = "success"
+	DependencyResultFetchFailed = "fetch_failed"
 )
 
 // DependencyObserver records bounded dependency signals without request data.
@@ -91,8 +91,8 @@ func boundedDependency(dependency string) string {
 
 func (request *DependencyRequest) Finish(ctx context.Context, result string, err error) {
 	outcome, level := DependencyResultSuccess, slog.LevelInfo
-	if result == DependencyResultOmitted {
-		outcome = DependencyResultOmitted
+	if result == DependencyResultFetchFailed {
+		outcome, level = DependencyResultFetchFailed, slog.LevelWarn
 	}
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -109,7 +109,7 @@ func (request *DependencyRequest) Finish(ctx context.Context, result string, err
 		attribute.String("insurance_hub.document.outcome", outcome),
 	}
 	request.span.SetAttributes(attrs...)
-	if err != nil {
+	if err != nil || outcome == DependencyResultFetchFailed {
 		request.span.SetAttributes(attribute.String("error.type", outcome))
 		request.span.SetStatus(codes.Error, "")
 	}

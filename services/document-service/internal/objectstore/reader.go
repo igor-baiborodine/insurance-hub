@@ -181,3 +181,9 @@ func classifyObjectKey(stored []byte) (string, bool) {
 	}
 	return decoded, objectKeyPattern.MatchString(decoded)
 }
+
+// IsObjectKey reports whether stored bytes use the legacy object-key representation.
+func IsObjectKey(stored []byte) bool {
+	_, objectBacked := classifyObjectKey(stored)
+	return objectBacked
+}

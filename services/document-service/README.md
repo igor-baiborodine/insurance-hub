@@ -239,8 +239,9 @@ diagnostic handler before enabled providers and restores the previous handler af
 `insurance_hub.document.requests` and `insurance_hub.document.request.duration` separately record
 bounded HTTP and gRPC transport outcomes. HTTP labels use only
 `GET /documents/{policyNumber}` or `unmatched`; gRPC records the fixed `find_documents` operation
-and final status. Lookup and dependency instruments distinguish complete, partial/omitted,
-PostgreSQL and object-store outcomes. Request paths, queries,
+and final status. Lookup instruments distinguish complete and partial/omitted responses. Dependency
+instruments record PostgreSQL outcomes and actual object-fetch success or failure without counting
+inline content as object-store activity. Request paths, queries,
 payloads, raw errors, headers and instance IDs are not metric labels. The same provider connects
 the HTTP server, gRPC client and gRPC server trace. Service identity stays on the resource.
 
