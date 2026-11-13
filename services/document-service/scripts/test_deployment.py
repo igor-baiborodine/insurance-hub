@@ -140,12 +140,25 @@ def test_render_rejects_weakened_target_security() -> None:
         checks.validate_render("local-dev", weakened)
 
 
-def test_qa_aggregate_preserves_java_and_waits_for_release_activation() -> None:
+def test_qa_aggregate_preserves_java_before_and_after_release_activation() -> None:
     checks.validate_qa_aggregate(["./document/legacy", "./product"])
-    with pytest.raises(checks.DeploymentError, match="inactive"):
-        checks.validate_qa_aggregate(["./document/legacy", "./document"])
-    with pytest.raises(checks.DeploymentError, match="Java Document"):
-        checks.validate_qa_aggregate(["./product"])
+    checks.validate_qa_aggregate(["./document/legacy", "./document", "./product"])
+
+
+@pytest.mark.parametrize(
+    ("resources", "message"),
+    [
+        (["./product"], "Java Document"),
+        (["./document/legacy", "./document/legacy"], "Java Document"),
+        (["./document/legacy", "./document", "./document"], "Go Document"),
+        (["./document/legacy", {"path": "./document"}], "resources are invalid"),
+    ],
+)
+def test_qa_aggregate_rejects_ambiguous_document_ownership(
+    resources: list[object], message: str
+) -> None:
+    with pytest.raises(checks.DeploymentError, match=message):
+        checks.validate_qa_aggregate(resources)
 
 
 def test_live_state_rejects_wrong_resource_identity() -> None:

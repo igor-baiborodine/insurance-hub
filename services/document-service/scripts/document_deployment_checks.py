@@ -789,8 +789,12 @@ def stop(target: Target, _items: list[dict[str, Any]]) -> None:
 
 def validate_qa_aggregate(resources: Any) -> None:
     require(isinstance(resources, list), "QA service aggregate resources are invalid")
-    require("./document/legacy" in resources, "Java Document must remain active")
-    require("./document" not in resources, "Go Document must remain inactive before release")
+    require(
+        all(isinstance(resource, str) for resource in resources),
+        "QA service aggregate resources are invalid",
+    )
+    require(resources.count("./document/legacy") == 1, "Java Document must remain active once")
+    require(resources.count("./document") <= 1, "Go Document must be activated at most once")
 
 
 def validate_legacy_identity(environment: str) -> None:
