@@ -6,6 +6,10 @@ on:
       - main
     paths:
       - '**/*-service/**/*.go'
+      - '**/*-service/**/*.py'
+      - '**/*-service/Makefile'
+      - '**/*-service/Dockerfile'
+      - '**/*-service/go-service-tooling.json'
       - '**/*-service/go.mod'
       - '**/*-service/go.sum'
       - '**/*-service/.golangci.yml'

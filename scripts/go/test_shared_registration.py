@@ -168,28 +168,25 @@ def test_ci_shared_change_can_accompany_one_changed_service(tmp_path: Path) -> N
     }
 
 
-def test_ci_ignores_nonqualifying_second_service_tooling_path(tmp_path: Path) -> None:
+def test_ci_rejects_service_python_change_with_second_service(tmp_path: Path) -> None:
     # given
     fixture_tree(tmp_path / "base", 1)
     fixture_tree(tmp_path / "head", 1)
 
-    # when
-    result = registration.plan_trees(
-        tmp_path / "base",
-        tmp_path / "head",
-        [
-            "services/product-service/scripts/local_check.py",
-            "templates/go-service/main.go",
-        ],
-        "a" * 40,
-        "b" * 40,
-        "a" * 40,
-        "ci",
-    )
-
-    # then
-    assert result["obligations"] == []
-    assert result["changed"] == ["templates/go-service"]
+    # when / then
+    with pytest.raises(SharedError, match="multiple Go service modules changed"):
+        registration.plan_trees(
+            tmp_path / "base",
+            tmp_path / "head",
+            [
+                "services/product-service/scripts/local_check.py",
+                "templates/go-service/main.go",
+            ],
+            "a" * 40,
+            "b" * 40,
+            "a" * 40,
+            "ci",
+        )
 
 
 def test_full_profile_keeps_changed_consumer_normal_gate(tmp_path: Path) -> None:

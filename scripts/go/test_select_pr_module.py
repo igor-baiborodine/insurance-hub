@@ -34,13 +34,10 @@ import select_pr_module
             {"module_dir": "services/product-service"},
         ),
         (
-            [
-                "services/product-service/scripts/local_check.py",
-                "templates/go-service/cmd/server/main.go",
-            ],
-            {"module_dir": "templates/go-service"},
+            ["services/product-service/scripts/local_check.py"],
+            {"module_dir": "services/product-service"},
         ),
-        (["services/product-service/Makefile"], {"module_dir": ""}),
+        (["services/product-service/Makefile"], {"module_dir": "services/product-service"}),
         (["libs/servicekit/health/health.go"], {"module_dir": "libs/servicekit"}),
         (["services/product-service/internal/app.go"], {"module_dir": "services/product-service"}),
     ],
@@ -142,6 +139,10 @@ def test_document_service_selects_standard_business_service_coverage() -> None:
         "templates/go-service/gen/openapiv2/scaffold/v1/example.swagger.json",
         "templates/go-service/internal/catalog/testdata/case.json",
         "services/product-service/internal/postgres/sql/schema.sql",
+        "services/product-service/Makefile",
+        "services/product-service/Dockerfile",
+        "services/product-service/go-service-tooling.json",
+        "services/product-service/scripts/local_check.py",
     ],
 )
 def test_go_pr_qualifying_paths_match_explicit_workflow_categories(path: str) -> None:
@@ -151,11 +152,7 @@ def test_go_pr_qualifying_paths_match_explicit_workflow_categories(path: str) ->
 @pytest.mark.parametrize(
     "path",
     [
-        "templates/go-service/Makefile",
         "templates/go-service/README.md",
-        "templates/go-service/scripts/check_copy.py",
-        "services/product-service/Dockerfile",
-        "services/product-service/scripts/local_check.py",
         "legacy/product-service/internal/incorrect.go",
         "services/group/claims-service/internal/incorrect.go",
         "libs/servicekit/health/health.go",

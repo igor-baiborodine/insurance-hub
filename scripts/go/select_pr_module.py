@@ -14,11 +14,14 @@ SHA = re.compile(r"[0-9a-f]{40}")
 GO_PR_ROOT_FILES = frozenset(
     {
         ".golangci.yml",
+        "Dockerfile",
+        "Makefile",
         "buf.gen.yaml",
         "buf.lock",
         "buf.yaml",
         "go.mod",
         "go.sum",
+        "go-service-tooling.json",
         "sqlc.yaml",
     }
 )
@@ -58,6 +61,8 @@ def is_go_pr_qualifying_module_path(path_value: str) -> bool:
     if not parts:
         return False
     if relative.suffix == ".go":
+        return True
+    if relative.suffix == ".py":
         return True
     if len(parts) == 1 and parts[0] in GO_PR_ROOT_FILES:
         return True

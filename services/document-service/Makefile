@@ -8,13 +8,12 @@ INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
-PYTHON_TOOLING_FILES := $(wildcard scripts/check_copy.py \
-	scripts/check_gateway_contract.py scripts/test_check_gateway_contract.py \
-	scripts/test_check_copy.py scripts/document_deployment_checks.py scripts/deployment.py \
+PYTHON_TOOLING_FILES := $(wildcard scripts/check_gateway_contract.py \
+	scripts/test_check_gateway_contract.py scripts/document_deployment_checks.py scripts/deployment.py \
 	scripts/disposable_deployment.py scripts/test_deployment.py \
 	scripts/test_disposable_deployment.py scripts/test_tooling.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
-	scripts/test_check_copy.py)
+	scripts/test_deployment.py scripts/test_disposable_deployment.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
