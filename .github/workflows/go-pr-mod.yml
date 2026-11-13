@@ -82,6 +82,10 @@ jobs:
           MODULE_DIR: ${{ steps.select.outputs.module_dir }}
         run: make -C "$MODULE_DIR" bootstrap-go-tools
 
+      - name: Prepare Document resource smoke dependencies
+        if: steps.select.outputs.module_dir == 'services/document-service'
+        run: make -C services/document-service bootstrap-resource-tests
+
       - name: Run selected module validation
         if: steps.select.outputs.module_dir != ''
         env:

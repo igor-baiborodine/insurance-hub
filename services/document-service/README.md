@@ -391,3 +391,10 @@ credential recovery and focused `resource-test-fast`, `test-administration` and
 Both command entry points use the same service-local logger facade as Product, backed by published
 Servicekit logging. Administrative queries and session/lock/grant statements live in embedded
 `.sql` files beside their owning administration or PostgreSQL adapter packages.
+
+Run `make bootstrap-resource-tests` explicitly to install the pinned MinIO client into `.tools/bin`
+and pull the disposable PostgreSQL/MinIO images before resource smoke tests. CI performs this setup
+for Document only. `make coverage-check` runs the existing resource smoke against a coverage-enabled
+migrator and combines its profile with unit coverage before enforcing the unchanged 75% minimum.
+The coverage directory is temporary and removed on completion or failure; normal migrator builds
+remain uninstrumented. Test/check targets do not install dependencies or pull images.

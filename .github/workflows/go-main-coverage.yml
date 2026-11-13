@@ -82,6 +82,10 @@ jobs:
           MODULE_DIR: ${{ matrix.module }}
         run: make -C "$MODULE_DIR" bootstrap-go-tools
 
+      - name: Prepare Document resource smoke dependencies
+        if: matrix.module == 'services/document-service'
+        run: make -C services/document-service bootstrap-go-tools bootstrap-resource-tests
+
       - name: Generate module coverage
         shell: bash
         env:
