@@ -376,3 +376,18 @@ the shared deadline.
 Use the [deployment runbook](deployment-runbook.md) for candidate, local-dev and Flux-owned QA
 commands. Use the [observability runbook](observability-runbook.md) for safe foundation signal
 checks. Both keep the Go foundation private and preserve the separate Java Document workload.
+
+The standalone `cmd/migrate` uses `internal/service/administration.go` for command lifecycle,
+`internal/postgres/administration.go` for connections, and `internal/administration` for migration
+policy/SQL, following Product. These own explicit Document PostgreSQL setup/adoption and read-only
+status/version. They are not used by server startup or
+included as an administrative entrypoint in the API image. Service-local resource tooling owns
+protected PostgreSQL/MinIO read credentials separately. See
+[explicit database and read-access administration](deployment-runbook.md#explicit-database-and-read-access-administration)
+for fresh Java-independent initialization, compatible adoption, target/confirmation requirements,
+credential recovery and focused `resource-test-fast`, `test-administration` and
+`resource-test-integration` commands. Lookup and runtime dependency wiring remain subsequent work.
+
+Both command entry points use the same service-local logger facade as Product, backed by published
+Servicekit logging. Administrative queries and session/lock/grant statements live in embedded
+`.sql` files beside their owning administration or PostgreSQL adapter packages.

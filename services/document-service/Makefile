@@ -11,9 +11,10 @@ TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
 PYTHON_TOOLING_FILES := $(wildcard scripts/check_gateway_contract.py \
 	scripts/test_check_gateway_contract.py scripts/document_deployment_checks.py scripts/deployment.py \
 	scripts/disposable_deployment.py scripts/test_deployment.py \
-	scripts/test_disposable_deployment.py scripts/test_tooling.py)
+	scripts/test_disposable_deployment.py scripts/test_tooling.py scripts/resource_administration.py \
+	scripts/test_resource_administration.py scripts/test_administration_integration.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
-	scripts/test_deployment.py scripts/test_disposable_deployment.py)
+	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_resource_administration.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -54,6 +55,13 @@ OTEL_HTTP_VERSION := v0.70.0
 X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.1.0
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
+PGX_VERSION := v5.11.0
+GOOSE_VERSION := v3.27.0
+BUILD_EXECUTABLES := server migrate
+MIGRATOR_OUTPUT ?= $(CURDIR)/.tools/document-migrate
+RESOURCE_TEST_ARGS ?=
+POSTGRES_IMAGE ?= postgres:17.10-alpine
+MINIO_IMAGE ?= cgr.dev/chainguard/minio@sha256:7ad2a5efd83f0ca1b8e00af9f7ec7fc3ff977c38ed29b942b0c47460ad2f8f3e
 TEST_PACKAGES ?= ./...
 COVERAGE_EXCLUDE_PATHS := gen
 INTEGRATION_COVERAGE_FILE ?=
@@ -169,6 +177,8 @@ bootstrap-go-tools bootstrap-tools: python-toolchain-setup
 
 update-deps:
 	GOWORK=off $(GO) get \
+		github.com/jackc/pgx/v5@$(PGX_VERSION) \
+		github.com/pressly/goose/v3@$(GOOSE_VERSION) \
 		buf.build/go/protovalidate@$(PROTOVALIDATE_GO_VERSION) \
 		buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go@$(PROTOVALIDATE_SCHEMA_GO_VERSION) \
 		github.com/grpc-ecosystem/grpc-gateway/v2@$(GRPC_GATEWAY_VERSION) \
@@ -272,4 +282,43 @@ help: ## Show the explicit setup and validation entry points without installing 
 	@printf '%s\n' 'Go service commands (see README.md for the full interface):' \
 		'  make bootstrap-tools  Install pinned local tools explicitly' \
 		'  make check            Validate the module without source mutation' \
-		'  make run              Start the service with environment configuration'
+		'  make run              Start the service with environment configuration' \
+		'  make build-migrator   Build the separate schema administrator' \
+		'  make migration        Run explicit migrate/status/version with protected inputs' \
+		'  make resource-inspect Inspect the explicitly selected Document dependencies' \
+		'  make resource-ensure  Guarded role/credential/read-resource setup' \
+		'  make resource-verify  Verify schema, workload reads and denied permissions'
+
+.PHONY: build-migrator migration resource-inspect resource-ensure resource-verify \
+	resource-test-fast resource-test-integration check-migration-schema
+
+build-migrator: verify-tools ## Build explicit administrative executable outside the API image
+	@test -n "$(strip $(MIGRATOR_OUTPUT))" || { echo 'MIGRATOR_OUTPUT is required' >&2; exit 1; }
+	GOWORK=off $(GO) build -mod=readonly -o "$(MIGRATOR_OUTPUT)" ./cmd/migrate
+
+migration: python-runtime-check ## Run migrate/status/version with explicit protected inputs
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" scripts/resource_administration.py migration
+
+resource-inspect resource-ensure resource-verify: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		KUBECTL="$(KUBECTL)" "$(PYTHON)" scripts/resource_administration.py '$(@:resource-%=%)'
+
+resource-test-fast: python-toolchain-check ## Exercise Document administration guards without contact
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		"$(PYTHON)" -m pytest -q -m 'not integration and not acceptance' scripts/test_resource_administration.py
+
+resource-test-integration: python-toolchain-check build-migrator ## Disposable PostgreSQL/MinIO administration smoke
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" MINIO_IMAGE="$(MINIO_IMAGE)" \
+		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" DOCKER="$(DOCKER)" \
+		"$(PYTHON)" -m pytest -q -m integration scripts/test_administration_integration.py $(RESOURCE_TEST_ARGS)
+
+check-migration-schema: RESOURCE_TEST_ARGS := -k 'fresh_adoption or rejects_unsafe'
+check-migration-schema: resource-test-integration
+
+.PHONY: test-administration
+test-administration: verify-tools ## Focused command, connection-guard and common-logger smoke
+	GOWORK=off $(GO) test -mod=readonly -count=1 -v ./cmd/migrate ./internal/administration ./internal/logger ./cmd/server
+
+check-go-pr: resource-test-integration test-administration

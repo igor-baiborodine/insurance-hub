@@ -1,0 +1,1 @@
+LOCK TABLE public.policy_document IN SHARE ROW EXCLUSIVE MODE
