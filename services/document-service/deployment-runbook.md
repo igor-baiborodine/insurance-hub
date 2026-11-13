@@ -53,6 +53,23 @@ cd legacy/agent-portal-gateway
 bash ./mvnw -Dskip.surefire.tests=true -Dit.test=DocumentLookupEdgeIT verify
 ```
 
+Use JDK 14, matching the legacy CI owner. If only JDK 17 is available, the old Lombok compiler
+requires these module openings before the same Maven command:
+
+```sh
+export MAVEN_OPTS="${MAVEN_OPTS:-} \
+ --add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED \
+ --add-opens=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED \
+ --add-opens=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED \
+ --add-opens=jdk.compiler/com.sun.tools.javac.jvm=ALL-UNNAMED \
+ --add-opens=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED \
+ --add-opens=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED \
+ --add-opens=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED \
+ --add-opens=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED \
+ --add-opens=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED \
+ --add-opens=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED"
+```
+
 It starts a disposable gateway with a synthetic signing key and overrides only
 `micronaut.http.services.document-service.urls`. It checks authenticated exact bytes,
 unauthenticated denial and the existing retry/fallback result. The checked-in local-dev and QA
@@ -326,10 +343,12 @@ make -C services/document-service test-administration
 make -C services/document-service resource-test-integration
 ```
 
-Disposable integration requires Docker, OpenSSL, psql and mc plus the already-installed images
-`postgres:17.10-alpine` and the accepted digest-qualified Chainguard MinIO image. It does not pull
-images. It creates uniquely named/labeled local containers, temporary PostgreSQL storage and private
-synthetic TLS/credential files; cleanup removes only those containers/files. It proves fresh
+Disposable integration requires Docker, OpenSSL and psql. The complete
+`resource-test-integration` suite additionally requires host `mc`; the lookup selected by
+`test-integration` and `image-check` instead uses the pinned containerized MinIO client. Missing
+pinned PostgreSQL, Chainguard MinIO and MinIO-client images are pulled by digest. The suite creates
+uniquely named/labeled local containers, temporary PostgreSQL storage and private synthetic
+TLS/credential files; cleanup removes only those containers/files. It proves fresh
 Java-independent setup, compatible adoption/replay, byte/ID/sequence preservation, subsequent safe
 ID allocation, schema/history/target rejection, bounded contention, TLS hostname rejection and
 actual PostgreSQL/MinIO read and denied-write/admin behavior. It is not evidence of deployed
