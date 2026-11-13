@@ -22,7 +22,9 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/config"
 )
 
-var objectKeyPattern = regexp.MustCompile(`^[0-9]{4}/[0-9]{2}/.*\.pdf$`)
+var objectKeyPattern = regexp.MustCompile(
+	`^[0-9]{4}/[0-9]{2}/[^\n\r\x{85}\x{2028}\x{2029}]*\.pdf$`,
+)
 
 type minioClient interface {
 	GetObject(context.Context, string, string, minio.GetObjectOptions) (*minio.Object, error)
