@@ -11,20 +11,18 @@ import sys
 from pathlib import Path, PurePosixPath
 
 SHA = re.compile(r"[0-9a-f]{40}")
-GO_PR_ROOT_FILES = frozenset(
+GO_PR_PRIMARY_ROOT_FILES = frozenset(
     {
         ".golangci.yml",
-        "Dockerfile",
-        "Makefile",
         "buf.gen.yaml",
         "buf.lock",
         "buf.yaml",
         "go.mod",
         "go.sum",
-        "go-service-tooling.json",
         "sqlc.yaml",
     }
 )
+GO_PR_FALLBACK_ROOT_FILES = frozenset({"Dockerfile", "Makefile", "go-service-tooling.json"})
 POLICY_SEARCH_ADDITIONAL_COVERAGE_FILES = (
     "elasticsearch-integration-coverage.txt",
     "event-integration-coverage.txt",
@@ -51,20 +49,24 @@ def is_validation_relevant_module_path(path_value: str) -> bool:
     return PurePosixPath(path_value).suffix.lower() != ".md"
 
 
-def is_go_pr_qualifying_module_path(path_value: str) -> bool:
-    """Return whether a path is an explicit Go service PR workflow input."""
+def module_relative_path(path_value: str) -> PurePosixPath | None:
+    """Return a supported service module path relative to its module root."""
     module = classify_module(path_value)
     if module is None or not module.endswith("-service"):
-        return False
+        return None
     relative = PurePosixPath(path_value).relative_to(module)
-    parts = relative.parts
-    if not parts:
+    return relative if relative.parts else None
+
+
+def is_go_pr_primary_module_path(path_value: str) -> bool:
+    """Return whether a path primarily selects a Go service module."""
+    relative = module_relative_path(path_value)
+    if relative is None:
         return False
+    parts = relative.parts
     if relative.suffix == ".go":
         return True
-    if relative.suffix == ".py":
-        return True
-    if len(parts) == 1 and parts[0] in GO_PR_ROOT_FILES:
+    if len(parts) == 1 and parts[0] in GO_PR_PRIMARY_ROOT_FILES:
         return True
     if parts[0] == "api" and relative.suffix == ".proto":
         return True
@@ -73,6 +75,38 @@ def is_go_pr_qualifying_module_path(path_value: str) -> bool:
     if len(parts) == 4 and parts[:3] == ("internal", "postgres", "sql"):
         return relative.suffix == ".sql"
     return "testdata" in parts[:-1]
+
+
+def is_go_pr_fallback_module_path(path_value: str) -> bool:
+    """Return whether tooling-only changes may select a service as a fallback."""
+    relative = module_relative_path(path_value)
+    if relative is None:
+        return False
+    return relative.suffix == ".py" or (
+        len(relative.parts) == 1 and relative.name in GO_PR_FALLBACK_ROOT_FILES
+    )
+
+
+def is_go_pr_qualifying_module_path(path_value: str) -> bool:
+    """Return whether a path can trigger Go service PR validation."""
+    return is_go_pr_primary_module_path(path_value) or is_go_pr_fallback_module_path(path_value)
+
+
+def go_pr_service_modules(paths: list[str]) -> set[str]:
+    """Select primary service modules, falling back to tooling-only modules."""
+    primary = {
+        module
+        for path in paths
+        if (module := classify_module(path)) and is_go_pr_primary_module_path(path)
+    }
+    if primary:
+        return primary
+    fallback = {
+        module
+        for path in paths
+        if (module := classify_module(path)) and is_go_pr_fallback_module_path(path)
+    }
+    return fallback if len(fallback) == 1 else set()
 
 
 def selection_outputs(paths: list[str], merge_base: str) -> dict[str, str]:
@@ -85,15 +119,7 @@ def selection_outputs(paths: list[str], merge_base: str) -> dict[str, str]:
             and is_validation_relevant_module_path(path)
         }
     )
-    service_modules = sorted(
-        {
-            module
-            for path in paths
-            if (module := classify_module(path))
-            and not module.startswith("libs/")
-            and is_go_pr_qualifying_module_path(path)
-        }
-    )
+    service_modules = sorted(go_pr_service_modules(paths))
     if len(service_modules) > 1:
         raise SelectionError(
             f"Multiple Go service modules changed; split the pull request: "

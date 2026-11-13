@@ -379,16 +379,14 @@ def plan_trees(
     changed = {
         root
         for root in roots
-        if any(
-            (
-                select_pr_module.is_validation_relevant_module_path(path)
-                if root == DIRECTORY
-                else select_pr_module.is_go_pr_qualifying_module_path(path)
-            )
+        if root == DIRECTORY
+        and any(
+            select_pr_module.is_validation_relevant_module_path(path)
             and (path == root or path.startswith(root + "/"))
             for path in paths
         )
     }
+    changed.update(select_pr_module.go_pr_service_modules(paths))
     changed_services = changed - {DIRECTORY}
     require(
         len(changed_services) <= 1,

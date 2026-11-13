@@ -70,6 +70,34 @@ def test_multiple_service_modules_are_rejected() -> None:
         select_pr_module.selection_outputs(paths, "a" * 40)
 
 
+def test_primary_module_wins_over_another_modules_tooling_fallback() -> None:
+    # given
+    paths = [
+        "templates/go-service/cmd/server/main.go",
+        "services/product-service/scripts/local_check.py",
+    ]
+
+    # when
+    result = select_pr_module.selection_outputs(paths, "a" * 40)
+
+    # then
+    assert result["module_dir"] == "templates/go-service"
+
+
+def test_multiple_tooling_only_service_modules_preserve_no_selection() -> None:
+    # given
+    paths = [
+        "templates/go-service/Makefile",
+        "services/product-service/scripts/local_check.py",
+    ]
+
+    # when
+    result = select_pr_module.selection_outputs(paths, "a" * 40)
+
+    # then
+    assert result == {"module_dir": ""}
+
+
 def test_policy_search_uploads_every_check_go_pr_coverage_profile() -> None:
     # when
     result = select_pr_module.selection_outputs(
