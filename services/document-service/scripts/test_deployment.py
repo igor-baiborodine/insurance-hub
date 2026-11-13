@@ -6,14 +6,15 @@ import json
 import os
 import re
 import signal
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import document_deployment_checks as checks
 import pytest
-from scripts.go.service import deployment as lifecycle
 
 import deployment
+from scripts.go.service import deployment as lifecycle
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -161,22 +162,86 @@ def test_qa_aggregate_rejects_ambiguous_document_ownership(
         checks.validate_qa_aggregate(resources)
 
 
-def test_live_state_rejects_wrong_resource_identity() -> None:
-    target = object.__new__(checks.Target)
-    target.namespace = "local-dev-all"
-    target.json = Mock(
-        return_value={
-            "kind": "ConfigMap",
-            "metadata": {"name": "foreign", "namespace": "local-dev-all"},
-        }
-    )
-    desired = {
-        "apiVersion": "v1",
-        "kind": "ConfigMap",
-        "metadata": {"name": "local-dev-document-config", "namespace": "local-dev-all"},
+def rendered_resources() -> list[dict[str, object]]:
+    return checks.validate_render("local-dev", checks.render("local-dev"))
+
+
+def target_with_live_resources(
+    items: list[dict[str, object]],
+) -> tuple[checks.Target, dict[tuple[str, str], dict[str, object]]]:
+    actual = {
+        (str(item["kind"]).lower(), str(item["metadata"]["name"])): deepcopy(item) for item in items
     }
+    target = object.__new__(checks.Target)
+    target.environment = "local-dev"
+    target.namespace = "local-dev-all"
+    target.deployment = "local-dev-document-api"
+    target.configuration = {"mode": "direct"}
+    target.json = Mock(side_effect=lambda _get, kind, name, _ignore: actual[(kind, name)])
+    return target, actual
+
+
+def use_previous_identity(
+    actual: dict[tuple[str, str], dict[str, object]], previous_image: str
+) -> None:
+    previous_version = "git-" + previous_image.rsplit(".", 1)[1]
+    actual[("configmap", "local-dev-document-config")]["data"]["SERVICE_VERSION"] = previous_version
+    deployment = actual[("deployment", "local-dev-document-api")]
+    deployment["metadata"]["labels"]["app.kubernetes.io/version"] = previous_version
+    deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"] = (
+        previous_version
+    )
+    deployment["spec"]["template"]["spec"]["containers"][0]["image"] = previous_image
+
+
+def test_live_state_rejects_wrong_resource_identity() -> None:
+    items = rendered_resources()
+    target, actual = target_with_live_resources(items)
+    actual[("configmap", "local-dev-document-config")]["metadata"]["name"] = "foreign"
+
     with pytest.raises(checks.DeploymentError, match="identity differs"):
-        target.live([desired], require_deployment=True)
+        target.live(items, require_deployment=True)
+
+
+def test_preflight_accepts_declared_previous_document_identity() -> None:
+    items = rendered_resources()
+    target, actual = target_with_live_resources(items)
+    previous_image = "insurance-hub-document-api:1.0.0-local.abcdef123456"
+    use_previous_identity(actual, previous_image)
+
+    with patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True):
+        target.live(items, require_deployment=False)
+
+
+def test_final_status_rejects_declared_previous_document_identity() -> None:
+    items = rendered_resources()
+    target, actual = target_with_live_resources(items)
+    previous_image = "insurance-hub-document-api:1.0.0-local.abcdef123456"
+    use_previous_identity(actual, previous_image)
+
+    with (
+        patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True),
+        pytest.raises(checks.DeploymentError, match="ConfigMap"),
+    ):
+        target.live(items, require_deployment=True)
+
+
+@pytest.mark.parametrize(
+    "previous_image",
+    [
+        "insurance-hub-document-api:latest",
+        "insurance-hub-dashboard-api:1.0.0-local.abcdef123456",
+    ],
+)
+def test_live_state_rejects_invalid_predecessor(previous_image: str) -> None:
+    items = rendered_resources()
+    target, _actual = target_with_live_resources(items)
+
+    with (
+        patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True),
+        pytest.raises(checks.DeploymentError, match="valid only for a direct local rollout"),
+    ):
+        target.live(items, require_deployment=False)
 
 
 def test_untrusted_access_probe_requires_network_timeout_and_cleans_up() -> None:

@@ -430,6 +430,33 @@ class Target:
         return text, items, image
 
     def live(self, items: list[dict[str, Any]], *, require_deployment: bool) -> None:
+        desired_deployment = resource(items, "Deployment", self.deployment)
+        desired_image = desired_deployment["spec"]["template"]["spec"]["containers"][0]["image"]
+        desired_config = resource(items, "ConfigMap", f"{self.environment}-document-config")
+        previous_image = os.environ.get("DEPLOY_PREVIOUS_IMAGE_REF", "")
+        if previous_image:
+            require(
+                self.configuration["mode"] == "direct"
+                and bool(
+                    re.fullmatch(
+                        r"insurance-hub-document-api:1\.[0-9]+\.[0-9]+-local\.[0-9a-f]{12}",
+                        previous_image,
+                    )
+                ),
+                "DEPLOY_PREVIOUS_IMAGE_REF is valid only for a direct local rollout",
+            )
+        allowed_images = {desired_image}
+        allowed_versions = {
+            desired_deployment.get("metadata", {})
+            .get("labels", {})
+            .get("app.kubernetes.io/version"),
+            desired_config.get("data", {}).get("SERVICE_VERSION"),
+        }
+        if previous_image and not require_deployment:
+            allowed_images.add(previous_image)
+            allowed_versions.add("git-" + previous_image.rsplit(".", 1)[1])
+        allowed_versions.discard(None)
+
         for desired in items:
             kind = str(desired.get("kind", ""))
             metadata = desired.get("metadata", {})
@@ -447,7 +474,18 @@ class Target:
                 f"live {kind}/{name} identity differs",
             )
             if kind == "ConfigMap":
-                require(actual.get("data") == desired.get("data"), f"live ConfigMap/{name} differs")
+                desired_data = desired.get("data", {})
+                actual_data = actual.get("data", {})
+                require(
+                    {key: value for key, value in actual_data.items() if key != "SERVICE_VERSION"}
+                    == {
+                        key: value
+                        for key, value in desired_data.items()
+                        if key != "SERVICE_VERSION"
+                    }
+                    and actual_data.get("SERVICE_VERSION") in allowed_versions,
+                    f"live ConfigMap/{name} differs",
+                )
             elif kind == "Service":
                 actual_spec = actual.get("spec", {})
                 desired_spec = desired.get("spec", {})
@@ -475,6 +513,8 @@ class Target:
                 actual_template = actual_spec.get("template", {})
                 desired_pod = desired_template.get("spec", {})
                 actual_pod = actual_template.get("spec", {})
+                desired_labels = desired.get("metadata", {}).get("labels", {})
+                desired_template_labels = desired_template.get("metadata", {}).get("labels", {})
                 require(
                     actual_spec.get("selector") == desired_spec.get("selector")
                     and actual_spec.get("strategy") == desired_spec.get("strategy")
@@ -485,12 +525,28 @@ class Target:
                     in ({desired_spec.get("replicas")} if require_deployment else {0, 1})
                     and labels_include(
                         actual.get("metadata", {}).get("labels"),
-                        desired.get("metadata", {}).get("labels"),
+                        {
+                            key: value
+                            for key, value in desired_labels.items()
+                            if key != "app.kubernetes.io/version"
+                        },
                     )
                     and labels_include(
                         actual_template.get("metadata", {}).get("labels"),
-                        desired_template.get("metadata", {}).get("labels"),
+                        {
+                            key: value
+                            for key, value in desired_template_labels.items()
+                            if key != "app.kubernetes.io/version"
+                        },
                     )
+                    and actual.get("metadata", {})
+                    .get("labels", {})
+                    .get("app.kubernetes.io/version")
+                    in allowed_versions
+                    and actual_template.get("metadata", {})
+                    .get("labels", {})
+                    .get("app.kubernetes.io/version")
+                    in allowed_versions
                     and actual_pod.get("automountServiceAccountToken") is False
                     and actual_pod.get("enableServiceLinks") is False
                     and actual_pod.get("terminationGracePeriodSeconds") == 30
@@ -519,10 +575,16 @@ class Target:
                     "resources",
                     "volumeMounts",
                 ):
-                    require(
-                        actual_container.get(field) == desired_container.get(field),
-                        f"live Deployment/{name} container {field} differs",
-                    )
+                    if field == "image":
+                        require(
+                            actual_container.get(field) in allowed_images,
+                            f"live Deployment/{name} container image differs",
+                        )
+                    else:
+                        require(
+                            actual_container.get(field) == desired_container.get(field),
+                            f"live Deployment/{name} container {field} differs",
+                        )
                 for field in ("startupProbe", "livenessProbe", "readinessProbe"):
                     require(
                         matching_probe(actual_container.get(field), desired_container.get(field)),

@@ -67,6 +67,25 @@ make go-svc-deploy SVC_NAME=document
 make go-svc-deploy-verify SVC_NAME=document
 ```
 
+For a local-dev replacement, capture the current Go image before preflight and declare it until
+the replacement is applied:
+
+```sh
+export DEPLOY_PREVIOUS_IMAGE_REF="$(kubectl --context "$DEPLOY_CONTEXT" \
+  -n "$DEPLOY_SVC_NS" get deployment/local-dev-document-api \
+  -o jsonpath='{.spec.template.spec.containers[0].image}')"
+make go-svc-deploy-preflight SVC_NAME=document
+make go-svc-image-load SVC_NAME=document
+make go-svc-deploy SVC_NAME=document
+unset DEPLOY_PREVIOUS_IMAGE_REF
+make go-svc-deploy-status SVC_NAME=document
+make go-svc-deploy-verify SVC_NAME=document
+```
+
+The predecessor input accepts only a source-derived local Document image. It permits that exact
+image, Deployment version labels and ConfigMap `SERVICE_VERSION` only before apply. Final status
+and verification require the selected replacement identity everywhere.
+
 `deploy`, `image-load` and `stop` reject QA. The bounded stop owner scales only
 `local-dev-document-api` to zero and waits up to 90 seconds for the Deployment to report no running
 replicas:
