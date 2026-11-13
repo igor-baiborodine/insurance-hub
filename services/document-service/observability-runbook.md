@@ -14,7 +14,8 @@ final operational qualification.
 
 Local development sets `OTEL_ENABLED=false`. QA exports OTLP/gRPC without TLS to the in-cluster
 `qa-alloy.qa-monitoring.svc.cluster.local:4317` receiver. That plaintext cluster hop has no CA or
-hostname setting to configure or bypass. The workload has DNS and Alloy egress only. Alloy's
+hostname setting to configure or bypass. The workload egress is limited to DNS, its selected
+PostgreSQL cluster, its MinIO namespace and Alloy in QA. Alloy's
 repository registration reads `qa-document-api` container logs through its existing Kubernetes API
 and RBAC path; the workload exposes no log ingress.
 
@@ -45,8 +46,8 @@ unverified. Identity conflicts, dropped-series counters, exporter failures or ab
 are stop conditions; preserve sanitized timestamps and identities, inspect Alloy delivery, and fix
 reviewed source rather than weakening filters.
 
-The Step-4 local candidate emitted a structured startup record with namespace `insurance-hub`,
-service `document-service`, implementation `go`, version `git-2f0bc5dd8bb7`, the configured
-candidate instance and `local-dev` environment. Telemetry was disabled, so no exporter or delivery
-claim applies. Current ordinary local-dev and QA delivery observations remain pending until the
-Step-5 acceptance procedure records them.
+The image check requires a structured startup record with namespace `insurance-hub`, service
+`document-service`, implementation `go`, the exact source-derived version, configured candidate
+instance and `local-dev` environment. Telemetry is disabled for that fixture, so no exporter or
+delivery claim follows from it. Ordinary local-dev and QA delivery observations remain pending
+until the live acceptance procedure records them.

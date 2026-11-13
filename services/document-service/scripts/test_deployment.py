@@ -29,7 +29,7 @@ def target_environment(name: str = "local-dev") -> dict[str, str]:
         "DEPLOY_ENV": name,
         "DEPLOY_CONTEXT": "qa-insurance-hub",
         "DEPLOY_SVC_NS": "qa-svc",
-        "DEPLOY_DATA_NS": "qa-svc",
+        "DEPLOY_DATA_NS": "qa-data",
     }
 
 
@@ -117,9 +117,9 @@ def test_image_shape_is_bound_to_target_ownership(image: str) -> None:
         checks.secret_and_image(target, image)
 
 
-def test_render_rejects_dependencies_incomplete_inventory_and_placeholder_version() -> None:
+def test_render_rejects_admin_credentials_incomplete_inventory_and_placeholder_version() -> None:
     with pytest.raises(checks.DeploymentError, match="forbidden"):
-        checks.validate_render("local-dev", "kind: Secret\nmetadata:\n  name: database\n")
+        checks.validate_render("local-dev", "kind: Secret\nmetadata:\n  name: migrator-creds\n")
     with pytest.raises(checks.DeploymentError, match="resource kinds"):
         checks.validate_render(
             "local-dev",
@@ -247,25 +247,24 @@ def test_live_state_rejects_invalid_predecessor(previous_image: str) -> None:
 @pytest.mark.parametrize("exit_code", [7, 28])
 def test_untrusted_access_probe_accepts_network_denial_and_cleans_up(exit_code: int) -> None:
     target = Mock()
+    target.business = "local-dev-document-api"
     target.management = "local-dev-document-api-management"
-    target.json.side_effect = [
-        {},
-        {
-            "status": {
-                "containerStatuses": [
-                    {"state": {"terminated": {"exitCode": exit_code}}},
-                ]
-            }
-        },
-    ]
+    terminated = {
+        "status": {
+            "containerStatuses": [
+                {"state": {"terminated": {"exitCode": exit_code}}},
+            ]
+        }
+    }
+    target.json.side_effect = [{}, terminated, {}, terminated, {}, terminated]
 
     checks.verify_untrusted_access_denied(target)
 
-    assert target.kubectl.call_count == 2
+    assert target.kubectl.call_count == 6
     assert target.kubectl.call_args_list[-1].args == (
         "delete",
         "pod",
-        "document-untrusted-probe",
+        "document-untrusted-management",
         "--ignore-not-found",
         "--wait=true",
         "--timeout=30s",
@@ -275,6 +274,7 @@ def test_untrusted_access_probe_accepts_network_denial_and_cleans_up(exit_code: 
 
 def test_untrusted_access_probe_rejects_unrelated_failure_and_cleans_up() -> None:
     target = Mock()
+    target.business = "local-dev-document-api"
     target.management = "local-dev-document-api-management"
     target.json.side_effect = [
         {},
@@ -287,15 +287,17 @@ def test_untrusted_access_probe_rejects_unrelated_failure_and_cleans_up() -> Non
     assert target.kubectl.call_args_list[-1].args[:3] == (
         "delete",
         "pod",
-        "document-untrusted-probe",
+        "document-untrusted-http",
     )
 
 
 def test_untrusted_access_probe_never_deletes_preexisting_pod() -> None:
     target = Mock()
-    target.json.return_value = {"metadata": {"name": "document-untrusted-probe"}}
+    target.json.return_value = {"metadata": {"name": "document-untrusted-http"}}
     with pytest.raises(checks.DeploymentError, match="unowned"):
-        checks.verify_untrusted_access_denied(target)
+        checks.verify_untrusted_endpoint_denied(
+            target, "document-untrusted-http", "http://local-dev-document-api:80/documents/SYN-362"
+        )
     target.kubectl.assert_not_called()
 
 

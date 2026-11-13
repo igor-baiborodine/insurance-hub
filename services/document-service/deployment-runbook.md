@@ -1,9 +1,9 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Document foundation deployment runbook](#document-foundation-deployment-runbook)
+- [Document lookup deployment runbook](#document-lookup-deployment-runbook)
   - [Source and candidate checks](#source-and-candidate-checks)
-  - [Qualified foundation candidate](#qualified-foundation-candidate)
+  - [Candidate identity and caller proof](#candidate-identity-and-caller-proof)
   - [Local development](#local-development)
   - [QA release and verification](#qa-release-and-verification)
   - [Explicit database and read-access administration](#explicit-database-and-read-access-administration)
@@ -12,14 +12,17 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# Document foundation deployment runbook
+# Document lookup deployment runbook
 
-The private Go foundation uses catalog key `document`. Local development is directly owned at
+The private Go lookup uses catalog key `document`. Local development is directly owned at
 context `kind-local-dev-insurance-hub`, namespace `local-dev-all`; QA is reconciled by
 `GitRepository/insurance-hub` and `Kustomization/qa-svc` in `flux-system` into namespace `qa-svc`.
-The Go Deployment is `<environment>-document-api`, its only Service is
-`<environment>-document-api-management`, and its NetworkPolicy denies workload ingress. The
-separate `<environment>-document-api-legacy` resources remain active and authoritative.
+The Go Deployment is `<environment>-document-api`. Its private business Service exposes HTTP 80
+and gRPC 9090; `<environment>-document-api-management` exposes management 8081. The NetworkPolicy
+admits business traffic only from a same-environment Pod carrying
+`insurance-hub.io/document-qualification-client=true`. It permits DNS, the Document PostgreSQL
+cluster, the Document MinIO namespace and, in QA, Alloy egress. The separate
+`<environment>-document-api-legacy` resources remain active and authoritative for ordinary traffic.
 
 ## Source and candidate checks
 
@@ -35,27 +38,41 @@ make go-svc-deploy-smoke SVC_NAME=document
 ```
 
 The disposable smoke creates and removes one labeled namespace in the configured local Kind
-cluster. It loads the exact source-derived image, checks health and the temporary Echo through a
-Kubernetes API port-forward, and proves an untrusted Pod cannot reach management. It does not
-create a cluster, business data, credentials or backend resources.
+cluster. It loads the exact source-derived image, starts owned PostgreSQL and MinIO fixtures,
+creates only synthetic `SYN-362` rows/object and reader credentials, and checks exact private
+lookup bytes and dependency-aware health. A labeled Pod proves allowed HTTP admission; unlabeled
+Pods separately prove denied HTTP, gRPC and management access. Cleanup removes only the namespace.
+The image check separately exercises TLS-verified disposable PostgreSQL and the accepted pinned
+MinIO image; the Kubernetes fixture uses cluster-isolated synthetic dependencies and does not
+replace live trust verification.
 
-## Qualified foundation candidate
+The unchanged legacy gateway boundary has a focused isolated check:
 
-The foundation candidate from source
-`2f0bc5dd8bb7db84f382ad443a7d630f42d4e715` was built as
-`insurance-hub-document-api:1.0.0-local.2f0bc5dd8bb7` with OCI version
-`git-2f0bc5dd8bb7` and local image ID
-`sha256:0c0705b885678fae50374751242d390b1686f66c1d24ebc5b5f57ae0fcf64058`.
-The registered image check passed its non-root runtime, identity, liveness and bounded termination
-contract. The disposable smoke passed rollout, Pod/config identity, health, temporary Echo and
-untrusted-Pod denial in `kind-local-dev-insurance-hub`, then removed its owned namespace. This is
-candidate qualification; the ordinary `local-dev-all` and Flux-owned QA observations remain the
-Step-5 acceptance boundary.
+```sh
+cd legacy/agent-portal-gateway
+bash ./mvnw -Dskip.surefire.tests=true -Dit.test=DocumentLookupEdgeIT verify
+```
+
+It starts a disposable gateway with a synthetic signing key and overrides only
+`micronaut.http.services.document-service.urls`. It checks authenticated exact bytes,
+unauthenticated denial and the existing retry/fallback result. The checked-in local-dev and QA
+destinations remain the Java `*-document-api-legacy` Service.
+
+## Candidate identity and caller proof
+
+The local overlay selects the committed lookup source `f50eeb5bd8f65bcf473c22060ec64166e6cb8224`
+as image `insurance-hub-document-api:1.0.0-local.f50eeb5bd8f6` with runtime version
+`git-f50eeb5bd8f6`. Qualification must independently record the OCI revision and local image ID;
+the ID is not a registry digest. Do not identify an image as a later dirty working tree or reuse
+this identity after runtime source changes. Ordinary local-dev and Flux-owned QA observations
+remain the live acceptance boundary.
 
 ## Local development
 
 Keep the following coordinates and exact candidate identity in one shell. These operations load
-the image, apply only the four Go resources, wait for rollout and verify private access:
+the image, apply the ConfigMap, Deployment, two Services and NetworkPolicy, wait for rollout and
+verify private access. Reader Secrets and the explicit migration/resource sequence must already
+exist:
 
 ```sh
 export DEPLOY_ENV=local-dev
@@ -115,11 +132,13 @@ inventory is a stop condition; do not scale or patch shared or Java resources.
 
 ## QA release and verification
 
-The source overlay remains absent from `k8s/overlays/qa/svc/kustomization.yaml` until publication.
-The main-branch `.github/workflows/go-release-svc.yml` owner builds and pushes the image, resolves
-its registry digest, then `go-svc-release-prepare` updates the semantic tag, source-derived runtime
-version and adds `./document` to the shared QA Kustomization in one release commit. Do not apply the
-QA overlay directly.
+The Document overlay is already selected once in `k8s/overlays/qa/svc/kustomization.yaml`. The
+main-branch `.github/workflows/go-release-svc.yml` owner builds and pushes the image, resolves its
+registry digest, then `go-svc-release-prepare` updates the semantic tag and source-derived runtime
+version while keeping the shared activation idempotent. Document has no catalog initialization
+owner, so its dormant release-bundle metadata is not the executable deployment path. The actual
+owner is the shared `GitRepository/insurance-hub` plus `Kustomization/qa-svc`; do not apply the QA
+overlay directly or invent a per-service GitOps owner.
 
 After Flux reports the shared source and `qa-svc` owner Ready at the release commit, supply the
 Flux-applied revision, immutable image digest and exact coordinates for read-only status and the
@@ -129,7 +148,7 @@ bounded verification fixture:
 export DEPLOY_ENV=qa
 export DEPLOY_CONTEXT=qa-insurance-hub
 export DEPLOY_SVC_NS=qa-svc
-export DEPLOY_DATA_NS=qa-svc
+export DEPLOY_DATA_NS=qa-data
 export DEPLOY_SOURCE_REVISION='FULL_FLUX_APPLIED_COMMIT'
 export DEPLOY_IMAGE_DIGEST='sha256:64_LOWERCASE_HEX'
 

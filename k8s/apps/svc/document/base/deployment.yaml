@@ -25,6 +25,8 @@ spec:
         app.kubernetes.io/name: document-api
         app.kubernetes.io/instance: insurance-hub-document-api
         app.kubernetes.io/component: api
+      annotations:
+        insurance-hub.io/document-reader-credential-revision: "1"
     spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
@@ -57,6 +59,26 @@ spec:
               containerPort: 8081
               protocol: TCP
           env:
+            - name: DOCUMENT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-document-reader-creds
+                  key: database-url
+            - name: MINIO_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: minio-document-reader-creds
+                  key: endpoint
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-document-reader-creds
+                  key: access-key
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-document-reader-creds
+                  key: secret-key
             - name: SERVICE_INSTANCE_ID
               valueFrom:
                 fieldRef:
@@ -65,6 +87,13 @@ spec:
           envFrom:
             - configMapRef:
                 name: document-config
+          volumeMounts:
+            - name: postgres-ca
+              mountPath: /etc/document-service/postgres
+              readOnly: true
+            - name: minio-ca
+              mountPath: /etc/document-service/minio
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -96,3 +125,18 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 2
             failureThreshold: 2
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: postgres-document-reader-creds
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 420
+        - name: minio-ca
+          secret:
+            secretName: minio-document-reader-creds
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 420

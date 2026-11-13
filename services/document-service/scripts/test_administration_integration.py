@@ -21,15 +21,20 @@ import resource_administration as resources  # noqa: E402
 
 pytestmark = pytest.mark.integration
 DOCKER = os.environ.get("DOCKER", "docker")
-PG_IMAGE = os.environ.get("POSTGRES_IMAGE", "postgres:17.10-alpine")
+PG_IMAGE = os.environ.get(
+    "POSTGRES_IMAGE",
+    "postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193",
+)
 MINIO_IMAGE = os.environ.get(
     "MINIO_IMAGE",
     "cgr.dev/chainguard/minio@sha256:7ad2a5efd83f0ca1b8e00af9f7ec7fc3ff977c38ed29b942b0c47460ad2f8f3e",
 )
 
 
-def run(args, text=None, *, failure=False):
-    result = subprocess.run(args, input=text, capture_output=True, text=True, timeout=30)
+def run(args, text=None, *, failure=False, environment=None):
+    result = subprocess.run(
+        args, input=text, capture_output=True, text=True, timeout=30, env=environment
+    )
     if failure:
         assert result.returncode != 0, "forbidden action succeeded"
     else:
@@ -38,14 +43,14 @@ def run(args, text=None, *, failure=False):
 
 
 @contextmanager
-def container(image, args, mounts=()):
+def container(image, args, mounts=(), environment=None):
     name = "document-362-" + uuid.uuid4().hex[:12]
     try:
         run(
             [
                 DOCKER,
                 "run",
-                "--pull=never",
+                "--pull=missing",
                 "--rm",
                 "-d",
                 "--name",
@@ -55,7 +60,8 @@ def container(image, args, mounts=()):
                 *mounts,
                 image,
                 *args,
-            ]
+            ],
+            environment=environment,
         )
         yield name
     finally:
@@ -90,6 +96,70 @@ def loopback_port():
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         return listener.getsockname()[1]
+
+
+@contextmanager
+def lookup_server(environment, root):
+    image = os.environ.get("SERVER_IMAGE", "")
+    if not image:
+        process = subprocess.Popen(
+            [os.environ["SERVER_OUTPUT"]],
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            yield None
+        finally:
+            assert resources.terminate_process_group(process, 10), "lookup service cleanup failed"
+        return
+
+    image_ca = root / "image-ca.crt"
+    image_ca.write_text((root / "ca.crt").read_text())
+    image_ca.chmod(0o444)
+    container_ca = "/etc/document-service/postgres/ca.crt"
+    container_environment = dict(environment)
+    container_environment["DOCUMENT_DATABASE_URL"] = container_environment[
+        "DOCUMENT_DATABASE_URL"
+    ].replace(str(root / "ca.crt"), container_ca)
+    container_environment.update(
+        {
+            "DEPLOYMENT_ENVIRONMENT": "local-dev",
+            "SERVICE_VERSION": os.environ["SOURCE_VERSION"],
+            "SERVICE_INSTANCE_ID": "document-image-check-362",
+        }
+    )
+    mounts = [
+        "--network",
+        "host",
+        "--mount",
+        f"type=bind,src={image_ca},dst={container_ca},readonly",
+    ]
+    runtime_names = {
+        "HTTP_ADDR",
+        "GRPC_ADDR",
+        "HEALTH_ADDR",
+        "DOCUMENT_DATABASE_URL",
+        "MINIO_ENDPOINT",
+        "MINIO_ACCESS_KEY",
+        "MINIO_SECRET_KEY",
+        "MINIO_BUCKET",
+        "OTEL_ENABLED",
+        "DEPLOYMENT_ENVIRONMENT",
+        "SERVICE_VERSION",
+        "SERVICE_INSTANCE_ID",
+    }
+    sensitive_names = {
+        "DOCUMENT_DATABASE_URL",
+        "MINIO_ACCESS_KEY",
+        "MINIO_SECRET_KEY",
+    }
+    for name in sorted(runtime_names):
+        value = container_environment[name]
+        mounts.extend(("--env", name if name in sensitive_names else f"{name}={value}"))
+    with container(image, [], mounts, container_environment) as name:
+        yield name
 
 
 @pytest.fixture(autouse=True)
@@ -662,14 +732,7 @@ def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
                 "OTEL_ENABLED": "false",
             }
         )
-        process = subprocess.Popen(
-            [os.environ["SERVER_OUTPUT"]],
-            env=environment,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        try:
+        with lookup_server(environment, root) as server_container:
             wait_for(
                 lambda: urlopen(f"http://127.0.0.1:{health_port}/readyz", timeout=1).status == 200
             )
@@ -679,8 +742,22 @@ def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
             assert contents == sorted(["JVBERi0zNjI=", "JVBERi0zNjI=", "JVBERi1PQkpFQ1QtMzYy"])
             with urlopen(f"http://127.0.0.1:{http_port}/documents/ABSENT", timeout=5) as response:
                 assert json.load(response) == {"documents": []}
-        finally:
-            assert resources.terminate_process_group(process, 10), "lookup service cleanup failed"
+            if server_container is not None:
+                log_result = subprocess.run(
+                    [DOCKER, "logs", server_container],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                assert log_result.returncode == 0, "could not read runtime image logs"
+                logs = "\n".join((log_result.stdout, log_result.stderr))
+                entries = [json.loads(line) for line in logs.splitlines() if line.startswith("{")]
+                assert any(
+                    entry.get("msg") == "service started"
+                    and entry.get("service_version") == os.environ["SOURCE_VERSION"]
+                    for entry in entries
+                ), "runtime startup log has no exact source version"
+                assert "synthetic-minio-admin-lookup-362" not in logs
 
 
 def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, monkeypatch):

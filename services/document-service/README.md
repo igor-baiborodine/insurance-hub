@@ -99,7 +99,7 @@ require `bootstrap-tools` to have been run explicitly.
 | `make python-toolchain-check` | Exact CPython, pytest, Ruff, and root locked-environment identity without installing or changing packages. | uv 0.13.1 and the provisioned repository environment, or a verified `PYTHON` override containing the root-locked tools. |
 | `make python-check`         | Ruff format/lint plus the focused generated-gateway contract tests for Document-owned Python. | Passing `python-toolchain-check`; no Go tools or network mutation. |
 | `make dockerfile-check` | Exact generated Dockerfile bytes against the validated service configuration and repository-owned fixed template. | Managed Python; no container runtime or mutation. |
-| `make image-check` | Builds the generated Dockerfile from committed source identity, then verifies OCI labels, platform, nonroot user, entrypoint, exposed ports, liveness, and graceful shutdown. | Docker Buildx and access to the pinned builder and runtime images unless cached. |
+| `make image-check` | Builds the generated Dockerfile from committed source identity, inspects OCI/runtime identity, then runs the image through the real PostgreSQL/MinIO lookup fixture with exact bytes, empty lookup, readiness, safe startup identity and bounded cleanup. | Docker Buildx, OpenSSL, psql, mc and the pinned builder, runtime, PostgreSQL and MinIO images available locally. |
 | `make format-check`         | The same ordered formatter pipeline and selected handwritten files as `format`, reported without rewriting them.                                                                                                                                                           | Verified tools; file selection below.                                                                                                                                              |
 | `make check-deps`           | Reproduces `update-deps` in a temporary standalone module and compares `go.mod` and `go.sum`.                                                                                                                                                                              | Go proxy/checksum access unless cached.                                                                                                                                            |
 | `make format-proto-check`   | Buf formatting for the one owned schema.                                                                                                                                                                                                                                   | Verified tools.                                                                                                                                                                    |
@@ -383,7 +383,10 @@ the shared deadline.
 
 Use the [deployment runbook](deployment-runbook.md) for candidate, local-dev and Flux-owned QA
 commands. Use the [observability runbook](observability-runbook.md) for safe foundation signal
-checks. Both keep the Go foundation private and preserve the separate Java Document workload.
+checks. The Go workload exposes separate private HTTP/gRPC and management Services. Its
+NetworkPolicy admits business traffic only from an explicitly labeled disposable qualification
+caller, allows only DNS, PostgreSQL, MinIO and QA telemetry egress, and preserves the separate Java
+Document workload and ordinary gateway destination.
 
 The standalone `cmd/migrate` uses `internal/service/administration.go` for command lifecycle,
 `internal/postgres/administration.go` for connections, and `internal/administration` for migration
@@ -394,7 +397,8 @@ protected PostgreSQL/MinIO read credentials separately. See
 [explicit database and read-access administration](deployment-runbook.md#explicit-database-and-read-access-administration)
 for fresh Java-independent initialization, compatible adoption, target/confirmation requirements,
 credential recovery and focused `resource-test-fast`, `test-administration` and
-`resource-test-integration` commands. Lookup and runtime dependency wiring remain subsequent work.
+`resource-test-integration` commands. The runtime mounts only the reader Secrets; migrator and
+administrative target credentials are never part of API startup or its image.
 
 Both command entry points use the same service-local logger facade as Product, backed by published
 Servicekit logging. Administrative queries and session/lock/grant statements live in embedded

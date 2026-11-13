@@ -63,7 +63,7 @@ BUILD_EXECUTABLES := server migrate
 MIGRATOR_OUTPUT ?= $(CURDIR)/.tools/document-migrate
 SERVER_OUTPUT ?= $(CURDIR)/.tools/document-server
 RESOURCE_TEST_ARGS ?=
-POSTGRES_IMAGE ?= postgres:17.10-alpine
+POSTGRES_IMAGE ?= postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
 MINIO_IMAGE ?= cgr.dev/chainguard/minio@sha256:7ad2a5efd83f0ca1b8e00af9f7ec7fc3ff977c38ed29b942b0c47460ad2f8f3e
 TEST_PACKAGES ?= ./...
 COVERAGE_EXCLUDE_PATHS := gen
@@ -127,9 +127,14 @@ image-build: dockerfile-check python-runtime-check
 image-check: image-build
 	@$(MAKE) --no-print-directory _image-check-existing
 
-_image-check-existing: dockerfile-check python-runtime-check
+_image-check-existing: dockerfile-check python-runtime-check build-migrator
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
-		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" check
+		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" inspect
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
+		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" MINIO_IMAGE="$(MINIO_IMAGE)" \
+		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" SERVER_IMAGE="$(IMAGE_REF)" DOCKER="$(DOCKER)" \
+		SOURCE_VERSION="$(SOURCE_VERSION)" "$(PYTHON)" -m pytest -q -m integration \
+		scripts/test_administration_integration.py -k lookup_traverses_real_rpc_postgres_and_minio
 
 deploy-render: python-runtime-check ## Render one Document overlay without applying it
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
