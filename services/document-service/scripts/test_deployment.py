@@ -367,6 +367,49 @@ def test_untrusted_access_probe_never_deletes_preexisting_pod() -> None:
     target.kubectl.assert_not_called()
 
 
+def test_qualified_access_probe_waits_for_network_policy_convergence() -> None:
+    # given
+    target = Mock()
+    target.business = "qa-document-api"
+    target.json.side_effect = [
+        {},
+        {"status": {"containerStatuses": [{"state": {"terminated": {"exitCode": 0}}}]}},
+    ]
+    target.kubectl.side_effect = [
+        None,
+        json.dumps(
+            {
+                "documents": [
+                    {"content": "JVBERi0zNjI="},
+                    {"content": "JVBERi0zNjI="},
+                    {"content": "JVBERi1PQkpFQ1QtMzYy"},
+                ]
+            }
+        ),
+        None,
+    ]
+
+    # when
+    checks.verify_qualification_access(target)
+
+    # then
+    assert target.kubectl.call_args_list[0].args[-5:] == (
+        "/bin/sh",
+        "-ec",
+        (
+            f"sleep {checks.NETWORK_POLICY_CONVERGENCE_SECONDS}\n"
+            'exec curl --fail --silent --max-time 5 "$1"'
+        ),
+        "document-qualified-http",
+        "http://qa-document-api:80/documents/SYN-362",
+    )
+    assert target.kubectl.call_args_list[-1].args[:3] == (
+        "delete",
+        "pod",
+        "document-qualified-http",
+    )
+
+
 def test_deployment_adapter_maps_interrupt_to_shell_status(monkeypatch) -> None:
     # given
     def interrupted(_arguments=None):
