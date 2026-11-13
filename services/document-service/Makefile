@@ -12,11 +12,9 @@ PYTHON_TOOLING_FILES := $(wildcard scripts/check_gateway_contract.py \
 	scripts/test_check_gateway_contract.py scripts/document_deployment_checks.py scripts/deployment.py \
 	scripts/disposable_deployment.py scripts/test_deployment.py \
 	scripts/test_disposable_deployment.py scripts/test_tooling.py scripts/resource_administration.py \
-	scripts/test_resource_administration.py scripts/test_administration_integration.py \
-	scripts/merge_coverage.py scripts/test_merge_coverage.py)
+	scripts/test_resource_administration.py scripts/test_administration_integration.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
-	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_resource_administration.py \
-	scripts/test_merge_coverage.py)
+	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_resource_administration.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -61,8 +59,6 @@ PGX_VERSION := v5.11.0
 GOOSE_VERSION := v3.27.0
 BUILD_EXECUTABLES := server migrate
 MIGRATOR_OUTPUT ?= $(CURDIR)/.tools/document-migrate
-MIGRATOR_COVERAGE_DIR ?=
-MINIO_CLIENT_VERSION := RELEASE.2025-08-13T08-35-41Z
 RESOURCE_TEST_ARGS ?=
 POSTGRES_IMAGE ?= postgres:17.10-alpine
 MINIO_IMAGE ?= cgr.dev/chainguard/minio@sha256:7ad2a5efd83f0ca1b8e00af9f7ec7fc3ff977c38ed29b942b0c47460ad2f8f3e
@@ -294,19 +290,11 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make resource-verify  Verify schema, workload reads and denied permissions'
 
 .PHONY: build-migrator migration resource-inspect resource-ensure resource-verify \
-	resource-test-fast resource-test-integration check-migration-schema \
-	bootstrap-resource-tests check-administration-coverage
-
-bootstrap-resource-tests: verify-tools ## Explicitly install pinned client and pull disposable test images
-	GOBIN="$(TOOLS_BIN)" GOWORK=off $(GO) install github.com/minio/mc@$(MINIO_CLIENT_VERSION)
-	$(DOCKER) pull "$(POSTGRES_IMAGE)"
-	$(DOCKER) pull "$(MINIO_IMAGE)"
+	resource-test-fast resource-test-integration check-migration-schema
 
 build-migrator: verify-tools ## Build explicit administrative executable outside the API image
 	@test -n "$(strip $(MIGRATOR_OUTPUT))" || { echo 'MIGRATOR_OUTPUT is required' >&2; exit 1; }
-	GOWORK=off $(GO) build -mod=readonly \
-		$(if $(strip $(MIGRATOR_COVERAGE_DIR)),-cover -covermode=atomic) \
-		-o "$(MIGRATOR_OUTPUT)" ./cmd/migrate
+	GOWORK=off $(GO) build -mod=readonly -o "$(MIGRATOR_OUTPUT)" ./cmd/migrate
 
 migration: python-runtime-check ## Run migrate/status/version with explicit protected inputs
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
@@ -322,7 +310,6 @@ resource-test-fast: python-toolchain-check ## Exercise Document administration g
 
 resource-test-integration: python-toolchain-check build-migrator ## Disposable PostgreSQL/MinIO administration smoke
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
-		PATH="$(TOOLS_BIN):$$PATH" GOCOVERDIR="$(MIGRATOR_COVERAGE_DIR)" \
 		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" MINIO_IMAGE="$(MINIO_IMAGE)" \
 		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_administration_integration.py $(RESOURCE_TEST_ARGS)
@@ -332,13 +319,9 @@ check-migration-schema: resource-test-integration
 
 .PHONY: test-administration
 test-administration: verify-tools ## Focused command, connection-guard and common-logger smoke
-	GOWORK=off $(GO) test -mod=readonly -count=1 -v ./cmd/migrate ./internal/administration ./internal/logger ./cmd/server
+	GOWORK=off $(GO) test -mod=readonly -count=1 -v \
+		./cmd/migrate ./internal/administration ./internal/postgres ./internal/logger ./cmd/server
+	GOWORK=off $(GO) test -mod=readonly -count=1 -v \
+		-run '^TestRunMigration_' ./internal/service
 
-check-administration-coverage: coverage python-toolchain-check ## Include existing resource smoke in Go coverage
-	@set -eu; directory=$$(mktemp -d); trap 'rm -rf -- "$$directory"' EXIT HUP INT TERM; \
-		$(MAKE) --no-print-directory resource-test-integration MIGRATOR_COVERAGE_DIR="$$directory"; \
-		GOWORK=off $(GO) tool covdata textfmt -i="$$directory" -o="$$directory/coverage.txt"; \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/merge_coverage.py "$(COVERAGE_FILE)" "$$directory/coverage.txt"
-
-coverage-check: check-administration-coverage
-check-go-pr: test-administration
+check-go-pr: resource-test-integration test-administration
