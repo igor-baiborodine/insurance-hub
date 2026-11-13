@@ -132,13 +132,10 @@ with their generated and manifest changes.
 `.github/workflows/go-pr-mod.yml` runs only for pull requests targeting `main` whose changed paths
 match the qualifying inputs for the scaffold or any immediate `services/*-service` directory.
 Qualifying inputs include Go source and generated output, `go.mod`/`go.sum`, owned Protobuf and SQL
-inputs, contract baselines, and module lint/generator configuration. Service-owned Python scripts,
-the module `Makefile`, `Dockerfile`, and `go-service-tooling.json` also trigger the workflow so their
-declared `check-go-pr` owner runs. These tooling paths select their service only when the diff has
-no primary Go/contract module; this preserves the established primary module for mixed scaffold or
-service changes. Documentation, workflow YAML, topology metadata, Codecov configuration, legacy
-baseline fixtures and deployment assets do not independently trigger the workflow. The additive
-shared workflow below covers other module auxiliary files and root validation tooling.
+inputs, contract baselines, and module lint/generator configuration. Scripts, Makefiles,
+documentation, workflow YAML, topology metadata, Codecov configuration, legacy baseline fixtures,
+Dockerfiles, and deployment assets do not independently trigger that selected-module workflow.
+The additive shared workflow below covers module auxiliary files and root validation tooling.
 
 `.github/workflows/go-report-card.yml` uses the same service and scaffold qualifying path matrix for
 pushes to `main` and pull requests targeting `main`, and additionally runs for changes under
@@ -150,10 +147,7 @@ Once triggered, the workflow compares the explicit pull-request base and head re
 the complete diff to the scaffold or conventionally named service roots. Zero supported modules is
 an explicit successful no-op. One module runs its `bootstrap-go-tools` and `check-go-pr` targets.
 More than one module fails before setup and asks the contributor to split the pull request,
-except that tooling-only paths in another service do not displace the primary Go/contract module.
-More than one primary module still fails. When a diff has tooling-only paths in multiple services
-and no primary module, the workflow retains its successful no-op because it cannot choose one
-module without changing the established multi-module boundary. A newly added
+including when the second module change was not independently qualifying. A newly added
 `services/<name>-service` module receives the same selection, cache, validation, and coverage
 behavior without a workflow edit. Superseded runs for the same pull request are cancelled.
 

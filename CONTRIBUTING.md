@@ -222,9 +222,7 @@ process for future modules or workspaces.
 
 #### Change-Based Local Validation
 
-**Go Module PR Check** runs for qualifying module inputs and validates one selected module. Go and
-contract inputs select the primary module; service Python, module `Makefile`, `Dockerfile`, and
-`go-service-tooling.json` select their service only when no primary module is present.
+**Go Module PR Check** runs only for qualifying module inputs and validates one selected module.
 **Go Shared Runtime PR Check** runs the library gate and candidate build/unit phases for active
 consumers when servicekit code changes. Its root tooling checks are fast; unchanged modules are
 not selected for root-only or library documentation changes. Before submitting a shared code
