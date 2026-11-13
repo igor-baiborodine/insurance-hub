@@ -148,6 +148,33 @@ def minio_ready(minio):
     return True
 
 
+def stop_lookup_container(name):
+    run([DOCKER, "stop", "--time", "10", name])
+    exit_code = run([DOCKER, "inspect", "--format", "{{.State.ExitCode}}", name])
+    assert exit_code == "0", f"lookup service exited with status {exit_code}"
+
+
+def test_stop_lookup_container_uses_bounded_graceful_stop(monkeypatch):
+    commands = []
+
+    def controlled_run(args, *unused_args, **unused_kwargs):
+        commands.append(args)
+        return "0" if args[1:3] == ["inspect", "--format"] else ""
+
+    monkeypatch.setattr(sys.modules[__name__], "run", controlled_run)
+    stop_lookup_container("document-image-362")
+    assert commands == [
+        [DOCKER, "stop", "--time", "10", "document-image-362"],
+        [
+            DOCKER,
+            "inspect",
+            "--format",
+            "{{.State.ExitCode}}",
+            "document-image-362",
+        ],
+    ]
+
+
 @contextmanager
 def lookup_server(environment, root):
     image = os.environ.get("SERVER_IMAGE", "")
@@ -209,7 +236,16 @@ def lookup_server(environment, root):
         value = container_environment[name]
         mounts.extend(("--env", name if name in sensitive_names else f"{name}={value}"))
     with container(image, [], mounts, container_environment) as name:
-        yield name
+        try:
+            yield name
+        finally:
+            previous_failure = sys.exc_info()[0] is not None
+            try:
+                stop_lookup_container(name)
+            except AssertionError, OSError, subprocess.TimeoutExpired:
+                if not previous_failure:
+                    raise
+                print("document image graceful shutdown failed", file=sys.stderr)
 
 
 @pytest.fixture(autouse=True)
