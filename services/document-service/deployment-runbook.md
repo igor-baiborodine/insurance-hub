@@ -68,11 +68,28 @@ make go-svc-deploy-verify SVC_NAME=document
 ```
 
 `deploy`, `image-load` and `stop` reject QA. Local stop scales only
-`local-dev-document-api` to zero:
+`local-dev-document-api` to zero. Confirm that bounded state with the exact selected context and
+namespace:
 
 ```sh
 make go-svc-stop SVC_NAME=document
+kubectl --context "$DEPLOY_CONTEXT" --namespace "$DEPLOY_SVC_NS" \
+  get deployment/local-dev-document-api -o 'jsonpath={.spec.replicas}{"\n"}'
 ```
+
+The readback must print `0`. `go-svc-deploy-status` deliberately rejects this stopped state because
+it verifies the ordinary ready workload and configuration; that failure does not mean the bounded
+stop failed. Recover only the Go foundation with the same accepted image and guarded owner:
+
+```sh
+make go-svc-deploy-preflight SVC_NAME=document
+make go-svc-deploy SVC_NAME=document
+make go-svc-deploy-verify SVC_NAME=document
+```
+
+Recovery must return one ready `local-dev-document-api` Pod with the accepted image/version while
+`local-dev-document-api-legacy` remains available. A different context, namespace, image or live
+inventory is a stop condition; do not scale or patch shared or Java resources.
 
 ## QA release and verification
 
