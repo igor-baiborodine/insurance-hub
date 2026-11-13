@@ -1,0 +1,90 @@
+package telemetry
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"log/slog"
+	"testing"
+
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
+
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/application"
+)
+
+func TestDependencyObserver_RecordsOnlyBoundedOutcomes(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		dependency string
+		result     string
+		err        error
+		want       string
+	}{
+		{"postgres success", DependencyPostgreSQL, DependencyResultSuccess, nil, "success"},
+		{"object omitted", DependencyObjectStore, DependencyResultOmitted, nil, "omitted"},
+		{"cancelled", DependencyPostgreSQL, DependencyResultSuccess, context.Canceled, "cancelled"},
+		{"deadline", DependencyObjectStore, DependencyResultSuccess, context.DeadlineExceeded, "deadline_exceeded"},
+		{"safe error", "private-dependency", DependencyResultSuccess, errors.New("private-error"), "error"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			observer, err := NewDependencyObserver(
+				slog.New(slog.NewJSONHandler(&output, nil)),
+				metricnoop.NewMeterProvider(),
+				tracenoop.NewTracerProvider(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, request := observer.Start(context.Background(), test.dependency)
+			request.Finish(ctx, test.result, test.err)
+			if !bytes.Contains(output.Bytes(), []byte(`"outcome":"`+test.want+`"`)) {
+				t.Fatalf("log = %s", output.Bytes())
+			}
+			if bytes.Contains(output.Bytes(), []byte("private-dependency")) ||
+				bytes.Contains(output.Bytes(), []byte("private-error")) {
+				t.Fatalf("unbounded value logged: %s", output.Bytes())
+			}
+		})
+	}
+}
+
+func TestObservers_RequireDependenciesAndRecordLookupOutcomes(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
+	meter := metricnoop.NewMeterProvider()
+	tracer := tracenoop.NewTracerProvider()
+	if _, err := NewDependencyObserver(nil, meter, tracer); err == nil {
+		t.Fatal("missing dependency observer logger accepted")
+	}
+	if _, err := NewDependencyObserver(logger, nil, tracer); err == nil {
+		t.Fatal("missing dependency meter accepted")
+	}
+	if _, err := NewDependencyObserver(logger, meter, nil); err == nil {
+		t.Fatal("missing dependency tracer accepted")
+	}
+	if _, err := NewLookupObserver(nil, meter); err == nil {
+		t.Fatal("missing lookup logger accepted")
+	}
+	if _, err := NewLookupObserver(logger, nil); err == nil {
+		t.Fatal("missing lookup meter accepted")
+	}
+	observer, err := NewLookupObserver(logger, meter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		omitted int
+		err     error
+	}{
+		{0, nil},
+		{1, nil},
+		{0, context.Canceled},
+		{0, context.DeadlineExceeded},
+		{0, application.ErrResponseLimit},
+		{0, application.ErrUnavailable},
+		{0, errors.New("unexpected")},
+	} {
+		observer.Record(context.Background(), 1, test.omitted, test.err)
+	}
+}

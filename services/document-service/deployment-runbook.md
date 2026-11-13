@@ -144,8 +144,8 @@ patch QA, suspend the shared owner or remove Java resources.
 
 ## Explicit database and read-access administration
 
-The administrative executable and resource tooling are separate from API startup. They do not
-replace Echo or activate lookup yet. Java retains ordinary routes and registration authority.
+The administrative executable and resource tooling are separate from API startup. Lookup uses the
+restricted reader identities only; Java retains ordinary routes and registration authority.
 `document` owns both fresh and adopted tables/sequences/history. `go_document_migrator` is a
 NOINHERIT login that explicitly assumes `document`; `go_document_reader` has SELECT only and no
 sequence/owner membership. MinIO uses a separate `document-reader` identity with a `document-reader`

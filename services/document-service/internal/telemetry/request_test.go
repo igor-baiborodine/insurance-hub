@@ -61,9 +61,9 @@ func TestRequestObserver_RecordsBoundedTransportOutcomes(t *testing.T) {
 		{status: "INTERNAL", normalized: "INTERNAL", outcome: "internal_error", level: "ERROR"},
 		{status: "private-status-marker", normalized: "UNKNOWN", outcome: "internal_error", level: "ERROR"},
 	} {
-		observer.StartGRPC(ctx).Finish(ctx, test.status)
+		observer.StartGRPC(ctx, OperationFindDocuments).Finish(ctx, test.status)
 		expected = append(expected, expectedRecord{
-			transport: "grpc", operation: "echo", outcome: test.outcome,
+			transport: "grpc", operation: "find_documents", outcome: test.outcome,
 			status: test.normalized, level: test.level,
 		})
 	}
@@ -78,9 +78,10 @@ func TestRequestObserver_RecordsBoundedTransportOutcomes(t *testing.T) {
 		{status: 504, outcome: "deadline_exceeded", level: "WARN"},
 		{status: 500, outcome: "internal_error", level: "ERROR"},
 	} {
-		observer.StartHTTP(ctx, "POST /v1/example/echo").FinishHTTP(ctx, test.status)
+		observer.StartHTTP(ctx, "GET /documents/{policyNumber}").
+			FinishHTTP(ctx, test.status)
 		expected = append(expected, expectedRecord{
-			transport: "http", operation: "echo", outcome: test.outcome,
+			transport: "http", operation: "find_documents", outcome: test.outcome,
 			status: float64(test.status), level: test.level,
 		})
 	}

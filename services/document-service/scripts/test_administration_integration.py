@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.request import urlopen
 
 import pytest
 
@@ -72,7 +74,7 @@ def wait_for(probe):
         try:
             if probe():
                 return
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired, OSError:
             pass
         time.sleep(0.2)
     raise AssertionError("disposable dependency did not become ready")
@@ -82,6 +84,12 @@ def private(path, value):
     path.write_text(value)
     path.chmod(0o600)
     return path
+
+
+def loopback_port():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return listener.getsockname()[1]
 
 
 @pytest.fixture(autouse=True)
@@ -567,6 +575,112 @@ def test_minio_reader_preserves_credentials_and_denies_writes(tmp_path, monkeypa
             assert result.returncode != 0
             assert resources.authorization_denied(result.stdout), result.stdout
         assert minio.mc("cat", "document/policies/2026/02/SYN-362.pdf") == "%PDF-362"
+
+
+def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
+    admin, migrate, _target, root, pg_name = postgres
+    assert migrate() == "version=1"
+    pg_port = json.loads(run([DOCKER, "inspect", pg_name]))[0]["NetworkSettings"]["Ports"][
+        "5432/tcp"
+    ][0]["HostPort"]
+    admin(
+        "SET ROLE document; INSERT INTO public.policy_document(id,bytes,policy_number) VALUES"
+        "(1,decode('255044462d333632','hex'),'SYN-362'),"
+        "(2,convert_to('2026/02/SYN-362.pdf','UTF8'),'SYN-362'),"
+        "(3,convert_to('2026/02/missing.pdf','UTF8'),'SYN-362'),"
+        "(4,''::bytea,'SYN-362'),"
+        "(5,decode('255044462d333632','hex'),'SYN-362');"
+    )
+
+    password = "synthetic-minio-admin-lookup-362"
+    mounts = [
+        "--tmpfs",
+        "/data:uid=65532,gid=65532,mode=0700",
+        "-e",
+        "MINIO_ROOT_USER=fixture-admin",
+        "-e",
+        f"MINIO_ROOT_PASSWORD={password}",
+        "-p",
+        "127.0.0.1::9000",
+        "--entrypoint",
+        "minio",
+    ]
+    with container(MINIO_IMAGE, ["server", "/data", "--address", ":9000"], mounts) as name:
+        minio_port = json.loads(run([DOCKER, "inspect", name]))[0]["NetworkSettings"]["Ports"][
+            "9000/tcp"
+        ][0]["HostPort"]
+        endpoint = f"http://127.0.0.1:{minio_port}"
+        config_dir = tmp_path / "lookup-admin"
+        config_dir.mkdir(mode=0o700)
+        config = private(
+            config_dir / "config.json",
+            json.dumps(
+                {
+                    "version": "10",
+                    "aliases": {
+                        "document": {
+                            "url": endpoint,
+                            "accessKey": "fixture-admin",
+                            "secretKey": password,
+                            "api": "S3v4",
+                            "path": "auto",
+                        }
+                    },
+                }
+            ),
+        )
+        minio = resources.Minio(resources.Commands(), config, endpoint)
+        wait_for(
+            lambda: (
+                subprocess.run(
+                    ["mc", "--config-dir", str(config_dir), "ready", "document"],
+                    capture_output=True,
+                    timeout=5,
+                ).returncode
+                == 0
+            )
+        )
+        minio.ensure(minio.inspect(), "a" * 64)
+        fixture = private(tmp_path / "lookup.pdf", "%PDF-OBJECT-362")
+        minio.mc("cp", str(fixture), "document/policies/2026/02/SYN-362.pdf")
+
+        http_port, grpc_port, health_port = (loopback_port() for _ in range(3))
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "HTTP_ADDR": f"127.0.0.1:{http_port}",
+                "GRPC_ADDR": f"127.0.0.1:{grpc_port}",
+                "HEALTH_ADDR": f"127.0.0.1:{health_port}",
+                "DOCUMENT_DATABASE_URL": (
+                    f"postgresql://go_document_reader:{'a' * 64}@localhost:{pg_port}/document"
+                    f"?sslmode=verify-full&sslrootcert={root / 'ca.crt'}"
+                ),
+                "MINIO_ENDPOINT": endpoint,
+                "MINIO_ACCESS_KEY": resources.USER,
+                "MINIO_SECRET_KEY": "a" * 64,
+                "MINIO_BUCKET": "policies",
+                "OTEL_ENABLED": "false",
+            }
+        )
+        process = subprocess.Popen(
+            [os.environ["SERVER_OUTPUT"]],
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            wait_for(
+                lambda: urlopen(f"http://127.0.0.1:{health_port}/readyz", timeout=1).status == 200
+            )
+            with urlopen(f"http://127.0.0.1:{http_port}/documents/SYN-362", timeout=5) as response:
+                payload = json.load(response)
+            contents = sorted(item["content"] for item in payload["documents"])
+            assert contents == sorted(["JVBERi0zNjI=", "JVBERi0zNjI=", "JVBERi1PQkpFQ1QtMzYy"])
+            with urlopen(f"http://127.0.0.1:{http_port}/documents/ABSENT", timeout=5) as response:
+                assert json.load(response) == {"documents": []}
+        finally:
+            assert resources.terminate_process_group(process, 10), "lookup service cleanup failed"
 
 
 def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, monkeypatch):

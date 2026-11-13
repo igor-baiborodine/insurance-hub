@@ -79,7 +79,7 @@
       "timeoutSeconds": 3600
     },
     "gateway": {
-      "generatedPath": "gen/openapiv2/document/v1/example_service.swagger.json",
+      "generatedPath": "gen/openapiv2/document/v1/document_service.swagger.json",
       "contractPath": "testdata/http-contract.json"
     },
     "dependencies": [],

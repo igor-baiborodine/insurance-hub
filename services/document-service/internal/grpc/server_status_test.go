@@ -55,7 +55,7 @@ func TestRPCStatus_PreservesCanonicalNamesInLogsAndMetrics(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx := context.Background()
-			request := observer.StartGRPC(ctx)
+			request := observer.StartGRPC(ctx, telemetry.OperationFindDocuments)
 			// when
 			request.Finish(ctx, rpcCodeName(test.code))
 			// then

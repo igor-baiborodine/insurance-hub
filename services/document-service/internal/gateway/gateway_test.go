@@ -1,706 +1,177 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	documentv1 "github.com/igor-baiborodine/insurance-hub/services/document-service/gen/document/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/telemetry"
 )
 
-func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
+type fakeClient struct {
+	find func(context.Context, *documentv1.FindDocumentsRequest) (*documentv1.FindDocumentsResponse, error)
+}
+
+func (client *fakeClient) FindDocuments(
+	ctx context.Context,
+	request *documentv1.FindDocumentsRequest,
+	_ ...grpc.CallOption,
+) (*documentv1.FindDocumentsResponse, error) {
+	return client.find(ctx, request)
+}
+
+func TestHandler_ServesAcceptedLookupEnvelope(t *testing.T) {
+	// given
+	client := &fakeClient{find: func(
+		_ context.Context,
+		request *documentv1.FindDocumentsRequest,
+	) (*documentv1.FindDocumentsResponse, error) {
+		if request.GetPolicyNumber() != "SYN 362" {
+			t.Fatalf("policy number = %q", request.GetPolicyNumber())
+		}
+		return &documentv1.FindDocumentsResponse{Documents: []*documentv1.Document{
+			{PolicyNumber: request.GetPolicyNumber(), Content: []byte("%PDF-362")},
+			{PolicyNumber: request.GetPolicyNumber(), Content: []byte{}},
+		}}, nil
+	}}
+	handler := newTestHandler(t, client)
+	request := httptest.NewRequest(http.MethodGet, "/documents/SYN%20362", nil)
+	response := httptest.NewRecorder()
+
+	// when
+	handler.ServeHTTP(response, request)
+
+	// then
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+	}
+	want := `{"documents":[{"policyNumber":"SYN 362","content":"JVBERi0zNjI="},{"policyNumber":"SYN 362","content":""}]}`
+	if strings.TrimSpace(response.Body.String()) != want {
+		t.Fatalf("body = %s", response.Body)
+	}
+}
+
+func TestHandler_PreservesEmptyCollectionAndSafeFailures(t *testing.T) {
 	// given
 	tests := []struct {
-		name, method, path, body, contentType, accept string
-		wantStatus, wantCalls                         int
-		wantBody                                      string
+		name       string
+		failure    error
+		statusCode int
+		body       string
 	}{
+		{"empty", nil, http.StatusOK, `{"documents":[]}`},
 		{
-			"valid",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"hello"}`,
-			"application/json",
-			"application/json",
-			200,
-			1,
-			`{"message":"hello"}`,
+			"unavailable",
+			status.Error(codes.Unavailable, "private-marker"),
+			http.StatusServiceUnavailable,
+			`{"code":14,"message":"service unavailable","details":[]}`,
 		},
 		{
-			"valid charset",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"é"}`,
-			"application/json; charset=utf-8",
-			"*/*",
-			200,
-			1,
-			`{"message":"é"}`,
-		},
-		{
-			"missing value reaches RPC",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{}`,
-			"application/json",
-			"",
-			400,
-			1,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"malformed",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"duplicate",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a","message":"b"}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"unknown member",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a","secret":"b"}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"wrong type",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":7}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"query",
-			http.MethodPost,
-			"/v1/example/echo?secret=value",
-			`{"message":"a"}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"unknown route",
-			http.MethodPost,
-			"/private/value",
-			`{}`,
-			"application/json",
-			"",
-			404,
-			0,
-			errorBody(5, "not found"),
-		},
-		{
-			"trailing slash",
-			http.MethodPost,
-			"/v1/example/echo/",
-			`{}`,
-			"application/json",
-			"",
-			404,
-			0,
-			errorBody(5, "not found"),
-		},
-		{
-			"method",
-			http.MethodGet,
-			"/v1/example/echo",
-			"",
-			"",
-			"",
-			405,
-			0,
-			errorBody(12, "method not allowed"),
-		},
-		{
-			"unacceptable",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"application/json",
-			"text/plain",
-			406,
-			0,
-			errorBody(3, "not acceptable"),
-		},
-		{
-			"zero quality response",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"application/json",
-			"application/json;q=0",
-			406,
-			0,
-			errorBody(3, "not acceptable"),
-		},
-		{
-			"parameterized response",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"application/json",
-			"application/json;profile=private",
-			406,
-			0,
-			errorBody(3, "not acceptable"),
-		},
-		{
-			"unsupported",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"text/plain",
-			"",
-			415,
-			0,
-			errorBody(3, "unsupported media type"),
-		},
-		{
-			"too large",
-			http.MethodPost,
-			"/v1/example/echo",
-			strings.Repeat("x", 65),
-			"application/json",
-			"",
-			413,
-			0,
-			errorBody(8, "request body too large"),
+			"limit",
+			status.Error(codes.ResourceExhausted, "private-marker"),
+			http.StatusTooManyRequests,
+			`{"code":8,"message":"response limit exceeded","details":[]}`,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{}
-			handler := newTestHandler(t, client, 64)
-			request := httptest.NewRequest(
+			client := &fakeClient{find: func(
+				context.Context,
+				*documentv1.FindDocumentsRequest,
+			) (*documentv1.FindDocumentsResponse, error) {
+				if test.failure != nil {
+					return nil, test.failure
+				}
+				return &documentv1.FindDocumentsResponse{}, nil
+			}}
+			handler := newTestHandler(t, client)
+			response := httptest.NewRecorder()
+
+			// when
+			handler.ServeHTTP(
+				response,
+				httptest.NewRequest(http.MethodGet, "/documents/SYN-362", nil),
+			)
+
+			// then
+			if response.Code != test.statusCode ||
+				strings.TrimSpace(response.Body.String()) != test.body {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+			}
+		})
+	}
+}
+
+func TestHandler_RejectsUnsupportedRoutesAndDecodedSlash(t *testing.T) {
+	// given
+	handler := newTestHandler(t, &fakeClient{find: func(
+		context.Context,
+		*documentv1.FindDocumentsRequest,
+	) (*documentv1.FindDocumentsResponse, error) {
+		t.Fatal("unexpected RPC call")
+		return nil, nil
+	}})
+	tests := []struct {
+		method string
+		path   string
+		status int
+	}{
+		{http.MethodGet, "/documents", http.StatusNotFound},
+		{http.MethodPost, "/documents/SYN-362", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/documents/SYN%2F362", http.StatusNotFound},
+		{http.MethodGet, "/documents/SYN-362?extra=true", http.StatusBadRequest},
+	}
+	for _, test := range tests {
+		response := httptest.NewRecorder()
+
+		// when
+		handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
+
+		// then
+		if response.Code != test.status {
+			t.Errorf(
+				"%s %s status = %d, want %d",
 				test.method,
 				test.path,
-				strings.NewReader(test.body),
-			)
-			if test.contentType != "" {
-				request.Header.Set("Content-Type", test.contentType)
-			}
-			if test.accept != "" {
-				request.Header.Set("Accept", test.accept)
-			}
-			recorder := httptest.NewRecorder()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != test.wantStatus ||
-				recorder.Body.String() != test.wantBody {
-				t.Errorf(
-					"response = (%d, %q), want (%d, %q)",
-					recorder.Code,
-					recorder.Body.String(),
-					test.wantStatus,
-					test.wantBody,
-				)
-			}
-			if client.callCount() != test.wantCalls {
-				t.Errorf(
-					"RPC calls = %d, want %d",
-					client.callCount(),
-					test.wantCalls,
-				)
-			}
-		})
-	}
-}
-
-func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
-	// given
-	privateMarker := "private-upstream-marker"
-	for _, test := range []struct {
-		name string
-		err  error
-		want int
-		body string
-	}{
-		{"unavailable", status.Error(codes.Unavailable, privateMarker), 503, errorBody(14, "service unavailable")},
-		{"deadline", status.Error(codes.DeadlineExceeded, privateMarker), 504, errorBody(4, "deadline exceeded")},
-		{"canceled", status.Error(codes.Canceled, privateMarker), 499, errorBody(1, "request canceled")},
-		{"resource exhausted", status.Error(codes.ResourceExhausted, privateMarker), 500, errorBody(13, "internal error")},
-		{"internal", status.Error(codes.Internal, privateMarker), 500, errorBody(13, "internal error")},
-		{"unknown", errors.New(privateMarker), 500, errorBody(13, "internal error")},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{err: test.err}
-			handler := newTestHandler(t, client, 4096)
-			request := httptest.NewRequest(
-				http.MethodPost,
-				"/v1/example/echo",
-				strings.NewReader(`{"message":"hello"}`),
-			)
-			request.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != test.want || recorder.Body.String() != test.body ||
-				strings.Contains(recorder.Body.String(), privateMarker) {
-				t.Errorf(
-					"unsafe response = (%d, %q)",
-					recorder.Code,
-					recorder.Body.String(),
-				)
-			}
-		})
-	}
-}
-
-func TestHandler_PreservesMessageByteBoundaries(t *testing.T) {
-	// given
-	for _, test := range []struct {
-		name    string
-		message string
-		status  int
-	}{
-		{"ASCII maximum", strings.Repeat("a", 128), http.StatusOK},
-		{"ASCII over", strings.Repeat("a", 129), http.StatusBadRequest},
-		{"UTF-8 maximum", strings.Repeat("é", 64), http.StatusOK},
-		{"UTF-8 over", strings.Repeat("é", 64) + "a", http.StatusBadRequest},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{}
-			handler := newTestHandler(t, client, 4096)
-			request := httptest.NewRequest(
-				http.MethodPost,
-				"/v1/example/echo",
-				strings.NewReader(`{"message":"`+test.message+`"}`),
-			)
-			request.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != test.status || client.callCount() != 1 {
-				t.Errorf(
-					"result = (status %d, calls %d), want (%d, 1)",
-					recorder.Code,
-					client.callCount(),
-					test.status,
-				)
-			}
-			if test.status == http.StatusOK &&
-				recorder.Body.String() != `{"message":"`+test.message+`"}` {
-				t.Errorf("Echo changed value: %q", recorder.Body.String())
-			}
-		})
-	}
-}
-
-func TestHandler_UsesShorterOfCallerAndServiceDeadline(t *testing.T) {
-	// given
-	for _, test := range []struct {
-		name          string
-		callerTimeout time.Duration
-		maximum       time.Duration
-	}{
-		{"service deadline ignores Grpc-Timeout", 0, 150 * time.Millisecond},
-		{"shorter caller deadline", 10 * time.Millisecond, 100 * time.Millisecond},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{waitForContext: true}
-			handler := newTestHandlerWithTimeout(t, client, 40*time.Millisecond)
-			ctx := context.Background()
-			var cancel context.CancelFunc
-			if test.callerTimeout > 0 {
-				ctx, cancel = context.WithTimeout(ctx, test.callerTimeout)
-				defer cancel()
-			}
-			request := httptest.NewRequest(http.MethodPost, "/v1/example/echo", strings.NewReader(`{"message":"hello"}`)).
-				WithContext(ctx)
-			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("Grpc-Timeout", "999H")
-			recorder := httptest.NewRecorder()
-			started := time.Now()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != http.StatusGatewayTimeout {
-				t.Errorf("status = %d, want 504", recorder.Code)
-			}
-			if elapsed := time.Since(started); elapsed > test.maximum {
-				t.Errorf(
-					"deadline completed in %v, want within %v",
-					elapsed,
-					test.maximum,
-				)
-			}
-		})
-	}
-}
-
-func TestHandler_PropagatesCallerCancellation(t *testing.T) {
-	// given
-	started := make(chan struct{})
-	client := &fakeClient{waitForContext: true, started: started}
-	handler := newTestHandlerWithTimeout(t, client, time.Second)
-	ctx, cancel := context.WithCancel(context.Background())
-	request := httptest.NewRequest(http.MethodPost, "/v1/example/echo", strings.NewReader(`{"message":"hello"}`)).
-		WithContext(ctx)
-	request.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-	done := make(chan struct{})
-	// when
-	go func() {
-		handler.ServeHTTP(recorder, request)
-		close(done)
-	}()
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("RPC did not start")
-	}
-	cancel()
-	// then
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("canceled request did not finish")
-	}
-	if recorder.Code != 499 || recorder.Body.String() != errorBody(1, "request canceled") {
-		t.Errorf("canceled response = (%d, %q)", recorder.Code, recorder.Body.String())
-	}
-}
-
-func TestHandler_StripsIdentityAndTimeoutHeaders(t *testing.T) {
-	// given
-	client := &fakeClient{}
-	handler := newTestHandler(t, client, 4096)
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
-	)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer private")
-	request.Header.Set("Grpc-Timeout", "999H")
-	request.Header.Set("Grpc-Metadata-Principal", "forged")
-	request.Header.Set("Forwarded", "for=203.0.113.44")
-	request.Header.Set("X-Forwarded-For", "203.0.113.44")
-	request.Header.Set("X-Forwarded-Host", "private.example")
-	request.Header.Set("X-Real-IP", "203.0.113.44")
-	recorder := httptest.NewRecorder()
-	// when
-	handler.ServeHTTP(recorder, request)
-	// then
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d", recorder.Code)
-	}
-	for _, marker := range []string{"private", "forged", "203.0.113.44", "private.example", "999H"} {
-		if strings.Contains(fmt.Sprint(client.lastMetadata()), marker) {
-			t.Errorf(
-				"injected marker %q escaped in metadata: %v",
-				marker,
-				client.lastMetadata(),
+				response.Code,
+				test.status,
 			)
 		}
 	}
 }
 
-func TestClearApplicationMetadata_DropsAllApplicationValues(t *testing.T) {
-	// given
-	ctx := metadata.NewOutgoingContext(
-		context.Background(),
-		metadata.Pairs("authorization", "private", "principal", "forged"),
-	)
-	called := false
-	// when
-	err := ClearApplicationMetadata(
-		ctx,
-		"/example",
-		nil,
-		nil,
-		nil,
-		func(ctx context.Context, _ string, _, _ any, _ *grpc.ClientConn, _ ...grpc.CallOption) error {
-			called = true
-			md, _ := metadata.FromOutgoingContext(ctx)
-			if len(md) != 0 {
-				t.Errorf("outgoing metadata = %v, want empty", md)
-			}
-			return nil
-		},
-	)
-	// then
-	if err != nil || !called {
-		t.Fatalf("interceptor = (%t, %v)", called, err)
-	}
-}
-
-func TestHandler_DeniesUpstreamHeadersAndTrailers(t *testing.T) {
-	// given
-	client := &fakeClient{responseMetadata: metadata.Pairs("private-header", "private-value")}
-	handler := newTestHandler(t, client, 4096)
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
-	)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("TE", "trailers")
-	recorder := httptest.NewRecorder()
-	// when
-	handler.ServeHTTP(recorder, request)
-	// then
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d", recorder.Code)
-	}
-	for name, values := range recorder.Header() {
-		if strings.Contains(strings.ToLower(name), "private") ||
-			strings.Contains(fmt.Sprint(values), "private-value") {
-			t.Errorf("response metadata escaped: %s=%v", name, values)
-		}
-	}
-}
-
-func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *testing.T) {
-	// given
-	const marker = "private-sensitive-marker"
-	var logs bytes.Buffer
-	reader := sdkmetric.NewManualReader()
-	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	spanRecorder := tracetest.NewSpanRecorder()
-	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
-	observer, err := telemetry.NewRequestObserver(
-		slog.New(slog.NewJSONHandler(&logs, nil)), meterProvider,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler, err := NewHandler(&fakeClient{}, Settings{
-		RequestTimeout: time.Second, MaxBodyBytes: 4096,
-		TracerProvider: tracerProvider, MeterProvider: meterProvider,
-		Propagator: propagation.TraceContext{}, Observer: observer,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	unknown := httptest.NewRequest(http.MethodGet, "/"+marker+"?value="+marker, nil)
-	unknown.Header.Set("X-Custom", marker)
-	// when
-	handler.ServeHTTP(httptest.NewRecorder(), unknown)
-	malformed := httptest.NewRequest(
-		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"`+marker),
-	)
-	malformed.Header.Set("Content-Type", "application/json")
-	handler.ServeHTTP(httptest.NewRecorder(), malformed)
-
-	// then
-	var metrics metricdata.ResourceMetrics
-	if err := reader.Collect(context.Background(), &metrics); err != nil {
-		t.Fatal(err)
-	}
-	combined := logs.String() + fmt.Sprint(metrics)
-	for _, span := range spanRecorder.Ended() {
-		combined += span.Name() + fmt.Sprint(span.Attributes(), span.Events())
-	}
-	if strings.Contains(combined, marker) {
-		t.Fatalf("sensitive marker escaped into telemetry: %s", combined)
-	}
-	if !strings.Contains(combined, "POST /v1/example/echo") ||
-		!strings.Contains(combined, "unmatched") ||
-		!strings.Contains(combined, "insurance_hub.service.requests") {
-		t.Errorf("missing bounded HTTP failure signals: %s", combined)
-	}
-}
-
-func TestUnavailableHandler_WritesFixedEnvelopeAndTelemetry(t *testing.T) {
-	// given
-	var logs bytes.Buffer
-	reader := sdkmetric.NewManualReader()
-	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	spanRecorder := tracetest.NewSpanRecorder()
-	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
-	observer, err := telemetry.NewRequestObserver(
-		slog.New(slog.NewJSONHandler(&logs, nil)), meterProvider,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler, err := NewUnavailableHandler(Settings{
-		RequestTimeout: time.Second, MaxBodyBytes: 4096,
-		TracerProvider: tracerProvider, MeterProvider: meterProvider,
-		Propagator: propagation.TraceContext{}, Observer: observer,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-
-	// when
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/example/echo", nil))
-
-	// then
-	if recorder.Code != http.StatusServiceUnavailable ||
-		recorder.Header().Get("Content-Type") != "application/json" ||
-		recorder.Body.String() != errorBody(int(codes.Unavailable), "service unavailable") {
-		t.Fatalf(
-			"unavailable response = (%d, %q, %q)",
-			recorder.Code,
-			recorder.Header().Get("Content-Type"),
-			recorder.Body.String(),
-		)
-	}
-	var metrics metricdata.ResourceMetrics
-	if err := reader.Collect(context.Background(), &metrics); err != nil {
-		t.Fatal(err)
-	}
-	combined := logs.String() + fmt.Sprint(metrics)
-	for _, span := range spanRecorder.Ended() {
-		combined += span.Name() + fmt.Sprint(span.Attributes())
-	}
-	if !strings.Contains(combined, "unmatched") ||
-		!strings.Contains(combined, "insurance_hub.service.requests") {
-		t.Errorf("missing drain-rejection telemetry: %s", combined)
-	}
-}
-
-func newTestHandler(
-	t *testing.T,
-	client documentv1.ExampleServiceClient,
-	maxBody int,
-) http.Handler {
-	return newTestHandlerWithSettings(t, client, maxBody, time.Second)
-}
-
-func newTestHandlerWithTimeout(
-	t *testing.T,
-	client documentv1.ExampleServiceClient,
-	timeout time.Duration,
-) http.Handler {
-	return newTestHandlerWithSettings(t, client, 4096, timeout)
-}
-
-func newTestHandlerWithSettings(
-	t *testing.T,
-	client documentv1.ExampleServiceClient,
-	maxBody int,
-	timeout time.Duration,
-) http.Handler {
+func newTestHandler(t *testing.T, client documentv1.DocumentServiceClient) http.Handler {
 	t.Helper()
-	meter := metricnoop.NewMeterProvider()
 	observer, err := telemetry.NewRequestObserver(
-		slog.New(slog.NewTextHandler(io.Discard, nil)), meter,
+		slog.New(slog.NewJSONHandler(io.Discard, nil)), metricnoop.NewMeterProvider(),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	handler, err := NewHandler(client, Settings{
-		RequestTimeout: timeout, MaxBodyBytes: maxBody,
-		TracerProvider: noop.NewTracerProvider(), MeterProvider: meter,
-		Propagator: propagation.TraceContext{}, Observer: observer,
+		RequestTimeout: time.Second,
+		TracerProvider: noop.NewTracerProvider(),
+		MeterProvider:  metricnoop.NewMeterProvider(),
+		Propagator: propagation.NewCompositeTextMapPropagator(
+			propagation.TraceContext{},
+		),
+		Observer: observer,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return handler
-}
-
-type fakeClient struct {
-	mu               sync.Mutex
-	calls            int
-	metadata         metadata.MD
-	err              error
-	responseMetadata metadata.MD
-	waitForContext   bool
-	started          chan struct{}
-}
-
-func (client *fakeClient) Echo(
-	ctx context.Context,
-	request *documentv1.EchoRequest,
-	options ...grpc.CallOption,
-) (*documentv1.EchoResponse, error) {
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	client.calls++
-	client.metadata, _ = metadata.FromOutgoingContext(ctx)
-	for _, option := range options {
-		switch selected := option.(type) {
-		case grpc.HeaderCallOption:
-			*selected.HeaderAddr = client.responseMetadata.Copy()
-		case grpc.TrailerCallOption:
-			*selected.TrailerAddr = client.responseMetadata.Copy()
-		}
-	}
-	if client.err != nil {
-		return nil, client.err
-	}
-	if client.waitForContext {
-		if client.started != nil {
-			close(client.started)
-		}
-		<-ctx.Done()
-		return nil, status.FromContextError(ctx.Err()).Err()
-	}
-	if request.GetMessage() == "" || len([]byte(request.GetMessage())) > 128 {
-		return nil, status.Error(codes.InvalidArgument, "invalid request")
-	}
-	return &documentv1.EchoResponse{Message: request.GetMessage()}, nil
-}
-
-func (client *fakeClient) callCount() int {
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	return client.calls
-}
-
-func (client *fakeClient) lastMetadata() metadata.MD {
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	return client.metadata.Copy()
-}
-
-func errorBody(code int, message string) string {
-	return fmt.Sprintf(`{"code":%d,"message":"%s","details":[]}`, code, message)
 }

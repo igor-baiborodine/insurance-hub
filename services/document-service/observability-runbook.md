@@ -1,16 +1,16 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Document foundation observability runbook](#document-foundation-observability-runbook)
+- [Document lookup observability runbook](#document-lookup-observability-runbook)
   - [Safe verification](#safe-verification)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# Document foundation observability runbook
+# Document lookup observability runbook
 
-The foundation exports safe structured logs plus common HTTP, gRPC, process and Go runtime signals.
-Echo proves transport delivery only; it is not Document business telemetry. Issue #364 owns the
-complete domain dashboards, alerts and final operational qualification.
+The lookup candidate exports safe structured logs plus HTTP, gRPC, PostgreSQL, object-store,
+lookup, process and Go runtime signals. Issue #364 owns the complete domain dashboards, alerts and
+final operational qualification.
 
 Local development sets `OTEL_ENABLED=false`. QA exports OTLP/gRPC without TLS to the in-cluster
 `qa-alloy.qa-monitoring.svc.cluster.local:4317` receiver. That plaintext cluster hop has no CA or
@@ -35,10 +35,11 @@ only these bounded identities:
 - `service.namespace=insurance-hub`, `service.name=document-service`, implementation `go`;
 - `service.version=git-<image-source-short-sha>` and `service.instance.id=<actual Pod UID>`;
 - container `document-api` in namespace `qa-svc`;
-- fixed Echo operation/transport/outcome, HTTP route/status and gRPC method/status labels;
+- fixed `find_documents` operation/transport/outcome, HTTP route/status and gRPC method/status;
+- bounded complete/partial lookup and PostgreSQL/object-store dependency outcomes and durations;
 - common Go runtime and process instruments.
 
-Do not query or retain request bodies, Echo messages, document identifiers, arbitrary errors,
+Do not query or retain request bodies, policy numbers, object keys, document bytes, arbitrary errors,
 credentials or business data. A healthy process with missing signals means delivery remains
 unverified. Identity conflicts, dropped-series counters, exporter failures or absent container logs
 are stop conditions; preserve sanitized timestamps and identities, inspect Alloy delivery, and fix

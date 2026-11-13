@@ -19,18 +19,17 @@
 
 # Document service
 
-This standalone module is the private Go Document foundation. It runs beside the authoritative Java
-Document service and does not own business traffic, storage, rendering, database, object-store or
-event behavior. Issue #362 replaces the temporary `ExampleService/Echo` contract with Document
-lookup; #363 adds registration and rendering. Java authority and legacy resources remain intact.
+This standalone module is the private Go Document lookup candidate. It runs beside the
+authoritative Java Document service; ordinary traffic and registration/rendering authority remain
+with Java. Issue #362 replaces temporary Echo with compatible PostgreSQL/MinIO lookup. Issue #363
+adds registration and rendering. Java source and legacy resources remain intact.
 
 The module identity is
 `github.com/igor-baiborodine/insurance-hub/services/document-service`. It resolves published
 Servicekit `v1.1.0` with `GOWORK=off` and no filesystem replacement or private service import. The
-foundation provides direct gRPC Echo, a generated HTTP gateway and Swagger 2.0 contract, typed
-configuration, safe structured logging, optional trace and metric export, three owned listeners,
-dependency-aware health and bounded signal-driven shutdown. Default local startup needs no
-business credentials, future dependencies or telemetry collector.
+service provides `DocumentService/FindDocuments`, a generated HTTP gateway and Swagger 2.0
+contract, typed PostgreSQL/MinIO configuration, safe structured logging, optional trace and metric
+export, three owned listeners, dependency-aware health and bounded signal-driven shutdown.
 
 ## Prerequisites
 
@@ -76,17 +75,17 @@ These operations are explicit and are never hidden inside `check`:
 | `make update-deps`       | Updates only `go.mod` and `go.sum` to the Makefile's pinned runtime/generated-code dependencies, then tidies.              | Go proxy and checksum access unless cached.                                                    |
 | `make update-proto-deps` | Updates only `buf.lock` for the schema dependency declared in `buf.yaml`.                                                  | Verified pinned Buf binary and BSR access unless cached.                                       |
 | `make format`            | Rewrites only the selected eligible handwritten Go files through gofumpt, goimports, then golines at 100 columns.          | Verified pinned tools; file selection is described below.                                      |
-| `make format-proto`      | Rewrites only `api/document/v1/example_service.proto` with pinned Buf.                                                     | Verified pinned tools.                                                                         |
+| `make format-proto`      | Rewrites only `api/document/v1/document_service.proto` with pinned Buf.                                                    | Verified pinned tools.                                                                         |
 | `make gen-proto`         | Removes and regenerates the exact declared Go/gateway/Swagger inventory under `gen/`.                                     | Pinned Buf and generators already installed; BSR access unless cached.                         |
 | `make run`               | Starts `./cmd/server`; it changes no repository file.                                                                      | Go 1.27.4; readonly modules; runtime settings below.                                           |
 
 Generated bindings must never be edited by hand. `gen-proto` owns only:
 
 ```text
-gen/document/v1/example_service.pb.go
-gen/document/v1/example_service.pb.gw.go
-gen/document/v1/example_service_grpc.pb.go
-gen/openapiv2/document/v1/example_service.swagger.json
+gen/document/v1/document_service.pb.go
+gen/document/v1/document_service.pb.gw.go
+gen/document/v1/document_service_grpc.pb.go
+gen/openapiv2/document/v1/document_service.swagger.json
 ```
 
 ### Non-mutating validation targets
@@ -122,9 +121,8 @@ returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make repo
 the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
-Database/broker integration, mock generation, migrations, deployment, workspace
-validation, and live infrastructure are not applicable to this foundation. It has no such
-dependencies or placeholder targets.
+The API startup never creates schema, roles, buckets or credentials. The explicit migrator and
+resource-administration targets own those operations; see the deployment runbook.
 
 ### Go file selection
 
@@ -186,10 +184,19 @@ do not repeat its supplied value.
 | `HTTP_WRITE_TIMEOUT` | `10s` | Positive duration greater than `REQUEST_TIMEOUT`. |
 | `HTTP_IDLE_TIMEOUT` | `30s` | Positive duration. |
 | `LOG_LEVEL` | `info` | A level accepted by `slog.Level`, including documented offsets. |
-| `REQUEST_TIMEOUT` | `8s` | Positive duration bounding HTTP admission and application work; never extends a shorter caller deadline. |
+| `REQUEST_TIMEOUT` | `4s` | Positive duration bounding HTTP admission and lookup; never extends a shorter caller deadline. |
 | `PROBE_TIMEOUT` | `2s` | Positive duration bounding initial gateway connection and readiness checks. |
-| `GRPC_MAX_RECV_BYTES` | `1048576` | Integer from 1 through 16777216; server receive and gateway-client send limit. |
-| `GRPC_MAX_SEND_BYTES` | `8388608` | Integer from 1 through 67108864; server send and gateway-client receive limit. |
+| `GRPC_MAX_RECV_BYTES` | `25165824` | Positive integer through 24 MiB; server receive and gateway-client send limit. |
+| `GRPC_MAX_SEND_BYTES` | `25165824` | Positive integer through 24 MiB; server send and gateway-client receive limit. |
+| `DOCUMENT_DATABASE_URL` | required | PostgreSQL reader URL; retained in a redacting value. |
+| `DB_MAX_CONNS` | `4` | Integer from 1 through 16. |
+| `DB_CONNECT_TIMEOUT` / `DB_ACQUIRE_TIMEOUT` / `DB_QUERY_TIMEOUT` | `3s` / `1s` / `2s` | Positive bounded database durations. |
+| `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` / `MINIO_BUCKET` | required | Fixed HTTP(S) origin, redacted credentials and `policies` bucket. |
+| `MINIO_CA_FILE` | required for HTTPS | CA bundle used with hostname verification; insecure TLS is unavailable. |
+| `MINIO_FETCH_TIMEOUT` | `3s` | Positive per-object fetch duration. |
+| `STARTUP_TIMEOUT` | `10s` | Positive bound covering dependency construction and readiness. |
+| `DOCUMENT_MAX_BYTES` / `DOCUMENT_RESPONSE_MAX_BYTES` / `HTTP_RESPONSE_MAX_BYTES` | 8 MiB / 16 MiB / 24 MiB | Per-document, aggregate protobuf and JSON safety budgets. |
+| `DOCUMENT_MAX_CONCURRENT_LOOKUPS` | `2` | Immediate bounded admission; saturation maps to 429. |
 | `DEPLOYMENT_ENVIRONMENT` | `development` when disabled | General identity string; an explicit non-development value is required when telemetry is enabled. |
 | `SERVICE_VERSION` | `development` when disabled | General identity string in `development`; otherwise exactly `git-` plus 12 lowercase hexadecimal characters with at least one nonzero suffix character, even when telemetry is disabled. |
 | `SERVICE_INSTANCE_ID` | `local-<pid>` when disabled | General identity string; enabled telemetry requires an explicit value without the `local-` prefix. Kubernetes injects Pod `metadata.uid`. |
@@ -229,9 +236,11 @@ flush and shutdown use bounded contexts. Safe export diagnostics are rate-limite
 seconds; queue saturation has a separate safe warning. The executable installs the shared
 diagnostic handler before enabled providers and restores the previous handler after service exit.
 
-`insurance_hub.service.requests` and `insurance_hub.service.request.duration` separately record
-bounded HTTP and gRPC transport outcomes. HTTP labels use only `POST /v1/example/echo` or
-`unmatched`; gRPC records the fixed Echo operation and final status. Request paths, queries,
+`insurance_hub.document.requests` and `insurance_hub.document.request.duration` separately record
+bounded HTTP and gRPC transport outcomes. HTTP labels use only
+`GET /documents/{policyNumber}` or `unmatched`; gRPC records the fixed `find_documents` operation
+and final status. Lookup and dependency instruments distinguish complete, partial/omitted,
+PostgreSQL and object-store outcomes. Request paths, queries,
 payloads, raw errors, headers and instance IDs are not metric labels. The same provider connects
 the HTTP server, gRPC client and gRPC server trace. Service identity stays on the resource.
 
@@ -278,24 +287,21 @@ reserved interval within the one overall deadline.
 
 ## Example RPC and HTTP gateway
 
-The generated `document.v1.ExampleService` exposes unary `Echo`. A valid request contains a UTF-8
-message from 1 through 128 bytes, and the response returns the same bytes. Protovalidate enforces
-the schema at the gRPC boundary before the Echo handler runs. Empty or oversized input returns
-`InvalidArgument`; cancellation and deadlines keep their gRPC status; unexpected handler failures
-return `Internal` with the stable message `internal error`. The generated gateway exposes the same
-operation as `POST /v1/example/echo` with an `application/json` body:
+The generated `document.v1.DocumentService` exposes unary `FindDocuments`. One exact, nonempty
+policy number returns every retrievable matching row in the `documents` collection. Duplicates are
+preserved, missing metadata is a successful empty collection, and unavailable object-backed rows
+are omitted without hiding a database failure. The generated gateway exposes
+`GET /documents/{policyNumber}`:
 
 ```sh
-curl --fail-with-body \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"hello"}' \
-  http://127.0.0.1:8080/v1/example/echo
+curl --fail-with-body http://127.0.0.1:8080/documents/SYN-362
 ```
 
-The response is `{"message":"hello"}`. Malformed, duplicate or unknown JSON members, a nonempty
-query, unsupported media, an unknown route and a wrong method receive fixed JSON error envelopes.
+Synthetic `%PDF-362` bytes are `{"documents":[{"policyNumber":"SYN-362",`\
+`"content":"JVBERi0zNjI="}]}`. A missing segment is 404, a decoded slash is not another policy
+segment, a nonempty query is 400 and an unsupported method is 405. Failures use fixed JSON envelopes.
 The generated Swagger 2.0 document is
-`gen/openapiv2/document/v1/example_service.swagger.json`; `testdata/http-contract.json` is the
+`gen/openapiv2/document/v1/document_service.swagger.json`; `testdata/http-contract.json` is the
 independent contract fixture checked by `make check-gateway-contract`.
 
 The transports log neither request/response bodies nor underlying failure details. HTTP identity,
@@ -306,10 +312,9 @@ debug endpoints and production exposure are not enabled by this foundation.
 
 ## Architecture and ownership
 
-Product is a source reference for operational foundations, not a runtime dependency. Document owns
-its independent runtime code and uses the repository's shared non-runtime Go Make tooling. The
-temporary Echo path proves transport, configuration, health, lifecycle and signal composition; it
-does not claim Document lookup or document-generation parity.
+Dashboard is the reference for common runtime, transport, telemetry and lifecycle code. Product is
+used only for PostgreSQL pool, reader, migration and administration mechanics. Neither is a runtime
+dependency; Document owns its domain, storage mapping and generated contract.
 
 | Foundation | Product reference | Document adaptation |
 | --- | --- | --- |
@@ -317,9 +322,10 @@ does not claim Document lookup or document-generation parity.
 | Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; generated fixed name, canonical non-development version, safe identity strings and Pod UID deployment input. Existing loopback ports preserved. |
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
-| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed Echo operation, bounded transport signals and configurable HTTP/gRPC limits. |
-| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup, with no database dependency. |
-| Business architecture | Product application-owned catalog ports and injected adapters | Echo remains a small injected function. Add domain/application/repository packages when a real migration requires them. |
+| Gateway, request observation and limits | Dashboard `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC lookup, fixed operation, safe errors and bounded transport signals. |
+| Health and lifecycle | Dashboard `internal/service/service.go` | PostgreSQL/MinIO-aware readiness, three listener ownership, HTTP-first drain and ordered cleanup. |
+| PostgreSQL | Product `internal/postgres` and migration owners | Parameterized Document reader, explicit schema administration and Document-owned SQL. |
+| Business architecture | Dashboard application ports and injected adapters | Document lookup owns duplicate, inline/key, omission and response-budget behavior. |
 
 
 Review this adaptation map when Product or Servicekit changes an operational foundation. Document
@@ -331,10 +337,12 @@ adopts compatible fixes through its own reviewed changes and behavior tests.
 | --- | --- |
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
+| `internal/domain`, `internal/application` | Wire-independent Document values, lookup orchestration, concurrency and aggregate budgets. |
+| `internal/postgres`, `internal/objectstore` | Bounded metadata reads and compatible inline/MinIO content resolution. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
-| `internal/grpc` | Generated Echo registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
+| `internal/grpc` | Generated lookup registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Document identity and cross-setting policy. |
-| `internal/logger`, `internal/telemetry` | Completion-log and Echo signal contracts; shared provider construction with local policy and metric views. |
+| `internal/logger`, `internal/telemetry` | Transport, lookup and dependency signals; shared provider construction with local policy and metric views. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/document/v1`, `gen/document/v1`, `gen/openapiv2/document/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 
@@ -363,10 +371,10 @@ flowchart TD
     config --> sharedIdentity["servicekit/identity"]
 ```
 
-At startup, composition binds all listeners, starts gRPC, derives the same-process client target
-from the bound address and waits for that channel to become ready. An HTTP Echo obtains a bounded
-HTTP server span, uses the generated client across the instrumented connection, obtains client and
-server spans, passes protobuf validation and calls the injected function with the shorter deadline.
+At startup, composition opens and checks PostgreSQL and MinIO, builds the lookup, binds all
+listeners, starts gRPC, derives the same-process client target and waits for every dependency to be
+ready. An HTTP lookup uses the generated client across the instrumented connection, passes protobuf
+validation, queries metadata and resolves inline or object-backed content within the shorter deadline.
 HTTP and gRPC record separate bounded completion signals. Shutdown withdraws readiness and drains
 accepted HTTP work before connection and gRPC teardown, then closes management and telemetry within
 the shared deadline.

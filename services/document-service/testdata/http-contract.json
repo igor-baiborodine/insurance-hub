@@ -1,63 +1,38 @@
 {
   "swagger": "2.0",
   "operation": {
-    "path": "/v1/example/echo",
-    "method": "post",
-    "operation_id": "ExampleService_Echo",
-    "consumes": [
-      "application/json"
-    ],
+    "path": "/documents/{policyNumber}",
+    "method": "get",
+    "operation_id": "DocumentService_FindDocuments",
     "produces": [
       "application/json"
     ],
-    "request_schema": "#/definitions/v1EchoRequest",
-    "success_schema": "#/definitions/v1EchoResponse",
+    "parameter": {
+      "name": "policyNumber",
+      "in": "path",
+      "required": true,
+      "type": "string"
+    },
+    "success_schema": "#/definitions/v1FindDocumentsResponse",
     "error_schema": "#/definitions/rpcStatus"
-  },
-  "request_contract": {
-    "json_members": [
-      "message"
-    ],
-    "unknown_fields": "reject",
-    "duplicate_fields": "reject",
-    "non_empty_query": "reject",
-    "accepted_content_types": [
-      "application/json",
-      "application/json; charset=utf-8"
-    ],
-    "accepted_response_types": [
-      "application/json",
-      "*/*"
-    ],
-    "minimum_utf8_bytes": 1,
-    "maximum_utf8_bytes": 128,
-    "multibyte_boundary": {
-      "valid": "64 repetitions of é",
-      "invalid": "64 repetitions of é followed by a"
-    }
   },
   "responses": {
     "200": {
-      "message": "hello"
+      "documents": [
+        {
+          "policyNumber": "SYN-362",
+          "content": "JVBERi0zNjI="
+        }
+      ]
     },
     "400": {
       "code": 3,
       "message": "invalid request",
       "details": []
     },
-    "406": {
-      "code": 3,
-      "message": "not acceptable",
-      "details": []
-    },
-    "413": {
+    "429": {
       "code": 8,
-      "message": "request body too large",
-      "details": []
-    },
-    "415": {
-      "code": 3,
-      "message": "unsupported media type",
+      "message": "response limit exceeded",
       "details": []
     },
     "499": {
@@ -81,6 +56,11 @@
       "details": []
     }
   },
+  "schemas": {
+    "document": "v1Document",
+    "response": "v1FindDocumentsResponse",
+    "status": "rpcStatus"
+  },
   "routing_responses": {
     "404": {
       "code": 5,
@@ -91,19 +71,6 @@
       "code": 12,
       "message": "method not allowed",
       "details": []
-    }
-  },
-  "schemas": {
-    "v1EchoRequest": {
-      "message": "string"
-    },
-    "v1EchoResponse": {
-      "message": "string"
-    },
-    "rpcStatus": {
-      "code": "integer",
-      "message": "string",
-      "details": "array"
     }
   }
 }
