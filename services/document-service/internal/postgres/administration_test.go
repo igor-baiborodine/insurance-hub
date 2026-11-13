@@ -20,7 +20,12 @@ func TestConfigureMigrationTunnel_AcceptsOnlyLoopback(t *testing.T) {
 	tunneled, err := configureMigrationTunnel(config)
 	// then
 	if err != nil || !tunneled || config.Host != "document" || config.Port != 15432 {
-		t.Fatalf("unexpected tunnel configuration: host=%s port=%d error=%v", config.Host, config.Port, err)
+		t.Fatalf(
+			"unexpected tunnel configuration: host=%s port=%d error=%v",
+			config.Host,
+			config.Port,
+			err,
+		)
 	}
 	addresses, err := config.LookupFunc(t.Context(), config.Host)
 	if err != nil || len(addresses) != 1 || addresses[0] != "127.0.0.1" {

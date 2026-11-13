@@ -173,7 +173,9 @@ func (t Target) validateCredential(
 	if len(query) != 4 || query.Get("hostaddr") != "127.0.0.1" ||
 		len(query["hostaddr"]) != 1 || len(query["port"]) != 1 || portError != nil ||
 		port < 1024 || port > 65535 {
-		return errors.New("database tunnel must use loopback and a bounded unprivileged port")
+		return errors.New(
+			"database tunnel must use loopback and a bounded unprivileged port",
+		)
 	}
 	return nil
 }
