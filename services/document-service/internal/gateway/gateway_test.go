@@ -115,6 +115,31 @@ func TestHandler_PreservesEmptyCollectionAndSafeFailures(t *testing.T) {
 	}
 }
 
+func TestHandler_RejectsOversizedJSONResponse(t *testing.T) {
+	client := &fakeClient{find: func(
+		context.Context,
+		*documentv1.FindDocumentsRequest,
+	) (*documentv1.FindDocumentsResponse, error) {
+		return &documentv1.FindDocumentsResponse{Documents: []*documentv1.Document{{
+			PolicyNumber: "SYN-362",
+			Content:      []byte("oversized"),
+		}}}, nil
+	}}
+	handler := newTestHandlerWithResponseLimit(t, client, 32)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/documents/SYN-362", nil),
+	)
+
+	if response.Code != http.StatusTooManyRequests ||
+		strings.TrimSpace(response.Body.String()) !=
+			`{"code":8,"message":"response limit exceeded","details":[]}` {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+	}
+}
+
 func TestHandler_RejectsUnsupportedRoutesAndDecodedSlash(t *testing.T) {
 	// given
 	handler := newTestHandler(t, &fakeClient{find: func(
@@ -154,6 +179,14 @@ func TestHandler_RejectsUnsupportedRoutesAndDecodedSlash(t *testing.T) {
 }
 
 func newTestHandler(t *testing.T, client documentv1.DocumentServiceClient) http.Handler {
+	return newTestHandlerWithResponseLimit(t, client, 1024*1024)
+}
+
+func newTestHandlerWithResponseLimit(
+	t *testing.T,
+	client documentv1.DocumentServiceClient,
+	maximumResponseBytes int,
+) http.Handler {
 	t.Helper()
 	observer, err := telemetry.NewRequestObserver(
 		slog.New(slog.NewJSONHandler(io.Discard, nil)), metricnoop.NewMeterProvider(),
@@ -162,9 +195,10 @@ func newTestHandler(t *testing.T, client documentv1.DocumentServiceClient) http.
 		t.Fatal(err)
 	}
 	handler, err := NewHandler(client, Settings{
-		RequestTimeout: time.Second,
-		TracerProvider: noop.NewTracerProvider(),
-		MeterProvider:  metricnoop.NewMeterProvider(),
+		RequestTimeout:       time.Second,
+		MaximumResponseBytes: maximumResponseBytes,
+		TracerProvider:       noop.NewTracerProvider(),
+		MeterProvider:        metricnoop.NewMeterProvider(),
 		Propagator: propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{},
 		),

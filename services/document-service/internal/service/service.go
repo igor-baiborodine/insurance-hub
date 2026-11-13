@@ -357,11 +357,12 @@ func run(
 	}
 	runtime.state = state
 	gatewaySettings := gateway.Settings{
-		RequestTimeout: settings.RequestTimeout,
-		TracerProvider: provider.TracerProvider(),
-		MeterProvider:  provider.MeterProvider(),
-		Propagator:     provider.HTTPPropagator(),
-		Observer:       observer,
+		RequestTimeout:       settings.RequestTimeout,
+		MaximumResponseBytes: settings.HTTPMaxResponseBytes,
+		TracerProvider:       provider.TracerProvider(),
+		MeterProvider:        provider.MeterProvider(),
+		Propagator:           provider.HTTPPropagator(),
+		Observer:             observer,
 	}
 	handler, err := deps.newGateway(
 		documentv1.NewDocumentServiceClient(runtime.connection),

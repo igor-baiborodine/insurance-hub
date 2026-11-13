@@ -33,11 +33,12 @@ const (
 )
 
 type Settings struct {
-	RequestTimeout time.Duration
-	TracerProvider trace.TracerProvider
-	MeterProvider  metric.MeterProvider
-	Propagator     propagation.TextMapPropagator
-	Observer       *telemetry.RequestObserver
+	RequestTimeout       time.Duration
+	MaximumResponseBytes int
+	TracerProvider       trace.TracerProvider
+	MeterProvider        metric.MeterProvider
+	Propagator           propagation.TextMapPropagator
+	Observer             *telemetry.RequestObserver
 }
 
 // NewHandler registers the generated client while retaining the accepted private HTTP contract.
@@ -46,7 +47,10 @@ func NewHandler(client documentv1.DocumentServiceClient, settings Settings) (htt
 		return nil, errors.New("create gateway: dependencies and limits are required")
 	}
 	mux := runtime.NewServeMux(
-		runtime.WithMarshalerOption(runtime.MIMEWildcard, newDocumentMarshaler()),
+		runtime.WithMarshalerOption(
+			runtime.MIMEWildcard,
+			newDocumentMarshaler(settings.MaximumResponseBytes),
+		),
 		runtime.WithIncomingHeaderMatcher(denyHeader),
 		runtime.WithOutgoingHeaderMatcher(denyHeader),
 		runtime.WithOutgoingTrailerMatcher(denyHeader),
@@ -91,7 +95,8 @@ func NewUnavailableHandler(settings Settings) (http.Handler, error) {
 }
 
 func validSettings(settings Settings) bool {
-	return settings.RequestTimeout > 0 && settings.TracerProvider != nil &&
+	return settings.RequestTimeout > 0 && settings.MaximumResponseBytes > 0 &&
+		settings.TracerProvider != nil &&
 		settings.MeterProvider != nil && settings.Propagator != nil && settings.Observer != nil
 }
 
@@ -281,13 +286,19 @@ func writeError(writer http.ResponseWriter, httpStatus int, code codes.Code, mes
 	)
 }
 
-type documentMarshaler struct{ *runtime.JSONPb }
+type documentMarshaler struct {
+	*runtime.JSONPb
+	maximumResponseBytes int
+}
 
-func newDocumentMarshaler() *documentMarshaler {
-	return &documentMarshaler{JSONPb: &runtime.JSONPb{
-		MarshalOptions:   protojson.MarshalOptions{EmitDefaultValues: true},
-		UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: true},
-	}}
+func newDocumentMarshaler(maximumResponseBytes int) *documentMarshaler {
+	return &documentMarshaler{
+		JSONPb: &runtime.JSONPb{
+			MarshalOptions:   protojson.MarshalOptions{EmitDefaultValues: true},
+			UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: true},
+		},
+		maximumResponseBytes: maximumResponseBytes,
+	}
 }
 
 func (marshaler *documentMarshaler) Marshal(value any) ([]byte, error) {
@@ -315,7 +326,14 @@ func (marshaler *documentMarshaler) Marshal(value any) ([]byte, error) {
 			Content:      content,
 		}
 	}
-	return json.Marshal(httpResponse)
+	encoded, err := json.Marshal(httpResponse)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) > marshaler.maximumResponseBytes {
+		return nil, status.Error(codes.ResourceExhausted, "response limit exceeded")
+	}
+	return encoded, nil
 }
 
 func (marshaler *documentMarshaler) NewEncoder(writer io.Writer) runtime.Encoder {
