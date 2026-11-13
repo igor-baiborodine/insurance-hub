@@ -157,6 +157,44 @@ def test_dashboard_supports_only_its_capabilities_and_target_data_coordinates() 
             resolve.resolve_service(root, script_dir / "catalog.json", "dashboard", unsupported)
 
 
+def test_document_supports_foundation_capabilities_without_administration() -> None:
+    # given
+    script_dir = Path(resolve.__file__).resolve().parent
+    root = script_dir.parents[2]
+    catalog = resolve.load_catalog(script_dir / "catalog.json")
+    expected = [
+        "image-build",
+        "image-check",
+        "deploy-render",
+        "deploy-check",
+        "deploy-preflight",
+        "deploy-status",
+        "image-load",
+        "deploy",
+        "deploy-verify",
+        "stop",
+        "deploy-test-tooling",
+        "deploy-smoke",
+    ]
+
+    # when
+    paths = [
+        resolve.resolve_service(root, script_dir / "catalog.json", "document", capability)
+        for capability in expected
+    ]
+
+    # then
+    record = catalog["services"]["document"]
+    assert record["capabilities"] == expected
+    assert record["releaseTargets"] == ["qa"]
+    assert "administration" not in record
+    assert all("initialization" not in target for target in record["deploymentTargets"].values())
+    assert paths == ["services/document-service"] * len(expected)
+    for unsupported in ("reader-ensure", "initialize", "resource-ensure"):
+        with pytest.raises(resolve.DispatchError, match="does not support capability"):
+            resolve.resolve_service(root, script_dir / "catalog.json", "document", unsupported)
+
+
 @pytest.mark.parametrize("arguments", [[], ["deploy", "status"]])
 def test_dispatch_wrong_arity_preserves_failure_contract(arguments: list[str]) -> None:
     # when / then

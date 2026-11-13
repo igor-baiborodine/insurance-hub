@@ -1,0 +1,40 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: local-dev-all
+namePrefix: local-dev-
+labels:
+  - includeSelectors: false
+    includeTemplates: true
+    pairs:
+      environment: local-dev
+resources:
+  - ../../../../apps/svc/document/base
+images:
+  - name: insurance-hub-document-api
+    newName: insurance-hub-document-api
+    newTag: 1.0.0-local.2f0bc5dd8bb7
+configMapGenerator:
+  - name: document-config
+    behavior: merge
+    literals:
+      - DEPLOYMENT_ENVIRONMENT=local-dev
+      - SERVICE_VERSION=git-2f0bc5dd8bb7
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: document-api
+replacements:
+  - source:
+      kind: ConfigMap
+      name: document-config
+      fieldPath: data.SERVICE_VERSION
+    targets:
+      - select:
+          kind: Deployment
+          name: document-api
+        fieldPaths:
+          - metadata.labels.app\.kubernetes\.io/version
+          - spec.template.metadata.labels.app\.kubernetes\.io/version
+        options:
+          create: true

@@ -49,6 +49,10 @@ jobs:
             role: business-service
             coverage_files: services/dashboard-service/coverage.txt,services/dashboard-service/integration-coverage.txt
             flag: dashboard-service
+          - module: services/document-service
+            role: business-service
+            coverage_files: services/document-service/coverage.txt,services/document-service/integration-coverage.txt
+            flag: document-service
     steps:
       - name: Checkout exact main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

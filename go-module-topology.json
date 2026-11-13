@@ -113,6 +113,34 @@
       "ciWorkflow": ".github/workflows/go-pr-mod.yml"
     },
     {
+      "directory": "services/document-service",
+      "modulePath": "github.com/igor-baiborodine/insurance-hub/services/document-service",
+      "role": "business-service",
+      "owner": "Document service maintainers",
+      "supportedModes": [
+        "standalone"
+      ],
+      "validationTarget": "check-go-pr",
+      "validationVariables": [
+        "FORMAT_SCOPE",
+        "FORMAT_BASE"
+      ],
+      "packageScope": "all Document packages under ./..., the server executable, owned Document v1 Echo contract and generated gateway/Swagger output, independent HTTP contract, real-listener lifecycle checks, runtime image and module dependency metadata",
+      "prerequisites": [
+        "Go 1.27.4",
+        "managed CPython 3.14.8",
+        "pinned Document Go tools installed by make -C services/document-service bootstrap-go-tools",
+        "GCC for race-enabled tests",
+        "Docker Engine with Buildx access for runtime image checks",
+        "public module, schema, tool, vulnerability and container services unless cached"
+      ],
+      "consumers": [
+        "github.com/igor-baiborodine/insurance-hub/services/document-service"
+      ],
+      "localReplacements": [],
+      "ciWorkflow": ".github/workflows/go-pr-mod.yml"
+    },
+    {
       "directory": "libs/servicekit",
       "modulePath": "github.com/igor-baiborodine/insurance-hub/libs/servicekit",
       "role": "public-shared",
@@ -137,7 +165,8 @@
         "github.com/igor-baiborodine/insurance-hub/templates/go-service",
         "github.com/igor-baiborodine/insurance-hub/services/product-service",
         "github.com/igor-baiborodine/insurance-hub/services/policy-search-service",
-        "github.com/igor-baiborodine/insurance-hub/services/dashboard-service"
+        "github.com/igor-baiborodine/insurance-hub/services/dashboard-service",
+        "github.com/igor-baiborodine/insurance-hub/services/document-service"
       ],
       "localReplacements": [],
       "ciWorkflow": ".github/workflows/go-pr-shared.yml"
@@ -626,6 +655,118 @@
       },
       "applicability": {
         "copy": "Dashboard is an independently built service, not a reusable source scaffold."
+      }
+    },
+    {
+      "module": "github.com/igor-baiborodine/insurance-hub/services/document-service",
+      "directory": "services/document-service",
+      "owner": "Document service maintainers",
+      "status": "active",
+      "required_dependency": "github.com/igor-baiborodine/insurance-hub/libs/servicekit",
+      "workflows": [
+        {
+          "path": ".github/workflows/go-pr-mod.yml",
+          "job": "validate"
+        },
+        {
+          "path": ".github/workflows/go-pr-shared.yml",
+          "job": "validate"
+        }
+      ],
+      "candidate_phases": [
+        "format",
+        "lint",
+        "unit",
+        "race",
+        "build",
+        "dependency",
+        "vulnerability",
+        "generated",
+        "breaking",
+        "integration",
+        "image"
+      ],
+      "phase_bindings": {
+        "format": {
+          "target": "shared-candidate-format",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "lint": {
+          "target": "shared-candidate-lint",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "unit": {
+          "target": "shared-fast-unit",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "race": {
+          "target": "shared-candidate-race",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "build": {
+          "target": "shared-fast-build",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "dependency": {
+          "target": "shared-candidate-dependency",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "vulnerability": {
+          "target": "shared-candidate-vulnerability",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "generated": {
+          "target": "shared-candidate-generated",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "breaking": {
+          "target": "shared-candidate-breaking",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "integration": {
+          "target": "shared-candidate-integration",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        },
+        "image": {
+          "target": "shared-candidate-image",
+          "modes": [
+            "normal",
+            "candidate"
+          ]
+        }
+      },
+      "applicability": {
+        "copy": "Document is an independently built service, not a reusable source scaffold."
       }
     }
   ]

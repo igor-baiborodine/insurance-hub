@@ -26,6 +26,9 @@ flag_management:
     - name: dashboard-service
       paths:
         - services/dashboard-service/
+    - name: document-service
+      paths:
+        - services/document-service/
 
 ignore:
   - "services/product-service/gen/**"
@@ -35,3 +38,4 @@ ignore:
   - "services/policy-search-service/internal/testing/**"
   - "services/dashboard-service/gen/**"
   - "services/dashboard-service/internal/testing/**"
+  - "services/document-service/gen/**"

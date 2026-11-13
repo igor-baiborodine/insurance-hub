@@ -157,6 +157,19 @@ def target_record(root: Path, record: dict[str, Any], name: str) -> dict[str, An
                 bool(re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", runtime_version_variable)),
                 "invalid runtimeVersionVariable",
             )
+        activation_path = flux.get("activationKustomization")
+        activation_resource = flux.get("activationResource")
+        require(
+            (activation_path is None) == (activation_resource is None),
+            "activationKustomization and activationResource must be configured together",
+        )
+        if activation_path is not None:
+            checkout_path(root, activation_path)
+            require(
+                isinstance(activation_resource, str)
+                and bool(re.fullmatch(r"\./[a-z][a-z0-9-]*", activation_resource)),
+                "invalid activationResource",
+            )
     else:
         require(
             bool(re.fullmatch(r"[a-z][a-z0-9-]*", target.get("kindCluster", ""))),
