@@ -82,8 +82,11 @@ func newReader(
 		return nil, errors.New("create PostgreSQL reader: limits must be positive")
 	}
 	return &Reader{
-		pool: pool, acquireTimeout: acquireTimeout, queryTimeout: queryTimeout,
-		maximumDocumentBytes: maximumDocumentBytes, maximumResponseBytes: maximumResponseBytes,
+		pool:                 pool,
+		acquireTimeout:       acquireTimeout,
+		queryTimeout:         queryTimeout,
+		maximumDocumentBytes: maximumDocumentBytes,
+		maximumResponseBytes: maximumResponseBytes,
 	}, nil
 }
 

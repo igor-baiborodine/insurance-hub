@@ -223,7 +223,11 @@ func TestObservedContentReaderRecordsOnlyObjectFetches(t *testing.T) {
 		}),
 		observer,
 	)
-	if _, present, readErr := reader.Read(context.Background(), []byte("inline")); readErr != nil || !present {
+	if _, present, readErr := reader.Read(
+		context.Background(),
+		[]byte("inline"),
+	); readErr != nil ||
+		!present {
 		t.Fatalf("inline read = (%t, %v)", present, readErr)
 	}
 	if output.Len() != 0 {

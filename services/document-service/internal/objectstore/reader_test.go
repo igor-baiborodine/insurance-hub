@@ -183,32 +183,34 @@ func TestReader_Read_PreservesInlineAndOmitsEmptyStoredBytes(t *testing.T) {
 }
 
 func TestReader_Read_PreservesZeroByteObjectAndRejectsOversize(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Query().Has("location") {
-			writer.Header().Set("Content-Type", "application/xml")
-			_, _ = io.WriteString(
-				writer,
-				`<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">us-east-1</LocationConstraint>`,
-			)
-			return
-		}
-		var content []byte
-		switch request.URL.Path {
-		case "/policies/2026/02/zero.pdf":
-			content = []byte{}
-		case "/policies/2026/02/oversize.pdf":
-			content = []byte("12345")
-		default:
-			http.NotFound(writer, request)
-			return
-		}
-		writer.Header().Set("Content-Length", fmt.Sprint(len(content)))
-		writer.Header().Set("ETag", `"synthetic"`)
-		writer.Header().Set("Last-Modified", "Wed, 21 Oct 2015 07:28:00 GMT")
-		if request.Method == http.MethodGet {
-			_, _ = writer.Write(content)
-		}
-	}))
+	server := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if request.URL.Query().Has("location") {
+				writer.Header().Set("Content-Type", "application/xml")
+				_, _ = io.WriteString(
+					writer,
+					`<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">us-east-1</LocationConstraint>`,
+				)
+				return
+			}
+			var content []byte
+			switch request.URL.Path {
+			case "/policies/2026/02/zero.pdf":
+				content = []byte{}
+			case "/policies/2026/02/oversize.pdf":
+				content = []byte("12345")
+			default:
+				http.NotFound(writer, request)
+				return
+			}
+			writer.Header().Set("Content-Length", fmt.Sprint(len(content)))
+			writer.Header().Set("ETag", `"synthetic"`)
+			writer.Header().Set("Last-Modified", "Wed, 21 Oct 2015 07:28:00 GMT")
+			if request.Method == http.MethodGet {
+				_, _ = writer.Write(content)
+			}
+		}),
+	)
 	defer server.Close()
 	endpoint, _ := url.Parse(server.URL)
 	reader, err := NewReader(config.ObjectStore{
