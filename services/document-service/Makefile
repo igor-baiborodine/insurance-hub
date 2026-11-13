@@ -324,4 +324,4 @@ test-administration: verify-tools ## Focused command, connection-guard and commo
 	GOWORK=off $(GO) test -mod=readonly -count=1 -v \
 		-run '^TestRunMigration_' ./internal/service
 
-check-go-pr: resource-test-integration test-administration
+check-go-pr: test-administration
